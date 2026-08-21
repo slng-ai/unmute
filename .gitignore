@@ -25,6 +25,11 @@ dist/
 
 __pycache__/
 .codex/worktrees/
+
+# Skills installed locally by `npx skills add`, which writes into the checkout.
+# Each machine installs its own; nothing tracked may depend on them.
+/.agents/
+
 .firecrawl
 bin/
 

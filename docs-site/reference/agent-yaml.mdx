@@ -68,7 +68,7 @@ capacity:
 | `controls` | map | no | — | lower snake case names | delegates and transfers |
 | `tools` | list of strings | no | — | loaded tool file names | tool files to load |
 | `conversation` | object | no | — | keys below | greeting, interruption, inactivity, and limits |
-| `tracing` | object | no | — | `provider: langfuse` | tracing provider |
+| `tracing` | object | no | — | `provider: langfuse` or `provider: coval` | tracing provider |
 | `channels` | map | yes | — | one or more channel definitions | how people reach the agent |
 | `capacity` | object | for telephony or code targets | — | positive values; constraints below | traffic estimate |
 
@@ -171,7 +171,7 @@ keys, the four names its connection maps, and the two desks it can transfer to.
 Declare every environment name the generated project reads: names written in
 tool and connection fields, destination values, literal `os.environ` reads in
 local handlers, provider API keys inferred from the model catalogue, and the
-three Langfuse names when tracing is enabled. Names the driver or platform
+names your tracing provider needs when tracing is enabled. Names the driver or platform
 supplies, such as `REDIS_URL` or `DAILY_API_KEY`, stay out. See
 [secrets](/reference/secrets).
 
@@ -442,17 +442,26 @@ tracing:
   provider: langfuse
 ```
 
-`langfuse` is the only provider today. It requires `LANGFUSE_BASE_URL`,
-`LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_SECRET_KEY`.
+`provider` takes one of two values, `langfuse` or `coval`. Tracing works on the
+`pipecat` and `livekit` targets and is refused on `vapi` and `deepgram`.
+
+| Provider | Required environment names |
+|---|---|
+| `langfuse` | `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` |
+| `coval` | `COVAL_API_KEY` |
 
 LiveKit uses the room name as the Langfuse session ID. Pipecat uses the runner
 session ID as both its conversation ID and the Langfuse session ID.
 Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
 
+With `coval`, each trace is attached to the Coval simulation that placed the
+call, and the agent finds that simulation ID on the call itself. See
+[tracing](/tracing/overview) for how the ID reaches the agent on each target.
+
 Traces can contain caller speech, model input and output, and tool arguments and results.
 Use only fake identities and fake customer data for release tests. Use a separate
-Langfuse project for those tests, and do not send real customer data until its
-access and retention rules are approved.
+project on your tracing provider for those tests, and do not send real customer
+data until its access and retention rules are approved.
 
 ## `channels`
 

@@ -367,6 +367,7 @@ type livekitData struct {
 	DevOptionalEnv       []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
 	Notes                []string
 	Tracing              bool
+	TracingProvider      string
 	OpenAIResponses      bool
 	NeedsOpenAIReasoning bool
 
@@ -454,6 +455,7 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldOutbound:              true, // SIP dial-out off job metadata
 	targetcap.FieldVoicemail:             true, // AMD machine-vm branches (N6)
 	targetcap.FieldTracingLangfuse:       true,
+	targetcap.FieldTracingCoval:          true, // tracing.py exports to Coval off the SIP simulation ID
 	targetcap.FieldDeploymentMultiRegion: true, // one README deploy row per declared region, own config file
 	targetcap.FieldVariableConversation:  true, // generated update_variables @function_tool writing userdata
 	targetcap.FieldToolInject:            true, // hidden request values merged from userdata
@@ -579,7 +581,7 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		// first deploy and unmute compile preserves it from then on.
 	}
 	if data.Tracing {
-		outputs = append(outputs, struct{ tmpl, path string }{"tracing.py", "tracing.py"})
+		outputs = append(outputs, struct{ tmpl, path string }{tracingTemplate(data.TracingProvider), "tracing.py"})
 	}
 	connector := data.Telephony != nil && data.Telephony.Transport == "connector"
 	if data.Telephony != nil {
@@ -652,12 +654,20 @@ func livekitSIPFiles(data livekitData) ([]File, error) {
 	}
 	var files []File
 	if telephony.HasInbound {
-		file, err := encode("sip-inbound-trunk.json", map[string]any{
-			"trunk": map[string]any{
-				"name":    data.Project + " " + telephony.Carrier + " inbound",
-				"numbers": []string{placeholder(telephony.FromNumberEnv)},
-			},
-		})
+		trunk := map[string]any{
+			"name":    data.Project + " " + telephony.Carrier + " inbound",
+			"numbers": []string{placeholder(telephony.FromNumberEnv)},
+		}
+		if data.TracingProvider == "coval" {
+			// Coval marks the call with a SIP header, and LiveKit only surfaces a
+			// header it was told about in advance. Map it explicitly rather than
+			// turning on blanket X- mapping: this names the one attribute the
+			// agent reads, in the one file the operator registers.
+			trunk["headers_to_attributes"] = map[string]string{
+				"X-Coval-Simulation-Id": "coval.simulation_id",
+			}
+		}
+		file, err := encode("sip-inbound-trunk.json", map[string]any{"trunk": trunk})
 		if err != nil {
 			return nil, err
 		}

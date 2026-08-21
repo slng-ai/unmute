@@ -15,9 +15,7 @@ variables:
 secrets:
   - OPENAI_API_KEY
   - SLNG_API_KEY
-  - LANGFUSE_BASE_URL
-  - LANGFUSE_PUBLIC_KEY
-  - LANGFUSE_SECRET_KEY
+  - COVAL_API_KEY
   - MANAGER_PHONE_NUMBER
   - TWILIO_ACCOUNT_SID
   - TWILIO_AUTH_TOKEN
@@ -269,7 +267,7 @@ conversation:
   max_duration: 15m
 
 tracing:
-  provider: langfuse
+  provider: coval
 
 channels:
   web:

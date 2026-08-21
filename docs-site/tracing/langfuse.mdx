@@ -1,0 +1,48 @@
+---
+title: "Langfuse"
+description: "Send spans to Langfuse to watch live calls and debug one conversation at a time."
+---
+
+[Langfuse](https://langfuse.com) collects traces from live calls. Use it when you
+want to open one conversation and read what happened in it.
+
+```yaml
+tracing:
+  provider: langfuse
+```
+
+## What you need
+
+Three secrets: `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY`, and
+`LANGFUSE_SECRET_KEY`. All three are required, and the agent fails at startup if
+any is missing. That is deliberate. Langfuse is configured once per deployment,
+so a missing key means the deployment is wrong, and failing loudly is better than
+running for a week without traces.
+
+## Trace and session names
+
+The trace name is `<entry_agent>-<project>`.
+
+Each target picks its own session ID from something it already has:
+
+| Target | Session ID |
+|---|---|
+| `livekit` | the LiveKit room name |
+| `pipecat` | the Pipecat runner session ID, which is also its conversation ID |
+
+## What the spans look like
+
+| Target | What a traced request contains |
+|---|---|
+| `pipecat` | `conversation` and `turn` spans, plus `llm` and `tts` generation observations |
+| `livekit` | `llm_node` and `llm_request` generation observations, plus the session and agent spans |
+
+With Langfuse tracing enabled, Pipecat MCP calls emit finite `tool:<name>` spans with tool arguments and, when completed, the result.
+
+Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
+
+## Checking it works
+
+Starting the worker or exporting a synthetic span proves connectivity only.
+Complete at least one user turn before you look at the trace, or you will be
+reading an empty one and concluding the wrong thing.

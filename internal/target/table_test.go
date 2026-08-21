@@ -42,12 +42,22 @@ func TestDefaultTableIsCompleteAndTyped(t *testing.T) {
 	if table.Capability(FieldInactivity, LiveKit).Tag != Warn || table.Capability(FieldMaxDuration, Deepgram).Tag != Warn {
 		t.Fatal("warn-tagged lifecycle fields must produce target warnings")
 	}
-	if table.Capability(FieldTracingLangfuse, LiveKit).Tag != Core || table.Capability(FieldTracingLangfuse, Pipecat).Tag != Core {
-		t.Fatal("Langfuse tracing must pass on code drivers")
-	}
-	for _, provider := range []Provider{Vapi, Deepgram} {
-		if table.Capability(FieldTracingLangfuse, provider).Tag != Gated {
-			t.Errorf("Langfuse tracing passed on %s", provider)
+	// Both tracing providers are gated the same way: the code drivers own a
+	// process to instrument, the managed targets do not.
+	for _, field := range []Field{FieldTracingLangfuse, FieldTracingCoval} {
+		if table.Capability(field, LiveKit).Tag != Core || table.Capability(field, Pipecat).Tag != Core {
+			t.Fatalf("%s must pass on code drivers", field)
+		}
+		for _, provider := range []Provider{Vapi, Deepgram} {
+			capability := table.Capability(field, provider)
+			if capability.Tag != Gated {
+				t.Errorf("%s passed on %s", field, provider)
+			}
+			// A gated row with no words leaves the author guessing, which is the
+			// thing "fail loud" exists to prevent.
+			if capability.Note == "" {
+				t.Errorf("%s denies %s without saying why", field, provider)
+			}
 		}
 	}
 }

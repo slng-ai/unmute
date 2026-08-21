@@ -1087,7 +1087,71 @@ theirs, not yours.
 Nothing here is a problem with this project. It compiles and deploys either way;
 the call is what fails if the account cannot do it yet.
 {{end}}
-{{if .Tracing}}
+{{if eq .TracingProvider "coval"}}
+## Trace with Coval
+
+Tracing is configured. Set `COVAL_API_KEY` in `.env`. Spans go to
+`https://api.coval.dev/v1/traces` under the service name
+`{{.EntryAgent}}-{{.Project}}`.
+
+Every trace belongs to one Coval simulation, and Coval puts that simulation ID
+on the call itself. The bot looks for it in four places, in this order:
+
+1. `X-Coval-Simulation-Id` on the WebSocket upgrade request. This is the route
+   Coval uses for a WebSocket agent.
+2. The SIP headers inside a Pipecat Cloud dial-in body
+   (`dialin_settings.sip_headers`).
+3. A custom parameter on the carrier stream, which is where a Twilio
+   `<Stream><Parameter name="X-Coval-Simulation-Id" .../>` arrives.
+4. `COVAL_SIMULATION_ID` in the environment, for a local run or a route none of
+   the above covers.
+
+Point your Coval agent at this service and Coval fills the ID in for you. In the
+Coval agent config the placeholder is `{{"{{"}}simulation_output_id{{"}}"}}`.
+
+Calls that no simulation placed are traced too. When such a call ends, the bot
+submits what was said to Coval as a conversation and exports the same spans
+against the conversation ID that comes back, so a local `unmute dev` run or a
+real customer call lands in Trace Search. Coval needs the call to exist before
+spans can attach to it, which is why this happens at the end. The transcript
+comes off the `stt` and `tts` spans the trace already holds.
+
+Until either ID is known the bot holds its spans in memory rather than sending
+them. The hold is capped, and once the cap is reached the oldest spans are
+dropped with a warning in the log. If `COVAL_API_KEY` is unset the bot logs a
+warning and runs without tracing; an evaluation credential never takes down a
+live call. A call where nobody said anything is not submitted either, because an
+empty conversation is not worth an entry.
+
+Pipecat already names its own spans the way Coval expects, so what you see is
+Pipecat's own `conversation`, `turn`, `llm`, `stt` and `tts` spans, not a second
+set. {{if .NeedsMCP}}With Coval tracing enabled, the same calls emit `llm_tool_call` spans carrying `function.name`, `tool_call_id`, and `function.arguments`.
+{{else if .NeedsFunctionCalls}}Each tool the agent runs adds one `llm_tool_call` span carrying
+`function.name`, `tool_call_id` and `function.arguments`.
+{{end}}One extra `transport` span records how the trace was correlated, in
+`coval.correlation.method`: which of the four routes supplied the simulation ID,
+or `conversation_submit` with `coval.conversation_id` when the call was
+registered as a conversation instead. Read that first if a trace lands somewhere
+unexpected.
+
+These spans carry the attributes Coval trace metrics read, so the useful
+metrics need no extra setup: percentiles over `metrics.ttfb` on `llm`, `tts`
+and `stt` spans show where the time goes, and averages over `gen_ai.usage.*`
+on `llm` spans show what the calls cost. An LLM-judged metric created with
+traces included can also read each round's prompt and tool activity, so a
+judge can check what the agent said against what its tools returned.
+
+Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
+
+Starting the worker or exporting a synthetic span proves connectivity only.
+Complete at least one user turn before reviewing the trace.
+
+Traces can contain caller speech, model input and output, and tool arguments and results.
+Use only fake identities and fake customer data for release tests, and do not
+send real customer data until your Coval project's access and retention rules
+are approved.
+
+{{else if .Tracing}}
 ## Trace with Langfuse
 
 Tracing is configured. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and

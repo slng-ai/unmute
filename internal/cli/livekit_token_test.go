@@ -17,7 +17,7 @@ func TestMintLiveKitToken(t *testing.T) {
 	const key, secret, room, id, agent = "APIabc", "s3cr3t", "room-xyz", "user-1", "remy-dev"
 	now := time.Unix(1_700_000_000, 0)
 
-	tok, err := mintLiveKitToken(key, secret, room, id, agent, now, 15*time.Minute)
+	tok, err := mintLiveKitToken(key, secret, room, id, agent, "", now, 15*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestMintLiveKitToken(t *testing.T) {
 }
 
 func TestMintLiveKitTokenRequiresCreds(t *testing.T) {
-	if _, err := mintLiveKitToken("", "s", "r", "i", "a", time.Now(), time.Minute); err == nil {
+	if _, err := mintLiveKitToken("", "s", "r", "i", "a", "", time.Now(), time.Minute); err == nil {
 		t.Error("missing api key must error")
 	}
 }

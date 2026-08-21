@@ -56,12 +56,18 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		t.Errorf("pipecat reasoning params = %#v, want Chat Completions with reasoning disabled", pipecatReason.Params)
 	}
 
-	if resolved.Tracing == nil || resolved.Tracing.Provider != "langfuse" {
-		t.Fatalf("tracing = %#v, want Langfuse", resolved.Tracing)
+	// This example is the release-readiness package, so it carries the provider
+	// that needs a real call to prove: Coval correlates a trace to the call that
+	// produced it, and only a live call exercises that.
+	if resolved.Tracing == nil || resolved.Tracing.Provider != "coval" {
+		t.Fatalf("tracing = %#v, want Coval", resolved.Tracing)
+	}
+	if !slices.Contains(resolved.Secrets, "COVAL_API_KEY") {
+		t.Errorf("secrets omit COVAL_API_KEY: %v", resolved.Secrets)
 	}
 	for _, name := range []string{"LANGFUSE_BASE_URL", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"} {
-		if !slices.Contains(resolved.Secrets, name) {
-			t.Errorf("secrets omit %s", name)
+		if slices.Contains(resolved.Secrets, name) {
+			t.Errorf("secrets still require %s after the move to Coval", name)
 		}
 	}
 	manager, ok := resolved.Controls["to_manager"].(*ir.HumanTransfer)
@@ -97,6 +103,13 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	for name, tool := range resolved.Tools {
 		if tool.Execution != ir.ToolLocal || tool.Handler != "tools/salon.py" {
 			t.Errorf("tool %q = %#v, want shared local Python handler", name, tool)
+		}
+	}
+	// chat_with_me answers from the model and routes onward, so everything it
+	// holds has to be a handoff rather than a tool.
+	for _, held := range resolved.Agents["chat_with_me"].Tools {
+		if _, isTool := resolved.Tools[held]; isTool {
+			t.Errorf("chat_with_me must hold handoffs only, got tool %q", held)
 		}
 	}
 	prepareBooking := resolved.Tasks["prepare_booking"]

@@ -1,0 +1,54 @@
+---
+title: "Tracing"
+description: "See what happened inside a call: what the caller said, what the model decided, and which tools ran."
+---
+
+Tracing records the inside of a call. Each turn becomes a span, so you can see
+what the caller said, what the model did with it, which tools ran, and how long
+each step took.
+
+Turn it on with one block in `agent.yaml`:
+
+```yaml
+tracing:
+  provider: langfuse
+```
+
+There are two providers.
+
+| Provider | Use it for | Needs |
+|---|---|---|
+| [`langfuse`](/tracing/langfuse) | watching live calls and debugging one conversation at a time | `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` |
+| [`coval`](/tracing/coval) | scoring simulated calls in Coval, where each trace belongs to one simulation | `COVAL_API_KEY` |
+
+Pick one. `provider` takes a single value.
+
+## What works where
+
+Tracing needs a process to instrument, so it works on the two code targets and
+not on the managed ones.
+
+| Target | Tracing |
+|---|---|
+| `pipecat` | yes |
+| `livekit` | yes |
+| `vapi` | no |
+| `deepgram` | no |
+
+Setting `tracing:` on a package whose target is `vapi` or `deepgram` fails
+validation and says why for that target.
+
+## Secrets
+
+You do not have to list tracing keys under `secrets:` yourself. The compiler adds
+the ones your chosen provider needs, and `unmute compile` prints them in the
+required environment list. See [secrets](/reference/secrets).
+
+## Before you send real calls through it
+
+A trace can contain caller speech, model input and output, and tool arguments and
+results. That is the point of it, and it is also the risk.
+
+Use fake identities and fake customer data for release tests. Keep those tests in
+a separate project on whichever provider you chose, and do not send real customer
+data until that project's access and retention rules are approved.

@@ -187,8 +187,9 @@ from livekit.agents.voice import MetricsCollectedEvent
 from livekit.plugins import {{join .PluginModules ", "}}
 
 from dev_metrics import install_dev_metrics
-{{if .Tracing}}from tracing import setup_langfuse
-{{end}}
+{{if .Tracing}}{{if eq .TracingProvider "coval"}}from tracing import setup_coval
+{{else}}from tracing import setup_langfuse
+{{end}}{{end}}
 
 logger = logging.getLogger({{pyq .Project}})
 logger.setLevel(logging.INFO)
@@ -1471,7 +1472,19 @@ async def entrypoint(ctx: JobContext) -> None:
 {{- end}}
     )
 
-{{if .Tracing}}
+{{if .Tracing}}{{if eq .TracingProvider "coval"}}
+    # The simulation ID arrives with the call, and on a SIP call it arrives after
+    # the job starts, so setup_coval watches for it rather than reading it once.
+    setup_coval(
+        ctx,
+        session,
+        metadata={
+            "session.id": ctx.room.name,
+            "agent.name": {{pyq .EntryAgent}} + "-" + {{pyq .Project}},
+        },
+    )
+
+{{else}}
     setup_langfuse(
         ctx,
         session,
@@ -1481,7 +1494,7 @@ async def entrypoint(ctx: JobContext) -> None:
         },
     )
 
-{{end}}
+{{end}}{{end}}
     # Inert unless the dev loop set UNMUTE_DEV_METRICS. Reads session events, so
     # it never touches the tracer provider an opt-in trace export would own.
     install_dev_metrics(session)

@@ -52,12 +52,11 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		TurnVersion:       turnVersion,
 		EndpointingDelay:  livekitEndpointingDelay(tgt.Models.Turn),
 		Pins:              tgt.Pins,
-		Tracing:           agent.Tracing != nil && agent.Tracing.Provider == "langfuse",
+		Tracing:           agent.Tracing != nil,
+		TracingProvider:   tracingProviderOf(agent),
 	}
-	if data.Tracing {
-		for _, name := range []string{"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"} {
-			env.add(name)
-		}
+	for _, name := range tracingEnv(data.TracingProvider) {
+		env.add(name)
 	}
 
 	entry := agent.Agents[agent.EntryAgent]
@@ -1434,8 +1433,15 @@ func livekitDeps(data livekitData) []string {
 		// latter. Drop this when livekit-agents declares its own.
 		"httpx",
 	}, sortedKeys(packages)...)
-	if data.Tracing {
+	switch data.TracingProvider {
+	case "langfuse":
 		deps = append(deps, "langfuse>=3", "opentelemetry-sdk>=1.33,<2")
+	case "coval":
+		// livekit-agents brings the OTel API and SDK in through its own
+		// telemetry module, but nothing in the LiveKit stack pulls the OTLP HTTP
+		// exporter, which is the one Coval ingests. Declare both so a clean
+		// install cannot import tracing.py and fail on the exporter.
+		deps = append(deps, "opentelemetry-sdk>=1.33,<2", "opentelemetry-exporter-otlp-proto-http>=1.33,<2")
 	}
 	// The connector bridge is a standalone aiohttp server that places outbound
 	// Twilio calls and validates inbound webhook signatures. livekit-agents

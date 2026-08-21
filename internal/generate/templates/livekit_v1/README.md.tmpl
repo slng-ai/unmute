@@ -456,7 +456,170 @@ reaches this worker: compare `lk sip dispatch list` with the `agentName` in the
 No log line carries a destination, a credential, an environment variable value,
 or the caller's words. The control name on the first line already says which
 destination fired.
-{{end}}{{if .Tracing}}
+{{end}}{{if eq .TracingProvider "coval"}}
+## Trace with Coval
+
+Tracing is configured. Set `COVAL_API_KEY` in `.env`. Spans go to
+`https://api.coval.dev/v1/traces` under the service name
+`{{.EntryAgent}}-{{.Project}}`.
+
+Every trace belongs to one Coval simulation, and Coval puts that simulation ID on
+the call. The agent looks for it in three places:
+
+1. **The SIP participant's attributes**, for an inbound phone call. Coval sends
+   the SIP header `X-Coval-Simulation-Id`, and LiveKit only surfaces a header it
+   was told about in advance. `sip-inbound-trunk.json` already carries that
+   mapping, in its `headers_to_attributes` field:
+
+   ```json
+   "headers_to_attributes": {
+     "X-Coval-Simulation-Id": "coval.simulation_id"
+   }
+   ```
+
+   Register the trunk with `telephony-setup.sh` as usual and the attribute
+   `coval.simulation_id` appears on the caller. These attributes arrive after the
+   job starts, so the agent keeps watching for them rather than reading once.
+2. **The agent's dispatch metadata**, for a browser or app call. See the token
+   server note below.
+3. **`COVAL_SIMULATION_ID`** in the environment, for a local run.
+
+In the Coval agent config the placeholder is
+`{{"{{"}}simulation_output_id{{"}}"}}`.
+
+### What your token server has to forward
+
+This project does not generate the token server for a deployed LiveKit agent.
+On LiveKit Cloud that server is yours, and Coval calls it before it joins the
+room. Two things have to line up:
+
+- In Coval, set the LiveKit agent's **Custom Headers (JSON)** to
+  `{"X-Coval-Simulation-Id": "{{"{{"}}simulation_output_id{{"}}"}}"}`.
+- In your token server, read that header and put it into the room's agent
+  dispatch metadata as JSON `{"coval.simulation_id": "<the header value>"}`.
+  With the LiveKit server SDK that is the `metadata` argument on
+  `RoomAgentDispatch`, alongside `agent_name`.
+
+The agent reads it back as `ctx.job.metadata`. Forward nothing and the phone
+route still works, because that one uses the SIP attribute instead.
+
+`unmute dev` already does this for you locally: its `/api/session` endpoint reads
+the same header and forwards it the same way.
+
+Calls that no simulation placed are traced too. When such a call ends, the agent
+submits what was said to Coval as a conversation and exports the same spans
+against the conversation ID that comes back, so a local `unmute dev` run or a
+real customer call lands in Trace Search. Coval needs the call to exist before
+spans can attach to it, which is why this happens at the end. Nothing extra is
+recorded for it: the transcript is what the trace already holds.
+
+Until either ID is known the agent holds its spans in memory rather than sending
+them. The hold is capped, and once the cap is reached the oldest spans are
+dropped with a warning in the log. If `COVAL_API_KEY` is unset the agent logs a
+warning and runs without tracing; an evaluation credential never takes down a
+live call. A call where nobody said anything is not submitted either, because an
+empty conversation is not worth an entry.
+
+The trace is built to Coval's own shape, one `conversation` holding one `turn`
+per exchange:
+
+```
+conversation                    call totals: turn counts, tool counts, duration
+└── turn                        one exchange, with both transcripts on it
+    ├── stt                     one per transcript, with stt.confidence
+    │   └── stt.provider.<name> the transcriber that answered
+    ├── vad                     the end-of-turn decision
+    ├── llm                     the prompt it ran on, ttfb, tokens, finish_reason
+    │   └── llm_tool_call       function.name, arguments, result, tool.error
+    └── tts                     metrics.ttfb, the text that was spoken
+```
+
+Every number on those spans is LiveKit's own measurement, taken from the session
+events that report it: `metrics_collected` for each model call's latency and
+tokens, `conversation_item_added` for each turn's text and its transcription and
+end-to-end delays, and `function_tools_executed` for every tool with its result.
+
+A turn starts when the caller starts speaking and ends when its last piece of
+work ends; the silence before the next utterance belongs to no exchange. The
+`stt` span covers the caller's speech through to the transcript landing. With
+preemptive generation the model starts while the caller is still speaking, so
+an `llm` span can overlap the `stt` beside it, and its metric can even arrive
+before LiveKit commits the utterance it answered. The round still lands in the
+turn whose utterance it answered rather than in the one that happened to be
+open when the metric arrived.
+
+Each `llm` span carries the prompt that round actually ran on:
+`gen_ai.system_instructions` is the system prompt of the agent holding the floor,
+`input` is its message history as JSON, `tools` and `tool_count` are what it was
+offered, and `agent.label` says which agent that was. One exchange can take
+several rounds, through tools or a handoff, and only the round that produced
+the spoken reply carries it as `output`. Those names are Pipecat's own, used on both targets on purpose: a package
+compiles to both, so one vocabulary means a Coval trace metric or judge prompt
+written once reads either. With handoffs that matters more than
+usual, because the prompt changes under the caller mid-call and a transcript
+cannot show which one produced a given answer. The history is snapshotted when
+the round's metrics arrive, which is where it is right: LiveKit appends the reply
+and any tool results after the request that produced them has finished. A
+workflow task group is the one agent that keeps no prompt of its own, so its
+instructions are read from the newest `agent_config_update` in its context,
+which is the prompt actually in force.
+
+The prompt has its own size budget, spent on the newest messages. A chat context
+grows all call long and rides along on every model call, so `input` holds as
+much of the tail as fits and `prompt.message_count` says how many messages there
+were against `prompt.messages_traced` for how many fit.
+
+One turn is one exchange, not one transcript. LiveKit commits a transcript each
+time the caller pauses, so a single spoken sentence can arrive in several
+pieces; they stay in the same turn, each with its own `stt` span, until the
+agent has actually answered. `turn.user_transcript` holds them joined back
+together.
+
+LiveKit's own OpenTelemetry spans are deliberately left switched off, so
+`livekit.agents.telemetry.set_tracer_provider` is never called. They are shaped
+for LiveKit rather than for Coval: `user_turn` and `agent_turn` are siblings, so
+the caller's speech can never sit inside the reply it caused, one exchange opens
+a fresh `agent_turn` for every tool round, and about a hundred internal spans per
+call arrive with names Coval has no meaning for. A span's parent is fixed when it
+starts, so renaming them cannot fix the shape.
+
+A number that was never measured is left off rather than sent as zero. A
+streaming transcriber reports a transcription delay of exactly zero because there
+is no per-request wait, and writing that to `metrics.ttfb` would fill Coval's
+TTFB metric with zeros instead of leaving it empty. The raw figure is still there
+as `stt.transcription_delay`. The same goes for token usage:
+a round LiveKit reported no usage for, which happens while it swaps agents,
+carries no `gen_ai.usage.*` at all rather than four zeros that would read as a
+free request.
+
+Transcripts, tool arguments and tool results are cut to `MAX_TEXT_CHARS` before
+they go out, so one long tool result cannot push a batch past what Coval's ingest
+accepts.
+
+Which route correlated the trace is recorded as `coval.correlation.method` on
+the `conversation` span: the delivery route when a simulation claimed the call,
+with a `simulation_id_received` event beside it, or `conversation_submit` with
+`coval.conversation_id` when the call was registered as a conversation instead.
+Read that first if a trace lands somewhere unexpected.
+
+These attributes are what Coval trace metrics read, so the useful metrics need
+no extra setup: percentiles over `metrics.ttfb` on `llm`, `tts` and `vad` spans
+show where the time goes, averages over `gen_ai.usage.*` on `llm` spans show
+what the calls cost, an error rate over `llm_tool_call` spans shows whether
+tools work, and the `conversation` root carries the per-call totals
+(`call.duration_seconds`, `transcript.turn.count`, `tool.call.count`,
+`tool.failure.count`). An LLM-judged metric created with traces included can
+also read each round's real prompt and every tool result, so a judge can check
+what the agent said against what its tools returned.
+
+Starting the worker or exporting a synthetic span proves connectivity only.
+Complete at least one user turn before reviewing the trace.
+
+Traces can contain caller speech, model input and output, and tool arguments and results.
+Use only fake identities and fake customer data for release tests, and do not
+send real customer data until your Coval project's access and retention rules
+are approved.
+{{else if .Tracing}}
 ## Trace with Langfuse
 
 Tracing is configured. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and

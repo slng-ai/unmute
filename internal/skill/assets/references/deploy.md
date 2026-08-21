@@ -109,12 +109,15 @@ tracing:
   provider: langfuse
 ```
 
-`langfuse` is the only provider today. It needs `LANGFUSE_BASE_URL`,
-`LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_SECRET_KEY` in the environment, and those
-names go in `secrets:`. Suggest it when a user asks how they will see what the
-agent did on a real call, because reading transcripts is how a prompt gets
-better after launch. See `prompting.md` on turning surprising sessions into test
-cases.
+`provider` is `langfuse` or `coval`. `langfuse` needs `LANGFUSE_BASE_URL`,
+`LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_SECRET_KEY`; `coval` needs `COVAL_API_KEY`.
+Those names go in `secrets:`. Both work on `pipecat` and `livekit` only.
+
+Suggest `langfuse` when a user asks how they will see what the agent did on a
+real call, because reading transcripts is how a prompt gets better after launch.
+Suggest `coval` when they want simulated calls scored, since each Coval trace is
+attached to the simulation that produced it. See `prompting.md` on turning
+surprising sessions into test cases.
 
 ## Changing the agent
 

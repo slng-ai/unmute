@@ -245,8 +245,8 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			errors = add(errors, fmt.Sprintf("model %q language must be a BCP-47 language tag such as en or en-US", name))
 		}
 	}
-	if agent.Tracing != nil && agent.Tracing.Provider != "langfuse" {
-		errors = add(errors, "tracing provider must be langfuse")
+	if agent.Tracing != nil && !validTracingProvider(agent.Tracing.Provider) {
+		errors = add(errors, fmt.Sprintf("tracing provider must be one of %s", strings.Join(TracingProviders, ", ")))
 	}
 	if len(agent.Models) == 0 {
 		errors = add(errors, "models must contain at least one model")
@@ -600,7 +600,7 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	}
 	validateDriverValues(resolved, provider, row)
 	if agent.Tracing != nil {
-		applyCapability(caps, targetcap.FieldTracingLangfuse, provider, row)
+		applyCapability(caps, tracingCapability(agent.Tracing.Provider), provider, row)
 	}
 	row.Errors = append(row.Errors, validateRegions(resolved.DeploymentRegions)...)
 	// Only a list of more than one is gated: one region works everywhere the
@@ -1717,8 +1717,8 @@ func referencedEnvNames(agent *Agent) map[string]string {
 		note(name, upstreams[name])
 	}
 	if agent.Tracing != nil {
-		for _, name := range []string{"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"} {
-			note(name, "tracing.provider: langfuse")
+		for _, name := range TracingSecrets[agent.Tracing.Provider] {
+			note(name, "tracing.provider: "+agent.Tracing.Provider)
 		}
 	}
 	for _, name := range sortedKeys(agent.Connections) {

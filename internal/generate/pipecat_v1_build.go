@@ -47,8 +47,10 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		EntryAgent:       agent.EntryAgent,
 		EntryClass:       pyName(agent.EntryAgent),
 		Transport:        target.Transport,
-		Tracing:          agent.Tracing != nil && agent.Tracing.Provider == "langfuse",
-		ResultsHint:      pipecatResultsHint,
+		// Tracing is on for either provider now, and TracingProvider says which.
+		Tracing:         agent.Tracing != nil,
+		TracingProvider: tracingProviderOf(agent),
+		ResultsHint:     pipecatResultsHint,
 		// The VAD's stop_secs is this driver's silence budget: the same knob
 		// LiveKit calls endpointing min_delay. A transcriber slower than the
 		// default answers half a sentence (B: fragmented STT, 2026-08-20).
@@ -58,10 +60,8 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	// project cannot disagree about what the account has to be allowed to do.
 	data.Prerequisites = ir.RoutePrerequisites(agent, target, targetcap.Pipecat)
 	env := newEnvSet()
-	if data.Tracing {
-		for _, name := range []string{"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"} {
-			env.add(name)
-		}
+	for _, name := range tracingEnv(data.TracingProvider) {
+		env.add(name)
 	}
 
 	stt, err := sttService(target.Models.Listen, env)

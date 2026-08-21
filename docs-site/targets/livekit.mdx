@@ -69,6 +69,11 @@ dependencies = [
 ]
 ```
 
+The two tracing lines above come from `tracing.provider: langfuse`. With
+`provider: coval` they are `opentelemetry-sdk` and
+`opentelemetry-exporter-otlp-proto-http` instead, and `langfuse` is not
+declared at all. See [tracing](/tracing/overview).
+
 Extras and plugins follow the providers your package binds.
 
 ## Deploy

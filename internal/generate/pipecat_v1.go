@@ -431,7 +431,12 @@ type pipecatData struct {
 	HandoffControls []string // control names dev_metrics.py must not report as tools
 	DevOptionalEnv  []string // passed through when the host sets it, never required
 	Notes           []string
+	// Tracing means tracing is on at all. Most of what it gates is the same for
+	// every provider: enable_tracing on the pipeline worker, the exit-time flush,
+	// and the tool-span subclass. TracingProvider carries which provider, and
+	// only the import block and the one setup call read it.
 	Tracing         bool
+	TracingProvider string
 	// Telephony means the carrier-websocket route, and every site that reads it
 	// means that. The Daily carrier leg is DailyCarrier; see its doc comment.
 	Telephony    *pipecatTelephony
@@ -531,6 +536,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolInterruption:     true, // cancel_on_interruption
 	targetcap.FieldToolAnnounce:         true, // TTSSpeakFrame queued before the handler body
 	targetcap.FieldTracingLangfuse:      true,
+	targetcap.FieldTracingCoval:         true, // tracing.py routes Pipecat's own spans to Coval
 	targetcap.FieldVariableConversation: true, // generated update_variables @tool writing State
 	targetcap.FieldToolInject:           true, // hidden request values merged from State
 	targetcap.FieldWebhookPath:          true, // rendered, URL-encoded path on the base URL
@@ -629,7 +635,10 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		{"env.example", ".env.example"},
 	}
 	if data.Tracing {
-		outputs = append(outputs, struct{ tmpl, path string }{"tracing.py", "tracing.py"})
+		// One provider per file: the two attribute models share nothing, so
+		// branching inside one template would make both harder to read. Both
+		// land on tracing.py so bot.py's import site does not care which.
+		outputs = append(outputs, struct{ tmpl, path string }{tracingTemplate(data.TracingProvider), "tracing.py"})
 	}
 	if data.Telephony != nil {
 		templateName := "telephony_twilio.py"

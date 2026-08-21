@@ -89,10 +89,12 @@ from dev_metrics import dev_metrics_observer
 {{if .Tracing}}from tracing import (
     TRACE_NAME,
 {{if or .NeedsFunctionCalls .NeedsMCP}}    TracedLLMWorker,
+{{end}}{{if eq .TracingProvider "coval"}}    activate_simulation,
 {{end}}    enable_agent_tracing,
     flush_tracing,
-    setup_langfuse_tracing,
-)
+{{if eq .TracingProvider "coval"}}    setup_coval_tracing,
+{{else}}    setup_langfuse_tracing,
+{{end}})
 {{end}}
 {{range .Imports}}{{.}}
 {{end}}
@@ -1276,12 +1278,18 @@ def build_stt():
     # with no telephony.
     phone_call = _phone_session(runner_args)
     call_context["_phone_call"] = phone_call
-{{end}}{{if .Tracing}}
+{{end}}{{if .Tracing}}{{if eq .TracingProvider "coval"}}
+    trace_provider = setup_coval_tracing()
+    trace_attributes = {"agent.name": TRACE_NAME}
+    # The simulation ID rides in on the call itself. Until it arrives spans are
+    # held, so a browser or console session traces nothing and still runs.
+    activate_simulation(runner_args)
+{{else}}
     trace_provider = setup_langfuse_tracing()
     trace_attributes = {"langfuse.trace.name": TRACE_NAME}
     if runner_args.session_id is not None:
         trace_attributes["langfuse.session.id"] = runner_args.session_id
-{{end}}
+{{end}}{{end}}
 {{if and .HasColdTransfer (not .CloudWebsocket)}}    call_context["_transport"] = transport
 {{end}}    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
@@ -1509,7 +1517,7 @@ def build_stt():
 {{if .Tracing}}        primary_error = sys.exception()
         if primary_error is not None:
             try:
-                await asyncio.to_thread(flush_tracing, trace_provider)
+                await asyncio.to_thread(flush_tracing, trace_provider{{if eq .TracingProvider "coval"}}, runner_args.session_id or ""{{end}})
             except BaseException as cleanup_error:
                 logger.error(
                     "Tracing flush failed while preserving the primary error ({})",
@@ -1521,13 +1529,13 @@ def build_stt():
             )
 {{end}}        else:
 {{if .NeedsMCP}}            try:
-                await asyncio.to_thread(flush_tracing, trace_provider)
+                await asyncio.to_thread(flush_tracing, trace_provider{{if eq .TracingProvider "coval"}}, runner_args.session_id or ""{{end}})
             finally:
                 await _close_mcp(
                     (agent.close_mcp() for agent in mcp_agents),
                     suppress=sys.exception() is not None,
                 )
-{{else}}            await asyncio.to_thread(flush_tracing, trace_provider)
+{{else}}            await asyncio.to_thread(flush_tracing, trace_provider{{if eq .TracingProvider "coval"}}, runner_args.session_id or ""{{end}})
 {{end}}
 {{else}}        await _close_mcp(
             (agent.close_mcp() for agent in mcp_agents),

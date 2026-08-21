@@ -110,6 +110,34 @@ func TestValidateTaskControlKinds(t *testing.T) {
 	}
 }
 
+// Every tracing provider is gated per target the same way, and a new provider
+// must not arrive ungated on a target that cannot lower it.
+func TestValidateTracingByTargetForEveryProvider(t *testing.T) { // V25
+	for _, name := range TracingProviders {
+		agent := safeAgent(t)
+		agent.Tracing = &Tracing{Provider: name}
+		for provider, wantError := range map[Provider]bool{
+			ProviderLiveKit: false, ProviderPipecat: false,
+			ProviderVapi: true, ProviderDeepgram: true,
+		} {
+			report, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
+			if (err != nil) != wantError {
+				t.Errorf("%s/%s: err=%v report=%#v", name, provider, err, report.PerTarget)
+			}
+		}
+	}
+}
+
+// An unknown provider fails before generation rather than silently tracing
+// nothing.
+func TestValidateRejectsAnUnknownTracingProvider(t *testing.T) {
+	agent := safeAgent(t)
+	agent.Tracing = &Tracing{Provider: "not-a-provider"}
+	if _, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default()); err == nil {
+		t.Fatal("an unknown tracing provider validated")
+	}
+}
+
 func TestValidateLangfuseTracingByTarget(t *testing.T) { // V25
 	agent := safeAgent(t)
 	agent.Tracing = &Tracing{Provider: "langfuse"}

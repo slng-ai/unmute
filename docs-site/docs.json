@@ -126,6 +126,16 @@
         ]
       },
       {
+        "group": "Tracing",
+        "public": true,
+        "icon": "chart-line",
+        "pages": [
+          "tracing/overview",
+          "tracing/coval",
+          "tracing/langfuse"
+        ]
+      },
+      {
         "group": "Phone calls",
         "public": true,
         "icon": "phone",

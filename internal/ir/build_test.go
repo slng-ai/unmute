@@ -518,9 +518,40 @@ func TestBuildTracing(t *testing.T) { // V25
 		t.Fatalf("tracing = %#v", agent.Tracing)
 	}
 
+	pkg.Agent.Tracing.Provider = "coval"
+	agent, err = Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.Tracing == nil || agent.Tracing.Provider != "coval" {
+		t.Fatalf("tracing = %#v", agent.Tracing)
+	}
+
 	pkg.Agent.Tracing.Provider = "other"
-	if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), `unsupported tracing provider "other"`) {
+	_, err = Build(pkg)
+	if err == nil || !strings.Contains(err.Error(), `unsupported tracing provider "other"`) {
 		t.Fatalf("got %v", err)
+	}
+	// The error has to name every provider that would have worked, or the author
+	// has to go read the source to find out.
+	for _, provider := range TracingProviders {
+		if !strings.Contains(err.Error(), provider) {
+			t.Errorf("error does not name the supported provider %q: %v", provider, err)
+		}
+	}
+}
+
+// Each provider needs its own credentials named, and only its own. A package
+// that switches provider and keeps the old required secrets is a package whose
+// compile report lies.
+func TestBuildTracingSecretsAreProviderSpecific(t *testing.T) {
+	if len(TracingSecrets) != len(TracingProviders) {
+		t.Fatalf("every provider needs a secret list: %v vs %v", TracingSecrets, TracingProviders)
+	}
+	for _, provider := range TracingProviders {
+		if len(TracingSecrets[provider]) == 0 {
+			t.Errorf("provider %q declares no required secret", provider)
+		}
 	}
 }
 
