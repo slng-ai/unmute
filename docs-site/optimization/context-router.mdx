@@ -279,14 +279,15 @@ second turn or later, and is it the exact pair of previous reply and current
 message. If all four hold, stop looking. The router decides, and some turns never
 cache.
 
-## The two salon examples
+## The shipped example
 
 [`examples/salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)
-and
-[`examples/optimized-salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/optimized-salon-concierge)
-are the same package, one with a direct think binding and one behind the router.
-Run the same conversation through both and the difference you measure is the
-router's.
+thinks through the router. It also sets `slng_pure_proxy: true`, which keeps
+every cache write but never serves from the cache. That package has four agents
+behind one `agent_id`, and the cache key is the last exchange with no system
+prompt in it, so two agents whose last exchange matches would be served each
+other's answers. Pure proxy is the guard until each emitted agent sends its own
+id. A single-agent package does not need it.
 
 ## Where to go next
 

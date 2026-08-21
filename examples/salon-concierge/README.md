@@ -45,10 +45,14 @@ asks for or repeats the number unless the caller says the saved identity is
 wrong. This readback checks what speech recognition captured; it is not strong
 authentication such as an OTP.
 
-On LiveKit, the target overrides the shared reasoning profile with OpenAI's
-Responses API and a held WebSocket in place of a fresh handshake on every model
-call, with reasoning still off. Pipecat keeps Chat Completions with reasoning
-disabled. Both targets still use the same model ID.
+Both targets think through the SLNG Context Router with reasoning off. The
+router caches the turns it judges repeatable; a repeat served by the model is
+expected, not a fault. The think params set `slng_pure_proxy: true`: the router
+still records what it would have served, but never answers from its cache. That guard is there
+because this package has four agents behind one `agent_id`, and the router's
+cache key is the last exchange with no system prompt in it, so two agents
+whose last exchange matches would be served each other's answers. Drop the
+line once each emitted agent sends its own id.
 
 The complaint specialist records the case with a local Python tool. It calls a
 cold transfer when the caller asks for a manager or uses clearly and strongly

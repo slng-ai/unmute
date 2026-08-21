@@ -220,9 +220,14 @@ decision the author is making rather than an implementation detail.
 - Three response headers are the only way to check which path answered:
   `x-slng-response-source`, `x-slng-cache-layer`, `x-slng-model`.
 
-Full page: [Context Router](https://docs.slng.ai/context-router/). The two salon
-examples, `salon-concierge` and `optimized-salon-concierge`, are the same package
-with and without it.
+Full page: [Context Router](https://docs.slng.ai/context-router/).
+`examples/salon-concierge` is the shipped package behind it. That package also
+sets `slng_pure_proxy: true` in the think params: the cache key is the last
+(assistant, user) exchange with no system prompt in it, so a package with
+several agents behind one `agent_id` can be served another agent's answer.
+Pure proxy keeps the cache writes and suppresses the serving. Author it on any
+multi-agent package until each emitted agent sends its own id; a single-agent
+package does not need it.
 
 ## Keep SLNG speech models in region
 
