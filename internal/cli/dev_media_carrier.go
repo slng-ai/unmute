@@ -793,10 +793,24 @@ func (r mediaCarrierRun) call(ctx context.Context, from, to string, duration tim
 	// arrives: a barge-in drops audio the agent had queued but the caller had
 	// not reached yet, and a recording built on arrival could not show that.
 	var (
-		mu      sync.Mutex
-		pending []byte
-		heard   []int16
+		mu             sync.Mutex
+		pending        []byte
+		heard          []int16
+		bytesFromAgent int
+		clears         int
 	)
+	// settled is result with the reader goroutine's own two counters folded in,
+	// under the lock that goroutine writes them behind. They are the only fields
+	// two goroutines touch, and returning result directly reported whatever this
+	// goroutine happened to see: a barge-in the agent really did send came back
+	// as no barge-in at all, which is the one thing gate M4 exists to catch.
+	settled := func() mediaCallResult {
+		mu.Lock()
+		defer mu.Unlock()
+		result.BytesFromAgent = bytesFromAgent
+		result.Clears = clears
+		return result
+	}
 	readDone := make(chan error, 1)
 	go func() {
 		for {
@@ -816,7 +830,7 @@ func (r mediaCarrierRun) call(ctx context.Context, from, to string, duration tim
 				}
 				mu.Lock()
 				pending = append(pending, frame...)
-				result.BytesFromAgent += len(frame)
+				bytesFromAgent += len(frame)
 				mu.Unlock()
 			case "clear":
 				// Barge-in: the agent is telling the carrier to throw away
@@ -825,7 +839,7 @@ func (r mediaCarrierRun) call(ctx context.Context, from, to string, duration tim
 				// one (gate M4).
 				mu.Lock()
 				pending = nil
-				result.Clears++
+				clears++
 				mu.Unlock()
 			}
 		}
@@ -837,7 +851,7 @@ func (r mediaCarrierRun) call(ctx context.Context, from, to string, duration tim
 	if !r.fixtureOnly() {
 		person, err := personCaller(ctx)
 		if err != nil {
-			return result, err
+			return settled(), err
 		}
 		caller = person
 	}
@@ -853,12 +867,12 @@ func (r mediaCarrierRun) call(ctx context.Context, from, to string, duration tim
 	for duration == 0 || time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
-			return r.finish(result, spoke, heard, nil)
+			return r.finish(settled(), spoke, heard, nil)
 		case err := <-readDone:
 			if errors.Is(err, io.EOF) {
-				return r.finish(result, spoke, heard, nil)
+				return r.finish(settled(), spoke, heard, nil)
 			}
-			return result, err
+			return settled(), err
 		case instruction := <-instructions:
 			// The carrier applies the document, and applying it is what ends the
 			// media stream: the agent's own comment says a line it had started
@@ -876,11 +890,11 @@ func (r mediaCarrierRun) call(ctx context.Context, from, to string, duration tim
 			// handler already answered 200 to. Recorded here rather than there
 			// so the record and the caller's leg move together.
 			if err := transfer.advance(transferAccepted); err != nil {
-				return result, err
+				return settled(), err
 			}
 			transfer.StreamCut = conn.Close() == nil
 			result.Transfer = transfer
-			return r.bridge(ctx, result, instruction, caller, spoke, heard)
+			return r.bridge(ctx, settled(), instruction, caller, spoke, heard)
 		case <-ticker.C:
 		}
 		if frame, ok := caller.next(); ok {
@@ -909,7 +923,7 @@ func (r mediaCarrierRun) call(ctx context.Context, from, to string, duration tim
 		}
 		mu.Unlock()
 	}
-	return r.finish(result, spoke, heard, nil)
+	return r.finish(settled(), spoke, heard, nil)
 }
 
 // bridge carries the transfer document out, after the agent's stream has been

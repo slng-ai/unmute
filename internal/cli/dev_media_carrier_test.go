@@ -611,8 +611,15 @@ func TestMediaCarrierDropsQueuedAudioOnBargeIn(t *testing.T) {
 	//
 	// So the same call runs twice against the same agent, once told to barge in
 	// and once not, and the barge-in run has to hear strictly less.
-	const replyFrames = 200
-	const duration = 500 * time.Millisecond
+	// The agent answers in one synchronous burst, and it has to finish that
+	// burst and read the caller's second frame before the call ends, or it never
+	// gets to the point where it barges in. Both numbers are sized for that with
+	// room to spare: a frame takes milliseconds to move under the race detector,
+	// which is around ten times what it takes without one, and at 200 frames and
+	// half a second this test spent the whole call still draining the burst and
+	// reported a barge-in that never happened.
+	const replyFrames = 60
+	const duration = time.Second
 	play := func(bargeInAfter int) mediaCallResult {
 		t.Helper()
 		agent := newFakeAgent(t, &fakeAgent{
