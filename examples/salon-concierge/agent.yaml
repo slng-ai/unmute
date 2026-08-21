@@ -49,9 +49,19 @@ models:
   listen:
     transcriber:
       provider: slng
-      model: "gradium/stt:default"
+      # How fast this model lands its *final* transcript decides how long the
+      # caller waits, because the turn detector reads the transcript to decide
+      # whether they have finished. A final that is still outstanding leaves the
+      # detector unsure, and an unsure detector waits the full endpointing
+      # max_delay of 2.5s instead of the 0.58s floor. On identical audio,
+      # gradium/stt:default finalised in 0.999s mean and crossed that line on
+      # 12 of 12 clips; deepgram/nova:3 finalised in 0.159s mean, worst 0.323s,
+      # and crossed it on none, for the same words.
+      model: "deepgram/nova:3"
       language: en
       params:
+        # Kept for EU data residency, matching speak. It buys no latency here:
+        # with and without it measured 0.190s and 0.186s mean.
         world_part_override: eu
   turn:
     detector:

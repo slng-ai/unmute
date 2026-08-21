@@ -99,6 +99,21 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		t.Errorf("pipecat reasoning params = %#v, want Chat Completions with reasoning disabled", pipecatReason.Params)
 	}
 
+	// The other half of the turn-latency contract, and the bigger half. LiveKit's
+	// turn detector reads the transcript to decide whether the caller has
+	// finished, so a transcriber that has not finalised yet leaves it unsure, and
+	// an unsure detector waits the full endpointing max_delay of 2.5s instead of
+	// the 0.58s floor. Measured on identical audio, 12 clips each, 2026-08-21:
+	// gradium/stt:default finalised in 0.999s mean and crossed the 0.55s line on
+	// 12 of 12; deepgram/nova:3 finalised in 0.159s mean, worst 0.323s, and
+	// crossed it on none, for the same words. Latency itself is not testable
+	// without the network, so this pins the model that measurement chose and
+	// fails loudly if someone swaps it back.
+	transcriber := resolved.Models["transcriber"]
+	if transcriber.Model != "deepgram/nova:3" {
+		t.Errorf("transcriber model = %q, want deepgram/nova:3: a slower final transcript costs 2s of endpointing per turn", transcriber.Model)
+	}
+
 	// This example is the release-readiness package, so it carries the provider
 	// that needs a real call to prove: Coval correlates a trace to the call that
 	// produced it, and only a live call exercises that.
