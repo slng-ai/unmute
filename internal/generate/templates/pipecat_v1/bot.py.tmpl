@@ -49,6 +49,11 @@ import aiohttp
 {{end}}{{end}}{{if .NeedsHTTPX}}
 import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
+{{end}}{{if .SIP}}from livekit.api import AccessToken{{if .SIP.ColdDestination}}, LiveKitAPI{{end}}, VideoGrants
+{{if .SIP.ColdDestination}}from livekit.protocol.models import ParticipantInfo
+from livekit.protocol.room import ListParticipantsRequest
+from livekit.protocol.sip import TransferSIPParticipantRequest as SIPTransferRequest
+{{end}}from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
 {{end}}{{if .Telephony}}import telephony
 {{end}}from dotenv import load_dotenv
 from loguru import logger
@@ -69,8 +74,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.runner.types import RunnerArguments
-from pipecat.runner.utils import create_transport
-{{if .NeedsFunctionCalls}}from pipecat.services.llm_service import FunctionCallParams
+{{if not .SIP}}from pipecat.runner.utils import create_transport
+{{end}}{{if .NeedsFunctionCalls}}from pipecat.services.llm_service import FunctionCallParams
 {{end}}{{if .NeedsMCP}}from pipecat.services.mcp_service import MCPClient
 {{end}}{{if .HasFlows}}from pipecat.services.settings import LLMSettings
 {{end}}{{if .NeedsLanguage}}from pipecat.transcriptions.language import Language
@@ -390,13 +395,17 @@ def _pipeline_audio_rates(phone_call: dict | None) -> dict:
     if not phone_call:
         return {}
     return {"audio_in_sample_rate": 8000, "audio_out_sample_rate": 8000}
-{{if not .CloudWebsocket.AccountSIDEnv}}
+
 
 async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
     """The carrier's stream, with the call ended by closing the socket.
 
-    This package receives calls and never places or redirects one, so it holds no
-    carrier credentials at all. The framework's own telephony path cannot be used
+    Used in two cases: a package that holds no carrier credentials at all, and
+    any package on a local-plane run. Both need the same thing, which is a
+    transport that never asks a carrier to hang a call up.
+
+    A package that receives calls and never places or redirects one holds no
+    carrier credentials. The framework's own telephony path cannot be used
     for that: it always asks the serializer to hang the call up through the
     carrier's REST API, and the serializer refuses to be built without credentials
     for it (`auto_hang_up is enabled but missing required parameters`, verified
@@ -425,7 +434,6 @@ async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
         params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
     )
     return FastAPIWebsocketTransport(websocket=runner_args.websocket, params=params)
-{{end}}
 {{if .HasColdTransfer}}
 def _transfer_twiml(destination: str, ring_timeout: int) -> str:
     """The whole transfer, as one document your carrier will run in order.
@@ -452,7 +460,12 @@ async def _update_carrier_call(call_id: str, twiml: str) -> None:
     HTTPS request, so no carrier SDK.
     """
     account_sid = os.environ[{{pyq .CloudWebsocket.AccountSIDEnv}}]
-    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_id}.json"
+    # Where the carrier's REST API is for this run. `unmute dev --telephony`
+    # stands the carrier in on loopback and puts its address in
+    # {{.LocalPlaneEnv}}, so a local run's call control reaches this machine
+    # instead of the network. Production never sets it and gets Twilio.
+    base = os.getenv({{pyq .LocalPlaneEnv}}) or "https://api.twilio.com"
+    url = f"{base}/2010-04-01/Accounts/{account_sid}/Calls/{call_id}.json"
     auth = aiohttp.BasicAuth(account_sid, os.environ[{{pyq .CloudWebsocket.AuthTokenEnv}}])
     async with aiohttp.ClientSession() as session:
         async with session.post(url, auth=auth, data={"Twiml": twiml}) as response:
@@ -460,7 +473,154 @@ async def _update_carrier_call(call_id: str, twiml: str) -> None:
                 raise RuntimeError(
                     f"carrier call update failed with {response.status}: {await response.text()}"
                 )
-{{end}}{{end}}{{if .DailyCarrier}}
+{{end}}{{end}}{{if .SIP}}
+
+async def _sip_transport(runner_args: RunnerArguments) -> BaseTransport:
+    """Join the room the caller's trunk leg landed in.
+
+    This route hosts its own trunk: a LiveKit Server and a LiveKit SIP service
+    the operator runs. The carrier's call arrives at LiveKit SIP, which puts the
+    caller in a room, and this agent joins that room. There is no carrier
+    webhook of ours and no media socket of ours, which is why nothing here reads
+    a signature or a stream address.
+
+    Local and deployed are the same code. The plane is the same stack, so unlike
+    the WebSocket routes there is nothing for the agent to switch on: the only
+    difference is where LIVEKIT_URL points.
+    """
+    room = _sip_room_name(runner_args)
+    token = (
+        AccessToken(os.environ[{{pyq .SIP.APIKeyEnv}}], os.environ[{{pyq .SIP.APISecretEnv}}])
+        .with_identity("unmute-agent")
+        .with_name("unmute-agent")
+        .with_grants(VideoGrants(room_join=True, room=room, agent=True))
+        .to_jwt()
+    )
+    return LiveKitTransport(
+        url=os.environ[{{pyq .SIP.ServerURLEnv}}],
+        token=token,
+        room_name=room,
+        params=LiveKitParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
+    )
+
+
+def _sip_room_name(runner_args: RunnerArguments) -> str:
+    """The room the dispatch handed this session.
+
+    The dispatch rule names the room, so it arrives in the job body rather than
+    being composed here: a room name this process invented would be a room the
+    caller is not in.
+    """
+    body = getattr(runner_args, "body", None) or {}
+    room = body.get("room") or body.get("room_name")
+    if not room:
+        raise RuntimeError(
+            "no room in the dispatch body, so there is no call to join. The dispatch "
+            "rule names the room; check it was created (telephony-setup.sh) and that "
+            "this agent was started by a dispatch rather than by hand"
+        )
+    return str(room)
+{{if .SIP.ColdDestination}}
+
+async def _sip_transfer(room: str) -> None:
+    """Move the caller's own leg to the destination, and step out.
+
+    Two calls to the platform, on the room this agent is already in. The caller's
+    leg is a real SIP leg, so this is a transfer rather than a new call: nothing
+    is dialled on their behalf and nothing bridges through this process.
+
+    The agent's own leg is ended by the caller, after this returns.
+    """
+    async with LiveKitAPI(
+        os.environ[{{pyq .SIP.ServerURLEnv}}],
+        os.environ[{{pyq .SIP.APIKeyEnv}}],
+        os.environ[{{pyq .SIP.APISecretEnv}}],
+    ) as platform:
+        # Asked of the room rather than carried over from a transport event.
+        # Every LiveKit transport event reports a participant *sid* (PA_...) and
+        # a transfer names a participant *identity* (sip_...), so handing on
+        # what an event gave is a 404 "participant does not exist" from the
+        # platform: measured 2026-08-21 against a real call.
+        listed = await platform.room.list_participants(ListParticipantsRequest(room=room))
+        callers = [p.identity for p in listed.participants if p.kind == ParticipantInfo.Kind.SIP]
+        if not callers:
+            # No leg left to move. The caller hung up, most likely while the
+            # announcement above was still being spoken to them.
+            raise RuntimeError(f"no SIP caller is in room {room} to transfer")
+        request = SIPTransferRequest(
+            room_name=room,
+            # One call per room, so one SIP leg: the trunk puts each caller in a
+            # room of their own and the destination is dialled outside it.
+            participant_identity=callers[0],
+            transfer_to={{.SIP.ColdDestination}},
+            play_dialtone=True,
+        )
+        request.ringing_timeout.FromNanoseconds(int({{.SIP.RingTimeoutSecs}} * 1e9))
+        await platform.sip.transfer_sip_participant(request)
+{{end}}{{end}}{{if .Telephony}}
+
+async def _local_plane_transport(runner_args: RunnerArguments) -> BaseTransport:
+    """The carrier's stream on a local run, built without carrier credentials.
+
+    `unmute dev --telephony` puts the stand-in's own address in
+    {{.LocalPlaneEnv}} and is the carrier over loopback. Production never sets
+    it, so the framework's own path is what runs there and this function is
+    dead code in a deployment.
+
+    It has to exist because the framework's path leaves the serializer's
+    automatic hangup on, and that does two things a local run cannot have. It
+    refuses to be built without carrier credentials, in those words
+    (`auto_hang_up is enabled but missing required parameters`). And when the
+    call ends it POSTs `Status=completed` to the carrier's REST API, which is a
+    write leaving your machine on a run that is supposed to touch nothing. Only
+    Twilio's serializer can be pointed elsewhere; Telnyx and Plivo hardcode
+    their API host. Verified against pipecat-ai 1.7.0 on 2026-08-20.
+
+    Turning automatic hangup off costs nothing here. There is no carrier to
+    tell, and closing the socket ends the call: the same reasoning the
+    cloud-websocket route's own builder above carries.
+    """
+    from pipecat.runner.utils import parse_telephony_websocket
+    from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport
+{{if eq .Telephony.Carrier "twilio"}}    from pipecat.serializers.twilio import TwilioFrameSerializer
+{{else if eq .Telephony.Carrier "telnyx"}}    from pipecat.serializers.telnyx import TelnyxFrameSerializer
+{{else if eq .Telephony.Carrier "plivo"}}    from pipecat.serializers.plivo import PlivoFrameSerializer
+{{end}}
+    # The handshake is read once and cached on the websocket by the framework,
+    # so these two attributes are set here for the same reason the other builder
+    # sets them: whichever path built the transport, the session helpers below
+    # read the call the same way.
+    transport_type, call_data = await parse_telephony_websocket(runner_args.websocket)
+    runner_args.transport_type = transport_type
+    runner_args.call_data = call_data
+    params = transport_params[transport_type]()
+    params.add_wav_header = False
+{{if eq .Telephony.Carrier "twilio"}}    params.serializer = TwilioFrameSerializer(
+        stream_sid=call_data["stream_id"],
+        call_sid=call_data["call_id"],
+        params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
+    )
+{{else if eq .Telephony.Carrier "telnyx"}}    params.serializer = TelnyxFrameSerializer(
+        stream_id=call_data["stream_id"],
+        call_control_id=call_data["call_id"],
+        outbound_encoding=call_data["outbound_encoding"],
+        # PCMU both ways: the stand-in and every real carrier on this route
+        # speak mulaw at 8 kHz, and the framework's own path hardcodes the same
+        # value for the inbound side.
+        inbound_encoding="PCMU",
+        params=TelnyxFrameSerializer.InputParams(auto_hang_up=False),
+    )
+{{else if eq .Telephony.Carrier "plivo"}}    params.serializer = PlivoFrameSerializer(
+        stream_id=call_data["stream_id"],
+        call_id=call_data["call_id"],
+        params=PlivoFrameSerializer.InputParams(auto_hang_up=False),
+    )
+{{end}}    return FastAPIWebsocketTransport(websocket=runner_args.websocket, params=params)
+{{end}}{{if .DailyCarrier}}
 # --- the carrier leg ---------------------------------------------------------
 # The call arrives through your own carrier and joins this room over SIP. Only
 # the forwarding request below speaks the carrier's own words; everything else
@@ -817,6 +977,10 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             self.call_context["_transfer_result"] = {"failed": "this session is not a phone call, so it cannot be transferred"}
             await params.result_callback(self.call_context["_transfer_result"])
             return
+{{else if $.SIP}}        # Every session on this route is a phone call, so there is nothing to
+        # refuse up front: the room came from the dispatch that started this
+        # session. Whether a leg is still in it is the transfer's own question.
+        room = self.call_context["_sip_room"]
 {{else}}        transport = self.call_context.get("_transport")
         if not isinstance(transport, {{$.DailyParams.Transport}}) or not self.call_context.get("_daily_sip_session"):
             # No phone call, so nothing to hand over: the browser and console
@@ -876,6 +1040,63 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         # request that arrives in that window replays this rather than re-firing.
         self.call_context["_transfer_result"] = {"transfer_started": True}
         await params.result_callback(self.call_context["_transfer_result"])
+{{else if $.SIP}}
+        # This agent speaks the announcement itself, because the transfer moves the
+        # caller's leg and leaves this process running: nothing else is going to
+        # say anything to them. Said before the move, and not left to the prompt,
+        # because a model that says "putting you through" and never calls this tool
+        # is indistinguishable to a caller from a transfer that failed.
+        try:
+            await params.llm.push_frame(
+                LLMMessagesAppendFrame(
+                    [{"role": "developer", "content": "Tell the caller you are putting them through now, briefly, then stop."}],
+                    run_llm=True,
+                )
+            )
+        except BaseException:
+            # Nothing has moved yet, so release the claim and let a later turn
+            # retry rather than stranding the caller on a claimed transfer.
+            self.call_context.pop("_transfer_result", None)
+            raise
+        try:
+            await _sip_transfer(room)
+        except Exception as exc:
+            logger.warning("cold transfer failed: {}", exc)
+{{if .HangupOnUnavailable}}            self.call_context["_transfer_result"] = {"failed": "The transfer could not be completed; the call is ending."}
+            failure_error = None
+            try:
+                await params.llm.push_frame(
+                    LLMMessagesAppendFrame(
+                        [{"role": "developer", "content": "Tell the caller nobody can take the call right now, apologize, and say goodbye."}],
+                        run_llm=True,
+                    )
+                )
+                await params.result_callback(self.call_context["_transfer_result"])
+            except BaseException as failed:
+                failure_error = failed
+            try:
+                await params.llm.push_frame(EndFrame())
+            except BaseException:
+                if failure_error is None:
+                    raise
+                logger.exception("failed to end call after transfer failure")
+            if failure_error is not None:
+                raise failure_error
+{{else}}            self.call_context["_transfer_result"] = {"failed": f"The transfer could not be completed ({exc}). Tell the caller and keep helping them."}
+            await params.llm.push_frame(
+                LLMMessagesAppendFrame(
+                    [{"role": "developer", "content": "Tell the caller the transfer did not go through and that you will keep helping them."}],
+                    run_llm=True,
+                )
+            )
+            await params.result_callback(self.call_context["_transfer_result"])
+{{end}}            return
+        # The caller's leg has moved. This agent is alone in the room now, so it
+        # ends its own leg: an agent left running in an empty room is a session
+        # that bills and answers nobody.
+        self.call_context["_transfer_result"] = {"transfer_started": True}
+        await params.result_callback(self.call_context["_transfer_result"])
+        await params.llm.push_frame(EndFrame())
 {{else}}        # Daily SIP transfers via REFER, which keeps the bot on the call
         # until the transfer completes, so the bot speaks the announcement
         # itself (the official daily-pstn-cold-transfer pattern).
@@ -1290,8 +1511,12 @@ def build_stt():
     if runner_args.session_id is not None:
         trace_attributes["langfuse.session.id"] = runner_args.session_id
 {{end}}{{end}}
-{{if and .HasColdTransfer (not .CloudWebsocket)}}    call_context["_transport"] = transport
-{{end}}    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+{{if and .HasColdTransfer (not .CloudWebsocket)}}{{if not .SIP}}    call_context["_transport"] = transport
+{{end}}{{end}}{{if .SIP}}{{if .SIP.ColdDestination}}    # The room the caller is already in, which is the only thing a transfer needs
+    # from this session: the leg to move is looked up in the room at the moment
+    # of the transfer, because no transport event carries its identity.
+    call_context["_sip_room"] = _sip_room_name(runner_args)
+{{end}}{{end}}    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     # turn: local — end-of-turn detection runs on-device (Silero VAD). No API
     # key, no network hop; the turn binding in targets.yaml is advisory.
@@ -1475,6 +1700,12 @@ def build_stt():
             await runner.add_workers(*agents)
         except Exception as error:
             worker_start_error = error
+            # Logged here, where it is still known. Cancelling the runner makes
+            # run() raise CancelledError, and that reaches the caller before the
+            # re-raise below ever runs, so this error is destroyed on its way
+            # out: measured 2026-08-21, a session died half a second in and
+            # reported nothing but a failed trace flush.
+            logger.exception("the agent workers failed to start")
             pipeline_started.set()
             await runner.cancel(reason="agent worker startup failed")
             return
@@ -1492,6 +1723,20 @@ def build_stt():
         # than ringback, and there is no ringing state to handle.
 {{end}}        await pipeline_started.wait()
         await activate_entry()
+{{else if .SIP}}
+    @transport.event_handler("on_first_participant_joined")
+    async def on_caller_ready(_transport, participant_id):
+        # The moment there is somebody to greet. This transport has neither an
+        # RTVI client-ready handshake nor on_client_connected: the caller is
+        # already in the room before this agent joins it, because their call is
+        # what created the room, and the transport reports them here (it checks
+        # for participants already present when it connects).
+        #
+        # Waiting for the RTVI handshake instead is what made this route answer
+        # a call and then say nothing: no phone call has an RTVI client, so the
+        # greeting was waiting for an event that could never arrive (2026-08-21).
+        await pipeline_started.wait()
+        await activate_entry()
 {{else}}
     @main.rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
@@ -1500,10 +1745,23 @@ def build_stt():
         await pipeline_started.wait()
         await activate_entry()
 {{end}}
-    @transport.event_handler("on_client_disconnected")
+{{if .SIP}}    @transport.event_handler("on_participant_disconnected")
+    async def on_caller_gone(_transport, participant_id):
+        # The caller hung up, so the call is over. This transport has no
+        # on_client_disconnected either, and without ending the run here the
+        # session outlives the call: the pipeline stays up until the session cap
+        # fires, which on a phone line is an agent talking to nobody for a
+        # quarter of an hour.
+        #
+        # Any remote participant leaving is the caller leaving. The dispatch rule
+        # gives every call a room of its own, and a cold transfer moves the
+        # caller's leg out through the platform rather than bringing a third
+        # party in, so this room never holds anyone else.
+        await runner.cancel()
+{{else}}    @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         await runner.cancel()
-
+{{end}}
 {{if and (not .NeedsMCP) (not .Tracing)}}    await runner.add_workers(main)
 {{end}}{{if or .Tracing .NeedsMCP}}
     try:
@@ -1560,6 +1818,34 @@ async def bot(runner_args: RunnerArguments) -> None:
         transport = await _carrier_transport(runner_args)
     else:
         transport = await create_transport(runner_args, transport_params)
+{{else if .CloudWebsocket}}    # This package holds carrier credentials, so a deployed call goes through the
+    # framework's own path exactly as before. A local-plane run cannot: that path
+    # leaves the serializer's automatic hangup on, which POSTs to the carrier's
+    # REST API when the call ends, and there is no carrier on a local run to tell.
+    # {{.LocalPlaneEnv}} holds the stand-in's address on a run of
+    # `unmute dev --telephony`, and is unset in production.
+    if (
+        os.getenv({{pyq .LocalPlaneEnv}})
+        and getattr(runner_args, "websocket", None) is not None
+    ):
+        transport = await _carrier_transport(runner_args)
+    else:
+        transport = await create_transport(runner_args, transport_params)
+{{else if .Telephony}}    # Only on a local-plane run, and only for a phone call: see
+    # _local_plane_transport for why the framework's path cannot be used there.
+    # {{.LocalPlaneEnv}} holds the stand-in's address on a run of
+    # `unmute dev --telephony`, and is unset in production, so a deployment
+    # takes the same branch it always has.
+    if (
+        os.getenv({{pyq .LocalPlaneEnv}})
+        and getattr(runner_args, "websocket", None) is not None
+    ):
+        transport = await _local_plane_transport(runner_args)
+    else:
+        transport = await create_transport(runner_args, transport_params)
+{{else if .SIP}}    # One transport, local and deployed alike: the plane is the same stack the
+    # operator runs, so there is nothing to switch on. See _sip_transport.
+    transport = await _sip_transport(runner_args)
 {{else}}    transport = await create_transport(runner_args, transport_params)
 {{end}}    await run_bot(transport, runner_args)
 

@@ -1,11 +1,30 @@
 ---
-title: "Your first phone call"
-description: "Take a real inbound call on your laptop with one command."
+title: "Inbound calls"
+description: "Take a real call from your own phone number, on the route that reaches a laptop."
 ---
+
+An inbound agent answers a call somebody else placed. The channel has to declare
+it, and your carrier has to be able to reach whatever is running the agent.
+
+```yaml agent.yaml
+channels:
+  phone:
+    kind: telephony
+    inbound: true
+```
 
 This page follows `examples/twilio-telephony-hello`, a minimal agent that only
 greets and chats. It exists to prove your phone wiring before you point a real
 agent at it.
+
+<Note>
+  A first inbound call with **no carrier account at all** is the faster loop, and
+  it is a different command: see [call your agent
+  locally](/dev/local-telephony). This page is the real call, through your own
+  number.
+</Note>
+
+## Pick the target your carrier can reach
 
 The package declares two targets, one per platform, on the route each platform
 recommends for Twilio:
@@ -15,18 +34,12 @@ recommends for Twilio:
 | `pipecat` | `cloud-websocket` | your number points at a static TwiML Bin whose stream goes to Pipecat Cloud |
 | `livekit` | `sip` | your number is attached to a Twilio Elastic SIP Trunk pointed at LiveKit SIP |
 
-**Use the `pipecat` target for a local inbound call.** Twilio reaches that
-route over HTTPS and WSS, which a tunnel can carry, so a real call can land on
-your laptop. SIP needs the carrier to reach a LiveKit Server and LiveKit SIP
-service over public signalling and media addresses, which an HTTPS tunnel cannot
-provide. For `livekit`, use a LiveKit Cloud project or self-host both services at
-public addresses. The agent worker may still run on your laptop.
-
-<Note>
-  LiveKit Cloud is optional; a reachable LiveKit telephony deployment is not.
-  Starting the generated local Compose graph proves its wiring, but laptop NAT or
-  firewall rules can still block the carrier's RTP media.
-</Note>
+**Use the `pipecat` target for a real call that lands on your laptop.** Twilio
+reaches that route over HTTPS and WSS, which a tunnel can carry. SIP needs the
+carrier to reach a LiveKit Server and a LiveKit SIP service over public
+signalling and media addresses, which an HTTPS tunnel cannot provide. For
+`livekit`, use a LiveKit Cloud project or run both services at public addresses.
+The agent worker can still run on your laptop.
 
 ## What you need
 
@@ -72,8 +85,13 @@ supplies those itself.
 ## Take the call
 
 ```sh
-unmute dev examples/twilio-telephony-hello --telephony --target pipecat
+unmute dev examples/twilio-telephony-hello --telephony --carrier --target pipecat
 ```
+
+`--carrier` is the part that reaches your account: without it the run stays on
+your machine and your number is never touched. What it changes, and what it puts
+back, is on [call your agent
+locally](/dev/local-telephony#when-you-do-want-a-real-call).
 
 Watch for three things in the output:
 
@@ -86,14 +104,8 @@ Watch for three things in the output:
 Call that number. The agent answers and greets you. Speak, and it replies.
 
 Ctrl-c stops the run and puts your number's previous voice configuration back.
-Your TwiML Bin is never touched, because the local run answers Twilio's webhook
-itself at `POST /` and sends the media stream through
-`wss://<tunnel-host>/ws`.
-
-Pass `--public-url https://your-tunnel.example` to use a tunnel you already run.
-Pass `--no-webhook` to leave the number untouched, then point its voice webhook
-at the printed origin root yourself. The first flag replaces the managed tunnel;
-the second replaces only the temporary Twilio update.
+Your TwiML Bin is never touched, because the run answers Twilio's webhook itself
+at `POST /` and sends the media stream through `wss://<tunnel-host>/ws`.
 
 ## One number, one target at a time
 
@@ -123,6 +135,10 @@ to put it back for the `livekit` target.
     The command lists exactly which names it could not find, before it starts
     anything.
   </Accordion>
+  <Accordion title="nothing happened to my number at all">
+    The run had no `--carrier`, so it never asked your carrier for anything. That
+    is the default, and the route line says `no carrier involved`.
+  </Accordion>
 </AccordionGroup>
 
 ## Where to go next
@@ -131,7 +147,13 @@ to put it back for the `livekit` target.
   <Card title="Outbound calls" icon="phone-outgoing" href="/telephony/outbound-calls">
     Make the agent dial you.
   </Card>
-  <Card title="Webhooks and tunnels" icon="link" href="/dev/webhooks-and-tunnels">
-    Bring your own public URL, or leave the carrier untouched.
+  <Card title="Get your Twilio details" icon="key" href="/telephony/twilio">
+    Which console value fills which name.
+  </Card>
+  <Card title="Call your agent locally" icon="play" href="/dev/local-telephony">
+    The same call, with no carrier account.
+  </Card>
+  <Card title="Transfers" icon="phone-forwarded" href="/transfers/overview">
+    Hand the caller to a person.
   </Card>
 </Columns>

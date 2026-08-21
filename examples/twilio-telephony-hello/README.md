@@ -125,19 +125,25 @@ This is the honest table, and the asymmetry is the transport's, not the CLI's.
 
 | | pipecat (`cloud-websocket`) | livekit (`sip`) |
 |---|---|---|
-| local inbound call | **yes**, `dev --telephony` | **no**: see below |
+| local inbound call | **yes**, `dev --telephony` | **yes**, `dev --telephony` |
+| you talk to it by | the command calling you, through your microphone | dialling it from a softphone |
 | local outbound call | no: see below | **yes**, `--to` |
 | runs locally as | `uv run bot.py`, no Docker | a Docker Compose graph: agent, Redis, LiveKit Server, LiveKit SIP |
-| tunnel | managed cloudflared | none, and none would help |
+| carrier account needed locally | none | none |
+| tunnel | none | none |
 | hosted by you in production | nothing | the worker |
 
-**Why local inbound differs.** Twilio reaches the pipecat route over HTTPS and WSS,
-which a tunnel carries, so the dev command borrows your number's voice
-configuration and a real call lands on your laptop. SIP is not HTTP: an inbound call
-needs the carrier to reach a LiveKit Server and LiveKit SIP service over public SIP
-signalling and RTP. An HTTPS tunnel is neither required nor sufficient. Use a
-LiveKit Cloud project, or self-host both services at public addresses; the agent
-worker itself may still run locally. Everything in the laptop SIP graph can be
+**Neither target needs a carrier account to run locally.** The default run is
+carrier-free on both: the pipecat side has the CLI speak Twilio's media-stream
+protocol over loopback, and the livekit side runs a real SIP stack in containers
+that you dial from a softphone. `--carrier` is the flag that reaches your own
+Twilio account, and only then does a tunnel exist.
+
+**What that does not prove.** A healthy local call on either target says nothing
+about whether a carrier can reach you. For inbound over SIP that needs a carrier
+to reach LiveKit Server and LiveKit SIP over public SIP signalling and RTP, and
+an HTTPS tunnel is neither required nor sufficient: use a LiveKit Cloud project,
+or self-host both at public addresses. Everything in the laptop SIP graph can be
 healthy while NAT or a firewall keeps it unreachable.
 
 **Why local outbound differs.** On the pipecat route an outbound call is created at
@@ -158,14 +164,26 @@ On **pipecat**, from the repository root:
 unmute dev examples/twilio-telephony-hello --telephony --target pipecat
 ```
 
-Watch for the tunnel URL, the webhook update, and the line `call +1...`. Call that
-number. The agent answers and greets you; speak and it replies. `ctrl-c` stops
-everything and puts the number's previous voice configuration back. Your TwiML Bin
-is never touched: the local runner answers Twilio's webhook itself.
+No account, no number, no tunnel. The command is the carrier: it places the call
+itself and connects your microphone to it, so speak and the agent replies. Use
+headphones, or the agent hears itself and interrupts itself. Both legs are
+recorded and the paths print when the call ends. Talking needs `sox`
+(`brew install sox`); without it the run plays a fixture and says so.
 
-On **livekit**, inbound needs a reachable telephony deployment: a LiveKit Cloud
-project, or a public self-hosted LiveKit Server and SIP service. The worker may run
-locally against either one. See **Deploy it**.
+On **livekit**, the same command brings up a real SIP stack and prints an address
+and a per-run credential to dial from a softphone:
+
+```sh
+unmute dev examples/twilio-telephony-hello --telephony --target livekit
+```
+
+Either way, [Calling your agent locally](https://docs.slng.ai/dev/local-telephony)
+is the page for what happens next.
+
+To place a **real** call through your own Twilio account, add `--carrier`. That is
+the mode with a tunnel and a temporary webhook change, and it puts the number's
+previous voice configuration back on the way out. Your TwiML Bin is never
+touched either way.
 
 ## Test an outbound call
 
@@ -179,7 +197,7 @@ Once the Compose graph is healthy the CLI dispatches the agent and the call goes
 through your trunk. Your phone rings and the agent talks when you answer. If the
 call connects but you hear nothing, that is the RTP path back to the container
 rather than anything in the agent; the
-[local telephony guide](../../docs-site/dev/telephony.mdx) covers it.
+[local telephony guide](../../docs-site/dev/local-telephony.mdx) covers it.
 
 On **pipecat**, outbound runs against the deployed agent:
 

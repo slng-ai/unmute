@@ -2496,3 +2496,78 @@ func TestValidateEndpointingDelayIsATurnFieldAndPositive(t *testing.T) {
 		})
 	}
 }
+
+// A transfer destination the local plane has no endpoint for is refused before
+// anything starts, naming the destination and what the plane does run. This is
+// a defect rather than a call that times out, and it should be read at compile
+// time instead of watched failing on a phone.
+func TestValidateRefusesADestinationThePlaneCannotReach(t *testing.T) {
+	pkg := loadSafeCore(t)
+	enableTelephony(pkg)
+	routeTarget(pkg, "livekit", "primary_phone", "sip", "twilio")
+	connection := pkg.Connections["primary_phone"]
+	connection.Environment = map[string]string{
+		"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME",
+		"sip_password": "TWILIO_SIP_PASSWORD", "from_number": "TWILIO_PHONE_NUMBER",
+	}
+	pkg.Connections["primary_phone"] = connection
+	pkg.Agent.Controls["to_human"] = packagespec.Control{
+		Kind: "human_transfer", Cold: &packagespec.ColdTransfer{Destination: "billing_line"},
+	}
+	if pkg.Agent.Destinations == nil {
+		pkg.Agent.Destinations = map[string]string{}
+	}
+	pkg.Agent.Destinations["billing_line"] = "BILLING_PHONE_NUMBER"
+	billing := pkg.Agent.Agents["billing"]
+	billing.Tools = append(billing.Tools, "to_human")
+	pkg.Agent.Agents["billing"] = billing
+
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := agent.Targets["livekit"]
+	// The build derives one endpoint per declared destination, so the state this
+	// refuses cannot be authored. It is reachable by a plane that stopped
+	// deriving one, which is what this drops the endpoint to simulate.
+	endpoints := resolved.Telephony.LocalEndpoints
+	if len(endpoints) < 2 {
+		t.Fatalf("the plane derived %d endpoints; this test no longer describes it", len(endpoints))
+	}
+	kept := []TelephonyLocalEndpoint{}
+	for _, endpoint := range endpoints {
+		if endpoint.Role != TelephonyRoleDestination {
+			kept = append(kept, endpoint)
+		}
+	}
+	resolved.Telephony.LocalEndpoints = kept
+	resolved.Telephony.Services = removeService(resolved.Telephony.Services, "telephony_destinations")
+	report, err := Validate(agent, []Target{resolved}, targetcap.Default())
+	joined := strings.Join(report.PerTarget[0].Errors, "\n")
+	if err == nil || !strings.Contains(joined, `transfer destination "billing_line" has no endpoint`) {
+		t.Fatalf("a destination with no endpoint was accepted: err=%v\n%s", err, joined)
+	}
+
+	// Two endpoints answering to one name is an ambiguous transfer and one
+	// recording overwriting another. The reachable case is a destination
+	// declared with the caller endpoint's own name.
+	resolved.Telephony.LocalEndpoints = append(endpoints, TelephonyLocalEndpoint{
+		Role: TelephonyRoleDestination, Name: "billing_line", Service: "telephony_destinations",
+		Address: "10.185.61.21", Port: 5060, Recording: "billing_line.wav",
+	})
+	report, err = Validate(agent, []Target{resolved}, targetcap.Default())
+	joined = strings.Join(report.PerTarget[0].Errors, "\n")
+	if err == nil || !strings.Contains(joined, `collides with another endpoint of the same name`) {
+		t.Fatalf("two endpoints sharing a name was accepted: err=%v\n%s", err, joined)
+	}
+}
+
+func removeService(services []string, drop string) []string {
+	kept := make([]string, 0, len(services))
+	for _, service := range services {
+		if service != drop {
+			kept = append(kept, service)
+		}
+	}
+	return kept
+}

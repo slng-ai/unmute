@@ -1661,7 +1661,7 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 		`@function_tool(on_duplicate="reject")
     async def to_human(self, ctx: RunContext) -> str | None:`,
 		"from livekit.agents.beta.workflows import WarmTransferTask, WorkflowInstructions",
-		`sip_call_to=os.environ["BILLING_PHONE_NUMBER"]`,
+		`sip_call_to=_sip_user(os.environ["BILLING_PHONE_NUMBER"])`,
 		// The conversation is read into one local and that local is what is
 		// handed over, so the count logged beside it cannot describe something
 		// else (003 contract C4).
@@ -1929,7 +1929,7 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		`await session.start(agent=Intake(initial=True), room=ctx.room`,
 		`await _livekit_entry_greeting(session)`,
 		"result = await WarmTransferTask(",
-		`sip_call_to=os.environ["BILLING_PHONE_NUMBER"],`,
+		`sip_call_to=_sip_user(os.environ["BILLING_PHONE_NUMBER"]),`,
 	} {
 		if !strings.Contains(agentPy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -1997,10 +1997,10 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	for _, want := range []string{
 		"image: valkey/valkey:9.1.1-alpine", "image: livekit/livekit-server:v1.13.4", "image: livekit/sip:v1.7.0",
 		"LIVEKIT_API_SECRET=secret", "address: redis:6379",
-		`stop_grace_period: "1200s"`, `"${LIVEKIT_HOST_PORT:-7880}:7880"`,
-		`"${LIVEKIT_SIP_HOST_PORT:-5060}:5060/udp"`,
+		`stop_grace_period: "1200s"`, `"${UNMUTE_CONTROL_BIND_IP:-127.0.0.1}:${LIVEKIT_HOST_PORT:-7880}:7880"`,
+		`"${UNMUTE_PLANE_ADVERTISE_IP:-127.0.0.1}:${LIVEKIT_SIP_HOST_PORT:-5060}:5060/udp"`,
 		`rtp_port: ${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}`,
-		`"${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}:${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}/udp"`,
+		`"${UNMUTE_PLANE_ADVERTISE_IP:-127.0.0.1}:${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}:${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}/udp"`,
 		"condition: service_healthy", "redis_data:/data",
 	} {
 		if !strings.Contains(compose, want) {

@@ -716,6 +716,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
             await runner.add_workers(*agents)
         except Exception as error:
             worker_start_error = error
+            # Logged here, where it is still known. Cancelling the runner makes
+            # run() raise CancelledError, and that reaches the caller before the
+            # re-raise below ever runs, so this error is destroyed on its way
+            # out: measured 2026-08-21, a session died half a second in and
+            # reported nothing but a failed trace flush.
+            logger.exception("the agent workers failed to start")
             pipeline_started.set()
             await runner.cancel(reason="agent worker startup failed")
             return

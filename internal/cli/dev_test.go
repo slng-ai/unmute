@@ -510,7 +510,7 @@ func routeSafeCore(t *testing.T, dir, pipecatTransport, livekitTransport string,
 // A provisional route is usable now: dev proceeds past validation instead of
 // failing closed on the credentialed-smoke gate. It stops later (here on
 // missing model credentials), never on the gate. Standalone --public-url still
-// requires --telephony.
+// requires --carrier.
 func TestDevTelephonyProvisionalRouteDoesNotFailClosed(t *testing.T) {
 	dir := copySafeCore(t)
 	routeSafeCore(t, dir, "carrier-websocket", "connector", false)
@@ -531,11 +531,11 @@ func TestDevTelephonyProvisionalRouteDoesNotFailClosed(t *testing.T) {
 	for _, name := range []string{"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"} {
 		t.Setenv(name, "value")
 	}
-	_, err = run(t, "dev", dir, "--target", "pipecat", "--telephony", "--public-url", "https://voice.example.com")
+	_, err = run(t, "dev", dir, "--target", "pipecat", "--telephony", "--carrier", "--public-url", "https://voice.example.com")
 	if err == nil || strings.Contains(err.Error(), "credentialed smoke") {
 		t.Fatalf("provisional route must no longer fail closed at validation, got %v", err)
 	}
-	if _, err := run(t, "dev", dir, "--target", "pipecat", "--public-url", "https://voice.example.com"); err == nil || !strings.Contains(err.Error(), "requires --telephony") {
+	if _, err := run(t, "dev", dir, "--target", "pipecat", "--public-url", "https://voice.example.com"); err == nil || !strings.Contains(err.Error(), "requires --carrier") {
 		t.Fatalf("standalone --public-url error = %v", err)
 	}
 }
@@ -594,8 +594,11 @@ func TestDevConsoleRemoved(t *testing.T) {
 // before target selection.
 func TestDevToFlagGuards(t *testing.T) {
 	dir := copySafeCore(t)
-	if _, err := run(t, "dev", dir, "--target", "pipecat", "--no-webhook"); err == nil || !strings.Contains(err.Error(), "--no-webhook requires --telephony") {
-		t.Fatalf("--no-webhook without --telephony error = %v", err)
+	if _, err := run(t, "dev", dir, "--target", "pipecat", "--no-webhook"); err == nil || !strings.Contains(err.Error(), "--no-webhook requires --carrier") {
+		t.Fatalf("--no-webhook without --carrier error = %v", err)
+	}
+	if _, err := run(t, "dev", dir, "--target", "pipecat", "--carrier"); err == nil || !strings.Contains(err.Error(), "--carrier requires --telephony") {
+		t.Fatalf("--carrier without --telephony error = %v", err)
 	}
 	if _, err := run(t, "dev", dir, "--target", "pipecat", "--to", "+15551234567"); err == nil || !strings.Contains(err.Error(), "--to requires --telephony") {
 		t.Fatalf("--to without --telephony error = %v", err)
@@ -685,7 +688,7 @@ func TestDevTelephonyOnTheCloudWebsocketRouteReachesTheLocalFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = run(t, "dev", dir, "--target", "pipecat", "--telephony", "--public-url", "https://voice.example.com")
+	_, err = run(t, "dev", dir, "--target", "pipecat", "--telephony", "--carrier", "--public-url", "https://voice.example.com")
 	if err == nil {
 		t.Fatal("with no carrier credentials the local flow must refuse")
 	}
@@ -749,11 +752,11 @@ func TestDevWithNoArgumentResolvesTheCurrentDirectory(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	// --public-url without --telephony is rejected just after the directory is
+	// --public-url without --carrier is rejected just after the directory is
 	// resolved, so this error means dev accepted the zero-argument form.
 	cmd.SetArgs([]string{"dev", "--public-url", "https://example.test"})
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "--public-url requires --telephony") {
+	if err == nil || !strings.Contains(err.Error(), "--public-url requires --carrier") {
 		t.Fatalf("dev with no directory did not reach its flag checks: %v", err)
 	}
 }

@@ -63,8 +63,14 @@ async def _signed_event(request: Request) -> dict:
 async def _call_api(method: str, path: str, body: dict) -> dict:
     headers = {"Authorization": "Bearer " + _env(API_KEY_ENV), "Content-Type": "application/json"}
     timeout = aiohttp.ClientTimeout(total=CONTROL_TIMEOUT_SECS)
+    # On a run of `unmute dev --telephony` the carrier is a stand-in on loopback
+    # and its address is in {{.LocalPlaneEnv}}. Redirected so that a local run
+    # writes nothing outside the machine (gate P2). Placing a call
+    # through the stand-in is not implemented for this carrier, so it answers with
+    # a 404 that says so: a legible failure rather than a request that quietly left.
+    base = os.getenv({{pyq .LocalPlaneEnv}}) or "https://api.telnyx.com"
     async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-        async with session.request(method, "https://api.telnyx.com/v2" + path, json=body) as response:
+        async with session.request(method, base + "/v2" + path, json=body) as response:
             if response.status < 200 or response.status >= 300:
                 raise RuntimeError(f"Telnyx call control failed with status {response.status}")
             return await response.json()

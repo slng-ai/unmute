@@ -3,6 +3,7 @@ package generate
 import (
 	"bytes"
 	"flag"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1216,6 +1217,32 @@ func TestV2_PipecatDelegateSnapshotsCompletedOwnerCall(t *testing.T) {
 	}
 	if !bytes.Contains(bot, []byte("\nimport copy\n")) {
 		t.Error("a bot with flows must import copy for the delegate snapshot")
+	}
+}
+
+// A worker that fails to start says why, at the point where why is still known.
+// The failure is recorded and the runner cancelled, which makes run() raise
+// CancelledError; that reaches the caller first and takes the recorded error's
+// place, so the re-raise below it never runs. Measured on a real call
+// 2026-08-21: the session died half a second in and the only line it left
+// behind was a failed trace flush, which says nothing about the cause.
+func TestPipecatWorkerStartFailureSaysWhy(t *testing.T) {
+	bot, err := os.ReadFile(filepath.Join("testdata", "golden", "pipecat_v1_tasks_bot.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := bytes.Index(bot, []byte("await runner.add_workers(*agents)"))
+	if start < 0 {
+		t.Fatal("this bot starts no agent workers")
+	}
+	cancel := bytes.Index(bot[start:], []byte(`await runner.cancel(reason="agent worker startup failed")`))
+	if cancel < 0 {
+		t.Fatal("nothing cancels the runner when a worker fails to start")
+	}
+	logged := bytes.Index(bot[start:start+cancel], []byte("logger.exception("))
+	if logged < 0 {
+		t.Error("the worker start failure is not logged before the runner is cancelled, so the " +
+			"cancellation replaces it and the session dies without naming a cause")
 	}
 }
 
@@ -2856,10 +2883,15 @@ func TestUS4_ForwardedRegionIsInTheReport(t *testing.T) {
 	}
 }
 
+// By name, in order, because a package may declare two targets on one provider:
+// salon-concierge puts Pipecat on the media stream and on a trunk. Ranging over
+// the map returned whichever one Go felt like, so a caller asking for "the
+// Pipecat target" of such a package was a coin flip that would land the day the
+// two stopped agreeing.
 func targetByProvider(t *testing.T, agent *ir.Agent, provider ir.Provider) ir.Target {
 	t.Helper()
-	for _, resolved := range agent.Targets {
-		if resolved.Provider == provider {
+	for _, name := range slices.Sorted(maps.Keys(agent.Targets)) {
+		if resolved := agent.Targets[name]; resolved.Provider == provider {
 			return resolved
 		}
 	}

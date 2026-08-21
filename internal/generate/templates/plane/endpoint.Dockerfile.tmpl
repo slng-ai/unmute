@@ -1,0 +1,16 @@
+# The local telephony plane's SIP endpoint: a real SIP user agent, so the plane
+# exercises the same call mechanism a carrier trunk does.
+#
+# baresip is BSD-3-Clause and packaged as baresip-core on Debian. Debian rather
+# than Alpine for exactly that reason: there is no Alpine package, and building
+# it from source here would trade a 20 MB layer for a toolchain.
+#
+# Local only. Nothing in a deployment builds this image, and no managed platform
+# ever sees it.
+FROM debian:trixie-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends baresip-core \
+ && rm -rf /var/lib/apt/lists/*
+# The accounts file is written at start from the service's own environment, so
+# each endpoint's role is visible in the Compose file rather than buried here.
+COPY baresip.conf /etc/baresip/config

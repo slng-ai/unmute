@@ -66,9 +66,19 @@ def _stream_xml(token: str) -> str:
 
 
 def _client() -> RestClient:
-    return RestClient(
+    client = RestClient(
         _env(AUTH_ID_ENV), _env(AUTH_TOKEN_ENV), timeout=CONTROL_TIMEOUT_SECS
     )
+    # On a run of `unmute dev --telephony` the carrier is a stand-in on loopback
+    # and its address is in {{.LocalPlaneEnv}}. base_uri is the only seam the SDK
+    # has: it takes no url parameter, and this attribute is read when each request
+    # is built (plivo 4.61.0). Redirected so a local run the machine (gate P2). Placing a call
+    # through the stand-in is not implemented for this carrier, so it answers with
+    # a 404 that says so: a legible failure rather than a request that quietly left.
+    local_plane = os.getenv({{pyq .LocalPlaneEnv}})
+    if local_plane:
+        client.client.base_uri = local_plane.rstrip("/")
+    return client
 
 
 def configure_pipecat_env() -> None:

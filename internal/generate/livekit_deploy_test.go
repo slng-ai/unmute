@@ -235,7 +235,7 @@ func TestLiveKitColdTransferSendsAURI(t *testing.T) {
 	}
 	// The warm path dials a number, so no scheme and no helper on that argument.
 	warm := emit(t, "SUPERVISOR_PHONE_NUMBER", true)
-	if !strings.Contains(warm, `sip_call_to=os.environ["SUPERVISOR_PHONE_NUMBER"]`) {
+	if !strings.Contains(warm, `sip_call_to=_sip_user(os.environ["SUPERVISOR_PHONE_NUMBER"])`) {
 		t.Error("warm sip_call_to is not a plain number expression")
 	}
 	if strings.Contains(warm, `sip_call_to=_refer_uri(`) || strings.Contains(warm, `sip_call_to="tel:`) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/slng-ai/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/target"
 )
 
 var (
@@ -84,6 +86,97 @@ func rejectLocalTopologyConflicts(plan *generate.TelephonyRuntimePlan, env []str
 		}
 		if values[name] != "" {
 			return fmt.Errorf("%s conflicts with the generated local LiveKit SIP topology; unset it for `unmute dev --telephony`", name)
+		}
+	}
+	return nil
+}
+
+// hostPort is one port this run will publish, and the one thing to change when
+// it is already taken.
+type hostPort struct {
+	// Port is the host port, as a string because that is how every one of these
+	// arrives: from a flag, or from an environment variable, or from a default.
+	Port string
+	// What names it in the message. Not the container's word for it: the reader
+	// is looking at their own machine.
+	What string
+	// MovedBy is the flag or variable that puts it somewhere else. A message that
+	// says a port is busy and not how to move it makes the reader go looking.
+	MovedBy string
+}
+
+// telephonyHostPorts is what this run will publish, per plane.
+//
+// Only the ports this command knows by name. Parsing them out of the generated
+// Compose file would cover more, and would mean expanding shell defaults out of
+// a YAML string, for ports whose collisions Docker already reports clearly. The
+// one it does not report clearly is the agent's, which is the reason this exists.
+func telephonyHostPorts(plan *generate.TelephonyRuntimePlan, botPort string, env []string) []hostPort {
+	ports := []hostPort{{Port: botPort, What: "the local agent", MovedBy: "--bot-port"}}
+	if plan == nil || plan.LocalPlane != string(target.LocalPlaneSIP) {
+		return ports
+	}
+	// The SIP plane publishes a control port and a signalling port too, and both
+	// have their own variable. The RTP range is deliberately not checked: it is a
+	// hundred ports, and probing a hundred listeners on every start to catch a
+	// collision Docker names accurately is not worth the wait.
+	return append(ports,
+		hostPort{Port: envOrDefault(env, "LIVEKIT_HOST_PORT", "7880"), What: "LiveKit Server", MovedBy: "LIVEKIT_HOST_PORT"},
+		hostPort{Port: envOrDefault(env, "LIVEKIT_SIP_HOST_PORT", "5060"), What: "LiveKit SIP", MovedBy: "LIVEKIT_SIP_HOST_PORT"},
+	)
+}
+
+// envOrDefault reads a name out of the child environment, falling back to the
+// same default the generated Compose file uses. The two have to agree, which is
+// why the defaults are written beside the names that carry them.
+func envOrDefault(env []string, name, fallback string) string {
+	if value := envValue(env, name); value != "" {
+		return value
+	}
+	return fallback
+}
+
+// rejectOccupiedHostPorts stops a run whose ports are already taken, naming the
+// port and what moves it.
+//
+// Two failures, and the quiet one is worse. A published port that collides makes
+// Docker refuse with its own message, which is at least a message. The **agent**
+// port does not collide loudly: a second run reaches the first run's agent, gets
+// an answer meant for a different package, and reports something that looks like
+// a bug in the caller's own code. Found by hitting it: a 404 from a route the
+// emitted agent plainly defines, because the port belonged to another run.
+// hostPortCheck is the seam, in the same shape as composePreflight beside it: a
+// test that stands in for the container runtime is also standing in for the
+// thing that binds these ports, so it has to be able to turn this off. Its own
+// gate is TestDevRefusesAPortAnotherRunIsHolding, which calls the function.
+var hostPortCheck = rejectOccupiedHostPorts
+
+func rejectOccupiedHostPorts(ports []hostPort) error {
+	for _, port := range ports {
+		if port.Port == "" {
+			continue
+		}
+		// Both addresses, because neither one alone sees every holder. Measured on
+		// darwin: a wildcard bind *succeeds* while loopback is held, so probing
+		// 0.0.0.0 alone misses another `unmute dev`, whose Compose publishes on
+		// loopback by default. Probing 127.0.0.1 alone misses a container
+		// published on the wildcard, which is how Docker publishes and is the
+		// collision people actually hit: another run's LiveKit Server on 7880
+		// sailed past a loopback-only probe and failed later as Compose's own
+		// bind error, buried in the log file.
+		for _, host := range []string{"127.0.0.1", "0.0.0.0"} {
+			listener, err := net.Listen("tcp", net.JoinHostPort(host, port.Port))
+			if err != nil {
+				return fmt.Errorf("port %s is already in use, and this run needs it for %s. Another "+
+					"`unmute dev` or container is probably still up: stop it, or move this one with %s. "+
+					"Left alone, this run would reach the other one's agent and report its answers as yours",
+					port.Port, port.What, port.MovedBy)
+			}
+			// Closed at once. This is a probe, not a reservation: holding it would
+			// be holding the port away from the thing about to publish it.
+			if err := listener.Close(); err != nil {
+				return fmt.Errorf("release the probe on port %s: %w", port.Port, err)
+			}
 		}
 	}
 	return nil

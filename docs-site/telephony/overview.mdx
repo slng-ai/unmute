@@ -5,8 +5,8 @@ sidebarTitle: "Overview"
 ---
 
 A phone call reaches your agent over a route: a target, a transport, and a
-carrier. Unmute picks the route from what your target declares, generates the
-code for it, and runs it locally when that route has a local topology.
+carrier. Unmute picks the route from what your target declares and generates the
+code for it.
 
 ## Declare a phone channel
 
@@ -87,9 +87,28 @@ its own `build/<target>/` directory.
 | Pipecat | `carrier-websocket` | Twilio, Telnyx, Plivo | a generated adapter of yours terminates the carrier's media stream |
 | Pipecat | `carrier-websocket` | Exotel | no adapter, so this route is refused at validation |
 | Pipecat | `daily-sip` | Twilio | your carrier forwards into the same Daily room through a helper you run |
+| Pipecat | `sip` | Twilio, Telnyx, Plivo | a SIP trunk carries the call into a LiveKit SIP service you run, which tells your agent about it |
 | LiveKit Agents | `sip` | Twilio, Telnyx, Plivo | a SIP trunk carries the call into LiveKit SIP |
 | LiveKit Agents | `sip` | Exotel | no adapter, so this route is refused at validation |
 | LiveKit Agents | `connector` | Twilio | a generated bridge turns Twilio Media Streams into a LiveKit room |
+
+### Where each route deploys
+
+| Route | Deploys to |
+|---|---|
+| Pipecat `cloud-websocket` | Pipecat Cloud |
+| Pipecat `carrier-websocket` | Pipecat Cloud |
+| Pipecat `daily-sip` | Pipecat Cloud, plus the public helper you host |
+| Pipecat `sip` | nothing managed: you run the four containers yourself |
+| LiveKit `sip` | LiveKit Cloud, or a LiveKit deployment of your own |
+| LiveKit `connector` | LiveKit Cloud |
+
+<Note>
+  Pipecat `sip` is the one route with no managed platform anywhere in it, so it
+  emits no deployment manifest. It also **receives calls only**: there is no
+  dial-out path, so `outbound: true` is refused on it by name. The compiler
+  prints the setup its own steps need, and the emitted `README.md` carries them.
+</Note>
 
 The Pipecat Daily helper exposes one public `/call` webhook. It requires the
 exact HTTPS base URL in `UNMUTE_PUBLIC_URL` (an optional path is allowed) and
@@ -115,35 +134,26 @@ The transport is not a detail. It decides what the agent can do on a call.
 
 [Transfers](/transfers/overview) covers which route can reach a human, and how.
 
-## Running one of these locally
+## Testing a route before you deploy it
 
-For routes with a local topology, one command runs the route your connection
-declares: `unmute dev --telephony`. The Pipecat Daily route uses the emitted
-helper you host, and LiveKit SIP still needs reachable SIP and media ingress for
-an inbound call. What the command starts, what it changes on your carrier
-account, and what it puts back when you stop it are all on [running a phone
-route locally](/dev/telephony).
-
-<Warning>
-  A healthy local runtime proves wiring, not reachability. A real call also needs
-  carrier credentials, a voice-capable number, and the route's public ingress.
-  The managed tunnel covers HTTPS and WSS routes. LiveKit SIP needs public SIP
-  signaling and RTP ingress; an HTTPS tunnel cannot provide either one.
-</Warning>
+Most of these routes run on your own machine with no carrier account at all, and
+that is the loop to build in. [Call your agent
+locally](/dev/local-telephony) is the one page for it: which plane each route
+gets, what a local call proves, and what it cannot tell you.
 
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="Run a route locally" icon="play" href="/dev/telephony">
-    What `--telephony` does, step by step.
-  </Card>
-  <Card title="Your first phone call" icon="phone-incoming" href="/telephony/first-phone-call">
-    A real inbound call, on the route that works from a laptop.
-  </Card>
   <Card title="Outbound calls" icon="phone-outgoing" href="/telephony/outbound-calls">
-    Make the agent dial out with `--to`.
+    Make the agent dial out, and give the call its values.
+  </Card>
+  <Card title="Inbound calls" icon="phone-incoming" href="/telephony/inbound-calls">
+    A real call arriving on the route that works from a laptop.
   </Card>
   <Card title="Get your Twilio details" icon="key" href="/telephony/twilio">
     Which console value fills which name.
+  </Card>
+  <Card title="Call your agent locally" icon="play" href="/dev/local-telephony">
+    The whole local loop, with no carrier account.
   </Card>
 </Columns>

@@ -344,18 +344,13 @@ func TestExecDevTelephonyConfiguresTwilioWebhookAfterReady(t *testing.T) {
 	fakeTwilioAPI(t, "sekrit-auth-77", "https://old.example/hook", &updates)
 	root, trace := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=sekrit-auth-77\nTWILIO_PHONE_NUMBER=+15550001111\n")
 	fakeDocker(t, root)
-	cloudflared := root + "/cloudflared"
-	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	restoreLook := tunnelLookPath
-	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
-	t.Cleanup(func() { tunnelLookPath = restoreLook })
+	allowHeldPorts(t)
+	fakeTunnel(t, root)
 
 	plan := pipecatTwilioPlan()
 	plan.AutoWebhookEndpoint = "inbound"
 	cmd, out := telephonyTestCommand(t)
-	if err := execDevTelephony(cmd, root, "phone", plan, composeFiles, devTelephonyOptions{botPort: "7861"}); err != nil {
+	if err := execDevTelephony(cmd, root, "phone", plan, composeFiles, devTelephonyOptions{botPort: "7861", carrier: true}); err != nil {
 		t.Fatalf("execDevTelephony: %v\n%s", err, out.String())
 	}
 	// V14: the last write the carrier saw is the *restore*. The dev URL dies
@@ -392,18 +387,13 @@ func TestExecDevTelephonyNoWebhookLeavesCarrierUntouched(t *testing.T) {
 	fakeTwilioAPI(t, "sekrit-auth-77", "https://old.example/hook", &updates)
 	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=sekrit-auth-77\nTWILIO_PHONE_NUMBER=+15550001111\n")
 	fakeDocker(t, root)
-	cloudflared := root + "/cloudflared"
-	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	restoreLook := tunnelLookPath
-	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
-	t.Cleanup(func() { tunnelLookPath = restoreLook })
+	allowHeldPorts(t)
+	fakeTunnel(t, root)
 
 	plan := pipecatTwilioPlan()
 	plan.AutoWebhookEndpoint = "inbound"
 	cmd, out := telephonyTestCommand(t)
-	opts := devTelephonyOptions{botPort: "7861", noWebhook: true}
+	opts := devTelephonyOptions{botPort: "7861", noWebhook: true, carrier: true}
 	if err := execDevTelephony(cmd, root, "phone", plan, composeFiles, opts); err != nil {
 		t.Fatalf("execDevTelephony: %v\n%s", err, out.String())
 	}

@@ -59,6 +59,12 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	// Read through the same door validate uses, so the command and the emitted
 	// project cannot disagree about what the account has to be allowed to do.
 	data.Prerequisites = ir.RoutePrerequisites(agent, target, targetcap.Pipecat)
+	// Rendered into the agent, deliberately never added to the env set: it is
+	// the plane's to set, never the author's (gate C4).
+	data.LocalPlaneEnv = targetcap.LocalPlaneEnvName
+	if target.Telephony != nil {
+		data.CarrierSteps = slices.Clone(target.Telephony.ManualSteps)
+	}
 	env := newEnvSet()
 	for _, name := range tracingEnv(data.TracingProvider) {
 		env.add(name)
@@ -163,6 +169,28 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	if err != nil {
 		return pipecatData{}, err
 	}
+	data.SIP, err = buildPipecatSIP(agent, target, env)
+	if err != nil {
+		return pipecatData{}, err
+	}
+
+	// The plane's selector has to reach the container, and this is the only list
+	// that carries a name into the generated Compose file without also putting it
+	// in .env.example for an author to fill in. Optional is exactly right: set on
+	// a local-plane run, absent everywhere else, and a deployment never sees it.
+	//
+	// Without this the container starts without it, silently takes the
+	// framework's transport path, and ends the call by POSTing to the carrier's
+	// REST API: the write gate P2 forbids. Found by running it.
+	if data.Telephony != nil || data.CloudWebsocket != nil {
+		data.DevOptionalEnv = append(data.DevOptionalEnv, targetcap.LocalPlaneEnvName)
+	}
+	// Not the SIP route: nothing there reads the selector. Its plane is a real
+	// SIP stack, so the agent's transport and its transfer are the same code
+	// locally and in production, and there is nothing for the agent to switch on.
+	// That is the route's own argument, and passing a name it never reads would
+	// contradict it.
+	slices.Sort(data.DevOptionalEnv)
 
 	applyConversation(agent.Conversation, &data)
 	data.Notes = append(data.Notes, serviceNotes(data)...)
@@ -319,9 +347,10 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 	if plan == nil {
 		return nil, nil
 	}
-	if plan.Key.Provider == ir.ProviderPipecat && (plan.Key.Transport == "daily-sip" || plan.Key.Transport == "cloud-websocket") {
-		// Both carrier routes have their own data group, so nothing that reads
-		// .Telephony (and means carrier-websocket) can see either of them.
+	if plan.Key.Provider == ir.ProviderPipecat &&
+		(plan.Key.Transport == "daily-sip" || plan.Key.Transport == "cloud-websocket" || plan.Key.Transport == "sip") {
+		// Each of those routes has its own data group, so nothing that reads
+		// .Telephony (and means carrier-websocket) can see any of them.
 		return nil, nil
 	}
 	if plan.Key.Provider != ir.ProviderPipecat || plan.Key.Transport != "carrier-websocket" {
@@ -340,12 +369,7 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 	}
 	env.add("UNMUTE_PUBLIC_URL")
 	env.add("REDIS_URL")
-	sessionTTL := 360
-	if agent.Conversation != nil {
-		if configured := durationSecs(agent.Conversation.MaxDuration) + 60; configured > sessionTTL {
-			sessionTTL = configured
-		}
-	}
+	sessionTTL := pipecatSessionTTL(agent)
 
 	telephony := &pipecatTelephony{
 		Carrier: plan.Key.Carrier, Connection: plan.Connection,
@@ -510,6 +534,75 @@ func buildPipecatCloudWebsocket(agent *ir.Agent, resolved ir.Target, env *envSet
 	return carrier, nil
 }
 
+// pipecatSessionTTL is how long a call may run before the container is forced
+// down: a floor, raised by a declared max_duration plus a minute of slack. Named
+// once because two routes read it, and a route with a shorter drain than its own
+// declared conversation length would cut calls off.
+func pipecatSessionTTL(agent *ir.Agent) int {
+	ttl := 360
+	if agent.Conversation != nil {
+		if configured := durationSecs(agent.Conversation.MaxDuration) + 60; configured > ttl {
+			ttl = configured
+		}
+	}
+	return ttl
+}
+
+// buildPipecatSIP is the self-hosted trunk route (US3): the operator runs a
+// LiveKit Server and LiveKit SIP, the carrier's trunk terminates there, and this
+// agent joins the room through Pipecat's own LiveKit transport.
+//
+// The exact mirror of buildPipecatCloudWebsocket, which hosts nothing. This one
+// hosts everything, and that is the only difference an author has to weigh.
+func buildPipecatSIP(agent *ir.Agent, resolved ir.Target, env *envSet) (*pipecatSIP, error) {
+	plan := resolved.Telephony
+	if plan == nil || plan.Key.Provider != ir.ProviderPipecat || plan.Key.Transport != "sip" {
+		return nil, nil
+	}
+	if agent.Capacity == nil || agent.Capacity.MaxSessions <= 0 {
+		return nil, fmt.Errorf("pipecat telephony requires positive capacity.max_sessions")
+	}
+	if err := pipecatConnectionVocabulary(plan, env); err != nil {
+		return nil, err
+	}
+	route := &pipecatSIP{
+		Carrier:        plan.Key.Carrier,
+		Connection:     plan.Connection,
+		RoomPrefix:     targetcap.SIPCallRoomPrefix,
+		WebhookPath:    targetcap.SIPRoomWebhookPath,
+		SIPAddressEnv:  plan.Environment["sip_address"],
+		SIPUsernameEnv: plan.Environment["sip_username"],
+		SIPPasswordEnv: plan.Environment["sip_password"],
+		FromNumberEnv:  plan.Environment["from_number"],
+		// The platform trio, read by name. Locally the plane supplies all three,
+		// which is what makes a local run of this route need no account at all.
+		ServerURLEnv: "LIVEKIT_URL",
+		APIKeyEnv:    "LIVEKIT_API_KEY",
+		APISecretEnv: "LIVEKIT_API_SECRET",
+		SessionTTL:   pipecatSessionTTL(agent),
+		// The plane, from the plan. planeServices lives with the plane's own types
+		// so both drivers build the endpoints the same way, from one place.
+		PlaneSubnet:   plan.PlaneSubnet,
+		PlaneServices: planeServices(plan),
+	}
+	for _, evidence := range plan.Evidence {
+		switch evidence.Feature {
+		case "inbound":
+			route.HasInbound = true
+		case "outbound":
+			route.HasOutbound = true
+		}
+	}
+	for _, name := range []string{route.ServerURLEnv, route.APIKeyEnv, route.APISecretEnv} {
+		env.add(name)
+	}
+	route.CallEnv = []string{
+		route.SIPAddressEnv, route.SIPUsernameEnv, route.SIPPasswordEnv, route.FromNumberEnv,
+		route.ServerURLEnv, route.APIKeyEnv, route.APISecretEnv,
+	}
+	return route, nil
+}
+
 // inlineEligible reports whether the bot collapses to the inline single-agent
 // shape (F3): the LLM sits directly in the main pipeline with its tools as
 // module-level direct functions in LLMContext, no bus / BusBridge / LLMWorker /
@@ -585,6 +678,18 @@ func setImportNeeds(data *pipecatData) {
 					// the carrier, so there is nothing here to end, and an EndFrame import
 					// that nothing pushes fails the emitted project's own lint gate.
 					data.NeedsEndFrame = t.HangupOnUnavailable || data.MaxDurationSecs > 0
+				}
+				if data.SIP != nil {
+					// The transfer details live on the route group as well, because the
+					// emitted transfer on this route is one platform call and its
+					// arguments come from here rather than from a document. One place
+					// to read them, so the tool and the route cannot disagree.
+					data.SIP.ColdDestination = t.ColdDestination
+					data.SIP.RingTimeoutSecs = t.RingTimeoutSecs
+					data.SIP.HangupOnUnavailable = t.HangupOnUnavailable
+					// The agent stays in the room after handing the caller over, so it
+					// has a leg of its own to end either way.
+					data.NeedsEndFrame = true
 				}
 				continue
 			}
@@ -760,6 +865,15 @@ func collectImportsExtras(data pipecatData) (imports, extras, deps []string) {
 		// that carries the machinery rather than inheriting fastapi from `runner`
 		// (research D12/F10).
 		extraSet["websocket"] = true
+	}
+	if data.SIP != nil {
+		// The self-hosted trunk route joins rooms through Pipecat's LiveKit
+		// transport, and transfers the caller through the platform's own API. The
+		// extra carries both: pipecat-ai[livekit] pulls livekit and livekit-api
+		// (checked against pipecat-ai 1.7.0, whose `livekit` group is
+		// livekit + livekit-api + tenacity + pyjwt). Without it the emitted
+		// imports resolve to nothing and the container exits on startup.
+		extraSet["livekit"] = true
 	}
 	if data.NeedsMCP {
 		// pipecat.services.mcp_service raises ImportError without it (N40).
@@ -1165,6 +1279,16 @@ func humanTransferTool(name, agent string, c *ir.HumanTransfer, target ir.Target
 		return pipecatTool{}, fmt.Errorf("human transfer %q destination %q missing on target %q", name, c.Destination, target.Name)
 	}
 	if c.Mode == ir.TransferWarm {
+		if target.Telephony != nil && target.Telephony.Key.Transport == "sip" {
+			// The self-hosted trunk route. The stack underneath it can do a warm
+			// handoff, so the honest refusal says this project has not built it,
+			// rather than implying a platform limit that does not exist.
+			return pipecatTool{}, fmt.Errorf("human transfer %q: this project has not built warm transfer "+
+				"on Pipecat yet. The stack this route runs on can do it: a warm handoff needs the agent to "+
+				"hold both legs and merge them, and that is not built here. Warm transfer compiles on "+
+				"(livekit, sip) trunks today. Change the transfer to cold, or run this package on a "+
+				"LiveKit target", name)
+		}
 		return pipecatTool{}, fmt.Errorf("human transfer %q: this driver does not emit warm transfer yet (Daily documents the pattern; it needs the bot to own the call audio, tracked as feature 005); warm compiles on (livekit, sip) today", name)
 	}
 	if target.Telephony == nil {
@@ -1181,10 +1305,14 @@ func humanTransferTool(name, agent string, c *ir.HumanTransfer, target ir.Target
 	// primitive, same promise: the caller reaches a person and is never stranded
 	// silently.
 	cloudWebsocket := target.Telephony.Key.Transport == "cloud-websocket"
-	if !carrierLeg && !cloudWebsocket {
-		return pipecatTool{}, fmt.Errorf("human transfer %q: the (%s, %s) route has no transfer primitive; Pipecat cold transfer rides the Daily route (transport daily-sip) or the platform's carrier stream (transport cloud-websocket)", name, target.Telephony.Key.Transport, target.Telephony.Key.Carrier)
+	// The self-hosted trunk route transfers through the platform's own SIP
+	// participant transfer, on a room the agent is already in. Third primitive,
+	// same promise as the other two.
+	selfHostedSIP := target.Telephony.Key.Transport == "sip"
+	if !carrierLeg && !cloudWebsocket && !selfHostedSIP {
+		return pipecatTool{}, fmt.Errorf("human transfer %q: the (%s, %s) route has no transfer primitive; Pipecat cold transfer rides the Daily route (transport daily-sip), the platform's carrier stream (transport cloud-websocket), or a self-hosted trunk (transport sip)", name, target.Telephony.Key.Transport, target.Telephony.Key.Carrier)
 	}
-	if !cloudWebsocket {
+	if !cloudWebsocket && !selfHostedSIP {
 		// The carrier-backed Daily route mints or joins a room with this key. The
 		// platform-terminated route touches no Daily API at all, so demanding the key
 		// would make a working package fail its startup check on a value nothing reads.

@@ -5,15 +5,18 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/target"
 )
 
 // fakeSIPAdmin is an in-memory Twirp livekit.SIP server: List* returns the
@@ -97,6 +100,20 @@ func (f *fakeSIPAdmin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		record["sipDispatchRuleId"] = "SDR_1"
 		f.rules = append(f.rules, record)
 		write(record)
+	case "UpdateSIPInboundTrunk":
+		id, _ := payload["sip_trunk_id"].(string)
+		replacement, _ := payload["replace"].(map[string]any)
+		for i, trunk := range f.inbound {
+			trunkID, _ := trunk["sipTrunkId"].(string)
+			if snake, _ := trunk["sip_trunk_id"].(string); trunkID == "" {
+				trunkID = snake
+			}
+			if trunkID == id {
+				replacement["sipTrunkId"] = id
+				f.inbound[i] = replacement
+			}
+		}
+		write(replacement)
 	case "UpdateSIPDispatchRule":
 		id, _ := payload["sipDispatchRuleId"].(string)
 		replacement, _ := payload["replace"].(map[string]any)
@@ -127,7 +144,26 @@ func livekitSIPPlan() *generate.TelephonyRuntimePlan {
 		Evidence:     []ir.TelephonyFeatureEvidence{{Feature: "inbound", Tag: "core"}, {Feature: "outbound", Tag: "core"}},
 		Services:     []string{"application", "livekit_server", "livekit_sip", "redis"},
 		Coordination: "shared",
+		LocalPlane:   string(target.LocalPlaneSIP),
+		PlaneSubnet:  "10.185.61.0/24", PlaneSIPAddress: "10.185.61.10",
+		LocalEndpoints: []ir.TelephonyLocalEndpoint{
+			{
+				Role: ir.TelephonyRoleCaller, Name: "caller", Service: "telephony_caller",
+				Address: "10.185.61.20", Port: 5060, Recording: "caller.wav",
+			},
+			{
+				Role: ir.TelephonyRoleDestination, Name: "billing_line", Service: "telephony_destinations",
+				Address: "10.185.61.21", Port: 5060, Recording: "billing_line.wav",
+				EnvName: "BILLING_PHONE_NUMBER",
+			},
+		},
 	}
+}
+
+// testDialCredential is a fixed credential, so a test can assert on the value
+// the run would have minted. Never what production uses: newDialCredential is.
+func testDialCredential() dialCredential {
+	return dialCredential{Username: "dev-a3k9xz", Password: "mnp4x7q2rtvw"}
 }
 
 func sipTestEnv() []string {
@@ -150,7 +186,7 @@ func TestEnsureLiveKitSIPRecordsIsIdempotent(t *testing.T) {
 	plan := livekitSIPPlan()
 	var out strings.Builder
 
-	if err := ensureLiveKitSIPRecords(context.Background(), &out, "phone", plan, sipTestEnv()); err != nil {
+	if err := ensureLiveKitSIPRecords(context.Background(), &out, "phone", plan, sipTestEnv(), testDialCredential()); err != nil {
 		t.Fatal(err)
 	}
 	first := strings.Join(fake.requests, ",")
@@ -175,7 +211,7 @@ func TestEnsureLiveKitSIPRecordsIsIdempotent(t *testing.T) {
 
 	fake.requests = nil
 	out.Reset()
-	if err := ensureLiveKitSIPRecords(context.Background(), &out, "phone", plan, sipTestEnv()); err != nil {
+	if err := ensureLiveKitSIPRecords(context.Background(), &out, "phone", plan, sipTestEnv(), testDialCredential()); err != nil {
 		t.Fatal(err)
 	}
 	second := strings.Join(fake.requests, ",")
@@ -200,7 +236,7 @@ func TestEnsureLiveKitSIPRecordsReadsSnakeCaseResponses(t *testing.T) {
 		"room_config":          map[string]any{"agents": []any{map[string]any{"agent_name": "phone"}}},
 	}}
 	var out strings.Builder
-	if err := ensureLiveKitSIPRecords(context.Background(), &out, "phone", livekitSIPPlan(), sipTestEnv()); err != nil {
+	if err := ensureLiveKitSIPRecords(context.Background(), &out, "phone", livekitSIPPlan(), sipTestEnv(), testDialCredential()); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "LiveKit inbound trunk ST_in_9 (reused)") {
@@ -224,7 +260,7 @@ func TestEnsureLiveKitSIPRecordsReplacesDispatchRuleOnAgentMismatch(t *testing.T
 		"roomConfig":        map[string]any{"agents": []any{map[string]any{"agentName": "old-target"}}},
 	}}
 	var out strings.Builder
-	if err := ensureLiveKitSIPRecords(context.Background(), &out, "phone", livekitSIPPlan(), sipTestEnv()); err != nil {
+	if err := ensureLiveKitSIPRecords(context.Background(), &out, "phone", livekitSIPPlan(), sipTestEnv(), testDialCredential()); err != nil {
 		t.Fatal(err)
 	}
 	requests := strings.Join(fake.requests, ",")
@@ -240,6 +276,67 @@ func TestEnsureLiveKitSIPRecordsReplacesDispatchRuleOnAgentMismatch(t *testing.T
 	}
 }
 
+// T086: the dispatch rule carries no roomConfig on a route whose agent is not a
+// LiveKit worker, because a worker is the only thing it can dispatch and this
+// route registers none. It is a record of something that would never happen.
+//
+// Not the thing that answers a call, deliberately: that is a subscribed audio
+// track in the room (livekit/sip waitSubscribe), which is what the room webhook
+// and the agent joining provide.
+func TestDispatchRuleNamesNoAgentWhenTheAgentIsNotAWorker(t *testing.T) {
+	fake, _ := newFakeSIPAdmin(t)
+	plan := livekitSIPPlan()
+	plan.Route = ir.TelephonyKey{Provider: ir.ProviderPipecat, Transport: "sip", Carrier: "twilio"}
+	var out strings.Builder
+	if err := ensureLiveKitSIPRecords(context.Background(), &out, "phone", plan, sipTestEnv(), testDialCredential()); err != nil {
+		t.Fatal(err)
+	}
+	body := fake.bodies["CreateSIPDispatchRule"]
+	if !strings.Contains(body, `"roomPrefix":"call-"`) {
+		t.Fatalf("the rule does not name the room prefix an inbound call lands on: %s", body)
+	}
+	if strings.Contains(body, "roomConfig") || strings.Contains(body, "agentName") {
+		t.Fatalf("the rule promises an agent this route never registers: %s", body)
+	}
+	// And the LiveKit route keeps its worker, because that route's agent is one.
+	fake.bodies = map[string]string{}
+	fake.rules = nil
+	if err := ensureLiveKitSIPRecords(context.Background(), &out, "phone", livekitSIPPlan(), sipTestEnv(), testDialCredential()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fake.bodies["CreateSIPDispatchRule"], `"agentName":"phone"`) {
+		t.Fatalf("the LiveKit route lost its worker dispatch: %s", fake.bodies["CreateSIPDispatchRule"])
+	}
+}
+
+// The Redis volume outlives a run, so a rule left by a LiveKit run on the same
+// machine is still there when a Pipecat package starts. Reusing it would hand
+// this route the ringing-forever rule it just stopped creating, so a rule whose
+// dispatched agent does not match what the route wants is replaced either way.
+func TestDispatchRuleReplacesAWorkerRuleForANonWorkerRoute(t *testing.T) {
+	fake, _ := newFakeSIPAdmin(t)
+	fake.inbound = []map[string]any{{"sipTrunkId": "ST_in_1", "numbers": []any{"+15550001111"}}}
+	fake.rules = []map[string]any{{
+		"sipDispatchRuleId": "SDR_worker",
+		"trunkIds":          []any{"ST_in_1"},
+		"rule":              map[string]any{"dispatchRuleIndividual": map[string]any{"roomPrefix": "call-"}},
+		"roomConfig":        map[string]any{"agents": []any{map[string]any{"agentName": "phone"}}},
+	}}
+	plan := livekitSIPPlan()
+	plan.Route = ir.TelephonyKey{Provider: ir.ProviderPipecat, Transport: "sip", Carrier: "twilio"}
+	var out strings.Builder
+	if err := ensureLiveKitSIPRecords(context.Background(), &out, "phone", plan, sipTestEnv(), testDialCredential()); err != nil {
+		t.Fatal(err)
+	}
+	replace := fake.bodies["UpdateSIPDispatchRule"]
+	if replace == "" {
+		t.Fatalf("a stale worker rule was reused rather than replaced: %v", fake.requests)
+	}
+	if strings.Contains(replace, "roomConfig") {
+		t.Fatalf("the replacement still promises a worker: %s", replace)
+	}
+}
+
 // The gate that switches on the two-phase local startup: infrastructure, then
 // these records, then the application. It used to read a dev-supplied
 // environment name, which is retired (SCHEMA N36), so it now reads the route and
@@ -252,8 +349,15 @@ func TestPlanCreatesLiveKitSIPRecordsOnlyForInboundSIP(t *testing.T) {
 	outboundOnly.Evidence = []ir.TelephonyFeatureEvidence{{Feature: "outbound", Tag: "core"}}
 	connector := livekitSIPPlan()
 	connector.Route = ir.TelephonyKey{Provider: ir.ProviderLiveKit, Transport: "connector", Carrier: "twilio"}
-	pipecat := livekitSIPPlan()
-	pipecat.Route = ir.TelephonyKey{Provider: ir.ProviderPipecat, Transport: "carrier-websocket", Carrier: "twilio"}
+	connector.LocalPlane = string(target.LocalPlaneMediaWebsocket)
+	websocket := livekitSIPPlan()
+	websocket.Route = ir.TelephonyKey{Provider: ir.ProviderPipecat, Transport: "carrier-websocket", Carrier: "twilio"}
+	websocket.LocalPlane = string(target.LocalPlaneMediaWebsocket)
+	// The route whose agent is a Pipecat bot on the same plane. It needs the same
+	// records for the same reason, and reading the provider instead of the plane
+	// is what left it without them.
+	pipecatSIP := livekitSIPPlan()
+	pipecatSIP.Route = ir.TelephonyKey{Provider: ir.ProviderPipecat, Transport: "sip", Carrier: "twilio"}
 
 	for _, tc := range []struct {
 		name string
@@ -263,7 +367,8 @@ func TestPlanCreatesLiveKitSIPRecordsOnlyForInboundSIP(t *testing.T) {
 		{"livekit sip inbound", inboundOutbound, true},
 		{"livekit sip outbound only", outboundOnly, false},
 		{"livekit connector, inbound but no trunk", connector, false},
-		{"pipecat carrier websocket, inbound but no trunk", pipecat, false},
+		{"pipecat carrier websocket, inbound but no trunk", websocket, false},
+		{"pipecat sip inbound, same plane", pipecatSIP, true},
 	} {
 		if got := planCreatesLiveKitSIPRecords(tc.plan); got != tc.want {
 			t.Errorf("%s: creates records = %v, want %v", tc.name, got, tc.want)
@@ -398,12 +503,8 @@ func TestExecDevTelephonySIPCreatesRecordsBetweenInfraAndApp(t *testing.T) {
 	newFakeSIPAdmin(t)
 	root, trace := fakeTelephonyRoot(t, strings.Join(sipTestEnv(), "\n"))
 	fakeDocker(t, root)
-	restoreLook := tunnelLookPath
-	tunnelLookPath = func(string) (string, error) {
-		t.Error("SIP routes must not start a tunnel")
-		return "", os.ErrNotExist
-	}
-	t.Cleanup(func() { tunnelLookPath = restoreLook })
+	allowHeldPorts(t)
+	refuseTunnel(t)
 
 	cmd, out := telephonyTestCommand(t)
 	if err := execDevTelephony(cmd, root, "phone", livekitSIPPlan(), composeFiles, devTelephonyOptions{botPort: "8081"}); err != nil {
@@ -433,7 +534,129 @@ func TestExecDevTelephonySIPCreatesRecordsBetweenInfraAndApp(t *testing.T) {
 	if strings.Contains(string(raw), "ST_in_1") {
 		t.Fatalf("a trunk ID reached the container environment:\n%s", raw)
 	}
-	if strings.Contains(out.String(), "call +15550001111") || !strings.Contains(out.String(), "publicly reachable SIP and RTP ingress") {
-		t.Fatalf("local SIP run claimed the phone number was reachable:\n%s", out.String())
+	// This assertion used to be the other way round: it required the run to say
+	// a real inbound call needed publicly reachable SIP and RTP ingress, and to
+	// print no number. That line was true and it was the defect, so the feature
+	// is that it is gone and a dialable address is here instead.
+	if strings.Contains(out.String(), "publicly reachable SIP and RTP ingress") {
+		t.Errorf("the run still tells the reader it cannot be called:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "dial sip:"+planeLocalNumber+"@") {
+		t.Errorf("the run prints no address to dial:\n%s", out.String())
+	}
+	// The carrier's own number is not what a local call reaches, so printing it
+	// would be an invitation to dial something that is not listening.
+	if strings.Contains(out.String(), "call +15550001111") {
+		t.Errorf("the local run named the carrier's number:\n%s", out.String())
+	}
+}
+
+// Gate S3: the trunk that accepts a call carries this run's own credential.
+// Without it the plane answers anybody who can reach the port, and on the
+// softphone profile that port is published on a real interface of the machine.
+func TestInboundTrunkCarriesThisRunsCredential(t *testing.T) {
+	fake, _ := newFakeSIPAdmin(t)
+	credential := testDialCredential()
+	var out strings.Builder
+	if err := ensureLiveKitSIPRecords(context.Background(), &out, "phone", livekitSIPPlan(), sipTestEnv(), credential); err != nil {
+		t.Fatal(err)
+	}
+	body := fake.bodies["CreateSIPInboundTrunk"]
+	for _, want := range []string{
+		`"auth_username":"` + credential.Username + `"`,
+		`"auth_password":"` + credential.Password + `"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the inbound trunk request does not carry %s: %s", want, body)
+		}
+	}
+	// A run with no plane has no per-run credential, and must not send an empty
+	// one: a trunk with a blank username set is a trunk that refuses every call.
+	fake.requests, fake.inbound = nil, nil
+	fake.bodies = map[string]string{}
+	if err := ensureLiveKitSIPRecords(context.Background(), &out, "phone", livekitSIPPlan(), sipTestEnv(), dialCredential{}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(fake.bodies["CreateSIPInboundTrunk"], "auth_username") {
+		t.Errorf("a run with no credential still sent an auth field: %s", fake.bodies["CreateSIPInboundTrunk"])
+	}
+}
+
+// Gate S3, the other half: the credential is printed, because somebody has to
+// type it into a softphone, and it reaches no file the run writes.
+func TestDialCredentialIsPrintedAndWrittenNowhere(t *testing.T) {
+	newFakeSIPAdmin(t)
+	root, _ := fakeTelephonyRoot(t, strings.Join(sipTestEnv(), "\n"))
+	fakeDocker(t, root)
+	allowHeldPorts(t)
+	refuseTunnel(t)
+	var report runReport
+	cmd, out := telephonyTestCommand(t)
+	if err := execDevTelephony(cmd, root, "phone", livekitSIPPlan(), composeFiles,
+		devTelephonyOptions{botPort: "8083", report: &report}); err != nil {
+		t.Fatalf("plane run: %v\n%s", err, out.String())
+	}
+	credential := report.DialCredential
+	if credential == "" {
+		t.Fatal("the run recorded no dial credential, so there is nothing for a caller to authenticate with")
+	}
+	if !strings.Contains(out.String(), credential) {
+		t.Errorf("the credential was never printed, so nobody can place a call:\n%s", out.String())
+	}
+	// Every file the run touched, not just the ones it meant to write.
+	var found []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		if strings.Contains(string(content), credential) {
+			found = append(found, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) > 0 {
+		t.Errorf("the dial credential was written to %v; it is printed and never stored", found)
+	}
+}
+
+// Gate S7: the trunk the agent dials transfers through points at the plane's
+// own endpoint, not at a carrier. On this route the trunk is not a record at
+// all, it is four environment names the agent reads and sends inline, so this
+// is where an outbound trunk pointing somewhere local exists or does not.
+func TestPlaneTrunkPointsAtItsOwnEndpointsAndNotACarrier(t *testing.T) {
+	plan := livekitSIPPlan()
+	supplied := planeEnvironment(plan, testDialCredential())
+
+	if got := supplied["TWILIO_SIP_ADDRESS"]; got != "10.185.61.21" {
+		t.Errorf("the dial-out trunk points at %q, want the plane's destinations endpoint", got)
+	}
+	if got := supplied["BILLING_PHONE_NUMBER"]; got != "sip:billing_line@10.185.61.21:5060" {
+		t.Errorf("the destination resolves to %q; a cold transfer sends this as a Refer-To and a bare number becomes tel:, which no local caller can route", got)
+	}
+	if got := supplied["TWILIO_PHONE_NUMBER"]; got != planeLocalNumber {
+		t.Errorf("the plane answers on %q, want the fictional local number %q", got, planeLocalNumber)
+	}
+	// Nothing in the supplied set names a carrier. If it did, the default loop
+	// would be reaching for an account the author is not required to have.
+	for name, value := range supplied {
+		for _, carrier := range []string{"pstn.twilio.com", "telnyx", "plivo", "exotel", ".com"} {
+			if strings.Contains(value, carrier) {
+				t.Errorf("%s is set to %q, which names something off this machine", name, value)
+			}
+		}
+	}
+	// Every name it supplies is one the author no longer has to provide, which
+	// is what makes the default loop runnable with no accounts at all.
+	for _, name := range plan.RequiredEnv {
+		if _, ok := supplied[name]; !ok {
+			t.Errorf("the plane does not supply %s, so a default run still demands it from the author", name)
+		}
 	}
 }

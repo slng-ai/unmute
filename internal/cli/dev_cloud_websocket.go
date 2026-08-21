@@ -20,6 +20,7 @@ import (
 
 	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/target"
 	"github.com/spf13/cobra"
 )
 
@@ -50,12 +51,24 @@ var cloudWebsocketAgentReady = waitForLocalAgentReady
 // phone line pointing at a dead tunnel.
 func execDevCloudWebsocket(cmd *cobra.Command, root, targetName string, plan *generate.TelephonyRuntimePlan, files []generate.File, opts devTelephonyOptions) (returnErr error) {
 	printDevTelephonyPlan(cmd.OutOrStdout(), targetName, plan, nil)
+	if opts.carrier {
+		printCarrierDisclaimer(cmd.OutOrStdout(), targetName)
+	} else {
+		printLocalPlaneMode(cmd.OutOrStdout(), targetName, target.TelephonyLocalPlane(plan.LocalPlane))
+	}
+	if opts.report != nil {
+		opts.report.Plane = target.TelephonyLocalPlane(plan.LocalPlane)
+	}
 	childEnv := devChildEnv(root, cmd.ErrOrStderr())
-	// Everything the local run needs, by name. The carrier credentials are needed
-	// here even though a deployed pure-inbound agent needs none: pointing the
-	// number at this session is a request to the carrier's API in the operator's
-	// name, so the CLI cannot do it without them.
-	required := []string{plan.Environment["account_sid"], plan.Environment["auth_token"], plan.Environment["from_number"]}
+	// Everything the local run needs, by name. The carrier credentials belong to
+	// carrier mode only: a deployed pure-inbound agent on this route needs none
+	// of them, and pointing the number at this session is a request to the
+	// carrier's API in the operator's name, so the CLI cannot do that without
+	// them. A default run points nothing anywhere, so it asks for none.
+	var required []string
+	if opts.carrier {
+		required = []string{plan.Environment["account_sid"], plan.Environment["auth_token"], plan.Environment["from_number"]}
+	}
 	required = append(required, externalTelephonyEnv(plan)...)
 	required = trimEmptyAndDevSupplied(required)
 	if missing := missingEnvironment(required, childEnv); len(missing) > 0 {
@@ -85,28 +98,57 @@ func execDevCloudWebsocket(cmd *cobra.Command, root, targetName string, plan *ge
 		processOut = io.MultiWriter(logFile, cmd.ErrOrStderr())
 	}
 
-	// --public-url brings your own tunnel and skips all tunnel management, exactly
-	// as on every other route.
-	var public *url.URL
-	switch {
-	case opts.publicValue != "":
-		public, err = parseTelephonyPublicURL(opts.publicValue)
-		if err != nil {
-			return err
+	// A default run on this route is a local-plane run: the stand-in is the
+	// carrier, over loopback, and it supplies what a carrier would so the run
+	// needs no account of yours (SC-004).
+	// This route publishes one port, the agent's, and it is the one whose
+	// collision is silent: a second run reaches the first run's agent and
+	// reports its answers as its own (T103).
+	if err := hostPortCheck(telephonyHostPorts(plan, opts.botPort, childEnv)); err != nil {
+		return err
+	}
+	var mediaPlane *mediaPlaneRun
+	if !opts.carrier && planeIsMediaWebsocket(plan) {
+		started, planeErr := startMediaPlaneRun(plan, opts.botPort, false)
+		if planeErr != nil {
+			return planeErr
 		}
-	default:
-		tunnel, err := startQuickTunnel(ctx, opts.botPort, processOut)
-		if err != nil {
-			return err
-		}
-		defer tunnel.Stop()
-		public, err = parseTelephonyPublicURL(tunnel.URL)
-		if err != nil {
-			return fmt.Errorf("managed tunnel returned an unusable origin: %w", err)
+		mediaPlane = started
+		// The plane holds a listener for the carrier's own API. Released here so
+		// a run that ends any way at all leaves no port behind (gate P8).
+		defer mediaPlane.stop()
+		// This route's local runner answers the incoming call at "/", not at the
+		// path the other routes on this plane use.
+		mediaPlane.inboundPath = devCloudWebsocketWebhookPath
+		childEnv = mediaPlane.apply(childEnv)
+		if _, planeErr = mediaPlane.prepare(outDir); planeErr != nil {
+			return planeErr
 		}
 	}
 
-	agent, err := startLocalCarrierAgent(ctx, outDir, opts.botPort, public.Host, childEnv, processOut)
+	// This route publishes no callback of ours, so a carrier run always needs a
+	// tunnel: --public-url brings your own, otherwise one is managed. A default
+	// run has no carrier and wants neither.
+	var public *url.URL
+	stopTunnel := func() {}
+	if opts.carrier {
+		origin, stop, originErr := carrierPublicOrigin(ctx, cmd.OutOrStdout(), targetName, plan, opts, processOut, true)
+		if originErr != nil {
+			return originErr
+		}
+		public, stopTunnel = origin, stop
+	}
+	defer stopTunnel()
+
+	// The runner takes a bare host to advertise to the carrier's media stream
+	// (research F12). A default run advertises the loopback address the local
+	// media plane reaches the agent on, because there is nothing else to reach
+	// it from.
+	proxyHost := net.JoinHostPort("127.0.0.1", opts.botPort)
+	if public != nil {
+		proxyHost = public.Host
+	}
+	agent, err := startLocalCarrierAgent(ctx, outDir, opts.botPort, proxyHost, childEnv, processOut)
 	if err != nil {
 		return err
 	}
@@ -139,13 +181,28 @@ func execDevCloudWebsocket(cmd *cobra.Command, root, targetName string, plan *ge
 			returnErr = errors.Join(returnErr, restoreErr)
 		}
 	}()
-	if !opts.noWebhook {
+	if opts.carrier && !opts.noWebhook {
+		number := envValue(childEnv, plan.Environment["from_number"])
+		opts.report.carrierWrite("%s: point %s at this run", plan.Route.Carrier, number)
 		restore, err = setDevCarrierWebhook(ctx, cmd.OutOrStdout(), targetName, plan, public, childEnv)
 		if err != nil {
 			return err
 		}
+		borrowed := restore
+		restore = func(restoreCtx context.Context) error {
+			opts.report.carrierWrite("%s: restore %s to what it pointed at before", plan.Route.Carrier, number)
+			return borrowed(restoreCtx)
+		}
 	}
 	printDevCloudWebsocketSession(cmd.OutOrStdout(), targetName, plan, public, childEnv, opts)
+
+	// The plane's own call, which on this route is the only thing that reaches
+	// the agent at all: nothing of ours is published, so without this the run
+	// prints a port and waits for a caller that cannot exist.
+	if mediaPlane != nil {
+		printMediaPlaneReady(cmd.OutOrStdout(), targetName, mediaPlane)
+		placeMediaPlaneCall(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), targetName, logPath, mediaPlane)
+	}
 
 	// Nothing left to orchestrate: wait for the agent to exit or for the session to
 	// be interrupted. The deferred stops and the restore run either way.
@@ -266,6 +323,12 @@ func setDevCarrierWebhook(ctx context.Context, out io.Writer, targetName string,
 // printDevCloudWebsocketSession states the session's facts once: what is running
 // where, what was borrowed, and that it will be given back.
 func printDevCloudWebsocketSession(out io.Writer, targetName string, plan *generate.TelephonyRuntimePlan, public *url.URL, env []string, opts devTelephonyOptions) {
+	if public == nil {
+		// A default run borrowed nothing and is reachable from nowhere, so the
+		// only fact left to state is where the agent is listening.
+		fmt.Fprintf(out, "%s: local agent on port %s, reachable on this machine only\n", targetName, opts.botPort)
+		return
+	}
 	fmt.Fprintf(out, "%s: local agent on port %s, reachable at %s (quick tunnel URLs rotate on every run)\n",
 		targetName, opts.botPort, strings.TrimSuffix(public.String(), "/"))
 	number := envValue(env, plan.Environment["from_number"])
@@ -281,11 +344,17 @@ func printDevCloudWebsocketSession(out io.Writer, targetName string, plan *gener
 		fmt.Fprintf(out, "\n  \033[1;32m▸\033[0m call %s  ·  ctrl-c to stop\n\n", number)
 	}
 	if opts.to != "" {
-		// Outbound on this route is one request to the carrier with inline markup
-		// naming the platform, so it reaches the *deployed* agent, not this local
-		// one. Placing it from here would test the wrong thing quietly.
-		fmt.Fprintf(out, "%s: --to is not placed locally on this route: an outbound call's markup names the deployed agent, "+
-			"so a local session cannot answer it. Use the outbound command in the emitted README against the deployed agent\n", targetName)
+		// Outbound on this route is one request the *operator* makes, with inline
+		// markup naming the deployed service host: the emitted agent publishes no
+		// endpoint to ask it from, so there is nothing here for the local plane to
+		// poke. Placing it from here would test the wrong thing quietly.
+		//
+		// The local plane does place outbound calls, on the carrier-websocket
+		// routes, where the agent does publish that endpoint (T068).
+		fmt.Fprintf(out, "%s: --to is not placed locally on this route: an outbound call's markup names the deployed agent "+
+			"and this route's agent publishes no endpoint to ask for one, so a local session has nothing to place. "+
+			"Use the outbound command in the emitted README against the deployed agent, or a carrier-websocket "+
+			"route to exercise outbound on the local plane\n", targetName)
 	}
 }
 

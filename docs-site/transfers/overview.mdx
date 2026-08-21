@@ -72,19 +72,20 @@ mechanisms, which is why the answer differs per route:
 | Route | Cold | Warm | Mechanism |
 |---|---|---|---|
 | LiveKit `sip` | yes | **yes, the only one** | SIP REFER on the caller's existing leg, and LiveKit's `WarmTransferTask` for the held and briefed shape |
-| Pipecat `daily-sip` + Twilio | yes, on a phone call | not built yet | Daily transfers the existing SIP phone leg |
+| Pipecat `sip` | yes | **refused** | SIP REFER on the caller's existing leg, through the SIP service the route runs |
+| Pipecat `daily-sip` + Twilio | yes, on a phone call | **refused** | Daily transfers the existing SIP phone leg |
 | Pipecat `cloud-websocket` | yes, differently | no, by trade | one request replaces the live call's markup at the carrier |
 | Pipecat `carrier-websocket` | no | no | the transport carries media only, with no transfer control |
 | LiveKit `connector` | no | no | same |
 
-Unmute does not support warm transfer on any Pipecat target. Today, warm
-transfer requires the LiveKit `sip` route.
+Warm transfer is not supported on any Pipecat target. It requires the LiveKit
+`sip` route.
 
 Two of those cells mean different things, and the difference matters:
 
-- **no** means the platform does not ship the primitive.
-- **not built yet** means the platform does ship it and Unmute has not emitted
-  it.
+- **no** means the platform has no primitive for it.
+- **refused** means the platform has one and Unmute does not emit it, so the
+  compiler rejects the shape and names where it does work.
 
 The route comes from the connection the target names, so that is what the refusal
 points at. A transfer a route cannot do is refused at validation, naming the

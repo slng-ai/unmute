@@ -66,18 +66,9 @@ unmute dev examples/outbound-reminder --telephony --target pipecat \
   --var "appointment_time=tomorrow at 3 pm"
 ```
 
-`--to` takes one E.164 number. Anything else is refused before Docker or the
-carrier is touched:
-
-```text
-unmute: dev: --to must be an E.164 number like +15551234567, got "4155550123"
-```
-
-`--to` needs `--telephony`:
-
-```text
-unmute: dev: --to requires --telephony
-```
+`--to` takes one E.164 number, needs `--telephony`, and is checked before Docker
+or the carrier is touched. [Call your agent
+locally](/dev/local-telephony#the-flags) has every flag it travels with.
 
 Once the stack is healthy, the call is placed and the CLI prints the call
 identifier:
@@ -154,8 +145,8 @@ System sources include `to_number`, `from_number`, `direction`, `call_id`,
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="Webhooks and tunnels" icon="link" href="/dev/webhooks-and-tunnels">
-    Take control of the public URL, or leave the carrier alone.
+  <Card title="Call your agent locally" icon="play" href="/dev/local-telephony">
+    Place this call with no carrier account at all.
   </Card>
   <Card title="Variables reference" icon="braces" href="/reference/variables">
     Types, sources, and where each value can be used.

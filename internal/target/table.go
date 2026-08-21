@@ -302,7 +302,7 @@ func Default() Table {
 			// to resolve. It rides the warm_transfer control row, which already
 			// says which routes can carry a private consultation leg at all.
 			FieldTransferBriefing: field(
-				deny(Pipecat, "Pipecat has no warm transfer, so no briefing lowering (SPEC C4)"),
+				deny(Pipecat, "this project emits no warm transfer on any Pipecat route yet, so a briefing has nothing to lower onto; warm transfer compiles on (livekit, sip) trunks today (SPEC C4)"),
 				deny(Deepgram, "the Deepgram bridge has no warm-transfer briefing lowering"),
 			),
 			FieldGreetingUserFirst: field(

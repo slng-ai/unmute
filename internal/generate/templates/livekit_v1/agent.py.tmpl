@@ -329,6 +329,28 @@ def _refer_uri(destination: str) -> str:
     return "tel:" + destination
 
 {{end}}
+{{- if .HasWarmTransfer}}
+# --- warm transfer destination -----------------------------------------------
+# CreateSIPParticipant's sip_call_to takes a phone number or a SIP user and
+# refuses a full URI, in those words: "SipCallTo should be a phone number or
+# SIP user, not a full SIP URI". Measured on a live call 2026-08-20 against
+# livekit-server v1.13.4, where a warm transfer failed with a 400 before it
+# dialled anything.
+#
+# A destination is allowed to be the `sip:+E164@<host>` form, which Plivo
+# documents as mandatory for its Refer-To, so the user part is what gets dialled
+# and the host is the trunk's job: _sip_trunk() already carries it. The cold
+# path takes the whole URI, because there the host belongs in the Refer-To.
+def _sip_user(destination: str) -> str:
+    """The destination as a number or SIP user, never a full URI."""
+    if "@" in destination:
+        destination = destination.rsplit("@", 1)[0]
+    for scheme in ("sip:", "sips:", "tel:"):
+        if destination.startswith(scheme):
+            return destination[len(scheme):]
+    return destination
+
+{{end}}
 {{- if and .Telephony (eq .Telephony.Transport "sip") (or .Telephony.HasOutbound .Telephony.HasWarm)}}
 # --- dial-out trunk ----------------------------------------------------------
 # The carrier's own trunk settings, sent inline with every dial. No stored

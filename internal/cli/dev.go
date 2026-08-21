@@ -29,7 +29,7 @@ import (
 
 func newDevCmd() *cobra.Command {
 	var uiPort, botPort, targetName, publicURL, to string
-	var noOpen, verbose, console, telephony, noWebhook bool
+	var noOpen, verbose, console, telephony, carrier, noWebhook bool
 	var vars []string
 
 	cmd := &cobra.Command{
@@ -44,11 +44,18 @@ func newDevCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if !telephony && publicURL != "" {
-				return errors.New("dev: --public-url requires --telephony")
+			if !telephony && carrier {
+				return errors.New("dev: --carrier requires --telephony")
 			}
-			if !telephony && noWebhook {
-				return errors.New("dev: --no-webhook requires --telephony")
+			// Both of these exist only to manage a public origin, and only a
+			// carrier run has one: the default loop never leaves the machine.
+			// So they name --carrier rather than --telephony, which is the mode
+			// that can actually use the value.
+			if !carrier && publicURL != "" {
+				return errors.New("dev: --public-url requires --carrier (a local telephony run has no public origin)")
+			}
+			if !carrier && noWebhook {
+				return errors.New("dev: --no-webhook requires --carrier (a local telephony run never touches your carrier's number)")
 			}
 			if !telephony && to != "" {
 				return errors.New("dev: --to requires --telephony")
@@ -85,7 +92,10 @@ func newDevCmd() *cobra.Command {
 					"Run `unmute dev " + root + "` to talk to the agent in your browser")
 			}
 			if telephony {
-				return runDevTelephony(cmd, root, selected, publicURL, botPort, to, noWebhook, verbose)
+				return runDevTelephony(cmd, root, selected, devTelephonyOptions{
+					publicValue: publicURL, botPort: botPort, to: to,
+					carrier: carrier, noWebhook: noWebhook, verbose: verbose,
+				})
 			}
 			// Default local mode: start the selected target's WebRTC runtime and
 			// serve one web UI for both Pipecat and LiveKit.
@@ -106,16 +116,17 @@ func newDevCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&console, "console", false, "removed: use the browser dev loop")
 	_ = cmd.Flags().MarkHidden("console")
 	cmd.Flags().BoolVar(&telephony, "telephony", false, "run the selected target's resolved telephony route (no browser UI)")
-	cmd.Flags().StringVar(&publicURL, "public-url", "", "exact public HTTPS origin for routes with carrier callbacks (requires --telephony)")
+	cmd.Flags().BoolVar(&carrier, "carrier", false, "reach the route through your own carrier: managed tunnel, webhook rewrite, restore on exit (requires --telephony)")
+	cmd.Flags().StringVar(&publicURL, "public-url", "", "exact public HTTPS origin for routes with carrier callbacks (requires --carrier)")
 	cmd.Flags().StringVar(&to, "to", "", "E.164 number to dial for an outbound telephony test (requires --telephony and an outbound-capable target)")
-	cmd.Flags().BoolVar(&noWebhook, "no-webhook", false, "do not touch the carrier number's webhook configuration (requires --telephony; point it at the printed public URL yourself)")
+	cmd.Flags().BoolVar(&noWebhook, "no-webhook", false, "do not touch the carrier number's webhook configuration (requires --carrier; point it at the printed public URL yourself)")
 	return cmd
 }
 
 // runDevTelephony is the fail-closed gate: loading and generation reject
 // every provisional or gated route before any tunnel, Docker, or carrier
 // call (SPEC V5). The post-gate orchestration lives in execDevTelephony.
-func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort, to string, noWebhook, verbose bool) error {
+func runDevTelephony(cmd *cobra.Command, root, targetName string, opts devTelephonyOptions) error {
 	agent, targets, err := loadPackage(root, []string{targetName})
 	if err != nil {
 		return fmt.Errorf("dev %s: %w", root, err)
@@ -143,14 +154,13 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort,
 		if plan == nil {
 			return fmt.Errorf("dev %s: target %q has no resolved telephony route", root, resolved.Name)
 		}
-		if to != "" && !planHasTelephonyFeature(plan, "outbound") {
+		if opts.to != "" && !planHasTelephonyFeature(plan, "outbound") {
 			return fmt.Errorf("dev %s: --to needs an outbound-capable target; %q has no outbound direction (set channels.phone outbound: true)", root, resolved.Name)
 		}
 		artifact, err := generate.Generate(agent, resolved, target.Default())
 		if err != nil {
 			return fmt.Errorf("dev %s: %w", root, err)
 		}
-		opts := devTelephonyOptions{publicValue: publicValue, botPort: botPort, to: to, noWebhook: noWebhook, verbose: verbose}
 		if err := execDevCloudWebsocket(cmd, root, resolved.Name, artifact.Telephony, artifact.Files, opts); err != nil {
 			return fmt.Errorf("dev %s: %w", root, err)
 		}
@@ -162,7 +172,7 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort,
 	}
 	// --to only makes sense for an outbound-capable target; reject before
 	// generate or any child process (SPEC V3, V6).
-	if to != "" && !planHasTelephonyFeature(plan, "outbound") {
+	if opts.to != "" && !planHasTelephonyFeature(plan, "outbound") {
 		return fmt.Errorf("dev %s: --to needs an outbound-capable target; %q has no outbound direction (set channels.phone outbound: true)", root, resolved.Name)
 	}
 	artifact, err := generate.Generate(agent, resolved, target.Default())
@@ -172,7 +182,6 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort,
 	if artifact.Telephony == nil || len(artifact.Telephony.Services) == 0 {
 		return fmt.Errorf("dev %s: target %q has no executable telephony topology", root, resolved.Name)
 	}
-	opts := devTelephonyOptions{publicValue: publicValue, botPort: botPort, to: to, noWebhook: noWebhook, verbose: verbose}
 	if err := execDevTelephony(cmd, root, resolved.Name, artifact.Telephony, artifact.Files, opts); err != nil {
 		return fmt.Errorf("dev %s: %w", root, err)
 	}

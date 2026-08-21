@@ -90,7 +90,7 @@ func TestLiveKitHumanTransferEnvironmentFollowsTheCallMode(t *testing.T) {
 	if !strings.Contains(cold, `transfer_to=_refer_uri(os.environ["BILLING_PHONE_NUMBER"])`) || strings.Contains(cold, "sip_call_to=") {
 		t.Error("cold transfer did not build only its REFER destination")
 	}
-	if !strings.Contains(warm, `sip_call_to=os.environ["SUPERVISOR_PHONE_NUMBER"]`) || strings.Contains(warm, "transfer_to=") {
+	if !strings.Contains(warm, `sip_call_to=_sip_user(os.environ["SUPERVISOR_PHONE_NUMBER"])`) || strings.Contains(warm, "transfer_to=") {
 		t.Error("warm transfer did not build only its dial destination")
 	}
 }

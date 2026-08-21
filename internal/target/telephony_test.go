@@ -264,3 +264,137 @@ func TestSelectableTelephonyRoutesExcludesPlaceholderRows(t *testing.T) {
 		t.Fatal("no selectable routes: the predicate is inverted")
 	}
 }
+
+// routePlaneExpectation is every row's two new facts, written out. A table of
+// expected values rather than a "is it non-zero" check, because that is the
+// only shape that fails when somebody adds a route and decides nothing: an
+// unlisted key is a failure here, and so is a listed key whose value moved.
+//
+// Gate P1 (contracts/local-planes.md) and task T104.
+var routePlaneExpectation = map[TelephonyKey]struct {
+	plane        TelephonyLocalPlane
+	cloudDeploys bool
+}{
+	// Pipecat's one self-hosted transport: a plain container and a Compose file,
+	// no deployment manifest.
+	{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"}: {LocalPlaneMediaWebsocket, false},
+	{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"}: {LocalPlaneMediaWebsocket, false},
+	{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "plivo"}:  {LocalPlaneMediaWebsocket, false},
+	// The two rows with an empty feature map. They compile to nothing, so they
+	// have no local loop to offer, and they are listed because the fields are
+	// assigned on every row.
+	{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "exotel"}: {LocalPlaneNone, false},
+	{Provider: LiveKit, Transport: "sip", Carrier: "exotel"}:               {LocalPlaneNone, true},
+	// Pipecat on the same plane, and the one row where CloudDeploys being false
+	// is the whole point: this route has no managed-platform path anywhere, which
+	// is what makes it the self-hosted answer (US3).
+	{Provider: Pipecat, Transport: "sip", Carrier: "twilio"}: {LocalPlaneSIP, false},
+	{Provider: Pipecat, Transport: "sip", Carrier: "telnyx"}: {LocalPlaneSIP, false},
+	{Provider: Pipecat, Transport: "sip", Carrier: "plivo"}:  {LocalPlaneSIP, false},
+	// A real SIP trunk in production, a real SIP stack locally.
+	{Provider: LiveKit, Transport: "sip", Carrier: "twilio"}: {LocalPlaneSIP, true},
+	{Provider: LiveKit, Transport: "sip", Carrier: "telnyx"}: {LocalPlaneSIP, true},
+	{Provider: LiveKit, Transport: "sip", Carrier: "plivo"}:  {LocalPlaneSIP, true},
+	// The carrier leg terminates in a third-party hosted service, so there is
+	// nothing on the machine to stand in for it.
+	{Provider: Pipecat, Transport: "daily-sip", Carrier: "twilio"}: {LocalPlaneNone, true},
+	// The platform terminates the same protocol the carrier-websocket routes use.
+	{Provider: Pipecat, Transport: "cloud-websocket", Carrier: "twilio"}: {LocalPlaneMediaWebsocket, true},
+	// The carrier streams media over a WebSocket into our own bridge.
+	{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}: {LocalPlaneMediaWebsocket, true},
+}
+
+// Gate P1, first half: the plane is decided on every row, including the rows
+// that refuse. LocalPlaneNone is a real value rather than the zero value
+// precisely so this test can tell a decision from an omission.
+func TestTelephonyLocalPlaneIsDecidedOnEveryRoute(t *testing.T) {
+	routes := TelephonyRoutes()
+	for key, route := range routes {
+		want, known := routePlaneExpectation[key]
+		if !known {
+			t.Errorf("route %+v has no expected plane: a new route must decide its "+
+				"local plane, and LocalPlaneNone is a legitimate answer", key)
+			continue
+		}
+		if route.LocalPlane == "" {
+			t.Errorf("route %+v has the zero-value plane, which means nobody decided; "+
+				"use LocalPlaneNone to say there is no local loop", key)
+		}
+		if route.LocalPlane != want.plane {
+			t.Errorf("route %+v plane = %q, want %q", key, route.LocalPlane, want.plane)
+		}
+	}
+	for key := range routePlaneExpectation {
+		if _, ok := routes[key]; !ok {
+			t.Errorf("expected route %+v left the table; this test guards a row that no longer exists", key)
+		}
+	}
+}
+
+// Gate P1, second half: the plane presents the mechanism the route's transport
+// actually uses. A route may not pick a more convenient plane than its carrier.
+func TestTelephonyLocalPlaneMatchesTheRouteTransport(t *testing.T) {
+	byTransport := map[string]TelephonyLocalPlane{
+		"sip":               LocalPlaneSIP,
+		"carrier-websocket": LocalPlaneMediaWebsocket,
+		"cloud-websocket":   LocalPlaneMediaWebsocket,
+		"connector":         LocalPlaneMediaWebsocket,
+		// The carrier leg is a hosted service, so no plane can present it.
+		"daily-sip": LocalPlaneNone,
+	}
+	for key, route := range SelectableTelephonyRoutes() {
+		want, known := byTransport[key.Transport]
+		if !known {
+			t.Errorf("transport %q has no plane mechanism recorded", key.Transport)
+			continue
+		}
+		if route.LocalPlane != want {
+			t.Errorf("route %+v on transport %q has plane %q, want %q: the plane must "+
+				"present the same call mechanism the carrier uses in production",
+				key, key.Transport, route.LocalPlane, want)
+		}
+	}
+}
+
+// T104. FR-024's refusal reads CloudDeploys and must never fire on a route that
+// can deploy to a managed platform, so the assertion covers both providers
+// rather than only the one that motivated the field. Inferring the value from
+// the provider would have rejected examples/livekit-human-transfer.
+func TestTelephonyCloudDeploysIsDecidedAndNeverFalseOnLiveKit(t *testing.T) {
+	for key, route := range TelephonyRoutes() {
+		want, known := routePlaneExpectation[key]
+		if !known {
+			t.Errorf("route %+v has no expected CloudDeploys value", key)
+			continue
+		}
+		if route.CloudDeploys != want.cloudDeploys {
+			t.Errorf("route %+v CloudDeploys = %v, want %v", key, route.CloudDeploys, want.cloudDeploys)
+		}
+		if key.Provider == LiveKit && !route.CloudDeploys {
+			t.Errorf("LiveKit route %+v has CloudDeploys false. Every LiveKit route "+
+				"deploys either to LiveKit Cloud or to a server the author runs, "+
+				"chosen by where LIVEKIT_URL points, and FR-024's refusal must not "+
+				"fire on it", key)
+		}
+	}
+}
+
+// Gate C7. `make rig` is deliberately credential-free, and the tag tracks a
+// credentialed check in CI. So a green rig must never promote a capability out
+// of provisional: FR-020 limits the change to the note.
+func TestTelephonyCapabilityTagsStayProvisional(t *testing.T) {
+	seen := 0
+	for key, route := range TelephonyRoutes() {
+		for feature, evidence := range route.Features {
+			seen++
+			if evidence.Tag != Provisional {
+				t.Errorf("route %+v feature %q tag = %q, want provisional: no route in "+
+					"this table has a credentialed smoke in CI, and the credential-free "+
+					"rig does not count as one", key, feature, evidence.Tag)
+			}
+		}
+	}
+	if seen == 0 {
+		t.Fatal("no capabilities inspected: the table is empty or the loop is wrong")
+	}
+}

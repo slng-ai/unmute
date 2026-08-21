@@ -32,10 +32,31 @@ func TestSmokeTelephonyComposeTopologies(t *testing.T) { // telephony V26
 	for _, tc := range []struct {
 		name     string
 		artifact func(*testing.T) generate.Artifact
+		// profile is the plane's Compose profile this case brings up, empty when
+		// the topology has none. The SIP plane's SIP service and endpoints belong
+		// to a profile, so with none selected they are correctly absent: this test
+		// asked for livekit_sip with no profile and got a graph without it.
+		profile  string
 		services []string
 	}{
 		{name: "pipecat", artifact: smokePipecatTelephonyArtifact, services: []string{"application", "redis"}},
-		{name: "livekit_sip", artifact: smokeLiveKitSIPArtifact, services: []string{"application", "livekit_server", "livekit_sip", "redis"}},
+		{
+			name: "livekit_sip", artifact: smokeLiveKitSIPArtifact, profile: planeProfileSoftphone,
+			// The softphone profile: you are the caller, so there is a SIP service
+			// and no caller container. No destination endpoint either, because this
+			// fixture declares no transfer and the plane emits no endpoint for a
+			// capability the package does not ask for (gate P6).
+			services: []string{"application", "livekit_server", "livekit_sip", "redis"},
+		},
+		{
+			name: "livekit_sip_headless", artifact: smokeLiveKitSIPArtifact, profile: planeProfileHeadless,
+			// The headless profile: every leg is a container, so the caller is one
+			// too and the SIP service is the one advertising its own address.
+			services: []string{
+				"application", "livekit_server", "livekit_sip_headless", "redis",
+				"telephony_caller",
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			outDir := filepath.Join(t.TempDir(), tc.name)
@@ -47,6 +68,9 @@ func TestSmokeTelephonyComposeTopologies(t *testing.T) { // telephony V26
 			project := composeProjectName(outDir, tc.name)
 			env := placeholderArtifactEnvironment(os.Environ(), artifact.Telephony, artifactFileContent(t, artifact, ".env.example"))
 			env = setChildEnv(env, "UNMUTE_TELEPHONY_PORT", "0")
+			if tc.profile != "" {
+				env = setChildEnv(env, "COMPOSE_PROFILES", tc.profile)
+			}
 			run := func(args ...string) ([]byte, error) {
 				cmd := exec.Command(docker, composeArgs(composeFile, project, args...)...)
 				cmd.Dir, cmd.Env = outDir, env

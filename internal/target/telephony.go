@@ -33,6 +33,96 @@ type TelephonyEvidence struct {
 	Smoke    bool             `json:"smoke"`
 }
 
+// LocalPlaneEnvName holds the carrier stand-in's own base address on a run of
+// `unmute dev --telephony`, and is unset in production. The emitted agent reads
+// it twice, and both readings are the same question: where is the carrier?
+//
+// Set at all, it means build the carrier transport directly rather than through
+// the framework, because the framework's path cannot be built without carrier
+// credentials and writes to the carrier's REST API when a call ends (gate P2,
+// research R7 addendum). Its value is where call control goes, so a cold
+// transfer replaces the call's document on this machine instead of posting to
+// api.twilio.com, which is the same gate on the other exit path.
+//
+// One name carrying an address rather than one name carrying "1" beside a
+// second one carrying the address: there is only ever one answer to give.
+//
+// It lives here rather than in internal/generate or internal/cli because both
+// of those need the same string: one renders it into the agent, the other sets
+// it. A second copy is the copy that goes stale.
+//
+// It is deliberately absent from every route's environment rules, so it reaches
+// no .env.example and no deployment manifest (gate C4).
+const LocalPlaneEnvName = "UNMUTE_LOCAL_PLANE"
+
+// LocalPlaneNumber is the number the local plane answers on. It is in the range
+// reserved for fiction on purpose: it belongs to nobody, it is never dialled off
+// the machine, and a reader who sees it in a log can tell at a glance that no
+// real number was involved.
+//
+// Here rather than in internal/cli, because the emitted Compose file needs the
+// same string: the caller endpoint dials it, and the command prints it. Two
+// copies would be two things to keep in step.
+const LocalPlaneNumber = "+15550000000"
+
+// LocalPlaneNoAnswerNumber is a destination the local plane rings and never
+// answers. Transfer one here and the run takes the route's unavailable path
+// instead of its happy one, which is otherwise unreachable without a real
+// destination that really does not pick up.
+//
+// It exists because "what my agent does when nobody answers" is the branch
+// people find out about in production. FR-013 says a run reports that outcome;
+// this is what makes there be one to report. Same reserved range and the same
+// reasoning as LocalPlaneNumber, and one digit apart from it so a log line
+// reads unambiguously either way.
+const LocalPlaneNoAnswerNumber = "+15550000009"
+
+// SIPCallRoomPrefix is the room-name prefix the inbound dispatch rule gives
+// every call that arrives on a LiveKit SIP trunk. It is load-bearing beyond
+// naming: a room with this prefix exists only because a trunk accepted a call and
+// the rule matched it, so it is how an agent that was not dispatched into the
+// room tells a call apart from any other room on the same server.
+//
+// Here rather than in internal/generate or internal/cli because all three need
+// it: the emitted provisioning JSON writes it, the dev command's own records
+// write it, and the emitted webhook reads it. Three copies would be three things
+// to keep in step.
+const SIPCallRoomPrefix = "call-"
+
+// SIPRoomWebhookPath is where a LiveKit Server announces its rooms to an agent
+// that a dispatch rule cannot dispatch. A LiveKit worker is put in the room for
+// it and needs no announcement; a Pipecat bot on the same plane speaks no worker
+// protocol, and an inbound call is answered only once something joins the room
+// and publishes audio, so without this the call rings until it times out.
+//
+// Here for the same reason as the prefix: the emitted Compose file points a
+// server at it and the emitted application serves it.
+const SIPRoomWebhookPath = "/telephony/livekit"
+
+// TelephonyLocalPlane names how a route is exercised on a developer's machine
+// with no carrier involved. It is a route fact: the plane must present the same
+// call mechanism the route's carrier uses in production, so a route never gets
+// to choose a more convenient one.
+type TelephonyLocalPlane string
+
+const (
+	// LocalPlaneNone: no carrier-free loop exists for this route, so the route
+	// keeps the refusal it prints today.
+	//
+	// This is deliberately not the empty string. A zero value that means "the
+	// author decided none" is indistinguishable from "the author forgot", and
+	// the totality test below has to fail on the second one. So the zero value
+	// is invalid and every row states its plane.
+	LocalPlaneNone TelephonyLocalPlane = "none"
+	// LocalPlaneSIP: a real SIP stack on the machine. The caller is either the
+	// developer's softphone or a headless endpoint; the transfer destination is
+	// always a headless endpoint, because the plane dials it (research R6).
+	LocalPlaneSIP TelephonyLocalPlane = "sip"
+	// LocalPlaneMediaWebsocket: the CLI speaks the carrier's media-streaming
+	// WebSocket protocol to the agent over loopback (research R7).
+	LocalPlaneMediaWebsocket TelephonyLocalPlane = "media-websocket"
+)
+
 type TelephonyRoute struct {
 	Key                        TelephonyKey
 	Features                   map[TelephonyFeature]TelephonyEvidence
@@ -48,6 +138,24 @@ type TelephonyRoute struct {
 	// the carrier keeps printed manual steps. This is a carrier fact, not a
 	// framework: only carriers with a CLI implementation may carry it.
 	AutoWebhookEndpoint string
+	// LocalPlane is how `unmute dev --telephony` exercises this route with no
+	// carrier. LocalPlaneNone means there is no carrier-free loop and the
+	// command keeps refusing, which is the honest answer for a route whose
+	// carrier leg terminates in a third-party hosted service we do not run.
+	LocalPlane TelephonyLocalPlane
+	// CloudDeploys reports whether this route has a managed-platform deployment
+	// path. It is a route fact and it does not follow from the provider.
+	//
+	// LiveKit routes are all true: the same route deploys to LiveKit Cloud or to
+	// a LiveKit Server the author runs, chosen at deploy time by where
+	// LIVEKIT_URL points, and the emitted runbook passes deployment_region to
+	// `lk agent create` either way. Pipecat routes split: cloud-websocket and
+	// daily-sip are true, carrier-websocket is false.
+	//
+	// It does NOT say which manifest, and a gate must not read it as though it
+	// did. pcc-deploy.toml is a Pipecat artifact: no LiveKit route emits one,
+	// true though CloudDeploys is on every LiveKit row.
+	CloudDeploys bool
 }
 
 type TelephonyProcess struct {
@@ -98,6 +206,25 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
 		features := append([]TelephonyFeature{TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup)}, sourcesWithStream...)
 		add(Pipecat, "carrier-websocket", carrier, pipecat, features...)
+		key := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: carrier}
+		route := routes[key]
+		route.LocalPlane = LocalPlaneMediaWebsocket
+		// The one Pipecat transport with no managed-platform path: it emits a
+		// plain container plus a Compose file and no deployment manifest.
+		route.CloudDeploys = false
+		// What the credential-free check covers on this route, and nothing more
+		// (FR-020). The tag stays provisional: it tracks a *credentialed* check in
+		// CI, and `make rig` is deliberately credential-free, so a green rig can
+		// never promote a capability (gate C7).
+		if carrier == "twilio" {
+			for feature, evidence := range route.Features {
+				evidence.Note = "make rig, 2026-08-20: inbound call, two-way audio and a cold " +
+					"transfer carried out against the real emitted agent on the local plane, with no " +
+					"accounts. Nothing about carrier reachability, and no live carrier call"
+				route.Features[feature] = evidence
+			}
+		}
+		routes[key] = route
 	}
 	pipecatProcess := []TelephonyProcess{{
 		Name: "agent", Command: []string{"uv", "run", "uvicorn", "telephony:app", "--host", "0.0.0.0", "--port", "7860"},
@@ -165,7 +292,13 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	exotel := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "exotel"}
 	routes[exotel] = TelephonyRoute{Key: exotel, Features: map[TelephonyFeature]TelephonyEvidence{}, RequiredEnvironment: []string{
 		"api_key", "api_token", "account_sid", "subdomain", "from_number", "app_id",
-	}}
+	},
+		// One of the two rows with an empty feature map, which
+		// ResolveTelephonyFeature refuses, so it compiles to nothing and has no
+		// local loop to offer. Assigned anyway: the field is set on every row so
+		// the zero value never claims a plane for a route that refuses.
+		LocalPlane: LocalPlaneNone, CloudDeploys: false,
+	}
 	sipRoutes := []struct{ carrier, docs string }{
 		{"twilio", "https://docs.livekit.io/telephony/start/providers/twilio/"},
 		{"telnyx", "https://docs.livekit.io/telephony/start/providers/telnyx/"},
@@ -180,6 +313,12 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		add(LiveKit, "sip", selected.carrier, selected.docs, features...)
 		key := TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: selected.carrier}
 		route := routes[key]
+		route.LocalPlane = LocalPlaneSIP
+		// True on every LiveKit row: LIVEKIT_URL decides at deploy time whether
+		// this is LiveKit Cloud or a server the author runs, and the runbook
+		// passes deployment_region either way. It does not mean this route emits
+		// a Pipecat deployment manifest, and no LiveKit route emits one.
+		route.CloudDeploys = true
 		route.RequiredEnvironment = []string{"sip_address", "sip_username", "sip_password", "from_number"}
 		route.Processes = []TelephonyProcess{{
 			Name: "agent", Command: []string{"uv", "run", "python", "-m", "livekit.agents", "start", "agent.py"}, Health: "/", Readiness: "/",
@@ -207,6 +346,79 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		}
 		routes[key] = route
 	}
+	// Pipecat over the same SIP plane: a self-hosted phone route with no managed
+	// platform anywhere in it (US3).
+	//
+	// The transport is Pipecat's own LiveKit transport, so the agent joins a room
+	// on a LiveKit Server the operator runs and LiveKit SIP terminates the
+	// carrier's trunk in front of it. Verified against pipecat-ai 1.7.0 on
+	// 2026-08-20: LiveKitTransport(url, token, room_name, params=LiveKitParams()),
+	// installed by the package's own `livekit` extra. No new protocol work.
+	//
+	// **No warm transfer**, deliberately, and it is not the platform's fault: a
+	// warm handoff needs the agent to hold both legs and merge them, and this
+	// project has not built that on Pipecat. The refusal says so and names where
+	// warm does compile (research D1).
+	for _, selected := range sipRoutes {
+		// **No `source.*` bindings.** The call-source table is filled by the
+		// carrier-websocket adapter, which this route does not emit: here the call
+		// arrives as a SIP participant in a room and its from/to live in the
+		// participant's own attributes, which nothing reads yet. Granting them
+		// would be granting a feature with no code path, which the emitter
+		// agreement exists to catch.
+		// **No outbound.** Not a gap being tolerated: nothing in this driver emits
+		// a dial-out path at all. The LiveKit driver's agent calls
+		// create_sip_participant; no Pipecat template calls it on any route, and
+		// the transport here only ever *joins* a room somebody else's call
+		// created. The feature was granted before that was true and a route that
+		// claims a capability with no code behind it is the thing the emitter
+		// agreement exists to catch, so it is claimed no longer (2026-08-21).
+		//
+		// A package declaring channels.phone outbound: true on this route is
+		// therefore refused, and the refusal names the routes that do dial out.
+		add(Pipecat, "sip", selected.carrier, "https://docs.pipecat.ai/pipecat/learn/transports",
+			TelephonyRouteSelected, TelephonyInbound,
+			TelephonyFeature(ColdTransfer), TelephonyFeature(Hangup))
+		key := TelephonyKey{Provider: Pipecat, Transport: "sip", Carrier: selected.carrier}
+		route := routes[key]
+		route.LocalPlane = LocalPlaneSIP
+		// No managed-platform path at all, which is the point of the route: it
+		// emits a plain container and a Compose file and no deployment manifest.
+		// FR-024's refusal reads this field, so it is what makes a
+		// managed-platform-only setting an error here and fine on (livekit, sip).
+		route.CloudDeploys = false
+		route.RequiredEnvironment = []string{"sip_address", "sip_username", "sip_password", "from_number"}
+		route.Processes = []TelephonyProcess{{
+			Name: "agent", Command: []string{"uv", "run", "uvicorn", "telephony:app", "--host", "0.0.0.0", "--port", "7860"},
+			Health: "/healthz", Readiness: "/readyz",
+		}}
+		// The same platform values the LiveKit rows need, for the same reason: the
+		// agent joins a room on a server, and locally the plane supplies all four.
+		route.RuntimeEnvironment = []TelephonyEnvironmentRule{
+			{Name: "LIVEKIT_API_KEY"},
+			{Name: "LIVEKIT_API_SECRET"},
+			{Name: "LIVEKIT_URL"},
+			{Name: "REDIS_URL"},
+		}
+		route.LocallySuppliedEnvironment = []string{"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL", "REDIS_URL"}
+		route.ManualSteps = []string{
+			"deploy LiveKit Server and LiveKit SIP yourself, sharing one Redis deployment, with LiveKit SIP reachable on public SIP signaling and RTP ports; this route has no hosted option, which is what it is for",
+			"point the carrier's origination URI at your LiveKit SIP endpoint with transport=tcp",
+			"get the selected carrier SIP address, username, password, and phone number from its SIP trunking console; the trunk's own values, which a cold transfer sends the caller's leg through",
+			"for inbound calls only, run bash telephony-setup.sh from the build directory: it resolves the inbound trunk by phone number and creates the trunk and dispatch rule (unmute dev --telephony creates the local records itself)",
+			"for inbound calls only, set your LiveKit Server's webhook config to POST to " + SIPRoomWebhookPath + " on this agent, with webhook.api_key one of the server's own keys; without it the agent is never told a call arrived and every call rings until it times out, because the dispatch rule cannot dispatch a Pipecat bot (unmute dev --telephony configures this for you)",
+		}
+		for feature, evidence := range route.Features {
+			// Nobody has called through this route. Said plainly rather than with
+			// the generic line, because the specific gap is the useful thing: the
+			// plane runs it, and no carrier has.
+			evidence.Verified = "2026-08-20"
+			evidence.Note = "built and offline-proven, and run on the local plane; " +
+				"no call has been placed through a carrier trunk on this route"
+			route.Features[feature] = evidence
+		}
+		routes[key] = route
+	}
 	// Twilio is the one SIP carrier anybody has called through. Both transfer shapes
 	// were run on a real trunk and a deployed agent on 2026-08-12, and each run
 	// found a defect no offline test had
@@ -227,7 +439,10 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	exotel = TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: "exotel"}
 	routes[exotel] = TelephonyRoute{Key: exotel, Features: map[TelephonyFeature]TelephonyEvidence{}, RequiredEnvironment: []string{
 		"sip_address", "sip_username", "sip_password", "from_number",
-	}}
+	},
+		// The other empty-feature row. Same reason as the Pipecat one above.
+		LocalPlane: LocalPlaneNone, CloudDeploys: true,
+	}
 	// LiveKit Twilio connector: Twilio Media Streams over WebSocket, bridged
 	// into a local LiveKit room by the generated telephony_bridge.py. Same
 	// Twilio surface as the Pipecat carrier-websocket route (HTTPS webhook +
@@ -259,6 +474,11 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		evidence.Note = "built and offline-proven; no call has been placed through a carrier trunk yet"
 		route.Features[feature] = evidence
 	}
+	// No carrier-free loop: the carrier leg terminates in a third-party hosted
+	// service, so there is nothing to stand in for on the machine. Keeps its
+	// current refusal.
+	route.LocalPlane = LocalPlaneNone
+	route.CloudDeploys = true
 	route.RequiredEnvironment = []string{"account_sid", "auth_token", "sip_address", "from_number"}
 	// Processes, PublicEndpoints, and Services below describe the *operator-run
 	// helper*, not the deployed agent. Every other route means the application by
@@ -334,6 +554,10 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	// needs none of the three: the platform terminates the carrier's stream itself
 	// and the emitted bot never speaks to the carrier's API (research F4, D4).
 	// ir.Build carries that conditionality; the row states the vocabulary.
+	// The platform terminates the same protocol and hands the bot the same
+	// interface, so the same stand-in serves this route.
+	route.LocalPlane = LocalPlaneMediaWebsocket
+	route.CloudDeploys = true
 	route.RequiredEnvironment = []string{"account_sid", "auth_token", "from_number"}
 	// The organization name completes the service host in outbound markup. The
 	// compiler knows the agent name and cannot know this, so it is read by name
@@ -363,6 +587,9 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	}, sourcesWithStream...)
 	add(LiveKit, "connector", "twilio", "https://docs.livekit.io/telephony/connectors/twilio/", connectorFeatures...)
 	route = routes[connector]
+	// Same mechanism as the Pipecat carrier-websocket route, different framework.
+	route.LocalPlane = LocalPlaneMediaWebsocket
+	route.CloudDeploys = true
 	route.RequiredEnvironment = []string{"account_sid", "auth_token", "from_number"}
 	route.Processes = []TelephonyProcess{{
 		// One container runs both roles: the agent worker (LiveKit) and the
@@ -525,6 +752,17 @@ func ResolveTelephonyFeature(key TelephonyKey, feature TelephonyFeature) Telepho
 					"telephony route (%s, %s, %s) does not emit warm transfer: a warm handoff has to act on how the "+
 						"destination's leg ended, which on this route needs a callback endpoint you host, and hosting "+
 						"nothing is what this route is for; warm transfer compiles on (livekit, sip) trunks today",
+					key.Provider, key.Transport, key.Carrier)}
+			}
+			if key.Provider == Pipecat && key.Transport == "sip" {
+				// The self-hosted trunk route. The stack under it can do a warm
+				// handoff, so a message implying otherwise would be false and would
+				// send an author looking for a workaround that does not exist.
+				return TelephonyEvidence{Feature: feature, Tag: Gated, Note: fmt.Sprintf(
+					"telephony route (%s, %s, %s): this project has not built warm transfer on Pipecat "+
+						"yet. The stack this route runs on can do it: a warm handoff needs the agent to "+
+						"hold both legs and merge them, and that is not built here. Warm transfer "+
+						"compiles on (livekit, sip) trunks today",
 					key.Provider, key.Transport, key.Carrier)}
 			}
 			if key.Provider == Pipecat && key.Transport == "daily-sip" {

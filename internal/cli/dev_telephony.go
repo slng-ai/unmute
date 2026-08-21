@@ -19,7 +19,6 @@ import (
 	"syscall"
 
 	"github.com/slng-ai/unmute/internal/generate"
-	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/target"
 	"github.com/spf13/cobra"
 )
@@ -39,8 +38,13 @@ type devTelephonyOptions struct {
 	publicValue string
 	botPort     string
 	to          string // --to: E.164 to dial once the outbound-capable graph is healthy
+	carrier     bool   // --carrier: reach the route through the author's own carrier
 	noWebhook   bool   // --no-webhook: leave the carrier's number configuration alone
 	verbose     bool
+	// report is where the run records what it did, and it is what the checks
+	// assert against. Optional: the recorder tolerates a nil, so a caller with
+	// nothing to print or assert passes nothing.
+	report *runReport
 }
 
 // e164Pattern matches an E.164 number, the same shape the generated
@@ -64,12 +68,70 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 	// TELEPHONY.md step 2: the provider-neutral plan prints before env
 	// validation; the endpoint URLs print at step 6, once the origin exists.
 	printDevTelephonyPlan(cmd.OutOrStdout(), targetName, plan, nil)
+	// Which mode this run is in, decided once and stated before anything
+	// starts: a local plane on this machine, or the author's own carrier. A
+	// route with neither has nothing this command can run locally, and saying
+	// so here costs one line instead of a failure further in.
+	plane := target.TelephonyLocalPlane(plan.LocalPlane)
+	if opts.report != nil {
+		opts.report.Plane = plane
+	}
+	switch {
+	case opts.carrier:
+		printCarrierDisclaimer(cmd.OutOrStdout(), targetName)
+	case plane == target.LocalPlaneSIP, plane == target.LocalPlaneMediaWebsocket:
+		printLocalPlaneMode(cmd.OutOrStdout(), targetName, plane)
+	default:
+		return fmt.Errorf("target %q has no local telephony plane on the %s %s route, so there is nothing "+
+			"this command can run on this machine; pass --carrier to reach the route through your own carrier account",
+			targetName, plan.Route.Provider, plan.Route.Transport)
+	}
 	childEnv := devChildEnv(root, cmd.ErrOrStderr())
 	if err := rejectLocalTopologyConflicts(plan, childEnv); err != nil {
 		return err
 	}
 	childEnv = setChildEnv(childEnv, "UNMUTE_TELEPHONY_PORT", opts.botPort)
+	// Before Docker, before the plane, before anything is created. A port this
+	// run needs and cannot have is a run that should not start (T103).
+	if err := hostPortCheck(telephonyHostPorts(plan, opts.botPort, childEnv)); err != nil {
+		return err
+	}
 	required := externalTelephonyEnv(plan)
+	// The SIP plane supplies for itself everything a carrier would have
+	// supplied, so none of those names has to be in the author's .env. This is
+	// what makes a default run credential-free, and it is the difference
+	// between a loop an author can run before lunch and one that needs an
+	// account first (SC-004).
+	var sipPlane *planeRun
+	if !opts.carrier && planeIsSIP(plan) {
+		started, err := startPlaneRun(plan, childEnv)
+		if err != nil {
+			return err
+		}
+		sipPlane = started
+		childEnv = sipPlane.apply(childEnv)
+		required = slices.DeleteFunc(required, func(name string) bool {
+			return slices.Contains(sipPlane.supplied, name)
+		})
+	}
+	// The other plane, for the routes whose carrier streams media over a
+	// WebSocket. Same reason, same shape: it supplies what a carrier would, so a
+	// default run needs no account (SC-004).
+	var mediaPlane *mediaPlaneRun
+	if !opts.carrier && planeIsMediaWebsocket(plan) {
+		started, err := startMediaPlaneRun(plan, opts.botPort, true)
+		if err != nil {
+			return err
+		}
+		mediaPlane = started
+		// The plane holds a listener for the carrier's own API. Released here so
+		// a run that ends any way at all leaves no port behind (gate P8).
+		defer mediaPlane.stop()
+		childEnv = mediaPlane.apply(childEnv)
+		required = slices.DeleteFunc(required, func(name string) bool {
+			return slices.Contains(mediaPlane.supplied, name)
+		})
+	}
 	// UNMUTE_PUBLIC_URL is dev-supplied here: --public-url or the managed
 	// tunnel injects it after this check, so it is not demanded from .env.
 	if opts.publicValue != "" || len(plan.PublicEndpoints) > 0 {
@@ -103,6 +165,20 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "compiled %s\n", outDir)
+	if sipPlane != nil {
+		// Made here rather than left to Compose: a bind mount whose source is
+		// missing is created by the daemon, owned by root, and the endpoint
+		// then cannot write its recording into it.
+		if err := sipPlane.prepare(outDir); err != nil {
+			return err
+		}
+		childEnv = sipPlane.apply(childEnv)
+	}
+	if mediaPlane != nil {
+		if _, err := mediaPlane.prepare(outDir); err != nil {
+			return err
+		}
+	}
 	composePath := filepath.Join(outDir, "compose.telephony.yaml")
 	if _, err := os.Stat(composePath); err != nil {
 		return fmt.Errorf("generated telephony Compose file: %w", err)
@@ -127,28 +203,30 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 	if opts.verbose {
 		processOut = io.MultiWriter(logFile, cmd.ErrOrStderr())
 	}
-
-	// --public-url wins and skips all tunnel management; otherwise routes
-	// with carrier callbacks get a managed cloudflared quick tunnel (V1).
-	var public *url.URL
-	switch {
-	case opts.publicValue != "":
-		public, err = parseTelephonyPublicURL(opts.publicValue)
-		if err != nil {
-			return err
-		}
-	case len(plan.PublicEndpoints) > 0:
-		tunnel, err := startQuickTunnel(ctx, opts.botPort, processOut)
-		if err != nil {
-			return err
-		}
-		defer tunnel.Stop()
-		public, err = parseTelephonyPublicURL(tunnel.URL)
-		if err != nil {
-			return fmt.Errorf("managed tunnel returned an unusable origin: %w", err)
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "%s: managed tunnel %s (quick tunnel URLs rotate on every run)\n", targetName, public)
+	// On the plane, the log stream is also where a transfer says what it did.
+	// Watching it here means the seven outcomes reach the terminal as they
+	// happen, instead of a developer reading a log file afterwards to find out
+	// whether the transfer they just heard fail actually failed (gate P8).
+	if sipPlane != nil {
+		processOut = io.MultiWriter(processOut, &transferWatcher{
+			out: cmd.OutOrStdout(), targetName: targetName, report: opts.report,
+		})
 	}
+
+	// The public origin, the webhook write and its restore are carrier mode's
+	// whole job, and they live in dev_carrier_check.go (V1). The default loop
+	// never calls into that file, which is what makes "this run touched no
+	// carrier" something a test can assert rather than something we assert.
+	var public *url.URL
+	stopTunnel := func() {}
+	if opts.carrier {
+		origin, stop, err := carrierPublicOrigin(ctx, cmd.OutOrStdout(), targetName, plan, opts, processOut, len(plan.PublicEndpoints) > 0)
+		if err != nil {
+			return err
+		}
+		public, stopTunnel = origin, stop
+	}
+	defer stopTunnel()
 	if public != nil {
 		childEnv = setChildEnv(childEnv, "UNMUTE_PUBLIC_URL", public.String())
 	}
@@ -167,7 +245,7 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 		// nowhere to land.
 		run.infraServices = telephonyInfraServices(plan)
 		run.beforeApp = func(ctx context.Context, env []string) ([]string, error) {
-			if err := ensureLiveKitSIPRecords(ctx, cmd.OutOrStdout(), targetName, plan, env); err != nil {
+			if err := ensureLiveKitSIPRecords(ctx, cmd.OutOrStdout(), targetName, plan, env, sipPlane.credentialOrNone()); err != nil {
 				return nil, err
 			}
 			return env, nil
@@ -177,27 +255,43 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 	// survives into the shutdown path (V14).
 	var restoreWebhook func(context.Context) error
 	run.onStop = func(ctx context.Context) error {
+		printPlaneRecordings(cmd.OutOrStdout(), targetName, plan, sipPlane, opts.report)
 		if restoreWebhook == nil {
 			return nil
 		}
 		return restoreWebhook(ctx)
 	}
 	run.onReady = func(ctx context.Context) error {
-		// The webhook is reconfigured on every start: quick tunnel URLs
-		// rotate per run, and the previous value is printed for restore (V3).
-		// --no-webhook opts out entirely, for a number this run must not touch.
-		if plan.AutoWebhookEndpoint != "" && public != nil && !opts.noWebhook {
-			restore, err := autoConfigureCarrierWebhook(ctx, cmd.OutOrStdout(), targetName, plan, public, childEnv)
+		if opts.carrier {
+			restore, err := armCarrierWebhook(ctx, cmd.OutOrStdout(), targetName, plan, public, childEnv, opts.noWebhook, opts.report)
 			if err != nil {
 				return err
 			}
 			restoreWebhook = restore
 		}
-		if opts.noWebhook && plan.AutoWebhookEndpoint != "" && public != nil {
-			fmt.Fprintf(cmd.OutOrStdout(), "%s: --no-webhook, carrier number left untouched; this run is reachable at %s\n",
-				targetName, strings.TrimSuffix(public.String(), "/"))
+		printDevCallLine(cmd.OutOrStdout(), targetName, plan, childEnv, sipPlane, opts.report)
+		// On this plane the stand-in is the caller, so the run places the call
+		// rather than waiting for a person to dial. Said before it happens, and
+		// before the run blocks, because a plane that looked like it were
+		// waiting would be a plane you waited at forever (gate P4).
+		//
+		// With --to the run places an outbound call instead, below: asking for
+		// one shape and being given both would double the wait and leave two
+		// call reports to tell apart.
+		//
+		// And only on a package that declares an inbound direction. Without one
+		// the agent publishes no inbound endpoint, so the stand-in's call is
+		// answered 404 and reported as a failure that reads like a broken plane.
+		// Found by running an outbound-only package: the honest thing to say is
+		// what to run instead.
+		if mediaPlane != nil && opts.to == "" && !planHasTelephonyFeature(plan, "inbound") {
+			fmt.Fprintf(cmd.OutOrStdout(), "%s: this package declares no inbound direction, so there is "+
+				"no incoming call to place. Add --to <E.164> to exercise its outbound direction, or set "+
+				"channels.phone inbound: true\n", targetName)
+		} else if mediaPlane != nil && opts.to == "" {
+			printMediaPlaneReady(cmd.OutOrStdout(), targetName, mediaPlane)
+			placeMediaPlaneCall(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), targetName, logPath, mediaPlane)
 		}
-		printDevCallLine(cmd.OutOrStdout(), plan, childEnv)
 		// Outbound-capable route: --to places one call now that the graph is
 		// healthy; without --to, print how to place one and do nothing (T5).
 		// The direction guard in runDevTelephony ensures opts.to is only set for
@@ -207,12 +301,36 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 		// /telephony/outbound (I.trigger, I.sipdial).
 		if planHasTelephonyFeature(plan, "outbound") {
 			if opts.to != "" {
-				if plan.Route.Transport == "sip" {
+				// On the plane the number reaches this machine, and a run that
+				// did not say so would read as a real call having been placed.
+				if sipPlane != nil {
+					printPlaneLocalDial(cmd.OutOrStdout(), targetName, opts.to, plan)
+				}
+				switch {
+				case mediaPlane != nil:
+					// The stand-in is the carrier, so it has to be waiting for
+					// the call the agent asks for before the agent is asked to
+					// place one. That ordering is why this owns the trigger
+					// rather than being called after it (T068).
+					placeMediaPlaneOutboundCall(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(),
+						targetName, logPath, opts.to, mediaPlane, func() error {
+							// io.Discard, because this line announces the same
+							// number and the same call id the stand-in's own
+							// banner does, and it cannot help arriving second:
+							// the agent only answers after the stand-in has taken
+							// the call. Printed, it read as the call being
+							// answered before it was made.
+							return placeOutboundCall(ctx, io.Discard, targetName,
+								opts.botPort, outboundToken, opts.to, childEnv)
+						})
+				case plan.Route.Transport == "sip":
 					if err := placeLiveKitDispatch(ctx, cmd.OutOrStdout(), targetName, opts.to, childEnv); err != nil {
 						return err
 					}
-				} else if err := placeOutboundCall(ctx, cmd.OutOrStdout(), targetName, opts.botPort, outboundToken, opts.to, childEnv); err != nil {
-					return err
+				default:
+					if err := placeOutboundCall(ctx, cmd.OutOrStdout(), targetName, opts.botPort, outboundToken, opts.to, childEnv); err != nil {
+						return err
+					}
 				}
 			} else {
 				fmt.Fprintf(cmd.OutOrStdout(), "%s: dial-out ready; re-run with --to <E.164> to place a call\n", targetName)
@@ -221,6 +339,13 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 		return nil
 	}
 	return runTelephonyCompose(ctx, run)
+}
+
+// printLocalPlaneMode states which local plane this run is on. One line,
+// before anything starts, because the mode decides whether anything leaves the
+// machine and a reader should not have to infer that from what follows.
+func printLocalPlaneMode(out io.Writer, targetName string, plane target.TelephonyLocalPlane) {
+	fmt.Fprintf(out, "%s: local telephony plane=%s  ·  no carrier involved\n", targetName, plane)
 }
 
 // placeOutboundCall triggers the container's dial-out endpoint over loopback
@@ -254,12 +379,16 @@ func placeOutboundCall(ctx context.Context, out io.Writer, targetName, botPort, 
 }
 
 // printDevCallLine prints the number to dial once an inbound route is live.
-func printDevCallLine(out io.Writer, plan *generate.TelephonyRuntimePlan, env []string) {
+func printDevCallLine(out io.Writer, targetName string, plan *generate.TelephonyRuntimePlan, env []string, plane *planeRun, report *runReport) {
 	if !planHasTelephonyFeature(plan, "inbound") {
 		return
 	}
-	if plan.Route.Provider == ir.ProviderLiveKit && plan.Route.Transport == "sip" {
-		fmt.Fprint(out, "\n  local LiveKit SIP wiring is ready  ·  a real inbound call needs publicly reachable SIP and RTP ingress  ·  ctrl-c to stop\n\n")
+	// The line this replaced said the wiring was ready and that a real inbound
+	// call needed publicly reachable SIP and RTP ingress. It was true, and it
+	// was the whole problem: a healthy run that could not be called. Now the
+	// run says how to call it.
+	if plane != nil {
+		printPlaneReady(out, targetName, plan, plane, report)
 		return
 	}
 	number := envValue(env, plan.Environment["from_number"])
@@ -277,8 +406,12 @@ func printDevCallLine(out io.Writer, plan *generate.TelephonyRuntimePlan, env []
 // have no SIP trunk at all, and an outbound-only package needs no record of
 // either kind (SCHEMA N36, 2026-08-12).
 func planCreatesLiveKitSIPRecords(plan *generate.TelephonyRuntimePlan) bool {
-	return plan.Route.Provider == ir.ProviderLiveKit && plan.Route.Transport == "sip" &&
-		planHasTelephonyFeature(plan, string(target.TelephonyInbound))
+	// The plane, not the provider. These records exist because the local plane is
+	// a LiveKit SIP plane and an inbound call has to land somewhere on it, which
+	// is equally true of the route whose *agent* is a Pipecat bot: reading the
+	// provider here left `(pipecat, sip)` with no trunk and no dispatch rule, so
+	// its first inbound call was answered 486.
+	return planeIsSIP(plan) && planHasTelephonyFeature(plan, string(target.TelephonyInbound))
 }
 
 func planHasTelephonyFeature(plan *generate.TelephonyRuntimePlan, feature string) bool {
