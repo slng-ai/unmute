@@ -1,7 +1,3 @@
-# Generated local-development topology. The devkey/secret pair below is the
-# documented `livekit-server --dev` pair (never for production); the dev server
-# accepts no other key pair.
-services:
   application:
     build:
       context: .
@@ -20,11 +16,18 @@ services:
       - {{.}}
 {{- end}}
     ports:
-      - "${UNMUTE_TELEPHONY_PORT:-8081}:8081"
+      # Bound to one interface, not the wildcard. This is a development stack
+      # holding a published key pair, and a laptop is often on a network with
+      # strangers on it.
+      - "${UNMUTE_CONTROL_BIND_IP:-127.0.0.1}:${UNMUTE_TELEPHONY_PORT:-8081}:8081"
+    # Deliberately not waiting on a SIP service: each one belongs to a profile,
+    # and depending on a profiled service drags its profile into every run. The
+    # worker registers with the server and does not read the SIP bridge, and
+    # `unmute dev` brings the plane up before the application either way.
     depends_on:
-      livekit_server:
+      redis:
         condition: service_healthy
-      livekit_sip:
+      livekit_server:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/', timeout=2)"]
@@ -33,68 +36,3 @@ services:
       retries: 30
       start_period: 15s
 
-  redis:
-    # Valkey (BSD-3-Clause) is the coordination store: Redis images are
-    # source-available (RSALv2/SSPLv1) since 7.4, not open source. The
-    # service name and REDIS_URL keep the protocol's name.
-    image: valkey/valkey:9.1.1-alpine
-    command: ["valkey-server", "--appendonly", "yes"]
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-
-  livekit_server:
-    image: livekit/livekit-server:v1.13.4
-    command: ["--dev", "--bind", "0.0.0.0", "--redis-host", "redis:6379"]
-    ports:
-      - "${LIVEKIT_HOST_PORT:-7880}:7880"
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-
-  livekit_sip:
-    image: livekit/sip:v1.7.0
-    environment:
-      SIP_CONFIG_BODY: |
-        api_key: devkey
-        api_secret: secret
-        ws_url: ws://livekit_server:7880
-        redis:
-          address: redis:6379
-        health_port: 8080
-        sip_port: 5060
-        rtp_port: ${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}
-        use_external_ip: true
-        logging:
-          level: debug
-    ports:
-      - "${LIVEKIT_SIP_HOST_PORT:-5060}:5060/tcp"
-      - "${LIVEKIT_SIP_HOST_PORT:-5060}:5060/udp"
-      - "${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}:${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}/udp"
-    depends_on:
-      redis:
-        condition: service_healthy
-      livekit_server:
-        condition: service_healthy
-    healthcheck:
-      # 1F90 is health_port 8080 in hex. Both tables are read: the image has no
-      # shell utilities beyond grep, and Go binds the IPv6 wildcard for a
-      # port-only listen address, so the socket shows up in /proc/net/tcp6 and
-      # never in /proc/net/tcp. Reading only the v4 table reported this
-      # container unhealthy for its full retry budget while it was serving.
-      test: ["CMD-SHELL", "grep -q ':1F90 ' /proc/net/tcp /proc/net/tcp6"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-
-volumes:
-  redis_data:

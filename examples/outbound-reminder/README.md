@@ -87,7 +87,7 @@ list them for exactly that reason. `compile-report.json` does, under
 
 | Variable | Who supplies it |
 |---|---|
-| `UNMUTE_PUBLIC_URL` | `unmute dev --telephony` sets it from the tunnel; the operator sets it at deploy time |
+| `UNMUTE_PUBLIC_URL` | `unmute dev --telephony` sets it to the local plane's own loopback address, or to the tunnel under `--carrier`; the operator sets it at deploy time |
 | `UNMUTE_OUTBOUND_TOKEN` | the outbound trigger token, generated for a local run |
 | `REDIS_URL` | the generated Compose graph, which ships Valkey |
 | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | the local Compose graph, or your LiveKit Cloud project (livekit target only) |
@@ -120,6 +120,13 @@ bin/unmute dev examples/outbound-reminder --telephony --target pipecat --to +155
 
 Values are checked against their declared type, and a name the package never
 declares is refused rather than quietly ignored.
+
+**No Twilio account is needed for that.** On the pipecat target the CLI is the
+carrier: the number is carried in the request, echoed back, and **never dialled
+anywhere**, and the run says so before it starts. What it proves is that the
+agent can ask a carrier to place a call and can hold a conversation on it; it
+proves nothing about which destination a number reaches. `--carrier` is the flag
+that places a real call through your own account.
 
 In production the same three values ride the target's own dispatch payload as
 one flat JSON object; each build's own README prints the exact spelling for its

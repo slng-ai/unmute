@@ -164,26 +164,38 @@ uses `uv`; LiveKit uses Docker Compose.
 
 ## Test the local phone runtimes
 
-Pipecat runs the generated phone-mode agent locally with `uv`:
+Both targets run carrier-free. **No Twilio account, no number, no tunnel.**
+
+Pipecat runs the generated phone-mode agent locally with `uv`, and the CLI is the
+carrier: it places the call over loopback and connects your microphone to it.
 
 ```sh
 bin/unmute dev --telephony examples/salon-concierge --target pipecat
 ```
 
-By default, the CLI opens an HTTPS/WSS tunnel and temporarily points the Twilio
-number at it. Add `--no-webhook` to leave Twilio untouched. A local-only check
-proves that `POST /` returns streaming TwiML and `/ws` accepts the WebSocket; it
-does not prove a carrier call or media path.
+Talk to it and ask for a manager. This package declares a **cold** transfer to
+`manager_line`, so the handoff runs: the caller's leg leaves the agent, the
+destination leg is recorded, and the run prints how far it got. A local run never
+proves that a person answered, and it says so. Use headphones, or the agent hears
+itself and interrupts itself. Talking needs `sox` (`brew install sox`); without it
+the run plays a fixture and says which.
 
-LiveKit starts Redis, LiveKit Server, LiveKit SIP, and the agent locally:
+LiveKit starts Redis, LiveKit Server, LiveKit SIP, and the agent locally, and
+prints an address and a per-run credential to dial from a softphone:
 
 ```sh
 bin/unmute dev --telephony examples/salon-concierge --target livekit
 ```
 
-The local check proves service health, trunk and dispatch setup, and worker
-registration. It does not make the laptop reachable from a carrier; a real call
-needs public SIP signaling and RTP. An HTTPS tunnel is not enough.
+The local check proves service health, trunk and dispatch setup, worker
+registration, and the conversation itself. It does not make the laptop reachable
+from a carrier; a real call needs public SIP signaling and RTP, and an HTTPS
+tunnel is not enough.
+
+`--carrier` is the flag that reaches your own Twilio account: that adds the
+tunnel and the temporary webhook change, and `--no-webhook` leaves the number
+alone within it. [Calling your agent locally](https://docs.slng.ai/dev/local-telephony)
+has the transfer support table and what each plane proves.
 
 The package environment must contain `MANAGER_PHONE_NUMBER`, matching
 `agent.yaml` and the generated `.env.example`. `SUPERVISOR_PHONE_NUMBER` is not

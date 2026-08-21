@@ -1,0 +1,64 @@
+# The rig's package. Deliberately the smallest thing that can carry a phone call,
+# because every field here is a field the rig has to keep working.
+#
+# It declares **no** transfer, and that is not a gap. This route refuses one, and
+# the rig drives the transfer through the plane's own call-control endpoint rather
+# than through the package or the model: it posts the carrier document the stand-in
+# would have received. That is what lets the whole check run with no accounts of
+# any kind, because nothing is ever asked to decide.
+version: 1
+entry_agent: reception
+
+secrets:
+  - OPENAI_API_KEY
+  - TWILIO_ACCOUNT_SID
+  - TWILIO_AUTH_TOKEN
+  - TWILIO_PHONE_NUMBER
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-terra
+  speak:
+    voice:
+      provider: openai
+      model: gpt-4o-mini-tts
+      voice: alloy
+  listen:
+    transcriber:
+      provider: openai
+      model: gpt-4o-transcribe
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  reception:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Rig here."
+  interruption:
+    enabled: true
+
+channels:
+  phone:
+    kind: telephony
+    inbound: true
+    # Inbound only. An outbound direction makes the agent require the dial-out
+    # token the command mints per run, and /readyz answers 503 naming it until it
+    # has one. The rig places an inbound call and transfers it; outbound on this
+    # plane is held by the tests in dev_media_control_test.go.
+    outbound: false
+
+capacity:
+  peak_sessions: 1
+  max_sessions: 2
+  peak_starts_per_second: 1
+  avg_session_duration: 1m

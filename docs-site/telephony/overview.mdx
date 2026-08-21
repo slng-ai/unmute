@@ -87,9 +87,32 @@ its own `build/<target>/` directory.
 | Pipecat | `carrier-websocket` | Twilio, Telnyx, Plivo | a generated adapter of yours terminates the carrier's media stream |
 | Pipecat | `carrier-websocket` | Exotel | no adapter, so this route is refused at validation |
 | Pipecat | `daily-sip` | Twilio | your carrier forwards into the same Daily room through a helper you run |
+| Pipecat | `sip` | Twilio, Telnyx, Plivo | a SIP trunk carries the call into a LiveKit SIP service you run, which tells your agent about it |
 | LiveKit Agents | `sip` | Twilio, Telnyx, Plivo | a SIP trunk carries the call into LiveKit SIP |
 | LiveKit Agents | `sip` | Exotel | no adapter, so this route is refused at validation |
 | LiveKit Agents | `connector` | Twilio | a generated bridge turns Twilio Media Streams into a LiveKit room |
+
+### What is supported locally, and what is supported deployed
+
+Every route above can be exercised locally. They do not all have a managed
+platform to deploy to, and one of them has none at all.
+
+| Route | Local test | Deploys to |
+|---|---|---|
+| Pipecat `cloud-websocket` | inbound, outbound, cold transfer | Pipecat Cloud |
+| Pipecat `carrier-websocket` | inbound, outbound | Pipecat Cloud |
+| Pipecat `daily-sip` | no local plane | Pipecat Cloud |
+| Pipecat `sip` | **inbound**, cold transfer up to the handoff | no deployment manifest: you run the containers |
+| LiveKit `sip` | inbound, outbound, cold and warm transfer | LiveKit Cloud, or a server you run |
+| LiveKit `connector` | inbound, outbound | LiveKit Cloud |
+
+<Note>
+  Pipecat `sip` is the one route with no managed platform anywhere in it: the
+  containers you run locally are the containers you run in production, and it
+  emits no deployment manifest. It **receives calls only** — it emits no
+  dial-out path, so `outbound: true` is refused on it by name. The compiler
+  prints the setup its own steps need, and the emitted `README.md` carries them.
+</Note>
 
 The Pipecat Daily helper exposes one public `/call` webhook. It requires the
 exact HTTPS base URL in `UNMUTE_PUBLIC_URL` (an optional path is allowed) and

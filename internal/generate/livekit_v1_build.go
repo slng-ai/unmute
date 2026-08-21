@@ -55,6 +55,9 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		Tracing:           agent.Tracing != nil,
 		TracingProvider:   tracingProviderOf(agent),
 	}
+	if tgt.Telephony != nil {
+		data.CarrierSteps = slices.Clone(tgt.Telephony.ManualSteps)
+	}
 	for _, name := range tracingEnv(data.TracingProvider) {
 		env.add(name)
 	}
@@ -492,6 +495,10 @@ func fillLiveKitTelephonyCommon(telephony *livekitTelephony, agent *ir.Agent, pl
 			})
 		}
 	}
+	telephony.Plane = plan.LocalPlane
+	telephony.PlaneSubnet = plan.PlaneSubnet
+	telephony.PlaneSIPAddress = plan.PlaneSIPAddress
+	telephony.PlaneServices = planeServices(plan)
 	sourceVariables := make([]string, 0, len(plan.SystemSources))
 	for variable := range plan.SystemSources {
 		sourceVariables = append(sourceVariables, variable)
@@ -1221,12 +1228,31 @@ func humanTransferWhen(c *ir.HumanTransfer) string {
 // destinationExpr renders a resolved destination as Python: a quoted literal,
 // or an os.environ lookup when the target defers it to an env var (N26). The
 // env name is registered so it reaches .env.example and the required-env list.
+// destinationExpr renders a destination for the warm path's `sip_call_to`,
+// which takes a phone number or a SIP user and refuses a full URI (measured
+// 2026-08-20; the live call that found it is in the emitted helper's comment).
+// The value is only known on the call when it defers to an environment name, so
+// the normalising happens at runtime there and at build time for a literal.
 func destinationExpr(destination string, env *envSet) string {
 	if name := ir.DestinationEnv(destination); name != "" {
 		env.add(name)
-		return envRef(name)
+		return "_sip_user(" + envRef(name) + ")"
 	}
-	return pyQuote(destination)
+	return pyQuote(sipUser(destination))
+}
+
+// sipUser is the Go side of the same rule, for a destination authored as a
+// literal rather than deferred to the environment.
+func sipUser(destination string) string {
+	if at := strings.LastIndex(destination, "@"); at >= 0 {
+		destination = destination[:at]
+	}
+	for _, scheme := range []string{"sip:", "sips:", "tel:"} {
+		if trimmed, ok := strings.CutPrefix(destination, scheme); ok {
+			return trimmed
+		}
+	}
+	return destination
 }
 
 // referURIExpr renders a cold-transfer destination for the `transfer_to` field
@@ -1453,3 +1479,80 @@ func livekitDeps(data livekitData) []string {
 	sort.Strings(deps)
 	return deps
 }
+
+// planeServices groups the plan's endpoints into the containers that run
+// them, in the order the Compose file lists them: the caller first, then the
+// destinations.
+func planeServices(plan *ir.TelephonyPlan) []planeService {
+	var services []planeService
+	byName := map[string]int{}
+	for _, endpoint := range plan.LocalEndpoints {
+		account := planeAccount{
+			Name: endpoint.Name, Role: endpoint.Role, Address: endpoint.Address,
+			Recording: endpoint.Recording, Line: baresipAccountLine(endpoint),
+		}
+		index, seen := byName[endpoint.Service]
+		if !seen {
+			service := planeService{
+				Name: endpoint.Service, Address: endpoint.Address,
+				Purpose:  planeServicePurpose(endpoint.Role),
+				Headless: endpoint.Role == ir.TelephonyRoleCaller,
+			}
+			if endpoint.Role == ir.TelephonyRoleCaller {
+				// The caller places the call. Nothing else in the graph would tell
+				// it to, and on the headless profile there is no person to: the
+				// container answered nothing for its whole life until this existed.
+				service.Dial = fmt.Sprintf("sip:%s@%s:5060", targetcap.LocalPlaneNumber, plan.PlaneSIPAddress)
+			}
+			services = append(services, service)
+			index = len(services) - 1
+			byName[endpoint.Service] = index
+		}
+		services[index].Accounts = append(services[index].Accounts, account)
+	}
+	return services
+}
+
+func planeServicePurpose(role string) string {
+	if role == ir.TelephonyRoleCaller {
+		return "Places the inbound call. Only the unattended check runs it: on\n    # the softphone profile you are the caller yourself."
+	}
+	return "Answers transfers. One account per destination the package\n    # declares, each recorded separately."
+}
+
+// baresipAccountLine is one endpoint's SIP identity and audio wiring. Every
+// parameter here was measured against baresip 1.1.0-3 on 2026-08-20:
+//
+//	regint=0      the plane is not a registrar. A client that insists on
+//	              registering before it will place a call cannot be used at all.
+//	answermode=auto  answers with a plain 200 and no header from the caller,
+//	              which is what makes the endpoint usable by a plane that sends
+//	              none. The config option named for auto-answer is not this: all
+//	              three of its values are header-driven.
+//	audio_codecs  mulaw at 8 kHz, one channel: a carrier leg, not a wideband
+//	              call the plane would flatter itself with.
+//	audio_source  every endpoint plays the fixture, and every endpoint has to.
+//	              A destination used to use a loopback device instead, on the
+//	              reasoning that it has nothing to say until somebody talks to
+//	              it. Measured on a live warm transfer 2026-08-20: that device
+//	              with nothing writing into it emits no packets at all, and the
+//	              plane closes a call it receives no audio on after 30 seconds.
+//	              The destination had answered in 2 ms and the transfer still
+//	              failed, as "media-timeout". A source that fails to start has
+//	              its call torn down immediately too, so this is not optional
+//	              for any role.
+//	audio_player  aufile as a player writes what this endpoint heard to exactly
+//	              this path, which is what makes a recording's name predictable.
+func baresipAccountLine(endpoint ir.TelephonyLocalEndpoint) string {
+	return fmt.Sprintf(
+		"<sip:%s@%s>;regint=0;answermode=auto;audio_codecs=pcmu/8000/1;audio_source=aufile,%s;audio_player=aufile,/calls/%s",
+		endpoint.Name, endpoint.Address, planeFixturePath, endpoint.Recording,
+	)
+}
+
+// planeFixturePath is where the endpoints read their audio from, mounted
+// read-only. One file per target rather than per run: it is input, identical
+// every time, and a copy in each run's directory would be megabytes of the same
+// samples. It has to outlast the call, because an endpoint hangs up the moment
+// its input runs out.
+const planeFixturePath = "/fixtures/endpoint.wav"

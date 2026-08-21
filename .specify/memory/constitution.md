@@ -1,6 +1,37 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 4.0.0 -> 4.0.1
+Bump rationale: PATCH. Clarifies one bullet under Principle V to match shipped
+behavior. The principle itself is unchanged: whatever compiles can still be
+spoken to, through the same four commands.
+
+Modified in 4.0.1:
+- Principle V's `dev` bullet said the generated project runs "in Docker". That
+  was already false in two shipped cases: the Pipecat browser loop runs the bot
+  as a host process so browser WebRTC can reach host-reachable ICE candidates
+  (see internal/generate/templates/pipecat_v1/compose.dev.yaml.tmpl), and the
+  cloud-websocket route runs it under `uv` because that route's platform
+  terminates the carrier's stream. The bullet now states the rule actually
+  followed: Docker unless containerizing would break the thing under test.
+- The same bullet now says a local stand-in for a carrier is not the generated
+  project. Local telephony planes stand in for a carrier, so they are governed
+  by "local input stands in for production input" rather than by this bullet.
+
+Reason: found by `/speckit-analyze` on specs/015-local-telephony-rigs, which
+correctly flagged the Docker bullet as a constitution conflict. The conflict
+predated that feature. Fixing the text rather than diluting the principle.
+
+Contributors do nothing differently. No gate changes.
+
+Convention for the next amendment: put the new report at the top of this comment
+and push the one it replaces down under "Previous report". The file used to hold
+only the current report, so history lived in git alone; keeping the previous one
+inline costs four lines and answers "when did this bullet change" without a
+blame walk. Trim the oldest when this comment reaches three reports.
+
+Previous report
+---------------
 Version change: 3.0.0 -> 4.0.0
 Bump rationale: MAJOR. Principle IV no longer makes a hand-written schema
 document the highest authority. Feature specs become ignored local work and
@@ -102,7 +133,11 @@ Four commands take an author from nothing to a voice they can talk to:
 - `init` refuses to overwrite a non-empty directory.
 - `validate` loads, builds, and validates without writing an artifact.
 - `compile` validates before writing one artifact directory per target.
-- `dev` runs the generated project in Docker for browser or telephony use.
+- `dev` runs the generated project locally, in Docker wherever the topology
+  allows. It runs as a host process where Docker would break the thing under
+  test: Pipecat browser WebRTC, which needs host-reachable ICE candidates, and
+  a route whose platform terminates the carrier's stream. A local stand-in for
+  a carrier is not the generated project and is not bound by this bullet.
 - `skill` is outside this path. It installs the offline coding-agent bundle
   and MUST NOT read, write, or validate an agent package.
 - Local input stands in for production input instead of creating another
@@ -159,4 +194,4 @@ topology change.
   knob needs a concrete reason. Without one, do less.
 - Rules added to `CLAUDE.md` need a failing gate or the label `(advisory)`.
 
-**Version**: 4.0.0 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-16
+**Version**: 4.0.1 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-19

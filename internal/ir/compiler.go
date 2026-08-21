@@ -497,23 +497,74 @@ type Connection struct {
 }
 
 type TelephonyPlan struct {
-	Channels            []string                      `json:"channels" yaml:"channels"`
-	Connection          string                        `json:"connection" yaml:"connection"`
-	Key                 TelephonyKey                  `json:"key" yaml:"key"`
-	Environment         map[string]string             `json:"environment" yaml:"environment"`
-	Destinations        map[string]string             `json:"destinations,omitempty" yaml:"destinations,omitempty"`
-	SystemSources       map[string]VariableSource     `json:"system_sources,omitempty" yaml:"system_sources,omitempty"`
-	Evidence            []TelephonyFeatureEvidence    `json:"evidence" yaml:"evidence"`
-	Processes           []TelephonyProcess            `json:"processes" yaml:"processes"`
-	PublicEndpoints     []TelephonyEndpoint           `json:"public_endpoints,omitempty" yaml:"public_endpoints,omitempty"`
-	RequiredEnvironment []string                      `json:"required_environment" yaml:"required_environment"`
-	LocalEnvironment    []string                      `json:"locally_supplied_environment" yaml:"locally_supplied_environment"`
-	AutoWebhookEndpoint string                        `json:"auto_webhook_endpoint,omitempty" yaml:"auto_webhook_endpoint,omitempty"`
-	ManualSteps         []string                      `json:"manual_steps,omitempty" yaml:"manual_steps,omitempty"`
+	Channels            []string                   `json:"channels" yaml:"channels"`
+	Connection          string                     `json:"connection" yaml:"connection"`
+	Key                 TelephonyKey               `json:"key" yaml:"key"`
+	Environment         map[string]string          `json:"environment" yaml:"environment"`
+	Destinations        map[string]string          `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+	SystemSources       map[string]VariableSource  `json:"system_sources,omitempty" yaml:"system_sources,omitempty"`
+	Evidence            []TelephonyFeatureEvidence `json:"evidence" yaml:"evidence"`
+	Processes           []TelephonyProcess         `json:"processes" yaml:"processes"`
+	PublicEndpoints     []TelephonyEndpoint        `json:"public_endpoints,omitempty" yaml:"public_endpoints,omitempty"`
+	RequiredEnvironment []string                   `json:"required_environment" yaml:"required_environment"`
+	LocalEnvironment    []string                   `json:"locally_supplied_environment" yaml:"locally_supplied_environment"`
+	AutoWebhookEndpoint string                     `json:"auto_webhook_endpoint,omitempty" yaml:"auto_webhook_endpoint,omitempty"`
+	ManualSteps         []string                   `json:"manual_steps,omitempty" yaml:"manual_steps,omitempty"`
+	// LocalPlane is how `unmute dev --telephony` exercises this route with no
+	// carrier: "sip", "media-websocket", or "none" when the route has no
+	// carrier-free loop and keeps its refusal. A plain string here, the way
+	// TelephonyKey mirrors target's rather than importing it, so the schema
+	// structs stay free of the capability package.
+	LocalPlane string `json:"local_plane" yaml:"local_plane"`
+	// CloudDeploys is whether this route has a managed-platform deployment path.
+	// A route fact, carried from the route record rather than inferred from the
+	// provider: one provider's routes each deploy to exactly one kind of place,
+	// the other's deploy either way on the same route. FR-024's refusal reads it.
+	CloudDeploys bool `json:"cloud_deploys" yaml:"cloud_deploys"`
+	// PlaneSubnet and PlaneSIPAddress describe the plane's own container
+	// network. They are derived here rather than written into a template
+	// because two readers need them and must agree: the emitted Compose file
+	// assigns the addresses, and the dev command prints and dials them.
+	PlaneSubnet     string `json:"plane_subnet,omitempty" yaml:"plane_subnet,omitempty"`
+	PlaneSIPAddress string `json:"plane_sip_address,omitempty" yaml:"plane_sip_address,omitempty"`
+	// LocalEndpoints is what the plane runs so a call has somewhere to come
+	// from and somewhere to go (data-model section 2). Derived from the
+	// package's declared destinations, never authored.
+	LocalEndpoints      []TelephonyLocalEndpoint      `json:"local_endpoints,omitempty" yaml:"local_endpoints,omitempty"`
 	Services            []string                      `json:"services" yaml:"services"`
 	Coordination        string                        `json:"coordination" yaml:"coordination"`
 	CoordinationReasons []TelephonyCoordinationReason `json:"coordination_reasons" yaml:"coordination_reasons"`
 	AdmissionOwner      string                        `json:"admission_owner" yaml:"admission_owner"`
+}
+
+// TelephonyLocalEndpoint is one SIP endpoint the local plane runs. The caller
+// places the inbound call; a destination answers a transfer, one per
+// destination the package declares, so a run can report which one was reached
+// (SPEC FR-010).
+//
+// Two endpoints never share a Name, which is what the plane addresses them by.
+// They may share an Address: measured 2026-08-20, one endpoint process serves
+// several accounts at one address and routes an incoming INVITE to the account
+// matching the request URI's user part. That is what lets every declared
+// destination be reachable, because the emitted agent sends every warm-transfer
+// dial through the single trunk hostname `_sip_trunk()` reads.
+type TelephonyLocalEndpoint struct {
+	// Role is "caller" or "destination".
+	Role string `json:"role" yaml:"role"`
+	// Name is the declared destination's name, or the role for the caller. It
+	// is the user part of the endpoint's SIP address.
+	Name string `json:"name" yaml:"name"`
+	// Service is the Compose service that runs it.
+	Service string `json:"service" yaml:"service"`
+	Address string `json:"address" yaml:"address"`
+	Port    int    `json:"port" yaml:"port"`
+	// EnvName is the environment variable the package defers this destination
+	// to. The plane sets it to this endpoint's address, which is how a transfer
+	// the agent asks for lands here instead of at a carrier.
+	EnvName string `json:"env_name,omitempty" yaml:"env_name,omitempty"`
+	// Recording is the file this endpoint writes what it hears into, relative
+	// to the run's own call directory.
+	Recording string `json:"recording" yaml:"recording"`
 }
 
 type TelephonyProcess struct {

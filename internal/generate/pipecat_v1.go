@@ -346,6 +346,57 @@ type pipecatCloudWebsocket struct {
 	CallEnv []string
 }
 
+// pipecatSIP is Pipecat on a SIP trunk it terminates itself (US3): a LiveKit
+// Server and LiveKit SIP the operator runs, with the agent joining rooms through
+// Pipecat's own LiveKit transport.
+//
+// A fourth group rather than a widening of any other, for the reason the third
+// one exists: nothing that reads .Telephony, .DailyCarrier or .CloudWebsocket
+// should be able to see this route, because none of their assumptions hold here.
+// This one has no carrier webhook, no media WebSocket of ours, and no managed
+// platform at all.
+type pipecatSIP struct {
+	Carrier    string
+	Connection string
+	// The trunk's own four names, which reach the agent's dial-out path directly.
+	// No trunk identifier: the emitted setup script resolves inbound records by
+	// phone number, the same way the LiveKit rows do.
+	SIPAddressEnv  string
+	SIPUsernameEnv string
+	SIPPasswordEnv string
+	FromNumberEnv  string
+	// The platform values the transport needs. Supplied by the plane on a local
+	// run and by the operator in production, which is why they are read by name
+	// rather than compiled in.
+	ServerURLEnv string
+	APIKeyEnv    string
+	APISecretEnv string
+	HasInbound   bool
+	HasOutbound  bool
+	// SessionTTL is how long a call may run before the container is forced down,
+	// derived the same way the carrier route derives it so a long conversation is
+	// not cut off by a shorter drain than it declared.
+	SessionTTL int
+	// ColdDestination is the transfer destination expression, and RingTimeoutSecs
+	// its ring timeout. Empty when the package declares no transfer.
+	ColdDestination     string
+	RingTimeoutSecs     int
+	HangupOnUnavailable bool
+	// CallEnv is what a phone call adds to the process environment on this route.
+	CallEnv []string
+	// The plane's own topology, read from the same plan the LiveKit SIP route
+	// reads. Derived in internal/ir and never computed here, because the Compose
+	// file assigns the addresses and the dev command dials them.
+	PlaneSubnet   string
+	PlaneServices []planeService
+	// RoomPrefix is which rooms on the server are calls for this agent, and
+	// WebhookPath is where the server announces them. Both are read from
+	// internal/target rather than written here, because the emitted Compose file
+	// points a server at the path and the emitted application serves it.
+	RoomPrefix  string
+	WebhookPath string
+}
+
 type pipecatSystemSource struct {
 	Variable string
 	Source   string
@@ -437,6 +488,18 @@ type pipecatData struct {
 	// only the import block and the one setup call read it.
 	Tracing         bool
 	TracingProvider string
+	// LocalPlaneEnv is the name the emitted agent checks to know it is on a
+	// local plane rather than deployed. Both media websocket routes read it, so
+	// it lives here rather than on either route's own group. Rendered, never
+	// read here, and never added to the env set: adding it would put it in
+	// .env.example for an author to fill in, and it is not theirs to set
+	// (gate C4).
+	LocalPlaneEnv string
+	// CarrierSteps are the route's dictated carrier actions, rendered verbatim
+	// into the runbook. internal/target owns this text: a runbook that restates
+	// it in its own prose has made a second copy of a one-owner fact, and the
+	// copy is the one that goes stale. Gate C5 asserts every step survives.
+	CarrierSteps []string
 	// Telephony means the carrier-websocket route, and every site that reads it
 	// means that. The Daily carrier leg is DailyCarrier; see its doc comment.
 	Telephony    *pipecatTelephony
@@ -445,6 +508,10 @@ type pipecatData struct {
 	// one route where the operator hosts nothing. See its type's doc comment for
 	// why it is a third field rather than a widening of either other one.
 	CloudWebsocket *pipecatCloudWebsocket
+	// SIP is the self-hosted trunk route: the one where the operator hosts
+	// everything. The mirror image of CloudWebsocket, and a fourth field for the
+	// same reason.
+	SIP *pipecatSIP
 	// Prerequisites are the route's account features the provider grants on
 	// request, read from the rulebook in internal/target and never restated here.
 	// Present only when this package uses something that needs one.
@@ -585,6 +652,26 @@ var pipecatCloudWebsocketEmittedTelephonyFeatures = map[targetcap.TelephonyFeatu
 	targetcap.TelephonyFeature(targetcap.Hangup):       true,
 }
 
+// pipecatSIPEmittedTelephonyFeatures is the (pipecat, sip, *) half of the
+// emitter agreement. The same four the row grants.
+//
+// No `TelephonyOutbound`: nothing in this driver emits a dial-out path. The
+// LiveKit driver's agent calls create_sip_participant; no Pipecat template calls
+// it on any route, and this route's transport only ever joins a room a call
+// already created. It was claimed here and in the row for as long as the route
+// existed, which is exactly the disagreement this test is for (2026-08-21).
+//
+// And deliberately no `source.*`: the call-source table is filled by the
+// carrier-websocket adapter, which this route does not emit. On this route the
+// call is a SIP participant in a room and its from/to live in the participant's
+// attributes, which nothing reads yet.
+var pipecatSIPEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
+	targetcap.TelephonyRouteSelected:                   true,
+	targetcap.TelephonyInbound:                         true,
+	targetcap.TelephonyFeature(targetcap.ColdTransfer): true,
+	targetcap.TelephonyFeature(targetcap.Hangup):       true,
+}
+
 // GeneratePipecat lowers a validated agent + pipecat target into a project.
 // The socket runs Validate(caps) first (V17), so this reads only agent+target.
 func GeneratePipecat(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedBinding, sizing []ir.Sizing) (Artifact, error) {
@@ -640,7 +727,8 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		// land on tracing.py so bot.py's import site does not care which.
 		outputs = append(outputs, struct{ tmpl, path string }{tracingTemplate(data.TracingProvider), "tracing.py"})
 	}
-	if data.Telephony != nil {
+	switch {
+	case data.Telephony != nil:
 		templateName := "telephony_twilio.py"
 		switch data.Telephony.Carrier {
 		case "telnyx":
@@ -652,7 +740,28 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		outputs = append(outputs, struct{ tmpl, path string }{"telephony_shared.py", "telephony_shared.py"})
 		outputs = append(outputs, struct{ tmpl, path string }{"telephony_state.py", "telephony_state.py"})
 		outputs = append(outputs, struct{ tmpl, path string }{"compose.telephony.yaml", "compose.telephony.yaml"})
-	} else {
+	case data.SIP != nil:
+		// The application the container's own command already starts: the
+		// Dockerfile's CMD is `uvicorn telephony:app` and the route's process is
+		// the same, so this route emitted a command with no module to import and
+		// the container exited before its readiness probe could ever pass.
+		//
+		// A different template from the carrier routes' because it answers a
+		// different thing. Those terminate a carrier's media WebSocket; this
+		// answers a room announcement from the platform and starts a session.
+		outputs = append(outputs, struct{ tmpl, path string }{"telephony_sip.py", "telephony.py"})
+		// The self-hosted trunk route. **No deployment manifest**, because there
+		// is no managed platform to deploy to: that absence is the route (gate
+		// C2). No carrier adapter either, because no carrier ever calls us here:
+		// the trunk terminates at LiveKit SIP and the agent joins a room.
+		//
+		// It gets its own Compose file, because the graph it needs is the plane's:
+		// LiveKit Server, LiveKit SIP, Redis, and the agent. The same graph the
+		// operator runs in production, which is the point of the route.
+		// Only this driver's own application service here. Every other plane file
+		// comes from the plane, below: same plane, same endpoints, one owner.
+		outputs = append(outputs, struct{ tmpl, path string }{"compose.telephony.sip.yaml", "compose.telephony.yaml"})
+	default:
 		outputs = append(outputs, struct{ tmpl, path string }{"pcc-deploy.toml", "pcc-deploy.toml"})
 	}
 	// The Daily carrier route deploys to Pipecat Cloud, so it keeps the manifest
@@ -667,7 +776,42 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		if err != nil {
 			return nil, err
 		}
+		if o.tmpl == "compose.telephony.sip.yaml" {
+			// The plane's topology is shared with the LiveKit SIP route, so this
+			// template holds only this driver's application service.
+			content, err = renderSIPPlaneCompose(sipPlaneCompose{
+				ApplicationService: string(content),
+				PlaneSubnet:        data.SIP.PlaneSubnet,
+				PlaneServices:      data.SIP.PlaneServices,
+				// Only this driver sets it. The LiveKit driver's agent is put in
+				// the room by the dispatch rule, so a POST to it would 404 on
+				// every call; leaving this empty is what keeps that route's
+				// Compose file exactly as it was.
+				//
+				// The host and port are this driver's own application service, in
+				// compose.telephony.sip.yaml.tmpl beside this.
+				WebhookURL: "http://application:7860" + data.SIP.WebhookPath,
+			})
+			if err != nil {
+				return nil, err
+			}
+		}
 		files = append(files, File{Path: o.path, Content: content})
+	}
+	if data.SIP != nil {
+		emitted, err := sipPlaneFiles(sipPlaneSetup{
+			Project: data.Project, AgentName: data.EntryAgent,
+			Carrier: data.SIP.Carrier, FromNumberEnv: data.SIP.FromNumberEnv,
+			// This driver's agent is a Pipecat bot, not a LiveKit worker, so the
+			// emitted rule names none: it is told about the call by the webhook
+			// above instead.
+			DispatchesWorker: false,
+			TracingProvider:  data.TracingProvider,
+		}, data.SIP.HasInbound)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, emitted...)
 	}
 	// Same set as the LiveKit driver's: secrets never reach the image, and a local
 	// `uv run` in this directory leaves a virtualenv behind that would otherwise

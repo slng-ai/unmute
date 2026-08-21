@@ -1,27 +1,70 @@
 ---
 title: "Running a phone route locally"
-description: "What unmute dev --telephony does, step by step, what it touches on your carrier account, and how it puts everything back."
+description: "What unmute dev --telephony does, what it does not touch, and what --carrier adds when you want a real call."
 sidebarTitle: "Phone routes"
 ---
 
 ```sh
-unmute dev examples/twilio-telephony-hello --telephony --target pipecat
+unmute dev examples/salon-concierge --telephony --target pipecat
 ```
 
-With `--telephony`, `unmute dev` runs the route your connection declares instead
-of the browser UI. Routes that receive carrier callbacks over HTTPS and WSS can
-reach a local agent through the managed tunnel. A local LiveKit SIP stack proves
-the wiring, but a real inbound SIP call still needs public SIP signaling and RTP
-ingress.
+With `--telephony`, `unmute dev` runs the phone route your connection declares
+instead of the browser UI. **A default run needs no carrier account, no phone
+number and no tunnel, and nothing leaves your machine.**
 
-This page is the mechanics: what runs, what it touches that is not yours, and what
-it undoes when you stop it. The route vocabulary itself, and which routes exist,
-is on [Telephony](/telephony/overview).
+<Note>
+  **Placing the call, talking to your agent, transfers, and reading the result
+  are on [Calling your agent locally](/dev/local-telephony).** That page has the
+  transfer support table and the honest account of what a local call proves,
+  which is worth reading before you conclude anything from a green run.
+</Note>
+
+This page is what runs, and what `--carrier` adds on top when you do want a real
+call through your own account.
+
+## Two planes, one command
+
+The route decides which local plane you get. You do not choose it, and the run
+prints which one it picked.
+
+| Route | Plane | Local stack | Tunnel | Touches your carrier |
+|---|---|---|---|---|
+| Pipecat `cloud-websocket` | `media-websocket` | the agent under `uv`, no Docker | no | nothing |
+| Pipecat `carrier-websocket` | `media-websocket` | Compose: agent, Redis | no | nothing |
+| LiveKit `connector` | `media-websocket` | Compose: agent, LiveKit Server | no | nothing |
+| LiveKit `sip` | `sip` | Compose: agent, Redis, LiveKit Server, LiveKit SIP | no | nothing; the trunk records it creates are on the local server |
+| Pipecat `sip` | `sip` | the same four, with a Pipecat agent in them | no | nothing; same as above |
+| Pipecat `daily-sip` | none | refused; run the emitted `telephony_helper.py` | n/a | nothing |
+
+The `no` in the tunnel column and the `nothing` in the last one are the point of
+a default run. Both change under [`--carrier`](#when-you-want-a-real-call).
+
+Pipecat `sip` is the one route with no managed platform anywhere in it: the four
+containers you run locally are the four you run in production. It emits no
+deployment manifest for that reason. Its trade is warm transfer, which this
+project has not built on Pipecat.
+
+On both `sip` routes a call is answered only once something joins the caller's
+room. The two routes get something there differently, and it matters when you
+deploy them yourself:
+
+- LiveKit `sip` puts its agent in the room with the dispatch rule, because that
+  agent is a LiveKit agent worker.
+- Pipecat `sip` cannot, because a dispatch rule dispatches only workers and its
+  agent is a Pipecat bot. Its LiveKit Server POSTs each new room to the agent's
+  own `/telephony/livekit` instead, and the agent joins on hearing about it. A
+  local run configures that for you; a deployment of your own has to set the
+  server's `webhook` block, and the emitted `README.md` says exactly what to put
+  in it. Without it every call rings and is never answered.
+
+Pipecat `sip` also **receives calls only**: it emits no dial-out path, so
+`outbound: true` is refused on it and `--to` has nothing to place. LiveKit `sip`
+runs the same plane and does dial out.
 
 <Note>
   The Pipecat `cloud-websocket` route runs the generated agent directly with
   `uv` instead of Docker. Install `uv` and check it with `uv --version` before
-  starting that route. The other local phone routes use Docker Compose.
+  starting that route. Every other local phone route uses Docker Compose.
 </Note>
 
 ## What happens, in order
@@ -29,132 +72,73 @@ is on [Telephony](/telephony/overview).
 <Steps>
   <Step title="Compile and print the plan">
     The package is generated into `build/<target>/`, and the resolved route is
-    printed: the transport, the carrier, the local services it needs, and the
-    carrier steps no command can do for you.
+    printed: the transport, the carrier, the local services it needs, the plane
+    it chose, and the carrier steps no command can do for you.
 
     ```text wrap
-    livekit: telephony route provider=livekit transport=sip carrier=twilio coordination=shared
-    livekit: setup: get the selected carrier SIP address, username, password, and phone number from its SIP trunking console; these four reach the deployed agent's dial-out path directly, so no outbound trunk is registered
-    livekit: local services: application, livekit_server, livekit_sip, redis
-    compiled pkg/build/livekit
+    pipecat: telephony route provider=pipecat transport=carrier-websocket carrier=twilio coordination=shared
+    pipecat: setup: get the Account SID and Auth Token from the Twilio Console account dashboard and select a Voice-capable number
+    pipecat: local services: application, redis
+    pipecat: local telephony plane=media-websocket  ·  no carrier involved
+    compiled examples/outbound-reminder/build/pipecat
     ```
+
+    Those `setup:` lines print on **every** run, including one that never touches
+    your carrier. They are what going live still needs, and a healthy local call
+    is not evidence about any of them.
   </Step>
   <Step title="Check the credentials you have to supply">
-    Only the ones that are yours. Values the command generates itself, such as the
-    outbound token and the public URL under a managed tunnel, are never asked of
-    you. A missing name stops the run before Docker or your carrier is touched, and
+    Only the ones that are yours, and on a default run that is fewer than you
+    might expect: the plane supplies every carrier credential itself, so it never
+    asks you for one. A missing name stops the run before Docker is touched, and
     the message says which name and why this route needs it.
-  </Step>
-  <Step title="Open a public tunnel, on the routes that need one">
-    A route with carrier callbacks needs a public HTTPS origin. The command starts a
-    `cloudflared` quick tunnel to the agent's port and uses its origin:
 
-    ```text
-    pipecat: managed tunnel https://<random>.trycloudflare.com (quick tunnel URLs rotate on every run)
-    ```
-
-    Pipecat `cloud-websocket` runs without Compose and reports the same origin
-    with its local agent:
-
-    ```text
-    pipecat: local agent on port 7860, reachable at https://<random>.trycloudflare.com (quick tunnel URLs rotate on every run)
-    ```
-
-    Quick tunnel URLs really do rotate on every run, which is why the next step
-    happens on every start rather than once. `--public-url` skips this entirely and
-    uses your own origin. The LiveKit SIP route needs no tunnel: SIP does not call
-    back over HTTP.
+    The plane's values also **override** anything already in your environment. If
+    it cannot replace a credential the route declares, it refuses rather than let
+    your own account details reach the agent.
   </Step>
   <Step title="Start the local runtime">
-    Docker Compose brings up the generated services for Compose routes. On
-    LiveKit SIP that is the agent, Redis, LiveKit Server, and LiveKit SIP. The
-    command creates the local trunk and dispatch records against that local
-    server before the agent starts.
+    Docker Compose brings up the generated services. On LiveKit SIP that is the
+    agent, Redis, LiveKit Server and LiveKit SIP, and the command creates the
+    trunk and dispatch records against that local server before the agent starts.
 
-    Pipecat `cloud-websocket` is the exception. Pipecat Cloud terminates this
-    route in production, but a dev run starts the compiled `bot.py` on your
-    machine with `uv run bot.py -t twilio`. Twilio reaches that local process
-    through the temporary tunnel.
+    Pipecat `cloud-websocket` is the exception: it starts the compiled `bot.py`
+    on your machine with `uv` rather than under Compose.
   </Step>
-  <Step title="Point your number at this run">
-    Where the carrier has an API for it, today Twilio, the number's voice webhook is
-    set to this run's public URL and the previous value is printed:
+  <Step title="Place the call, or say how to">
+    On the `media-websocket` plane the command is the carrier, so it places the
+    call itself and connects your microphone to it.
 
-    ```text
-    pipecat: Twilio voice webhook for +15551234567 set to https://<random>.trycloudflare.com/ (was: unset)
-    ```
+    On the `sip` plane there is a real phone to pick up, so it prints an address
+    and a per-run credential to dial with, and waits.
 
-    The path depends on the local runtime. Pipecat `cloud-websocket` answers
-    `POST /` itself and returns TwiML that streams the call to
-    `wss://<tunnel-host>/ws`. Generated Pipecat `carrier-websocket` and LiveKit
-    `connector` applications answer `POST /telephony/inbound`.
-
-    This is the one thing the command changes outside your machine, and it changes it
-    in your name, which is why the previous value is printed rather than assumed.
-  </Step>
-  <Step title="Print the call line">
-    Local HTTPS/WSS routes print the number you can call:
-
-    ```text
-    call +1XXXXXXXXXX  ·  ctrl-c to stop
-    ```
-
-    A local LiveKit SIP stack instead says that its wiring is ready and that a
-    real inbound call still needs publicly reachable SIP and RTP ingress. It
-    does not claim that a laptop behind normal NAT can receive the call.
-
-    On an outbound-capable route it also says whether dial-out is ready, and what to
-    add to place a call.
+    Either way, [Calling your agent locally](/dev/local-telephony) is the page
+    for what happens next.
   </Step>
 </Steps>
 
 ## Stopping puts things back
 
-Ctrl-c undoes the outward changes:
+Ctrl-c stops the local Pipecat process, or stops and removes the Compose stack.
+Named data volumes are kept. On a default run there is nothing else to undo,
+because nothing outside the machine was changed.
 
-- the carrier webhook is set back to what it was, and the restore is printed:
-
-  ```text
-  pipecat: Twilio voice webhook for +15551234567 restored to unset
-  ```
-
-- the tunnel is closed, so the URL stops existing,
-- the local Pipecat process is stopped, or the Compose stack is stopped and
-  removed. Named data volumes are kept.
-
-The restore is armed before the number is ever touched, so it runs on handled exit
-paths: a clean ctrl-c, cancellation, or a local-agent error while the CLI is still
-running. If the restore itself fails, you get a warning naming the number, not
-silence.
-
-## What each route actually runs
-
-| Route | Local stack | Tunnel | Touches your carrier |
-|---|---|---|---|
-| Pipecat `cloud-websocket` + Twilio | the compiled agent under `uv`, no Docker | yes | sets the number's voice webhook for this run |
-| Pipecat `carrier-websocket` + Twilio | Compose: agent, Redis | yes | sets the number's voice webhook for this run |
-| LiveKit `connector` + Twilio | Compose: agent, LiveKit Server; no Redis | yes | sets the number's voice webhook for this run |
-| LiveKit `sip` + Twilio | Compose: agent, Redis, LiveKit Server, LiveKit SIP | no | nothing; the trunk records it creates are on the local server |
-| Pipecat `daily-sip` + Twilio | refused; run the emitted `telephony_helper.py` | not applicable | nothing |
-
-The Daily route needs an existing carrier phone leg. Its generated README gives
-the two commands for the helper and tunnel; `unmute dev --telephony` does not
-host that public helper for you. Set `UNMUTE_PUBLIC_URL` to the helper's exact
-HTTPS base URL before it starts. The helper verifies Twilio's signed `/call`
-form before it uses the Pipecat Cloud key to start an agent session.
+Under `--carrier` there is: see [below](#when-you-want-a-real-call).
 
 ## The flags
 
 | Flag | What it does |
 |---|---|
 | `--telephony` | run the route instead of the browser UI |
-| `--no-webhook` | on callback routes, leave the carrier number alone; point it at the printed inbound URL yourself |
-| `--public-url` | use your own HTTPS origin, already forwarding to the local agent, instead of a managed quick tunnel |
-| `--to <E.164>` | place one outbound call as soon as the stack is healthy |
-| `--verbose` | follow the run's log on stderr as well as writing it to the log file |
+| `--carrier` | reach the route through your own carrier: managed tunnel, webhook rewrite, restore on exit |
+| `--to <E.164>` | place one outbound call once the stack is healthy. On a local plane the number reaches this machine and is never dialled, and the run says so |
+| `--public-url` | your own HTTPS origin instead of a managed quick tunnel (requires `--carrier`) |
+| `--no-webhook` | leave the carrier number's webhook alone; point it at the printed URL yourself (requires `--carrier`) |
 | `--bot-port` | change the host port the agent publishes, default `7860` |
+| `--verbose` | follow the run's log on stderr as well as writing it to the log file |
 
-`--public-url` and `--to` both require `--telephony`, and say so:
+`--to` requires `--telephony`, and `--public-url` and `--no-webhook` require
+`--carrier`. Each says so rather than being ignored:
 
 ```text
 unmute: dev: --to requires --telephony
@@ -168,8 +152,8 @@ unmute: dev: --to must be an E.164 number like +15551234567, got "4155550123"
 
 ## Where the log is
 
-Everything the stack prints goes to `build/<target>/telephony.log`, and the path is
-printed with the ready line. It is also printed when the stack fails to start,
+Everything the stack prints goes to `build/<target>/telephony.log`, and the path
+is printed with the ready line. It is also printed when the stack fails to start,
 which is where the reason lives:
 
 ```text
@@ -177,7 +161,8 @@ telephony Compose failed to start. logs: pkg/build/livekit/telephony.log
 unmute: dev pkg: start Docker Compose topology: exit status 1
 ```
 
-A verified example of what you find in there: a port another run is already holding.
+A verified example of what you find in there: a port another run is already
+holding.
 
 ```text wrap
 Error response from daemon: failed to set up container networking: driver failed programming external connectivity on endpoint unmute-pkg-livekit-e7f5b2b6-livekit_server-1: Bind for 0.0.0.0:7880 failed: port is already allocated
@@ -185,11 +170,89 @@ Error response from daemon: failed to set up container networking: driver failed
 
 That one means another dev stack is still up. Stop it, or run the other package.
 
-Use `--bot-port` to move the agent. On LiveKit SIP, set
-`LIVEKIT_HOST_PORT`, `LIVEKIT_SIP_HOST_PORT`, and
-`LIVEKIT_RTP_HOST_PORT_RANGE` before the run when those host ports are busy.
-The local RTP range defaults to `10000-10100`; every occupied port and range
-must differ when two stacks run at once.
+Two runs on the **same agent port** used to be worse than that, because they did
+not fail: the second reached the first one's agent and reported an error that
+looked like a bug in your package. The run now refuses before it starts anything:
+
+```text
+unmute: dev: port 7860 is already in use, and this run needs it for the local
+agent. Another `unmute dev` is probably still up: stop it, or move this one with
+--bot-port. Left alone, this run would reach the other one's agent and report its
+answers as yours
+```
+
+On LiveKit SIP also set `LIVEKIT_HOST_PORT`, `LIVEKIT_SIP_HOST_PORT` and
+`LIVEKIT_RTP_HOST_PORT_RANGE` when those host ports are busy; the local RTP range
+defaults to `10000-10100`.
+
+## When you want a real call
+
+`--carrier` is the flag that reaches your own carrier account. It is what
+`--telephony` used to do on its own, and it is the only mode that changes
+anything outside your machine.
+
+It adds three things to the run above.
+
+<Steps>
+  <Step title="A public tunnel, on the routes that need one">
+    A route with carrier callbacks needs a public HTTPS origin. The command starts
+    a `cloudflared` quick tunnel to the agent's port and uses its origin:
+
+    ```text
+    pipecat: managed tunnel https://<random>.trycloudflare.com (quick tunnel URLs rotate on every run)
+    ```
+
+    Quick tunnel URLs really do rotate on every run, which is why the next step
+    happens on every start rather than once. `--public-url` skips the tunnel and
+    uses your own origin. The LiveKit SIP route needs no tunnel: SIP does not
+    call back over HTTP.
+  </Step>
+  <Step title="Your number pointed at this run">
+    Where the carrier has an API for it, today Twilio, the number's voice webhook
+    is set to this run's public URL and the previous value is printed:
+
+    ```text
+    pipecat: Twilio voice webhook for +15551234567 set to https://<random>.trycloudflare.com/ (was: unset)
+    ```
+
+    The path depends on the runtime. Pipecat `cloud-websocket` answers `POST /`
+    itself and returns markup streaming the call to `wss://<tunnel-host>/ws`.
+    Generated Pipecat `carrier-websocket` and LiveKit `connector` applications
+    answer `POST /telephony/inbound`.
+
+    This is the one thing the command changes outside your machine, and it
+    changes it in your name, which is why the previous value is printed rather
+    than assumed. `--no-webhook` leaves it alone.
+  </Step>
+  <Step title="The restore, on the way out">
+    ```text
+    pipecat: Twilio voice webhook for +15551234567 restored to unset
+    ```
+
+    The restore is armed before the number is ever touched, so it runs on handled
+    exit paths: a clean ctrl-c, cancellation, or a local-agent error while the
+    CLI is still running. If the restore itself fails you get a warning naming
+    the number, not silence. The tunnel is closed, so its URL stops existing.
+  </Step>
+</Steps>
+
+It also says what its audio delay means, because this is the mode where people
+start timing things:
+
+```text
+livekit: --carrier: this places a real call through your carrier.
+livekit: audio delay in this mode is an artifact of reaching your machine from
+livekit: the public network. It is not the delay a deployed agent has.
+```
+
+## The Daily route
+
+`daily-sip` needs an existing carrier phone leg, so it has no local plane and
+`--telephony` refuses it. Its generated README gives the two commands for the
+helper and the tunnel; `unmute dev` does not host that public helper for you.
+Set `UNMUTE_PUBLIC_URL` to the helper's exact HTTPS base URL before it starts.
+The helper verifies Twilio's signed `/call` form before it uses the Pipecat Cloud
+key to start an agent session.
 
 ## What a healthy local run proves
 
@@ -204,6 +267,9 @@ must differ when two stacks run at once.
 ## Where to go next
 
 <Columns cols={2}>
+  <Card title="Calling your agent locally" icon="phone-arrow-down-left" href="/dev/local-telephony">
+    Talk to it, transfer yourself, and read the recordings.
+  </Card>
   <Card title="Your first phone call" icon="phone-incoming" href="/telephony/first-phone-call">
     The route that works from a laptop, end to end.
   </Card>

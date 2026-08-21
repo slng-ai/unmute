@@ -123,8 +123,9 @@
         "icon": "terminal",
         "pages": [
           "dev/overview",
+          "dev/local-telephony",
           "dev/latency",
-          "dev/telephony",
+              "dev/telephony",
           "dev/webhooks-and-tunnels"
         ]
       },

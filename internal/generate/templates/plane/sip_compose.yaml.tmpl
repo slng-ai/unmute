@@ -1,0 +1,188 @@
+# Generated local-development topology. The devkey/secret pair below is the
+# documented `livekit-server --dev` pair (never for production); the dev server
+# accepts no other key pair.
+#
+# Two profiles, and they are not a convenience. The SIP service can advertise
+# exactly one address, and a softphone on the host and a container on the
+# plane's own network need different ones. Measured 2026-08-20 in both
+# directions: the wrong one leaves the caller's ACK going nowhere and the plane
+# drops the call after about eight seconds.
+#
+#   softphone  you call the agent yourself. Publishes SIP and the media range.
+#   headless   every leg is a container. Publishes nothing. This is the profile
+#              `make rig` uses, which is why it is safe in continuous
+#              integration and free of host-port collisions.
+#
+# Pick one with COMPOSE_PROFILES; `unmute dev --telephony` sets it for you.
+
+# Everything the two SIP services share. Only the advertised address differs,
+# and it cannot be shared, so it is the one thing written twice. A change to
+# anything else reaches both.
+x-livekit-sip: &livekit-sip
+  image: livekit/sip:v1.7.0
+  depends_on:
+    redis:
+      condition: service_healthy
+    livekit_server:
+      condition: service_healthy
+  healthcheck:
+    # 1F90 is health_port 8080 in hex. Both tables are read: the image has no
+    # shell utilities beyond grep, and Go binds the IPv6 wildcard for a
+    # port-only listen address, so the socket shows up in /proc/net/tcp6 and
+    # never in /proc/net/tcp. Reading only the v4 table reported this
+    # container unhealthy for its full retry budget while it was serving.
+    test: ["CMD-SHELL", "grep -q ':1F90 ' /proc/net/tcp /proc/net/tcp6"]
+    interval: 2s
+    timeout: 3s
+    retries: 30
+
+services:
+{{.ApplicationService}}  redis:
+    # Valkey (BSD-3-Clause) is the coordination store: Redis images are
+    # source-available (RSALv2/SSPLv1) since 7.4, not open source. The
+    # service name and REDIS_URL keep the protocol's name.
+    image: valkey/valkey:9.1.1-alpine
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  livekit_server:
+    image: livekit/livekit-server:v1.13.4
+    command: ["--dev", "--bind", "0.0.0.0", "--redis-host", "redis:6379"]
+{{- if .WebhookURL}}
+    # Where this server announces rooms. Only one of the two drivers that run on
+    # this plane sets it, and it is not a preference. An inbound call is answered
+    # only once something in the room publishes audio the SIP service can
+    # subscribe to, so *something* has to join. A LiveKit agent is dispatched into
+    # the room by the dispatch rule and needs no announcement (a webhook POST to
+    # that agent would 404 on every call). The Pipecat driver's agent speaks no
+    # worker protocol, so this is the only thing that tells it a call arrived, and
+    # without it every call rings for three minutes and is cut off.
+    #
+    # LIVEKIT_CONFIG is livekit-server's own --config-body flag by another name.
+    # It sets no `keys`, deliberately: --dev fills in the devkey/secret pair only
+    # while none are configured, so writing them here would be writing them
+    # twice. Parsing is strict, so an unknown field under `webhook` stops the
+    # server rather than being ignored.
+    environment:
+      LIVEKIT_CONFIG: |
+        webhook:
+          # Must be one of the keys this server holds; it is the key the
+          # delivery's own JWT is signed with, and what the receiver verifies.
+          api_key: devkey
+          urls:
+            - {{.WebhookURL}}
+{{- end}}
+    ports:
+      - "${UNMUTE_CONTROL_BIND_IP:-127.0.0.1}:${LIVEKIT_HOST_PORT:-7880}:7880"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  livekit_sip:
+    <<: *livekit-sip
+    # You are the caller, from a softphone on this machine.
+    profiles: ["softphone"]
+    environment:
+      SIP_CONFIG_BODY: |
+        api_key: devkey
+        api_secret: secret
+        ws_url: ws://livekit_server:7880
+        redis:
+          address: redis:6379
+        health_port: 8080
+        sip_port: 5060
+        rtp_port: ${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}
+        use_external_ip: false
+        nat_1_to_1_ip: ${UNMUTE_PLANE_ADVERTISE_IP:-127.0.0.1}
+        media_nat_1_to_1_ip: ${UNMUTE_PLANE_ADVERTISE_IP:-127.0.0.1}
+        symmetric_rtp: true
+        logging:
+          level: debug
+    ports:
+      - "${UNMUTE_PLANE_ADVERTISE_IP:-127.0.0.1}:${LIVEKIT_SIP_HOST_PORT:-5060}:5060/tcp"
+      - "${UNMUTE_PLANE_ADVERTISE_IP:-127.0.0.1}:${LIVEKIT_SIP_HOST_PORT:-5060}:5060/udp"
+      - "${UNMUTE_PLANE_ADVERTISE_IP:-127.0.0.1}:${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}:${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}/udp"
+
+  livekit_sip_headless:
+    <<: *livekit-sip
+    # Every leg is a container, so the address to advertise is this service's
+    # own and nothing needs publishing.
+    profiles: ["headless"]
+    environment:
+      SIP_CONFIG_BODY: |
+        api_key: devkey
+        api_secret: secret
+        ws_url: ws://livekit_server:7880
+        redis:
+          address: redis:6379
+        health_port: 8080
+        sip_port: 5060
+        rtp_port: ${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}
+        use_external_ip: false
+        nat_1_to_1_ip: 10.185.61.10
+        media_nat_1_to_1_ip: 10.185.61.10
+        symmetric_rtp: true
+        logging:
+          level: debug
+    networks:
+      default:
+        ipv4_address: 10.185.61.10
+
+{{range .PlaneServices}}  {{.Name}}:
+    # {{.Purpose}}
+{{if .Headless}}    profiles: ["headless"]
+{{end}}    build:
+      context: .
+      dockerfile: endpoint.Dockerfile
+    # The endpoint writes a stray early-media file of its own; this keeps it
+    # with the run's recordings instead of loose in the container root.
+    working_dir: /calls
+    environment:
+      UNMUTE_ENDPOINT_ACCOUNTS: |
+{{range .Accounts}}        {{.Line}}
+{{end}}    command:
+      - sh
+      - -c
+{{if .Dial}}      # `-e` executes a command at startup (baresip 1.1.0), which is what makes
+      # this endpoint *place* a call rather than wait for one. Without it the
+      # caller container sat answering nothing, on a profile whose whole purpose
+      # is that every leg is a container. Found by the unattended check.
+      - printf '%s' "$$UNMUTE_ENDPOINT_ACCOUNTS" > /etc/baresip/accounts && exec baresip -f /etc/baresip -e '/dial {{.Dial}}'
+{{else}}      - printf '%s' "$$UNMUTE_ENDPOINT_ACCOUNTS" > /etc/baresip/accounts && exec baresip -f /etc/baresip
+{{end}}    volumes:
+      # Input is read-only and the same every run; recordings belong to the run
+      # that made them.
+      - ./plane-fixture.wav:/fixtures/endpoint.wav:ro
+      - ./calls/${UNMUTE_RUN_ID:-current}:/calls
+    networks:
+      default:
+        ipv4_address: {{.Address}}
+
+{{end}}networks:
+  # The plane's own network, with an explicit subnet because the plane dials its
+  # endpoints by address: an endpoint answers only a request URI whose host is
+  # local to itself, so a Compose service name resolves and is then refused.
+  #
+  # The subnet sits outside Docker's default address pools on purpose. Measured
+  # 2026-08-20: a /24 inside them collides with what Docker has already handed
+  # out, and Compose refuses the whole run with "Pool overlaps with other one on
+  # this address space". If this range is taken on your machine, that is the
+  # error you will see.
+  default:
+    ipam:
+      config:
+        - subnet: {{.PlaneSubnet}}
+
+volumes:
+  redis_data:

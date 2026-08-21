@@ -130,6 +130,39 @@ and WebSocket front door. Routes that need shared call coordination use Redis
 for bounded records such as call correlation, idempotency, transfers, and
 admission counters.
 
+### Local telephony planes
+
+A local run of a phone route uses a **plane**: a stand-in for the carrier that
+lives on the developer's machine. Which plane a route gets is a fact recorded on
+the route, not a choice, so a route never gets a more convenient mechanism
+locally than it has in production.
+
+```text
+   sip plane                        media-websocket plane
+
+softphone                        unmute dev  (the carrier)
+    |  SIP + RTP                     |  the carrier's media protocol
+    v                                |  and its call-control API
+LiveKit SIP <--> LiveKit Server      v
+    |            ^               generated agent
+    |            |                 in a container, or under uv
+destination      generated agent
+ endpoints         worker
+```
+
+The two differ in who calls. On the `sip` plane a real SIP stack runs in
+containers and the developer dials it from a softphone. On the
+`media-websocket` plane there is nothing to dial: the command itself speaks the
+carrier's protocol to the agent over loopback, places the call, and serves the
+carrier's call-control endpoint so a transfer can be carried out. One route,
+Pipecat `daily-sip`, has no plane: it needs an existing carrier phone leg, and
+the command refuses rather than pretending.
+
+Both planes are credential-free by construction. The plane mints the carrier
+values the agent reads and overrides whatever is in the developer's
+environment, refusing to start if it cannot replace all of them. Reaching a
+real carrier is a separate mode, `--carrier`, which is the only one that
+changes anything outside the machine.
 ## Dev loop topology
 
 The dev server starts before the runtime it serves, not after it. The listener

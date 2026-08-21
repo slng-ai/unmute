@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	packagespec "github.com/slng-ai/unmute/internal/spec"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 func TestBuildBuiltinToolResolvesRegistryDefaults(t *testing.T) {
@@ -1215,5 +1216,59 @@ func TestTargetOverrideKeepsEndpointingDelay(t *testing.T) {
 	overrides["detector"] = packagespec.ModelDef{Provider: "livekit", Model: "turn-detector-mini", EndpointingDelay: "800ms"}
 	if got := resolveBindings(agent, map[string]bool{}, overrides).Turn.EndpointingDelay; got != "800ms" {
 		t.Errorf("override value must win: got %q", got)
+	}
+}
+
+// T086: the SIP plane's graph is the plane's, whichever driver's agent runs on
+// it. Both routes name the same four services and the same one reason to keep a
+// coordination store.
+//
+// This is not bookkeeping. `unmute dev --telephony` starts a SIP-plane run in two
+// phases and reads this list for the first one: infrastructure, then the trunk
+// and dispatch records, then the application. Derived from the *provider*, as it
+// was, `(pipecat, sip)` claimed a two-container graph, so the first phase brought
+// up the coordination store on its own and the records were then created against
+// a LiveKit server that was not running.
+//
+// The two Pipecat correlation reasons are deliberately absent here. Each names a
+// record the emitted carrier adapter keeps in Redis, and this route emits no
+// carrier adapter: what it needs the store for is the server and the SIP service
+// finding each other.
+func TestBuildGivesBothSIPPlaneRoutesThePlanesGraph(t *testing.T) {
+	for _, provider := range []string{"pipecat", "livekit"} {
+		t.Run(provider, func(t *testing.T) {
+			pkg := loadSafeCore(t)
+			enableTelephony(pkg)
+			routeTarget(pkg, provider, "primary_phone", "sip", "twilio")
+			connection := pkg.Connections["primary_phone"]
+			connection.Environment = map[string]string{
+				"sip_address": "SIP_TRUNK_HOSTNAME", "sip_username": "SIP_AUTH_USERNAME",
+				"sip_password": "SIP_AUTH_PASSWORD", "from_number": "SIP_FROM_NUMBER",
+			}
+			pkg.Connections["primary_phone"] = connection
+
+			agent, err := Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan := agent.Targets[provider].Telephony
+			if plan == nil {
+				t.Fatal("telephony plan was not resolved")
+			}
+			if plan.LocalPlane != string(targetcap.LocalPlaneSIP) {
+				t.Fatalf("this test is about the SIP plane and the route's plane is %q", plan.LocalPlane)
+			}
+			// The plane's own four, plus whatever endpoint services the package's
+			// declared transfer destinations add.
+			for _, want := range []string{"application", "livekit_server", "livekit_sip", "redis"} {
+				if !slices.Contains(plan.Services, want) {
+					t.Errorf("the plan does not name %s, so the two-phase startup will not bring it up: %v",
+						want, plan.Services)
+				}
+			}
+			if got := coordinationReasonNames(plan.CoordinationReasons); got != "livekit_control_plane" {
+				t.Errorf("coordination reasons = %s, want livekit_control_plane alone", got)
+			}
+		})
 	}
 }

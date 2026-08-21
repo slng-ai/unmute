@@ -17,6 +17,13 @@ services:
 {{- end}}
     ports:
       - "${UNMUTE_TELEPHONY_PORT:-7860}:7860"
+    # How the container reaches the machine running it. Used by `unmute dev
+    # --telephony`, where the carrier is a stand-in on the host and the agent
+    # has to reach its API: a container's own 127.0.0.1 is the container.
+    # host-gateway is the portable spelling, and this entry is what creates the
+    # name on Linux. Unused in production, where the carrier is the carrier.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy

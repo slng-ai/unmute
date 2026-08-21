@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,12 +14,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/target"
 	"github.com/spf13/cobra"
 )
 
@@ -31,6 +35,17 @@ func fakeTelephonyRoot(t *testing.T, env string) (root, trace string) {
 		t.Fatal(err)
 	}
 	return root, trace
+}
+
+// allowHeldPorts turns off the host-port probe for a test that binds a port
+// itself in place of the container runtime. Not a weakening of the check: those
+// tests *are* the thing that would be listening, so the probe is asking about
+// them. TestDevRefusesAPortAnotherRunIsHolding holds the check itself.
+func allowHeldPorts(t *testing.T) {
+	t.Helper()
+	restore := hostPortCheck
+	hostPortCheck = func([]hostPort) error { return nil }
+	t.Cleanup(func() { hostPortCheck = restore })
 }
 
 // fakeDocker traces `docker <args>` plus selected env values, and turns the
@@ -48,6 +63,12 @@ func fakeDocker(t *testing.T, dir string) {
 	}
 	composePreflight = func(context.Context, []string) error { return nil }
 	t.Cleanup(func() { composeCommand, composePreflight = restoreCmd, restorePreflight })
+	// Standing in for the container runtime means standing in for the thing that
+	// binds the ports too: nothing here publishes anything, so a real probe would
+	// only report on whatever else happens to be running on the machine. Left
+	// real, every test using this fake passes or fails by what is up in Docker at
+	// the time, which is how a container holding 7880 turned six of them red.
+	allowHeldPorts(t)
 }
 
 func telephonyTestCommand(t *testing.T) (*cobra.Command, *bytes.Buffer) {
@@ -72,6 +93,7 @@ func pipecatTwilioPlan() *generate.TelephonyRuntimePlan {
 		Evidence:     []ir.TelephonyFeatureEvidence{{Feature: "inbound", Tag: "core"}},
 		Services:     []string{"application", "redis"},
 		Coordination: "shared",
+		LocalPlane:   string(target.LocalPlaneMediaWebsocket),
 	}
 }
 
@@ -82,6 +104,30 @@ func pipecatTwilioOutboundPlan() *generate.TelephonyRuntimePlan {
 	plan.PublicEndpoints = append(plan.PublicEndpoints, generate.TelephonyEndpoint{Name: "outbound", Method: "POST", Path: "/telephony/outbound"})
 	plan.RequiredEnv = append(plan.RequiredEnv, "UNMUTE_OUTBOUND_TOKEN")
 	plan.Evidence = append(plan.Evidence, ir.TelephonyFeatureEvidence{Feature: "outbound", Tag: "core"})
+	return plan
+}
+
+// pipecatTwilioOutboundOnlyPlan is a package that dials out and answers nothing,
+// which is what examples/outbound-reminder is: `channels.phone inbound: false`.
+// Its own shape, rather than the inbound fixture with a flag flipped, because the
+// endpoint list and the evidence both have to lose their inbound entry or the
+// plan describes an agent that does not exist.
+func pipecatTwilioOutboundOnlyPlan() *generate.TelephonyRuntimePlan {
+	plan := pipecatTwilioOutboundPlan()
+	endpoints := plan.PublicEndpoints[:0:len(plan.PublicEndpoints)]
+	for _, endpoint := range plan.PublicEndpoints {
+		if endpoint.Name != "inbound" {
+			endpoints = append(endpoints, endpoint)
+		}
+	}
+	plan.PublicEndpoints = endpoints
+	evidence := plan.Evidence[:0:len(plan.Evidence)]
+	for _, item := range plan.Evidence {
+		if item.Feature != "inbound" {
+			evidence = append(evidence, item)
+		}
+	}
+	plan.Evidence = evidence
 	return plan
 }
 
@@ -106,6 +152,192 @@ func livekitConnectorPlan() *generate.TelephonyRuntimePlan {
 		Evidence:         []ir.TelephonyFeatureEvidence{{Feature: "inbound", Tag: "provisional"}, {Feature: "outbound", Tag: "provisional"}},
 		Services:         []string{"application", "livekit_server"},
 		Coordination:     "shared",
+		LocalPlane:       string(target.LocalPlaneMediaWebsocket),
+	}
+}
+
+// refuseTunnel is gate P3: a default run starts no tunnel, so the lookup seam
+// fails the test if anything reaches for one. Every default-loop test calls
+// this, which is what keeps the gate honest as the loop grows: a default path
+// that starts tunnelling fails here rather than in a reader's terminal.
+func refuseTunnel(t *testing.T) {
+	t.Helper()
+	restore := tunnelLookPath
+	tunnelLookPath = func(string) (string, error) {
+		t.Error("a default telephony run must not start a tunnel; that is --carrier's job")
+		return "", os.ErrNotExist
+	}
+	t.Cleanup(func() { tunnelLookPath = restore })
+}
+
+// planForRoute builds the plan a default run of this route gets, from the route
+// record itself rather than a copy of it, so the gate below reads the table. It
+// carries no feature evidence on purpose: that keeps every route on the same
+// plain compose path, since the point here is the printed output, not the
+// route's own startup shape.
+func planForRoute(route target.TelephonyRoute) *generate.TelephonyRuntimePlan {
+	return &generate.TelephonyRuntimePlan{
+		Route: ir.TelephonyKey{
+			Provider: ir.Provider(route.Key.Provider), Transport: route.Key.Transport, Carrier: route.Key.Carrier,
+		},
+		RequiredEnv: route.RequiredEnvironment,
+		ManualSteps: route.ManualSteps,
+		LocalPlane:  string(route.LocalPlane),
+		Services:    []string{"application"},
+	}
+}
+
+// P5: every default run prints the carrier steps its route dictates. This is
+// the answer to "does a healthy local run mean I can go live": it does not, on
+// any route, and the run has to say so every time. The steps come from the
+// route table, so a step added there is covered here without an edit.
+func TestDefaultRunPrintsEveryDictatedCarrierStep(t *testing.T) {
+	planes := 0
+	for _, route := range target.SelectableTelephonyRoutes() {
+		if route.LocalPlane == target.LocalPlaneNone {
+			continue
+		}
+		planes++
+		name := fmt.Sprintf("%s_%s_%s", route.Key.Provider, route.Key.Transport, route.Key.Carrier)
+		t.Run(name, func(t *testing.T) {
+			if len(route.ManualSteps) == 0 {
+				t.Skipf("route %s dictates no carrier steps", name)
+			}
+			var env strings.Builder
+			for _, key := range route.RequiredEnvironment {
+				fmt.Fprintf(&env, "%s=value\n", key)
+			}
+			root, _ := fakeTelephonyRoot(t, env.String())
+			fakeDocker(t, root)
+			refuseTunnel(t)
+
+			cmd, out := telephonyTestCommand(t)
+			if err := execDevTelephony(cmd, root, "phone", planForRoute(route), composeFiles, devTelephonyOptions{botPort: "7899"}); err != nil {
+				t.Fatalf("default run on %s: %v\n%s", name, err, out.String())
+			}
+			printed := out.String()
+			for _, step := range route.ManualSteps {
+				if !strings.Contains(printed, step) {
+					t.Errorf("the default run never printed the carrier step %q:\n%s", step, printed)
+				}
+			}
+			if !strings.Contains(printed, "no carrier involved") {
+				t.Errorf("a default run must name its mode on its first lines:\n%s", printed)
+			}
+		})
+	}
+	// A table that grows a plane but loses this gate's coverage is the failure
+	// this counts against.
+	if planes == 0 {
+		t.Fatal("no selectable route declares a local plane; the gate covered nothing")
+	}
+}
+
+// fakeTunnel puts a cloudflared on the lookup seam that reports one quick
+// tunnel origin and then sleeps, which is what every carrier-mode test needs
+// and none of them needs to spell out.
+func fakeTunnel(t *testing.T, dir string) {
+	t.Helper()
+	script := filepath.Join(dir, "cloudflared")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restore := tunnelLookPath
+	tunnelLookPath = func(string) (string, error) { return script, nil }
+	t.Cleanup(func() { tunnelLookPath = restore })
+}
+
+// FR-016: carrier mode states what its audio delay means, and the default loop
+// does not, because it has no such delay to explain. Reaching a laptop from the
+// public network is slow; without these lines a carrier run reads as evidence
+// that a deployed agent is sluggish, which is the wrong conclusion drawn from a
+// real measurement.
+func TestCarrierModeStatesWhatItsDelayMeans(t *testing.T) {
+	disclaimer := []string{
+		"--carrier: this places a real call through your carrier.",
+		"artifact of reaching your machine from",
+		"not the delay a deployed agent has",
+	}
+
+	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
+	fakeDocker(t, root)
+	allowHeldPorts(t)
+	fakeTunnel(t, root)
+	cmd, out := telephonyTestCommand(t)
+	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioPlan(), composeFiles, devTelephonyOptions{botPort: "7864", carrier: true}); err != nil {
+		t.Fatalf("carrier run: %v\n%s", err, out.String())
+	}
+	for _, want := range disclaimer {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("carrier mode never said %q:\n%s", want, out.String())
+		}
+	}
+
+	// The same lines under a default run would be a lie: nothing reaches this
+	// machine from outside it.
+	newFakeSIPAdmin(t)
+	localRoot, _ := fakeTelephonyRoot(t, strings.Join(sipTestEnv(), "\n"))
+	fakeDocker(t, localRoot)
+	refuseTunnel(t)
+	localCmd, localOut := telephonyTestCommand(t)
+	if err := execDevTelephony(localCmd, localRoot, "phone", livekitSIPPlan(), composeFiles, devTelephonyOptions{botPort: "8082"}); err != nil {
+		t.Fatalf("default run: %v\n%s", err, localOut.String())
+	}
+	for _, forbidden := range disclaimer {
+		if strings.Contains(localOut.String(), forbidden) {
+			t.Errorf("a default run claimed a carrier delay it does not have (%q):\n%s", forbidden, localOut.String())
+		}
+	}
+}
+
+// P2: a default run performs no write outside this machine, and this is how
+// SC-004 is measured. The recorder sits on the carrier path itself, so this
+// asserts what the code did rather than what it printed, and the second half
+// asserts the recorder is not simply inert: the same path under --carrier has
+// to record, or an empty field would prove nothing.
+func TestDefaultRunWritesNothingToACarrier(t *testing.T) {
+	newFakeSIPAdmin(t)
+	root, _ := fakeTelephonyRoot(t, strings.Join(sipTestEnv(), "\n"))
+	fakeDocker(t, root)
+	allowHeldPorts(t)
+	refuseTunnel(t)
+	var local runReport
+	cmd, out := telephonyTestCommand(t)
+	if err := execDevTelephony(cmd, root, "phone", livekitSIPPlan(), composeFiles,
+		devTelephonyOptions{botPort: "8083", report: &local}); err != nil {
+		t.Fatalf("default run: %v\n%s", err, out.String())
+	}
+	if len(local.CarrierWrites) != 0 {
+		t.Errorf("a default run wrote to a carrier: %v", local.CarrierWrites)
+	}
+	if local.Plane != target.LocalPlaneSIP {
+		t.Errorf("the report records plane %q, want %q", local.Plane, target.LocalPlaneSIP)
+	}
+
+	var updates url.Values
+	fakeTwilioAPI(t, "sekrit-auth-77", "https://old.example/hook", &updates)
+	carrierRoot, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=sekrit-auth-77\nTWILIO_PHONE_NUMBER=+15550001111\n")
+	fakeDocker(t, carrierRoot)
+	fakeTunnel(t, carrierRoot)
+	plan := pipecatTwilioPlan()
+	plan.AutoWebhookEndpoint = "inbound"
+	var carrier runReport
+	carrierCmd, carrierOut := telephonyTestCommand(t)
+	if err := execDevTelephony(carrierCmd, carrierRoot, "phone", plan, composeFiles,
+		devTelephonyOptions{botPort: "7865", carrier: true, report: &carrier}); err != nil {
+		t.Fatalf("carrier run: %v\n%s", err, carrierOut.String())
+	}
+	if len(carrier.CarrierWrites) == 0 {
+		t.Fatal("carrier mode recorded no write, so the default loop's empty record proves nothing")
+	}
+	// The set and its restore are two writes, and the restore is the one that
+	// matters most: a run that sets and never restores leaves a real number
+	// pointing at a dead tunnel.
+	joined := strings.Join(carrier.CarrierWrites, "\n")
+	for _, want := range []string{"+15550001111", "restore"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the recorded writes never mention %q:\n%s", want, joined)
+		}
 	}
 }
 
@@ -118,6 +350,7 @@ var composeFiles = []generate.File{{Path: "compose.telephony.yaml", Content: []b
 func TestExecDevTelephonyManagedTunnelInjectsPublicURLAndTearsDown(t *testing.T) {
 	root, trace := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
 	fakeDocker(t, root)
+	allowHeldPorts(t)
 	cloudflared := filepath.Join(root, "cloudflared")
 	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |' 1>&2\necho $$ > \""+root+"/tunnel.pid\"\nsleep 60\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -127,7 +360,7 @@ func TestExecDevTelephonyManagedTunnelInjectsPublicURLAndTearsDown(t *testing.T)
 	t.Cleanup(func() { tunnelLookPath = restoreLook })
 
 	cmd, out := telephonyTestCommand(t)
-	err := execDevTelephony(cmd, root, "phone", pipecatTwilioPlan(), composeFiles, devTelephonyOptions{botPort: "7861"})
+	err := execDevTelephony(cmd, root, "phone", pipecatTwilioPlan(), composeFiles, devTelephonyOptions{botPort: "7861", carrier: true})
 	if err != nil {
 		t.Fatalf("execDevTelephony: %v\n%s", err, out.String())
 	}
@@ -177,6 +410,7 @@ func TestExecDevTelephonyManagedTunnelInjectsPublicURLAndTearsDown(t *testing.T)
 func TestExecDevTelephonyPublicURLSkipsTunnelManagement(t *testing.T) {
 	root, trace := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
 	fakeDocker(t, root)
+	allowHeldPorts(t)
 	restoreLook := tunnelLookPath
 	tunnelLookPath = func(string) (string, error) {
 		t.Error("tunnel management must be skipped when --public-url is set")
@@ -185,7 +419,7 @@ func TestExecDevTelephonyPublicURLSkipsTunnelManagement(t *testing.T) {
 	t.Cleanup(func() { tunnelLookPath = restoreLook })
 
 	cmd, out := telephonyTestCommand(t)
-	opts := devTelephonyOptions{publicValue: "https://mine.example.dev", botPort: "7860"}
+	opts := devTelephonyOptions{publicValue: "https://mine.example.dev", botPort: "7860", carrier: true}
 	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioPlan(), composeFiles, opts); err != nil {
 		t.Fatalf("execDevTelephony: %v\n%s", err, out.String())
 	}
@@ -206,12 +440,13 @@ func TestExecDevTelephonyPublicURLSkipsTunnelManagement(t *testing.T) {
 func TestExecDevTelephonyMissingCloudflaredFailsBeforeCompose(t *testing.T) {
 	root, trace := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
 	fakeDocker(t, root)
+	allowHeldPorts(t)
 	restoreLook := tunnelLookPath
 	tunnelLookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 	t.Cleanup(func() { tunnelLookPath = restoreLook })
 
 	cmd, out := telephonyTestCommand(t)
-	err := execDevTelephony(cmd, root, "phone", pipecatTwilioPlan(), composeFiles, devTelephonyOptions{botPort: "7860"})
+	err := execDevTelephony(cmd, root, "phone", pipecatTwilioPlan(), composeFiles, devTelephonyOptions{botPort: "7860", carrier: true})
 	if err == nil || !strings.Contains(err.Error(), "brew install cloudflared") || !strings.Contains(err.Error(), "--public-url") {
 		t.Fatalf("missing cloudflared error = %v\n%s", err, out.String())
 	}
@@ -335,7 +570,7 @@ func TestExecDevTelephonyRelativeRootLocatesComposeFile(t *testing.T) {
 	t.Cleanup(func() { tunnelLookPath = restoreLook })
 
 	cmd, out := telephonyTestCommand(t)
-	if err := execDevTelephony(cmd, "pkg", "phone", pipecatTwilioPlan(), composeFiles, devTelephonyOptions{botPort: "7862"}); err != nil {
+	if err := execDevTelephony(cmd, "pkg", "phone", pipecatTwilioPlan(), composeFiles, devTelephonyOptions{botPort: "7862", carrier: true}); err != nil {
 		t.Fatalf("execDevTelephony with relative root: %v\n%s", err, out.String())
 	}
 	if raw, err := os.ReadFile(trace); err == nil && strings.Contains(string(raw), "FILE_MISSING") {
@@ -360,17 +595,11 @@ func TestExecDevTelephonyOutboundSuppliesTokenWithoutEnvOrPrint(t *testing.T) {
 	composePreflight = func(context.Context, []string) error { return nil }
 	t.Cleanup(func() { composeCommand, composePreflight = restoreCmd, restorePreflight })
 
-	cloudflared := filepath.Join(root, "cloudflared")
-	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	restoreLook := tunnelLookPath
-	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
-	t.Cleanup(func() { tunnelLookPath = restoreLook })
+	fakeTunnel(t, root)
 
 	cmd, out := telephonyTestCommand(t)
 	// The .env has no UNMUTE_OUTBOUND_TOKEN; a clean run proves the CLI supplied it.
-	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioOutboundPlan(), composeFiles, devTelephonyOptions{botPort: "7861"}); err != nil {
+	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioOutboundPlan(), composeFiles, devTelephonyOptions{botPort: "7861", carrier: true}); err != nil {
 		t.Fatalf("execDevTelephony (outbound): %v\n%s", err, out.String())
 	}
 	raw, err := os.ReadFile(trace)
@@ -402,16 +631,10 @@ func TestExecDevTelephonyConnectorSuppliesTokenAndTwilioEnvOnly(t *testing.T) {
 	composePreflight = func(context.Context, []string) error { return nil }
 	t.Cleanup(func() { composeCommand, composePreflight = restoreCmd, restorePreflight })
 
-	cloudflared := filepath.Join(root, "cloudflared")
-	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	restoreLook := tunnelLookPath
-	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
-	t.Cleanup(func() { tunnelLookPath = restoreLook })
+	fakeTunnel(t, root)
 
 	cmd, out := telephonyTestCommand(t)
-	if err := execDevTelephony(cmd, root, "phone", livekitConnectorPlan(), composeFiles, devTelephonyOptions{botPort: "7862"}); err != nil {
+	if err := execDevTelephony(cmd, root, "phone", livekitConnectorPlan(), composeFiles, devTelephonyOptions{botPort: "7862", carrier: true}); err != nil {
 		t.Fatalf("execDevTelephony (connector): %v\n%s", err, out.String())
 	}
 	raw, err := os.ReadFile(trace)
@@ -429,6 +652,9 @@ func TestExecDevTelephonyConnectorSuppliesTokenAndTwilioEnvOnly(t *testing.T) {
 // V5: a LiveKit SIP run injects no UNMUTE_OUTBOUND_TOKEN — SIP dials out by
 // agent dispatch, so the token would be a dead injection.
 func TestExecDevTelephonySIPInjectsNoOutboundToken(t *testing.T) {
+	// Own fake docker, so own port stub: see fakeDocker for why the probe has no
+	// place in a test where nothing publishes.
+	allowHeldPorts(t)
 	newFakeSIPAdmin(t)
 	root, trace := fakeTelephonyRoot(t, strings.Join(sipTestEnv(), "\n"))
 	script := filepath.Join(root, "docker")
@@ -442,6 +668,7 @@ func TestExecDevTelephonySIPInjectsNoOutboundToken(t *testing.T) {
 	}
 	composePreflight = func(context.Context, []string) error { return nil }
 	t.Cleanup(func() { composeCommand, composePreflight = restoreCmd, restorePreflight })
+	refuseTunnel(t)
 
 	cmd, out := telephonyTestCommand(t)
 	if err := execDevTelephony(cmd, root, "phone", livekitSIPPlan(), composeFiles, devTelephonyOptions{botPort: "8081"}); err != nil {
@@ -476,16 +703,14 @@ func TestV4_ExecDevTelephonyPlacesOutboundCallWithCallStartAfterReady(t *testing
 
 	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\nUNMUTE_CALL_START={\"name\":\"Ada\",\"attempts\":2}\n")
 	fakeDocker(t, root)
-	cloudflared := filepath.Join(root, "cloudflared")
-	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	restoreLook := tunnelLookPath
-	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
-	t.Cleanup(func() { tunnelLookPath = restoreLook })
+	allowHeldPorts(t)
+	fakeTunnel(t, root)
+	// The httptest server above is standing in for the container that would
+	// publish this port, so the probe would be refusing this test's own listener.
+	allowHeldPorts(t)
 
 	cmd, out := telephonyTestCommand(t)
-	opts := devTelephonyOptions{botPort: parsed.Port(), to: "+15559998888"}
+	opts := devTelephonyOptions{botPort: parsed.Port(), to: "+15559998888", carrier: true}
 	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioOutboundPlan(), composeFiles, opts); err != nil {
 		t.Fatalf("execDevTelephony (outbound --to): %v\n%s", err, out.String())
 	}
@@ -511,16 +736,11 @@ func TestV4_ExecDevTelephonyPlacesOutboundCallWithCallStartAfterReady(t *testing
 func TestExecDevTelephonyOutboundWithoutToHintsAndPlacesNothing(t *testing.T) {
 	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
 	fakeDocker(t, root)
-	cloudflared := filepath.Join(root, "cloudflared")
-	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	restoreLook := tunnelLookPath
-	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
-	t.Cleanup(func() { tunnelLookPath = restoreLook })
+	allowHeldPorts(t)
+	fakeTunnel(t, root)
 
 	cmd, out := telephonyTestCommand(t)
-	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioOutboundPlan(), composeFiles, devTelephonyOptions{botPort: "7861"}); err != nil {
+	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioOutboundPlan(), composeFiles, devTelephonyOptions{botPort: "7861", carrier: true}); err != nil {
 		t.Fatalf("outbound without --to: %v\n%s", err, out.String())
 	}
 	if !strings.Contains(out.String(), "dial-out ready") {
@@ -535,16 +755,11 @@ func TestExecDevTelephonyOutboundWithoutToHintsAndPlacesNothing(t *testing.T) {
 func TestExecDevTelephonyInboundOnlyHasNoDialOutText(t *testing.T) {
 	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
 	fakeDocker(t, root)
-	cloudflared := filepath.Join(root, "cloudflared")
-	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	restoreLook := tunnelLookPath
-	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
-	t.Cleanup(func() { tunnelLookPath = restoreLook })
+	allowHeldPorts(t)
+	fakeTunnel(t, root)
 
 	cmd, out := telephonyTestCommand(t)
-	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioPlan(), composeFiles, devTelephonyOptions{botPort: "7861"}); err != nil {
+	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioPlan(), composeFiles, devTelephonyOptions{botPort: "7861", carrier: true}); err != nil {
 		t.Fatalf("inbound-only: %v\n%s", err, out.String())
 	}
 	if strings.Contains(out.String(), "dial-out") {
@@ -569,6 +784,7 @@ func cloudWebsocketPlan() *generate.TelephonyRuntimePlan {
 		Services:     []string{"application"},
 		Coordination: "shared",
 		ManualSteps:  []string{"create a TwiML Bin"},
+		LocalPlane:   string(target.LocalPlaneMediaWebsocket),
 	}
 }
 
@@ -583,6 +799,44 @@ func fakeUV(t *testing.T, dir, body string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
+// P3, on the route with its own dev entry point: a default run on
+// cloud-websocket starts no tunnel and asks the carrier for nothing. This route
+// needs its own case because it does not go through execDevTelephony at all —
+// it has its own tunnel call and its own webhook write, and a gate that only
+// covered the Compose path would have missed both.
+func TestExecDevCloudWebsocketDefaultRunStartsNoTunnelAndTouchesNoCarrier(t *testing.T) {
+	// The credentials are present because the route declares them, and what
+	// the carrier-free media plane needs from them is not settled here. The
+	// gate is that having them changes nothing: none of them is sent anywhere.
+	root, _ := fakeTelephonyRoot(t,
+		"TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\nPIPECAT_CLOUD_ORGANIZATION=org\n")
+	fakeUV(t, root, "exit 0\n")
+	refuseTunnel(t)
+	var calls []string
+	fakeTwilioAPIRecording(t, "https://old.example/hook", false, &calls)
+	restoreReady := cloudWebsocketAgentReady
+	cloudWebsocketAgentReady = func(context.Context, string, <-chan error) error { return nil }
+	t.Cleanup(func() { cloudWebsocketAgentReady = restoreReady })
+
+	cmd, out := telephonyTestCommand(t)
+	if err := execDevCloudWebsocket(cmd, root, "phone", cloudWebsocketPlan(), cloudWebsocketFiles,
+		devTelephonyOptions{botPort: "7863"}); err != nil {
+		t.Fatalf("default run on cloud-websocket: %v\n%s", err, out.String())
+	}
+	if len(calls) != 0 {
+		t.Errorf("a default run reached the carrier's API: %v", calls)
+	}
+	printed := out.String()
+	if !strings.Contains(printed, "no carrier involved") {
+		t.Errorf("a default run must name its mode:\n%s", printed)
+	}
+	for _, forbidden := range []string{"borrowed", "trycloudflare", "voice webhook"} {
+		if strings.Contains(printed, forbidden) {
+			t.Errorf("a default run printed %q, which belongs to carrier mode:\n%s", forbidden, printed)
+		}
+	}
+}
+
 var cloudWebsocketFiles = []generate.File{{Path: "bot.py", Content: []byte("# generated\n")}}
 
 // The route has no Compose graph and no credentials of the dev command's own, so
@@ -594,7 +848,7 @@ func TestExecDevCloudWebsocketRefusesMissingCredentialsByName(t *testing.T) {
 	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\n")
 	cmd, _ := telephonyTestCommand(t)
 	err := execDevCloudWebsocket(cmd, root, "phone", cloudWebsocketPlan(), cloudWebsocketFiles,
-		devTelephonyOptions{botPort: "7861", publicValue: "https://voice.example.com"})
+		devTelephonyOptions{botPort: "7861", publicValue: "https://voice.example.com", carrier: true})
 	if err == nil {
 		t.Fatal("a session with no auth token and no number must refuse")
 	}
@@ -622,7 +876,7 @@ func TestExecDevCloudWebsocketDoesNotTouchTwilioBeforeAgentReady(t *testing.T) {
 
 	cmd, _ := telephonyTestCommand(t)
 	err := execDevCloudWebsocket(cmd, root, "phone", cloudWebsocketPlan(), cloudWebsocketFiles,
-		devTelephonyOptions{botPort: "7861", publicValue: "https://voice.example.com"})
+		devTelephonyOptions{botPort: "7861", publicValue: "https://voice.example.com", carrier: true})
 	if err == nil || !strings.Contains(err.Error(), "local agent not ready") {
 		t.Fatalf("readiness failure = %v, want local-agent error", err)
 	}
@@ -672,7 +926,7 @@ func TestExecDevCloudWebsocketRestoresTheNumberOnEveryExitPath(t *testing.T) {
 				}()
 			}
 			err := execDevCloudWebsocket(cmd, root, "phone", cloudWebsocketPlan(), cloudWebsocketFiles,
-				devTelephonyOptions{botPort: "7861", publicValue: "https://voice.example.com"})
+				devTelephonyOptions{botPort: "7861", publicValue: "https://voice.example.com", carrier: true})
 			if tc.wantErr && err == nil {
 				t.Fatalf("expected command error:\n%s", out.String())
 			}
@@ -737,4 +991,135 @@ func fakeTwilioAPIRecording(t *testing.T, existingVoiceURL string, restoreFails 
 	twilioAPIBase = server.URL
 	t.Cleanup(func() { twilioAPIBase = restore })
 	return server
+}
+
+// T103: a port another run is holding stops this one, with a message naming the
+// port and what moves it.
+//
+// The reason this exists is a real diagnosis cycle. A run reached an agent
+// started by a *different* run in a different worktree, on the default port,
+// and answered a 404 for a route the emitted agent plainly defines. Docker does
+// name a published-port collision clearly; the agent port is the one that fails
+// silently, by succeeding against the wrong agent.
+func TestDevRefusesAPortAnotherRunIsHolding(t *testing.T) {
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = held.Close() }()
+	port := strconv.Itoa(held.Addr().(*net.TCPAddr).Port)
+
+	err = rejectOccupiedHostPorts([]hostPort{
+		{Port: port, What: "the local agent", MovedBy: "--bot-port"},
+	})
+	if err == nil {
+		t.Fatal("a run started on a port another process holds; it would reach that process's agent")
+	}
+	for _, want := range []string{port, "the local agent", "--bot-port", "report its answers as yours"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q: %v", want, err)
+		}
+	}
+
+	// The holder that a loopback-only probe cannot see, and the one people
+	// actually hit: Docker publishes on the wildcard, so another run's LiveKit
+	// Server on 7880 shows up here and nowhere on 127.0.0.1. On darwin a
+	// wildcard bind succeeds while loopback is held, which is why the probe has
+	// to try both and why this case is its own.
+	wildcard, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = wildcard.Close() }()
+	wildPort := strconv.Itoa(wildcard.Addr().(*net.TCPAddr).Port)
+	if err := rejectOccupiedHostPorts([]hostPort{
+		{Port: wildPort, What: "LiveKit Server", MovedBy: "LIVEKIT_HOST_PORT"},
+	}); err == nil {
+		t.Error("a run started on a port a container publishes on the wildcard; the port error " +
+			"would surface later as the container runtime's own message in the log file")
+	}
+
+	// And a free port is not refused, or nothing could ever start. The probe must
+	// also release what it takes: a second call on the same port has to pass.
+	free, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	freePort := strconv.Itoa(free.Addr().(*net.TCPAddr).Port)
+	if err := free.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ports := []hostPort{{Port: freePort, What: "the local agent", MovedBy: "--bot-port"}}
+	for round := range 2 {
+		if err := rejectOccupiedHostPorts(ports); err != nil {
+			t.Fatalf("round %d refused a free port, so the probe is holding what it tested: %v", round, err)
+		}
+	}
+}
+
+// Which ports a run claims, per plane. The SIP plane publishes two more and each
+// has its own variable, and a message naming the wrong variable sends the reader
+// to change something that has no effect.
+func TestTheRunKnowsWhichPortsItClaims(t *testing.T) {
+	media := telephonyHostPorts(pipecatTwilioOutboundPlan(), "7860", nil)
+	if len(media) != 1 || media[0].Port != "7860" {
+		t.Errorf("the media-websocket plane claims %+v; it publishes the agent's port and no more", media)
+	}
+
+	sip := telephonyHostPorts(livekitSIPPlan(), "7860", nil)
+	byMover := map[string]string{}
+	for _, port := range sip {
+		byMover[port.MovedBy] = port.Port
+	}
+	for mover, want := range map[string]string{
+		"--bot-port":            "7860",
+		"LIVEKIT_HOST_PORT":     "7880",
+		"LIVEKIT_SIP_HOST_PORT": "5060",
+	} {
+		if byMover[mover] != want {
+			t.Errorf("%s covers port %q, want %q; the defaults here and in the generated Compose file "+
+				"have to agree or the probe checks a port nothing publishes", mover, byMover[mover], want)
+		}
+	}
+
+	// And an override is read, or the probe checks the default while the run
+	// publishes something else.
+	moved := telephonyHostPorts(livekitSIPPlan(), "7860", []string{"LIVEKIT_SIP_HOST_PORT=5070"})
+	found := false
+	for _, port := range moved {
+		if port.MovedBy == "LIVEKIT_SIP_HOST_PORT" {
+			found = port.Port == "5070"
+		}
+	}
+	if !found {
+		t.Errorf("an overridden LIVEKIT_SIP_HOST_PORT was ignored: %+v", moved)
+	}
+}
+
+// An outbound-only package has no inbound endpoint, so the plane must not place
+// an inbound call at it. Found by running examples/outbound-reminder, whose
+// channels declare `inbound: false`: the stand-in placed a call, the agent
+// answered 404, and the run reported "the local call did not complete", which
+// reads as a broken plane rather than as a package with one direction.
+func TestThePlaneDoesNotCallAPackageWithNoInboundDirection(t *testing.T) {
+	plan := pipecatTwilioOutboundOnlyPlan()
+	if planHasTelephonyFeature(plan, "inbound") {
+		t.Fatal("the outbound-only fixture declares inbound, so this test cannot reach the case it is about")
+	}
+	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
+	fakeDocker(t, root)
+	allowHeldPorts(t)
+	refuseTunnel(t)
+
+	cmd, out := telephonyTestCommand(t)
+	if err := execDevTelephony(cmd, root, "phone", plan, composeFiles, devTelephonyOptions{botPort: "8099"}); err != nil {
+		t.Fatalf("execDevTelephony: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "declares no inbound direction") {
+		t.Errorf("the run did not say why no call was placed:\n%s", out.String())
+	}
+	// And it must not report a failed call, because it never should have tried.
+	if strings.Contains(out.String(), "did not complete") {
+		t.Errorf("the run placed an inbound call at a package that answers none:\n%s", out.String())
+	}
 }

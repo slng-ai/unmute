@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, urlparse
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 from fastapi import HTTPException, Request, WebSocket
@@ -37,11 +37,52 @@ AUTH_TOKEN_ENV = {{pyq .Telephony.AuthTokenEnv}}
 FROM_NUMBER_ENV = {{pyq .Telephony.FromNumberEnv}}
 
 
+class _LocalPlaneHttpClient(TwilioHttpClient):
+    """Send the SDK's requests to the local carrier stand-in, not to Twilio.
+
+    On a run of `unmute dev --telephony` there is no Twilio: the stand-in is the
+    carrier, on loopback, and its address is in {{.LocalPlaneEnv}}. An
+    unredirected client would write outside the machine on a run that is meant
+    to touch nothing.
+
+    `http_client` is the SDK's own seam for this, and the only one that reaches a
+    non-Twilio host: `region` and `edge` rewrite the hostname but can only ever
+    produce another twilio.com. Signature checked against twilio 9.11.0.
+    """
+
+    def __init__(self, base: str, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self._base = base.rstrip("/")
+
+    def request(  # noqa: PLR0913 - the signature is the SDK's, not ours
+        self,
+        method: str,
+        url: str,
+        params: dict | None = None,
+        data: dict | None = None,
+        headers: dict | None = None,
+        auth: tuple | None = None,
+        timeout: float | None = None,
+        allow_redirects: bool = False,
+    ):
+        # Path only. The SDK builds the whole URL from its own host, and the
+        # stand-in serves the same paths, so swapping the origin is the whole job.
+        moved = self._base + urlparse(url).path
+        return super().request(
+            method, moved, params, data, headers, auth, timeout, allow_redirects
+        )
+
+
 def _client() -> Client:
+    local_plane = os.getenv({{pyq .LocalPlaneEnv}})
     return Client(
         _env(ACCOUNT_SID_ENV),
         _env(AUTH_TOKEN_ENV),
-        http_client=TwilioHttpClient(timeout=CONTROL_TIMEOUT_SECS),
+        http_client=(
+            _LocalPlaneHttpClient(local_plane, timeout=CONTROL_TIMEOUT_SECS)
+            if local_plane
+            else TwilioHttpClient(timeout=CONTROL_TIMEOUT_SECS)
+        ),
     )
 
 

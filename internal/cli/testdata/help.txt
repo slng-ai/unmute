@@ -63,11 +63,12 @@ Usage:
 
 Flags:
       --bot-port string     host port for the local agent runtime (with Compose, UNMUTE_DEV_PORT or UNMUTE_TELEPHONY_PORT) (default "7860")
+      --carrier             reach the route through your own carrier: managed tunnel, webhook rewrite, restore on exit (requires --telephony)
   -h, --help                help for dev
       --no-open             do not open the browser automatically
-      --no-webhook          do not touch the carrier number's webhook configuration (requires --telephony; point it at the printed public URL yourself)
+      --no-webhook          do not touch the carrier number's webhook configuration (requires --carrier; point it at the printed public URL yourself)
       --port string         port for the local dev UI (default "8765")
-      --public-url string   exact public HTTPS origin for routes with carrier callbacks (requires --telephony)
+      --public-url string   exact public HTTPS origin for routes with carrier callbacks (requires --carrier)
       --target string       target instance name (required without a TTY when multiple exist)
       --telephony           run the selected target's resolved telephony route (no browser UI)
       --to string           E.164 number to dial for an outbound telephony test (requires --telephony and an outbound-capable target)

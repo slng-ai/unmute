@@ -1,0 +1,38 @@
+  application:
+    build:
+      context: .
+    stop_grace_period: "{{.SIP.SessionTTL}}s"
+    environment:
+      - LIVEKIT_URL=ws://livekit_server:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=secret
+      - REDIS_URL=redis://redis:6379/0
+{{- range .RequiredEnv}}
+{{- if and (ne . "LIVEKIT_URL") (ne . "LIVEKIT_API_KEY") (ne . "LIVEKIT_API_SECRET") (ne . "REDIS_URL")}}
+      - {{.}}
+{{- end}}
+{{- end}}
+{{- range .DevOptionalEnv}}
+      # optional: passed through when set on the host; absent otherwise
+      - {{.}}
+{{- end}}
+    ports:
+      # Bound to one interface, not the wildcard. This is a development stack
+      # holding a published key pair, and a laptop is often on a network with
+      # strangers on it.
+      - "${UNMUTE_CONTROL_BIND_IP:-127.0.0.1}:${UNMUTE_TELEPHONY_PORT:-7860}:7860"
+    # Deliberately not waiting on a SIP service: each one belongs to a profile,
+    # and depending on a profiled service drags its profile into every run. The
+    # agent joins rooms on the server and never reads the SIP bridge.
+    depends_on:
+      redis:
+        condition: service_healthy
+      livekit_server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/readyz', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+

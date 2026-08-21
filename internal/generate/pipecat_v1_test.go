@@ -1219,6 +1219,32 @@ func TestV2_PipecatDelegateSnapshotsCompletedOwnerCall(t *testing.T) {
 	}
 }
 
+// A worker that fails to start says why, at the point where why is still known.
+// The failure is recorded and the runner cancelled, which makes run() raise
+// CancelledError; that reaches the caller first and takes the recorded error's
+// place, so the re-raise below it never runs. Measured on a real call
+// 2026-08-21: the session died half a second in and the only line it left
+// behind was a failed trace flush, which says nothing about the cause.
+func TestPipecatWorkerStartFailureSaysWhy(t *testing.T) {
+	bot, err := os.ReadFile(filepath.Join("testdata", "golden", "pipecat_v1_tasks_bot.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := bytes.Index(bot, []byte("await runner.add_workers(*agents)"))
+	if start < 0 {
+		t.Fatal("this bot starts no agent workers")
+	}
+	cancel := bytes.Index(bot[start:], []byte(`await runner.cancel(reason="agent worker startup failed")`))
+	if cancel < 0 {
+		t.Fatal("nothing cancels the runner when a worker fails to start")
+	}
+	logged := bytes.Index(bot[start:start+cancel], []byte("logger.exception("))
+	if logged < 0 {
+		t.Error("the worker start failure is not logged before the runner is cancelled, so the " +
+			"cancellation replaces it and the session dies without naming a cause")
+	}
+}
+
 // TestV3PipecatToolsResolveCallback: every emitted agent-level @tool method
 // resolves its function call via params.result_callback. Pipecat drops a @tool's
 // return value, so a bare `return {...}` leaves the call unresolved (V3, B1). The

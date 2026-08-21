@@ -323,15 +323,35 @@ func TestCloudWebsocketRunbookContract(t *testing.T) {
 			t.Errorf("the runbook mentions %q, which exists nowhere on this route", forbidden)
 		}
 	}
+	// What a default local run is, in the runbook's own words. These changed
+	// when local telephony became carrier-free: the subsection used to promise a
+	// tunnel and a webhook rewrite on every run, and now those are --carrier
+	// only. The claims are pinned rather than relaxed, because a runbook that
+	// stops saying "nothing leaves your machine" is a runbook somebody will read
+	// as permission to run this against a real account by accident.
 	for _, want := range []string{
-		"cloudflared",
-		"restored",
-		"TwiML Bin is never touched",
-		"waits for `/status` to report `ready`",
-		"webhook at the tunnel root (`/`)",
+		// The three the reader most needs, and the three most likely to rot.
+		"nothing leaves your machine",
+		"protocol and not the company",
+		"refuses to start if it cannot replace",
+		// The real-call path still exists and still puts things back.
+		"--carrier",
+		"restores the previous value",
+		// And the honest limit, so a green local call is not read as go-live.
+		"is not reachability",
 	} {
 		if !strings.Contains(section[local:], want) {
-			t.Errorf("the local development subsection does not mention %q", want)
+			t.Errorf("the local development subsection does not say %q", want)
+		}
+	}
+	// The old promises must not linger beside the new ones: a runbook that says
+	// both is worse than one that says neither.
+	for _, stale := range []string{
+		"points the declared number's voice configuration at that tunnel",
+		"waits for `/status` to report `ready`",
+	} {
+		if strings.Contains(section[local:], stale) {
+			t.Errorf("the local development subsection still promises %q, which a default run no longer does", stale)
 		}
 	}
 }
@@ -415,16 +435,33 @@ func TestCloudWebsocketPureInboundAsksForNothing(t *testing.T) {
 			t.Errorf("the compile report omits %s, which the emitted bot checks for", name)
 		}
 	}
-	// The other side of the same branch: a package that *has* credentials uses the
-	// framework's path, so it must not carry the local one.
+	// The other side of the same branch: a package that *has* credentials uses
+	// the framework's path when it is deployed.
+	//
+	// This half used to forbid the local builder outright, on the reasoning that
+	// a credentialed package had no use for one. That stopped being true when
+	// this route gained a local plane: a plane run cannot use the framework's
+	// path, because that path leaves the serializer's automatic hangup on, which
+	// POSTs to the carrier's REST API when the call ends and there is no carrier
+	// on a local run to tell (gate P2, research R7 addendum).
+	//
+	// What the rule was protecting is unchanged and still asserted: a deployed
+	// call goes through the framework's factory. What it no longer forbids is a
+	// second path that only a local run can reach.
 	fullBot := artifactFile(t, full, "bot.py")
-	for _, forbidden := range []string{"_carrier_transport", "auto_hang_up"} {
-		if strings.Contains(fullBot, forbidden) {
-			t.Errorf("a credentialed package still builds its own transport (%q): the framework's path handles it", forbidden)
-		}
-	}
 	if !strings.Contains(fullBot, "create_transport(runner_args, transport_params)") {
 		t.Error("a credentialed package does not use the framework's transport factory")
+	}
+	if !strings.Contains(fullBot, `os.getenv("`+target.LocalPlaneEnvName+`")`) {
+		t.Errorf("a credentialed package's own transport is not guarded by %s, so a deployment "+
+			"could reach it", target.LocalPlaneEnvName)
+	}
+	// The receive-only form dispatches on the session alone, with no selector.
+	// A credentialed package must never carry that: it would take the local path
+	// on every deployed phone call.
+	unguarded := "if getattr(runner_args, \"websocket\", None) is not None:\n        transport = await _carrier_transport("
+	if strings.Contains(fullBot, unguarded) {
+		t.Error("a credentialed package reaches its own transport with no plane check, so a deployed call would use it")
 	}
 }
 
@@ -608,6 +645,52 @@ func TestCloudWebsocketColdTransferEndsOriginalCallAfterDial(t *testing.T) {
 		if strings.Contains(bot, forbidden) {
 			t.Errorf("the transfer reconnects after the dial (%q is still emitted)", forbidden)
 		}
+	}
+}
+
+// The plane reads the document this template writes, and the two live in
+// different packages, so each holds its own half. This is the emitted half: the
+// verbs, in the order the stand-in acts on them, with the attributes it reads.
+// internal/cli's TestTransferDocumentReadsWhatTheAgentSends is the other half.
+//
+// Without this pair a change here is silent: the transfer still compiles, the
+// agent still posts, and the local run reports a failed transfer for a reason
+// nothing in the diff explains.
+func TestColdTransferDocumentStaysWhatThePlaneCanRead(t *testing.T) {
+	bot := artifactFile(t, cloudWebsocketArtifact(t, cloudWebsocketOptions{
+		inbound: true, transfer: true, connection: true,
+	}), "bot.py")
+	for _, want := range []string{
+		// Read as instruction.Say, and on this route the caller hears it from
+		// the carrier rather than from the agent.
+		"<Say>",
+		// Read as the destination and the ring timeout.
+		`<Dial answerOnBridge="true" timeout="{ring_timeout}">{destination}</Dial>`,
+		// Read as instruction.Hangup, which is what ends the caller's leg.
+		"<Hangup/>",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("the emitted transfer document no longer carries %q, so the local plane cannot "+
+				"carry it out and a local transfer fails for no visible reason", want)
+		}
+	}
+}
+
+// Gate P2 on the transfer path. The cold transfer is the one request in the
+// project made in a carrier's own words, and on a local run it must be
+// redirectable: an unredirectable api.twilio.com is a write leaving the machine
+// on a run that is meant to touch nothing, whether or not its credentials work.
+func TestColdTransferCallControlIsRedirectableToTheLocalPlane(t *testing.T) {
+	bot := artifactFile(t, cloudWebsocketArtifact(t, cloudWebsocketOptions{
+		inbound: true, transfer: true, connection: true,
+	}), "bot.py")
+	if strings.Contains(bot, `url = f"https://api.twilio.com/`) {
+		t.Error("call control posts to a hardcoded api.twilio.com, so a local-plane transfer writes " +
+			"outside this machine (gate P2)")
+	}
+	if !strings.Contains(bot, `os.getenv("`+target.LocalPlaneEnvName+`") or "https://api.twilio.com"`) {
+		t.Errorf("call control does not fall back through %s, so either the local plane cannot serve "+
+			"it or production no longer reaches the real carrier", target.LocalPlaneEnvName)
 	}
 }
 

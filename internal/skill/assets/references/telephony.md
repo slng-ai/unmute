@@ -163,23 +163,112 @@ names the new home.
 unmute dev examples/twilio-telephony-hello --telephony --target pipecat
 ```
 
-This runs the route the connection declares, on the user's laptop, and a real
-call can reach it. In order it compiles and prints the resolved route, checks
-the credentials that are genuinely theirs, opens a `cloudflared` tunnel on the
-routes that need a public callback origin, and brings up the generated Compose
-stack.
+This runs the route the connection declares on the user's own machine, with **no
+carrier account and nothing leaving the machine**. It compiles, prints the
+resolved route and the plane it chose, starts the local runtime, and then does
+one of two things depending on the plane:
 
-Two things worth telling the user in advance:
+- On the `sip` plane it prints an address and a per-run credential and waits for
+  the user to dial from a softphone.
+- On the `media-websocket` plane there is nothing to dial: the CLI **is** the
+  carrier, so it places the call itself and connects the machine's microphone to
+  it. Without `sox` on the PATH it plays a recorded fixture and says which.
 
-- **Quick tunnel URLs rotate on every run**, which is why the carrier webhook is
-  rewritten on every start rather than once. `--public-url` skips the tunnel and
-  uses their own origin.
-- **The LiveKit SIP route needs no tunnel**, because SIP does not call back over
-  HTTP.
-- **A real LiveKit SIP call still needs a reachable telephony deployment**:
-  either a LiveKit Cloud project, or a public self-hosted LiveKit Server and SIP
-  service. The agent worker may run locally against either one. Starting the
-  laptop Compose graph alone does not make its SIP and RTP ports public.
+The runtime is Compose on every route except Pipecat `cloud-websocket`, which
+runs the generated `bot.py` under `uv` on the host.
+
+Every route is exercised on a **local plane**, which is a route fact rather than
+a choice. The plane presents the agent the same call mechanism the route's
+carrier uses in production, so a route never gets a more convenient one:
+
+| Plane | Which routes | What it is |
+|---|---|---|
+| `sip` | LiveKit `sip`, Pipecat `sip` | a real SIP trunk in containers, with endpoints for the caller and for each declared transfer destination |
+| `media-websocket` | LiveKit `connector`, Pipecat `carrier-websocket`, Pipecat `cloud-websocket` | the CLI speaks the carrier's media-streaming protocol to the agent over loopback |
+| `none` | Pipecat `daily-sip` | no carrier-free loop exists, and the command keeps refusing rather than pretending |
+
+**Pipecat `sip` is the self-hosted route**, and the only one with no managed
+platform anywhere in it. It runs the same four containers locally and in
+production (the agent, LiveKit Server, LiveKit SIP, and a coordination store),
+emits no deployment manifest, and builds on a plain Python image. Its trade is
+warm transfer, which this project has not built on Pipecat. Reach for it when the
+user says they want to host everything themselves; reach for `cloud-websocket`
+when they want to host nothing.
+
+**Tell the user this one before they deploy it themselves.** LiveKit SIP answers
+an inbound call only once something joins the caller's room and publishes audio.
+On LiveKit `sip` the dispatch rule puts the agent in the room, because that agent
+is a LiveKit agent worker. On Pipecat `sip` it cannot: a dispatch rule dispatches
+only workers, and this agent is a Pipecat bot. So the route emits a
+`telephony.py` that answers a LiveKit room webhook at `/telephony/livekit` and
+starts a session, and the dispatch rule it creates names no agent at all. A local
+run configures the server's `webhook` block for the user. A deployment of their
+own has to, and the emitted `README.md` carries the block to paste. Without it
+every inbound call rings for three minutes and is cut off, with nothing in any
+log that looks like an error.
+
+Things worth telling the user in advance:
+
+- **A default run touches no carrier and opens no tunnel.** This changed: it
+  used to do both. An author who wants a real call passes `--carrier`.
+- **`--carrier` requires `--telephony`** and places one real call through the
+  user's own carrier, including the webhook rewrite and its restore. So do
+  `--public-url` and `--no-webhook`, which exist only to manage a public origin
+  and now name `--carrier` in their refusals.
+- **The delay heard under `--carrier` is not the product's delay.** It is the
+  public network reaching the user's machine. The run says so itself.
+- **The SIP plane's code is the same locally and deployed.** Unlike the WebSocket
+  routes there is no local-only transport branch, because the plane *is* the
+  stack: the only difference is where `LIVEKIT_URL` points. Nothing on a `sip`
+  route reads the plane selector, and a package that did would contradict the
+  route's own argument.
+- **On the SIP plane the run prints a dial address and a per-run credential.**
+  The plane is not a registrar: a softphone that insists on registering before
+  it will place a call cannot be used. `baresip` works and is BSD licensed.
+- **Transfers land on the plane's own endpoints**, one per destination the
+  package declares, and each leg is recorded to `calls/<run>/<name>.wav`.
+- **`--to` on the `media-websocket` plane never dials the number.** The stand-in
+  is both the carrier and the far end, so the number is carried in the request
+  and echoed back. It proves the agent can ask for a call and talk on it, and
+  nothing about which destination a number reaches. Twilio only on that plane:
+  the other two carriers' call-creation dialects are redirected to the stand-in
+  so nothing leaves the machine, and refused there with a message saying so.
+  `cloud-websocket` has no local outbound at all, because its agent publishes no
+  endpoint to ask a call from.
+- **A healthy local run is not proof of reachability.** Going live needs the
+  route's dictated carrier steps, on every route, and a default run prints them
+  every time for exactly this reason.
+- **Warm and cold transfers are not equally testable locally, and the reason is
+  worth telling the user.** On the `sip` plane a warm transfer is dialled by the
+  plane, so every leg is between containers and a softphone can exercise the
+  whole thing including the briefing and the merge. A cold transfer there is a
+  SIP REFER: the plane hands the *caller* the destination's address and steps
+  out, and a softphone on the user's machine cannot route the plane's container
+  network. So cold is proven up to the REFER being sent and accepted, which is
+  where the product's responsibility ends (in production the carrier routes it),
+  and the headless profile completes the last leg.
+- **A cold transfer runs on the `media-websocket` plane too**, on the one route
+  there that emits one (`cloud-websocket`). It works by replacing the live call's
+  markup at the carrier, so the stand-in serves the carrier's own call-control
+  endpoint on loopback and carries the document out: it cuts the agent's stream,
+  bridges the caller to a destination sink, records that leg separately, and
+  honours the final hangup. Without this the agent would post to
+  `api.twilio.com`, which is a write leaving the machine on a run meant to touch
+  nothing.
+- **No local plane can prove a person answered.** Both planes stop at the
+  handoff and say so on the way out. A run that claimed a completed transfer
+  would be the false completion the unattended check exists to catch.
+- **The run reports transfer progress as distinct outcomes**, and two of them
+  never print locally on purpose: `destination reached` on a cold transfer,
+  because nothing observable says the caller arrived, and `not acted on by the
+  caller`, which is indistinguishable from success from the agent's side.
+- **Recordings are per leg, at `build/<target>/calls/<run>/<name>.wav`.** The
+  destination's file is what the destination *heard*, so it is where to check
+  whether a warm briefing carried. A file of exactly 44 bytes is a header with
+  no audio, which is a different failure from silence.
+
+`docs-site/dev/local-telephony.mdx` is the user-facing version of all of this,
+including the softphone commands. Point users there rather than restating it.
 
 Every outward change the run makes is undone when it exits, including on
 `ctrl-c`.
@@ -222,6 +311,11 @@ Outbound needs `outbound: true` on the channel and, on most routes, a
 `from_number` in the connection's environment. To place one locally, run
 `unmute dev --telephony --to <E.164 number>`.
 
+**Pipecat `sip` receives calls only.** It emits no dial-out path at all, so
+`outbound: true` on that route is refused at compile and `--to` has nothing to
+place. Its LiveKit sibling on the same plane does dial out. If the user wants a
+self-hosted route *and* outbound, that is the one to reach for.
+
 `on_voicemail` on the channel takes `hangup` or `leave_message` and requires
-`outbound: true`. Voicemail detection is a SIP-route capability, so check the
-route before promising it.
+`outbound: true`. Voicemail detection belongs to the LiveKit `sip` route, so check
+the route before promising it.
