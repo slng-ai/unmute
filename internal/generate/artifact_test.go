@@ -192,3 +192,7 @@ func compilerTarget(agent *ir.Agent, provider ir.Provider) ir.Target {
 func enableLangfuse(agent *ir.Agent) {
 	agent.Tracing = &ir.Tracing{Provider: "langfuse"}
 }
+
+func enableCoval(agent *ir.Agent) {
+	agent.Tracing = &ir.Tracing{Provider: "coval"}
+}

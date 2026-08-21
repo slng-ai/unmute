@@ -1,0 +1,447 @@
+"""Generated Coval tracing for {{.Project}}.
+
+Pipecat already names its own spans the way Coval wants: `conversation`, `turn`,
+`llm`, `stt` and `tts` come straight from `pipecat.utils.tracing`. So this module
+adds an exporter and a simulation ID, and otherwise leaves Pipecat's spans alone
+rather than emitting a second parallel set.
+
+Spans are held until the simulation ID for the call arrives, then flushed. A
+session with no Coval caller (browser, console, `unmute dev`) therefore traces
+nothing and still runs normally.
+"""
+
+from __future__ import annotations
+
+{{if or .NeedsFunctionCalls .NeedsMCP}}import asyncio
+{{end}}import json
+{{if or .NeedsFunctionCalls .NeedsMCP}}import functools
+{{end}}import logging
+import os
+import threading
+import urllib.error
+import urllib.request
+from collections import deque
+from collections.abc import Sequence
+
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor, TracerProvider
+from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+from pipecat.pipeline.worker import PipelineWorker
+from pipecat.utils.tracing.setup import setup_tracing
+from pipecat.workers.llm import LLMWorker
+
+logger = logging.getLogger("coval_tracing")
+
+TRACE_NAME = {{pyq .EntryAgent}} + "-" + {{pyq .Project}}
+
+
+COVAL_TRACES_ENDPOINT = "https://api.coval.dev/v1/traces"
+
+# Coval puts the simulation ID on the call under this name. Header and SIP header
+# lookups are case-insensitive because carriers rewrite header casing freely.
+SIMULATION_KEY = "x-coval-simulation-id"
+
+# Set by Coval on the OTLP request, not on the call. Different name on purpose.
+SIMULATION_EXPORT_HEADER = "X-Simulation-Id"
+
+# The other way a trace can be correlated. A call no simulation placed is
+# submitted as a Coval conversation once it ends, and its spans go out against
+# the conversation ID that submit returns. Coval accepts exactly one of the two
+# headers, never both.
+COVAL_CONVERSATIONS_ENDPOINT = "https://api.coval.dev/v1/conversations:submit"
+CONVERSATION_EXPORT_HEADER = "X-Conversation-Id"
+
+# A call nobody ever claims must not grow the process without limit.
+MAX_PREACTIVATION_SPANS = 1024
+
+# Coval's ingest is append-only and does not de-duplicate, so a retry has to
+# resend only the batch that failed. The docs require this exact timeout.
+EXPORT_TIMEOUT_SECONDS = 30
+
+_SIMULATION_ID_ATTR = "coval.internal.simulation_id"
+
+# Older Pipecat releases named these spans differently. Current Pipecat already
+# emits Coval's canonical names, so this map is a no-op there and only earns its
+# keep if the pinned Pipecat version is rolled back.
+_SPAN_ALIASES = {
+    "llm_request": "llm",
+    "llm_request_run": "llm",
+    "stt_request": "stt",
+    "stt_request_run": "stt",
+    "tts_request": "tts",
+    "tts_request_run": "tts",
+}
+
+_router: "_CovalRouter | None" = None
+_provider: TracerProvider | None = None
+
+
+def _simulation_from_mapping(values) -> str | None:
+    """Case-insensitive lookup of the Coval key in one mapping."""
+    if not values:
+        return None
+    try:
+        items = values.items()
+    except AttributeError:
+        return None
+    for key, value in items:
+        if str(key).lower() == SIMULATION_KEY and value:
+            return str(value)
+    return None
+
+
+def resolve_simulation_id(runner_args) -> tuple[str | None, str]:
+    """Find the Coval simulation ID for this call, and say where it came from.
+
+    Four sources, because this project can be compiled onto four transports and
+    they deliver a per-call payload in three different shapes:
+
+    1. the WebSocket upgrade headers, which is Coval's primary route for a
+       WebSocket agent,
+    2. the SIP headers in a Pipecat Cloud dial-in body,
+    3. a custom parameter on the carrier stream, which is where a Twilio
+       ``<Stream><Parameter>`` lands,
+    4. ``COVAL_SIMULATION_ID`` in the environment, which covers a local run and
+       any route an operator wires that the compiler did not predict.
+
+    Returns ``(None, "none")`` when this is not a Coval call, which is the normal
+    case for a browser session.
+    """
+    websocket = getattr(runner_args, "websocket", None)
+    found = _simulation_from_mapping(getattr(websocket, "headers", None))
+    if found:
+        return found, "websocket_header"
+
+    body = getattr(runner_args, "body", None) or {}
+    if isinstance(body, dict):
+        dialin = body.get("dialin_settings") or {}
+        if isinstance(dialin, dict):
+            found = _simulation_from_mapping(dialin.get("sip_headers"))
+            if found:
+                return found, "sip_header"
+        found = _simulation_from_mapping(body)
+        if found:
+            return found, "call_body"
+
+    call_data = getattr(runner_args, "call_data", None)
+    if call_data is not None:
+        nested = getattr(call_data, "body", None)
+        if nested is None and isinstance(call_data, dict):
+            nested = call_data.get("body")
+        found = _simulation_from_mapping(nested)
+        if found:
+            return found, "carrier_parameter"
+
+    found = os.environ.get("COVAL_SIMULATION_ID")
+    if found:
+        return found, "environment"
+    return None, "none"
+
+
+class _CovalTagger(SpanProcessor):
+    """Stamp the active simulation ID on each span as it starts."""
+
+    def on_start(self, span: Span, parent_context=None) -> None:
+        alias = _SPAN_ALIASES.get(span.name)
+        if alias:
+            span.update_name(alias)
+        simulation_id = _router.simulation_id if _router else None
+        if simulation_id:
+            span.set_attribute(_SIMULATION_ID_ATTR, simulation_id)
+
+    def on_end(self, span: ReadableSpan) -> None:
+        pass
+
+    def shutdown(self) -> None:
+        pass
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return True
+
+
+class _CovalRouter(SpanExporter):
+    """Hold spans until the call's simulation ID is known, then export them.
+
+    ponytail: one call per process, which is how Pipecat Cloud and the local
+    runner both work. If a deployment ever multiplexes calls in one process, key
+    the buffer by session and stamp that key on each span in ``_CovalTagger``.
+    """
+
+    def __init__(self, api_key: str):
+        self._api_key = api_key
+        self._lock = threading.RLock()
+        self._buffer: deque[ReadableSpan] = deque(maxlen=MAX_PREACTIVATION_SPANS)
+        self._dropped = 0
+        self._exporter: OTLPSpanExporter | None = None
+        self.simulation_id: str | None = None
+
+    @property
+    def active(self) -> bool:
+        return self._exporter is not None
+
+    def held(self) -> list[ReadableSpan]:
+        """The spans waiting for a correlation ID, oldest first."""
+        with self._lock:
+            return list(self._buffer)
+
+    def activate(self, correlation_id: str, header: str = SIMULATION_EXPORT_HEADER) -> None:
+        with self._lock:
+            if self.simulation_id == correlation_id:
+                return
+            self.simulation_id = correlation_id
+            self._exporter = OTLPSpanExporter(
+                endpoint=COVAL_TRACES_ENDPOINT,
+                headers={"x-api-key": self._api_key, header: correlation_id},
+                timeout=EXPORT_TIMEOUT_SECONDS,
+            )
+            held = list(self._buffer)
+            self._buffer.clear()
+            dropped = self._dropped
+            self._dropped = 0
+            exporter = self._exporter
+        if dropped:
+            logger.warning("Dropped %d span(s) before the correlation ID arrived", dropped)
+        if held:
+            logger.info("Flushing %d held span(s) to Coval", len(held))
+            exporter.export(held)
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        with self._lock:
+            exporter = self._exporter
+            if exporter is None:
+                for span in spans:
+                    if len(self._buffer) == MAX_PREACTIVATION_SPANS:
+                        self._dropped += 1
+                    self._buffer.append(span)
+                return SpanExportResult.SUCCESS
+        # ponytail: exporting every span the exporter sees, not only the ones
+        # tagged at start. Pipecat wraps this exporter in a BatchSpanProcessor,
+        # so a span created before the ID arrived can still be sitting in that
+        # queue when activate() drains the buffer. Filtering on the tag here
+        # would silently drop it.
+        return exporter.export(spans)
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        with self._lock:
+            exporter = self._exporter
+        return exporter.force_flush(timeout_millis) if exporter else True
+
+    def shutdown(self) -> None:
+        with self._lock:
+            exporter = self._exporter
+            self._exporter = None
+            self._buffer.clear()
+        if exporter:
+            exporter.shutdown()
+
+
+def _transcript_from(spans: Sequence[ReadableSpan]) -> list[dict]:
+    """Rebuild the conversation from the spans that are already held.
+
+    Pipecat puts the caller's words on its `stt` spans and the agent's on its
+    `tts` spans, so a call that ends without a simulation already holds
+    everything Coval needs to register it as a conversation. Nothing extra is
+    recorded for this, and nothing is invented.
+    """
+    roles = {"stt": ("user", "transcript"), "tts": ("assistant", "text")}
+    ordered = sorted(
+        (span for span in spans if span.name in roles),
+        key=lambda span: span.start_time or 0,
+    )
+    transcript: list[dict] = []
+    for span in ordered:
+        role, key = roles[span.name]
+        text = str((span.attributes or {}).get(key) or "").strip()
+        if not text:
+            continue
+        # Pipecat emits one span per synthesis segment and one per final
+        # transcript, so consecutive spans from the same side are one message.
+        if transcript and transcript[-1]["role"] == role:
+            transcript[-1]["content"] = transcript[-1]["content"] + " " + text
+        else:
+            transcript.append({"role": role, "content": text})
+    return transcript
+
+
+def submit_conversation(transcript: list[dict], session_id: str) -> str | None:
+    """Register this call with Coval as a conversation, and return its ID.
+
+    This is the route for a call no simulation placed: a local `unmute dev`
+    run, or production traffic. Coval needs the call to exist before spans can
+    be attached to it, so the transcript is submitted first and the ID it
+    returns is what the spans are exported against.
+    """
+    api_key = os.getenv("COVAL_API_KEY", "")
+    if not api_key or not transcript:
+        return None
+    payload = {
+        "transcript": transcript,
+        "metadata": {"agent": TRACE_NAME, "source": "unmute", "session_id": session_id},
+        "tags": [TRACE_NAME],
+    }
+    if session_id:
+        payload["external_conversation_id"] = session_id
+    request = urllib.request.Request(
+        COVAL_CONVERSATIONS_ENDPOINT,
+        data=json.dumps(payload).encode(),
+        headers={"x-api-key": api_key, "content-type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=EXPORT_TIMEOUT_SECONDS) as response:
+            body = json.load(response)
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        # A trace is not worth failing a call over, on this path least of all:
+        # the call is already over by the time this runs.
+        logger.warning("Could not register this call with Coval: %s", error)
+        return None
+    conversation_id = str((body.get("conversation") or {}).get("conversation_id") or "")
+    return conversation_id or None
+
+
+def setup_coval_tracing() -> TracerProvider:
+    global _router, _provider
+    if _provider is not None:
+        return _provider
+    existing_provider = trace.get_tracer_provider()
+    if isinstance(existing_provider, TracerProvider):
+        raise RuntimeError(
+            "OpenTelemetry already has a TracerProvider; configure Pipecat Coval tracing first"
+        )
+
+    api_key = os.getenv("COVAL_API_KEY", "")
+    # Unlike Langfuse, a missing key is not fatal here. A Coval key only matters
+    # while a simulation is running, and a live call must not fail because an
+    # evaluation credential is absent.
+    _router = _CovalRouter(api_key=api_key)
+    if not setup_tracing(service_name=TRACE_NAME, exporter=_router):
+        raise RuntimeError("Pipecat OpenTelemetry tracing is unavailable")
+    provider = trace.get_tracer_provider()
+    if not isinstance(provider, TracerProvider):
+        raise RuntimeError("Pipecat did not install an SDK tracer provider")
+    provider.add_span_processor(_CovalTagger())
+    if not api_key:
+        logger.warning("COVAL_API_KEY is not set, so no trace will reach Coval")
+    _provider = provider
+    return provider
+
+
+def activate_simulation(runner_args) -> str | None:
+    """Resolve the simulation ID for this call and start exporting against it."""
+    simulation_id, route = resolve_simulation_id(runner_args)
+    if not simulation_id:
+        logger.info("No Coval simulation ID on this call, so no trace is exported")
+        return None
+    if not os.getenv("COVAL_API_KEY", ""):
+        logger.warning("Coval simulation %s found but COVAL_API_KEY is unset", simulation_id)
+        return None
+    if _router is not None:
+        _router.activate(simulation_id)
+    # Recorded on the trace so a span that lands against the wrong simulation can
+    # be diagnosed from the trace itself rather than by guesswork.
+    trace.get_tracer("unmute.coval").start_span(
+        "transport",
+        attributes={"coval.correlation.method": route, "agent.name": TRACE_NAME},
+    ).end()
+    logger.info("Coval tracing active for simulation %s via %s", simulation_id, route)
+    return simulation_id
+
+
+def enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:
+    # ponytail: Pipecat 1.7.0 LLMWorker exposes no tracing kwargs. Share the main
+    # worker's context until its public constructor accepts them.
+    for agent in agents:
+        agent._enable_tracing = True
+        agent._tracing_context = main._tracing_context
+
+
+def flush_tracing(provider: TracerProvider, session_id: str = "") -> None:
+    """Send this call's trace, registering the call first if nothing claimed it."""
+    # Pipecat batches spans, so this flush is what moves them into the router.
+    # After it, a call no simulation claimed has its whole trace held, which is
+    # the transcript Coval needs to register it as a conversation. The spans
+    # then go out against that conversation ID, so a local run lands in Trace
+    # Search instead of being dropped.
+    provider.force_flush()
+    if _router is None or _router.active:
+        return
+    conversation_id = submit_conversation(_transcript_from(_router.held()), session_id)
+    if not conversation_id:
+        return
+    trace.get_tracer("unmute.coval").start_span(
+        "transport",
+        attributes={
+            "coval.correlation.method": "conversation_submit",
+            "coval.conversation_id": conversation_id,
+            "agent.name": TRACE_NAME,
+        },
+    ).end()
+    provider.force_flush()
+    _router.activate(conversation_id, CONVERSATION_EXPORT_HEADER)
+
+
+{{if or .NeedsFunctionCalls .NeedsMCP}}# ponytail: Pipecat 1.7.0 has no standard-tool tracing hook. Remove this
+# subclass when ordinary LLMWorker tools gain native spans.
+class TracedLLMWorker(LLMWorker):
+    """Add the `llm_tool_call` spans missing from Pipecat's standard tracing."""
+
+    async def _trace_tool(self, name, arguments, call, tool_call_id=None):
+        context = self._tracing_context
+        if not self._enable_tracing or context is None:
+            return await call(None)
+        parent = context.get_turn_context() or context.get_conversation_context()
+        with trace.get_tracer("unmute.coval.tools").start_as_current_span(
+            "llm_tool_call", context=parent
+        ) as span:
+            span.set_attribute("function.name", name)
+            span.set_attribute("function.arguments", json.dumps(arguments, default=str))
+            if tool_call_id:
+                span.set_attribute("tool_call_id", tool_call_id)
+            try:
+                result = await call(span)
+            except asyncio.CancelledError:
+                span.set_attribute("tool.error", "cancelled")
+                raise
+            except Exception:
+                span.set_attribute("tool.error", "error")
+                raise
+            if result is not None:
+                span.set_attribute("tool.result", json.dumps(result, default=str))
+            return result
+
+    def _track_tool_call(self, method):
+        tracked = super()._track_tool_call(method)
+
+        @functools.wraps(tracked)
+        async def wrapper(params, *args, **kwargs):
+            async def call(span):
+                if span:
+                    result_callback = params.result_callback
+
+                    async def traced_result_callback(result, **callback_kwargs):
+                        span.set_attribute("tool.result", json.dumps(result, default=str))
+                        return await result_callback(result, **callback_kwargs)
+
+                    params.result_callback = traced_result_callback
+                return await tracked(params, *args, **kwargs)
+
+            return await self._trace_tool(
+                params.function_name,
+                dict(params.arguments),
+                call,
+                tool_call_id=params.tool_call_id,
+            )
+
+        return wrapper
+
+    def _trace_flow_tool(self, name, method):
+        @functools.wraps(method)
+        async def wrapper(args, flow_manager):
+            async def call(_span):
+                return await method(args, flow_manager)
+
+            return await self._trace_tool(name, dict(args), call)
+
+        return wrapper
+{{end}}

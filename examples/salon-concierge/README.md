@@ -9,7 +9,7 @@ you want one package to exercise the main Unmute paths together:
 - a complaint agent with cold manager transfer;
 - a chat agent that answers open questions and hands off, with no tool of its own;
 - local Python tools backed by SQLite;
-- Langfuse tracing for release inspection;
+- Coval tracing for release inspection;
 - browser audio and inbound phone calls on both code targets.
 
 There is no outbound route. `channels.phone.outbound` is `false`.
@@ -78,9 +78,7 @@ Common values:
 |---|---|
 | `OPENAI_API_KEY` | reasoning model |
 | `SLNG_API_KEY` | speech and transcription models |
-| `LANGFUSE_BASE_URL` | Langfuse API base URL |
-| `LANGFUSE_PUBLIC_KEY` | Langfuse project public key |
-| `LANGFUSE_SECRET_KEY` | Langfuse project secret key |
+| `COVAL_API_KEY` | Coval trace ingest |
 
 `MANAGER_PHONE_NUMBER` is the cold-transfer destination in E.164 form. It is
 needed only for inbound phone manager transfers, may stay unset for browser
@@ -101,7 +99,7 @@ Secrets stay in `.env`. No credential or phone number belongs in this package.
 Traces and debug logs can include caller speech, model input and output, phone
 details, complaint text, and tool arguments or results. Use only fake identities,
 fake phone numbers, and fake customer data for release tests, in a separate
-Langfuse project. Do not send real customer data until its access and retention
+Coval project. Do not send real customer data until its access and retention
 rules are approved. Keep `UNMUTE_LOG_LEVEL=INFO` for normal runs.
 
 ## Booking confirmation boundary

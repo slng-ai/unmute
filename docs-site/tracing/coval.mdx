@@ -1,0 +1,245 @@
+---
+title: "Coval"
+description: "Send spans to Coval so each trace is attached to the simulation that produced the call."
+---
+
+[Coval](https://coval.dev) runs simulated calls against your agent and scores
+them. Coval tracing attaches the spans from a call to the simulation that made
+it, so a low score comes with the transcript, the tool calls, and the timings
+that produced it.
+
+```yaml
+tracing:
+  provider: coval
+```
+
+That is the whole change to your package. Compile, and both the Pipecat and
+LiveKit projects send spans to Coval.
+
+## What you need
+
+One secret: `COVAL_API_KEY`. Put it in the build directory's `.env`.
+
+If it is missing, the agent logs a warning and runs without tracing. That is
+deliberate: an evaluation credential should never take down a live call. It is
+different from Langfuse, which fails at startup when its keys are missing,
+because Langfuse is set once per deployment while a Coval key only matters while
+a simulation is running.
+
+## How a trace finds its simulation
+
+Coval gives every simulation an ID and puts that ID on the call it places. Your
+agent reads it back and stamps it on the spans it sends. You do not write any of
+that code, but you do have to let the ID through, and how depends on the target.
+
+In your Coval agent config the placeholder is `{{simulation_output_id}}`.
+(`{{simulation_id}}` is an older name for the same value and still works.)
+
+### LiveKit
+
+Three routes, checked in this order.
+
+**Inbound phone calls** use the SIP participant's attributes. Coval sends the SIP
+header `X-Coval-Simulation-Id`. LiveKit only surfaces a SIP header it was told
+about in advance, so the generated `sip-inbound-trunk.json` already carries the
+mapping:
+
+```json
+"headers_to_attributes": {
+  "X-Coval-Simulation-Id": "coval.simulation_id"
+}
+```
+
+Register it with `telephony-setup.sh` the way you already do, and the attribute
+appears on the caller. Nothing else to do.
+
+**Browser and app calls** use the agent's dispatch metadata. Coval calls your
+token endpoint first, so that endpoint is where the ID enters. In Coval, set the
+LiveKit agent's **Custom Headers (JSON)** to:
+
+```json
+{"X-Coval-Simulation-Id": "{{simulation_output_id}}"}
+```
+
+Then, in your token server, read that header and put it into the room's agent
+dispatch metadata as `{"coval.simulation_id": "<the header value>"}`. With the
+LiveKit server SDK that is the `metadata` argument on `RoomAgentDispatch`.
+
+Unmute does not generate that token server for a deployed agent. On LiveKit Cloud
+it is yours. `unmute dev` does it for you locally, so you can try the route before
+you write it.
+
+**Local runs** use `COVAL_SIMULATION_ID` in the environment.
+
+### Pipecat
+
+Four routes, checked in this order.
+
+1. `X-Coval-Simulation-Id` on the WebSocket upgrade request. This is what Coval
+   sends to a WebSocket agent, and it needs no configuration on your side.
+2. The SIP headers inside a Pipecat Cloud dial-in body, at
+   `dialin_settings.sip_headers`.
+3. A custom parameter on the carrier stream. A Twilio
+   `<Stream><Parameter name="X-Coval-Simulation-Id" value="..."/>` lands here.
+4. `COVAL_SIMULATION_ID` in the environment.
+
+## Calls that no simulation owns
+
+Most calls are not simulations. A local `unmute dev` run, a browser session, a
+real customer on the phone: none of them carry a Coval simulation ID. They are
+still traced.
+
+Coval has two ways to correlate a trace, and the agent uses both:
+
+| The call | How it is correlated | Where it lands |
+| --- | --- | --- |
+| Coval placed it | the simulation ID Coval put on the call | the simulation's result, and Trace Search |
+| anything else | submitted as a Coval conversation when it ends | Trace Search |
+
+For the second row the agent waits until the call is over, submits what was said
+to Coval as a conversation, and exports the same spans against the conversation
+ID that comes back. Coval needs the call to exist before spans can attach to it,
+which is why this happens at the end rather than at the start. Nothing extra is
+recorded for it: the transcript is what the trace already holds.
+
+Until either ID is known the spans are held in memory. If one arrives mid-call,
+the earlier spans are sent too, so you do not lose the start of the
+conversation. The hold is capped so a long call cannot grow the process without
+limit; past the cap the oldest spans are dropped and the log says how many.
+
+Two things switch this off, both on purpose. Without `COVAL_API_KEY` nothing is
+sent at all, and a call where nobody said anything is not submitted, because an
+empty conversation is not worth an entry.
+
+Read `coval.correlation.method` to see which route a trace took:
+`conversation_submit` for the second row, and the name of the delivery route for
+the first.
+
+## What the spans look like
+
+Both targets send Coval's canonical span names, so Coval's viewer labels them and
+its trace metrics work without you renaming anything. One `conversation` holds
+one `turn` per exchange, and each turn holds the work that answered it:
+
+```
+conversation                    call totals: turn counts, tool counts, duration
+└── turn                        one exchange, with both transcripts on it
+    ├── stt                     one per transcript, with stt.confidence
+    │   └── stt.provider.<name> the transcriber that answered
+    ├── vad                     the end-of-turn decision
+    ├── llm                     the prompt it ran on, ttfb, tokens, finish_reason
+    │   └── llm_tool_call       function.name, arguments, result, tool.error
+    └── tts                     metrics.ttfb, the text that was spoken
+```
+
+The two targets get there differently, because the two frameworks trace
+differently.
+
+**Pipecat** already names its own spans this way and already nests them this way,
+so what you see is Pipecat's own spans, not a second copy of them. One extra
+`transport` span records which route supplied the simulation ID.
+
+**LiveKit** builds the tree above from its session events instead, and its own
+OpenTelemetry spans are left switched off. LiveKit's spans are shaped for
+LiveKit: `user_turn` and `agent_turn` are siblings, so the caller's speech can
+never sit inside the reply it caused, one exchange opens a fresh `agent_turn` for
+every tool round, and about a hundred internal spans per call arrive with names
+Coval has no meaning for. A span's parent is fixed when it starts, so renaming
+cannot fix the shape. Every number on the spans is still LiveKit's own
+measurement, read off `metrics_collected`, `conversation_item_added` and
+`function_tools_executed`. Where the simulation ID came from is recorded on the
+`conversation` span instead of on a `transport` span of its own.
+
+A turn starts when the caller starts speaking and ends when its last piece of
+work ends; the silence before the next utterance belongs to no exchange. The
+`stt` span covers the caller's speech through to the transcript landing. With
+preemptive generation the model starts while the caller is still speaking, so
+an `llm` span can overlap the `stt` beside it, and its metric can even arrive
+before LiveKit commits the utterance it answered. The round still lands in the
+turn whose utterance it answered rather than in the one that happened to be
+open when the metric arrived.
+
+Each `llm` span carries the prompt that round actually ran on:
+`gen_ai.system_instructions` is the system prompt of the agent holding the floor,
+`input` is its message history as JSON, `tools` and `tool_count` are what it was
+offered, and `agent.label` says which agent that was. One exchange can take
+several rounds, through tools or a handoff, and only the round that produced
+the spoken reply carries it as `output`; a superseded or pre-handoff round
+claiming those words would be lying. Those names are Pipecat's own, used on both targets on purpose: a package
+compiles to both, so one vocabulary means a Coval trace metric or judge prompt
+written once reads either. With handoffs that matters more than
+usual, because the prompt changes under the caller mid-call and a transcript
+cannot show which one produced a given answer. The history is snapshotted when
+the round's metrics arrive, which is where it is right: LiveKit appends the reply
+and any tool results after the request that produced them has finished. A
+workflow task group is the one agent that keeps no prompt of its own, so its
+instructions are read from the newest `agent_config_update` in its context,
+which is the prompt actually in force.
+
+The prompt has its own size budget, spent on the newest messages. A chat context
+grows all call long and rides along on every model call, so `input` holds as
+much of the tail as fits and `prompt.message_count` says how many messages there
+were against `prompt.messages_traced` for how many fit.
+
+One turn is one exchange, not one transcript. LiveKit commits a transcript each
+time the caller pauses, so a single spoken sentence can arrive in several
+pieces; they stay in the same turn, each with its own `stt` span, until the
+agent has actually answered. `turn.user_transcript` holds them joined back
+together.
+
+A number that was never measured is left off rather than sent as zero. A
+streaming transcriber reports a transcription delay of exactly zero, because
+there is no per-request wait to measure, and writing that to `metrics.ttfb` would
+fill Coval's TTFB metric with zeros instead of leaving it empty. The raw figure
+stays on the span as `stt.transcription_delay`. The same goes for token usage:
+a round LiveKit reported no usage for, which happens while it swaps agents,
+carries no `gen_ai.usage.*` at all rather than four zeros that would read as a
+free request.
+
+Transcripts, tool arguments and tool results are cut to a fixed length before
+they go out, so one long tool result cannot push a batch past what Coval's ingest
+accepts.
+
+## Metrics that read these traces
+
+Coval trace metrics are created in Coval, on its Metrics page or through its
+API, and they read span names and attributes. Everything below is already on
+the spans both targets send, so these work with no extra setup:
+
+- **Where the time goes.** `metrics.ttfb` on `llm` spans is the wait for the
+  first token, on `tts` the wait for the first audio byte, and on `vad` the
+  end-of-turn wait before the agent even started thinking. Coval's built-in
+  LLM TTFB metric reads the same attribute. A p90 over each of the three tells
+  you which stage is the bottleneck.
+- **What the calls cost.** Average `gen_ai.usage.input_tokens` and
+  `gen_ai.usage.output_tokens` over `llm` spans. Input tokens grow with the
+  chat context, so a rising average is a prompt that is getting heavy.
+- **Whether tools work.** An error rate over `llm_tool_call` spans: a failed
+  call carries error status and `tool.error` set to `1`.
+- **Per-call totals.** The `conversation` root carries `call.duration_seconds`,
+  `transcript.turn.count`, `tool.call.count` and `tool.failure.count`.
+- **What the agent actually did.** An LLM-judged metric created with traces
+  included can read each round's real prompt (`input`), its system
+  instructions, and every tool's arguments and results. That lets a judge
+  check the agent's answer against what its tools returned, which a
+  transcript alone cannot.
+
+Numbers that were never measured are missing rather than zero (see above), so
+averages and percentiles stay honest.
+
+## When a trace lands on the wrong simulation
+
+Read `coval.correlation.method`. On Pipecat it is on the `transport` span, on
+LiveKit it is on the `conversation` span next to a `simulation_id_received`
+event. It says which route supplied the ID: `websocket_header`, `sip_header`,
+`carrier_parameter`, `sip_participant_attribute`, `dispatch_metadata`, or
+`environment`. That usually points straight at the misconfigured end.
+
+A common one: `environment` when you expected `sip_header` means
+`COVAL_SIMULATION_ID` is still set from an earlier local run and is winning over
+the live call.
+
+## Not covered here
+
+Submitting audio with a conversation, so Coval can score speech as well as text,
+is not emitted today. Only the transcript is submitted.

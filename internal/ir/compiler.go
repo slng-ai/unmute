@@ -1,5 +1,11 @@
 package ir
 
+import (
+	"slices"
+
+	targetcap "github.com/slng-ai/unmute/internal/target"
+)
+
 // Agent is the resolved v1 package. References remain names so the graph is
 // acyclic and schema derivation does not recurse through agent handoffs.
 type Agent struct {
@@ -28,6 +34,32 @@ type Agent struct {
 
 type Tracing struct {
 	Provider string `json:"provider" yaml:"provider"`
+}
+
+// TracingProviders is the allowlist both Build and Validate read, so the two
+// cannot drift into disagreeing about which providers exist.
+var TracingProviders = []string{"coval", "langfuse"}
+
+func validTracingProvider(provider string) bool {
+	return slices.Contains(TracingProviders, provider)
+}
+
+// TracingSecrets is the env each provider needs at run time. It is the one place
+// the required-secret notes and the drivers read, so a new provider cannot ship
+// with its credentials missing from the compile report.
+var TracingSecrets = map[string][]string{
+	"coval":    {"COVAL_API_KEY"},
+	"langfuse": {"LANGFUSE_BASE_URL", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"},
+}
+
+// tracingCapability maps a provider onto the capability row that gates it, so a
+// target denies the provider the package actually named rather than whichever
+// one happened to be gated first.
+func tracingCapability(provider string) targetcap.Field {
+	if provider == "coval" {
+		return targetcap.FieldTracingCoval
+	}
+	return targetcap.FieldTracingLangfuse
 }
 
 // ModelKind is resolved from a model's reference site in Build (N15).

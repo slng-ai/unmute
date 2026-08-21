@@ -22,13 +22,14 @@ Use this prompt to start a fresh manual release sweep:
 > Watch the generated `build/<target>/dev.log` files while the tester speaks.
 > Inspect tool arguments, task transitions, errors, duplicate calls, and final
 > results. If the package opts into tracing and the tester supplied their own
-> Langfuse credentials, use their Langfuse project as extra evidence. Langfuse
-> is optional: never require access to a maintainer project, and never send a
-> user's traces or credentials there by default.
+> credentials, use their tracing project as extra evidence: a Langfuse project
+> for `provider: langfuse`, or the Coval simulation the call belongs to for
+> `provider: coval`. Tracing is optional: never require access to a maintainer
+> project, and never send a user's traces or credentials there by default.
 >
 > Traces can contain caller speech, model input and output, and tool arguments and results.
 > Use only fake identities and fake customer data for release tests. Use a
-> separate Langfuse project for the sweep.
+> separate project on the tracing provider for the sweep.
 >
 > When something fails, reproduce it, find the shared root cause, add the
 > smallest regression test, fix the shared compiler/runtime path, rebuild, and

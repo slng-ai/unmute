@@ -1371,3 +1371,57 @@ func findOutside(content, needle, allowed string) []string {
 	}
 	return hits
 }
+
+// The provider list is owned by Go (ir.TracingProviders), and the bundle and the
+// public guide restate it. Constitution III says a fact stated twice gets an
+// agreement test, so a provider added in Go without a matching doc edit fails
+// here rather than shipping a skill that has never heard of it.
+func TestTracingProvidersMatchTheCode(t *testing.T) {
+	surfaces := map[string]string{
+		"references/package.md":              bundleFile(t, "references/package.md"),
+		"references/deploy.md":               bundleFile(t, "references/deploy.md"),
+		"docs-site/reference/agent-yaml.mdx": trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
+		"docs-site/reference/secrets.mdx":    trackedFile(t, "docs-site/reference/secrets.mdx"),
+		"docs-site/tracing/overview.mdx":     trackedFile(t, "docs-site/tracing/overview.mdx"),
+	}
+	for name, content := range surfaces {
+		for _, provider := range ir.TracingProviders {
+			if !strings.Contains(content, provider) {
+				t.Errorf("%s does not name the tracing provider %q", name, provider)
+			}
+			// Naming the provider without naming what it needs leaves the reader
+			// to discover the missing variable at run time.
+			for _, secret := range ir.TracingSecrets[provider] {
+				if !strings.Contains(content, secret) {
+					t.Errorf("%s names %q without its required secret %q", name, provider, secret)
+				}
+			}
+		}
+	}
+}
+
+// Coval correlates a trace to a simulation, and the routes differ per target.
+// A reader who does not know the route cannot make tracing work, so each surface
+// that offers Coval has to say how the simulation ID arrives.
+func TestCovalCorrelationRoutesStayDocumented(t *testing.T) {
+	for name, content := range map[string]string{
+		"references/package.md":                                 bundleFile(t, "references/package.md"),
+		"docs-site/tracing/coval.mdx":                           trackedFile(t, "docs-site/tracing/coval.mdx"),
+		"internal/generate/templates/livekit_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/livekit_v1/README.md.tmpl"),
+		"internal/generate/templates/pipecat_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
+	} {
+		for _, fact := range []string{"X-Coval-Simulation-Id", "COVAL_SIMULATION_ID"} {
+			if !strings.Contains(content, fact) {
+				t.Errorf("%s does not state %q, so the reader cannot wire correlation", name, fact)
+			}
+		}
+	}
+	// LiveKit Cloud runs the customer's own token server, so the emitted runbook
+	// is the only place that can tell them what to forward.
+	livekitReadme := trackedFile(t, "internal/generate/templates/livekit_v1/README.md.tmpl")
+	for _, fact := range []string{"coval.simulation_id", "RoomAgentDispatch", "headers_to_attributes"} {
+		if !strings.Contains(livekitReadme, fact) {
+			t.Errorf("the LiveKit runbook does not tell the operator about %q", fact)
+		}
+	}
+}

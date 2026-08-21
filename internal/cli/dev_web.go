@@ -415,7 +415,7 @@ func devSessionHandler(provider ir.Provider, agentName, liveKitURL string, strea
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			token, err := mintLiveKitToken(liveKitDevKey, liveKitDevSecret, room, identity, agentName, time.Now(), 30*time.Minute)
+			token, err := mintLiveKitToken(liveKitDevKey, liveKitDevSecret, room, identity, agentName, covalDispatchMetadata(r), time.Now(), 30*time.Minute)
 			if err != nil {
 				http.Error(w, fmt.Sprintf("mint token: %v", err), http.StatusInternalServerError)
 				return
@@ -496,6 +496,29 @@ func writeDevEvent(w http.ResponseWriter, ev devEvent) bool {
 	}
 	_, err = fmt.Fprintf(w, "id: %d\ndata: %s\n\n", ev.Seq, payload)
 	return err == nil
+}
+
+// covalSimulationHeader is the header Coval sets on a token request when it
+// drives a LiveKit agent. A deployed agent uses the operator's own token server,
+// so this handler is only the local half; the emitted README states what a
+// production token server has to forward.
+const covalSimulationHeader = "X-Coval-Simulation-Id"
+
+// covalDispatchMetadata turns a Coval simulation header on the token request
+// into the dispatch metadata the emitted agent reads back as ctx.job.metadata.
+// Empty when the header is absent, which is every ordinary browser session.
+func covalDispatchMetadata(r *http.Request) string {
+	simulation := r.Header.Get(covalSimulationHeader)
+	if simulation == "" {
+		return ""
+	}
+	// The key matches the participant attribute the emitted inbound trunk maps,
+	// so the agent's resolver reads one name whichever route the call took.
+	metadata, err := json.Marshal(map[string]string{"coval.simulation_id": simulation})
+	if err != nil {
+		return ""
+	}
+	return string(metadata)
 }
 
 // readyWatcher tees a stream to w while watching for a marker line; it fires

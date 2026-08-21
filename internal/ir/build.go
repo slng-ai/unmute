@@ -33,8 +33,8 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	if _, ok := pkg.Agent.Agents[pkg.Agent.EntryAgent]; !ok {
 		return nil, missing(pkg, "agent.yaml", "entry_agent", pkg.Agent.EntryAgent)
 	}
-	if pkg.Agent.Tracing != nil && pkg.Agent.Tracing.Provider != "langfuse" {
-		return nil, fmt.Errorf("%s: unsupported tracing provider %q; supported provider: langfuse", pkg.Location("agent.yaml", "tracing:"), pkg.Agent.Tracing.Provider)
+	if pkg.Agent.Tracing != nil && !validTracingProvider(pkg.Agent.Tracing.Provider) {
+		return nil, fmt.Errorf("%s: unsupported tracing provider %q; supported providers: %s", pkg.Location("agent.yaml", "tracing:"), pkg.Agent.Tracing.Provider, strings.Join(TracingProviders, ", "))
 	}
 
 	models, err := buildModels(pkg)

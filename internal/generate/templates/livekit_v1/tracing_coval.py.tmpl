@@ -1,0 +1,1116 @@
+"""Generated Coval tracing for {{.Project}}.
+
+Coval reads a conversation as `conversation > turn > stt | vad | llm | tts`,
+where one turn is one exchange. LiveKit's own spans are not shaped that way:
+`user_turn` and `agent_turn` are siblings under `agent_session`, so the caller's
+speech can never sit inside the reply it produced, and `agent_turn` is one
+generation rather than one exchange, so a call that runs tools opens several of
+them per exchange. A rename cannot fix either, because a span's parent is fixed
+when it starts.
+
+So this module does what Coval's LiveKit guidance says to do: it builds Coval's
+spans itself from the session's own events, and leaves LiveKit's telemetry
+switched off. `livekit.agents.telemetry.set_tracer_provider` is deliberately not
+called, which keeps LiveKit's ~110 internal spans per call out of the trace. The
+numbers on every span still come from LiveKit's own measurements, carried on
+those events.
+
+Each turn is written out when the next one opens, so its spans get real start
+and end times taken from the metrics LiveKit reports rather than from whenever a
+callback happened to run.
+
+Spans are held until the call's Coval simulation ID arrives, then flushed. A
+browser session started by `unmute dev` has no Coval caller, so it holds a few
+spans, exports nothing, and runs normally.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import threading
+import time
+import urllib.error
+import urllib.request
+from collections import deque
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+
+from livekit.agents import AgentSession, JobContext
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
+from opentelemetry.trace import Span, Status, StatusCode
+from opentelemetry.util.types import AttributeValue
+
+logger = logging.getLogger("coval_tracing")
+
+TRACE_NAME = {{pyq .EntryAgent}} + "-" + {{pyq .Project}}
+
+
+COVAL_TRACES_ENDPOINT = "https://api.coval.dev/v1/traces"
+
+# Coval puts the simulation ID on the inbound call as a SIP header of this name.
+SIMULATION_HEADER = "x-coval-simulation-id"
+
+# Set by Coval on the OTLP request, not on the call. Different name on purpose.
+SIMULATION_EXPORT_HEADER = "X-Simulation-Id"
+
+# The other way a trace can be correlated. A call no simulation placed is
+# submitted as a Coval conversation once it ends, and its spans go out against
+# the conversation ID that submit returns. Coval accepts exactly one of the two
+# headers, never both.
+COVAL_CONVERSATIONS_ENDPOINT = "https://api.coval.dev/v1/conversations:submit"
+CONVERSATION_EXPORT_HEADER = "X-Conversation-Id"
+
+# Where the ID shows up as a participant attribute. The first is the explicit
+# mapping the emitted inbound trunk configures. The second is what LiveKit writes
+# when a trunk turns on blanket X- header mapping instead; LiveKit lowercases the
+# header name, so the key is lowercase even though the SIP header is not.
+SIMULATION_ATTRIBUTES = ("coval.simulation_id", "sip.h." + SIMULATION_HEADER)
+
+MAX_PREACTIVATION_SPANS = 1024
+
+# Coval's docs require this exact export timeout.
+EXPORT_TIMEOUT_SECONDS = 30
+
+# Transcripts, prompts and tool payloads are free text, so they are cut before
+# they go out. Coval asks for bounded attributes and counts rather than whole
+# prompts, and an oversized batch is rejected outright at 413.
+MAX_TEXT_CHARS = 1024
+
+# The prompt gets its own, larger budget, and it is spent on the newest messages
+# rather than the oldest: a chat context grows all call long and rides along on
+# every model call, so the whole history on every span would be the largest thing
+# in the trace by far. What was cut is still counted.
+MAX_PROMPT_CHARS = 8192
+
+# What LiveKit puts in a workflow task group's instructions in place of a prompt.
+PLACEHOLDER_INSTRUCTIONS = "*empty*"
+
+_router: "_CovalRouter | None" = None
+_recorder: "_Conversation | None" = None
+
+
+# --------------------------------------------------------------------------
+# Finding the simulation this call belongs to
+# --------------------------------------------------------------------------
+
+
+def _simulation_from_attributes(attributes) -> str | None:
+    if not attributes:
+        return None
+    for key in SIMULATION_ATTRIBUTES:
+        value = attributes.get(key)
+        if value:
+            return str(value)
+    # An operator can map the header to any attribute name they like, so fall
+    # back to matching the header itself rather than failing on a valid trunk.
+    for key, value in attributes.items():
+        if value and str(key).lower().endswith(SIMULATION_HEADER):
+            return str(value)
+    return None
+
+
+def resolve_simulation_id(ctx: JobContext) -> tuple[str | None, str]:
+    """Find the Coval simulation ID for this job, and say where it came from.
+
+    Three sources, in the order they become available:
+
+    1. the dispatch metadata, which is what a token server forwards when Coval
+       drives a LiveKit agent through its token endpoint,
+    2. ``COVAL_SIMULATION_ID`` in the environment, for a local run,
+    3. the SIP participant's attributes, checked separately as participants join
+       because a SIP participant appears after the job starts.
+
+    Returns ``(None, "none")`` when no Coval simulation owns this call.
+    """
+    raw = getattr(ctx.job, "metadata", "") or ""
+    if raw:
+        try:
+            metadata = json.loads(raw)
+        except (TypeError, ValueError):
+            metadata = {}
+        if isinstance(metadata, dict):
+            found = _simulation_from_attributes(metadata)
+            if found:
+                return found, "dispatch_metadata"
+
+    found = os.environ.get("COVAL_SIMULATION_ID")
+    if found:
+        return found, "environment"
+
+    for participant in getattr(ctx.room, "remote_participants", {}).values():
+        found = _simulation_from_attributes(getattr(participant, "attributes", None))
+        if found:
+            return found, "sip_participant_attribute"
+    return None, "none"
+
+
+# --------------------------------------------------------------------------
+# Holding spans until that simulation is known
+# --------------------------------------------------------------------------
+
+
+class _CovalRouter(SpanExporter):
+    """Hold spans until the call's simulation ID is known, then export them.
+
+    ponytail: one call per process, which is how a LiveKit worker runs a job.
+    If that ever changes, key the buffer by job id and stamp that key on each
+    span as it starts.
+    """
+
+    def __init__(self, api_key: str):
+        self._api_key = api_key
+        self._lock = threading.RLock()
+        self._buffer: deque[ReadableSpan] = deque(maxlen=MAX_PREACTIVATION_SPANS)
+        self._dropped = 0
+        self._exporter: OTLPSpanExporter | None = None
+        self.simulation_id: str | None = None
+
+    @property
+    def active(self) -> bool:
+        return self._exporter is not None
+
+    def held(self) -> list[ReadableSpan]:
+        """The spans waiting for a correlation ID, oldest first."""
+        with self._lock:
+            return list(self._buffer)
+
+    def activate(self, correlation_id: str, header: str = SIMULATION_EXPORT_HEADER) -> None:
+        with self._lock:
+            if self.simulation_id == correlation_id:
+                return
+            self.simulation_id = correlation_id
+            self._exporter = OTLPSpanExporter(
+                endpoint=COVAL_TRACES_ENDPOINT,
+                headers={"x-api-key": self._api_key, header: correlation_id},
+                timeout=EXPORT_TIMEOUT_SECONDS,
+            )
+            held = list(self._buffer)
+            self._buffer.clear()
+            dropped = self._dropped
+            self._dropped = 0
+            exporter = self._exporter
+        if dropped:
+            logger.warning("Dropped %d span(s) before the correlation ID arrived", dropped)
+        if held:
+            logger.info("Flushing %d held span(s) to Coval", len(held))
+            exporter.export(held)
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        with self._lock:
+            exporter = self._exporter
+            if exporter is None:
+                for span in spans:
+                    if len(self._buffer) == MAX_PREACTIVATION_SPANS:
+                        self._dropped += 1
+                    self._buffer.append(span)
+                return SpanExportResult.SUCCESS
+        return exporter.export(spans)
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        with self._lock:
+            exporter = self._exporter
+        return exporter.force_flush(timeout_millis) if exporter else True
+
+    def shutdown(self) -> None:
+        with self._lock:
+            exporter = self._exporter
+            self._exporter = None
+            self._buffer.clear()
+        if exporter:
+            exporter.shutdown()
+
+
+def submit_conversation(transcript: list[dict], session_id: str) -> str | None:
+    """Register this call with Coval as a conversation, and return its ID.
+
+    This is the route for a call no simulation placed: a local `unmute dev`
+    run, or production traffic. Coval needs the call to exist before spans can
+    be attached to it, so the transcript is submitted first and the ID it
+    returns is what the spans are exported against.
+    """
+    api_key = os.getenv("COVAL_API_KEY", "")
+    if not api_key or not transcript:
+        return None
+    payload = {
+        "transcript": transcript,
+        "metadata": {"agent": TRACE_NAME, "source": "unmute", "session_id": session_id},
+        "tags": [TRACE_NAME],
+    }
+    if session_id:
+        payload["external_conversation_id"] = session_id
+    request = urllib.request.Request(
+        COVAL_CONVERSATIONS_ENDPOINT,
+        data=json.dumps(payload).encode(),
+        headers={"x-api-key": api_key, "content-type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=EXPORT_TIMEOUT_SECONDS) as response:
+            body = json.load(response)
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        # A trace is not worth failing a call over, on this path least of all:
+        # the call is already over by the time this runs.
+        logger.warning("Could not register this call with Coval: %s", error)
+        return None
+    conversation_id = str((body.get("conversation") or {}).get("conversation_id") or "")
+    return conversation_id or None
+
+
+# --------------------------------------------------------------------------
+# What one turn is made of
+# --------------------------------------------------------------------------
+
+
+def _clip_to(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _clip(value: object) -> str:
+    return _clip_to("" if value is None else str(value), MAX_TEXT_CHARS)
+
+
+def _is_latency(value: object) -> bool:
+    """A latency Coval can average, rather than a stand-in for one.
+
+    A streaming provider reports a delay of exactly zero, because there is no
+    per-request wait to measure. Writing that to `metrics.ttfb` would not leave
+    the metric empty, it would fill it with zeros and read as an agent that
+    answers instantly, so a non-positive figure is left off. bool is an int in
+    Python, and a flag here would be a nonsense duration.
+    """
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+
+
+def _ns(seconds: float) -> int:
+    return int(seconds * 1_000_000_000)
+
+
+def _role(items: list, index: int) -> str:
+    item = items[index]
+    return str(item.get("role", "")) if isinstance(item, dict) else ""
+
+
+def _text_of(item: dict) -> str:
+    content = item.get("content")
+    if isinstance(content, list):
+        return " ".join(str(part) for part in content if isinstance(part, str))
+    return str(content or "")
+
+
+def _prompt(agent) -> tuple[str, str, int, int]:
+    """What this agent would send the model: its system prompt and its history.
+
+    Returns the system prompt, the messages as JSON, how many there were, and
+    how many fit in the budget. The newest messages are kept, because a chat
+    context grows all call long and the end of it is what a failing turn is read
+    against. System messages are kept whatever their age: they are the prompt,
+    and a workflow task keeps its prompt in the context rather than on the agent.
+    """
+    chat_ctx = getattr(agent, "chat_ctx", None)
+    to_dict = getattr(chat_ctx, "to_dict", None)
+    if to_dict is None:
+        return "", "", 0, 0
+    try:
+        items = to_dict(
+            exclude_image=True,
+            exclude_audio=True,
+            exclude_timestamp=True,
+            exclude_metrics=True,
+        ).get("items", [])
+    except (TypeError, ValueError):
+        return "", "", 0, 0
+
+    # Positions, not the dicts themselves: two identical utterances in one call
+    # are ordinary, and comparing by value would confuse them for each other.
+    system = [i for i, item in enumerate(items) if _role(items, i) == "system"]
+    # Three places a prompt can be, in the order they are authoritative. A plain
+    # Agent carries it as a str subclass. A workflow task group carries the
+    # literal placeholder LiveKit fills in for it, and reconfigures itself
+    # through `agent_config_update` entries in the context, so the newest of
+    # those is the prompt actually in force. Failing both, the system message.
+    instructions = str(getattr(agent, "instructions", "") or "")
+    if instructions in ("", PLACEHOLDER_INSTRUCTIONS):
+        instructions = ""
+        for item in reversed(items):
+            if isinstance(item, dict) and item.get("type") == "agent_config_update":
+                instructions = str(item.get("instructions") or "")
+                if instructions:
+                    break
+    if not instructions and system:
+        instructions = "\n\n".join(_text_of(items[i]) for i in system)
+
+    kept = set(system)
+    spent = sum(len(json.dumps(items[i], default=str)) for i in system)
+    for i in range(len(items) - 1, -1, -1):
+        if i in kept:
+            continue
+        blob = json.dumps(items[i], default=str)
+        if kept and spent + len(blob) > MAX_PROMPT_CHARS:
+            break
+        kept.add(i)
+        spent += len(blob)
+    # Back into the order the model saw them.
+    messages = [items[i] for i in sorted(kept)]
+    return (
+        _clip_to(instructions, MAX_PROMPT_CHARS),
+        _clip_to(json.dumps(messages, default=str), MAX_PROMPT_CHARS),
+        len(items),
+        len(messages),
+    )
+
+
+def _tool_names(agent) -> list[str]:
+    names = []
+    for tool in getattr(agent, "tools", None) or []:
+        name = getattr(tool, "name", None) or getattr(tool, "__name__", None)
+        if name:
+            names.append(str(name))
+    return sorted(names)
+
+
+@dataclass
+class _Round:
+    """One LLM call, and the tools it asked for."""
+
+    started: float
+    ended: float
+    ttft: float | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cached_tokens: int = 0
+    model: str = ""
+    provider: str = ""
+    cancelled: bool = False
+    request_id: str = ""
+    agent_label: str = ""
+    instructions: str = ""
+    prompt: str = ""
+    prompt_messages: int = 0
+    prompt_messages_traced: int = 0
+    offered_tools: list[str] = field(default_factory=list)
+    tools: list[dict] = field(default_factory=list)
+
+
+@dataclass
+class _Speech:
+    """One TTS request."""
+
+    started: float
+    ended: float
+    ttfb: float | None = None
+    request_id: str = ""
+    characters: int = 0
+    audio_seconds: float = 0.0
+    model: str = ""
+    provider: str = ""
+
+
+@dataclass
+class _Heard:
+    """One transcript LiveKit committed for the caller.
+
+    A single spoken sentence can produce several of these when the caller
+    pauses, so a turn holds a list of them rather than one string.
+    """
+
+    text: str
+    at: float
+    confidence: float | None = None
+    speech_started: float | None = None
+    speech_stopped: float | None = None
+    transcription_delay: float | None = None
+    end_of_turn_delay: float | None = None
+
+
+@dataclass
+class _Turn:
+    index: int
+    started: float
+    replied_at: float | None = None
+    heard: list[_Heard] = field(default_factory=list)
+    stt_model: str = ""
+    stt_provider: str = ""
+    stt_streamed: bool = False
+    stt_audio_seconds: float = 0.0
+    agent_transcript: str = ""
+    e2e_latency: float | None = None
+    interrupted: bool = False
+    handoffs: list[str] = field(default_factory=list)
+    rounds: list[_Round] = field(default_factory=list)
+    speeches: list[_Speech] = field(default_factory=list)
+
+    def said(self) -> str:
+        return " ".join(heard.text for heard in self.heard if heard.text)
+
+
+# --------------------------------------------------------------------------
+# Turning that into Coval's spans
+# --------------------------------------------------------------------------
+
+
+class _Conversation:
+    """Records what happens on the session, and writes Coval's span tree.
+
+    A turn is written when the next one opens, and the last one when the session
+    closes. Waiting is what makes the timings honest: LiveKit reports the length
+    of an LLM or TTS request after it finishes, so a span started when a callback
+    fires would be the wrong shape. Written at the end, each span gets the start
+    and end LiveKit actually measured.
+    """
+
+    def __init__(self, provider: TracerProvider, session: AgentSession, session_id: str) -> None:
+        self._tracer = provider.get_tracer("unmute.coval")
+        self._session = session
+        self._last_agent = None
+        self._started = time.time()
+        self._root: Span = self._tracer.start_span(
+            "conversation", start_time=_ns(self._started)
+        )
+        self._root_ctx = trace.set_span_in_context(self._root)
+        self._session_id = session_id
+        self._turn: _Turn | None = None
+        self._turns = 0
+        self._tool_calls = 0
+        self._tool_failures = 0
+        self._user_turns = 0
+        self._agent_turns = 0
+        self._messages = 0
+        self._closed = False
+        self._transcript: list[dict] = []
+
+    # -- recording -------------------------------------------------------
+
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    def transcript(self) -> list[dict]:
+        """What was said, in order, as Coval's conversation submit wants it."""
+        return list(self._transcript)
+
+    def conversation_found(self, conversation_id: str) -> None:
+        """Record that this call was registered as a Coval conversation.
+
+        Its own span rather than an attribute on the root, because by now the
+        root may already have ended: the session fires its close event before
+        the job runs its shutdown callbacks, and the OpenTelemetry SDK ignores
+        attributes written to an ended span. A new child is always recorded.
+        This is the same `transport` span the Pipecat target writes, so the
+        route reads the same way on both.
+        """
+        at = time.time()
+        self._child(
+            "transport",
+            self._root,
+            at,
+            at,
+            {
+                "coval.conversation_id": conversation_id,
+                "coval.correlation.method": "conversation_submit",
+                "agent.name": TRACE_NAME,
+                "session.id": self._session_id,
+            },
+        )
+
+    def simulation_found(self, simulation_id: str, route: str, source: str) -> None:
+        self._root.set_attribute("coval.simulation_id", simulation_id)
+        self._root.set_attribute("coval.correlation.method", route)
+        self._root.add_event(
+            "simulation_id_received",
+            {"coval.correlation.method": route, "coval.correlation.source": source},
+        )
+
+    def _agent(self):
+        """The agent holding the floor.
+
+        LiveKit raises while it swaps agents, and a round's metrics can land in
+        that window, so the last one seen stands in rather than the round
+        arriving with no prompt and no name at all.
+        """
+        try:
+            self._last_agent = self._session.current_agent
+        except (AttributeError, RuntimeError):
+            pass
+        return self._last_agent
+
+    def _current(self, at: float) -> _Turn:
+        if self._turn is None:
+            self._turns += 1
+            self._turn = _Turn(index=self._turns, started=at)
+        return self._turn
+
+    def open_turn(self, at: float) -> _Turn:
+        previous, self._turn = self._turn, None
+        self._turns += 1
+        turn = _Turn(index=self._turns, started=at)
+        if previous is not None:
+            # Work for this exchange can finish before the user message that
+            # names it arrives: preemptive generation starts the model while the
+            # caller is still speaking, and LiveKit commits the user message
+            # only once the final transcript lands, up to a second later. So
+            # anything the previous turn collected after this caller started
+            # speaking was early work for this exchange, and it moves here
+            # before the previous turn is written.
+            turn.rounds = [r for r in previous.rounds if r.started >= at]
+            previous.rounds = [r for r in previous.rounds if r.started < at]
+            turn.speeches = [sp for sp in previous.speeches if sp.started >= at]
+            previous.speeches = [sp for sp in previous.speeches if sp.started < at]
+            self._write_turn(previous)
+        self._turn = turn
+        return turn
+
+    def item_added(self, item) -> None:
+        kind = getattr(item, "type", "")
+        at = float(getattr(item, "created_at", 0.0) or time.time())
+        if kind == "agent_handoff":
+            self._current(at).handoffs.append(str(getattr(item, "new_agent_id", "") or ""))
+            return
+        if kind != "message":
+            return
+
+        self._messages += 1
+        metrics = dict(getattr(item, "metrics", None) or {})
+        role = getattr(item, "role", "")
+        if role == "user":
+            # A user message starts the exchange that will hold the reply to it.
+            # LiveKit commits one per pause, so a single spoken sentence can
+            # arrive as several; those belong to the same exchange until the
+            # agent has actually answered one of them.
+            started = float(metrics.get("started_speaking_at") or at)
+            turn = self._turn
+            if turn is None or turn.speeches or turn.agent_transcript:
+                turn = self.open_turn(started)
+            elif not turn.heard:
+                # The turn already exists because an early metric opened it, so
+                # its start is that metric's stamp. The caller spoke first.
+                turn.started = min(turn.started, started)
+            turn.heard.append(
+                _Heard(
+                    text=_clip(item.text_content),
+                    at=at,
+                    confidence=getattr(item, "transcript_confidence", None),
+                    speech_started=metrics.get("started_speaking_at"),
+                    speech_stopped=metrics.get("stopped_speaking_at"),
+                    transcription_delay=metrics.get("transcription_delay"),
+                    end_of_turn_delay=metrics.get("end_of_turn_delay"),
+                )
+            )
+            return
+
+        if role == "assistant":
+            turn = self._current(at)
+            turn.agent_transcript = _clip(item.text_content)
+            turn.interrupted = bool(getattr(item, "interrupted", False))
+            turn.e2e_latency = metrics.get("e2e_latency")
+            turn.replied_at = at
+
+    def metrics(self, m) -> None:
+        kind = getattr(m, "type", "")
+        stamp = float(getattr(m, "timestamp", 0.0) or time.time())
+        duration = float(getattr(m, "duration", 0.0) or 0.0)
+        meta = getattr(m, "metadata", None)
+        model = str(getattr(meta, "model_name", "") or "")
+        provider = str(getattr(meta, "model_provider", "") or "")
+        turn = self._current(stamp)
+
+        if kind == "llm_metrics":
+            # Snapshotted here, not earlier, because here is where it is right:
+            # LiveKit appends the reply and any tool results to the chat context
+            # after the request that produced them has finished, so what the
+            # agent is holding at this moment is what the round was asked.
+            agent = self._agent()
+            instructions, prompt, total, traced = (
+                _prompt(agent) if agent is not None else ("", "", 0, 0)
+            )
+            turn.rounds.append(
+                _Round(
+                    started=stamp - duration,
+                    ended=stamp,
+                    ttft=getattr(m, "ttft", None),
+                    input_tokens=int(getattr(m, "prompt_tokens", 0) or 0),
+                    output_tokens=int(getattr(m, "completion_tokens", 0) or 0),
+                    total_tokens=int(getattr(m, "total_tokens", 0) or 0),
+                    cached_tokens=int(getattr(m, "prompt_cached_tokens", 0) or 0),
+                    model=model,
+                    provider=provider,
+                    cancelled=bool(getattr(m, "cancelled", False)),
+                    request_id=str(getattr(m, "request_id", "") or ""),
+                    agent_label=str(getattr(agent, "label", "") or "") if agent else "",
+                    instructions=instructions,
+                    prompt=prompt,
+                    prompt_messages=total,
+                    prompt_messages_traced=traced,
+                    offered_tools=_tool_names(agent) if agent is not None else [],
+                )
+            )
+        elif kind == "tts_metrics":
+            turn.speeches.append(
+                _Speech(
+                    started=stamp - duration,
+                    ended=stamp,
+                    ttfb=getattr(m, "ttfb", None),
+                    request_id=str(getattr(m, "request_id", "") or ""),
+                    characters=int(getattr(m, "characters_count", 0) or 0),
+                    audio_seconds=float(getattr(m, "audio_duration", 0.0) or 0.0),
+                    model=model,
+                    provider=provider,
+                )
+            )
+        elif kind == "stt_metrics":
+            turn.stt_model = model or turn.stt_model
+            turn.stt_provider = provider or turn.stt_provider
+            turn.stt_streamed = bool(getattr(m, "streamed", False))
+            turn.stt_audio_seconds = float(getattr(m, "audio_duration", 0.0) or 0.0)
+        elif kind == "eou_metrics" and turn.heard:
+            # The user message carries the same two figures, but the EOU record
+            # arrives whether or not a message was committed.
+            heard = turn.heard[-1]
+            if heard.transcription_delay is None:
+                heard.transcription_delay = getattr(m, "transcription_delay", None)
+            if heard.end_of_turn_delay is None:
+                heard.end_of_turn_delay = getattr(m, "end_of_utterance_delay", None)
+
+    def tools_executed(self, ev) -> None:
+        at = float(getattr(ev, "created_at", 0.0) or time.time())
+        turn = self._current(at)
+        # zipped() pairs each call with its result. Older builds have only the
+        # calls, in which case the tool is recorded without an outcome rather
+        # than not recorded at all.
+        if hasattr(ev, "zipped"):
+            pairs = ev.zipped()
+        else:
+            pairs = [(call, None) for call in getattr(ev, "function_calls", [])]
+        # Tools run after the LLM that asked for them, so the round they belong
+        # to is the last one recorded, and its end is where they start.
+        started = turn.rounds[-1].ended if turn.rounds else at
+        for call, output in pairs:
+            failed = bool(getattr(output, "is_error", False))
+            self._tool_calls += 1
+            if failed:
+                self._tool_failures += 1
+            result = getattr(output, "output", None)
+            record = {
+                "name": str(getattr(call, "name", "") or ""),
+                "call_id": str(getattr(call, "call_id", "") or ""),
+                "arguments": _clip(getattr(call, "arguments", "")),
+                "failed": failed,
+                "output": _clip(result) if result is not None else "",
+                "output_chars": len(str(result)) if result is not None else 0,
+                "started": started,
+                "ended": at,
+            }
+            if turn.rounds:
+                turn.rounds[-1].tools.append(record)
+            else:
+                turn.rounds.append(
+                    _Round(started=started, ended=at, tools=[record])
+                )
+
+    def failed(self, ev) -> None:
+        error = getattr(ev, "error", None)
+        self._root.add_event(
+            "session_error",
+            {
+                "error.type": type(error).__name__ if error is not None else "unknown",
+                "error.message": _clip(getattr(error, "message", None) or error),
+            },
+        )
+        self._root.set_status(Status(StatusCode.ERROR, "session reported an error"))
+
+    # -- writing ---------------------------------------------------------
+
+    def flush_turn(self) -> None:
+        turn, self._turn = self._turn, None
+        if turn is None:
+            return
+        self._write_turn(turn)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self.flush_turn()
+        ended = time.time()
+        self._root.set_attributes(
+            {
+                "session.id": self._session_id,
+                "agent.name": TRACE_NAME,
+                "call.duration_seconds": round(ended - self._started, 4),
+                "transcript.turn.count": self._turns,
+                "transcript.user_turn.count": self._user_turns,
+                "transcript.agent_turn.count": self._agent_turns,
+                "tool.call.count": self._tool_calls,
+                "tool.failure.count": self._tool_failures,
+            }
+        )
+        self._root.end(end_time=_ns(ended))
+
+    def _child(self, name: str, parent, started: float, ended: float, attributes: dict) -> Span:
+        span = self._tracer.start_span(
+            name,
+            context=trace.set_span_in_context(parent),
+            start_time=_ns(started),
+            attributes={k: v for k, v in attributes.items() if v is not None and v != "" and v != []},
+        )
+        span.end(end_time=_ns(max(ended, started)))
+        return span
+
+    def _write_turn(self, turn: _Turn) -> None:
+        # Counted per turn rather than per message, because LiveKit commits one
+        # message per pause and several of them can be the same sentence.
+        if turn.heard:
+            self._user_turns += 1
+        if turn.agent_transcript:
+            self._agent_turns += 1
+        # Kept as the turn is written, because this is the only moment both
+        # sides of the exchange are known and nothing has been discarded yet.
+        # A call no simulation claimed is registered with Coval from this.
+        for role, text in (("user", turn.said()), ("assistant", turn.agent_transcript)):
+            if text.strip():
+                self._transcript.append({"role": role, "content": text.strip()})
+        # The turn starts when its first piece of work starts. A child must
+        # never fall outside its parent, and a greeting's synthesis can begin
+        # before LiveKit creates the message item for it.
+        started = min(
+            [turn.started]
+            + [h.speech_started or h.speech_stopped or h.at for h in turn.heard]
+            + [r.started for r in turn.rounds]
+            + [sp.started for sp in turn.speeches]
+        )
+        span = self._tracer.start_span(
+            "turn",
+            context=self._root_ctx,
+            start_time=_ns(started),
+            attributes={
+                "turn.index": turn.index,
+                "turn.user_transcript": _clip(turn.said()),
+                "turn.agent_transcript": turn.agent_transcript,
+                "turn.interrupted": 1 if turn.interrupted else 0,
+                "turn.tool.call.count": sum(len(r.tools) for r in turn.rounds),
+            },
+        )
+        if _is_latency(turn.e2e_latency):
+            span.set_attribute("metrics.e2e_latency", float(turn.e2e_latency))
+        # No second latency of our own is written next to it. LiveKit computes
+        # e2e_latency as the agent's first audio minus the caller's last speech,
+        # from the same optional VAD marks any measurement here would need, so a
+        # hand-rolled one would be the same number read less accurately. The gap
+        # is visible in the waterfall regardless: the turn holds the stt span
+        # that ends it and the tts span that answers it.
+        for handoff in turn.handoffs:
+            span.add_event("agent_handoff", {"agent.name": handoff})
+
+        ends: list[float] = [started]
+        if turn.replied_at is not None:
+            ends.append(turn.replied_at)
+        for heard in turn.heard:
+            ends.append(self._write_stt(turn, heard, span))
+            vad_end = self._write_vad(heard, span)
+            if vad_end is not None:
+                ends.append(vad_end)
+        reply = turn.rounds[-1] if turn.rounds else None
+        for round_ in turn.rounds:
+            ends.append(self._write_round(turn, round_, span, reply=round_ is reply))
+        first_speech = True
+        for speech in turn.speeches:
+            self._write_tts(turn, speech, span, first_speech)
+            ends.append(speech.ended)
+            first_speech = False
+
+        # The turn ends when its last piece of work ends. A turn is only
+        # written when the next one opens, and the silence between the reply
+        # and the next utterance belongs to no exchange, so the flush moment
+        # must never become the end stamp.
+        span.end(end_time=_ns(max(ends)))
+
+    def _write_stt(self, turn: _Turn, heard: _Heard, parent: Span) -> float:
+        # The window the transcriber is answerable for: a streaming transcriber
+        # works the whole time the caller speaks, and the transcript lands one
+        # transcription delay after they stop. Falling back to when the
+        # transcript was committed keeps the span honest when LiveKit measured
+        # no window at all.
+        stopped = heard.speech_stopped or heard.speech_started or heard.at
+        started = heard.speech_started or stopped
+        delay = heard.transcription_delay
+        ended = stopped + float(delay) if _is_latency(delay) else max(heard.at, stopped)
+        attributes: dict[str, AttributeValue] = {
+            "transcript": heard.text,
+            "stt.transcription_delay": float(delay) if delay is not None else None,
+            "stt.end_of_turn_delay": (
+                float(heard.end_of_turn_delay) if heard.end_of_turn_delay is not None else None
+            ),
+            "stt.streamed": 1 if turn.stt_streamed else 0,
+            "stt.audio_duration": turn.stt_audio_seconds or None,
+            "gen_ai.request.model": turn.stt_model,
+            "stt.providerName": turn.stt_provider,
+        }
+        if heard.confidence is not None:
+            attributes["stt.confidence"] = float(heard.confidence)
+        # A streaming transcriber has no per-request wait, so it reports exactly
+        # zero. Coval averages metrics.ttfb, and a zero there reads as an instant
+        # transcript rather than as no measurement, so it is left off.
+        if _is_latency(delay):
+            attributes["metrics.ttfb"] = float(delay)
+        span = self._child("stt", parent, started, ended, attributes)
+        if turn.stt_provider:
+            self._child(
+                "stt.provider." + turn.stt_provider.lower(),
+                span,
+                started,
+                ended,
+                {
+                    "stt.providerName": turn.stt_provider,
+                    "metrics.ttfb": float(delay) if _is_latency(delay) else None,
+                    "stt.confidence": (
+                        float(heard.confidence) if heard.confidence is not None else None
+                    ),
+                },
+            )
+        return ended
+
+    def _write_vad(self, heard: _Heard, parent: Span) -> float | None:
+        delay = heard.end_of_turn_delay
+        if not _is_latency(delay):
+            return None
+        started = heard.speech_stopped or heard.at
+        ended = started + float(delay)
+        self._child(
+            "vad",
+            parent,
+            started,
+            ended,
+            {
+                "vad.end_of_turn_delay": float(delay),
+                "metrics.ttfb": float(delay),
+            },
+        )
+        return ended
+
+    def _write_round(self, turn: _Turn, round_: _Round, parent: Span, reply: bool) -> float:
+        # Coval only ever sees "stop" or "tool_calls" here. LiveKit's metrics do
+        # not surface "length" or "content_filter", and guessing at them would be
+        # worse than leaving the two that are known to be true.
+        attributes: dict[str, AttributeValue] = {
+            "llm.finish_reason": "tool_calls" if round_.tools else "stop",
+            "gen_ai.request.model": round_.model,
+            "gen_ai.provider.name": round_.provider,
+            "gen_ai.operation.name": "chat",
+            "gen_ai.response.id": round_.request_id,
+            # What the model was actually working from. The system prompt and
+            # the message history are the two things a failing turn is read
+            # against, and neither can be reconstructed from a transcript once
+            # handoffs move the agent between prompts.
+            #
+            # The names are Pipecat's, deliberately. Pipecat's own tracing calls
+            # these `input`, `output`, `tools` and `tool_count`, and a package
+            # compiles to both targets, so one vocabulary means a Coval trace
+            # metric or judge prompt written once reads either target.
+            "gen_ai.system_instructions": round_.instructions,
+            "input": round_.prompt,
+            "tools": round_.offered_tools,
+            "tool_count": len(round_.offered_tools),
+            "agent.label": round_.agent_label,
+            "prompt.message_count": round_.prompt_messages,
+            "prompt.messages_traced": round_.prompt_messages_traced,
+            "llm.cancelled": 1 if round_.cancelled else 0,
+        }
+        # Usage is reported only when there was some. A round LiveKit reported no
+        # usage for is one it did not measure, and four zeros would read as a
+        # free request rather than as no measurement, the same way a zero
+        # latency would.
+        if round_.total_tokens or round_.input_tokens or round_.output_tokens:
+            attributes.update(
+                {
+                    "gen_ai.usage.input_tokens": round_.input_tokens,
+                    "gen_ai.usage.output_tokens": round_.output_tokens,
+                    "gen_ai.usage.total_tokens": round_.total_tokens,
+                    "gen_ai.usage.input_cached_tokens": round_.cached_tokens,
+                }
+            )
+        # Only the round that ends the turn produced the spoken reply. Earlier
+        # rounds either answered with tool calls, which sit on their
+        # llm_tool_call children, or were superseded, the way a preemptive
+        # generation or a pre-handoff answer is, and stamping the reply on
+        # those would credit them with words they never produced.
+        if reply and not round_.tools and turn.agent_transcript:
+            attributes["output"] = turn.agent_transcript
+            attributes["response.length"] = len(turn.agent_transcript)
+        if _is_latency(round_.ttft):
+            attributes["metrics.ttfb"] = float(round_.ttft)
+        # Tools run after the model asks for them, so the round's span stretches
+        # over its tool children rather than letting a child end after its
+        # parent. The request itself still reads from metrics.ttfb and the
+        # children's own windows.
+        ended = round_.ended
+        for tool in round_.tools:
+            ended = max(ended, float(tool["ended"]))
+        span = self._child("llm", parent, round_.started, ended, attributes)
+        for tool in round_.tools:
+            self._write_tool(tool, span)
+        return ended
+
+    def _write_tool(self, tool: dict, parent: Span) -> None:
+        call = self._tracer.start_span(
+            "llm_tool_call",
+            context=trace.set_span_in_context(parent),
+            start_time=_ns(tool["started"]),
+            attributes={
+                "function.name": tool["name"],
+                "tool_call_id": tool["call_id"],
+                "function.arguments": tool["arguments"],
+                "tool.result": tool["output"],
+                "tool.result.length": tool["output_chars"],
+                # Numeric, not a boolean: Coval's rate-style trace metrics
+                # average the attribute, so a failure rate needs 1 and 0 to
+                # average over.
+                "tool.error": 1 if tool["failed"] else 0,
+                "tool.latency_ms": round((tool["ended"] - tool["started"]) * 1000, 3),
+            },
+        )
+        if tool["failed"]:
+            call.set_status(Status(StatusCode.ERROR, "tool call failed"))
+        call.end(end_time=_ns(max(tool["ended"], tool["started"])))
+
+    def _write_tts(self, turn: _Turn, speech: _Speech, parent: Span, first: bool) -> None:
+        attributes: dict[str, AttributeValue] = {
+            "tts.characters_count": speech.characters,
+            "tts.request_id": speech.request_id,
+            "tts.audio_duration": speech.audio_seconds or None,
+            "gen_ai.request.model": speech.model,
+            "gen_ai.provider.name": speech.provider,
+        }
+        if _is_latency(speech.ttfb):
+            attributes["metrics.ttfb"] = float(speech.ttfb)
+        # The spoken text is the whole reply, so it goes on the first request of
+        # the turn rather than being repeated on each segment of it.
+        if first and turn.agent_transcript:
+            attributes["transcript"] = turn.agent_transcript
+        self._child("tts", parent, speech.started, speech.ended, attributes)
+
+
+# --------------------------------------------------------------------------
+# Wiring
+# --------------------------------------------------------------------------
+
+
+def setup_coval(
+    ctx: JobContext,
+    session: AgentSession,
+    metadata: dict[str, AttributeValue] | None = None,
+) -> TracerProvider:
+    """Install Coval tracing for this job and start watching for its ID."""
+    global _router, _recorder
+    api_key = os.getenv("COVAL_API_KEY", "")
+    # Unlike Langfuse, a missing key is not fatal. A Coval key only matters while
+    # a simulation is running, and a live call must not fail because an
+    # evaluation credential is absent.
+    if not api_key:
+        logger.warning("COVAL_API_KEY is not set, so no trace will reach Coval")
+
+    _router = _CovalRouter(api_key=api_key)
+    attributes: dict[str, AttributeValue] = {
+        SERVICE_NAME: TRACE_NAME,
+        "agent.name": TRACE_NAME,
+        "agent.provider": "livekit",
+        "coval.agent_type": "sip_inbound_voice",
+    }
+    attributes.update(metadata or {})
+    provider = TracerProvider(resource=Resource.create(attributes))
+    # SimpleSpanProcessor on purpose: the router below flushes its own held spans
+    # the moment the simulation ID arrives, and a batching processor could still
+    # be holding a span at that moment, which would export it under no
+    # simulation at all.
+    provider.add_span_processor(SimpleSpanProcessor(_router))
+    # livekit.agents.telemetry.set_tracer_provider is deliberately not called.
+    # LiveKit's spans are shaped for LiveKit, not for Coval: they nest the
+    # caller's speech outside the reply it caused, split one exchange across
+    # several `agent_turn`s, and add about a hundred internal spans per call that
+    # Coval has no name for. Coval's spans are built from the session's events
+    # below instead, which is what Coval's LiveKit guidance asks for.
+
+    recorder = _Conversation(provider, session, session_id=getattr(ctx.room, "name", "") or "")
+    _recorder = recorder
+
+    async def flush_trace() -> None:
+        # If no simulation ever claimed this call, register it with Coval as a
+        # conversation and export the same spans against that ID, so a local
+        # run lands in Trace Search instead of being built and dropped. This
+        # runs before close, while the root span is still open and can still
+        # record how it was correlated. The submit is blocking and this is the
+        # event loop, so it goes to a worker thread.
+        if _router is not None and not _router.active:
+            # Writes the turn still open, if the session's close event has not
+            # already done it, so the last exchange is in the transcript.
+            recorder.flush_turn()
+            conversation_id = await asyncio.to_thread(
+                submit_conversation, recorder.transcript(), recorder.session_id
+            )
+            if conversation_id:
+                recorder.conversation_found(conversation_id)
+                _router.activate(conversation_id, CONVERSATION_EXPORT_HEADER)
+        recorder.close()
+        provider.force_flush()
+
+    ctx.add_shutdown_callback(flush_trace)
+
+    def activate(source: str) -> None:
+        simulation_id, route = resolve_simulation_id(ctx)
+        if not simulation_id or _router is None:
+            return
+        if _router.simulation_id == simulation_id:
+            return
+        _router.activate(simulation_id)
+        recorder.simulation_found(simulation_id, route, source)
+        logger.info("Coval tracing active for simulation %s via %s", simulation_id, route)
+
+    # A SIP participant carries the ID in its attributes and joins after the job
+    # starts, and LiveKit delivers those attributes asynchronously, so the same
+    # check runs on join and on every attribute update. activate does no I/O of
+    # its own, so these stay plain synchronous callbacks.
+    ctx.room.on("participant_connected", lambda _participant: activate("participant_connected"))
+    ctx.room.on(
+        "participant_attributes_changed",
+        lambda _changed, _participant: activate("participant_attributes_changed"),
+    )
+    activate("job_start")
+
+    instrument_session(session, recorder)
+    return provider
+
+
+def instrument_session(session: AgentSession, recorder: _Conversation) -> None:
+    """Record the events Coval's spans are built from.
+
+    Every number here is LiveKit's own measurement. `metrics_collected` reports
+    how long each model call took and when it ended, `conversation_item_added`
+    reports the text of each turn with the transcription and end-to-end delays
+    attached, and `function_tools_executed` reports every tool with its result.
+    """
+
+    @session.on("conversation_item_added")
+    def _on_item(ev) -> None:
+        recorder.item_added(ev.item)
+
+    @session.on("metrics_collected")
+    def _on_metrics(ev) -> None:
+        recorder.metrics(ev.metrics)
+
+    @session.on("function_tools_executed")
+    def _on_tools(ev) -> None:
+        recorder.tools_executed(ev)
+
+    @session.on("error")
+    def _on_error(ev) -> None:
+        recorder.failed(ev)
+
+    @session.on("close")
+    def _on_close(_ev) -> None:
+        recorder.close()

@@ -266,18 +266,57 @@ yet. `peak_sessions` and `max_sessions` must also be positive,
 `peak_sessions` cannot exceed `max_sessions`, and `avg_session_duration` must
 be a positive Go duration such as `5m`.
 
-`langfuse` is the only tracing provider today. It needs `LANGFUSE_BASE_URL`,
-`LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_SECRET_KEY`, and those names go in
-`secrets:` like any others.
+`provider` takes one of two values, `langfuse` or `coval`. Tracing works on the
+`pipecat` and `livekit` targets and is refused on `vapi` and `deepgram`.
+
+| provider | secrets it needs | use it for |
+|---|---|---|
+| `langfuse` | `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | reading one live conversation |
+| `coval` | `COVAL_API_KEY` | scoring simulated calls in Coval |
+
+Those names go in `secrets:` like any others.
 
 LiveKit uses the room name as the Langfuse session ID. Pipecat uses the runner
 session ID as both its conversation ID and the Langfuse session ID.
 Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
 
+With `coval`, each trace is attached to the Coval simulation that placed the
+call. The agent finds that simulation ID on the call itself, so the package
+author writes no correlation code. The route differs per target: LiveKit reads
+the SIP participant attribute `coval.simulation_id` (the emitted
+`sip-inbound-trunk.json` maps the `X-Coval-Simulation-Id` SIP header onto it) or
+its own dispatch metadata; Pipecat reads the WebSocket upgrade header, the
+Pipecat Cloud dial-in SIP headers, or a carrier stream parameter. Both fall back
+to `COVAL_SIMULATION_ID` in the environment. A call that no simulation owns is
+traced too: when it ends the agent submits what was said to Coval as a
+conversation and exports the same spans against the returned conversation ID,
+which is what puts a local `unmute dev` run in Coval's Trace Search.
+`coval.correlation.method` says which of the two routes a trace took. Without
+`COVAL_API_KEY`, or with nothing said on the call, nothing is sent and the call
+still runs.
+
+Coval reads a call as `conversation` > `turn` > `stt` | `vad` | `llm` | `tts`,
+with `stt.provider.<name>` under `stt` and `llm_tool_call` under `llm`. Each
+`llm` span carries the prompt that round ran on: `gen_ai.system_instructions`,
+the message history as `input`, the offered tools as `tools` and `tool_count`,
+the answering agent as `agent.label`, and the reply as `output`. Those are
+Pipecat's own attribute names, used on both targets so one metric or judge
+prompt reads either. All of it is size-bounded. Pipecat
+already emits that tree, so its own spans are what Coval sees. LiveKit's spans
+are shaped differently, so the emitted module builds the tree from LiveKit's
+session events and leaves LiveKit's own OpenTelemetry off; the numbers are still
+LiveKit's own measurements. A missing `COVAL_API_KEY`
+warns and disables Coval tracing instead of failing startup, unlike Langfuse,
+which fails when its keys are missing. Coval trace metrics read these spans
+directly: percentiles over `metrics.ttfb` on `llm` and `tts` (and `vad` on
+LiveKit) find the bottleneck, averages over `gen_ai.usage.*` on `llm` track
+cost, and an LLM-judged metric created with traces included can check the
+agent's answers against its real prompt and tool results.
+
 Traces can contain caller speech, model input and output, and tool arguments and results.
 Use only fake identities and fake customer data for release tests. Use a separate
-Langfuse project for those tests, and do not send real customer data until its
-access and retention rules are approved.
+project on the tracing provider for those tests, and do not send real customer
+data until its access and retention rules are approved.
 
 ## targets.yaml
 

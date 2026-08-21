@@ -82,6 +82,7 @@ const (
 	FieldVoicemail             Field = "channels.telephony.on_voicemail"
 	FieldDeploymentMultiRegion Field = "deployment_region.multiple"
 	FieldTracingLangfuse       Field = "tracing.provider.langfuse"
+	FieldTracingCoval          Field = "tracing.provider.coval"
 	FieldVariableConversation  Field = "variables.source.conversation"
 	FieldToolInject            Field = "tools.inject"
 	FieldWebhookPath           Field = "tools.webhook.path"
@@ -417,6 +418,14 @@ func Default() Table {
 			FieldTracingLangfuse: field(
 				deny(Vapi, "Vapi has no Langfuse tracing lowering"),
 				deny(Deepgram, "the Deepgram driver does not emit Langfuse tracing"),
+			),
+			// Coval tracing needs a process the driver owns: it installs an
+			// OpenTelemetry provider and reads a per-call simulation ID off the
+			// inbound call. A managed target exposes neither, so both rows deny
+			// for the same reason their Langfuse rows do.
+			FieldTracingCoval: field(
+				deny(Vapi, "Vapi runs the call itself, so there is no process to install a Coval OpenTelemetry exporter in"),
+				deny(Deepgram, "the Deepgram driver does not emit Coval tracing"),
 			),
 			// Several regions in one deployment_region (N32). LiveKit creates
 			// one deployment per region from one build directory; every other
