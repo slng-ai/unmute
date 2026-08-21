@@ -527,7 +527,7 @@ type pipecatData struct {
 	AuthKinds          authKindSet // webhook auth schemes in use: helpers + imports per scheme
 	NeedsFunctionCalls bool        // any @tool/transfer/delegate (FunctionCallParams)
 	ResultsHint        string      // developer-message tail when a delegate hands its results back
-	// EndpointingDelay is the authored silence budget in seconds, "" when the
+	// EndpointingDelay is the authored silence window in seconds, "" when the
 	// package leaves the VAD default alone.
 	EndpointingDelay         string
 	NeedsTurnStrategies      bool // interruption min-words strategy
@@ -602,6 +602,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolAuth:             true, // _bearer Authorization header off token_env
 	targetcap.FieldToolInterruption:     true, // cancel_on_interruption
 	targetcap.FieldToolAnnounce:         true, // TTSSpeakFrame queued before the handler body
+	targetcap.FieldToolAnnounceTask:     true, // same frame, queued via FlowManager.worker
 	targetcap.FieldTracingLangfuse:      true,
 	targetcap.FieldTracingCoval:         true, // tracing.py routes Pipecat's own spans to Coval
 	targetcap.FieldVariableConversation: true, // generated update_variables @tool writing State

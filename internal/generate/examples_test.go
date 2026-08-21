@@ -16,28 +16,6 @@ import (
 	"github.com/slng-ai/unmute/internal/target"
 )
 
-func TestV3_OutboundReminderBusinessToolsAreSelfContained(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "outbound-reminder"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, err := ir.Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, secret := range agent.Secrets {
-		if strings.HasPrefix(secret, "SALON_API_") {
-			t.Errorf("outbound live example depends on unrelated salon API secret %q", secret)
-		}
-	}
-	for _, name := range []string{"confirm_appointment", "reschedule_appointment", "cancel_appointment"} {
-		tool := agent.Tools[name]
-		if tool.Execution != ir.ToolLocal || tool.HandlerSource == "" || tool.URLEnv != "" {
-			t.Errorf("tool %q execution/handler/url = %q/%t/%q, want local/nonempty/empty", name, tool.Execution, tool.HandlerSource != "", tool.URLEnv)
-		}
-	}
-}
-
 // The salon package is the one docs-site/dev/local-telephony.mdx tells a reader
 // to run for each local plane, by target name. Two of its three targets ride the
 // same trunk on purpose: the same agent, once dispatched into the room as a
@@ -88,13 +66,60 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	livekitReason := targetByProvider(t, resolved, ir.ProviderLiveKit).Models.Reason["reasoning"]
-	if livekitReason.Params["api"] != "responses" || livekitReason.Params["reasoning_effort"] != "low" || livekitReason.Params["use_websocket"] != false {
-		t.Errorf("livekit reasoning params = %#v, want Responses API with low reasoning over HTTP", livekitReason.Params)
+	// The turn-latency contract on both targets: thinking goes through the SLNG
+	// Context Router, the model does not think before its first token, and
+	// nothing is ever replayed to the caller.
+	//
+	// pure proxy is load-bearing, not belt and braces. The router's cache key is
+	// the (assistant speech, user speech) pair and carries no system prompt, so
+	// two of this package's agents whose last exchange matches collide under one
+	// agent_id. Measured 2026-08-21 on three live calls: the booking
+	// specialist's opening turn was served the concierge's "what phone number
+	// should I use", cache_layer l2_exact, 1.27ms, no model call. Remove this
+	// only together with per-agent agent ids.
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		reason := targetByProvider(t, resolved, provider).Models.Reason["reasoning"]
+		if !reason.Router() {
+			t.Errorf("%s reasoning is not a router binding: %#v", provider, reason)
+		}
+		if reason.Params["reasoning_effort"] != "none" {
+			t.Errorf("%s reasoning params = %#v, want reasoning off before the first token", provider, reason.Params)
+		}
+		if reason.Params["slng_pure_proxy"] != true {
+			t.Errorf("%s reasoning params = %#v, want slng_pure_proxy: a cross-agent cache hit repeats an earlier agent's line to the caller", provider, reason.Params)
+		}
 	}
-	pipecatReason := targetByProvider(t, resolved, ir.ProviderPipecat).Models.Reason["reasoning"]
-	if _, ok := pipecatReason.Params["api"]; ok || pipecatReason.Params["reasoning_effort"] != "none" {
-		t.Errorf("pipecat reasoning params = %#v, want Chat Completions with reasoning disabled", pipecatReason.Params)
+
+	// The other half of the turn-latency contract, and the bigger half. LiveKit's
+	// turn detector reads the transcript to decide whether the caller has
+	// finished, so a transcriber that has not finalised yet leaves it unsure, and
+	// an unsure detector waits the full endpointing max_delay of 2.5s instead of
+	// the 0.58s floor. Measured on identical audio, 12 clips each, 2026-08-21:
+	// gradium/stt:default finalised in 0.999s mean and crossed the 0.55s line on
+	// 12 of 12; deepgram/nova:3 finalised in 0.159s mean, worst 0.323s, and
+	// crossed it on none, for the same words. Latency itself is not testable
+	// without the network, so this pins the model that measurement chose and
+	// fails loudly if someone swaps it back.
+	transcriber := resolved.Models["transcriber"]
+	if transcriber.Model != "deepgram/nova:3" {
+		t.Errorf("transcriber model = %q, want deepgram/nova:3: a slower final transcript costs 2s of endpointing per turn", transcriber.Model)
+	}
+
+	// A warm TTS socket means the gateway's session init is already done when
+	// the text arrives. Worth ~40ms of mean time to first audio and a much
+	// better floor: gateway synthesis was 418ms mean / 221ms best without it
+	// and 376ms mean / 58ms best with it, over 14 and 9 segments, with
+	// standby_used true on 9 of 9 so the mechanism is confirmed. Off by default
+	// in the plugin, so an author gets the slow path unless they ask by name.
+	//
+	// An earlier version of this comment claimed ~610ms. That was the wait for
+	// a usable websocket, which LiveKit's tts ttfb does not contain: ttfb
+	// tracks gateway synthesis alone, matching it to the millisecond across
+	// three runs, so the handshake was already off the caller's path. Pinned
+	// here for the floor and the confirmed mechanism, not for a headline.
+	voice := resolved.Models["voice"]
+	if voice.Params["warm_standby_enabled"] != true {
+		t.Errorf("voice params = %#v, want warm_standby_enabled: without it gateway synthesis never drops below ~221ms", voice.Params)
 	}
 
 	// This example is the release-readiness package, so it carries the provider
@@ -153,27 +178,39 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 			t.Errorf("chat_with_me must hold handoffs only, got tool %q", held)
 		}
 	}
-	prepareBooking := resolved.Tasks["prepare_booking"]
-	if !slices.Contains(prepareBooking.Tools, "get_current_date") {
-		t.Errorf("prepare_booking tools = %v, want get_current_date", prepareBooking.Tools)
-	}
-	if _, ok := prepareBooking.Result["confirmed"]; ok {
-		t.Error("prepare_booking result must not decide confirmation")
-	}
-	confirmBooking, ok := resolved.Tasks["confirm_booking"]
+	// One booking task, not three chained steps. Each step boundary costs its own
+	// LLM round trip to finish, which the caller hears as silence, and the
+	// mutation tools already refuse an unconfirmed write, so the split bought
+	// latency and no safety. Held here so it cannot drift back.
+	booking, ok := resolved.Tasks["booking"]
 	if !ok {
-		t.Fatal("tasks omit confirm_booking")
+		t.Fatal("tasks omit booking")
 	}
-	wantConfirmResult := []string{"action", "booking_id", "confirmed", "service", "slot_id"}
-	gotConfirmResult := slices.Sorted(maps.Keys(confirmBooking.Result))
-	if !slices.Equal(gotConfirmResult, wantConfirmResult) {
-		t.Errorf("confirm_booking result = %v, want %v", gotConfirmResult, wantConfirmResult)
+	for _, name := range []string{"prepare_booking", "confirm_booking", "apply_booking"} {
+		if _, split := resolved.Tasks[name]; split {
+			t.Errorf("booking is split again into %q; one task owns draft, confirm and apply", name)
+		}
 	}
-	if !slices.Equal(confirmBooking.Tools, []string{"to_complaints", "to_chat"}) {
-		t.Errorf("confirm_booking tools = %v, want topic-switch controls only", confirmBooking.Tools)
+	if len(resolved.TaskGroups) != 0 {
+		t.Errorf("task groups = %v, want none: the booking flow is one task", slices.Sorted(maps.Keys(resolved.TaskGroups)))
 	}
-	if got := resolved.TaskGroups["booking_flow"].Steps; !slices.Equal(got, []string{"prepare_booking", "confirm_booking", "apply_booking"}) {
-		t.Errorf("booking_flow steps = %v, want prepare -> confirm -> apply", got)
+	// The one task has to reach every step it absorbed: read the diary, resolve a
+	// relative date, offer times, and write exactly one of the three mutations.
+	for _, want := range []string{
+		"list_bookings", "get_current_date", "check_availability",
+		"create_booking", "modify_booking", "cancel_booking",
+	} {
+		if !slices.Contains(booking.Tools, want) {
+			t.Errorf("booking tools = %v, want %q", booking.Tools, want)
+		}
+	}
+	wantBookingResult := []string{"action", "booking_id", "status", "summary"}
+	if got := slices.Sorted(maps.Keys(booking.Result)); !slices.Equal(got, wantBookingResult) {
+		t.Errorf("booking result = %v, want %v", got, wantBookingResult)
+	}
+	bookingDelegate, ok := resolved.Controls["manage_booking"].(*ir.Delegate)
+	if !ok || bookingDelegate.Task != "booking" || bookingDelegate.Group != "" {
+		t.Fatalf("manage_booking = %#v, want a delegate to the single booking task", resolved.Controls["manage_booking"])
 	}
 	currentDate, ok := resolved.Tools["get_current_date"]
 	if !ok {
@@ -213,63 +250,55 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 			}
 		}
 	}
-	requireText("verification", resolved.Tasks["customer_verification"].Instructions,
-		"Accumulate the full name and phone number across turns",
-		"The complete identity readback is the one exception",
-		"A complete phone has 10 to 15 digits", "incomplete fragment",
-		"consume the one invalid-value retry",
-		"one initial customer lookup only after both the full name",
-		"Retain separate first name, surname, and phone values across turns",
-		"spell the complete first name one letter at a time",
-		"spell the complete surname one letter at a time",
-		"read every phone digit aloud",
-		"First name: N, I, C, O, L, A",
-		"Surname: C, R, O, O, N",
-		"Phone: plus three four",
-		"Only a new unambiguous yes after that complete readback counts",
-		"Do not call the customer action before that confirmation",
-		"call the customer action immediately and silently with the exact confirmed values")
-	requireText("concierge verification", resolved.Agents["concierge"].Instructions,
-		"Repeat the full phone only inside the required identity confirmation",
-		"new explicit yes after the complete readback")
-	if strings.Contains(resolved.Agents["concierge"].Instructions, "Never repeat a full phone number") ||
-		strings.Contains(resolved.Tasks["customer_verification"].Instructions, "Never repeat a full phone number") {
-		t.Error("verification prompts still forbid the required full phone readback")
+	// Verification is one phone number, nothing else. Spelling a name over a
+	// transcriber is the slowest and least reliable thing a caller can be asked
+	// to do, and the number alone identifies the record.
+	verification := resolved.Tasks["customer_verification"]
+	requireText("verification", verification.Instructions,
+		"A complete number is 10 to 15 digits",
+		"Never invent a country code",
+		"Read every digit back once",
+		"On a clear yes, look the number up")
+	for _, banned := range []string{"first name", "surname", "one letter at a time", "spell"} {
+		if strings.Contains(strings.ToLower(verification.Instructions), banned) {
+			t.Errorf("verification still collects a name: prompt mentions %q", banned)
+		}
+	}
+	if _, named := verification.Result["customer_name"]; named {
+		t.Error("verification still returns customer_name; the phone number is the identity")
 	}
 	verificationDelegate, ok := resolved.Controls["verify_customer"].(*ir.Delegate)
 	if !ok {
 		t.Fatalf("verify_customer = %#v, want delegate", resolved.Controls["verify_customer"])
 	}
 	requireText("verification delegate", verificationDelegate.When,
-		"new explicit yes", "spelling the full name", "reading every phone digit", "before lookup")
-	requireText("customer lookup", resolved.Tools["find_or_create_customer"].Description,
-		"exact confirmed first name and surname",
-		"only after the complete readback receives a new unambiguous yes",
-		"Never guess identity or use an unconfirmed value")
-	requireText("verification correction", resolved.Tasks["customer_verification"].Instructions,
-		"A no, a correction, an interruption, or an ambiguous answer remains unconfirmed",
-		"ask which field is wrong",
-		"Keep every field the caller did not correct",
-		"Any correction clears the earlier readback and confirmation",
-		"repeat the complete three-field readback",
-		"require a new explicit yes",
-		"A phrase such as ‘maybe,’ ‘I think so,’ or ‘yes, but’ is ambiguous",
-		"return to the complete readback and confirmation gate before the single retry")
-	requireText("prepare booking", resolved.Tasks["prepare_booking"].Instructions,
-		"Never ask for, interpret, or record confirmation",
-		"A service, booking, date, or time choice only selects a draft",
-		"call `get_current_date` first", "Never guess the current date or year")
-	if strings.Contains(resolved.Tasks["prepare_booking"].Instructions, "`confirmed`") {
-		t.Error("prepare booking names the confirmation field owned by the next task")
+		"reads the phone number back", "needs a yes before it looks anyone up")
+	if _, assigned := verificationDelegate.Assign["customer_name"]; assigned {
+		t.Error("verify_customer still assigns customer_name")
 	}
-	requireText("confirm booking", confirmBooking.Instructions,
-		"authoritative `prepare_booking` finish result",
-		"Never call `finish` in this opening response",
-		"Nothing said before that question counts as confirmation",
-		"copy the draft exactly")
-	requireText("apply booking", resolved.Tasks["apply_booking"].Instructions,
-		"false, missing", "anything other than true", "Do not call a mutation",
-		"authoritative `confirm_booking` finish result", "Do not replace")
+	lookup := resolved.Tools["find_or_create_customer"]
+	requireText("customer lookup", lookup.Description,
+		"exact confirmed phone number",
+		"only after the digit readback got a clear yes",
+		"Never guess a number or pass one the caller has not confirmed")
+	lookupProperties, ok := lookup.Input["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("find_or_create_customer input properties = %#v, want object", lookup.Input["properties"])
+	}
+	if got := slices.Sorted(maps.Keys(lookupProperties)); !slices.Equal(got, []string{"phone"}) {
+		t.Errorf("find_or_create_customer input = %v, want phone only", got)
+	}
+	// The confirmation gate moved from a step boundary into this one prompt, so
+	// the prompt is now the only thing standing between a spoken time and a
+	// written booking. Every clause that makes it a gate is held here.
+	requireText("booking", booking.Instructions,
+		"Say the whole thing back in one sentence and ask one yes-or-no question",
+		"Nothing said before that question counts as a yes",
+		"including the caller choosing the time",
+		"On a clear yes, save it in the same turn with `confirmed` set to true",
+		"On a no, or on a second unclear answer, finish with action `none` and save nothing",
+		"call `get_current_date` first", "never guess today's date",
+		"Never say a booking is saved, moved, or cancelled unless the matching tool ran in this turn")
 	// The chat agent has no tool of its own, so the prompt's job is to stop it
 	// claiming a lookup it cannot perform.
 	requireText("chat", resolved.Agents["chat_with_me"].Instructions,
@@ -533,20 +562,11 @@ func TestPublicExamplePackages(t *testing.T) {
 			directories = append(directories, entry.Name())
 		}
 	}
-	// The focused telephony examples stay one per use case (spec 007 FR-016):
-	// warm+inbound on LiveKit (livekit-human-transfer), cold+inbound on Pipecat
-	// over Twilio with nothing hosted (pipecat-human-transfer-twilio), and
-	// inbound+outbound (twilio-telephony-hello). salon-concierge is the composite
-	// release fixture. Daily route guards remain against internal test fixtures.
-	//
-	// A telephony example whose behaviour is one provider's names that provider
-	// first, because the route is the thing a reader is choosing between.
-	//
-	// optimized-salon-concierge is the second half of a matched pair: the same
-	// package with its think binding behind the SLNG Context Router, so the two
-	// can be measured against each other. It earns its own directory rather than
-	// a note in the salon README because the comparison is the deliverable.
-	want := []string{"livekit-human-transfer", "mcp-example", "multi-task", "optimized-salon-concierge", "outbound-reminder", "pipecat-human-transfer-twilio", "regional-infrastructure", "salon-concierge", "salon-support", "simple-prompt", "subagents", "task-groups", "twilio-telephony-hello"}
+	// Five packages: four structural, and salon-concierge as the composite
+	// release fixture that also carries the only shipped telephony route. The
+	// focused telephony, outbound, transfer, MCP and regional examples were
+	// removed 2026-08-21; route guards remain against internal test fixtures.
+	want := []string{"multi-task", "salon-concierge", "simple-prompt", "subagents", "task-groups"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
@@ -576,39 +596,6 @@ func TestRepositoryKeepsSpecsPrivateAndDocsFocused(t *testing.T) {
 	}
 	if err := exec.Command("git", "-C", repo, "check-ignore", "-q", "--", "specs/.unmute-ignore-probe/spec.md").Run(); err != nil {
 		t.Errorf("specs/ is not ignored: %v", err)
-	}
-}
-
-// The shipped telephony example (twilio-telephony-hello) is a complete,
-// schema-faithful package carrying the route each platform recommends for Twilio:
-// Pipecat on the platform's own carrier stream, and LiveKit on a SIP trunk. Both
-// are provisional (adapter present, no credentialed smoke yet) and usable, so both
-// generate.
-//
-// The transports are asserted by name because that pairing is the example's whole
-// subject. It used to pair cloud-websocket with the LiveKit Twilio connector, which
-// tested better on a laptop and taught a route with no transfer primitive; the
-// connector keeps its own coverage through examples/outbound-reminder.
-func TestTelephonyExampleGeneratesProvisionalRoute(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "twilio-telephony-hello"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, err := ir.Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, transport := range map[string]string{"livekit": "sip", "pipecat": "cloud-websocket"} {
-		resolved, ok := agent.Targets[name]
-		if !ok || resolved.Telephony == nil || resolved.Transport != transport {
-			t.Fatalf("target %q is not the resolved %s route: %#v", name, transport, resolved.Telephony)
-		}
-		if resolved.Carrier != "twilio" {
-			t.Fatalf("target %q carrier = %q, want twilio", name, resolved.Carrier)
-		}
-		if _, err := Generate(agent, resolved, target.Default()); err != nil {
-			t.Fatalf("provisional telephony route %q must generate, got %v", name, err)
-		}
 	}
 }
 
@@ -745,88 +732,6 @@ func TestV16_ExampleDestinationsAreEnvironmentNames(t *testing.T) {
 	}
 }
 
-// Every environment variable a telephony example's generated .env.example lists
-// must be accounted for in that example's own README and on the secrets
-// reference page. A reader who sets everything both pages name has a package
-// that runs; one who does not finds out on a live call, which is the failure
-// this check exists to make impossible (spec FR-005f, FR-027a).
-//
-// docs-site/reference/secrets.mdx is the public page that answers "which
-// variables does this agent need".
-//
-// DAILY_API_KEY is the case that forced this. It is exempt from `secrets:`
-// because no author writes it — the route's own runtime supplies it — and it is
-// still required at runtime, so the only place it can be explained is prose.
-//
-// Scoped to the five telephony examples on purpose (FR-005f0): four of the
-// other examples ship no README at all, so widening this is a separate change
-// with its own writing to do, not a flag to flip here.
-//
-// The two halves are scoped differently, because they answer different
-// questions. The example's own README must account for **every** name, since it
-// is the page a reader of that example follows. The shared secrets page must
-// account for every name the package never declares in `secrets:` — the ones the
-// runtime supplies, like DAILY_API_KEY and REDIS_URL. Those are exactly the
-// names nothing in the package mentions, so a shared page is the only place they
-// can be explained. A tool's own webhook credentials are the README's job.
-//
-// One direction only. It never fails on a name a page mentions and
-// .env.example does not: a page is free to name a variable to say the reader
-// does not set it, or to teach a name that is not a variable at all.
-func TestTelephonyExampleDocsAccountForEveryRequiredEnv(t *testing.T) {
-	sharedPage := filepath.Join("..", "..", "docs-site", "reference", "secrets.mdx")
-	secretsPage, err := os.ReadFile(sharedPage)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for example, providers := range map[string][]ir.Provider{
-		"twilio-telephony-hello":        {ir.ProviderPipecat, ir.ProviderLiveKit},
-		"livekit-human-transfer":        {ir.ProviderLiveKit},
-		"pipecat-human-transfer-twilio": {ir.ProviderPipecat},
-		"outbound-reminder":             {ir.ProviderPipecat, ir.ProviderLiveKit},
-		"salon-concierge":               {ir.ProviderPipecat, ir.ProviderLiveKit},
-		"optimized-salon-concierge":     {ir.ProviderPipecat, ir.ProviderLiveKit},
-	} {
-		t.Run(example, func(t *testing.T) {
-			readme, err := os.ReadFile(filepath.Join("..", "..", "examples", example, "README.md"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))
-			if err != nil {
-				t.Fatal(err)
-			}
-			agent, err := ir.Build(pkg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, provider := range providers {
-				artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
-				if err != nil {
-					t.Fatalf("%s: %v", provider, err)
-				}
-				for _, line := range strings.Split(artifactFile(t, artifact, ".env.example"), "\n") {
-					name, _, found := strings.Cut(line, "=")
-					name = strings.TrimSpace(name)
-					if !found || name == "" || strings.HasPrefix(name, "#") {
-						continue
-					}
-					if !strings.Contains(string(readme), name) {
-						t.Errorf("%s needs %s, which this example's README never names", provider, name)
-					}
-					if slices.Contains(agent.Secrets, name) {
-						continue // the package declares it, so the package explains it
-					}
-					if !strings.Contains(string(secretsPage), name) {
-						t.Errorf("%s needs %s, which nothing in the package declares and "+
-							"%s never names", provider, name, sharedPage)
-					}
-				}
-			}
-		})
-	}
-}
-
 func TestSalonConciergeTransferEnvironmentContract(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
 	if err != nil {
@@ -868,11 +773,7 @@ func TestBrowserPathStartupCheckAsksForNoRouteEnvironment(t *testing.T) {
 		"PIPECAT_CLOUD_ORGANIZATION", "MANAGER_PHONE_NUMBER",
 	}
 	for example, providers := range map[string][]ir.Provider{
-		"twilio-telephony-hello":        {ir.ProviderPipecat, ir.ProviderLiveKit},
-		"pipecat-human-transfer-twilio": {ir.ProviderPipecat},
-		"outbound-reminder":             {ir.ProviderPipecat, ir.ProviderLiveKit},
-		"salon-concierge":               {ir.ProviderPipecat, ir.ProviderLiveKit},
-		"optimized-salon-concierge":     {ir.ProviderPipecat, ir.ProviderLiveKit},
+		"salon-concierge": {ir.ProviderPipecat, ir.ProviderLiveKit},
 	} {
 		t.Run(example, func(t *testing.T) {
 			pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))

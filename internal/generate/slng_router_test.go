@@ -449,3 +449,48 @@ func TestSlngRouterGolden(t *testing.T) {
 		}
 	}
 }
+
+// TestSlngRouterPureProxyRidesTheBody is the gate on the one authored switch
+// that suppresses the router's serve. It has to reach the request body: as a
+// constructor kwarg the SDK would reject it, and silently dropped it would
+// leave a package believing it was protected.
+//
+// Why a package would author it: the cache key is the (assistant speech, user
+// speech) pair and carries no system prompt, so two agents in one package whose
+// last exchange matches share a cache entry under one agent_id. Measured
+// 2026-08-21 on three live calls of examples/salon-concierge, the booking
+// specialist's opening turn was served the concierge's "what phone number
+// should I use" — cache_layer l2_exact, 1.27ms, no model call.
+func TestSlngRouterPureProxyRidesTheBody(t *testing.T) {
+	for _, tc := range routerTargets() {
+		t.Run(string(tc.provider), func(t *testing.T) {
+			agent := routerFixture(t)
+			for name, tgt := range agent.Targets {
+				for profile, binding := range tgt.Models.Reason {
+					if !binding.Router() {
+						continue
+					}
+					binding.Params = map[string]any{
+						"world_part_override": "eu",
+						"reasoning_effort":    "none",
+						"slng_pure_proxy":     true,
+					}
+					tgt.Models.Reason[profile] = binding
+				}
+				agent.Targets[name] = tgt
+			}
+			_, all := emitAgentSource(t, agent, tc.provider, tc.module)
+			if !strings.Contains(all, `"slng_pure_proxy": True`) {
+				t.Error("emitted source does not carry slng_pure_proxy in the request body")
+			}
+			// The consumed-param rule: never also a kwarg the SDK never heard of.
+			if strings.Contains(all, "slng_pure_proxy=True") {
+				t.Error("emitted source passes slng_pure_proxy as a constructor kwarg")
+			}
+			// Unset must leave the router serving, with no mention either way.
+			if _, unset := emitAgentSource(t, routerFixture(t), tc.provider, tc.module); strings.Contains(unset, "slng_pure_proxy") {
+				t.Error("emitted source mentions slng_pure_proxy with none authored")
+			}
+		})
+	}
+}

@@ -63,7 +63,7 @@ environment:
   from_number: SIP_FROM_NUMBER
 ```
 
-From `examples/twilio-telephony-hello`, where it is the LiveKit target's route.
+From `examples/salon-concierge`, where it is the LiveKit target's route.
 
 ### No credentials
 
@@ -115,7 +115,7 @@ connections/twilio_sip.yaml:4: connection "twilio_sip" environment key "account_
 
 A target names at most one connection, and a connection declares one transport.
 So two targets on different transports need two files, even when there is one
-carrier account behind both. `examples/outbound-reminder` is that case:
+carrier account behind both. `examples/salon-concierge` is that case:
 
 ```yaml targets.yaml
 targets:

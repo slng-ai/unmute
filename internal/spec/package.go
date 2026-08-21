@@ -86,9 +86,10 @@ type ModelDef struct {
 	EndpointEnv         string   `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
 	Placement           string   `json:"placement,omitempty" yaml:"placement,omitempty"`
 	SemanticEndpointing string   `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
-	// EndpointingDelay is how long the runtime waits after speech stops before it
-	// takes the turn. A transcriber slower than the default sends its final text
-	// after the turn is already committed, so the agent answers half a sentence.
+	// EndpointingDelay is the window of silence that has to pass before the
+	// runtime treats the caller as finished. It is the floor on every turn, so
+	// shortening it shortens every answer and lengthening it gives a caller who
+	// pauses mid-sentence more room. LiveKit will not accept less than 250ms.
 	EndpointingDelay string `json:"endpointing_delay,omitempty" yaml:"endpointing_delay,omitempty"`
 	// AgentID scopes the SLNG Context Router's cache. One stable value per
 	// package, authored by a human, carrying a version suffix they own and bump

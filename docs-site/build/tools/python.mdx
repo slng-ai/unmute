@@ -36,9 +36,10 @@ def cancel_appointment(customer_id):
     return {"cancelled": True, "customer_id": customer_id}
 ```
 
-Both files are real, from `examples/outbound-reminder`. All three appointment
-outcomes in that package are local fixtures so its live test can focus on the
-outbound phone call without a separate booking service.
+Those two are a worked example rather than a quote: they are the smallest shape
+that shows a handler receiving an injected value. For real ones, every tool in
+`examples/salon-concierge` is a local handler, and all eight share the one
+`tools/salon.py`.
 
 ## When the handler is slow
 
@@ -49,14 +50,15 @@ result arrives no later than it would in silence:
 
 ```yaml tools/check_availability.yaml
 local:
-  handler: tools/check_availability.py
+  handler: tools/salon.py
 
-announce: Let me check the calendar.
+announce: Let me check.
 ```
 
-That one is real too, from `examples/salon-support`. The fixtures above do not
-use it, because they return instantly and a tool that speaks before doing nothing
-slow is just noise. Full rules in
+That one is real, from `examples/salon-concierge`. Keep the line shorter than the
+gap it covers: a long one runs into the answer and breaks its own promise of a
+wait. The fixtures above carry no `announce:`, because they return instantly and a
+tool that speaks before doing nothing slow is just noise. Full rules in
 [the behavior fields](/build/tools/overview#the-three-behavior-fields).
 
 ## The block

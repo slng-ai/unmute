@@ -2037,16 +2037,19 @@ func TestValidateToolAnnouncePerTarget(t *testing.T) {
 	}
 }
 
-// TestValidateToolAnnounceOnTaskScopePerTarget: scope, not kind. LiveKit reaches
-// agent tools and task tools through one lowering, so it emits the same line
-// either way. Pipecat emits a task tool as a flows handler with no speech seam,
-// so it refuses by name and says where to list the tool instead (FR-014).
+// TestValidateToolAnnounceOnTaskScopePerTarget: scope, not kind. Both code
+// drivers reach a task tool's speech seam, they just reach it differently.
+// LiveKit lowers agent tools and task tools through one path and emits the same
+// session.say either way; Pipecat emits a task tool as a flows handler and
+// queues the frame through FlowManager.worker.
+//
+// This used to assert that Pipecat refused with "cannot announce a tool listed
+// on a task: list it on the agent instead". That was a gap in this compiler
+// written as a limit of the provider, and asserting it kept a working feature
+// switched off. Now neither driver refuses, and the assertion is that neither
+// does.
 func TestValidateToolAnnounceOnTaskScopePerTarget(t *testing.T) {
-	const wantPipecat = "the Pipecat driver cannot announce a tool listed on a task: list it on the agent instead"
-	for provider, wantError := range map[Provider]bool{
-		ProviderLiveKit: false,
-		ProviderPipecat: true,
-	} {
+	for _, provider := range []Provider{ProviderLiveKit, ProviderPipecat} {
 		agent := safeAgent(t)
 		tool := agent.Tools["lookup_customer"]
 		tool.Announce = "Let me look that up."
@@ -2059,12 +2062,12 @@ func TestValidateToolAnnounceOnTaskScopePerTarget(t *testing.T) {
 		}
 
 		report, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
-		if (err != nil) != wantError {
-			t.Fatalf("%s: err=%v report=%#v", provider, err, report.PerTarget)
+		if err != nil {
+			t.Fatalf("%s: announcing a task tool must validate: %v %#v", provider, err, report.PerTarget[0].Errors)
 		}
 		joined := strings.Join(report.PerTarget[0].Errors, "\n")
-		if got := strings.Contains(joined, wantPipecat); got != wantError {
-			t.Errorf("%s: task-scope refusal = %v, want %v: %#v", provider, got, wantError, report.PerTarget[0].Errors)
+		if strings.Contains(joined, "list it on the agent instead") {
+			t.Errorf("%s: the old task-scope refusal is back: %#v", provider, report.PerTarget[0].Errors)
 		}
 	}
 }
@@ -2467,8 +2470,8 @@ func TestValidateRejectsReservedTaskResultField(t *testing.T) {
 	}
 }
 
-// endpointing_delay is the silence budget a slow transcriber needs, and it only
-// means anything on a turn model.
+// endpointing_delay is the window of silence that has to pass before the runtime
+// treats the caller as finished, and it only means anything on a turn model.
 func TestValidateEndpointingDelayIsATurnFieldAndPositive(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -2570,4 +2573,58 @@ func removeService(services []string, drop string) []string {
 		}
 	}
 	return kept
+}
+
+// TestValidateEndpointingDelayLiveKitFloor is the compile-time half of a runtime
+// crash. livekit-agents refuses a VAD silence window under 250ms when a
+// streaming turn detector is bound: _check_vad_silence_requirement raises
+// ValueError (voice/audio_recognition.py:885-903, against
+// MIN_SILENCE_DURATION_MS = 200 plus 50 in inference/eot/base.py). A package
+// that authors 200ms builds fine and then dies when the worker takes its first
+// call, which is the worst possible moment to find out.
+//
+// The floor is unconditional on LiveKit because the driver already refuses a
+// target with no turn binding ("missing open turn binding"), so the streaming
+// detector the SDK checks against is always there. Pipecat has no documented
+// floor and is left alone.
+func TestValidateEndpointingDelayLiveKitFloor(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		provider  Provider
+		value     Duration
+		wantError bool
+	}{
+		{name: "at the floor is allowed", provider: ProviderLiveKit, value: "250ms"},
+		{name: "above the floor is allowed", provider: ProviderLiveKit, value: "300ms"},
+		{name: "the runtime default is allowed", provider: ProviderLiveKit, value: "550ms"},
+		{name: "below the floor is refused", provider: ProviderLiveKit, value: "200ms", wantError: true},
+		{name: "far below is refused", provider: ProviderLiveKit, value: "10ms", wantError: true},
+		{name: "pipecat has no floor to enforce", provider: ProviderPipecat, value: "10ms"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := safeAgent(t)
+			tgt := targetFor(agent, tc.provider)
+			if tgt.Models.Turn == nil {
+				t.Fatalf("%s target has no turn binding to configure", tc.provider)
+			}
+			turn := *tgt.Models.Turn
+			turn.EndpointingDelay = tc.value
+			tgt.Models.Turn = &turn
+			report, err := Validate(agent, []Target{tgt}, targetcap.Default())
+			if (err != nil) != tc.wantError {
+				t.Fatalf("err = %v, wantError = %v: errors=%#v", err, tc.wantError, reportFor(report, tc.provider).Errors)
+			}
+			if !tc.wantError {
+				return
+			}
+			text := strings.Join(reportFor(report, tc.provider).Errors, "\n")
+			// The message has to carry both numbers, because the author needs to
+			// know what they wrote and what the runtime will accept.
+			for _, want := range []string{string(tc.value), "250ms"} {
+				if !strings.Contains(text, want) {
+					t.Errorf("error does not name %q: %q", want, text)
+				}
+			}
+		})
+	}
 }

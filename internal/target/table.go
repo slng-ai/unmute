@@ -248,9 +248,17 @@ func Default() Table {
 				warn(Vapi, "Vapi semantic endpointing is forwarded as a preference"),
 				warn(Deepgram, "Deepgram semantic endpointing depends on the bound listen model"),
 			),
-			// Both code drivers have a real silence budget to set: LiveKit's
-			// endpointing min_delay, Pipecat's VAD stop_secs. The hosted stacks
-			// own turn taking themselves, so the value has nowhere to land.
+			// One window, two places to set it: LiveKit's prewarmed Silero VAD
+			// (min_silence_duration, floored at 250ms because the turn detector
+			// raises below that) and Pipecat's VADParams stop_secs. Not
+			// interchangeable defaults, which matters when a package moves
+			// between the two: LiveKit's Silero defaults to 0.55s and Pipecat's
+			// stop_secs to 0.2s, so the same unset package hears a different
+			// agent. LiveKit's turn_handling endpointing min_delay is
+			// deliberately NOT the destination; it cannot fire before the VAD
+			// reports end of speech, so anything under the window is inert
+			// there. The hosted stacks own turn taking, so the value has
+			// nowhere to land.
 			FieldEndpointingDelay: field(
 				warn(Vapi, "Vapi integrates turn detection; the endpointing delay is ignored"),
 				warn(Deepgram, "Deepgram integrates turn detection into listen; the endpointing delay is ignored"),
@@ -400,13 +408,20 @@ func Default() Table {
 				deny(Deepgram, "the Deepgram driver does not emit tool announcements yet"),
 			),
 			// Scope, not kind: Pipecat emits an agent tool as a decorated
-			// function that holds FunctionCallParams, but a task tool as a bare
-			// flows handler with no speech seam. So a tool that announces fails
-			// by name when it is listed on a task, instead of going quiet there
-			// (same split as FieldToolMCPTask).
-			FieldToolAnnounceTask: field(
-				deny(Pipecat, "the Pipecat driver cannot announce a tool listed on a task: list it on the agent instead"),
-			),
+			// function that holds FunctionCallParams, but a task tool as a flows
+			// handler, which holds a FlowManager instead. Both have a seam:
+			// FlowManager.worker is the documented way to queue a frame from
+			// inside a handler, verified on pipecat-ai 1.7.0, the pinned version,
+			// where flows ships bundled as pipecat.flows rather than the
+			// standalone pipecat_flows package.
+			//
+			// This row used to read deny(Pipecat, "cannot announce a tool listed
+			// on a task: list it on the agent instead"). That was a gap in this
+			// compiler stated as a limit of the provider, and it blocked a
+			// feature that worked. The scope stays a named field because the two
+			// drivers reach the seam differently and a third might not have one,
+			// so it keeps somewhere to say so.
+			FieldToolAnnounceTask: field(),
 			FieldOutbound: field(
 				deny(Pipecat, "the Pipecat driver does not emit outbound calling yet"),
 				warn(Deepgram, "Deepgram outbound calling uses carrier-conditional generated AMD"),

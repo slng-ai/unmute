@@ -86,7 +86,7 @@ print("slng router helpers ok")
 // because the vertex helper is emitted only when an upstream needs it, and drives
 // both helpers on the real SDK.
 func TestSmokeSlngRouterHelpers(t *testing.T) {
-	runPipecatSmokeScript(t, "optimized-salon-concierge", nil, func(agent *ir.Agent) {
+	runPipecatSmokeScript(t, "salon-concierge", nil, func(agent *ir.Agent) {
 		// Swap the openai upstream for a vertex one so the credential helper is
 		// emitted. The example ships openai, which is the case a reader copies;
 		// this is the case only smoke can exercise.

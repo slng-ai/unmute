@@ -1111,15 +1111,21 @@ func livekitChainService(binding ir.Binding, env *envSet, site slngSite) (liveki
 	return resolveLiveKitService(targetcap.Reason, binding, env, site)
 }
 
-// livekitEndpointingDelay renders the turn binding's silence budget as seconds
+// livekitEndpointingDelay renders the turn binding's silence window as seconds
 // for EndpointingOptions.min_delay. A transcriber slower than LiveKit's 0.5s
 // default sends its final text after the turn is committed, and the agent
 // answers half a sentence (B: fragmented STT, 2026-08-20).
+// livekitEndpointingDelay formats the authored VAD silence window for the
+// prewarmed silero.VAD.load call. It reads the target's turn binding, of which
+// there is exactly one per target, which is what makes it safe to carry into
+// prewarm: prewarm runs once per worker process, before any job, so it cannot
+// see per-session values.
 func livekitEndpointingDelay(binding *ir.Binding) string {
 	if binding == nil || binding.EndpointingDelay == "" {
 		return ""
 	}
-	// ir.Validate already refused anything unparseable or non-positive.
+	// ir.Validate already refused anything unparseable, non-positive, or under
+	// the 250ms floor the turn detector raises below.
 	return durationSeconds(binding.EndpointingDelay)
 }
 

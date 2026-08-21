@@ -70,6 +70,22 @@
     {
       "source": "/dev/console",
       "destination": "/dev/overview"
+    },
+    {
+      "source": "/dev/latency",
+      "destination": "/optimization/latency"
+    },
+    {
+      "source": "/models/optimization",
+      "destination": "/optimization/execution-layer"
+    },
+    {
+      "source": "/models/context-router",
+      "destination": "/optimization/context-router"
+    },
+    {
+      "source": "/models/regional-infrastructure",
+      "destination": "/optimization/regional-infrastructure"
     }
   ],
   "navigation": {
@@ -135,8 +151,7 @@
         "icon": "terminal",
         "pages": [
           "dev/overview",
-          "dev/local-telephony",
-          "dev/latency"
+          "dev/local-telephony"
         ]
       },
       {
@@ -187,15 +202,24 @@
             "group": "Models",
             "icon": "brain",
             "pages": [
-              "models/regional-infrastructure",
               "models/stt",
               "models/tts",
               "models/llm",
-              "models/context-router",
-              "models/turn-detection",
-              "models/optimization"
+              "models/turn-detection"
             ]
           }
+        ]
+      },
+      {
+        "group": "Optimization",
+        "public": true,
+        "icon": "gauge",
+        "pages": [
+          "optimization/overview",
+          "optimization/latency",
+          "optimization/execution-layer",
+          "optimization/context-router",
+          "optimization/regional-infrastructure"
         ]
       },
       {

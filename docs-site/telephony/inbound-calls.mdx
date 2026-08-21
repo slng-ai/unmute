@@ -13,9 +13,10 @@ channels:
     inbound: true
 ```
 
-This page follows `examples/twilio-telephony-hello`, a minimal agent that only
-greets and chats. It exists to prove your phone wiring before you point a real
-agent at it.
+This page follows `examples/salon-concierge`, the shipped package with an
+inbound phone route. It declares `inbound: true` and no outbound, and it carries
+a target for each transport, so the same package proves the wiring on whichever
+route you pick.
 
 <Note>
   A first inbound call with **no carrier account at all** is the faster loop, and
@@ -50,7 +51,7 @@ The agent worker can still run on your laptop.
   on macOS), or your own tunnel and `--public-url`.
 - Model provider keys.
 
-Put the values in `examples/twilio-telephony-hello/.env`:
+Put the values in `examples/salon-concierge/.env`:
 
 ```bash
 OPENAI_API_KEY=sk-...
@@ -85,7 +86,7 @@ supplies those itself.
 ## Take the call
 
 ```sh
-unmute dev examples/twilio-telephony-hello --telephony --carrier --target pipecat
+unmute dev examples/salon-concierge --telephony --carrier --target pipecat
 ```
 
 `--carrier` is the part that reaches your account: without it the run stays on

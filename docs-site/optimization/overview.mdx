@@ -1,0 +1,274 @@
+---
+title: "Optimizing your agent"
+description: "The settings we recommend for a faster agent, why each one matters, and how to write them in agent.yaml."
+sidebarTitle: "Overview"
+---
+
+A caller judges a voice agent on how long it waits. This page is the short list of
+settings we recommend, why each one matters, and where it goes in `agent.yaml`.
+
+Two different jobs, two different pages. This one is **what to change**. If you
+are looking at a slow call and want to know *which part* was slow, start with
+[Reading the latency numbers](/optimization/latency) instead, then come back here.
+
+<Note>
+  These are the settings we recommend, based on building and calling these agents
+  ourselves.
+</Note>
+
+## Where the wait actually is
+
+One turn is four spans, and they are nothing like equal:
+
+| span | what it is |
+|---|---|
+| silence window | how long you have to stay quiet before the agent believes you finished |
+| transcript | your last word to the final text |
+| LLM | one round trip — a tool turn costs two |
+| TTS | synthesis to the first audio |
+| network | every hop between your agent and each model, on every turn |
+
+In our experience the LLM is the largest and the silence window is the most
+predictable, and the rest are smaller than people expect. That is why the order
+below is not the order of size — it is the order of how reliably each one pays
+off.
+
+Measure your own agent rather than trusting anyone's numbers, including ours.
+[Reading the latency numbers](/optimization/latency) shows what `unmute dev`
+reports for every turn.
+
+## The short list
+
+### Bind SLNG for listening and speaking
+
+`unmute init` does this already, and every shipped example keeps it. It is the
+choice the rest of this section rests on: the caching described in
+[Execution Layer](/optimization/execution-layer) and
+[Context Router](/optimization/context-router) exists on SLNG's own layer, and the
+per-connection settings below are only exposed by the SLNG plugins.
+
+```yaml agent.yaml
+models:
+  listen:
+    transcriber:
+      provider: slng
+      model: "deepgram/nova:3"
+      language: en
+  speak:
+    voice:
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+      language: en
+```
+
+### Put the models near your callers
+
+Network time is charged on **every** span above, not once per call: the turn
+detector, the transcriber, the reasoning model and the speech model each pay a
+round trip. Coval's
+[guide to measuring voice AI latency](https://www.coval.ai/blog/how-to-measure-voice-ai-latency-the-complete-guide/)
+explains why that adds up faster than people expect.
+
+With SLNG this is a configuration rather than a deployment problem: the same
+model can run in the world part or the specific region nearest your callers. See
+[Regional infrastructure](/optimization/regional-infrastructure) for the full
+picture, including where the agent itself runs.
+
+```yaml agent.yaml
+models:
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+      params:
+        # A broad area: na, eu or ap.
+        world_part_override: eu
+        # Or a specific region. When both are set this one wins, and
+        # world_part_override is ignored rather than used as a fallback.
+        region_override: eu-north-1
+```
+
+<Tip>
+  Not every model is offered in every region, and the regions available for
+  listening and speaking are not the same set. Set a region on a route you have
+  tested: a model that rejects one fails at connection time, on a live call.
+</Tip>
+
+### Choose the transcriber on how fast it finalises
+
+Not on its accuracy score. The turn detector reads the transcript to decide
+whether you have finished talking, so a transcriber that has not finalised yet
+holds the whole turn open — the agent is waiting on text, not on thinking.
+
+The number to compare is **time from the end of speech to the final transcript**,
+and it varies a lot between models that score similarly on accuracy. Two models
+can return the same words with very different waits.
+
+For independent, like-for-like comparisons across providers, we recommend
+[Coval's voice AI benchmarks](https://benchmarks.coval.ai/overview). Then confirm
+on your own audio, because accents, phone codecs and the length of a typical
+utterance all move the result.
+
+<Tip>
+  Test the route before you ship it. Not every model on a provider is available on
+  every transport or in every region, and some combinations only fail once a call
+  is live. See [Speech to text](/models/stt).
+</Tip>
+
+### Hold the TTS connection open
+
+Off by default. It takes the provider's session setup off the front of every
+segment, which shows up most on the first segment of a call and on the fastest
+turns.
+
+```yaml agent.yaml
+models:
+  speak:
+    voice:
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+      language: en
+      params:
+        # Hold a socket open so the provider's setup is done before the text
+        # arrives. Off by default.
+        warm_standby_enabled: true
+        # Data residency. Pick the region nearest your callers.
+        world_part_override: eu
+```
+
+### Set the silence window on purpose
+
+It is the floor charged on **every** turn. Lowering it also makes short replies
+finalise sooner, because the transcriber is only asked to finalise once the
+silence window elapses — so it pays twice on a "yes, that's right".
+
+Do not take it to the minimum. Too short and a caller who pauses mid-sentence gets
+cut in two: we had "tomorrow" committed as one turn and "afternoon" as the next,
+and the agent asked twice. Come down from the default in steps and listen for
+interruptions rather than chasing the number. See
+[Turn detection](/models/turn-detection) for the mechanism.
+
+```yaml agent.yaml
+models:
+  turn:
+    detector:
+      provider: local
+      model: silero
+      endpointing_delay: 400ms
+```
+
+### Cut LLM round trips before tuning connections
+
+The largest span, and every control hop costs a whole round trip. Collapsing a
+multi-step flow into one task, and asking for one piece of information instead of
+three, bought us more than every connection-level setting on this page combined.
+
+Look for: a task that could be one task instead of three, a confirmation step the
+tool already enforces, and a prompt long enough to slow the first token.
+
+```yaml agent.yaml
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-luna
+      params:
+        # No thinking before the first token.
+        reasoning_effort: "none"
+```
+
+### Speak before a tool runs
+
+The tool is usually not the wait. A local handler returns in milliseconds; the
+caller is waiting through the second LLM round trip and the speech after it.
+`announce:` fills that gap with something to listen to.
+
+```yaml tools/check_availability.yaml
+local:
+  handler: tools/salon.py
+
+announce: Let me check.
+```
+
+Keep the line **shorter than the gap it covers**. A long line runs into the answer
+and breaks its own promise of a wait — "Okay, one sec." works where "One sec, let
+me pull up your details and see what we have" does not. Put it only on tools that
+fetch or push data, and never on two tools that fire in the same turn, or the
+caller hears two lines for one request.
+
+## All of it in one package
+
+```yaml agent.yaml
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-luna
+      params:
+        # No thinking before the first token.
+        reasoning_effort: "none"
+  speak:
+    voice:
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+      language: en
+      params:
+        # Hold a socket open so the provider's setup is done before the text
+        # arrives. Off by default.
+        warm_standby_enabled: true
+        # Run the model near your callers. A world part, or a specific region
+        # with region_override, which wins when both are set.
+        world_part_override: eu
+  listen:
+    transcriber:
+      provider: slng
+      # Chosen on time-to-final, not accuracy score.
+      model: "deepgram/nova:3"
+      language: en
+  turn:
+    detector:
+      provider: local
+      model: silero
+      # The floor on every turn. Come down from the default in steps and listen
+      # for interruptions. Defaults differ per target, so set it if you ship to
+      # both.
+      endpointing_delay: 400ms
+```
+
+<Warning>
+  If your package has a `targets.yaml` that overrides a model, a target's
+  `params:` block **replaces** the base block rather than merging into it. A param
+  authored on the base model never reaches that target, and nothing warns you.
+  Author it on the override.
+</Warning>
+
+## Two things that will mislead you
+
+**One call will not tell you whether a setting helped.** We have seen two calls on
+an identical build differ by more than any single setting here is worth. Make a
+few calls per change, and compare the specific span the setting touches rather
+than the end-to-end number, which only gives you two or three samples a call.
+
+**A struggling provider looks exactly like a latency problem.** We have had calls
+where speech took seconds to start and then arrived slower than real time, which a
+caller hears as broken audio rather than as delay. Nothing on this page fixes
+that, so check your provider's own per-segment timings before you change a
+setting.
+
+## Next
+
+<CardGroup cols={3}>
+  <Card title="Execution Layer" icon="bolt" href="/optimization/execution-layer">
+    Caching and routing for speech, on SLNG's own layer.
+  </Card>
+  <Card title="Context Router" icon="route" href="/optimization/context-router">
+    Caching at the reasoning step.
+  </Card>
+  <Card title="Regional infrastructure" icon="globe" href="/optimization/regional-infrastructure">
+    Putting the models near the caller.
+  </Card>
+</CardGroup>

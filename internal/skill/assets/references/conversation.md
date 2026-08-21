@@ -127,15 +127,32 @@ models:
       model: silero
 ```
 
-### When the transcriber is slower than the turn
+### The window of silence that ends a turn
 
-`endpointing_delay` on the turn entry is how long the runtime waits after speech
-stops before it takes the turn. Raise it when a transcriber lands its final text
-after the turn is already committed: the agent answers half a sentence, the
-caller repeats themselves, and a task can be cancelled mid-step. LiveKit warns
-about exactly this in its logs ("consider raising `min_delay`"). It lowers to
-LiveKit's endpointing `min_delay` and to Pipecat's VAD `stop_secs`; the hosted
-stacks own turn taking, so they ignore it and say so at validation.
+`endpointing_delay` on the turn entry is how long the caller has to stay quiet
+before the runtime treats them as finished. It is the **floor on every turn**:
+nothing downstream can start earlier, because the transcriber is only asked to
+finalise once the VAD reports end of speech.
+
+Lower it to answer sooner, at the cost of cutting off a caller who pauses
+mid-sentence. Raise it to give them more room, or when a transcriber lands its
+final text after the turn is already committed, which makes the agent answer half
+a sentence.
+
+It lowers to the VAD silence window on both code targets: LiveKit's prewarmed
+`silero.VAD.load(min_silence_duration=...)` and Pipecat's `VADParams(stop_secs=...)`.
+The hosted stacks own turn taking, so they ignore it and say so at validation.
+
+Two things worth knowing before you set it:
+
+- **The defaults differ per target.** LiveKit's Silero VAD defaults to `550ms`
+  and Pipecat's `stop_secs` to `200ms`, so a package with nothing authored
+  answers noticeably faster on Pipecat. Set it explicitly if the package runs on
+  both and you want them to match.
+- **LiveKit floors it at `250ms`** and `unmute compile` rejects anything lower,
+  because the turn detector raises rather than degrading. It is *not* lowered to
+  LiveKit's `turn_handling` endpointing `min_delay`: that cannot fire before the
+  VAD reports end of speech, so a value under the window would do nothing there.
 
 ```yaml agent.yaml
 models:

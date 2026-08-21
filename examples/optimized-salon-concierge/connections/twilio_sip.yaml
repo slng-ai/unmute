@@ -1,8 +1,0 @@
-# LiveKit inbound and cold-transfer route through a Twilio Elastic SIP Trunk.
-transport: sip
-carrier: twilio
-environment:
-  sip_address: SIP_TRUNK_HOSTNAME
-  sip_username: SIP_AUTH_USERNAME
-  sip_password: SIP_AUTH_PASSWORD
-  from_number: SIP_FROM_NUMBER

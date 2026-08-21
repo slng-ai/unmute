@@ -291,10 +291,7 @@ func TestSecretsCrossCheckNeverAsksForDriverSuppliedNames(t *testing.T) {
 // SC-008, asserted directly. The underlying check only warns, and a warning is
 // easy to stop reading, so the shipped examples are held to zero.
 func TestTelephonyExamplesDeclareEveryNameTheyWrite(t *testing.T) {
-	for _, example := range []string{
-		"twilio-telephony-hello", "livekit-human-transfer",
-		"pipecat-human-transfer-twilio", "outbound-reminder", "salon-concierge",
-	} {
+	for _, example := range []string{"salon-concierge"} {
 		t.Run(example, func(t *testing.T) {
 			pkg, err := packagespec.Load(filepath.Join("..", "..", "examples", example))
 			if err != nil {
@@ -324,7 +321,7 @@ func TestTelephonyExamplesDeclareEveryNameTheyWrite(t *testing.T) {
 func TestSecretsCheckRunsWithNoBlock(t *testing.T) {
 	load := func(t *testing.T, mutate func(*packagespec.Package)) *Agent {
 		t.Helper()
-		pkg, err := packagespec.Load(filepath.Join("..", "..", "examples", "livekit-human-transfer"))
+		pkg, err := packagespec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -342,7 +339,7 @@ func TestSecretsCheckRunsWithNoBlock(t *testing.T) {
 		}
 	})
 
-	dropped := []string{"BILLING_PHONE_NUMBER", "SIP_AUTH_USERNAME", "SIP_TRUNK_HOSTNAME"}
+	dropped := []string{"MANAGER_PHONE_NUMBER", "SIP_AUTH_USERNAME", "SIP_TRUNK_HOSTNAME"}
 	t.Run("b: three names missing, all three reported with their site", func(t *testing.T) {
 		agent := load(t, func(pkg *packagespec.Package) {
 			pkg.Agent.Secrets = slices.DeleteFunc(slices.Clone(pkg.Agent.Secrets), func(name string) bool {
@@ -379,7 +376,11 @@ func TestSecretsCheckRunsWithNoBlock(t *testing.T) {
 		// The site is the first models entry that chose the key, whichever
 		// section that is: one key often serves several roles, and naming the
 		// first one the author can go and look at is the point.
-		for _, name := range []string{"OPENAI_API_KEY", "SLNG_API_KEY"} {
+		// OPENAI_API_KEY is not asserted here any more: on this fixture the
+		// think binding is the SLNG Context Router, so the OpenAI key reaches
+		// the request through the upstream block rather than a models provider
+		// key, and referencedEnvNames only walks the provider keys.
+		for _, name := range []string{"SLNG_API_KEY"} {
 			site, ok := refs[name]
 			if !ok {
 				t.Errorf("%s is not in the reference set, so the check is vacuous for a scaffolded package", name)

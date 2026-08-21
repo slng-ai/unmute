@@ -1208,6 +1208,32 @@ class _RetryEmptyTaskResponseMixin:
         # Every generated user of this mixin is an AgentTask; narrow that
         # invariant here so the emitted project type-checks without a new base.
         assert isinstance(self, Agent)
+        # ponytail: keyed on the SDK's own marker rather than the placeholder
+        # wording, and the emitted-code test is what catches it changing.
+        #
+        # The delegate that started this task is still running, so the framework
+        # injects that call plus a placeholder output reading "The tool call is
+        # still in progress." into the context (voice/generation.py,
+        # _inject_running_tool_calls). For the agent that made the call that is
+        # right: it stops the model re-issuing a call already in flight. A task
+        # is a different agent with a different prompt, and its opening turn
+        # reads an unfinished tool call it never made: it then answers with
+        # nothing, or apologises for a failure that did not happen, which the
+        # caller hears as the agent breaking. Reproduced on 3 of 3 scripted
+        # salon calls (B: task opened silent after delegate, 2026-08-21).
+        running_placeholders = {
+            item.call_id
+            for item in chat_ctx.items
+            if isinstance(item, llm.FunctionCall)
+            and item.extra.get("__lk_running_placeholder__")
+        }
+        if running_placeholders:
+            chat_ctx = chat_ctx.copy()
+            chat_ctx.items = [
+                item
+                for item in chat_ctx.items
+                if getattr(item, "call_id", None) not in running_placeholders
+            ]
         completed_tool_call_ids = {
             item.call_id
             for item in chat_ctx.items
@@ -1416,7 +1442,16 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 
 # --- session ---------------------------------------------------------------
 def prewarm(proc: JobProcess) -> None:
+{{- if .EndpointingDelay}}
+    # The silence window is what the runtime actually waits before it treats the
+    # caller as finished, so it is the only place an authored endpointing_delay
+    # can do anything. turn_handling's own endpointing min_delay cannot fire
+    # before the VAD reports end of speech, which makes any value under this
+    # window unreachable. Floor is 0.25s; the turn detector raises below it.
+    proc.userdata["vad"] = silero.VAD.load(min_silence_duration={{.EndpointingDelay}})
+{{- else}}
     proc.userdata["vad"] = silero.VAD.load()
+{{- end}}
 
 
 {{- if .Telephony}}
@@ -1471,21 +1506,11 @@ async def entrypoint(ctx: JobContext) -> None:
             turn_detection=inference.TurnDetector({{if .TurnVersion}}version={{pyq .TurnVersion}}{{end}}),
             interruption={"enabled": {{if .Interruption.Enabled}}True{{else}}False{{end}}{{if .Interruption.MinWords}}, "min_words": {{.Interruption.MinWords}}{{end}}},
             preemptive_generation={"enabled": True},
-{{- if .EndpointingDelay}}
-            # A transcriber slower than the 0.5s default lands its final text after
-            # the turn is already committed, and the agent answers a fragment.
-            endpointing={"min_delay": {{.EndpointingDelay}}},
-{{- end}}
         ),
 {{- else}}
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector({{if .TurnVersion}}version={{pyq .TurnVersion}}{{end}}),
             preemptive_generation={"enabled": True},
-{{- if .EndpointingDelay}}
-            # A transcriber slower than the 0.5s default lands its final text after
-            # the turn is already committed, and the agent answers a fragment.
-            endpointing={"min_delay": {{.EndpointingDelay}}},
-{{- end}}
         ),
 {{- end}}
         vad=ctx.proc.userdata["vad"],

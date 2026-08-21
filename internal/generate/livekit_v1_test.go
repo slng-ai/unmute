@@ -3027,3 +3027,104 @@ func livekitMethodBody(t *testing.T, agentpy, method string) string {
 	}
 	return body
 }
+
+// A delegated task must never be asked to answer a tool call it did not make.
+//
+// The framework injects the parent's in-flight delegate call, plus a placeholder
+// output reading "The tool call is still in progress.", into the context the task
+// generates from (voice/generation.py, _inject_running_tool_calls). For the agent
+// that made the call that is right: it stops the model re-issuing a call already
+// running. A task is a different agent with a different prompt, and its opening
+// turn reads an unfinished tool call it never made. It then answers with nothing,
+// or apologises for a failure that did not happen, and the caller hears the agent
+// break: 3 of 3 scripted salon calls opened with either the empty-response
+// fallback or "I'm sorry, but I can't complete your booking right now"
+// (B: task opened silent after delegate, 2026-08-21).
+//
+// The strip is keyed on the SDK's own marker rather than the placeholder wording,
+// because the wording is prose and the marker is the flag the SDK added for
+// exactly this. That makes the private name load-bearing, so this test names it:
+// if upstream renames it, this fails here rather than in a live call.
+func TestLiveKitV1TaskDropsParentInFlightCall(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	agentpy := artifactFile(t, artifact, "agent.py")
+
+	// The strip lives in the task mixin's llm_node, so it covers the opening turn
+	// and every retry, not just the construction of the context.
+	mixin := "class _RetryEmptyTaskResponseMixin:"
+	start := strings.Index(agentpy, mixin)
+	if start < 0 {
+		t.Fatal("a package with tasks emits no task mixin")
+	}
+	body := agentpy[start:]
+	if end := strings.Index(body[len(mixin):], "\nclass "); end >= 0 {
+		body = body[:len(mixin)+end]
+	}
+	for _, want := range []string{
+		`item.extra.get("__lk_running_placeholder__")`,
+		"running_placeholders = {",
+		`if getattr(item, "call_id", None) not in running_placeholders`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the task mixin does not drop the parent's in-flight call: want %q", want)
+		}
+	}
+	if !strings.Contains(body, "isinstance(item, llm.FunctionCall)") {
+		t.Error("the strip must key on the flagged FunctionCall, not on the placeholder text")
+	}
+	// Matching the prose would break silently the next time upstream rewords it.
+	if strings.Contains(body, "The tool call is still in progress") {
+		t.Error("the strip matches the placeholder wording; key on the SDK marker instead")
+	}
+
+	// A package with no tasks has no mixin, so it must not carry the strip.
+	bare, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bareAgent, err := ir.Build(bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bareAgent.Tasks = nil
+	bareAgent.TaskGroups = nil
+	for name, control := range bareAgent.Controls {
+		if _, isDelegate := control.(*ir.Delegate); isDelegate {
+			delete(bareAgent.Controls, name)
+		}
+	}
+	for name, held := range bareAgent.Agents {
+		kept := held.Tools[:0:0]
+		for _, tool := range held.Tools {
+			_, isControl := bareAgent.Controls[tool]
+			_, isTool := bareAgent.Tools[tool]
+			if isControl || isTool {
+				kept = append(kept, tool)
+			}
+		}
+		held.Tools = kept
+		bareAgent.Agents[name] = held
+	}
+	bareArtifact, err := Generate(bareAgent, targetByProvider(t, bareAgent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate task-free: %v", err)
+	}
+	got := artifactFile(t, bareArtifact, "agent.py")
+	if strings.Contains(got, "_RetryEmptyTaskResponseMixin") {
+		t.Fatal("a package with no tasks still emits the task mixin; the negative case proves nothing")
+	}
+	if strings.Contains(got, "running_placeholders") {
+		t.Error("a package with no tasks emits the in-flight strip anyway")
+	}
+}

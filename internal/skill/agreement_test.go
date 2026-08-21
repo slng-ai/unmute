@@ -185,7 +185,6 @@ func TestPipecatCloudTransferFallbackDocsStayAligned(t *testing.T) {
 	for name, content := range map[string]string{
 		"references/transfers.md":                          bundleFile(t, "references/transfers.md"),
 		"docs-site/transfers/pipecat-twilio.mdx":           trackedFile(t, "docs-site/transfers/pipecat-twilio.mdx"),
-		"examples/pipecat-human-transfer-twilio/README.md": trackedFile(t, "examples/pipecat-human-transfer-twilio/README.md"),
 		"internal/generate/templates/pipecat_v1/README.md": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
 	} {
 		if !strings.Contains(strings.Join(strings.Fields(content), " "), rule) {
@@ -250,7 +249,6 @@ func TestPipecatMCPTracingDocsStayAligned(t *testing.T) {
 	for name, content := range map[string]string{
 		"references/tools.md":                                   bundleFile(t, "references/tools.md"),
 		"docs-site/build/tools/mcp.mdx":                         trackedFile(t, "docs-site/build/tools/mcp.mdx"),
-		"examples/mcp-example/README.md":                        trackedFile(t, "examples/mcp-example/README.md"),
 		"internal/generate/templates/pipecat_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
 	} {
 		if !strings.Contains(content, tracingRule) {
@@ -456,7 +454,7 @@ func TestOpenAIResponsesGuidanceMatchesExample(t *testing.T) {
 		"references/models.md":     bundleFile(t, "references/models.md"),
 		"docs-site/models/llm.mdx": trackedFile(t, "docs-site/models/llm.mdx"),
 	} {
-		for _, want := range []string{"api: responses", "reasoning_effort: low", "use_websocket: false"} {
+		for _, want := range []string{"api: responses", "reasoning_effort: none", "use_websocket: true"} {
 			if !strings.Contains(content, want) {
 				t.Errorf("%s omits %q", name, want)
 			}
@@ -470,7 +468,7 @@ func TestModelFieldAndPassthroughGuidanceStaysExact(t *testing.T) {
 		"| `language` | `speak`, `listen` |",
 		"| `temperature`, `top_p`, `top_k` | `think` |",
 		"| `semantic_endpointing` | `turn`: `required`, `preferred`, or `off` |",
-		"| `endpointing_delay` | `turn`: a positive duration, how long to wait after speech stops before taking the turn |",
+		"| `endpointing_delay` | `turn`: a positive duration, the window of silence before the caller counts as finished. The floor on every turn. LiveKit refuses under `250ms`; defaults differ per target (LiveKit `550ms`, Pipecat `200ms`) |",
 	}
 	for name, content := range map[string]string{
 		"references/package.md":              bundleFile(t, "references/package.md"),
@@ -515,8 +513,10 @@ func TestRegionalGuidanceStaysExplicit(t *testing.T) {
 		}
 	}
 
-	if examples := bundleFile(t, "references/examples.md"); !strings.Contains(examples, "`examples/regional-infrastructure`") {
-		t.Error("references/examples.md does not route regional work to examples/regional-infrastructure")
+	// The regional example was removed 2026-08-21 with the other focused
+	// packages, so the skill must not send anyone to a path that is not there.
+	if examples := bundleFile(t, "references/examples.md"); strings.Contains(examples, "`examples/regional-infrastructure`") {
+		t.Error("references/examples.md still routes regional work to a deleted example")
 	}
 }
 

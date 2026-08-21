@@ -1188,7 +1188,7 @@ func TestBuildToolAnnounceTrimsToASettledValue(t *testing.T) {
 	}
 }
 
-// A target override replaces the vendor selection, not the silence budget: the
+// A target override replaces the vendor selection, not the silence window: the
 // package sets endpointing_delay once for a slow transcriber, and a target that
 // swaps the detector must not drop it (B: fragmented STT, 2026-08-20).
 func TestTargetOverrideKeepsEndpointingDelay(t *testing.T) {

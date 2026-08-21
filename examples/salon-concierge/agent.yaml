@@ -1,6 +1,3 @@
-# One full salon project: verification task, booking task group, specialist
-# handoffs, cold manager transfer, local SQLite tools, browser audio, and
-# inbound-only phone routes on both code targets.
 version: 1
 entry_agent: concierge
 
@@ -8,9 +5,6 @@ variables:
   customer_id:
     type: string
     description: Verified customer ID. It is assigned by the verification task and never spoken.
-  customer_name:
-    type: string
-    description: Verified customer display name carried across specialist handoffs.
 
 secrets:
   - OPENAI_API_KEY
@@ -31,24 +25,28 @@ destinations:
 models:
   think:
     reasoning:
-      provider: openai
-      model: gpt-5.6-terra
+      provider: slng
+      model: gpt-5.6-luna
+      agent_id: optimized-salon-concierge-v3
+      upstream:
+        provider: openai
       params:
+        world_part_override: eu
         reasoning_effort: "none"
+        slng_pure_proxy: true
   speak:
     voice:
       provider: slng
-      model: "cartesia/sonic:3.5"
-      voice: "f786b574-daa5-4673-aa0c-cbe3e8534c02"
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
       language: en
       params:
-        # Speech world part. SLNG speech serves na, eu and ap; the Context
-        # Router's own regions are a different set under the same key.
         world_part_override: eu
+        warm_standby_enabled: true
   listen:
     transcriber:
       provider: slng
-      model: "gradium/stt:default"
+      model: "deepgram/nova:3"
       language: en
       params:
         world_part_override: eu
@@ -56,6 +54,7 @@ models:
     detector:
       provider: local
       model: silero
+      endpointing_delay: 400ms
 
 agents:
   concierge:
@@ -105,96 +104,52 @@ tasks:
       - find_or_create_customer
     result:
       customer_id: string
-      customer_name: string
       status:
         enum:
           - existing
           - created
-          - name_mismatch
           - invalid
       summary: string
     context:
       history: full
 
-  prepare_booking:
-    instructions: tasks/prepare-booking.md
+  booking:
+    instructions: tasks/booking.md
     tools:
       - list_bookings
       - get_current_date
       - check_availability
-      - to_complaints
-      - to_chat
-    result:
-      action:
-        enum:
-          - create
-          - modify
-          - cancel
-          - none
-      booking_id: string
-      service: string
-      slot_id: string
-    context:
-      history: full
-
-  confirm_booking:
-    instructions: tasks/confirm-booking.md
-    tools:
-      - to_complaints
-      - to_chat
-    result:
-      action:
-        enum:
-          - create
-          - modify
-          - cancel
-          - none
-      booking_id: string
-      service: string
-      slot_id: string
-      confirmed: boolean
-    context:
-      history: full
-
-  apply_booking:
-    instructions: tasks/apply-booking.md
-    tools:
       - create_booking
       - modify_booking
       - cancel_booking
+      - to_complaints
+      - to_chat
     result:
-      action: string
+      action:
+        enum:
+          - create
+          - modify
+          - cancel
+          - none
       booking_id: string
       status: string
       summary: string
     context:
       history: full
 
-task_groups:
-  booking_flow:
-    steps:
-      - prepare_booking
-      - confirm_booking
-      - apply_booking
-    context_scope: shared
-    then: return
-    merge: results
-
 controls:
   verify_customer:
     kind: delegate
     task: customer_verification
     when: >-
-      Run identity confirmation before any specialist handoff. The task needs a
-      new explicit yes after spelling the full name and reading every phone digit
-      before lookup.
+      Confirm who the caller is before any specialist handoff. The task reads
+      the phone number back and needs a yes before it looks anyone up.
     assign:
       customer_id: result.customer_id
-      customer_name: result.customer_name
 
   manage_booking:
     kind: delegate
-    group: booking_flow
+    task: booking
     when: The verified caller wants to create, modify, or cancel a booking.
 
   to_booking:

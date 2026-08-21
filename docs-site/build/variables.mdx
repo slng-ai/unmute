@@ -10,8 +10,9 @@ should never see.
 This page teaches the common workflow. For every type, source, and supported
 location, use the [Variables reference](/reference/variables).
 
-This page follows `examples/salon-support`, the smallest package with a full
-`variables:` block.
+The `agent.yaml` and tool snippets below are a worked example you can paste.
+`examples/salon-concierge` is the shipped package with a `variables:` block, and
+it is what the runnable commands here use.
 
 ## Declare them
 
@@ -61,8 +62,7 @@ In production the values arrive with the call. On your machine, `--var` stands
 in for that:
 
 ```sh
-unmute dev examples/salon-support --target pipecat \
-  --var customer_name=Ada \
+unmute dev examples/salon-concierge --target pipecat \
   --var customer_id=cus_2002
 ```
 
@@ -73,7 +73,7 @@ something to say.
 of accepting it and dropping it:
 
 ```text wrap
-unmute: dev examples/salon-support: --var requested_service=haircut: "requested_service" has source conversation, so the model saves it mid-call through update_variables, not you
+unmute: dev my-agent: --var requested_service=haircut: "requested_service" has source conversation, so the model saves it mid-call through update_variables, not you
 ```
 
 An undeclared name is refused the same way.
@@ -143,7 +143,7 @@ default.
 error, not a value that leaks at run time:
 
 ```text
-unmute: validate examples/salon-support: build: agent.yaml:70: conversation.greeting.text
+unmute: validate my-agent: build: agent.yaml:70: conversation.greeting.text
 references {{OPENAI_API_KEY}}, but secrets never flow through templates; a secret
 reaches a tool through its own *_env field
 ```
@@ -156,12 +156,14 @@ name and wrong for a token. See [secrets](/reference/secrets).
 ## Try it
 
 ```sh
-unmute dev examples/salon-support --target pipecat --var customer_name=Ada
+unmute dev examples/salon-concierge --target pipecat --var customer_id=cus_2002
 ```
 
-Ask to book something before saying which service you want. The booking tool
-refuses, and the agent asks you what you would like. That refusal is the guard
-working.
+Seeding `customer_id` is the same thing a production call does when it already
+knows who is calling. Ask to book straight away: the handoff to the booking
+specialist `requires: customer_id`, so with a value already set it goes through
+without the verification step. Leave the flag out and the concierge asks for a
+phone number first. That difference is the variable doing its job.
 
 ## Where to go next
 

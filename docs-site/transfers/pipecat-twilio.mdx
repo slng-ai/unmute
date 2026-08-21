@@ -4,9 +4,9 @@ description: "Cold transfer through your own Twilio number, with no server of yo
 sidebarTitle: "Pipecat"
 ---
 
-This page follows `examples/pipecat-human-transfer-twilio`. That package
-declares **one target, Pipecat only**, on the `cloud-websocket` transport: your
-own Twilio number, and nothing of yours hosted anywhere.
+This page follows the `pipecat` target of `examples/salon-concierge`, on the
+`cloud-websocket` transport: your own Twilio number, and nothing of yours hosted
+anywhere. Cold transfer is the only kind this route supports.
 
 ```yaml targets.yaml
 targets:
@@ -99,7 +99,7 @@ billing, instead of waiting for someone to ring in.
 ## Check the route compiles
 
 ```sh
-unmute compile examples/pipecat-human-transfer-twilio
+unmute compile examples/salon-concierge --target pipecat
 ```
 
 ```text wrap

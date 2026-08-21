@@ -131,7 +131,7 @@ Repeatable, and each value is parsed against the declared type. `--var` accepts
 payload:
 
 ```
-unmute: dev examples/salon-support: --var requested_service=haircut: "requested_service"
+unmute: dev my-agent: --var requested_service=haircut: "requested_service"
   has source conversation, so the model saves it mid-call through update_variables, not you
 ```
 

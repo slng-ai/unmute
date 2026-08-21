@@ -26,6 +26,7 @@ reaches it.
 | `references/orchestration.md` | the brief has phases, order, roles, permissions, or a next step |
 | `references/variables.md` | values, secrets, destinations, templates, or task assignment |
 | `references/conversation.md` | greeting, interruption, inactivity, turn taking, or call limits |
+| `references/latency.md` | the brief is make it faster, it feels slow, or optimize the agent |
 | `references/telephony.md` | answering or placing a phone call |
 | `references/transfers.md` | sending a phone caller to a person |
 | `references/deploy.md` | moving a checked package into production |

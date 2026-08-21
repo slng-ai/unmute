@@ -61,13 +61,12 @@ const (
 // (compile.go), so comparing them compares the sweep against itself.
 var sweepIgnored = []string{".env", "livekit.toml", "livekit-sip.toml"}
 
-// sweepVars seeds input variables a greeting interpolates. salon-support's
-// defaults keep the greeting valid without these, but that would exercise the
-// fallback instead of the dispatch path this example exists to prove.
-// multi-task declares the same two names but neither is call_start and its
-// greeting interpolates nothing, so it needs none (research.md R5, closed).
+// sweepVars seeds input variables the sweep would otherwise leave to their
+// defaults, which would exercise the fallback instead of the dispatch path.
+// multi-task declares names too but neither is call_start and its greeting
+// interpolates nothing, so it needs none (research.md R5, closed).
 var sweepVars = map[string][]string{
-	"salon-support": {"customer_name=Robin", "customer_id=cus_0042"},
+	"salon-concierge": {"customer_id=cus_0042"},
 }
 
 type sweepSession struct {
@@ -229,13 +228,13 @@ func discoverExamples(t *testing.T, root string) []sweepExample {
 func TestSweepDiscoveryUsesBrowserChannel(t *testing.T) {
 	root := repoRoot(t)
 	t.Chdir(root)
-	t.Setenv(sweepOnlyEnv, "livekit-human-transfer,salon-concierge,simple-prompt")
+	t.Setenv(sweepOnlyEnv, "salon-concierge,simple-prompt")
 	got := map[string]bool{}
 	for _, example := range discoverExamples(t, root) {
 		got[example.Name] = example.Runnable
 	}
 	for name, want := range map[string]bool{
-		"simple-prompt": true, "salon-concierge": true, "livekit-human-transfer": false,
+		"simple-prompt": true, "salon-concierge": true,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got[name] != want {

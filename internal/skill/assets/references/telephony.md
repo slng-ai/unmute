@@ -160,7 +160,7 @@ names the new home.
 ## Testing over a real phone, locally
 
 ```sh
-unmute dev examples/twilio-telephony-hello --telephony --target pipecat
+unmute dev examples/salon-concierge --telephony --target pipecat
 ```
 
 This runs the route the connection declares on the user's own machine, with **no

@@ -42,3 +42,4 @@ local:
 
 interruption: provider_default
 effect: returns_data
+announce: Cancelling that now.

@@ -217,7 +217,7 @@ def cancel_appointment(customer_id):
     return {"cancelled": True, "customer_id": customer_id}
 ```
 
-This is the self-contained fixture from `examples/outbound-reminder`; its live
+This is a self-contained fixture; its live
 test exercises outbound calling without requiring a booking API.
 
 The rules the function follows:
@@ -395,9 +395,12 @@ Rules that will fail the compile if you break them:
 - A fixed sentence. `{{variables}}` are refused, because a rendered line would
   need a round trip, which is the delay the field exists to hide.
 - A blank value reads as absent. Nothing is spoken and nothing is emitted.
-- On Pipecat, list an announcing tool on an **agent**, not on a task. A task tool
-  is emitted as a flows handler with no seam to speak from, so it is refused by
-  name. LiveKit emits the same line in either place.
+- Legal on a tool listed on an agent **or** on a task, on both code drivers.
+  LiveKit lowers both through one path and emits the same `session.say`. Pipecat
+  emits an agent tool as a decorated function and a task tool as a flows handler,
+  and queues the frame through `FlowManager.worker` in the second case. This rule
+  used to say a Pipecat task tool was refused by name; that was wrong, and the
+  compiler was refusing a feature that worked.
 - A target whose driver has no lowering for the field fails validation with that
   driver's own reason. Read the error to the user rather than dropping the field.
 

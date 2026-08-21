@@ -6,13 +6,11 @@ targets:
     connection: twilio_sip
     deployment_region: eu-central
     models:
-      reasoning:
-        provider: openai
-        model: gpt-5.6-terra
-        params:
-          api: responses
-          reasoning_effort: low
-          use_websocket: false
+      # No reasoning override here on purpose. A target's models block replaces
+      # the base one rather than merging into it, so an override would route
+      # this target straight past the Context Router with nothing to warn you.
+      # The router speaks Chat Completions, which also rules out the Responses
+      # API and its held websocket that this target used before.
       detector:
         provider: livekit
         model: turn-detector-mini

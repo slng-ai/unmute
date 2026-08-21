@@ -4,9 +4,10 @@ description: "The only route with both cold and warm transfer, over a Twilio SIP
 sidebarTitle: "LiveKit"
 ---
 
-This page follows `examples/livekit-human-transfer`. That package declares
-**one target, LiveKit only**. Warm transfer compiles on no other route today,
-so the example does not pretend to be portable.
+`examples/salon-concierge` carries the cold half of this on its LiveKit target,
+over a Twilio SIP trunk. Warm transfer compiles on no other route today, and no
+shipped example declares it, so the warm snippets below are worked examples
+rather than quotes from a package you can run.
 
 ```yaml targets.yaml
 targets:
@@ -111,7 +112,7 @@ carries whatever you write through verbatim.
 ## Run it
 
 ```sh
-unmute compile examples/livekit-human-transfer
+unmute compile examples/salon-concierge
 ```
 
 The compile report prints the route, every required environment variable, and

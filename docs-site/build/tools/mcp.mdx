@@ -34,7 +34,8 @@ tools:
   - web_search
 ```
 
-That is `examples/mcp-example`, which compiles on both targets.
+No shipped example declares an MCP server, so that is a worked example rather
+than a quote. It compiles on both targets as written.
 
 ## The block
 
@@ -178,8 +179,8 @@ Either way the dependency the project declares picks up the extra for you:
 
 ## What the compile does with it
 
-Every name the block holds becomes part of the generated project. From a real
-compile of `examples/mcp-example`:
+Every name the block holds becomes part of the generated project. Compiling the
+package above gives:
 
 `build/livekit/.env.example`
 

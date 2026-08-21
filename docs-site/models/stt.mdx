@@ -3,6 +3,10 @@ title: "Speech to text"
 description: "Which speech to text vendors each target can construct, and the SLNG models the scaffold binds."
 ---
 
+<Note>
+  Choosing a transcriber for **speed** rather than accuracy score is its own decision, and it is measured in [Optimizing your agent](/optimization/overview): how fast a model lands its *final* transcript decides how long the caller waits.
+</Note>
+
 The `listen` role turns the caller's voice into text. You bind it once in
 `agent.yaml`:
 
@@ -15,9 +19,9 @@ models:
 ```
 
 A scaffolded package binds SLNG here by design, so one `SLNG_API_KEY` covers
-listening and speaking. See the [SLNG Execution Layer](/models/optimization).
+listening and speaking. See the [SLNG Execution Layer](/optimization/execution-layer).
 To keep transcription compute in a world part or exact region, see
-[regional infrastructure](/models/regional-infrastructure).
+[regional infrastructure](/optimization/regional-infrastructure).
 
 <Info>
   Model ids are forwarded to the vendor exactly as you write them. Unmute keeps no
@@ -81,10 +85,10 @@ Pipecat has `openai`, LiveKit has `sarvam`. Everything else matches.
   <Card title="Text to speech" icon="volume-2" href="/models/tts">
     The voice the caller hears.
   </Card>
-  <Card title="SLNG Execution Layer" icon="zap" href="/models/optimization">
+  <Card title="SLNG Execution Layer" icon="zap" href="/optimization/execution-layer">
     The SLNG Execution Layer behind these models.
   </Card>
-  <Card title="Regional infrastructure" icon="globe-2" href="/models/regional-infrastructure">
+  <Card title="Regional infrastructure" icon="earth" href="/optimization/regional-infrastructure">
     Place speech compute and the agent worker separately.
   </Card>
 </Columns>

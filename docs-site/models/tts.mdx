@@ -3,6 +3,10 @@ title: "Text to speech"
 description: "Which text to speech vendors each target can construct, and the SLNG voice the scaffold binds."
 ---
 
+<Note>
+  For the connection settings that cut time to first audio, and what each one measured, see [Optimizing your agent](/optimization/overview).
+</Note>
+
 The `speak` role turns the agent's words into audio. You bind it once in
 `agent.yaml`, and this role usually takes a voice as well as a model:
 
@@ -16,9 +20,9 @@ models:
 ```
 
 A scaffolded package binds SLNG here by design, so one `SLNG_API_KEY` covers
-listening and speaking. See the [SLNG Execution Layer](/models/optimization).
+listening and speaking. See the [SLNG Execution Layer](/optimization/execution-layer).
 To keep synthesis compute in a world part or exact region, see
-[regional infrastructure](/models/regional-infrastructure).
+[regional infrastructure](/optimization/regional-infrastructure).
 
 <Info>
   Model ids and voice ids are forwarded to the vendor exactly as you write them.
@@ -84,10 +88,10 @@ Pipecat has `openai`, LiveKit has `gemini`. Everything else matches.
   <Card title="Reasoning model" icon="brain" href="/models/llm">
     The model that decides what to say.
   </Card>
-  <Card title="SLNG Execution Layer" icon="zap" href="/models/optimization">
+  <Card title="SLNG Execution Layer" icon="zap" href="/optimization/execution-layer">
     The SLNG Execution Layer behind these models.
   </Card>
-  <Card title="Regional infrastructure" icon="globe-2" href="/models/regional-infrastructure">
+  <Card title="Regional infrastructure" icon="earth" href="/optimization/regional-infrastructure">
     Place speech compute and the agent worker separately.
   </Card>
 </Columns>

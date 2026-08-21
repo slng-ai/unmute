@@ -69,7 +69,7 @@ Setup prerequisites:
 An error names the file and the line:
 
 ```text wrap
-unmute: validate examples/salon-support: build: agent.yaml:70: conversation.greeting.text references {{OPENAI_API_KEY}}, but secrets never flow through templates; a secret reaches a tool through its own *_env field
+unmute: validate my-agent: build: agent.yaml:70: conversation.greeting.text references {{OPENAI_API_KEY}}, but secrets never flow through templates; a secret reaches a tool through its own *_env field
 ```
 
 The exit code is 1 if any selected target fails.

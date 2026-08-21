@@ -2105,7 +2105,7 @@ func TestSmokePipecatV1ServicesInstantiate(t *testing.T) {
 }
 
 func TestSmokePipecatRegionalInfrastructureInstantiates(t *testing.T) {
-	runPipecatSmoke(t, "regional-infrastructure", nil, nil)
+	runPipecatSmoke(t, "salon-concierge", nil, nil)
 }
 
 // TestSmokePipecatV1TaskGroupsInstantiate runs the generated FlowManager on

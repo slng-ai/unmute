@@ -61,7 +61,7 @@ func TestManagedPlatformSettingRefusedOnlyWhereItCannotBeHonoured(t *testing.T) 
 }
 
 // The half that would have been got wrong by inferring the predicate from the
-// provider. examples/livekit-human-transfer declares a deployment region on a SIP
+// provider. examples/salon-concierge declares a deployment region on a SIP
 // route, and that route deploys either to LiveKit Cloud or to a server the author
 // runs, using the same route: the region is load-bearing there. It must still
 // compile with the rule live.

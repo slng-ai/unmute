@@ -8,44 +8,23 @@ help.
 The four structural packages contain the same five deterministic local Python
 tools for customer lookup and creation, availability, booking, and cancellation.
 Those tools use no network or durable storage. `salon-concierge` is the full
-integration example: it combines the structures with SQLite, MCP, handoffs, and
+integration example: it combines the structures with handoffs, tracing, and
 inbound telephony. The other packages keep smaller tool sets on purpose.
 
 Use the [end-to-end example harness](../docs/HARNESS_TEST.md) when a change needs a real
 provider request and a human conversation, not only the automated checks.
 
-The focused telephony examples stay **one per use case**:
-`twilio-telephony-hello` for inbound and outbound,
-`pipecat-human-transfer-twilio` for a cold transfer with nothing hosted, and
-`livekit-human-transfer` for cold and warm SIP transfer. `salon-concierge` is
-the larger release-readiness package that combines inbound routes with the main
-orchestration features. The [telephony overview](../docs-site/telephony/overview.mdx)
-explains which route to pick.
-
-**Where a name starts with a provider, the provider is the point.** Putting a
-caller through to a person works differently on each platform (LiveKit does it over
-a SIP trunk with a native primitive for both cold and warm; Pipecat does it over
-Twilio Media Streams, cold only), so those packages are not interchangeable and
-their names say which one you are reading. `twilio-telephony-hello` is named after
-its **carrier** instead, because it carries one target per provider and the point is
-comparing how one carrier reaches each platform. `outbound-reminder` is named after
-neither, because it is about an outbound workflow and runtime values on both.
-
 | Package | Structure | Responsibility split |
 |---|---|---|
-| [`simple-prompt`](simple-prompt/) | One agent and one large prompt | One agent owns every workflow and tool. **Compact tracing example:** it sets `tracing.provider: langfuse` and needs the three `LANGFUSE_*` values. |
+| [`simple-prompt`](simple-prompt/) | One agent and one large prompt | **Start here.** One agent owns every workflow and tool. **Compact tracing example:** it sets `tracing.provider: langfuse` and needs the three `LANGFUSE_*` values. |
 | [`multi-task`](multi-task/) | One agent and two independent tasks | One task owns customer records; another owns appointments. |
 | [`task-groups`](task-groups/) | One agent and three ordered tasks | Shared context moves through customer identification, slot selection, and finalization. |
 | [`subagents`](subagents/) | Two agents with handoffs | One agent books new visits; the other reschedules and cancels. |
-| [`salon-support`](salon-support/) | One agent, variables, browser only | **Start here.** The one you can run in a minute: web audio, local tools, no Twilio and no API to stand up. Shows a personalized greeting, a hidden tool parameter, and the model saving what the caller says. |
 | [`salon-concierge`](salon-concierge/) | Four agents, tasks, a task group, handoffs, local SQLite, tracing, and inbound phone routes | **Release-readiness example.** Verify once, manage stored bookings, answer or escalate complaints, cold-transfer to a manager, and inspect Coval traces. Every tool is local Python, so nothing remote has to be up before the greeting. Browser and inbound phone on three targets, one per local telephony plane, no outbound. |
-| [`optimized-salon-concierge`](optimized-salon-concierge/) | `salon-concierge` again, thinking behind the SLNG Context Router | **The matched pair.** Same prompts, same tasks, same routes; the think binding is `provider: slng`, so a turn the router judges repeatable comes back from its cache instead of the model. Run the same conversation on both and the difference you measure is the router's. |
-| [`twilio-telephony-hello`](twilio-telephony-hello/) | A minimal inbound and outbound phone agent | Real Twilio calls on the route each platform recommends: Pipecat on the platform's own carrier stream (`cloud-websocket`, Media Streams, nothing hosted by you) and LiveKit on a Twilio Elastic SIP Trunk (`sip`, the route with transfers and voicemail). Two mechanisms side by side, and between them you can hear both call directions on a laptop. |
-| [`livekit-human-transfer`](livekit-human-transfer/) | One phone agent, two ways to reach a person | Cold transfer hands the caller off and the agent drops out; warm transfer holds the caller, briefs a supervisor, then bridges the two. **LiveKit only**, over a Twilio SIP trunk: warm transfer compiles on no other route today. |
-| [`pipecat-human-transfer-twilio`](pipecat-human-transfer-twilio/) | Cold transfer and inbound, with nothing hosted | The same salon on Pipecat Cloud, reached through your own Twilio number. Your number points at static markup in the Twilio console; no server of yours is in the path. When the destination leg ends, Twilio ends the original call. Unmute does not support warm transfer on Pipecat. |
-| [`regional-infrastructure`](regional-infrastructure/) | Regional worker, STT, and TTS settings | Runs both targets in Europe and routes SLNG speech by world part or exact region. Its guide also explains LiveKit multi-region deployment. |
-| [`mcp-example`](mcp-example/) | One agent, one remote MCP server | **The MCP example.** A single tool file declares Firecrawl's MCP server, its transport, its bearer token, and the one tool of its own the agent may use; ask a question that needs current information and the agent searches the web. Browser only, both code targets, no telephony. See [MCP servers](../docs-site/build/tools/mcp.mdx). |
-| [`outbound-reminder`](outbound-reminder/) | One outbound agent using runtime values | Input variables from the dispatch, a system variable from the route, and a conversation variable the model saves mid call. All three appointment outcomes use local Python fixtures, so only the model and outbound carrier services are external. See [variables](../docs-site/reference/variables.mdx). |
+
+`salon-concierge` is the only package with a telephony route. The
+[telephony overview](../docs-site/telephony/overview.mdx) explains the routes
+each platform offers and which one to pick.
 
 ## Compile an example
 
@@ -60,7 +39,7 @@ bin/unmute compile examples/simple-prompt
 The generated projects are in `examples/simple-prompt/build/livekit/` and
 `examples/simple-prompt/build/pipecat/`.
 
-## Review Langfuse traces
+## Review traces
 
 Keep credentials in the ignored repository-root `.env`, then run one target
 from the repository root. A package-level `.env` can override shared values.
@@ -69,18 +48,18 @@ from the repository root. A package-level `.env` can override shared values.
 bin/unmute dev examples/simple-prompt --target pipecat
 ```
 
-Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_BASE_URL`
-together. `simple-prompt` and `salon-concierge` both configure
-`tracing.provider: langfuse`; the smaller starter examples do not, so the first
-run still needs only model-provider keys. Add `tracing:` to any other package
-that wants traces; the block is two lines and the section below explains what
-you get.
+`simple-prompt` sets `tracing.provider: langfuse` and needs
+`LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_BASE_URL` together.
+`salon-concierge` sets `tracing.provider: coval` and needs `COVAL_API_KEY`. The
+smaller starter examples set neither, so the first run still needs only
+model-provider keys. Add `tracing:` to any other package that wants traces; the
+block is two lines and the section below explains what you get.
 
-LiveKit creates one trace for the room and uses the room name as the Langfuse
-session ID. Pipecat creates one trace for the full conversation.
+LiveKit creates one trace for the room and uses the room name as the session ID.
+Pipecat creates one trace for the full conversation.
 
 Starting a worker or exporting a synthetic span only proves that credentials
-and transport work. Complete at least one user turn before reviewing Langfuse.
+and transport work. Complete at least one user turn before reviewing traces.
 LiveKit then records `llm_node` and `llm_request` generation observations;
 Pipecat records `llm` and `tts` generation observations under its conversation
 and turn spans.

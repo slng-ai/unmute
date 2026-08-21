@@ -97,7 +97,7 @@ do outside Unmute before a real call. Pass those on.
 An error names the file and the line:
 
 ```
-unmute: validate examples/salon-support: build: agent.yaml:70: conversation.greeting.text
+unmute: validate my-agent: build: agent.yaml:70: conversation.greeting.text
   references {{OPENAI_API_KEY}}, but secrets never flow through templates; a secret
   reaches a tool through its own *_env field
 ```

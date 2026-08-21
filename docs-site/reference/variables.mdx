@@ -84,7 +84,7 @@ in for the dispatch payload production sends, so it accepts `call_start`
 variables only:
 
 ```text wrap
-unmute: dev examples/salon-support: --var requested_service=haircut: "requested_service" has source conversation, so the model saves it mid-call through update_variables, not you
+unmute: dev my-agent: --var requested_service=haircut: "requested_service" has source conversation, so the model saves it mid-call through update_variables, not you
 ```
 
 An undeclared name is refused rather than accepted and dropped.

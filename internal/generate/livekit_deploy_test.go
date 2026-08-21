@@ -2,13 +2,11 @@ package generate
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/slng-ai/unmute/internal/ir"
-	"github.com/slng-ai/unmute/internal/spec"
 	"github.com/slng-ai/unmute/internal/target"
 )
 
@@ -148,7 +146,7 @@ func TestLiveKitReportCarriesRegions(t *testing.T) { // FR-020
 // package declares none, and openai 3.0 replaced its httpx dependency with
 // httpx2. Since `livekit.agents.__init__` imports `inference` eagerly, such a
 // project cannot import the SDK at all. This is the exact shape of
-// examples/livekit-human-transfer, which is the package the transfer rig deploys.
+// examples/salon-concierge, which is the package the transfer rig deploys.
 func TestLiveKitDeclaresHTTPXWithoutWebhooksOrTracing(t *testing.T) {
 	agent := loadCompilerAgent(t)
 	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
@@ -176,127 +174,5 @@ func TestLiveKitDeclaresHTTPXWithoutWebhooksOrTracing(t *testing.T) {
 	}
 	if !strings.Contains(pyproject, `"httpx"`) {
 		t.Errorf("pyproject omits httpx, so the deployed agent cannot import livekit.agents:\n%s", pyproject)
-	}
-}
-
-// TransferSIPParticipant's transfer_to becomes the Refer-To of a SIP REFER, so
-// it must be a URI. WarmTransferTask's sip_call_to is a number to dial, so it
-// must not be. One destination, two positions, two shapes. Verified 2026-08-12
-// against the call-forwarding and WarmTransferTask docs.
-func TestLiveKitColdTransferSendsAURI(t *testing.T) {
-	emit := func(t *testing.T, destination string, warm bool) string {
-		t.Helper()
-		pkg, err := spec.Load(filepath.Join("..", "..", "examples", "livekit-human-transfer"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		agent, err := ir.Build(pkg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
-		for name, control := range agent.Controls {
-			human, ok := control.(*ir.HumanTransfer)
-			if !ok {
-				continue
-			}
-			if warm != (human.Mode == ir.TransferWarm) {
-				continue
-			}
-			tgt.Destinations[human.Destination] = destination
-			_ = name
-		}
-		artifact, err := Generate(agent, tgt, target.Default())
-		if err != nil {
-			t.Fatal(err)
-		}
-		return artifactFile(t, artifact, "agent.py")
-	}
-
-	// A bare number gains the scheme at compile time; the helper is not needed.
-	if got := emit(t, "+14155550123", false); !strings.Contains(got, `transfer_to="tel:+14155550123"`) {
-		t.Error("a literal E.164 destination did not become a tel: URI")
-	}
-	// An authored URI is left exactly as written: double prefixing breaks it.
-	if got := emit(t, "sip:+14155550123@my-trunk.zt.plivo.com", false); !strings.Contains(got, `transfer_to="sip:+14155550123@my-trunk.zt.plivo.com"`) {
-		t.Error("an authored sip: destination was rewritten")
-	}
-	// An env destination is only known on the call, so it goes through the
-	// emitted helper, which must also be defined.
-	envForm := emit(t, "BILLING_PHONE_NUMBER", false)
-	for _, want := range []string{
-		`transfer_to=_refer_uri(os.environ["BILLING_PHONE_NUMBER"])`,
-		"def _refer_uri(destination: str) -> str:",
-		`if destination.startswith(("tel:", "sip:", "sips:")):`,
-	} {
-		if !strings.Contains(envForm, want) {
-			t.Errorf("env destination missing %q", want)
-		}
-	}
-	// The warm path dials a number, so no scheme and no helper on that argument.
-	warm := emit(t, "SUPERVISOR_PHONE_NUMBER", true)
-	if !strings.Contains(warm, `sip_call_to=_sip_user(os.environ["SUPERVISOR_PHONE_NUMBER"])`) {
-		t.Error("warm sip_call_to is not a plain number expression")
-	}
-	if strings.Contains(warm, `sip_call_to=_refer_uri(`) || strings.Contains(warm, `sip_call_to="tel:`) {
-		t.Error("warm sip_call_to carries a URI scheme, which it must not")
-	}
-}
-
-// REDIS_URL and the LIVEKIT_* trio are not the operator's to supply on LiveKit
-// Cloud: the platform injects the trio and drops it from any secrets file, and
-// its managed SIP service owns Redis, which no emitted Python reads.
-//
-// They used to be listed under a "Supplied for you, not by you" heading. That
-// was better than listing them beside real keys, and still wrong: `.env.example`
-// is a to-do list, and an entry that is not the reader's to do does not belong
-// on it in any form (FR-018). This test now holds the absence, and the two
-// places the information survives.
-func TestLiveKitEnvExampleOmitsPlatformSuppliedNames(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "livekit-human-transfer"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, err := ir.Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
-	env := artifactFile(t, artifact, ".env.example")
-	for _, name := range []string{"REDIS_URL", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"} {
-		if strings.Contains(env, name) {
-			t.Errorf("%s is still in .env.example, in some form; it is not the reader's to set:\n%s", name, env)
-		}
-	}
-	for _, name := range []string{"BILLING_PHONE_NUMBER", "SUPERVISOR_PHONE_NUMBER", "OPENAI_API_KEY", "SIP_TRUNK_HOSTNAME"} {
-		if !strings.Contains(env, name+"=") {
-			t.Errorf("%s must stay the operator's to set", name)
-		}
-	}
-	// Where the hidden names go instead: prose that says where each value comes
-	// from, which is more useful than a blank line ever was.
-	readme := artifactFile(t, artifact, "README.md")
-	for _, want := range []string{"LIVEKIT_URL", "REDIS_URL"} {
-		if !strings.Contains(readme, want) {
-			t.Errorf("README.md does not say where %s comes from", want)
-		}
-	}
-	// The stored outbound trunk is gone from the emitted project entirely
-	// (SCHEMA N33, 2026-08-12): the agent dials with the carrier's trunk
-	// settings inline, so this name is neither the operator's nor the
-	// platform's, it simply is not read.
-	if strings.Contains(env, "LIVEKIT_SIP_OUTBOUND_TRUNK") {
-		t.Error(".env.example still lists LIVEKIT_SIP_OUTBOUND_TRUNK")
-	}
-	// The report keeps the complete list: what the package requires has not
-	// changed, only who supplies each name.
-	report := artifactFile(t, artifact, "compile-report.json")
-	for _, name := range []string{"REDIS_URL", "LIVEKIT_URL", "BILLING_PHONE_NUMBER"} {
-		if !strings.Contains(report, name) {
-			t.Errorf("compile-report.json lost %s from required_env", name)
-		}
 	}
 }

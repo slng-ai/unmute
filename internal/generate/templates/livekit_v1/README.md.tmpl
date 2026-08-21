@@ -80,9 +80,21 @@ would otherwise bounce the call before the caller hears anything. Every later
 turn has the full list back.
 {{- if .EndpointingDelay}}
 
-The session waits {{.EndpointingDelay}}s after speech stops before it takes the
-turn, from the package's `endpointing_delay`. Raise it further if the transcriber
-still lands its final text after the turn is committed.
+## Turn taking
+
+The prewarmed Silero VAD waits {{.EndpointingDelay}}s of silence before it reports
+end of speech, from the package's `endpointing_delay`. That window is the floor on
+every turn: nothing downstream can start earlier, because the transcriber is only
+asked to finalise once the VAD says the caller stopped.
+
+Lower it to answer sooner, at the cost of cutting off a caller who pauses
+mid-sentence. Raise it to give them more room. The runtime refuses anything under
+0.25s, so `unmute compile` rejects it rather than letting the worker raise on its
+first call.
+
+This does not set `turn_handling`'s endpointing `min_delay`, and that is
+deliberate: `min_delay` cannot fire before the VAD reports end of speech, so any
+value below this window would be unreachable there.
 {{- end}}
 
 ## Tasks and task groups
@@ -108,6 +120,14 @@ source task so the next task can identify it. An isolated group carries no
 results between steps. The final `merge: results` map is keyed by task name.
 
 ## Empty task responses
+
+Before it generates anything, a generated task drops the delegate call that
+started it from its own copy of the conversation. That call is still running
+while the task runs, so LiveKit adds it plus a placeholder result reading "The
+tool call is still in progress." This is right for the agent that made the call:
+it stops the model re-issuing a call already in flight. It is wrong for a task,
+which is a different agent reading an unfinished call it never made, and which
+then opens with nothing or apologises for a failure that did not happen.
 
 Generated LiveKit tasks retry up to twice when a full successful response has
 neither non-whitespace text nor a tool call. Each retry starts immediately in

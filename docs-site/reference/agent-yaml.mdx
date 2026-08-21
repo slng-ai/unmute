@@ -97,7 +97,7 @@ Which fields are legal depends on the section:
 | `language` | `speak`, `listen` |
 | `temperature`, `top_p`, `top_k` | `think` |
 | `semantic_endpointing` | `turn`: `required`, `preferred`, or `off` |
-| `endpointing_delay` | `turn`: a positive duration, how long to wait after speech stops before taking the turn |
+| `endpointing_delay` | `turn`: a positive duration, the window of silence before the caller counts as finished. The floor on every turn. LiveKit refuses under `250ms`; defaults differ per target (LiveKit `550ms`, Pipecat `200ms`) |
 | `fallback` | `think`, `listen` |
 
 | Field | Values and constraints |
@@ -165,8 +165,8 @@ secrets:
 ```
 
 A list of UPPER_SNAKE environment variable names. Never values, and never usable
-in a `{{template}}`. That list is `examples/livekit-human-transfer`'s: two model
-keys, the four names its connection maps, and the two desks it can transfer to.
+in a `{{template}}`. That list is a worked example: two model keys, the four
+names a SIP connection maps, and the two desks the agent can transfer to.
 
 Declare every environment name the generated project reads: names written in
 tool and connection fields, destination values, literal `os.environ` reads in
