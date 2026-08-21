@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "Unmute by SLNG//",
+  "name": "Unmute",
   "description": "Build portable voice agents and compile them to Pipecat or LiveKit Agents projects you own.",
   "colors": {
     "primary": "#8A7300",
@@ -9,10 +9,13 @@
     "dark": "#8A7300"
   },
   "logo": {
-    "light": "/logo/slng.png",
-    "dark": "/logo/slng.png"
+    "light": "/logo/Isotype_UNMUTE.svg",
+    "dark": "/logo/Isotype_UNMUTE_wb.svg"
   },
-  "favicon": "/logo/slng.png",
+  "favicon": {
+    "light": "/logo/Isotype_UNMUTE.svg",
+    "dark": "/logo/Isotype_UNMUTE_wb.svg"
+  },
   "icons": {
     "library": "lucide"
   },
@@ -212,14 +215,14 @@
   "navbar": {
     "links": [
       {
-        "label": "SLNG models",
+        "label": "Model catalog",
         "href": "https://docs.slng.ai/models"
       }
     ]
   },
   "footer": {
     "socials": {
-      "website": "https://slng.ai"
+      "github": "https://github.com/slng-ai/unmute"
     }
   }
 }

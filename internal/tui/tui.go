@@ -123,7 +123,7 @@ func runCreate(runner *fieldRunner) (Result, bool, error) {
 
 // homeTitle is the Home select title used by the accessible renderer; the
 // interactive renderer draws the wordmark hero instead (view.go).
-func homeTitle() string { return "SLNG//" }
+func homeTitle() string { return "UNMUTE//" }
 
 // sidebarSections is the fixed five-section tree shown in the console sidebar.
 // Order matches editorSectionOptions.

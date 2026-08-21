@@ -7,8 +7,8 @@ import (
 )
 
 func TestV48HeaderShowsBrand(t *testing.T) {
-	if h := newUI(&bytes.Buffer{}).header("validate"); !strings.Contains(h, "SLNG//") {
-		t.Fatalf("run header omits the SLNG brand: %q", h)
+	if h := newUI(&bytes.Buffer{}).header("validate"); !strings.Contains(h, "UNMUTE//") {
+		t.Fatalf("run header omits the Unmute brand: %q", h)
 	}
 }
 

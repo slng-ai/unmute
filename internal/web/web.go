@@ -9,5 +9,5 @@ import "embed"
 
 // FS holds the dev client, its logo, and the vendored livekit-client build.
 //
-//go:embed index.html logo.png livekit-client.umd.js
+//go:embed index.html logo.svg livekit-client.umd.js
 var FS embed.FS

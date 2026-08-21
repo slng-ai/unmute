@@ -22,12 +22,12 @@ func TestV43WarnIsNotBrandYellow(t *testing.T) {
 
 func TestV43NoColorEmitsNoEscapes(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
-	for _, s := range []string{Badge("SLNG//"), Accented("hero"), Dim("meta")} {
+	for _, s := range []string{Badge("UNMUTE//"), Accented("hero"), Dim("meta")} {
 		if strings.ContainsRune(s, '\x1b') {
 			t.Fatalf("NO_COLOR output contains escape: %q", s)
 		}
 	}
-	if got := Badge("SLNG//"); got != "SLNG//" {
-		t.Fatalf("NO_COLOR badge = %q, want plain SLNG//", got)
+	if got := Badge("UNMUTE//"); got != "UNMUTE//" {
+		t.Fatalf("NO_COLOR badge = %q, want plain UNMUTE//", got)
 	}
 }

@@ -1,8 +1,9 @@
 <p align="center">
-  <a href="https://slng.ai"><img src="images/Logo_SLNG.png" alt="SLNG" height="100"></a>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="images/Logo_UNMUTE_wb.svg">
+    <img src="images/Logo_UNMUTE.svg" alt="Unmute" height="80">
+  </picture>
 </p>
-
-<h1 align="center">Unmute</h1>
 
 Unmute is a command line compiler for voice agents. You write a small package of
 YAML and Markdown that says who the agent is, which models it uses, and which
