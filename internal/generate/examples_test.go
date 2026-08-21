@@ -94,6 +94,15 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if livekitReason.Params["api"] != "responses" || livekitReason.Params["reasoning_effort"] != "none" || livekitReason.Params["use_websocket"] != true {
 		t.Errorf("livekit reasoning params = %#v, want Responses API with reasoning off over a websocket", livekitReason.Params)
 	}
+	// Fast mode, which buys a tighter tail rather than a faster median: measured
+	// live 2026-08-21 over every inference in a call, ttft median moved 0.810s to
+	// 0.780s while p90 moved 1.480s to 0.940s. A caller remembers the slow turn,
+	// so the tail is the number worth paying for, and priority does bill at a
+	// higher rate. This lives on the target override rather than the base model
+	// because a target that overrides a model replaces its params block whole.
+	if livekitReason.Params["service_tier"] != "priority" {
+		t.Errorf("livekit reasoning params = %#v, want service_tier priority: without it llm ttft p90 is ~0.5s worse", livekitReason.Params)
+	}
 	pipecatReason := targetByProvider(t, resolved, ir.ProviderPipecat).Models.Reason["reasoning"]
 	if _, ok := pipecatReason.Params["api"]; ok || pipecatReason.Params["reasoning_effort"] != "none" {
 		t.Errorf("pipecat reasoning params = %#v, want Chat Completions with reasoning disabled", pipecatReason.Params)

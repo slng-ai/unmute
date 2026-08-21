@@ -13,6 +13,14 @@ targets:
           api: responses
           reasoning_effort: none
           use_websocket: true
+          # Fast mode. OpenAI accepts auto, default, flex, fast and priority,
+          # and fast or priority opt into it. It buys a tighter tail rather
+          # than a faster median: over every inference in a call, ttft median
+          # moved 0.810s to 0.780s while p90 moved 1.480s to 0.940s. That is
+          # the shape a caller notices, because the slow turn is the one they
+          # remember. Priority bills at a higher rate, so this is a deliberate
+          # trade and not a free win. Measured 2026-08-21.
+          service_tier: priority
       detector:
         provider: livekit
         model: turn-detector-mini
