@@ -279,14 +279,19 @@ models:
     model: gpt-5.6-terra
     params:
       api: responses
-      reasoning_effort: low
-      use_websocket: false
+      reasoning_effort: none
+      use_websocket: true
 ```
 
 This emits `openai.responses.LLM` and, when present, maps `reasoning_effort` to
 the nested reasoning setting. Use that field instead of a raw `reasoning` map.
 Keep the override target-local so Pipecat retains its normal OpenAI request
 shape. The salon concierge is the working source example.
+
+`use_websocket: true` belongs in every voice package that reaches OpenAI. With
+HTTP each model call in a turn opens its own TLS connection, and a turn that
+calls a tool makes at least two, so the handshake lands in the silence the
+caller is sitting through.
 
 ## The vendors, per target per role
 

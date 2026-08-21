@@ -11,8 +11,8 @@ targets:
         model: gpt-5.6-terra
         params:
           api: responses
-          reasoning_effort: low
-          use_websocket: false
+          reasoning_effort: none
+          use_websocket: true
       detector:
         provider: livekit
         model: turn-detector-mini

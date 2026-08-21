@@ -3,39 +3,51 @@
 The full Sage and Stone Salon project. Use this example before a release when
 you want one package to exercise the main Unmute paths together:
 
-- a verification entry agent and a typed customer task;
-- a three-step draft, confirmation, and apply group for create, modify, and cancel;
+- a phone-only verification entry agent and a typed customer task;
+- one booking task that handles create, modify, and cancel;
 - agent handoffs with shared customer context;
 - a complaint agent with cold manager transfer;
 - a chat agent that answers open questions and hands off, with no tool of its own;
-- local Python tools backed by SQLite;
+- local Python tools backed by one in-memory store;
 - Coval tracing for release inspection;
 - browser audio and inbound phone calls on three targets, covering both local
   telephony planes.
 
 There is no outbound route. `channels.phone.outbound` is `false`.
 
+## Tuned for turn latency
+
+This package is tuned to cut the silence a caller hears between turns. Two
+structural choices do that, and both work by cutting the number of LLM round
+trips a turn needs, not by cutting what the agent can do:
+
+- Verification asks for a phone number only, with no name to spell out loud.
+  Spelling a name letter by letter over a transcriber is slow and error-prone,
+  and the number alone finds the record.
+- Booking is one task, not three. A separate draft, confirm, and apply step
+  each cost their own round trip to finish, and the mutation tools already
+  refuse a write that is not confirmed, so the split bought no extra safety.
+
 ## How the call moves
 
-The concierge verifies the caller once, saves `customer_id` and `customer_name`,
+The concierge verifies the caller once by phone number, saves `customer_id`,
 then routes the full conversation silently. Every specialist can route directly
 to any other specialist without announcing the internal handoff. The booking
-preparation task can also leave immediately for a complaint or a general
-request without applying a booking change. The apply step carries no handoff on
-purpose, so a request raised there ends that step first, with whatever the
-mutation actually returned, and names the request in `unserved_request`. The
-booking specialist reads that off the returned result and routes the caller
-without being asked twice. The apply step never refuses in place. Every route keeps the verified identity
-and full history. During verification, the task spells the first name and surname,
-reads every phone digit, and waits for a new clear yes before the customer action.
-After verification, no specialist asks for or repeats those details unless the
-caller says the saved identity is wrong. This readback checks what speech recognition
-captured; it is not strong authentication such as an OTP.
+task can also leave immediately for a complaint or open chat without applying a
+booking change, since it holds those two handoffs itself. For any other request
+it cannot serve, the task finishes first with whatever the last mutation
+actually returned, and names the request in `unserved_request`. The booking
+specialist reads that off the returned result and routes the caller without
+being asked twice. Every route keeps the verified identity and full history.
+During verification, the task reads every phone digit back once and waits for a
+new clear yes before the customer lookup. After verification, no specialist
+asks for or repeats the number unless the caller says the saved identity is
+wrong. This readback checks what speech recognition captured; it is not strong
+authentication such as an OTP.
 
-On LiveKit, each shared booking result is labeled with its source task before
-the next task starts, so the apply step can identify the confirmed draft.
-That target overrides the shared reasoning profile with OpenAI's Responses API,
-low reasoning, and HTTP transport. Pipecat keeps Chat Completions with reasoning
+On LiveKit, the target overrides the shared reasoning profile with OpenAI's
+Responses API and a held WebSocket in place of a fresh handshake on every model
+call, with reasoning still off. Pipecat keeps Chat Completions with reasoning
 disabled. Both targets still use the same model ID.
 
 The complaint specialist records the case with a local Python tool. It calls a
@@ -54,13 +66,15 @@ hands off for booking or complaint work. For a remote tool over MCP, see
 
 ## Local data
 
-All eight local tools share one process-specific SQLite database. The worker
-deletes that database and its sidecars at startup, so every new worker starts
-empty while verification, booking, and complaint tasks in that worker still
-share data. Concurrent workers use separate files.
+All eight local tools share one in-process store: dicts of customers,
+bookings, and complaints guarded by one lock, held in a module that every copy
+of `tools/salon.py` imports under the same name. Every new worker starts with
+an empty store, and verification, booking, and complaint tasks in that worker
+all see the same data. Concurrent workers do not share data.
 
-This is disposable test storage. Restart `unmute dev` for a clean run; do not
-delete database files by hand. Use a shared database for a real deployment.
+This is disposable test storage with a hard ceiling: it lives in one process
+and disappears when the worker restarts. Restart `unmute dev` for a clean run.
+Put a real service behind these functions before a second replica exists.
 
 Run its fast behavior check directly:
 
@@ -110,16 +124,17 @@ rules are approved. Keep `UNMUTE_LOG_LEVEL=INFO` for normal runs.
 
 ## Booking confirmation boundary
 
-Selection, confirmation, and mutation are separate tasks. Selecting a time only
-finishes the draft step. The confirmation step then states the full proposal and
-asks a new yes-or-no question; nothing said before that question counts. A clear
-yes or matching “book it,” “move it,” or “cancel it” copies the exact draft into
-the apply step. One unclear or interrupted answer gets one full restatement;
-another unclear answer, an explicit no, or omitted confirmation yields zero
-mutation. A topic change exits without applying the stale draft. This is a
-model-and-workflow gate, not hard authorization. The local mutation functions do
-not authenticate a caller or independently prove consent. A production booking
-service must enforce authorization, consent, and idempotency at its own boundary.
+Selection and confirmation happen inside the one booking task. Picking a time
+only finishes the selection step; it does not count as a yes. The task then
+states the full proposal in one sentence and asks a new yes-or-no question.
+A clear yes, or a matching “book it,” “move it,” or “cancel it,” saves the
+exact proposal in the same turn with `confirmed` set to true. One unclear or
+interrupted answer gets one full restatement; a second unclear answer, an
+explicit no, or omitted confirmation saves nothing. A topic change exits
+without saving the open proposal. This is a model-and-workflow gate, not hard
+authorization. The local mutation functions do not authenticate a caller or
+independently prove consent. A production booking service must enforce
+authorization, consent, and idempotency at its own boundary.
 
 ## Empty LiveKit task responses
 
@@ -147,9 +162,8 @@ bin/unmute validate examples/salon-concierge
 bin/unmute compile examples/salon-concierge
 ```
 
-LiveKit warns that its task-group primitive is experimental. Both targets also
-warn that inactivity and maximum-duration values still need driver-side range
-checks. These are warnings, not silent downgrades.
+Both targets warn that inactivity and maximum-duration values still need
+driver-side range checks. These are warnings, not silent downgrades.
 
 The generated `build/<target>/README.md` is the deployment and carrier runbook.
 Do not commit `build/`; it is disposable.
@@ -224,7 +238,7 @@ Repeat it on an inbound phone route only when that route is separately reachable
 | Check | What to say | Pass result |
 |---|---|---|
 | Unverified booking | “I want to book a haircut.” Do not give identity until asked. | Verification runs first. No booking action runs before it succeeds. |
-| Relative-date booking | Give a fake first name, surname, and 10–15 digit phone number, confirm the complete identity readback, say “Book a haircut tomorrow afternoon,” pick an offered time, then explicitly confirm the full booking. | `find_or_create_customer` runs once after the identity yes and returns `created`. The trace then calls `get_current_date` before `check_availability`; the availability date is one day after the returned date, with no guessed-year invalid call. One `create_booking` returns `booked` for the offered slot. |
+| Relative-date booking | Give a fake 10–15 digit phone number, confirm the digit readback, say “Book a haircut tomorrow afternoon,” pick an offered time, then explicitly confirm the full booking. | `find_or_create_customer` runs once after the phone confirmation and returns `created`. The trace then calls `get_current_date` before `check_availability`; the availability date is one day after the returned date, with no guessed-year invalid call. One `create_booking` returns `booked` for the offered slot. |
 | No confirmation | Prepare a create, modify, or cancel request, then say no, stay silent, or change topic instead of confirming. | No booking mutation runs. An explicit no or a second unclear answer finishes unconfirmed; silence waits for inactivity handling, and a topic change hands off without completing the booking. |
 | Neutral complaint | “My last haircut was uneven, but I’d like the salon to fix it.” | One `record_complaint` returns `recorded` for the same customer, no booking mutation runs, and no manager transfer starts. |
 | Book then cancel | Ask to cancel the active booking and confirm. | One `cancel_booking` returns `cancelled`; a later `list_bookings` has no active booking. |
@@ -243,16 +257,17 @@ successful case must follow this order:
 
 ```text
 verify_customer
-complete first-name, surname, and phone readback
+complete phone-number readback
 new clear caller confirmation
-find_or_create_customer       exactly once, with the confirmed values
+find_or_create_customer       exactly once, with the confirmed number
 ```
 
-Test details given at once, a yes spoken before the readback, an interrupted
-readback, a one-field correction, a fragmented phone number, an ambiguous
-answer, and an explicit no. No customer action may run before the final yes;
-the one later action must use the values that were read back. The Python
-self-check covers name mismatch, and `make smoke` covers the clean restart.
+Test the number given at once, a yes spoken before the readback, an
+interrupted readback, a digit correction, a fragmented phone number, an
+ambiguous answer, and an explicit no. No customer action may run before the
+final yes; the one later action must use the number that was read back. The
+Python self-check covers invalid and malformed phone numbers, and `make smoke`
+covers the clean restart.
 
 ### Exact answered and unavailable transfer calls
 
@@ -261,11 +276,10 @@ target with the manager answering and once per target with the manager declining
 or not answering. Wait for each response.
 
 1. “I need help with a complaint.”
-2. “My name is Alex Test.”
-3. “My phone number is plus one, five five five, zero one zero.” Pause, then
+2. “My phone number is plus one, five five five, zero one zero.” Pause, then
    say: “Eight eight four four.”
-4. After the complete identity readback, say: “Yes, that is correct.”
-5. “My haircut was uneven and I want to speak to a manager.”
+3. After the complete phone readback, say: “Yes, that is correct.”
+4. “My haircut was uneven and I want to speak to a manager.”
 
 An answered run needs observed two-way human audio. Carrier acceptance alone
 does not prove that the manager answered. An unavailable run must end without a
@@ -276,11 +290,11 @@ new concierge greeting or a claim that the manager answered.
 Start a new worker first. Run this once in the browser and once by inbound phone
 on each target. Wait for each response before speaking the next line.
 
-1. “I want to book a haircut tomorrow at three. My name is Robin Taylor.”
+1. “I want to book a haircut tomorrow at three.”
 2. “My number is five five five zero one zero.” Pause, then say: “Eight eight
    four four.”
-3. After the complete identity readback, say: “Yes, that is correct.”
-4. After booking preparation starts: “Actually, my last haircut was uneven. I’d
+3. After the complete phone readback, say: “Yes, that is correct.”
+4. After the booking task starts: “Actually, my last haircut was uneven. I’d
    like the salon to fix it.”
 5. Only after customer care says the complaint was saved: “I want to speak to a
    manager.”
@@ -300,7 +314,7 @@ to_manager                    exactly once
 ```
 
 The final demo state is one customer, zero bookings, and one complaint. There
-is no second verification, apply task, or booking mutation.
+is no second verification or booking mutation.
 
 | Target and channel | Test | Pass result |
 |---|---|---|
@@ -324,15 +338,14 @@ names, phone numbers, transcripts, tool arguments, credentials, or raw traces.
 | Pending | LiveKit browser combined | Pending | Pending | Pending | Pending |
 | Pending | Pipecat inbound answered | Pending | Pending | Twilio child-leg status plus observed two-way audio | Pending |
 | Pending | Pipecat inbound unavailable | Pending | Pending | Twilio child-leg final status plus observed terminal timeout | Pending |
-| Pending | Pipecat inbound combined | Pending | Pending | SQLite counts/status plus Twilio child-leg status | Pending |
+| Pending | Pipecat inbound combined | Pending | Pending | Traced tool-result counts/status plus Twilio child-leg status | Pending |
 | Pending | LiveKit inbound answered | Pending | Pending | SIP/worker status plus observed two-way audio | Pending |
 | Pending | LiveKit inbound unavailable | Pending | Pending | SIP/worker status plus observed terminal timeout | Pending |
-| Pending | LiveKit inbound combined | Pending | Pending | SQLite counts/status plus SIP/worker status | Pending |
+| Pending | LiveKit inbound combined | Pending | Pending | Traced tool-result counts/status plus SIP/worker status | Pending |
 
 For longer real conversations, use the
 [end-to-end harness](../../docs/HARNESS_TEST.md). Feature references:
 [tasks](../../docs-site/build/orchestration/tasks.mdx),
-[task groups](../../docs-site/build/orchestration/task-groups.mdx),
 [handoffs](../../docs-site/build/orchestration/handoffs.mdx),
 [transfers](../../docs-site/transfers/overview.mdx), and
 [telephony](../../docs-site/telephony/overview.mdx).

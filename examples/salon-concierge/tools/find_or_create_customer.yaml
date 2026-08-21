@@ -1,20 +1,16 @@
 description: >-
-  Look up or create one salon customer from the exact confirmed first name and
-  surname and phone. Use only after the complete readback receives a new
-  unambiguous yes. Reuse the exact match or create a record for a new phone
-  number. Never guess identity or use an unconfirmed value.
+  Look up or create one salon customer from the exact confirmed phone number.
+  Use only after the digit readback got a clear yes. Reuse the record that
+  already owns the number, or create one for a number that is new. Never guess
+  a number or pass one the caller has not confirmed.
 
 input:
   type: object
   properties:
-    name:
-      type: string
-      description: Exact confirmed first name and surname joined as one full name
     phone:
       type: string
       description: Exact confirmed phone; 10 to 15 digits with no inferred country code
   required:
-    - name
     - phone
 
 output:
@@ -22,20 +18,16 @@ output:
   properties:
     customer_id:
       type: string
-    customer_name:
-      type: string
     status:
       type: string
       enum:
         - existing
         - created
-        - name_mismatch
         - invalid
     summary:
       type: string
   required:
     - customer_id
-    - customer_name
     - status
     - summary
 

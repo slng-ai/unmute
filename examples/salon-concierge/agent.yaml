@@ -1,6 +1,10 @@
-# One full salon project: verification task, booking task group, specialist
-# handoffs, cold manager transfer, local SQLite tools, browser audio, and
-# inbound-only phone routes on both code targets.
+# One full salon project: verification task, booking task, specialist handoffs,
+# cold manager transfer, local in-memory tools, browser audio, and inbound-only
+# phone routes on both code targets.
+#
+# Tuned for turn latency: one LLM round trip per control hop is the dominant
+# cost in a voice turn, so verification asks for a phone number only and the
+# booking flow is one task rather than three. See README.md.
 version: 1
 entry_agent: concierge
 
@@ -8,9 +12,6 @@ variables:
   customer_id:
     type: string
     description: Verified customer ID. It is assigned by the verification task and never spoken.
-  customer_name:
-    type: string
-    description: Verified customer display name carried across specialist handoffs.
 
 secrets:
   - OPENAI_API_KEY
@@ -105,96 +106,56 @@ tasks:
       - find_or_create_customer
     result:
       customer_id: string
-      customer_name: string
       status:
         enum:
           - existing
           - created
-          - name_mismatch
           - invalid
       summary: string
     context:
       history: full
 
-  prepare_booking:
-    instructions: tasks/prepare-booking.md
+  # One task, not three. A draft step, a confirm step and an apply step each
+  # cost their own LLM round trip to finish, and the mutation tools already
+  # refuse an unconfirmed write, so the split bought two seconds of silence per
+  # booking and no extra safety.
+  booking:
+    instructions: tasks/booking.md
     tools:
       - list_bookings
       - get_current_date
       - check_availability
-      - to_complaints
-      - to_chat
-    result:
-      action:
-        enum:
-          - create
-          - modify
-          - cancel
-          - none
-      booking_id: string
-      service: string
-      slot_id: string
-    context:
-      history: full
-
-  confirm_booking:
-    instructions: tasks/confirm-booking.md
-    tools:
-      - to_complaints
-      - to_chat
-    result:
-      action:
-        enum:
-          - create
-          - modify
-          - cancel
-          - none
-      booking_id: string
-      service: string
-      slot_id: string
-      confirmed: boolean
-    context:
-      history: full
-
-  apply_booking:
-    instructions: tasks/apply-booking.md
-    tools:
       - create_booking
       - modify_booking
       - cancel_booking
+      - to_complaints
+      - to_chat
     result:
-      action: string
+      action:
+        enum:
+          - create
+          - modify
+          - cancel
+          - none
       booking_id: string
       status: string
       summary: string
     context:
       history: full
 
-task_groups:
-  booking_flow:
-    steps:
-      - prepare_booking
-      - confirm_booking
-      - apply_booking
-    context_scope: shared
-    then: return
-    merge: results
-
 controls:
   verify_customer:
     kind: delegate
     task: customer_verification
     when: >-
-      Run identity confirmation before any specialist handoff. The task needs a
-      new explicit yes after spelling the full name and reading every phone digit
-      before lookup.
+      Confirm who the caller is before any specialist handoff. The task reads
+      the phone number back and needs a yes before it looks anyone up.
     assign:
       customer_id: result.customer_id
-      customer_name: result.customer_name
 
   manage_booking:
     kind: delegate
-    group: booking_flow
+    task: booking
     when: The verified caller wants to create, modify, or cancel a booking.
 
   to_booking:

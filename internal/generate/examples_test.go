@@ -89,8 +89,10 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	livekitReason := targetByProvider(t, resolved, ir.ProviderLiveKit).Models.Reason["reasoning"]
-	if livekitReason.Params["api"] != "responses" || livekitReason.Params["reasoning_effort"] != "low" || livekitReason.Params["use_websocket"] != false {
-		t.Errorf("livekit reasoning params = %#v, want Responses API with low reasoning over HTTP", livekitReason.Params)
+	// The turn-latency contract: a reasoning model that does not think before the
+	// first token, over one held socket rather than a fresh handshake per call.
+	if livekitReason.Params["api"] != "responses" || livekitReason.Params["reasoning_effort"] != "none" || livekitReason.Params["use_websocket"] != true {
+		t.Errorf("livekit reasoning params = %#v, want Responses API with reasoning off over a websocket", livekitReason.Params)
 	}
 	pipecatReason := targetByProvider(t, resolved, ir.ProviderPipecat).Models.Reason["reasoning"]
 	if _, ok := pipecatReason.Params["api"]; ok || pipecatReason.Params["reasoning_effort"] != "none" {
@@ -153,27 +155,39 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 			t.Errorf("chat_with_me must hold handoffs only, got tool %q", held)
 		}
 	}
-	prepareBooking := resolved.Tasks["prepare_booking"]
-	if !slices.Contains(prepareBooking.Tools, "get_current_date") {
-		t.Errorf("prepare_booking tools = %v, want get_current_date", prepareBooking.Tools)
-	}
-	if _, ok := prepareBooking.Result["confirmed"]; ok {
-		t.Error("prepare_booking result must not decide confirmation")
-	}
-	confirmBooking, ok := resolved.Tasks["confirm_booking"]
+	// One booking task, not three chained steps. Each step boundary costs its own
+	// LLM round trip to finish, which the caller hears as silence, and the
+	// mutation tools already refuse an unconfirmed write, so the split bought
+	// latency and no safety. Held here so it cannot drift back.
+	booking, ok := resolved.Tasks["booking"]
 	if !ok {
-		t.Fatal("tasks omit confirm_booking")
+		t.Fatal("tasks omit booking")
 	}
-	wantConfirmResult := []string{"action", "booking_id", "confirmed", "service", "slot_id"}
-	gotConfirmResult := slices.Sorted(maps.Keys(confirmBooking.Result))
-	if !slices.Equal(gotConfirmResult, wantConfirmResult) {
-		t.Errorf("confirm_booking result = %v, want %v", gotConfirmResult, wantConfirmResult)
+	for _, name := range []string{"prepare_booking", "confirm_booking", "apply_booking"} {
+		if _, split := resolved.Tasks[name]; split {
+			t.Errorf("booking is split again into %q; one task owns draft, confirm and apply", name)
+		}
 	}
-	if !slices.Equal(confirmBooking.Tools, []string{"to_complaints", "to_chat"}) {
-		t.Errorf("confirm_booking tools = %v, want topic-switch controls only", confirmBooking.Tools)
+	if len(resolved.TaskGroups) != 0 {
+		t.Errorf("task groups = %v, want none: the booking flow is one task", slices.Sorted(maps.Keys(resolved.TaskGroups)))
 	}
-	if got := resolved.TaskGroups["booking_flow"].Steps; !slices.Equal(got, []string{"prepare_booking", "confirm_booking", "apply_booking"}) {
-		t.Errorf("booking_flow steps = %v, want prepare -> confirm -> apply", got)
+	// The one task has to reach every step it absorbed: read the diary, resolve a
+	// relative date, offer times, and write exactly one of the three mutations.
+	for _, want := range []string{
+		"list_bookings", "get_current_date", "check_availability",
+		"create_booking", "modify_booking", "cancel_booking",
+	} {
+		if !slices.Contains(booking.Tools, want) {
+			t.Errorf("booking tools = %v, want %q", booking.Tools, want)
+		}
+	}
+	wantBookingResult := []string{"action", "booking_id", "status", "summary"}
+	if got := slices.Sorted(maps.Keys(booking.Result)); !slices.Equal(got, wantBookingResult) {
+		t.Errorf("booking result = %v, want %v", got, wantBookingResult)
+	}
+	bookingDelegate, ok := resolved.Controls["manage_booking"].(*ir.Delegate)
+	if !ok || bookingDelegate.Task != "booking" || bookingDelegate.Group != "" {
+		t.Fatalf("manage_booking = %#v, want a delegate to the single booking task", resolved.Controls["manage_booking"])
 	}
 	currentDate, ok := resolved.Tools["get_current_date"]
 	if !ok {
@@ -213,63 +227,55 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 			}
 		}
 	}
-	requireText("verification", resolved.Tasks["customer_verification"].Instructions,
-		"Accumulate the full name and phone number across turns",
-		"The complete identity readback is the one exception",
-		"A complete phone has 10 to 15 digits", "incomplete fragment",
-		"consume the one invalid-value retry",
-		"one initial customer lookup only after both the full name",
-		"Retain separate first name, surname, and phone values across turns",
-		"spell the complete first name one letter at a time",
-		"spell the complete surname one letter at a time",
-		"read every phone digit aloud",
-		"First name: N, I, C, O, L, A",
-		"Surname: C, R, O, O, N",
-		"Phone: plus three four",
-		"Only a new unambiguous yes after that complete readback counts",
-		"Do not call the customer action before that confirmation",
-		"call the customer action immediately and silently with the exact confirmed values")
-	requireText("concierge verification", resolved.Agents["concierge"].Instructions,
-		"Repeat the full phone only inside the required identity confirmation",
-		"new explicit yes after the complete readback")
-	if strings.Contains(resolved.Agents["concierge"].Instructions, "Never repeat a full phone number") ||
-		strings.Contains(resolved.Tasks["customer_verification"].Instructions, "Never repeat a full phone number") {
-		t.Error("verification prompts still forbid the required full phone readback")
+	// Verification is one phone number, nothing else. Spelling a name over a
+	// transcriber is the slowest and least reliable thing a caller can be asked
+	// to do, and the number alone identifies the record.
+	verification := resolved.Tasks["customer_verification"]
+	requireText("verification", verification.Instructions,
+		"A complete number is 10 to 15 digits",
+		"Never invent a country code",
+		"Read every digit back once",
+		"On a clear yes, look the number up")
+	for _, banned := range []string{"first name", "surname", "one letter at a time", "spell"} {
+		if strings.Contains(strings.ToLower(verification.Instructions), banned) {
+			t.Errorf("verification still collects a name: prompt mentions %q", banned)
+		}
+	}
+	if _, named := verification.Result["customer_name"]; named {
+		t.Error("verification still returns customer_name; the phone number is the identity")
 	}
 	verificationDelegate, ok := resolved.Controls["verify_customer"].(*ir.Delegate)
 	if !ok {
 		t.Fatalf("verify_customer = %#v, want delegate", resolved.Controls["verify_customer"])
 	}
 	requireText("verification delegate", verificationDelegate.When,
-		"new explicit yes", "spelling the full name", "reading every phone digit", "before lookup")
-	requireText("customer lookup", resolved.Tools["find_or_create_customer"].Description,
-		"exact confirmed first name and surname",
-		"only after the complete readback receives a new unambiguous yes",
-		"Never guess identity or use an unconfirmed value")
-	requireText("verification correction", resolved.Tasks["customer_verification"].Instructions,
-		"A no, a correction, an interruption, or an ambiguous answer remains unconfirmed",
-		"ask which field is wrong",
-		"Keep every field the caller did not correct",
-		"Any correction clears the earlier readback and confirmation",
-		"repeat the complete three-field readback",
-		"require a new explicit yes",
-		"A phrase such as ‘maybe,’ ‘I think so,’ or ‘yes, but’ is ambiguous",
-		"return to the complete readback and confirmation gate before the single retry")
-	requireText("prepare booking", resolved.Tasks["prepare_booking"].Instructions,
-		"Never ask for, interpret, or record confirmation",
-		"A service, booking, date, or time choice only selects a draft",
-		"call `get_current_date` first", "Never guess the current date or year")
-	if strings.Contains(resolved.Tasks["prepare_booking"].Instructions, "`confirmed`") {
-		t.Error("prepare booking names the confirmation field owned by the next task")
+		"reads the phone number back", "needs a yes before it looks anyone up")
+	if _, assigned := verificationDelegate.Assign["customer_name"]; assigned {
+		t.Error("verify_customer still assigns customer_name")
 	}
-	requireText("confirm booking", confirmBooking.Instructions,
-		"authoritative `prepare_booking` finish result",
-		"Never call `finish` in this opening response",
-		"Nothing said before that question counts as confirmation",
-		"copy the draft exactly")
-	requireText("apply booking", resolved.Tasks["apply_booking"].Instructions,
-		"false, missing", "anything other than true", "Do not call a mutation",
-		"authoritative `confirm_booking` finish result", "Do not replace")
+	lookup := resolved.Tools["find_or_create_customer"]
+	requireText("customer lookup", lookup.Description,
+		"exact confirmed phone number",
+		"only after the digit readback got a clear yes",
+		"Never guess a number or pass one the caller has not confirmed")
+	lookupProperties, ok := lookup.Input["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("find_or_create_customer input properties = %#v, want object", lookup.Input["properties"])
+	}
+	if got := slices.Sorted(maps.Keys(lookupProperties)); !slices.Equal(got, []string{"phone"}) {
+		t.Errorf("find_or_create_customer input = %v, want phone only", got)
+	}
+	// The confirmation gate moved from a step boundary into this one prompt, so
+	// the prompt is now the only thing standing between a spoken time and a
+	// written booking. Every clause that makes it a gate is held here.
+	requireText("booking", booking.Instructions,
+		"Say the whole thing back in one sentence and ask one yes-or-no question",
+		"Nothing said before that question counts as a yes",
+		"including the caller choosing the time",
+		"On a clear yes, save it in the same turn with `confirmed` set to true",
+		"On a no, or on a second unclear answer, finish with action `none` and save nothing",
+		"call `get_current_date` first", "never guess today's date",
+		"Never say a booking is saved, moved, or cancelled unless the matching tool ran in this turn")
 	// The chat agent has no tool of its own, so the prompt's job is to stop it
 	// claiming a lookup it cannot perform.
 	requireText("chat", resolved.Agents["chat_with_me"].Instructions,

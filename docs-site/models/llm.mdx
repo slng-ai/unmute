@@ -65,8 +65,8 @@ models:
     model: gpt-5.6-terra
     params:
       api: responses
-      reasoning_effort: low
-      use_websocket: false
+      reasoning_effort: none
+      use_websocket: true
 ```
 
 Unmute emits `openai.responses.LLM` and turns `reasoning_effort` into the API's
@@ -74,6 +74,11 @@ nested reasoning setting when it is present. Use that field instead of a raw
 `reasoning` map. Put this under the LiveKit target, not in the shared model
 profile: Pipecat keeps its normal OpenAI request shape. The salon concierge uses
 this exact override on its LiveKit target.
+
+`use_websocket: true` is the latency line here. With HTTP, every model call in
+the turn opens a fresh TLS connection, and a turn that calls a tool makes at
+least two. One socket held open for the call removes that handshake from each
+of them.
 
 ## Pipecat
 

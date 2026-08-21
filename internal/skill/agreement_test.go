@@ -456,7 +456,7 @@ func TestOpenAIResponsesGuidanceMatchesExample(t *testing.T) {
 		"references/models.md":     bundleFile(t, "references/models.md"),
 		"docs-site/models/llm.mdx": trackedFile(t, "docs-site/models/llm.mdx"),
 	} {
-		for _, want := range []string{"api: responses", "reasoning_effort: low", "use_websocket: false"} {
+		for _, want := range []string{"api: responses", "reasoning_effort: none", "use_websocket: true"} {
 			if !strings.Contains(content, want) {
 				t.Errorf("%s omits %q", name, want)
 			}
