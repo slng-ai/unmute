@@ -359,7 +359,7 @@ func TestTelephonyLocalPlaneMatchesTheRouteTransport(t *testing.T) {
 // T104. FR-024's refusal reads CloudDeploys and must never fire on a route that
 // can deploy to a managed platform, so the assertion covers both providers
 // rather than only the one that motivated the field. Inferring the value from
-// the provider would have rejected examples/livekit-human-transfer.
+// the provider would have rejected examples/salon-concierge.
 func TestTelephonyCloudDeploysIsDecidedAndNeverFalseOnLiveKit(t *testing.T) {
 	for key, route := range TelephonyRoutes() {
 		want, known := routePlaneExpectation[key]

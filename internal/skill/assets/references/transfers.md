@@ -235,7 +235,8 @@ Say this, in this order:
    four SIP environment names in `telephony.md`.
 3. If they are already on Pipecat and cannot move, cold transfer works there and
    here is what the caller will experience instead.
-4. `examples/livekit-human-transfer` is the working package. Start from it.
+4. `examples/salon-concierge` is the working package for the cold half. No
+   shipped example declares a warm block; write it from the fields here.
 
 Do not write a warm block against a Pipecat target and let validate deliver the
 news.
@@ -272,5 +273,5 @@ the tool result is `transfer_started`.
 
 | Package | Route | Shape |
 |---|---|---|
-| `examples/livekit-human-transfer` | LiveKit over a Twilio SIP trunk | cold and warm, side by side |
-| `examples/pipecat-human-transfer-twilio` | Pipecat Cloud, reached through a Twilio number | cold, with nothing hosted by the user |
+| `examples/salon-concierge`, `livekit` target | LiveKit over a Twilio SIP trunk | cold to a manager |
+| `examples/salon-concierge`, `pipecat` target | Pipecat Cloud, reached through a Twilio number | cold, with nothing hosted by the user |

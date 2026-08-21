@@ -118,7 +118,7 @@ print("pipecat webhook ok:", captured["path"], captured["body"], captured["auth"
 `
 
 func TestSmokePipecatWebhookSendsInjectedBodyPathAndToken(t *testing.T) {
-	runPipecatSmokeScript(t, "outbound-reminder", nil, useWebhookTools, pipecatWebhookSmokeScript)
+	runPipecatSmokeScript(t, "salon-concierge", nil, useWebhookTools, pipecatWebhookSmokeScript)
 }
 
 const livekitWebhookSmokeScript = echoServerPreamble + `
@@ -168,7 +168,7 @@ print("livekit webhook ok:", captured["path"], captured["body"], captured["auth"
 `
 
 func TestSmokeLiveKitWebhookSendsInjectedBodyPathAndToken(t *testing.T) {
-	runLiveKitSmokeScript(t, "outbound-reminder", nil, useWebhookTools, livekitWebhookSmokeScript)
+	runLiveKitSmokeScript(t, "salon-concierge", nil, useWebhookTools, livekitWebhookSmokeScript)
 }
 
 // The api_key scheme is the other half of SCHEMA §5.3 and no example uses it, so
@@ -213,7 +213,7 @@ print("pipecat api_key + startup check ok:", captured["headers"].get("x-api-key"
 `
 
 func TestSmokePipecatAPIKeySchemeAndStartupCheck(t *testing.T) {
-	runPipecatSmokeScript(t, "outbound-reminder", nil, useAPIKeyAuth, pipecatAPIKeySmokeScript)
+	runPipecatSmokeScript(t, "salon-concierge", nil, useAPIKeyAuth, pipecatAPIKeySmokeScript)
 }
 
 const livekitAPIKeySmokeScript = echoServerPreamble + `
@@ -247,7 +247,7 @@ print("livekit api_key + startup check ok:", captured["headers"].get("x-api-key"
 `
 
 func TestSmokeLiveKitAPIKeySchemeAndStartupCheck(t *testing.T) {
-	runLiveKitSmokeScript(t, "outbound-reminder", nil, useAPIKeyAuth, livekitAPIKeySmokeScript)
+	runLiveKitSmokeScript(t, "salon-concierge", nil, useAPIKeyAuth, livekitAPIKeySmokeScript)
 }
 
 // useWebhookTools keeps webhook generation covered without making a public

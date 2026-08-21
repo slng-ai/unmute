@@ -9,15 +9,15 @@ compiles the package, starts the target's local runtime, and serves a web page
 you can talk through.
 
 ```sh
-unmute dev examples/salon-support --target pipecat
+unmute dev examples/simple-prompt --target pipecat
 ```
 
 ```text
-compiled examples/salon-support/build/pipecat
+compiled examples/simple-prompt/build/pipecat
 starting the local Pipecat agent...
 
   ▸ http://localhost:8765/?agent=pipecat
-    ctrl-c to stop  ·  logs: examples/salon-support/build/pipecat/dev.log
+    ctrl-c to stop  ·  logs: examples/simple-prompt/build/pipecat/dev.log
 ```
 
 That names a package sitting somewhere else, which is why it carries a path.
@@ -84,7 +84,7 @@ unmute: dev examples/simple-prompt: target instance "nope" is not declared
 Change both when a port is busy:
 
 ```sh
-unmute dev examples/salon-support --target pipecat --port 8790 --bot-port 7890
+unmute dev examples/simple-prompt --target pipecat --port 8790 --bot-port 7890
 ```
 
 The web page URL always carries the target name, for example
@@ -156,13 +156,13 @@ means "follow container/agent logs on stderr", and without it the log goes to th
 file only:
 
 ```sh
-unmute dev examples/salon-support --target pipecat --verbose
+unmute dev examples/simple-prompt --target pipecat --verbose
 ```
 
 ## Not opening the browser
 
 ```sh
-unmute dev examples/salon-support --target pipecat --no-open
+unmute dev examples/simple-prompt --target pipecat --no-open
 ```
 
 The URL is still printed. Useful over SSH, and in scripts.
@@ -189,8 +189,7 @@ with. It is repeatable, and it only accepts variables declared with
 `source: call_start`:
 
 ```sh
-unmute dev examples/salon-support --target pipecat \
-  --var customer_name=Ada \
+unmute dev examples/salon-concierge --target pipecat \
   --var customer_id=cus_2002
 ```
 
@@ -207,7 +206,7 @@ overlap. Move signaling, TCP fallback, and UDP media as one set:
 
 ```sh
 LIVEKIT_HOST_PORT=7890 LIVEKIT_TCP_HOST_PORT=7891 LIVEKIT_UDP_HOST_PORT=7892 \
-  unmute dev examples/regional-infrastructure --target livekit --port 8766
+  unmute dev examples/subagents --target livekit --port 8766
 ```
 
 ## The two ways to run

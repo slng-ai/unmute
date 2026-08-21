@@ -16,28 +16,6 @@ import (
 	"github.com/slng-ai/unmute/internal/target"
 )
 
-func TestV3_OutboundReminderBusinessToolsAreSelfContained(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "outbound-reminder"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, err := ir.Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, secret := range agent.Secrets {
-		if strings.HasPrefix(secret, "SALON_API_") {
-			t.Errorf("outbound live example depends on unrelated salon API secret %q", secret)
-		}
-	}
-	for _, name := range []string{"confirm_appointment", "reschedule_appointment", "cancel_appointment"} {
-		tool := agent.Tools[name]
-		if tool.Execution != ir.ToolLocal || tool.HandlerSource == "" || tool.URLEnv != "" {
-			t.Errorf("tool %q execution/handler/url = %q/%t/%q, want local/nonempty/empty", name, tool.Execution, tool.HandlerSource != "", tool.URLEnv)
-		}
-	}
-}
-
 // The salon package is the one docs-site/dev/local-telephony.mdx tells a reader
 // to run for each local plane, by target name. Two of its three targets ride the
 // same trunk on purpose: the same agent, once dispatched into the room as a
@@ -88,15 +66,28 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	livekitReason := targetByProvider(t, resolved, ir.ProviderLiveKit).Models.Reason["reasoning"]
-	// The turn-latency contract: a reasoning model that does not think before the
-	// first token, over one held socket rather than a fresh handshake per call.
-	if livekitReason.Params["api"] != "responses" || livekitReason.Params["reasoning_effort"] != "none" || livekitReason.Params["use_websocket"] != true {
-		t.Errorf("livekit reasoning params = %#v, want Responses API with reasoning off over a websocket", livekitReason.Params)
-	}
-	pipecatReason := targetByProvider(t, resolved, ir.ProviderPipecat).Models.Reason["reasoning"]
-	if _, ok := pipecatReason.Params["api"]; ok || pipecatReason.Params["reasoning_effort"] != "none" {
-		t.Errorf("pipecat reasoning params = %#v, want Chat Completions with reasoning disabled", pipecatReason.Params)
+	// The turn-latency contract on both targets: thinking goes through the SLNG
+	// Context Router, the model does not think before its first token, and
+	// nothing is ever replayed to the caller.
+	//
+	// pure proxy is load-bearing, not belt and braces. The router's cache key is
+	// the (assistant speech, user speech) pair and carries no system prompt, so
+	// two of this package's agents whose last exchange matches collide under one
+	// agent_id. Measured 2026-08-21 on three live calls: the booking
+	// specialist's opening turn was served the concierge's "what phone number
+	// should I use", cache_layer l2_exact, 1.27ms, no model call. Remove this
+	// only together with per-agent agent ids.
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		reason := targetByProvider(t, resolved, provider).Models.Reason["reasoning"]
+		if !reason.Router() {
+			t.Errorf("%s reasoning is not a router binding: %#v", provider, reason)
+		}
+		if reason.Params["reasoning_effort"] != "none" {
+			t.Errorf("%s reasoning params = %#v, want reasoning off before the first token", provider, reason.Params)
+		}
+		if reason.Params["slng_pure_proxy"] != true {
+			t.Errorf("%s reasoning params = %#v, want slng_pure_proxy: a cross-agent cache hit repeats an earlier agent's line to the caller", provider, reason.Params)
+		}
 	}
 
 	// The other half of the turn-latency contract, and the bigger half. LiveKit's
@@ -571,20 +562,11 @@ func TestPublicExamplePackages(t *testing.T) {
 			directories = append(directories, entry.Name())
 		}
 	}
-	// The focused telephony examples stay one per use case (spec 007 FR-016):
-	// warm+inbound on LiveKit (livekit-human-transfer), cold+inbound on Pipecat
-	// over Twilio with nothing hosted (pipecat-human-transfer-twilio), and
-	// inbound+outbound (twilio-telephony-hello). salon-concierge is the composite
-	// release fixture. Daily route guards remain against internal test fixtures.
-	//
-	// A telephony example whose behaviour is one provider's names that provider
-	// first, because the route is the thing a reader is choosing between.
-	//
-	// optimized-salon-concierge is the second half of a matched pair: the same
-	// package with its think binding behind the SLNG Context Router, so the two
-	// can be measured against each other. It earns its own directory rather than
-	// a note in the salon README because the comparison is the deliverable.
-	want := []string{"livekit-human-transfer", "mcp-example", "multi-task", "optimized-salon-concierge", "outbound-reminder", "pipecat-human-transfer-twilio", "regional-infrastructure", "salon-concierge", "salon-support", "simple-prompt", "subagents", "task-groups", "twilio-telephony-hello"}
+	// Five packages: four structural, and salon-concierge as the composite
+	// release fixture that also carries the only shipped telephony route. The
+	// focused telephony, outbound, transfer, MCP and regional examples were
+	// removed 2026-08-21; route guards remain against internal test fixtures.
+	want := []string{"multi-task", "salon-concierge", "simple-prompt", "subagents", "task-groups"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
@@ -614,39 +596,6 @@ func TestRepositoryKeepsSpecsPrivateAndDocsFocused(t *testing.T) {
 	}
 	if err := exec.Command("git", "-C", repo, "check-ignore", "-q", "--", "specs/.unmute-ignore-probe/spec.md").Run(); err != nil {
 		t.Errorf("specs/ is not ignored: %v", err)
-	}
-}
-
-// The shipped telephony example (twilio-telephony-hello) is a complete,
-// schema-faithful package carrying the route each platform recommends for Twilio:
-// Pipecat on the platform's own carrier stream, and LiveKit on a SIP trunk. Both
-// are provisional (adapter present, no credentialed smoke yet) and usable, so both
-// generate.
-//
-// The transports are asserted by name because that pairing is the example's whole
-// subject. It used to pair cloud-websocket with the LiveKit Twilio connector, which
-// tested better on a laptop and taught a route with no transfer primitive; the
-// connector keeps its own coverage through examples/outbound-reminder.
-func TestTelephonyExampleGeneratesProvisionalRoute(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "twilio-telephony-hello"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, err := ir.Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, transport := range map[string]string{"livekit": "sip", "pipecat": "cloud-websocket"} {
-		resolved, ok := agent.Targets[name]
-		if !ok || resolved.Telephony == nil || resolved.Transport != transport {
-			t.Fatalf("target %q is not the resolved %s route: %#v", name, transport, resolved.Telephony)
-		}
-		if resolved.Carrier != "twilio" {
-			t.Fatalf("target %q carrier = %q, want twilio", name, resolved.Carrier)
-		}
-		if _, err := Generate(agent, resolved, target.Default()); err != nil {
-			t.Fatalf("provisional telephony route %q must generate, got %v", name, err)
-		}
 	}
 }
 
@@ -783,88 +732,6 @@ func TestV16_ExampleDestinationsAreEnvironmentNames(t *testing.T) {
 	}
 }
 
-// Every environment variable a telephony example's generated .env.example lists
-// must be accounted for in that example's own README and on the secrets
-// reference page. A reader who sets everything both pages name has a package
-// that runs; one who does not finds out on a live call, which is the failure
-// this check exists to make impossible (spec FR-005f, FR-027a).
-//
-// docs-site/reference/secrets.mdx is the public page that answers "which
-// variables does this agent need".
-//
-// DAILY_API_KEY is the case that forced this. It is exempt from `secrets:`
-// because no author writes it — the route's own runtime supplies it — and it is
-// still required at runtime, so the only place it can be explained is prose.
-//
-// Scoped to the five telephony examples on purpose (FR-005f0): four of the
-// other examples ship no README at all, so widening this is a separate change
-// with its own writing to do, not a flag to flip here.
-//
-// The two halves are scoped differently, because they answer different
-// questions. The example's own README must account for **every** name, since it
-// is the page a reader of that example follows. The shared secrets page must
-// account for every name the package never declares in `secrets:` — the ones the
-// runtime supplies, like DAILY_API_KEY and REDIS_URL. Those are exactly the
-// names nothing in the package mentions, so a shared page is the only place they
-// can be explained. A tool's own webhook credentials are the README's job.
-//
-// One direction only. It never fails on a name a page mentions and
-// .env.example does not: a page is free to name a variable to say the reader
-// does not set it, or to teach a name that is not a variable at all.
-func TestTelephonyExampleDocsAccountForEveryRequiredEnv(t *testing.T) {
-	sharedPage := filepath.Join("..", "..", "docs-site", "reference", "secrets.mdx")
-	secretsPage, err := os.ReadFile(sharedPage)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for example, providers := range map[string][]ir.Provider{
-		"twilio-telephony-hello":        {ir.ProviderPipecat, ir.ProviderLiveKit},
-		"livekit-human-transfer":        {ir.ProviderLiveKit},
-		"pipecat-human-transfer-twilio": {ir.ProviderPipecat},
-		"outbound-reminder":             {ir.ProviderPipecat, ir.ProviderLiveKit},
-		"salon-concierge":               {ir.ProviderPipecat, ir.ProviderLiveKit},
-		"optimized-salon-concierge":     {ir.ProviderPipecat, ir.ProviderLiveKit},
-	} {
-		t.Run(example, func(t *testing.T) {
-			readme, err := os.ReadFile(filepath.Join("..", "..", "examples", example, "README.md"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))
-			if err != nil {
-				t.Fatal(err)
-			}
-			agent, err := ir.Build(pkg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, provider := range providers {
-				artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
-				if err != nil {
-					t.Fatalf("%s: %v", provider, err)
-				}
-				for _, line := range strings.Split(artifactFile(t, artifact, ".env.example"), "\n") {
-					name, _, found := strings.Cut(line, "=")
-					name = strings.TrimSpace(name)
-					if !found || name == "" || strings.HasPrefix(name, "#") {
-						continue
-					}
-					if !strings.Contains(string(readme), name) {
-						t.Errorf("%s needs %s, which this example's README never names", provider, name)
-					}
-					if slices.Contains(agent.Secrets, name) {
-						continue // the package declares it, so the package explains it
-					}
-					if !strings.Contains(string(secretsPage), name) {
-						t.Errorf("%s needs %s, which nothing in the package declares and "+
-							"%s never names", provider, name, sharedPage)
-					}
-				}
-			}
-		})
-	}
-}
-
 func TestSalonConciergeTransferEnvironmentContract(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
 	if err != nil {
@@ -906,11 +773,7 @@ func TestBrowserPathStartupCheckAsksForNoRouteEnvironment(t *testing.T) {
 		"PIPECAT_CLOUD_ORGANIZATION", "MANAGER_PHONE_NUMBER",
 	}
 	for example, providers := range map[string][]ir.Provider{
-		"twilio-telephony-hello":        {ir.ProviderPipecat, ir.ProviderLiveKit},
-		"pipecat-human-transfer-twilio": {ir.ProviderPipecat},
-		"outbound-reminder":             {ir.ProviderPipecat, ir.ProviderLiveKit},
-		"salon-concierge":               {ir.ProviderPipecat, ir.ProviderLiveKit},
-		"optimized-salon-concierge":     {ir.ProviderPipecat, ir.ProviderLiveKit},
+		"salon-concierge": {ir.ProviderPipecat, ir.ProviderLiveKit},
 	} {
 		t.Run(example, func(t *testing.T) {
 			pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))

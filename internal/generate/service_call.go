@@ -49,6 +49,7 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 	// of. binding is a value, so this is local to the call being built (D2).
 	router := role == targetcap.Reason && binding.Router()
 	region := slngRegion(binding)
+	pureProxy := slngPureProxy(binding)
 	if router {
 		binding.Params = slngConsumedParams(binding.Params)
 	}
@@ -166,7 +167,7 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 			// Pipecat merges Settings.extra into the request params, so the two
 			// dicts ride there; LiveKit takes them as constructor kwargs. Either
 			// way they reach the same place in the request.
-			extras := slngRequestExtras(binding, site)
+			extras := slngRequestExtras(binding, site, pureProxy)
 			if spec.SettingsOverflow != "" {
 				if overflow == nil {
 					overflow = make(map[string]any, len(extras))

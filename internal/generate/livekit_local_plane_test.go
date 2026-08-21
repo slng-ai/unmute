@@ -1,14 +1,10 @@
 package generate
 
 import (
-	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/goccy/go-yaml"
-	"github.com/slng-ai/unmute/internal/ir"
-	"github.com/slng-ai/unmute/internal/spec"
 	"github.com/slng-ai/unmute/internal/target"
 )
 
@@ -75,28 +71,6 @@ func serviceNames(compose planeCompose) []string {
 		names = append(names, name)
 	}
 	return names
-}
-
-// livekitTwoDestinationArtifact is the example that declares both transfer
-// shapes and two destinations. The real package rather than a fixture, because
-// it is the one the phase's live validation runs against, so a divergence
-// between what is tested and what is demonstrated cannot open up.
-func livekitTwoDestinationArtifact(t *testing.T) (Artifact, *ir.TelephonyPlan) {
-	t.Helper()
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "livekit-human-transfer"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, err := ir.Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolved := agent.Targets["livekit"]
-	artifact, err := Generate(agent, resolved, target.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return artifact, resolved.Telephony
 }
 
 // Gates S1, S2 and S6. The advertised signalling and media addresses have to be
@@ -179,84 +153,6 @@ func TestPlaneProfilesAdvertiseAnAddressTheCallerCanReach(t *testing.T) {
 				t.Errorf("%s publishes %q with no host address, so it binds every interface", name, port)
 			}
 		}
-	}
-}
-
-// Gates S4 and S5. One endpoint per declared destination, each reachable from
-// the plane's own container.
-//
-// The original wording of S5 asked for one address per endpoint. Spike work on
-// 2026-08-20 replaced that with one *name* per endpoint: an endpoint process
-// routes an incoming call to the account matching the request URI's user part,
-// measured, and the emitted agent dials every warm transfer through the single
-// trunk hostname `_sip_trunk()` reads. One address per endpoint would therefore
-// leave every destination but one unreachable by a warm transfer. The intent of
-// the gate is unchanged, and the part that mattered is untouched: never a host
-// address, and never a bare service name.
-func TestEveryDeclaredDestinationGetsOneReachableEndpoint(t *testing.T) {
-	artifact, plan := livekitTwoDestinationArtifact(t)
-	compose := readPlaneCompose(t, artifact)
-
-	declared := []string{"billing_line", "supervisor_line"}
-	var destinations []ir.TelephonyLocalEndpoint
-	for _, endpoint := range plan.LocalEndpoints {
-		if endpoint.Role == ir.TelephonyRoleDestination {
-			destinations = append(destinations, endpoint)
-		}
-	}
-	if len(destinations) != len(declared) {
-		t.Fatalf("package declares %d destinations and the plane runs %d endpoints for them: %+v",
-			len(declared), len(destinations), destinations)
-	}
-	for i, name := range declared {
-		if destinations[i].Name != name {
-			t.Errorf("destination endpoint %d is %q, want %q", i, destinations[i].Name, name)
-		}
-		if destinations[i].Recording != name+".wav" {
-			t.Errorf("destination %q records to %q; each destination needs its own file or a run cannot say which one answered",
-				name, destinations[i].Recording)
-		}
-	}
-
-	// S5: a static address on the plane's own network. Not the host, which the
-	// plane's container cannot route to, and not a service name, which resolves
-	// and is then refused with 404 because its host is not local to the
-	// endpoint (measured 2026-08-20).
-	for _, endpoint := range plan.LocalEndpoints {
-		if !strings.HasPrefix(endpoint.Address, "10.185.61.") {
-			t.Errorf("endpoint %q is at %q, which is not on the plane's own network", endpoint.Name, endpoint.Address)
-		}
-		for _, forbidden := range []string{"127.0.0.1", "localhost", "host.docker.internal", "telephony_destinations", "telephony_caller"} {
-			if endpoint.Address == forbidden {
-				t.Errorf("endpoint %q is addressed as %q; the plane cannot reach that", endpoint.Name, forbidden)
-			}
-		}
-	}
-	if subnet := compose.Networks["default"].IPAM.Config[0].Subnet; subnet != "10.185.61.0/24" {
-		t.Errorf("the plane's network subnet is %q; the endpoints' static addresses are not on it", subnet)
-	}
-
-	// Each destination is an account on the endpoint service, answering
-	// automatically and registering with nobody, because the plane is not a
-	// registrar.
-	accounts := serviceEnv(t, compose, "telephony_destinations", "UNMUTE_ENDPOINT_ACCOUNTS")
-	for _, name := range declared {
-		want := fmt.Sprintf("<sip:%s@10.185.61.21>;regint=0;answermode=auto", name)
-		if !strings.Contains(accounts, want) {
-			t.Errorf("the destinations endpoint has no account line starting %q:\n%s", want, accounts)
-		}
-		if !strings.Contains(accounts, "audio_player=aufile,/calls/"+name+".wav") {
-			t.Errorf("destination %q writes no recording of its own:\n%s", name, accounts)
-		}
-	}
-	// The caller endpoint belongs to the unattended check alone: on the
-	// softphone profile the developer is the caller, and starting a container
-	// to duplicate them would place a second call nobody asked for.
-	if profiles := compose.Services["telephony_caller"].Profiles; len(profiles) != 1 || profiles[0] != "headless" {
-		t.Errorf("telephony_caller profiles are %v, want exactly [headless]", profiles)
-	}
-	if profiles := compose.Services["telephony_destinations"].Profiles; len(profiles) != 0 {
-		t.Errorf("telephony_destinations is gated to profiles %v; a transfer needs somewhere to land in both", profiles)
 	}
 }
 

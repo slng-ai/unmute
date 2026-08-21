@@ -79,7 +79,7 @@ The difference that matters day to day is **who dials**.
     pipecat: setup: get the Account SID and Auth Token from the Twilio Console account dashboard and select a Voice-capable number
     pipecat: local services: application, redis
     pipecat: local telephony plane=media-websocket  ·  no carrier involved
-    compiled examples/outbound-reminder/build/pipecat
+    compiled examples/salon-concierge/build/pipecat
     ```
 
     Those `setup:` lines print on **every** run, including one that never touches
@@ -250,7 +250,7 @@ sets that up for you. If you deploy this route yourself, the emitted `README.md`
 has the `webhook` block to add to your own server.
 
 ```sh
-unmute dev examples/livekit-human-transfer --telephony --target livekit
+unmute dev examples/salon-concierge --telephony --target livekit
 ```
 
 It prints, before it starts waiting:
@@ -266,9 +266,8 @@ livekit: LiveKit dispatch rule "unmute livekit inbound" (created)
     works here and is BSD licensed; any client that can place a call with
     registration turned off will do. The plane is not a registrar, and a
     client that insists on registering first cannot be used at all.
-    transfers to billing_line land on sip:billing_line@10.185.61.21:5060
-    transfers to supervisor_line land on sip:supervisor_line@10.185.61.21:5060
-    recordings: examples/livekit-human-transfer/build/livekit/calls/20260821-055716-3sc3
+    transfers to manager_line land on sip:manager_line@10.185.61.21:5060
+    recordings: examples/salon-concierge/build/livekit/calls/20260821-055716-3sc3
     ctrl-c to stop
 
 livekit: dial-out ready; re-run with --to <E.164> to place a call
@@ -744,7 +743,7 @@ unmute dev ./agent --telephony --carrier --public-url https://your-tunnel.exampl
 with an optional path, and nothing else:
 
 ```text
-unmute: dev examples/twilio-telephony-hello: --public-url must be an HTTPS origin with an optional path, got "http://x.example"
+unmute: dev examples/salon-concierge: --public-url must be an HTTPS origin with an optional path, got "http://x.example"
 ```
 
 A trailing slash is trimmed for you. With the origin known, the command prints

@@ -1999,8 +1999,8 @@ func validateChannels(agent *Agent, resolved Target, provider targetcap.Provider
 // The deployment region looked like the obvious first entry and is not one: on
 // LiveKit routes it selects the region the deploy command targets and is
 // load-bearing whether the deploy goes to the managed platform or to a server the
-// author runs. Enrolling it would reject examples/livekit-human-transfer, which
-// ships in this repository and works.
+// author runs. Enrolling it would reject examples/salon-concierge's livekit
+// target, which ships in this repository and works.
 //
 // The predicate is the point of having this now: it reads the route record's own
 // CloudDeploys, never the provider. One provider's routes each deploy to exactly
@@ -2023,8 +2023,8 @@ func validateManagedPlatformSettings(plan *TelephonyPlan, row *TargetValidation)
 		// This route can deploy to a managed platform, so such a setting is
 		// meaningful here and must not be refused. Read from the route record,
 		// never inferred from the provider: inferring it would reject
-		// examples/livekit-human-transfer, which declares a deployment region on a
-		// SIP route and works.
+		// examples/salon-concierge, which declares a deployment region on a SIP
+		// route and works.
 		return
 	}
 	for _, setting := range managedPlatformOnlySettings {

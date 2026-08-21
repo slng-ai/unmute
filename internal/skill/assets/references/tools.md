@@ -217,7 +217,7 @@ def cancel_appointment(customer_id):
     return {"cancelled": True, "customer_id": customer_id}
 ```
 
-This is the self-contained fixture from `examples/outbound-reminder`; its live
+This is a self-contained fixture; its live
 test exercises outbound calling without requiring a booking API.
 
 The rules the function follows:

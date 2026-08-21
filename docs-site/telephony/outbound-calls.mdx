@@ -7,9 +7,11 @@ An outbound agent starts the call. That changes two things: the channel has to
 declare it, and the agent usually needs to know who it is calling before the
 first word.
 
-This page follows `examples/outbound-reminder`, an agent that calls a customer
-about an appointment. Its appointment tools are local fixtures, so the only
-external path under test is the outbound call itself.
+No shipped example dials out: `examples/salon-concierge` declares
+`outbound: false`, and every other package is browser only. So the snippets and
+commands below are a worked example named `my-agent`, an agent that calls a
+customer about an appointment. Everything in them is authorable as shown; there
+is just no package in the repository to run them against.
 
 ## Declare the direction
 
@@ -29,9 +31,8 @@ unmute: dev <package>: --to needs an outbound-capable target; "pipecat" has no o
 ## One route per target
 
 Dialling out is the carrier's job, so each target needs a connection that can
-reach your carrier account. `examples/outbound-reminder` runs on both targets, and
-they ride different mechanisms, so it has two connection files holding the same
-three names:
+reach your carrier account. An agent on both targets rides two different
+mechanisms, so it needs two connection files holding the same three names:
 
 ```yaml connections/twilio_websocket.yaml
 transport: carrier-websocket
@@ -59,7 +60,7 @@ anything else about the route. See
 ## Place a test call
 
 ```sh
-unmute dev examples/outbound-reminder --telephony --target pipecat \
+unmute dev my-agent --telephony --target pipecat \
   --to +15551234567 \
   --var customer_id=cus_1042 \
   --var name=Ada \
@@ -112,7 +113,7 @@ variables:
 Locally, `--var` supplies them:
 
 ```sh
-unmute dev examples/outbound-reminder --target pipecat \
+unmute dev my-agent --target pipecat \
   --var customer_id=cus_1042 \
   --var name=Ada \
   --var "appointment_time=tomorrow at 3 pm"

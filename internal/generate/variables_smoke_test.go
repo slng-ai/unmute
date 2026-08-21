@@ -78,7 +78,7 @@ print("pipecat variables ok")
 `
 
 func TestSmokePipecatVariablesRenderRefuseAndCapture(t *testing.T) {
-	runPipecatSmokeScript(t, "outbound-reminder", nil, nil, pipecatVariablesSmokeScript)
+	runPipecatSmokeScript(t, "salon-concierge", nil, nil, pipecatVariablesSmokeScript)
 }
 
 // livekitVariablesSmokeScript does the same against the emitted LiveKit agent:
@@ -122,5 +122,5 @@ print("livekit variables ok")
 `
 
 func TestSmokeLiveKitVariablesRenderRefuseAndCapture(t *testing.T) {
-	runLiveKitSmokeScript(t, "outbound-reminder", nil, nil, livekitVariablesSmokeScript)
+	runLiveKitSmokeScript(t, "salon-concierge", nil, nil, livekitVariablesSmokeScript)
 }

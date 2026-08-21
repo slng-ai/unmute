@@ -62,7 +62,7 @@ Every tool in the package is a local Python handler, so nothing has to be
 reachable before the greeting. `chat_with_me` has no business tool at all: it
 answers from what it knows, says plainly when it cannot check something, and
 hands off for booking or complaint work. For a remote tool over MCP, see
-[`examples/mcp-example`](../mcp-example/).
+[MCP servers](../../docs-site/build/tools/mcp.mdx).
 
 ## Local data
 

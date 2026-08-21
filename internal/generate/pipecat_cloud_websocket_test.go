@@ -92,29 +92,6 @@ func cloudWebsocketTarget(t *testing.T, opts cloudWebsocketOptions) (*ir.Agent, 
 	return agent, agent.Targets["pipecat"]
 }
 
-// The shipped example, compiled. Used where the assertion is about what an
-// operator actually gets rather than about a shape the fixtures can vary.
-func compileCloudWebsocketExample(t *testing.T) Artifact {
-	t.Helper()
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "pipecat-human-transfer-twilio"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, err := ir.Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Generate(agent, agent.Targets["pipecat"], target.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return artifact
-}
-
-func hasArtifactFile(artifact Artifact, path string) bool {
-	return slices.Contains(artifactPaths(artifact), path)
-}
-
 // telephonySection is the emitted README's route section: from its heading to the
 // next top-level heading. The runbook contract is about that section, so the test
 // reads that section rather than the whole file.

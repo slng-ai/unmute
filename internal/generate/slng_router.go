@@ -213,12 +213,15 @@ func slngRouterBinding(agent *ir.Agent, tgt ir.Target, model string) (string, bo
 // slngRequestExtras is the pair of dicts every router think request carries:
 // the identity headers, and the body extension holding the inline configuration
 // and the variable snapshot.
-func slngRequestExtras(binding ir.Binding, site slngSite) map[string]any {
+func slngRequestExtras(binding ir.Binding, site slngSite, pureProxy bool) map[string]any {
 	headers := map[string]any{
 		targetcap.SlngAgentIDHeader:   binding.AgentID,
 		targetcap.SlngSessionIDHeader: pyExpr(site.SessionExpr),
 	}
 	body := map[string]any{"slng_config": pyExpr(site.ConfigFunc + "()")}
+	if pureProxy {
+		body[slngPureProxyParam] = true
+	}
 	if len(site.Names) > 0 {
 		body["template_variables"] = pyExpr(fmt.Sprintf("_slng_template_variables(%s, (%s))",
 			slngStateExpr(site.StateExpr), pyTuple(site.Names)))
@@ -250,20 +253,43 @@ func pyTuple(values []string) string {
 }
 
 // slngConsumedParams drops the params the compiler consumes rather than
-// forwards. world_part_override becomes the base URL, so it must not also reach
-// the client as a kwarg the SDK never heard of (D2).
+// forwards. world_part_override becomes the base URL and slng_pure_proxy rides
+// the request body, so neither must also reach the client as a kwarg the SDK
+// never heard of (D2).
 func slngConsumedParams(params map[string]any) map[string]any {
 	if len(params) == 0 {
 		return params
 	}
 	out := make(map[string]any, len(params))
 	for key, value := range params {
-		if key == "world_part_override" {
+		if key == "world_part_override" || key == slngPureProxyParam {
 			continue
 		}
 		out[key] = value
 	}
 	return out
+}
+
+// slngPureProxyParam is the authored switch for the router's pure-proxy mode:
+// the upstream still answers every request, the cache still records what it
+// would have served, and nothing is ever replayed to the caller. It is the
+// router's own documented shadow-trial mode (docs/pure_proxy.md, read
+// 2026-08-21), and the reason it exists here is measured: the cache key is the
+// (assistant speech, user speech) pair and carries no system prompt, so two
+// unmute agents whose last exchange matches collide. Observed 2026-08-21 on
+// three live calls: the booking specialist's opening turn was served the
+// concierge's "what phone number should I use", cache_layer l2_exact, 1.27ms,
+// no model call.
+//
+// Authored rather than always-on, because suppressing the serve gives up the
+// speed the router exists for. The real fix is one agent id per emitted agent,
+// which the router's own scope contract already describes.
+const slngPureProxyParam = "slng_pure_proxy"
+
+// slngPureProxy reads the authored switch off a binding, before it is consumed.
+func slngPureProxy(binding ir.Binding) bool {
+	on, _ := binding.Params[slngPureProxyParam].(bool)
+	return on
 }
 
 // slngRegion reads the authored region off a binding, before it is consumed.

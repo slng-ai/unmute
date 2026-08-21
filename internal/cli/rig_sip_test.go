@@ -62,7 +62,7 @@ import (
 
 // rigSIPPackage is the checked-in example this runs, chosen because it declares
 // a transfer and so brings up the plane's destination endpoints.
-const rigSIPPackage = "../../examples/livekit-human-transfer"
+const rigSIPPackage = "../../examples/salon-concierge"
 
 func TestRigSIPPlane(t *testing.T) {
 	requireContainerRuntime(t)

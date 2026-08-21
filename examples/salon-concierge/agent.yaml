@@ -1,10 +1,3 @@
-# One full salon project: verification task, booking task, specialist handoffs,
-# cold manager transfer, local in-memory tools, browser audio, and inbound-only
-# phone routes on both code targets.
-#
-# Tuned for turn latency: one LLM round trip per control hop is the dominant
-# cost in a voice turn, so verification asks for a phone number only and the
-# booking flow is one task rather than three. See README.md.
 version: 1
 entry_agent: concierge
 
@@ -32,20 +25,15 @@ destinations:
 models:
   think:
     reasoning:
-      provider: openai
+      provider: slng
       model: gpt-5.6-luna
+      agent_id: optimized-salon-concierge-v3
+      upstream:
+        provider: openai
       params:
+        world_part_override: eu
         reasoning_effort: "none"
-  # speak:
-  #   voice:
-  #     provider: slng
-  #     # UNDER TEST. Swapped from cartesia/sonic:3.5 while chasing intermittent
-  #     # first-segment failures on the gateway: segments sent their text, waited
-  #     # 11.3s, received zero audio and errored. Voice ids are model-specific
-  #     # here, and gradium rejects a cartesia uuid with "Embeddings not found".
-  #     model: "gradium/tts:default"
-  #     voice: "4SZHfMpw-p46Ywgs"
-  #     language: en
+        slng_pure_proxy: true
   speak:
     voice:
       provider: slng
@@ -53,48 +41,19 @@ models:
       voice: "aura-2-thalia-en"
       language: en
       params:
-        # Speech world part. SLNG speech serves na, eu and ap; the Context
-        # Router's own regions are a different set under the same key.
         world_part_override: eu
-        # Hold a TTS socket open ahead of the turn, so the gateway's session
-        # init is already done when the text arrives. Off by default in the
-        # SLNG plugin. Worth about 40ms of mean time to first audio and a much
-        # better floor: gateway synthesis fell from 418ms mean and 221ms best
-        # without it, to 376ms mean and 58ms best with it, over 14 and 9
-        # segments. standby_used was true on 9 of 9 segments, so the mechanism
-        # is confirmed rather than inferred. Measured 2026-08-21.
-        #
-        # It is NOT worth the ~610ms an earlier version of this comment
-        # claimed. That number was the wait for a usable websocket, which
-        # LiveKit's tts ttfb does not contain: ttfb tracks the gateway's
-        # synthesis time alone, matching it to the millisecond across three
-        # runs. The socket handshake was already off the caller's path.
         warm_standby_enabled: true
   listen:
     transcriber:
       provider: slng
-      # How fast this model lands its *final* transcript decides how long the
-      # caller waits, because the turn detector reads the transcript to decide
-      # whether they have finished. A final that is still outstanding leaves the
-      # detector unsure, and an unsure detector waits the full endpointing
-      # max_delay of 2.5s instead of the 0.58s floor. On identical audio,
-      # gradium/stt:default finalised in 0.999s mean and crossed that line on
-      # 12 of 12 clips; deepgram/nova:3 finalised in 0.159s mean, worst 0.323s,
-      # and crossed it on none, for the same words.
       model: "deepgram/nova:3"
       language: en
       params:
-        # Kept for EU data residency, matching speak. It buys no latency here:
-        # with and without it measured 0.190s and 0.186s mean.
         world_part_override: eu
   turn:
     detector:
       provider: local
       model: silero
-      # UNDER TEST at 400ms on a TTS that works. 250ms moved the floor 0.577s to
-      # ~0.30s but the agent re-asked a question, which is what a split
-      # utterance looks like. The earlier retest was wasted on cartesia
-      # segments that returned no audio at all.
       endpointing_delay: 400ms
 
 agents:
@@ -154,10 +113,6 @@ tasks:
     context:
       history: full
 
-  # One task, not three. A draft step, a confirm step and an apply step each
-  # cost their own LLM round trip to finish, and the mutation tools already
-  # refuse an unconfirmed write, so the split bought two seconds of silence per
-  # booking and no extra safety.
   booking:
     instructions: tasks/booking.md
     tools:
