@@ -38,6 +38,47 @@ func TestV3_OutboundReminderBusinessToolsAreSelfContained(t *testing.T) {
 	}
 }
 
+// The salon package is the one docs-site/dev/local-telephony.mdx tells a reader
+// to run for each local plane, by target name. Two of its three targets ride the
+// same trunk on purpose: the same agent, once dispatched into the room as a
+// LiveKit worker and once told about the call by the plane's webhook because a
+// Pipecat bot is not a worker. A target renamed, dropped, or repointed here
+// turns that page's commands into commands that fail, which is the failure the
+// page exists to prevent.
+func TestSalonConciergeCoversBothLocalPlanes(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, plane := range map[string]target.TelephonyLocalPlane{
+		"pipecat":     target.LocalPlaneMediaWebsocket,
+		"pipecat_sip": target.LocalPlaneSIP,
+		"livekit":     target.LocalPlaneSIP,
+	} {
+		t.Run(name, func(t *testing.T) {
+			resolved, ok := agent.Targets[name]
+			if !ok {
+				t.Fatalf("no target %q, and the page says `unmute dev examples/salon-concierge --telephony --target %s`", name, name)
+			}
+			if resolved.Telephony == nil {
+				t.Fatalf("target %q resolves no telephony route", name)
+			}
+			if resolved.Telephony.LocalPlane != string(plane) {
+				t.Errorf("target %q runs on the %s plane, and the page has it under %s",
+					name, resolved.Telephony.LocalPlane, plane)
+			}
+			// Run as-is is the claim, so it has to emit.
+			if _, err := Generate(agent, resolved, target.Default()); err != nil {
+				t.Errorf("target %q does not generate: %v", name, err)
+			}
+		})
+	}
+}
+
 func TestSalonConciergeFeatureContract(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
 	if err != nil {

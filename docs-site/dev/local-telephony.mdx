@@ -282,51 +282,18 @@ one line per run.
 
 ### Running the Pipecat `sip` route
 
-No shipped example puts a `pipecat` target on a `sip` connection, so point one
-there yourself. `examples/twilio-telephony-hello` already carries both
-connections, which makes it two edits:
+`examples/salon-concierge` carries a target on this route, so there is nothing
+to edit:
 
 ```sh
-cp -R examples/twilio-telephony-hello /tmp/sip-hello
-```
-
-In `targets.yaml`, point the `pipecat` target at the trunk instead of the media
-stream:
-
-```yaml
-targets:
-  pipecat:
-    provider: pipecat
-    connection: twilio_sip    # was: twilio_voice
-```
-
-Compile now and the route refuses the package, which is the second edit telling
-you what it is:
-
-```text
-pipecat: telephony outbound: telephony route (pipecat, sip, twilio) does not
-support outbound. Connection "twilio_sip" declares transport: sip
-```
-
-This route receives calls and does not place them, so in `agent.yaml` set the
-phone channel to inbound only:
-
-```yaml
-channels:
-  phone:
-    kind: telephony
-    inbound: true
-    outbound: false    # was: true
-```
-
-Then run it:
-
-```sh
-unmute dev /tmp/sip-hello --telephony --target pipecat
+unmute dev examples/salon-concierge --telephony --target pipecat_sip
 ```
 
 You get the same four containers and the same dial line as the LiveKit route
-above, and the same softphone dials it.
+above, and the same softphone dials it. That one package is the same agent on
+three routes: `pipecat_sip` here, `livekit` on the same trunk with a LiveKit
+worker in the room instead of a Pipecat bot, and `pipecat` on the media stream.
+So it covers both planes, and the conversation is identical across them.
 
 ### What it proves, and what it does not
 

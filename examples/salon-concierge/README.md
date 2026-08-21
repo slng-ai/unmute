@@ -10,7 +10,8 @@ you want one package to exercise the main Unmute paths together:
 - a chat agent that answers open questions and hands off, with no tool of its own;
 - local Python tools backed by SQLite;
 - Coval tracing for release inspection;
-- browser audio and inbound phone calls on both code targets.
+- browser audio and inbound phone calls on three targets, covering both local
+  telephony planes.
 
 There is no outbound route. `channels.phone.outbound` is `false`.
 
@@ -89,11 +90,16 @@ The Pipecat target uses the `cloud-websocket` transport and also needs
 inbound call and transfer. `PIPECAT_CLOUD_ORGANIZATION` is supplied by the route
 when deployed, not declared by the package. This route needs no `DAILY_API_KEY`.
 
-The LiveKit target uses the `sip` transport and also needs
+The `livekit` and `pipecat_sip` targets both use the `sip` transport and need
 `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, and
 `SIP_FROM_NUMBER`. Local development supplies `LIVEKIT_URL`, `LIVEKIT_API_KEY`,
 `LIVEKIT_API_SECRET`, and `REDIS_URL`; LiveKit Cloud or your operator supplies
 them after deployment.
+
+`pipecat_sip` is the same agent on that trunk with a Pipecat bot in the room
+instead of a LiveKit worker. No managed platform sits behind it, so it emits no
+deployment manifest: the containers a local run starts are the ones you run in
+production. It receives calls only.
 
 Secrets stay in `.env`. No credential or phone number belongs in this package.
 Traces and debug logs can include caller speech, model input and output, phone
@@ -187,8 +193,15 @@ prints an address and a per-run credential to dial from a softphone:
 bin/unmute dev --telephony examples/salon-concierge --target livekit
 ```
 
-The local check proves service health, trunk and dispatch setup, worker
-registration, and the conversation itself. It does not make the laptop reachable
+The same trunk, with a Pipecat bot in the room instead of a LiveKit worker, is
+dialled exactly the same way:
+
+```sh
+bin/unmute dev --telephony examples/salon-concierge --target pipecat_sip
+```
+
+The local check proves service health, trunk and dispatch setup, how the agent is
+told about the call, and the conversation itself. It does not make the laptop reachable
 from a carrier; a real call needs public SIP signaling and RTP, and an HTTPS
 tunnel is not enough.
 

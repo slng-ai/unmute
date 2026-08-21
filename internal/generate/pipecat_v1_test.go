@@ -3,6 +3,7 @@ package generate
 import (
 	"bytes"
 	"flag"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2882,10 +2883,15 @@ func TestUS4_ForwardedRegionIsInTheReport(t *testing.T) {
 	}
 }
 
+// By name, in order, because a package may declare two targets on one provider:
+// salon-concierge puts Pipecat on the media stream and on a trunk. Ranging over
+// the map returned whichever one Go felt like, so a caller asking for "the
+// Pipecat target" of such a package was a coin flip that would land the day the
+// two stopped agreeing.
 func targetByProvider(t *testing.T, agent *ir.Agent, provider ir.Provider) ir.Target {
 	t.Helper()
-	for _, resolved := range agent.Targets {
-		if resolved.Provider == provider {
+	for _, name := range slices.Sorted(maps.Keys(agent.Targets)) {
+		if resolved := agent.Targets[name]; resolved.Provider == provider {
 			return resolved
 		}
 	}
