@@ -581,6 +581,13 @@ type mediaCarrierRun struct {
 // they stop it.
 const mediaPlaneBridgeSeconds = 4
 
+// audioToolLookPath finds the tools that carry a person's voice. A variable so a
+// test can say which kind of machine it is describing, the way tunnelLookPath
+// does for cloudflared: whether sox is installed decides which of two banners a
+// run prints, and a test that read the real PATH asserted the talking banner on a
+// laptop with sox and the recording one on a runner without it.
+var audioToolLookPath = exec.LookPath
+
 // fixtureOnly reports whether this call will play a recording rather than carry
 // a person's voice.
 func (r mediaCarrierRun) fixtureOnly() bool {
@@ -594,7 +601,7 @@ func (r mediaCarrierRun) fixtureReason() string {
 		return "this run asked for one"
 	}
 	for _, tool := range []string{"rec", "play"} {
-		if _, err := exec.LookPath(tool); err != nil {
+		if _, err := audioToolLookPath(tool); err != nil {
 			return fmt.Sprintf("%q is not on your PATH, and it comes with sox (`brew install sox`)", tool)
 		}
 	}

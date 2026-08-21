@@ -553,12 +553,27 @@ func TestCallControlRefusesAnUnauthenticatedRequest(t *testing.T) {
 	}
 }
 
+// withAudioTools makes this test describe a machine that can carry a person's
+// voice, whichever machine it runs on.
+func withAudioTools(t *testing.T) {
+	t.Helper()
+	restore := audioToolLookPath
+	audioToolLookPath = func(tool string) (string, error) { return "/usr/bin/" + tool, nil }
+	t.Cleanup(func() { audioToolLookPath = restore })
+}
+
 // A live call must say it is live. On a machine with audio tools an outbound
 // call has no length decided in advance and holds the microphone until it is
 // stopped, and the run that printed nothing here was a run you sat in front of
 // with your microphone open, wondering.
 func TestALiveOutboundCallSaysWhatIsHappening(t *testing.T) {
 	request := outboundRequest{CallID: "CAlive", To: "+15559990000", From: planeLocalNumber}
+
+	// A machine with audio tools, stated rather than inherited. Read from the
+	// real PATH this asserted the talking banner wherever sox happened to be
+	// installed and the recording banner everywhere else, so it passed on a
+	// laptop and failed on a runner for being a runner.
+	withAudioTools(t)
 
 	var person strings.Builder
 	printMediaPlaneAnswered(&person, "pipecat", request, mediaCarrierRun{})
