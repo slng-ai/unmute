@@ -139,10 +139,16 @@ def require_env() -> None:
 # The router answers a repeated turn from its cache instead of calling the model.
 # That is why a router-bound system prompt below keeps its placeholders instead of
 # being rendered here: the router substitutes them from template_variables, so the
-# prompt it sees is identical on every call, which is what lets a turn repeat. The
-# agent id scopes that cache and is one value for this whole package. A first turn
-# never caches, and the router decides which later turns are repeatable, so a
-# repeat served by the model is expected rather than a fault.
+# prompt it sees is identical on every call, which is what lets a turn repeat. A
+# first turn never caches, and the router decides which later turns are
+# repeatable, so a repeat served by the model is expected rather than a fault.
+#
+# The agent id header scopes that cache, and it is one value per prompt rather
+# than one for the package: each agent and each task sends the authored agent_id,
+# a colon, then its own name. The cache key is the last exchange and carries no
+# system prompt, so two prompts under one scope get served each other's answers.
+# A task runs on its owner's service here, so entering one swaps its scope in and
+# every way out swaps the owner's back.
 {{range .Slng.Configs}}
 
 def {{.Func}}() -> dict:
@@ -877,6 +883,10 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{if $.Variables}}        self.state = state
 {{end}}{{if $.HasFlows}}        self.context = context
 {{end}}{{if or $.Telephony $.HasColdTransfer}}        self.call_context = call_context if call_context is not None else {}
+{{end}}{{if and $.Slng.Any .SlngHeaders}}        # Kept on self because a task's headers are swapped in from a method
+        # body, where the constructor's parameter is out of scope, and a whole
+        # header dict has to carry this along with the scope.
+        self._slng_session_id = slng_session_id
 {{end}}
         llm = build_{{.Name}}_llm({{if $.Variables}}state{{end}}{{if $.Slng.Any}}{{if $.Variables}}, {{end}}slng_session_id=slng_session_id{{end}})
         super().__init__({{pyq .Name}}, llm=llm, pipeline=Pipeline([llm, build_{{.Name}}_tts()]), bridged=())
@@ -891,10 +901,22 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
     async def on_activated(self, args) -> None:
         # A Flow replaces this worker's system instruction with its task role.
         # Re-entry restores the owning agent before tools/messages run.
+{{if .SlngHeaders}}        # And its cache scope with it: a task that handed the conversation on
+        # rather than returning left this service holding the task's scope, so
+        # re-entry has to take it back or this agent would answer as the task.
+        # Only the extra_headers key travels: a settings update merges the extra
+        # dict key by key, so the inline configuration and the reasoning setting
+        # survive untouched.
         await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(
+                system_instruction={{.RuntimePromptExpr}},
+                extra={"extra_headers": {{.SlngHeaders}}},
+            ),
+        ))
+{{else}}        await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(system_instruction={{.RuntimePromptExpr}}),
         ))
-        await super().on_activated(args)
+{{end}}        await super().on_activated(args)
 {{end}}
 {{if .MCPSources}}    async def start_mcp(self) -> None:
         """Connect every source and register its tools on this agent's LLM."""
@@ -1182,7 +1204,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             response.raise_for_status()
             await params.result_callback(response.json())
 {{end}}{{if and .EndsCall (not .ColdDestination)}}        await params.llm.push_frame(EndFrame())
-{{end}}{{end}}{{$agentPromptExpr := .RuntimePromptExpr}}{{range $d := .Delegates}}
+{{end}}{{end}}{{$agentPromptExpr := .RuntimePromptExpr}}{{$agentSlngHeaders := .SlngHeaders}}{{range $d := .Delegates}}
     @_direct_tool
     async def {{$d.MethodName}}(self, params: FunctionCallParams):
         """{{$d.When}}"""
@@ -1205,7 +1227,14 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         # restoration erases that call and the unchanged request delegates again.
         await self.flush_pipeline()
         self._{{$d.MethodName}}_snapshot = (copy.deepcopy(self.context.get_messages()), self.context.tools)
-        await flow.initialize(self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
+{{if (index $d.StepTasks 0).SlngHeaders}}        # The step's own cache scope, queued before the node is entered so it is
+        # ahead of the frame that triggers the step's first completion. That
+        # first request is the one that collided: it asks with the task's prompt,
+        # so it has to ask under the task's scope, not this agent's.
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(extra={"extra_headers": {{(index $d.StepTasks 0).SlngHeaders}}}),
+        ))
+{{end}}        await flow.initialize(self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
 {{range $t := $d.StepTasks}}
     def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:
         return NodeConfig(
@@ -1260,7 +1289,13 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             ]
             self.context.set_messages(messages + task_messages)
             self.context.set_tools(tools)
-            await self.activate_worker(
+{{if $agentSlngHeaders}}            # This worker is about to be deactivated with the step's cache scope
+            # still on its service. Put the owner's back before handing over, so
+            # a later re-entry cannot answer as a task that already ended.
+            await self.queue_frame(LLMUpdateSettingsFrame(
+                delta=LLMSettings(extra={"extra_headers": {{$agentSlngHeaders}}}),
+            ))
+{{end}}            await self.activate_worker(
                 {{pyq $x.To}},
                 args=LLMWorkerActivationArgs(
                     messages=[{"role": "developer", "content": {{pyq $x.Reason}}}],
@@ -1268,13 +1303,24 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                 ),
                 deactivate_self=True,
             )
-        except BaseException:
+        except BaseException as error:
             self._{{$d.MethodName}}_active_step = {{pyq $t.Name}}
             if flow_messages is not None:
                 self.context.set_messages(flow_messages)
             if flow_tools is not None:
                 self.context.set_tools(flow_tools)
-            raise
+{{if $t.SlngHeaders}}            # The owner's scope was already queued above, so a handover that
+            # failed leaves this step asking under it. Put the step's back with
+            # the rest of its state. Wrapped the same way the finish handler's
+            # rollback is, so a failure to roll back cannot replace the error
+            # that caused it.
+            try:
+                await self.queue_frame(LLMUpdateSettingsFrame(
+                    delta=LLMSettings(extra={"extra_headers": {{$t.SlngHeaders}}}),
+                ))
+            except BaseException as rollback_error:
+                raise error from rollback_error
+{{end}}            raise
         return {"transferred": True}, NO_RESPONSE
 
 {{end}}    async def _{{$d.MethodName}}_finish_{{$t.Name}}(self, args, flow_manager):
@@ -1282,7 +1328,13 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             return {"status": "already handled"}, NO_RESPONSE
         self._{{$d.MethodName}}_active_step = {{if $t.NextName}}{{pyq $t.NextName}}{{else}}None{{end}}
 {{end}}        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
-{{if $t.NextName}}        return {"status": "ok", "result": self._{{$d.MethodName}}_results[{{pyq $t.Name}}]}, self._{{$d.MethodName}}_node_{{$t.NextName}}()
+{{if $t.NextName}}{{if $t.SlngNextHeaders}}        # The next step is a different prompt site, so it asks under a different
+        # cache scope. Queued before the node is handed back, for the same reason
+        # the first step's was.
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(extra={"extra_headers": {{$t.SlngNextHeaders}}}),
+        ))
+{{end}}        return {"status": "ok", "result": self._{{$d.MethodName}}_results[{{pyq $t.Name}}]}, self._{{$d.MethodName}}_node_{{$t.NextName}}()
 {{else}}{{if and $d.HasTransfers (ne $d.Then "end")}}        flow_messages = None
         flow_tools = None
         completion_started = False
@@ -1301,7 +1353,11 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                     self.context.set_tools(flow_tools)
                 if completion_started:
                     await self.queue_frame(LLMUpdateSettingsFrame(
-                        delta=LLMSettings(system_instruction={{$t.PromptExpr}}),
+                        delta=LLMSettings(system_instruction={{$t.PromptExpr}}{{if $t.SlngHeaders}},
+                            # Completion had already put the owner's scope back,
+                            # so rolling back into the step has to put the step's
+                            # scope back with its prompt.
+                            extra={"extra_headers": {{$t.SlngHeaders}}}{{end}}),
                     ))
                     await self.flush_pipeline()
             except BaseException as rollback_error:
@@ -1310,14 +1366,22 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 
     async def _{{$d.MethodName}}_complete_{{$t.Name}}(self):
 {{end}}{{if not (and $d.HasTransfers (ne $d.Then "end"))}}{{range $d.Assign}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
-{{end}}{{end}}{{if eq $d.Then "end"}}        # then: end — hand to a terminal node whose end_conversation
+{{end}}{{end}}{{if eq $d.Then "end"}}{{if $agentSlngHeaders}}        # The terminal node's goodbye is spoken by this agent, not by the step,
+        # so the owner's cache scope goes back first.
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(extra={"extra_headers": {{$agentSlngHeaders}}}),
+        ))
+{{end}}        # then: end — hand to a terminal node whose end_conversation
         # post-action ends the call after the goodbye drains (V4/B2).
         return {"status": "ok"}, self._{{$d.MethodName}}_end_node()
 {{else}}        # then: {{$d.Then}} — restore the owner's pre-flow context (messages and
         # tools); only the typed results cross back (merge: results, N13).
         messages, tools = self._{{$d.MethodName}}_snapshot
         await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(system_instruction={{$agentPromptExpr}}),
+            delta=LLMSettings(system_instruction={{$agentPromptExpr}}{{if $agentSlngHeaders}},
+                # The owner's cache scope goes back with its prompt. A leaked
+                # task scope is the same defect pointing the other way.
+                extra={"extra_headers": {{$agentSlngHeaders}}}{{end}}),
         ))
         await self.flush_pipeline()
 {{if eq $d.Then "transfer"}}        self.context.set_messages(messages)

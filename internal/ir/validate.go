@@ -70,6 +70,7 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	global, globalWarnings := validateStructure(agent)
 	global = append(global, validateConfiguredTargets(agent, caps)...)
 	global = append(global, slngOneAgentIDPerPackage(agent)...)
+	global = append(global, slngScopeErrors(agent)...)
 	globalWarnings = add(globalWarnings, undeclaredSecretWarning(agent))
 	globalWarnings = add(globalWarnings, unusedConnectionWarning(agent))
 	report := ValidateReport{PerTarget: make([]TargetValidation, 0, len(targets))}
@@ -1176,12 +1177,35 @@ func validateSlngRouter(agent *Agent, resolved Target, row *TargetValidation) {
 // build: nothing fails, the agent is simply never fast. So the refusal names both
 // profiles and both values, because the author has to know which line to change.
 //
+// The composing half of FR-010 is gone: an agent id is no longer carried verbatim
+// to every site, each site sends its own scope derived from it. What survives is
+// this, that a package authors one id, because that is what makes the derivation
+// mean anything.
+func slngOneAgentIDPerPackage(agent *Agent) []string {
+	ids := slngAuthoredIDs(agent)
+	var errors []string
+	for _, other := range ids[min(1, len(ids)):] {
+		if other[1] != ids[0][1] {
+			errors = add(errors, fmt.Sprintf(
+				"think.%s agent_id %q and think.%s agent_id %q differ; one package sends one agent id, because the id is what scopes the router's cache",
+				ids[0][0], ids[0][1], other[0], other[1]))
+		}
+	}
+	return errors
+}
+
+// slngAuthoredIDs collects every agent id this package authors, as
+// (profile, id) pairs in profile-name order, first sighting of a profile
+// winning.
+//
 // It runs over the whole models palette rather than only the profiles a target
 // compiles, and over every target's resolved bindings as well. An unused second
-// profile emits nothing today, but pointing one agent at it is a one-word edit,
-// and finding out then means finding out from a latency graph.
-func slngOneAgentIDPerPackage(agent *Agent) []string {
-	// profile name -> id, first sighting wins, in name order.
+// profile emits nothing today, but pointing one agent at it is a one-word edit.
+//
+// One owner, two readers: the one-id-per-package rule and the derived-scope
+// rules below both need the same answer to "what did the author write", and two
+// walks of the same maps could disagree about it.
+func slngAuthoredIDs(agent *Agent) [][2]string {
 	var ids [][2]string
 	seen := map[string]bool{}
 	note := func(profile, id string) {
@@ -1204,12 +1228,57 @@ func slngOneAgentIDPerPackage(agent *Agent) []string {
 			}
 		}
 	}
+	return ids
+}
+
+// slngPromptSites lists every place in this package that will send a system
+// prompt to the router: one site per agent, one per task, plus the summarizer,
+// whose prompt is fixed and which therefore needs only one value.
+//
+// The summarizer is included whether or not this package's conversation setting
+// emits one. Its suffix is the fixed and short `summary`, so including it can
+// only refuse a package whose every other site is already refused, and leaving
+// it out would mean a package that starts summarising later fails then instead
+// of now.
+func slngPromptSites(agent *Agent) []targetcap.SlngSite {
+	sites := make([]targetcap.SlngSite, 0, len(agent.Agents)+len(agent.Tasks)+1)
+	for _, name := range sortedKeys(agent.Agents) {
+		sites = append(sites, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name})
+	}
+	for _, name := range sortedKeys(agent.Tasks) {
+		sites = append(sites, targetcap.SlngSite{Kind: targetcap.SlngSiteTask, Name: name})
+	}
+	return append(sites, targetcap.SlngSite{Kind: targetcap.SlngSiteSummary})
+}
+
+// slngScopeErrors holds the one refusal the derived cache scope brings with it:
+// the bound moves from the authored value to the value that actually leaves.
+//
+// It does not also refuse a name holding the separator, which the plan for this
+// change expected to be necessary. It is not: checkNames in build.go already
+// holds every agent and task name to `^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`, before
+// Validate ever runs, so a name cannot hold a colon. The overlap is gated from
+// the other side instead, by TestNamePatternExcludesTheScopeSeparator, because a
+// derived scope's uniqueness now rests on a pattern that was written for Python
+// identifiers and knows nothing about cache scopes.
+//
+// Nothing fires on a package with no router binding: a package that derives no
+// scope has no scope to refuse.
+func slngScopeErrors(agent *Agent) []string {
+	ids := slngAuthoredIDs(agent)
+	if len(ids) == 0 {
+		return nil
+	}
+	sites := slngPromptSites(agent)
+	// Every authored id is checked, not only the first. The one-id rule refuses
+	// a second id separately, and reporting both problems in one pass beats
+	// making an author fix one to discover the other.
 	var errors []string
-	for _, other := range ids[min(1, len(ids)):] {
-		if other[1] != ids[0][1] {
-			errors = add(errors, fmt.Sprintf(
-				"think.%s agent_id %q and think.%s agent_id %q differ; one package sends one agent id, because the id is what scopes the router's cache",
-				ids[0][0], ids[0][1], other[0], other[1]))
+	for _, pair := range ids {
+		for _, site := range sites {
+			if err := targetcap.ValidateSlngScope(pair[1], site); err != nil {
+				errors = add(errors, fmt.Sprintf("think.%s: %s", pair[0], err))
+			}
 		}
 	}
 	return errors

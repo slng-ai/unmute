@@ -112,10 +112,14 @@ def require_env() -> None:
 # The router answers a repeated turn from its cache instead of calling the model.
 # That is why a router-bound system prompt below keeps its placeholders instead of
 # being rendered here: the router substitutes them from template_variables, so the
-# prompt it sees is identical on every call, which is what lets a turn repeat. The
-# agent id scopes that cache and is one value for this whole package. A first turn
-# never caches, and the router decides which later turns are repeatable, so a
-# repeat served by the model is expected rather than a fault.
+# prompt it sees is identical on every call, which is what lets a turn repeat. A
+# first turn never caches, and the router decides which later turns are
+# repeatable, so a repeat served by the model is expected rather than a fault.
+#
+# The agent id header scopes that cache, and it is one value per prompt rather
+# than one for the package: each agent and each task sends the authored agent_id,
+# a colon, then its own name. The cache key is the last exchange and carries no
+# system prompt, so two prompts under one scope get served each other's answers.
 
 
 def _slng_config_fast_reasoning() -> dict:
@@ -179,6 +183,12 @@ def _render(text: str, userdata, *, quote_values: bool = False) -> str:
 class Userdata:
     customer_id: str | None = None
     verified: bool | None = False
+    # One value per call, set where the call begins. It groups this call's think
+    # requests for support and scopes nothing: the cache scope is the agent id
+    # header, so this may differ freely between calls. It lives here rather than
+    # in an entrypoint local because the header set now travels per request, so
+    # every agent and task class has to be able to reach it from a method body.
+    slng_session_id: str = ""
 
 
 # --- job metadata ------------------------------------------------------------
@@ -254,9 +264,77 @@ class IgnorePhrasesMixin:
         return _filtered()
 
 
+# --- router cache scope ------------------------------------------------------
+async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
+    """Agent.default.llm_node, plus the asking class's own router cache scope.
+
+    One model object serves every agent and task in this session, so the scope
+    cannot be a constructor value: it would be the same for all of them, and two
+    prompt sites sharing one scope is exactly the collision this prevents. It has
+    to be the whole header dict rather than the one header, because the plugin
+    replaces the extra_headers entry instead of merging it
+    (livekit-plugins-openai llm.py:960-962, read at the pinned version), which is
+    also why no router model is built with extra_headers at all.
+
+    The body restates the framework's own default (livekit-agents 1.6.10,
+    agents/voice/agent.py:524-545), because that default passes no per-request
+    extras and ModelSettings carries only tool_choice, so there is no supported
+    seam short of the node. The version pin is exact, floor equal to ceiling, so
+    a framework bump is already a deliberate step; checking this against the new
+    default is part of it.
+
+    A module function rather than only a mixin method, because two things need
+    it: the agent classes, through _SlngScoped below, and the task retry mixin,
+    which overrides llm_node for its own reasons and calls the default itself. A
+    second copy of this body is how one of those two would come to send the
+    wrong scope.
+
+    agent.session is read rather than stored: llm_node is only ever called by the
+    running activity, so the session exists by the time this runs. That holds for
+    an AgentTask too, which is an Agent.
+    """
+    session = agent.session
+    # The activity resolves a per-class override against the session default the
+    # same way (agent_activity.py:4627). isinstance covers both the not-given and
+    # the None case without reaching for a private helper.
+    activity_llm = agent.llm if isinstance(agent.llm, llm.LLM) else session.llm
+    tool_choice = model_settings.tool_choice if model_settings else NOT_GIVEN
+    async with activity_llm.chat(
+        chat_ctx=chat_ctx,
+        tools=tools,
+        tool_choice=tool_choice,
+        conn_options=session.conn_options.llm_conn_options,
+        extra_kwargs={
+            "extra_headers": {
+                "X-Slng-Agent-Id": agent._slng_scope,
+                "X-Slng-Session-Id": session.userdata.slng_session_id,
+            },
+        },
+    ) as stream:
+        async for chunk in stream:
+            yield chunk
+
+
+class _SlngScoped:
+    """Route an agent class's think requests through its own cache scope.
+
+    Agents only. A task carries _slng_scope as a plain class attribute and gets
+    here through _RetryEmptyTaskResponseMixin instead, because that mixin
+    overrides llm_node too and this one would shadow it.
+    """
+
+    _slng_scope: str
+
+    def llm_node(self, chat_ctx, tools, model_settings):
+        return _slng_llm_node(self, chat_ctx, tools, model_settings)
+
+
 # --- agents ----------------------------------------------------------------
 
-class Billing(IgnorePhrasesMixin, Agent):
+class Billing(_SlngScoped, IgnorePhrasesMixin, Agent):
+    # This agent's own cache scope, sent by _SlngScoped on every request.
+    _slng_scope = "safe-core-router-v3:billing"
+
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(
             instructions=BILLING_PROMPT,
@@ -281,7 +359,10 @@ class Billing(IgnorePhrasesMixin, Agent):
 
 
 
-class Intake(IgnorePhrasesMixin, Agent):
+class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
+    # This agent's own cache scope, sent by _SlngScoped on every request.
+    _slng_scope = "safe-core-router-v3:intake"
+
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN, initial: bool = False) -> None:
         self._initial = initial
         super().__init__(
@@ -410,7 +491,15 @@ class _RetryEmptyTaskResponseMixin:
         request_chat_ctx = chat_ctx
         for attempt in range(3):
             has_response = False
-            async for chunk in Agent.default.llm_node(
+            # A router-bound task asks under its own cache scope, not its owner's.
+            # Dispatched here because this mixin owns llm_node for every task, and
+            # a package can mix a router-bound task with one that is not.
+            node = (
+                _slng_llm_node
+                if getattr(self, "_slng_scope", None)
+                else Agent.default.llm_node
+            )
+            async for chunk in node(
                 self, request_chat_ctx, request_tools, model_settings
             ):
                 if isinstance(chunk, str):
@@ -508,6 +597,10 @@ class _RetryEmptyTaskResponseMixin:
 
 
 class Collect(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict]):
+    # This task's own cache scope. Read by _RetryEmptyTaskResponseMixin rather
+    # than by a mixin of its own, because that mixin already owns llm_node here.
+    _slng_scope = "safe-core-router-v3:task.collect"
+
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(instructions=COLLECT_PROMPT, chat_ctx=chat_ctx)
         self._response_tool_call_ids: set[str] = set()
@@ -534,6 +627,10 @@ class Collect(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict])
         self.complete(_task_result({"tier": tier}, unserved_request))
 
 class Confirm(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict]):
+    # This task's own cache scope. Read by _RetryEmptyTaskResponseMixin rather
+    # than by a mixin of its own, because that mixin already owns llm_node here.
+    _slng_scope = "safe-core-router-v3:task.confirm"
+
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(instructions=CONFIRM_PROMPT, chat_ctx=chat_ctx)
         self._response_tool_call_ids: set[str] = set()
@@ -559,21 +656,21 @@ server.setup_fnc = prewarm
 @server.rtc_session(agent_name="livekit")
 async def entrypoint(ctx: JobContext) -> None:
     require_env()
-    # One SLNG Context Router session id per call, created where the call begins
-    # and passed as an argument from here on, so one worker process serving
-    # several jobs keeps them apart. It groups this call's think requests for
-    # support and scopes nothing: the agent id is what scopes the router's cache,
-    # so this may differ freely between calls. Not named session_id, because this
-    # file already writes a "session_id" into the telephony call context and that
-    # is a different thing.
-    slng_session_id = str(uuid.uuid4())
-    # The call state is a local here rather than an inline argument, so the
+    # The call state is a local here as well as the session's user data, so the
     # router's template variable snapshot can read it beside the llm kwarg.
-    slng_state = Userdata()
+    #
+    # It also carries one SLNG Context Router session id per call, created here
+    # where the call begins, so one worker process serving several jobs keeps them
+    # apart. It rides the state object rather than a local of its own because
+    # every agent and task now builds its own header set at request time and has
+    # to be able to reach this from a method body. Not named session_id, because
+    # this file already writes a "session_id" into the telephony call context and
+    # that is a different thing.
+    slng_state = Userdata(slng_session_id=str(uuid.uuid4()))
     session = AgentSession[Userdata](
         userdata=slng_state,
         stt=deepgram.STT(api_key=os.environ["DEEPGRAM_API_KEY"], model="nova-3"),
-        llm=openai.LLM(api_key=os.environ["SLNG_API_KEY"], base_url="https://eu.context-router.slng.ai/v1", model="gpt-5.6-luna", extra_body={"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(slng_state, ("customer_id",))}, extra_headers={"X-Slng-Agent-Id": "safe-core-router-v3", "X-Slng-Session-Id": slng_session_id}, reasoning_effort="none"),
+        llm=openai.LLM(api_key=os.environ["SLNG_API_KEY"], base_url="https://eu.context-router.slng.ai/v1", model="gpt-5.6-luna", extra_body={"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(slng_state, ("customer_id",))}, reasoning_effort="none"),
         tts=elevenlabs.TTS(api_key=os.environ["ELEVEN_API_KEY"], voice_id="cgSgspJ2msm6clMCkdW9"),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(version="v1-mini"),

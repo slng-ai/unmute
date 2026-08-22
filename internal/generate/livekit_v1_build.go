@@ -409,6 +409,14 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		return livekitData{}, err
 	}
 	data.Slng = slng
+	// A router package gets a Userdata object whether or not it declares
+	// variables: the per-call session id lives there now, and a class reaching
+	// it from a method body is the only way the header set can travel per
+	// request.
+	data.HasUserdata = data.HasVars || slng.Any()
+	// The emitted mixin names llm.LLM to tell a per-class model override from
+	// the session default, the way the framework's own activity does.
+	data.NeedsLLM = data.NeedsLLM || slng.Any()
 	data.Deps = livekitDeps(data)
 	data.RequiredEnv = env.sorted()
 	// The startup check is derived from what the compiler knows it requires, not
@@ -733,7 +741,12 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 	// untouched one keeps the bare module constant.
 	// A router-bound prompt keeps its placeholders, so there is nothing to
 	// re-render on entry and the update_instructions call goes away with it.
-	if _, router := slngRouterBinding(agent, tgt, def.Model); ir.HasTemplate(def.Instructions) && !router {
+	profile, router := slngRouterBinding(agent, tgt, def.Model)
+	if router {
+		built.SlngScope = targetcap.SlngScope(tgt.Models.Reason[profile].AgentID,
+			targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name})
+	}
+	if ir.HasTemplate(def.Instructions) && !router {
 		built.PromptExpr = promptExpr(promptConst(name), def.Instructions, "self.session.userdata", false)
 	}
 	if def.Model != entry.Model {
@@ -825,7 +838,7 @@ func buildLiveKitTransfer(agent *ir.Agent, tgt ir.Target, ref string, control *i
 		Announce: control.Announce, Requires: control.Requires,
 	}
 	if control.Context.History == ir.HistorySummary {
-		summarizer, err := livekitReasonLLM(agent, tgt, control.Context.Summarizer, env)
+		summarizer, err := livekitSummaryLLM(agent, tgt, control.Context.Summarizer, env)
 		if err != nil {
 			return livekitTransfer{}, fmt.Errorf("transfer %q summarizer: %w", ref, err)
 		}
@@ -907,7 +920,7 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 		// The task's own context (N12) shapes its entry; group steps instead
 		// take the group's scope (SCHEMA 4.6), handled in the group path.
 		if task.Context.History == ir.HistorySummary {
-			summarizer, err := livekitReasonLLM(agent, tgt, task.Context.Summarizer, env)
+			summarizer, err := livekitSummaryLLM(agent, tgt, task.Context.Summarizer, env)
 			if err != nil {
 				return livekitDelegate{}, fmt.Errorf("delegate %q task %q summarizer: %w", ref, c.Task, err)
 			}
@@ -971,7 +984,12 @@ func livekitTaskCanTransfer(agent *ir.Agent, task ir.Task) bool {
 
 func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *envSet) (livekitTask, error) {
 	built := livekitTask{Name: name, Class: pyName(name), PromptConst: promptConst(name)}
-	if _, router := slngRouterBinding(agent, tgt, task.Model); ir.HasTemplate(task.Instructions) && !router {
+	profile, router := slngRouterBinding(agent, tgt, task.Model)
+	if router {
+		built.SlngScope = targetcap.SlngScope(tgt.Models.Reason[profile].AgentID,
+			targetcap.SlngSite{Kind: targetcap.SlngSiteTask, Name: name})
+	}
+	if ir.HasTemplate(task.Instructions) && !router {
 		built.PromptExpr = promptExpr(promptConst(name), task.Instructions, "self.session.userdata", false)
 	}
 	// Per-task model (B1): AgentTask takes its own llm=, resolved through the
@@ -1164,18 +1182,46 @@ func livekitReasonLLM(agent *ir.Agent, tgt ir.Target, profile string, env *envSe
 	return out, nil
 }
 
-// livekitSlngSite is where the router's per-call values live on this target: a
-// uuid created once in the entrypoint and the call state hoisted into a local
-// there, which is why ir.Validate holds every router profile to being the entry
-// agent's. Zero for a profile that is not a router binding.
+// livekitSummaryLLM is livekitReasonLLM for a summarizer: the same chain, built
+// from the one site that still carries its headers at construction. Separate
+// because the site differs, not the resolution.
+func livekitSummaryLLM(agent *ir.Agent, tgt ir.Target, profile string, env *envSet) (livekitChain, error) {
+	primary, err := livekitChainService(tgt.Models.Reason[profile], env, livekitSummarySite(agent, tgt, profile))
+	if err != nil {
+		return livekitChain{}, fmt.Errorf("model %q: %w", profile, err)
+	}
+	out := livekitChain{Primary: primary}
+	for _, fb := range agent.Models[profile].Fallback {
+		svc, err := livekitChainService(tgt.Models.Reason[fb], env, livekitSummarySite(agent, tgt, fb))
+		if err != nil {
+			return livekitChain{}, fmt.Errorf("model %q fallback %q: %w", profile, fb, err)
+		}
+		out.Chain = append(out.Chain, svc)
+	}
+	return out, nil
+}
+
+// livekitSlngSite is where the router's per-call values live on this target: the
+// call state hoisted into an entrypoint local, which is why ir.Validate holds
+// every router profile to being the entry agent's. Zero for a profile that is
+// not a router binding.
+//
+// The identity headers do not live here. One model object serves every agent and
+// task in the session on this target, so a constructor header set would send one
+// scope for all of them, which is the defect. They travel per request instead,
+// built by the emitted mixin from the speaking class's own scope constant. And
+// this is not a preference: a constructor extra_headers overwrites the
+// per-request one wholesale rather than merging, so leaving it would silently win
+// while the emitted source still looked right (research R5).
 func livekitSlngSite(agent *ir.Agent, tgt ir.Target, profile string) slngSite {
 	if binding, ok := tgt.Models.Reason[profile]; !ok || !binding.Router() {
 		return slngSite{}
 	}
 	site := slngSite{
-		SessionExpr: livekitSessionIDExpr,
-		Names:       slngTemplateNames(agent, tgt, profile),
-		ConfigFunc:  slngConfigFunc(profile),
+		SessionExpr:       livekitSessionIDExpr,
+		Names:             slngTemplateNames(agent, tgt, profile),
+		ConfigFunc:        slngConfigFunc(profile),
+		HeadersPerRequest: true,
 	}
 	if len(agent.Variables) > 0 {
 		site.StateExpr = livekitSlngStateExpr
@@ -1183,13 +1229,44 @@ func livekitSlngSite(agent *ir.Agent, tgt ir.Target, profile string) slngSite {
 	return site
 }
 
-// The two locals the entrypoint defines for the router. The session id is not
-// called `session_id`, because this template already writes "session_id":
-// room_name into the telephony call context and that is a different thing.
+// livekitSummarySite is the one router site on this target that keeps its headers
+// at construction. The summarizer is built inline where a handoff shapes history
+// and its request never passes through the overridden request path, so there is
+// nothing per-request to carry them.
+//
+// It is also built inside an agent method, where the entrypoint's locals are out
+// of scope, so both values are read off the session's user data object instead.
+// Before the session id moved there, this expression named a local that did not
+// exist in that scope: a NameError waiting for the first package to combine a
+// router binding with history: summary.
+func livekitSummarySite(agent *ir.Agent, tgt ir.Target, profile string) slngSite {
+	site := livekitSlngSite(agent, tgt, profile)
+	if site.ConfigFunc == "" {
+		return site
+	}
+	site.HeadersPerRequest = false
+	site.SessionExpr = livekitRuntimeSessionIDExpr
+	if site.StateExpr != "" {
+		site.StateExpr = livekitRuntimeStateExpr
+	}
+	site.Scope = targetcap.SlngScope(tgt.Models.Reason[profile].AgentID, targetcap.SlngSite{Kind: targetcap.SlngSiteSummary})
+	return site
+}
+
+// The entrypoint's own names for the router's per-call values, and the same two
+// values as an agent method reaches them. The session id is not called
+// `session_id`, because this template already writes "session_id": room_name into
+// the telephony call context and that is a different thing.
 const (
-	livekitSessionIDExpr = "slng_session_id"
-	livekitSlngStateExpr = "slng_state"
+	livekitSessionIDExpr        = "slng_state.slng_session_id"
+	livekitSlngStateExpr        = "slng_state"
+	livekitRuntimeSessionIDExpr = "self.session.userdata.slng_session_id"
+	livekitRuntimeStateExpr     = "self.session.userdata"
 )
+
+// livekitSessionIDField is the field the per-call session id occupies on the user
+// data object, and the name both expressions above are built from.
+const livekitSessionIDField = "slng_session_id"
 
 // livekitCtxExpr lowers a context block's history shaping (V5) to a Python
 // expression for the handed-over ChatContext. "" means history: reset — the

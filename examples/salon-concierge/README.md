@@ -28,6 +28,38 @@ trips a turn needs, not by cutting what the agent can do:
   each cost their own round trip to finish, and the mutation tools already
   refuse a write that is not confirmed, so the split bought no extra safety.
 
+### One router cache scope per prompt
+
+Thinking goes through the SLNG Context Router, which can answer a repeated turn
+from cache instead of asking the model. It judges which turns are worth treating
+as repeatable, so a repeat served by the model is expected and not a fault.
+`agent_id` is what keeps one project's learned answers apart from another's, and
+this package writes one value: `optimized-salon-concierge-v3`.
+
+The compiler adds the name of whoever is speaking, so this package sends six
+scopes:
+
+```
+optimized-salon-concierge-v3:concierge
+optimized-salon-concierge-v3:booking_specialist
+optimized-salon-concierge-v3:complaint_specialist
+optimized-salon-concierge-v3:chat_with_me
+optimized-salon-concierge-v3:task.customer_verification
+optimized-salon-concierge-v3:task.booking
+```
+
+Six and not one, because the cache key is the last exchange and does not include
+the system prompt. Under one shared scope these agents were served each other's
+lines: on 2026-08-21 the booking specialist's opening turn after a handoff came
+back as the concierge's "what phone number should I use to look up your customer
+profile?", from cache, in 1.27 ms, with no model call. The caller heard the agent
+repeat itself.
+
+This package used to carry `slng_pure_proxy: true` to stop that, which works by
+turning cache serving off entirely and giving up the speed the router is here for.
+It is gone. Cache serving is on, and nothing in the emitted output asks the router
+to stop.
+
 ## How the call moves
 
 The concierge verifies the caller once by phone number, saves `customer_id`,

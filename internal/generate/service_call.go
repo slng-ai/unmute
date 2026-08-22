@@ -167,7 +167,7 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 			// Pipecat merges Settings.extra into the request params, so the two
 			// dicts ride there; LiveKit takes them as constructor kwargs. Either
 			// way they reach the same place in the request.
-			extras := slngRequestExtras(binding, site, pureProxy)
+			extras := slngRequestExtras(site, pureProxy)
 			if spec.SettingsOverflow != "" {
 				if overflow == nil {
 					overflow = make(map[string]any, len(extras))

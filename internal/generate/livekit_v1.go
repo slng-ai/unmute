@@ -66,6 +66,13 @@ type livekitAgent struct {
 	Transfers      []livekitTransfer
 	HumanTransfers []livekitHumanTransfer
 	Delegates      []livekitDelegate
+	// SlngScope is this agent's own router cache scope, empty unless its think
+	// profile is a router binding.
+	//
+	// It is a per-class constant rather than a constructor value because one
+	// model object serves the whole session on this target: the scope has to
+	// travel with the request, and the class is what knows whose request it is.
+	SlngScope string
 }
 
 // livekitGreeting drives the entry agent's on_enter: a fixed line, a
@@ -250,6 +257,10 @@ type livekitTask struct {
 	Prebuilt    []livekitTool // execution: builtin tools, rendered into super().__init__(tools=...)
 	MCPServers  []livekitMCPServer
 	Transfers   []livekitTransfer
+	// SlngScope is this task's own router cache scope, empty unless its think
+	// profile is a router binding. A task's prompt is not its owner's, so its
+	// scope is not its owner's either.
+	SlngScope string
 }
 
 type livekitTool struct {
@@ -394,16 +405,21 @@ type livekitData struct {
 	NeedsRender        bool        // any template site: the _render helper + re import
 	NeedsRefusal       bool        // any tool whose injected variables can be unset (V4)
 	AuthKinds          authKindSet // webhook auth schemes in use: helpers + imports per scheme
-	HasVars            bool        // Userdata dataclass + session userdata
-	NeedsLastN         bool        // the _last_n history helper
-	NeedsSummarize     bool        // the _summarize history helper
-	NeedsAsyncio       bool        // inactivity end / max_duration timers
-	NeedsInspect       bool        // local tool wrappers (isawaitable)
-	NeedsMCP           bool        // mcp import (MCPServerHTTP)
-	NeedsEndCallTool   bool        // beta.tools EndCallTool import (prebuilt end_call)
-	HasColdTransfer    bool        // get_job_context import
-	HasWarmTransfer    bool        // WarmTransferTask import + trunk env + room_options (B14)
-	HasTaskTransfers   bool        // _TaskTransfer sentinel + task delegate catch paths
+	HasVars            bool        // session userdata carries the package's variables
+	// HasUserdata says the Userdata object is emitted at all. Variables need it,
+	// and so does a router package with none: the per-call session id lives on
+	// it, because the header set now travels per request and every agent and
+	// task class has to be able to reach the value from a method body.
+	HasUserdata      bool
+	NeedsLastN       bool // the _last_n history helper
+	NeedsSummarize   bool // the _summarize history helper
+	NeedsAsyncio     bool // inactivity end / max_duration timers
+	NeedsInspect     bool // local tool wrappers (isawaitable)
+	NeedsMCP         bool // mcp import (MCPServerHTTP)
+	NeedsEndCallTool bool // beta.tools EndCallTool import (prebuilt end_call)
+	HasColdTransfer  bool // get_job_context import
+	HasWarmTransfer  bool // WarmTransferTask import + trunk env + room_options (B14)
+	HasTaskTransfers bool // _TaskTransfer sentinel + task delegate catch paths
 	// HasToolAnnouncements gates the README section only: the emitted speech is
 	// per-tool and needs no import, so nothing in agent.py reads this.
 	HasToolAnnouncements bool

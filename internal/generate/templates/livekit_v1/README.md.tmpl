@@ -230,8 +230,26 @@ Every think request carries two identity headers:
 
 | Header | Value |
 |---|---|
-| `X-Slng-Agent-Id` | the id from the package, one value for this whole project. It scopes the cache. |
+| `X-Slng-Agent-Id` | the cache scope of whichever agent or task is speaking: the `agent_id` from the package, a colon, then that agent's or task's own name. It scopes the cache. |
 | `X-Slng-Session-Id` | one uuid per call, created where the call begins. It groups this call's requests and scopes nothing. |
+
+Each agent and each task sends a different scope, because each one has a different
+prompt and the router's cache key does not include the prompt. Two agents sharing
+one scope would answer each other's questions from cache. An agent's scope is its
+own name; a task's is `task.` and then its name:
+
+```
+{{range .Slng.Scopes}}{{.}}
+{{end}}```
+
+You still write one `agent_id` and you still own its version suffix: bump it when a
+prompt change should make old answers wrong, and every scope in the package retires
+together.
+
+Two consequences worth knowing. Two agents whose instructions happen to be
+identical now get two scopes and stop sharing warmth. And a single-agent project
+that upgrades to this compiler starts on a cold cache once, because its one scope
+is spelled differently from the one it used before.
 
 The model configuration travels inline in the request body, which means **this
 agent sends the upstream provider's credentials to SLNG on every think request**.

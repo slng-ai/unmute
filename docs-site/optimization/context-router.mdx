@@ -29,8 +29,9 @@ Three edits, all to one binding:
     use.
   </Step>
   <Step title="Name the cache and the model behind it">
-    Add an `agent_id`, which is the name the cache is kept under, and an
-    `upstream`, which says where your model actually lives.
+    Add an `agent_id`, which names your project's cache, and an `upstream`, which
+    says where your model actually lives. One `agent_id` for the package; the
+    compiler gives each agent and task its own scope under it.
   </Step>
 </Steps>
 
@@ -74,24 +75,65 @@ second send and the other going to the model eight times in a row while returnin
 a byte-identical answer each time. A repeat served by the model is expected, not a
 fault, and nothing here promises otherwise.
 
-## Why one stable `agent_id`
+## One stable `agent_id`, one scope per prompt
 
-`agent_id` scopes the cache. Everything learned under one id is invisible to
-another.
+`agent_id` names your project's cache, and everything learned under one scope is
+invisible to another. You write one value; the compiler sends one scope per agent
+and per task underneath it. Both halves matter, and this section takes them in
+turn.
 
-You write the value, and you own its version suffix. Change a prompt in a way that
+You write one value, and you own its version suffix. Change a prompt in a way that
 should make old answers wrong, and bump the suffix: `salon-concierge-v1` becomes
 `salon-concierge-v2`, and the router starts fresh. Fix a typo, and leave it alone,
 because throwing the cache away buys nothing.
 
 The compiler cannot make that judgement for you. It has no way to know whether a
 reworded sentence changes what a good answer looks like, so it never derives the
-id, never hashes your prompts into it, and never composes it out of an agent or
-task name. A package sends exactly one id, and compiling fails if two think
-profiles disagree about it.
+value from your prompts and never hashes them into it. A package sends one
+`agent_id`, and compiling fails if two think profiles disagree about it.
 
-One consequence worth planning for: hit rates build over calls. A fresh id is a
-cold cache, so bump it deliberately rather than as housekeeping.
+### One scope per agent, from the one id you wrote
+
+What the compiler does do is add the name of whoever is speaking. Each agent and
+each task sends the `agent_id`, a colon, then its own name:
+
+```
+salon-concierge-v3:concierge
+salon-concierge-v3:booking_specialist
+salon-concierge-v3:task.booking
+```
+
+That is not decoration. The cache key is the last exchange, and it does not
+include the system prompt, so two agents sharing one scope can be served each
+other's answers. Measured on a live call: the booking specialist's opening line
+after a handoff was the concierge's "what phone number should I use to look up
+your customer profile?", served from cache in 1.27 ms with no model call. The
+caller heard the agent repeat itself. One scope per prompt is what the router's
+own contract asks for, and now that is what unmute sends.
+
+The names come from your package and nothing else, so the same package always
+compiles to the same scopes, on either target. A wording change never moves a
+scope: only your version suffix retires a cache, and bumping it retires every
+scope in the package together.
+
+Two things you will notice:
+
+- **Two agents with identical instructions now get two scopes** and stop sharing
+  warmth. They are two prompt sites, and keeping them apart is the point.
+- **An existing project goes cold once.** A single-agent package that used to send
+  a bare `agent_id` now sends `id:agent_name`, which is a different scope. Hit
+  rates rebuild over the next calls.
+
+One more consequence worth planning for: hit rates build over calls either way. A
+fresh id is a cold cache, so bump it deliberately rather than as housekeeping.
+
+Compiling refuses a scope that will not fit. The value leaves as an HTTP header
+and the bound is 128 characters, counted on the finished scope rather than on the
+`agent_id` alone, so a long id plus a long agent name can be refused where the id
+by itself was fine. The message names which agent or task produced the long value
+and how the two lengths add up, so you know which of the two names to shorten. It
+refuses rather than truncating, because two truncated scopes could land on the
+same string and bring the collision back quietly.
 
 ## Regions
 

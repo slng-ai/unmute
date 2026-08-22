@@ -81,6 +81,89 @@ func ValidateSlngAgentID(id string) error {
 	return nil
 }
 
+// SlngScopeSeparator joins the authored agent id to the site that is speaking.
+// A colon: printable ASCII, legal in a header value, and it cannot appear in a
+// Python identifier, so no agent or task name can hold one by accident. A name
+// that does hold one is refused in ir.Validate, because two different sites
+// could otherwise derive the same scope and quietly bring back the collision
+// this whole shape exists to prevent.
+const SlngScopeSeparator = ":"
+
+// SlngSiteKind is what kind of prompt site is speaking.
+type SlngSiteKind string
+
+const (
+	SlngSiteAgent   SlngSiteKind = "agent"
+	SlngSiteTask    SlngSiteKind = "task"
+	SlngSiteSummary SlngSiteKind = "summary"
+)
+
+// SlngSite is one place in an emitted project that sends a system prompt to the
+// router. Not a model profile: two sites can share a profile and still be two
+// sites, which is exactly how four agents and two tasks came to share one cache.
+type SlngSite struct {
+	Kind SlngSiteKind
+	// Name is the site's own name from the package. Unused by a summarizer,
+	// whose prompt is fixed and which therefore needs only one value.
+	Name string
+}
+
+// String names the site the way an author wrote it, for a refusal.
+func (s SlngSite) String() string {
+	if s.Kind == SlngSiteSummary {
+		return "the summarizer"
+	}
+	return string(s.Kind) + " " + s.Name
+}
+
+// suffix is what the scope carries after the authored id.
+//
+// An agent's name is the bare suffix, because an agent is the ordinary case and
+// a reader of the router's own logs should see the name they wrote. Every other
+// kind namespaces itself with its own kind, so a task called `concierge` and an
+// agent called `concierge` cannot derive the same value. That is also why the
+// default arm namespaces instead of falling back to the bare name: a kind added
+// later is collision-free without anyone having to remember this rule.
+func (s SlngSite) suffix() string {
+	switch s.Kind {
+	case SlngSiteAgent:
+		return s.Name
+	case SlngSiteSummary:
+		return string(SlngSiteSummary)
+	default:
+		return string(s.Kind) + "." + s.Name
+	}
+}
+
+// SlngScope is the cache scope one site sends as its agent id header value.
+//
+// Derived from names, never from prompt content. A wording change must not move
+// the scope, or every edit would silently retire a cache the author meant to
+// keep. Retiring one is the author's own act, done by bumping the version suffix
+// on the authored id (FR-041, FR-043).
+func SlngScope(authoredID string, site SlngSite) string {
+	return authoredID + SlngScopeSeparator + site.suffix()
+}
+
+// ValidateSlngScope bounds the value that actually leaves, which is the derived
+// one and not the authored one. A package that fits today can fail after this
+// change, and that refusal is the point: a truncated scope would still be sent,
+// two sites could truncate to the same string, and the collision would come back
+// silently. A value the router rejects outright would instead fail on the first
+// turn of a live call, which is the worst place to learn a compile-time fact.
+func ValidateSlngScope(authoredID string, site SlngSite) error {
+	scope := SlngScope(authoredID, site)
+	if len(scope) <= SlngAgentIDMaxLen {
+		return nil
+	}
+	return fmt.Errorf(
+		"the cache scope for %s is %d characters and the bound is %d: agent_id %q is %d and the site adds %d, and the two add up because the whole value becomes the %s header value. Shorten the agent_id or the name",
+		site, len(scope), SlngAgentIDMaxLen,
+		authoredID, len(authoredID), len(scope)-len(authoredID),
+		SlngAgentIDHeader,
+	)
+}
+
 // SlngUpstreamField is one field on an upstream block, and the key it takes
 // inside the router's endpoint object.
 type SlngUpstreamField struct {

@@ -69,6 +69,14 @@ type pipecatAgent struct {
 	// RuntimePromptExpr is the same prompt inside an agent method, where call
 	// state is reached through self rather than the constructor-local name.
 	RuntimePromptExpr string
+	// SlngHeaders is this agent's own identity header dict, as a Python literal
+	// spelled for a method body. Empty unless this agent's think profile is a
+	// router binding.
+	//
+	// It exists because a task borrows this worker's service: entering one swaps
+	// the task's scope in, and every way out has to swap this back or the owner
+	// would keep answering under the task's cache scope.
+	SlngHeaders       string
 	LLM               pipecatService
 	TTS               pipecatService
 	Tools             []pipecatTool
@@ -117,6 +125,15 @@ type pipecatTask struct {
 	Transfers      []pipecatTransfer
 	ResultProps    string // Python literal: JSON-schema properties for finish args
 	ResultRequired string // Python literal: list of required finish arg names
+	// SlngHeaders is this task's own identity header dict, as a Python literal
+	// spelled for a method body. Empty unless the task's think profile is a
+	// router binding.
+	SlngHeaders string
+	// SlngNextHeaders is the following step's dict, empty on the last step of a
+	// chain. A step handing over to the next step is a change of prompt site, so
+	// it is a change of scope, and the finish handler is the only place that
+	// transition happens.
+	SlngNextHeaders string
 }
 
 // pipecatDelegate is a delegate control: run a task or an ordered group of tasks
