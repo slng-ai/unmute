@@ -2163,6 +2163,66 @@ func TestValidateSlngRouterAgentID(t *testing.T) {
 	}
 }
 
+// The bound moved from the authored value to the derived one, so an id that
+// passes on its own can still be refused once a site name is added to it. That
+// refusal is the point: the whole value becomes the header value, and a
+// truncation would let two sites collapse onto one scope silently.
+func TestValidateSlngRouterScopeOverBound(t *testing.T) {
+	// Long enough that the shortest site name pushes it over, short enough that
+	// the authored-value rule still accepts it. safe_core's shortest agent name
+	// is `intake`, six characters, plus one separator.
+	id := strings.Repeat("v", targetcap.SlngAgentIDMaxLen-len("intake"))
+	if err := targetcap.ValidateSlngAgentID(id); err != nil {
+		t.Fatalf("fixture must pass the authored-value rule first: %v", err)
+	}
+	agent := routerAgent(t, func(def *packagespec.ModelDef) { def.AgentID = id })
+	got := routerErrors(t, agent, ProviderPipecat)
+	// The author has two names to choose between, so the refusal has to name
+	// the site as well as the profile and the bound.
+	for _, want := range []string{
+		"think.fast_reasoning", "agent intake", "the bound is 128", targetcap.SlngAgentIDHeader, "Shorten",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("refusal does not say %q:\n%s", want, got)
+		}
+	}
+	// And a package whose *longest* site still fits compiles, so the bound is
+	// the bound and not a margin. safe_core's longest suffix is seven
+	// characters: `billing`, and the summarizer's `summary` matches it.
+	shorter := strings.Repeat("v", targetcap.SlngAgentIDMaxLen-len("billing")-len(targetcap.SlngScopeSeparator))
+	if got := routerErrors(t, routerAgent(t, func(def *packagespec.ModelDef) { def.AgentID = shorter }), ProviderPipecat); got != "" {
+		t.Errorf("a scope of exactly the bound was refused:\n%s", got)
+	}
+}
+
+// A derived scope is unique per site only because the separator appears in it
+// exactly once, and what guarantees that is checkNames, written for Python
+// identifiers long before anything composed a header value out of a name.
+//
+// So the guarantee is gated here, at the rule that actually holds it. Loosening
+// namePattern to admit a colon would let two sites derive one scope and bring
+// back the collision this whole feature exists to kill, with nothing else in the
+// tree noticing. The plan for this change expected to need a second refusal in
+// Validate; it does not, and this is the check that keeps that true.
+func TestNamePatternExcludesTheScopeSeparator(t *testing.T) {
+	for _, name := range []string{
+		"billing" + targetcap.SlngScopeSeparator + "eu",
+		targetcap.SlngScopeSeparator + "billing",
+		"billing" + targetcap.SlngScopeSeparator,
+	} {
+		if namePattern.MatchString(name) {
+			t.Errorf("namePattern admits %q, so two prompt sites could derive one cache scope", name)
+		}
+	}
+	// And the shape a scope is actually built from still passes, so the rule is
+	// refusing the separator rather than everything.
+	for _, name := range []string{"billing", "customer_verification", "chat_with_me"} {
+		if !namePattern.MatchString(name) {
+			t.Errorf("namePattern refuses %q, which the shipped example uses", name)
+		}
+	}
+}
+
 // FR-010, the rule with the worst silent cost: a second id splits one package's
 // cache and nothing fails, the agent is just never fast. The refusal names both
 // profiles and both values because the author has to know which line to change.

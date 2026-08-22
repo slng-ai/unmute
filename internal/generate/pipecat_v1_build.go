@@ -943,7 +943,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	profile, router := slngRouterBinding(agent, target, def.Model)
 	prompt := promptExpr(promptConst, def.Instructions, pipecatStateExpr, router)
 	llm, err := agentLLMService(target.Models.Reason[def.Model], prompt, env,
-		pipecatSlngSite(agent, target, profile))
+		pipecatSlngSite(agent, target, profile, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name}))
 	if err != nil {
 		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 	}
@@ -955,6 +955,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 		Name: name, Class: pyName(name) + "Agent", Prompt: def.Instructions,
 		PromptConst: promptConst, PromptExpr: prompt,
 		RuntimePromptExpr: promptExpr(promptConst, def.Instructions, "self.state", router),
+		SlngHeaders:       pipecatRuntimeHeaders(target, profile, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name}),
 		LLM:               llm, TTS: tts,
 	}
 
@@ -1043,6 +1044,7 @@ func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, e
 	}
 	for i := range delegate.StepTasks[:len(delegate.StepTasks)-1] {
 		delegate.StepTasks[i].NextName = delegate.StepTasks[i+1].Name
+		delegate.StepTasks[i].SlngNextHeaders = delegate.StepTasks[i+1].SlngHeaders
 	}
 	return delegate, nil
 }
@@ -1054,7 +1056,7 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 	if strings.TrimSpace(task.Instructions) == "" {
 		return pipecatTask{}, fmt.Errorf("task %q instructions must not be empty", name)
 	}
-	_, taskRouter := slngRouterBinding(agent, tgt, task.Model)
+	taskProfile, taskRouter := slngRouterBinding(agent, tgt, task.Model)
 	// The node's finish function is the only way out of the step, and its name is
 	// per-step here, so the prompt has to name it (livekitTaskPrompt does the
 	// same for a plain `finish`).
@@ -1071,6 +1073,10 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 		PromptExpr:     promptExpr(pyQuote(prompt), prompt, "self.state", taskRouter),
 		ResultProps:    pyLiteral(resultProperties(task.Result)),
 		ResultRequired: pyLiteral(anyStrings(sortedResultNames(task.Result))),
+		// A task's prompt is not its owner's, so its cache scope is not its
+		// owner's either. This is the value the emitted handlers swap in on the
+		// way into the node and out of on every way back.
+		SlngHeaders: pipecatRuntimeHeaders(tgt, taskProfile, targetcap.SlngSite{Kind: targetcap.SlngSiteTask, Name: name}),
 	}
 	for _, ref := range task.Tools {
 		tool, ok := agent.Tools[ref]
@@ -1204,6 +1210,13 @@ const pipecatStateExpr = "state"
 // template already reads runner_args.session_id for its Langfuse trace and that
 // is a different thing.
 const pipecatSessionIDExpr = "slng_session_id"
+
+// pipecatRuntimeSessionIDExpr is the same value inside an agent method, where
+// the constructor's parameter is out of scope, so the worker keeps it on self.
+// Exactly the split RuntimePromptExpr already makes for a prompt: one value,
+// two spellings, because a task's headers are swapped in from a method body and
+// a whole header dict has to carry the session id along with the scope.
+const pipecatRuntimeSessionIDExpr = "self._slng_session_id"
 
 // buildMCPSource lowers one mcp tool source to its client. Both env names are
 // registered, so the address and the token reach .env.example and the bot's
@@ -1543,7 +1556,13 @@ func sttService(binding *ir.Binding, env *envSet) (pipecatService, error) {
 // pipecatSlngSite is where the router's per-call values live on this target: a
 // uuid created once in run_bot and passed as an argument, and the call state the
 // agent already receives. Zero for a profile that is not a router binding.
-func pipecatSlngSite(agent *ir.Agent, tgt ir.Target, profile string) slngSite {
+//
+// site names which prompt is speaking, and it is what makes the cache scope this
+// site's own rather than the whole package's. This target builds one service per
+// agent, so an agent's scope can sit on its own service at construction and never
+// move; a task borrows its owner's service, so a task's scope is swapped in on
+// the way in and back out on the way out.
+func pipecatSlngSite(agent *ir.Agent, tgt ir.Target, profile string, site targetcap.SlngSite) slngSite {
 	if profile == "" {
 		return slngSite{}
 	}
@@ -1552,7 +1571,26 @@ func pipecatSlngSite(agent *ir.Agent, tgt ir.Target, profile string) slngSite {
 		StateExpr:   pipecatStateExpr,
 		Names:       slngTemplateNames(agent, tgt, profile),
 		ConfigFunc:  slngConfigFunc(profile),
+		Scope:       targetcap.SlngScope(tgt.Models.Reason[profile].AgentID, site),
 	}
+}
+
+// pipecatRuntimeHeaders is one prompt site's identity header dict as a Python
+// literal, spelled for an agent method body rather than for a builder call.
+// Empty for a profile that is not a router binding, so a non-router package
+// emits nothing.
+//
+// The whole dict, not just the scope: a settings update merges the `extra` dict
+// key by key, so `extra_headers` is replaced wholesale and a delta carrying only
+// the scope would drop the session id from every request after it.
+func pipecatRuntimeHeaders(tgt ir.Target, profile string, site targetcap.SlngSite) string {
+	if profile == "" {
+		return ""
+	}
+	return pyLiteral(slngRequestHeaders(slngSite{
+		SessionExpr: pipecatRuntimeSessionIDExpr,
+		Scope:       targetcap.SlngScope(tgt.Models.Reason[profile].AgentID, site),
+	}))
 }
 
 // agentLLMService builds an agent's LLM; the prompt nests into Settings as

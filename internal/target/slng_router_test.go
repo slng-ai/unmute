@@ -274,3 +274,77 @@ func mustUpstream(t *testing.T, provider string) SlngUpstream {
 	}
 	return upstream
 }
+
+func TestSlngScope(t *testing.T) {
+	const authored = "optimized-salon-concierge-v3"
+	for _, tc := range []struct {
+		site SlngSite
+		want string
+	}{
+		{SlngSite{Kind: SlngSiteAgent, Name: "concierge"}, "optimized-salon-concierge-v3:concierge"},
+		{SlngSite{Kind: SlngSiteAgent, Name: "booking_specialist"}, "optimized-salon-concierge-v3:booking_specialist"},
+		{SlngSite{Kind: SlngSiteTask, Name: "customer_verification"}, "optimized-salon-concierge-v3:task.customer_verification"},
+		{SlngSite{Kind: SlngSiteTask, Name: "booking"}, "optimized-salon-concierge-v3:task.booking"},
+		{SlngSite{Kind: SlngSiteSummary}, "optimized-salon-concierge-v3:summary"},
+	} {
+		if got := SlngScope(authored, tc.site); got != tc.want {
+			t.Errorf("SlngScope(%q, %v) = %q; want %q", authored, tc.site, got, tc.want)
+		}
+	}
+}
+
+// An agent and a task may share a name. They are still two sites with two
+// prompts, so they must not share a scope: that sharing is the whole defect.
+func TestSlngScopeSeparatesKindsSharingAName(t *testing.T) {
+	agent := SlngScope("pkg-v1", SlngSite{Kind: SlngSiteAgent, Name: "booking"})
+	task := SlngScope("pkg-v1", SlngSite{Kind: SlngSiteTask, Name: "booking"})
+	if agent == task {
+		t.Fatalf("agent and task named booking both derived %q", agent)
+	}
+	prefix := "pkg-v1" + SlngScopeSeparator
+	if !strings.HasPrefix(agent, prefix) || !strings.HasPrefix(task, prefix) {
+		t.Errorf("both scopes must carry the authored prefix: %q and %q", agent, task)
+	}
+}
+
+// The scope is derived from names only. A prompt cannot move it, because a
+// prompt is not a parameter: the signature is (authoredID, site) and a site
+// holds a kind and a name. This asserts the consequence an author depends on,
+// which is that the same package compiles to the same scope every time, so only
+// their own version suffix retires a cache.
+func TestSlngScopeIsStableAcrossCalls(t *testing.T) {
+	site := SlngSite{Kind: SlngSiteAgent, Name: "concierge"}
+	first := SlngScope("pkg-v1", site)
+	for range 100 {
+		if got := SlngScope("pkg-v1", site); got != first {
+			t.Fatalf("SlngScope is not stable: %q then %q", first, got)
+		}
+	}
+}
+
+func TestValidateSlngScope(t *testing.T) {
+	// The bound is on the derived value, so an authored id that passes
+	// ValidateSlngAgentID on its own can still fail here. That is the point.
+	longEnoughToFail := strings.Repeat("x", SlngAgentIDMaxLen)
+	if err := ValidateSlngAgentID(longEnoughToFail); err != nil {
+		t.Fatalf("fixture must pass the authored-value rule first: %v", err)
+	}
+	site := SlngSite{Kind: SlngSiteAgent, Name: "concierge"}
+	err := ValidateSlngScope(longEnoughToFail, site)
+	if err == nil {
+		t.Fatalf("ValidateSlngScope accepted a %d-character scope; want refused", len(SlngScope(longEnoughToFail, site)))
+	}
+	// The author has two names to choose between, so the message has to say
+	// which site produced the value and how the two lengths add up.
+	for _, want := range []string{"agent concierge", "128", SlngAgentIDHeader, "Shorten"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not mention %q", err, want)
+		}
+	}
+	// A scope that lands exactly on the bound is accepted: the bound is a
+	// header-value limit, not a margin.
+	exact := strings.Repeat("y", SlngAgentIDMaxLen-len(SlngScopeSeparator)-len("concierge"))
+	if err := ValidateSlngScope(exact, site); err != nil {
+		t.Errorf("ValidateSlngScope refused a scope of exactly %d characters: %v", SlngAgentIDMaxLen, err)
+	}
+}

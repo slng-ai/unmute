@@ -142,11 +142,28 @@ Four things are required and none has a default:
 - `model`, named directly. There is no auto-select spelling to write here.
 - `agent_id`, which scopes the router's cache. One stable value per package,
   written by a human, carrying a version suffix they bump when a prompt change
-  should make old answers wrong. Never derive it, never hash prompts into it,
-  never compose it from an agent or task name: a split id splits the cache and
-  nothing fails, the agent is simply never fast. Two think profiles disagreeing
-  about it is a compile error. It must be printable ASCII with no whitespace,
-  because it becomes an HTTP header value.
+  should make old answers wrong. Never derive it and never hash prompts into it.
+  Two think profiles disagreeing about it is a compile error. It must be
+  printable ASCII with no whitespace, because it becomes an HTTP header value.
+
+  **You write one value; the compiler sends one scope per prompt.** Each agent
+  and each task reaches the router as `<agent_id>:<its own name>`, and a task as
+  `<agent_id>:task.<its own name>`. Do not write those yourself and do not try to
+  give an agent its own `agent_id`: the compiler composes them from the package's
+  names, identically on both targets. The reason is measured. The router's cache
+  key is the last exchange and carries no system prompt, so two agents under one
+  scope get served each other's lines: a booking specialist's opening turn came
+  back as the concierge's "what phone number should I use", from cache, with no
+  model call.
+
+  Two things to tell an author. Two agents whose instructions are identical still
+  get two scopes and stop sharing warmth. And an existing single-agent package
+  goes cold once on upgrade, because a bare `agent_id` and `agent_id:name` are
+  different scopes.
+
+  The 128-character bound is checked on the finished scope, not on `agent_id`
+  alone, so a long id plus a long agent name can be refused where the id by
+  itself passed. The refusal names the agent or task that produced the long value.
 - `upstream`, saying who actually serves the model.
 - `params.world_part_override`, from the router's own region set: `eu`, `us`,
   `india`, `indonesia`. **Not the speech world parts** `na`, `eu`, `ap`: the same

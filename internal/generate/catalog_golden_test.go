@@ -128,7 +128,11 @@ func TestLanguageLoweringUsesCataloguedSlot(t *testing.T) {
 // slng models keep the route form to show the prefix transform, wildcards get
 // an unlisted vendor (plus an endpoint where required).
 // sampleSlngSite is the driver-supplied half of a router construction, spelled
-// the way Pipecat spells it: a session-id argument and the call state.
+// the way Pipecat spells it: a session-id argument, the call state, and one
+// agent's own cache scope. A scope is not optional here even though it is a
+// synthetic sample: a site with no scope would emit an empty header value, which
+// the router rejects on the first turn of a call, and this golden is where a
+// reader looks to see what a construction actually carries.
 func sampleSlngSite(entry targetcap.Entry) slngSite {
 	if entry.Vendor != "slng" || entry.Role != targetcap.Reason {
 		return slngSite{}
@@ -136,6 +140,8 @@ func sampleSlngSite(entry targetcap.Entry) slngSite {
 	return slngSite{
 		SessionExpr: "slng_session_id", StateExpr: "state",
 		Names: []string{"salon_name"}, ConfigFunc: slngConfigFunc("reasoning"),
+		Scope: targetcap.SlngScope("catalog-sample-v1",
+			targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: "concierge"}),
 	}
 }
 

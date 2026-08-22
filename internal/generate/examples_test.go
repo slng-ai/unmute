@@ -67,16 +67,20 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The turn-latency contract on both targets: thinking goes through the SLNG
-	// Context Router, the model does not think before its first token, and
-	// nothing is ever replayed to the caller.
+	// Context Router, the model does not think before its first token, and the
+	// caller never hears another agent's line.
 	//
-	// pure proxy is load-bearing, not belt and braces. The router's cache key is
-	// the (assistant speech, user speech) pair and carries no system prompt, so
-	// two of this package's agents whose last exchange matches collide under one
-	// agent_id. Measured 2026-08-21 on three live calls: the booking
+	// The last of those was measured, not imagined. The router's cache key is the
+	// (assistant speech, user speech) pair and carries no system prompt, so two
+	// of this package's agents whose last exchange matched collided while they
+	// shared one cache scope. 2026-08-21, three live calls: the booking
 	// specialist's opening turn was served the concierge's "what phone number
-	// should I use", cache_layer l2_exact, 1.27ms, no model call. Remove this
-	// only together with per-agent agent ids.
+	// should I use", cache_layer l2_exact, 1.27ms, no model call.
+	//
+	// The fix is one scope per prompt site, which is what the scope assertion at
+	// the end of this function holds. It replaced slng_pure_proxy, which used to
+	// be required here and which bought the same safety by turning cache serving
+	// off entirely.
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		reason := targetByProvider(t, resolved, provider).Models.Reason["reasoning"]
 		if !reason.Router() {
@@ -85,10 +89,23 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		if reason.Params["reasoning_effort"] != "none" {
 			t.Errorf("%s reasoning params = %#v, want reasoning off before the first token", provider, reason.Params)
 		}
-		if reason.Params["slng_pure_proxy"] != true {
-			t.Errorf("%s reasoning params = %#v, want slng_pure_proxy: a cross-agent cache hit repeats an earlier agent's line to the caller", provider, reason.Params)
+		// This used to require slng_pure_proxy, which stops the router serving
+		// from cache at all. It was a guard against a cross-agent cache hit
+		// repeating an earlier agent's line to the caller, and it bought that
+		// safety by giving up the speed the router exists for. The real fix is
+		// one cache scope per prompt site, and with that in place the guard is a
+		// workaround the example should not be teaching. If you are here because
+		// you put it back: the collision it guarded against cannot happen, and
+		// suppressing the serve means every turn goes to the model.
+		if _, present := reason.Params["slng_pure_proxy"]; present {
+			t.Errorf("%s reasoning sets slng_pure_proxy: %#v. The example demonstrates the router doing its job, and this switch stops it serving from cache", provider, reason.Params)
 		}
 	}
+
+	// SC-008 on the package a reader actually opens. A fixture and the goldens are
+	// gated elsewhere; nothing gated this until the collision had already shipped
+	// in it.
+	assertSalonScopes(t, resolved)
 
 	// The other half of the turn-latency contract, and the bigger half. LiveKit's
 	// turn detector reads the transcript to decide whether the caller has
@@ -590,7 +607,11 @@ func TestRepositoryKeepsSpecsPrivateAndDocsFocused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tracked specs and docs: %v", err)
 	}
-	want := "docs/ARCHITECTURE.md\ndocs/HARNESS_TEST.md"
+	// The allow-list is the point: a new file under docs/ is a deliberate
+	// decision, not somewhere to park notes. Three earn their place. ARCHITECTURE
+	// describes the system, and the other two are the two ways behaviour gets
+	// checked: SELF_VERIFY without a caller, HARNESS_TEST with one.
+	want := "docs/ARCHITECTURE.md\ndocs/HARNESS_TEST.md\ndocs/SELF_VERIFY.md"
 	if got := strings.TrimSpace(string(tracked)); got != want {
 		t.Errorf("tracked specs and docs = %q, want the focused allow-list %q", got, want)
 	}
@@ -928,5 +949,101 @@ func TestExampleReadmesNameTheirDeclaredTransports(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// salonScopes is every cache scope the shipped example must produce: one per
+// agent, one per task. Four agents and two tasks on one think profile is the
+// shape that collided, so it is the shape worth naming here in full.
+func salonScopes() []string {
+	const id = "optimized-salon-concierge-v3"
+	return []string{
+		id + ":concierge",
+		id + ":booking_specialist",
+		id + ":complaint_specialist",
+		id + ":chat_with_me",
+		id + ":task.customer_verification",
+		id + ":task.booking",
+	}
+}
+
+// assertSalonScopes holds SC-008 on the package a reader opens: six distinct
+// scopes on each target, the same six on both, each carrying the authored prefix,
+// and the bare authored id sent by nobody.
+func assertSalonScopes(t *testing.T, resolved *ir.Agent) {
+	t.Helper()
+	value := regexp.MustCompile(`"X-Slng-Agent-Id": "([^"]*)"|_slng_scope = "([^"]*)"`)
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		artifact, err := Generate(resolved, targetByProvider(t, resolved, provider), target.Default())
+		if err != nil {
+			t.Fatalf("%s: generate: %v", provider, err)
+		}
+		found := map[string]bool{}
+		for _, file := range artifact.Files {
+			if !strings.HasSuffix(file.Path, ".py") {
+				continue
+			}
+			for _, match := range value.FindAllStringSubmatch(string(file.Content), -1) {
+				found[match[1]+match[2]] = true
+			}
+		}
+		for _, want := range salonScopes() {
+			if !found[want] {
+				t.Errorf("%s: the example sends no scope %q; found %v", provider, want, found)
+			}
+			delete(found, want)
+		}
+		for leftover := range found {
+			t.Errorf("%s: the example sends unexpected scope %q; the six are %v", provider, leftover, salonScopes())
+		}
+	}
+}
+
+// The gate the four documentation surfaces never had. FR-047 and SC-005 are prose
+// claims, and prose is where this feature's reversal is easiest to half-finish: a
+// reader who lands on a stale line is told the opposite of what the compiler does.
+// A human read still happens, because prose rots in ways no grep catches. This
+// catches the one thing a grep can.
+func TestRouterScopeSurfacesDoNotContradictTheCompiler(t *testing.T) {
+	root := filepath.Join("..", "..")
+	for _, surface := range []string{
+		filepath.Join("internal", "generate", "templates", "livekit_v1", "README.md.tmpl"),
+		filepath.Join("internal", "generate", "templates", "pipecat_v1", "README.md.tmpl"),
+		// The emitted modules themselves. They carried the same claim in a
+		// module-level comment, and leaving it out of this list is how that one
+		// survived the first pass of the rewrite: a reader in the code sees it
+		// long before they open a runbook.
+		filepath.Join("internal", "generate", "templates", "livekit_v1", "agent.py.tmpl"),
+		filepath.Join("internal", "generate", "templates", "pipecat_v1", "bot.py.tmpl"),
+		filepath.Join("examples", "salon-concierge", "README.md"),
+		filepath.Join("docs-site", "optimization", "context-router.mdx"),
+		filepath.Join("internal", "skill", "assets", "references", "models.md"),
+	} {
+		body, err := os.ReadFile(filepath.Join(root, surface))
+		if err != nil {
+			t.Fatalf("%s: %v", surface, err)
+		}
+		text := string(body)
+		// The two claims this feature reversed. Both were true of every surface
+		// before it, and either one left standing tells a reader the opposite of
+		// what the compiler now does.
+		for _, stale := range []string{
+			"one value for this whole project",
+			"one value for this whole package",
+			"never composes it out of an agent",
+			"never compose it from an agent",
+		} {
+			if strings.Contains(text, stale) {
+				t.Errorf("%s still says %q; the scope is now composed per agent and per task", surface, stale)
+			}
+		}
+		// And the positive half: a surface that talks about the header at all has
+		// to say the scope is per site, or a reader learns only half of it.
+		if !strings.Contains(text, target.SlngAgentIDHeader) && !strings.Contains(text, "agent_id") {
+			continue
+		}
+		if !strings.Contains(text, "task.") {
+			t.Errorf("%s describes the cache scope and never mentions the task. prefix, so a reader does not learn that a task has its own scope", surface)
+		}
 	}
 }

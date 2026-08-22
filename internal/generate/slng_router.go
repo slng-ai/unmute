@@ -48,6 +48,26 @@ type slngSite struct {
 	// ConfigFunc is the emitted helper returning this profile's inline
 	// configuration.
 	ConfigFunc string
+	// Scope is the cache scope this one prompt site sends as its agent id
+	// header value, derived by target.SlngScope from the single authored id and
+	// the site's own name.
+	//
+	// Per site, not per profile, and that is the whole point of this field. Two
+	// sites can share a think profile and still be two prompts: four agents and
+	// two tasks shared one profile in examples/salon-concierge, and therefore
+	// one cache, which is how the booking specialist's opening turn was served
+	// the concierge's line.
+	Scope string
+	// HeadersPerRequest says the identity headers travel with each request
+	// rather than being fixed at construction.
+	//
+	// True on LiveKit, where one model object serves every site in the session,
+	// so the scope cannot be a constructor value: a constructor extra_headers
+	// overwrites the per-request one wholesale rather than merging with it
+	// (research R5, and the note in target/catalog_livekit.go). False on
+	// Pipecat, which builds one service per agent and can carry the scope where
+	// it already carries everything else.
+	HeadersPerRequest bool
 }
 
 // slngConfigFunc names the emitted configuration helper for one think profile.
@@ -75,6 +95,18 @@ type slngHelpers struct {
 	// Limit is the truncation ceiling, so the emitted helper and the runbook
 	// cannot drift from each other.
 	Limit int
+	// The two header names, and the field the per-call identifier occupies on a
+	// LiveKit user data object. A template that builds the header dict itself
+	// still reads the names from internal/target, so a rename there reaches the
+	// emitted Python rather than only the Go-rendered half.
+	AgentIDHeader   string
+	SessionIDHeader string
+	SessionIDField  string
+	// Scopes is every cache scope this package sends, in agent order then task
+	// order. The emitted runbook prints the list rather than describing the rule,
+	// because a reader checking a log line wants to recognise the value they are
+	// looking at.
+	Scopes []string
 }
 
 // Any reports whether the package needs the router machinery at all.
@@ -84,7 +116,12 @@ func (h slngHelpers) Any() bool { return len(h.Configs) > 0 }
 // the resolved bindings rather than agent.Models, because a per-target override
 // can turn a binding into a router binding or away from one.
 func slngHelpersFor(agent *ir.Agent, tgt ir.Target) (slngHelpers, error) {
-	helpers := slngHelpers{Limit: slngVariableLimit}
+	helpers := slngHelpers{
+		Limit:           slngVariableLimit,
+		AgentIDHeader:   targetcap.SlngAgentIDHeader,
+		SessionIDHeader: targetcap.SlngSessionIDHeader,
+		SessionIDField:  livekitSessionIDField,
+	}
 	for _, profile := range slices.Sorted(maps.Keys(tgt.Models.Reason)) {
 		binding := tgt.Models.Reason[profile]
 		if !binding.Router() {
@@ -102,7 +139,29 @@ func slngHelpersFor(agent *ir.Agent, tgt ir.Target) (slngHelpers, error) {
 			helpers.Vertex = true
 		}
 	}
+	helpers.Scopes = slngPackageScopes(agent, tgt)
 	return helpers, nil
+}
+
+// slngPackageScopes lists every cache scope this package sends on this target, in
+// agent order then task order. A site whose think profile is not a router binding
+// contributes nothing, the same way the drivers give it no scope.
+func slngPackageScopes(agent *ir.Agent, tgt ir.Target) []string {
+	var scopes []string
+	add := func(model string, site targetcap.SlngSite) {
+		profile, router := slngRouterBinding(agent, tgt, model)
+		if !router {
+			return
+		}
+		scopes = append(scopes, targetcap.SlngScope(tgt.Models.Reason[profile].AgentID, site))
+	}
+	for _, name := range slices.Sorted(maps.Keys(agent.Agents)) {
+		add(agent.Agents[name].Model, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name})
+	}
+	for _, name := range slices.Sorted(maps.Keys(agent.Tasks)) {
+		add(agent.Tasks[name].Model, targetcap.SlngSite{Kind: targetcap.SlngSiteTask, Name: name})
+	}
+	return scopes
 }
 
 // slngConfigBody renders the inline slng_config literal: one tier, one entry,
@@ -210,14 +269,30 @@ func slngRouterBinding(agent *ir.Agent, tgt ir.Target, model string) (string, bo
 	return profile, profile != ""
 }
 
-// slngRequestExtras is the pair of dicts every router think request carries:
-// the identity headers, and the body extension holding the inline configuration
-// and the variable snapshot.
-func slngRequestExtras(binding ir.Binding, site slngSite, pureProxy bool) map[string]any {
-	headers := map[string]any{
-		targetcap.SlngAgentIDHeader:   binding.AgentID,
+// slngRequestHeaders is the identity header dict one prompt site sends: its own
+// cache scope, and the call's session id which scopes nothing and only groups one
+// conversation's requests together.
+//
+// One owner, two readers. The construction path below puts it on the service that
+// carries it for its whole life, and the Pipecat task handlers swap it on the way
+// into a task and back on the way out. A second spelling of this dict is how a
+// task would come to send its owner's scope.
+func slngRequestHeaders(site slngSite) map[string]any {
+	return map[string]any{
+		targetcap.SlngAgentIDHeader:   site.Scope,
 		targetcap.SlngSessionIDHeader: pyExpr(site.SessionExpr),
 	}
+}
+
+// slngRequestExtras is what a router think request carries beyond the prompt: the
+// body extension holding the inline configuration and the variable snapshot, and
+// on a target that fixes them at construction, the identity headers too.
+//
+// A site whose headers travel per request gets no header dict here. On LiveKit
+// that is not an optimisation but a requirement: a constructor extra_headers
+// replaces the per-request one instead of merging, so leaving it in place would
+// silently win over the scope and the emitted source would still look right.
+func slngRequestExtras(site slngSite, pureProxy bool) map[string]any {
 	body := map[string]any{"slng_config": pyExpr(site.ConfigFunc + "()")}
 	if pureProxy {
 		body[slngPureProxyParam] = true
@@ -226,7 +301,11 @@ func slngRequestExtras(binding ir.Binding, site slngSite, pureProxy bool) map[st
 		body["template_variables"] = pyExpr(fmt.Sprintf("_slng_template_variables(%s, (%s))",
 			slngStateExpr(site.StateExpr), pyTuple(site.Names)))
 	}
-	return map[string]any{"extra_headers": headers, "extra_body": body}
+	extras := map[string]any{"extra_body": body}
+	if !site.HeadersPerRequest {
+		extras["extra_headers"] = slngRequestHeaders(site)
+	}
+	return extras
 }
 
 // slngStateExpr is the state object the snapshot reads. A package with names to
@@ -281,9 +360,16 @@ func slngConsumedParams(params map[string]any) map[string]any {
 // concierge's "what phone number should I use", cache_layer l2_exact, 1.27ms,
 // no model call.
 //
-// Authored rather than always-on, because suppressing the serve gives up the
-// speed the router exists for. The real fix is one agent id per emitted agent,
-// which the router's own scope contract already describes.
+// The measurement stays on the record because it is why this switch was reached
+// for. What has changed is that it is no longer the answer. The real fix landed:
+// every prompt site sends its own cache scope, derived from the one authored id,
+// so two agents cannot share a cache and the collision above cannot happen. The
+// shipped example carried this switch and no longer does.
+//
+// So the switch is now an author's own tool rather than a guard anything needs: a
+// shadow trial, where you want to see what the cache would have served without
+// serving it. Authored and never on by default, because suppressing the serve
+// gives up the speed the router exists for.
 const slngPureProxyParam = "slng_pure_proxy"
 
 // slngPureProxy reads the authored switch off a binding, before it is consumed.

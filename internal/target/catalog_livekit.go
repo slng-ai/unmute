@@ -300,11 +300,20 @@ var livekitCatalog = []Entry{
 		// would reach LiveKit Inference instead of the router (FR-014).
 		//
 		// extra_headers and extra_body are constructor kwargs on openai.LLM and
-		// are forwarded into every chat() call (livekit-plugins-openai llm.py
-		// :112-113 and :958-962, source read 2026-08-19 against 1.6.4 and 1.4.4).
-		// The LLM object is built once per job, and the session id is one value
-		// per call, so construction time is the right place and the plugin needs
-		// no subclass.
+		// are forwarded into every chat() call. Re-read 2026-08-22 against the
+		// pinned 1.6.10, where chat() builds its extras at llm.py:953-968: a
+		// per-request extra_kwargs is merged in first, and then a constructor
+		// value **replaces** the whole entry, `extra["extra_headers"] =
+		// self._opts.extra_headers` at :961-962. Not a per-key merge.
+		//
+		// That line is load-bearing now rather than background. extra_body still
+		// belongs here, because one inline configuration serves the whole job. The
+		// two identity headers do not: each agent and task sends its own cache
+		// scope, so a constructor header set would send one scope for all of them
+		// and would silently win over the per-request one. A router binding on
+		// this framework therefore carries no extra_headers at construction, and
+		// the emitted mixin passes both headers per request instead. The one
+		// exception is the summarizer, whose request never reaches that mixin.
 		//
 		// No Distributes, for the same reason as the Pipecat row (FR-021).
 		Framework: LiveKit, Role: Reason, Vendor: "slng",

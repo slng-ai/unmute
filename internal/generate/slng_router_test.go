@@ -124,11 +124,26 @@ func routerTargets() []struct {
 	}
 }
 
-// FR-010 and FR-029. Counting distinct values in the output is the right shape
-// for this gate: validation sees the binding, this sees what a driver wrote, and
-// a refactor that starts composing the id per agent or per task fails here no
-// matter which driver does it.
-func TestSlngRouterEmitsExactlyOneAgentID(t *testing.T) {
+// routerScopes is every cache scope the fixture must produce: one per agent, one
+// per task. The group's two steps are tasks like any other, and they are what a
+// per-agent-only fix would have missed.
+func routerScopes() []string {
+	return []string{
+		routerAgentID + ":intake",
+		routerAgentID + ":billing",
+		routerAgentID + ":task.collect",
+		routerAgentID + ":task.confirm",
+	}
+}
+
+// FR-040 and FR-041, and the reverse of the rule this gate used to hold. It used
+// to require exactly one agent id in the output and to name composed forms as
+// failures; one value across every prompt site is the defect, measured on live
+// calls, because the router's cache key carries no system prompt and the scope is
+// the id. So the shape of the check is the same and the expectation is inverted:
+// validation sees the binding, this sees what a driver wrote, and a refactor that
+// collapses the sites back onto one scope fails here whichever driver does it.
+func TestSlngRouterEmitsOneScopePerPromptSite(t *testing.T) {
 	agent := routerFixture(t)
 	header := regexp.MustCompile(`"X-Slng-Agent-Id": "([^"]*)"`)
 	for _, tc := range routerTargets() {
@@ -137,15 +152,154 @@ func TestSlngRouterEmitsExactlyOneAgentID(t *testing.T) {
 		for _, match := range header.FindAllStringSubmatch(all, -1) {
 			found[match[1]] = true
 		}
-		if len(found) != 1 || !found[routerAgentID] {
-			t.Errorf("%s: emitted agent ids %v, want exactly {%q}", tc.provider, found, routerAgentID)
+		// On livekit the header dict is built once in the mixin from a per-class
+		// constant, so the scopes are read off those constants instead.
+		scope := regexp.MustCompile(`_slng_scope = "([^"]*)"`)
+		for _, match := range scope.FindAllStringSubmatch(all, -1) {
+			found[match[1]] = true
 		}
-		// The composed forms a previous attempt shipped. Any of them is a split
-		// cache, so they are named rather than left to the count alone.
-		for _, name := range []string{"intake", "billing", "collect", "confirm", "triage"} {
-			if strings.Contains(all, routerAgentID+"--"+name) || strings.Contains(all, routerAgentID+"-"+name) {
-				t.Errorf("%s: the agent id is composed with %q; it is authored and carried verbatim", tc.provider, name)
+		// Every emitted scope carries the authored prefix, so a log reader can
+		// tell whose package it belongs to and a typo cannot silently orphan one.
+		//
+		// Read off the emitted values, before the loop below consumes them. An
+		// earlier version of this ran over routerScopes(), which is this file's
+		// own constant, so it compared a constant with itself and could never
+		// fail whatever a driver emitted.
+		for emitted := range found {
+			if emitted == "" {
+				continue // reported by name below, where the reason is specific
 			}
+			if !strings.HasPrefix(emitted, routerAgentID+target.SlngScopeSeparator) {
+				t.Errorf("%s: emitted scope %q does not start with the authored id %q and the separator", tc.provider, emitted, routerAgentID)
+			}
+		}
+		for _, want := range routerScopes() {
+			if !found[want] {
+				t.Errorf("%s: no site sends scope %q; found %v", tc.provider, want, found)
+			}
+			delete(found, want)
+		}
+		// The bare authored id is the defect itself, and an empty value is the
+		// near miss a count alone would pass: the router rejects it on the first
+		// turn of a live call.
+		for leftover := range found {
+			switch leftover {
+			case routerAgentID:
+				t.Errorf("%s: a site still sends the bare authored id %q, so two prompts share one cache", tc.provider, routerAgentID)
+			case "":
+				t.Errorf("%s: a site sends an empty scope, which the router refuses on the first turn", tc.provider)
+			default:
+				t.Errorf("%s: unexpected scope %q; the expected set is %v", tc.provider, leftover, routerScopes())
+			}
+		}
+	}
+}
+
+// FR-040c. One package, one behaviour: a site compiled for either target reaches
+// the router under the same scope, so a reader comparing two deployments of the
+// same package is comparing like with like.
+func TestSlngRouterScopesAgreeAcrossTargets(t *testing.T) {
+	agent := routerFixture(t)
+	perTarget := map[ir.Provider]map[string]bool{}
+	header := regexp.MustCompile(`"X-Slng-Agent-Id": "([^"]*)"|_slng_scope = "([^"]*)"`)
+	for _, tc := range routerTargets() {
+		_, all := emitAgentSource(t, agent, tc.provider, tc.module)
+		found := map[string]bool{}
+		for _, match := range header.FindAllStringSubmatch(all, -1) {
+			found[match[1]+match[2]] = true
+		}
+		perTarget[tc.provider] = found
+	}
+	for want := range perTarget[ir.ProviderPipecat] {
+		if !perTarget[ir.ProviderLiveKit][want] {
+			t.Errorf("pipecat sends scope %q and livekit does not", want)
+		}
+	}
+	for want := range perTarget[ir.ProviderLiveKit] {
+		if !perTarget[ir.ProviderPipecat][want] {
+			t.Errorf("livekit sends scope %q and pipecat does not", want)
+		}
+	}
+}
+
+// The one thing a scope count cannot see. The plugin replaces the whole
+// extra_headers entry from the constructor value rather than merging it
+// (livekit-plugins-openai llm.py:960-962), so a router model still built with
+// extra_headers would silently win over the per-request scope while the emitted
+// source looked right. The summarizer is the exception and has none in this
+// fixture, which uses full history.
+func TestSlngRouterLiveKitPassesNoConstructorHeaders(t *testing.T) {
+	agent := routerFixture(t)
+	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, "agent.py")
+	if strings.Contains(source, "extra_headers={") {
+		t.Errorf("livekit builds a router model with extra_headers at construction, which overwrites the per-request scope:\n%s", source)
+	}
+}
+
+// FR-040d, the same defect pointing the other way. Pipecat carries the scope in
+// persistent settings, so a task that took the service's scope has to give it
+// back on every way out, or the owner answers as a task that already ended.
+func TestSlngRouterPipecatRestoresTheOwnerScope(t *testing.T) {
+	agent := routerFixture(t)
+	source, _ := emitAgentSource(t, agent, ir.ProviderPipecat, "bot.py")
+	owner := `"X-Slng-Agent-Id": "` + routerAgentID + `:intake"`
+	// Entering the group's first step, then each step in turn, then back to the
+	// owner: four swaps at least, and the owner's own construction on top.
+	if got := strings.Count(source, owner); got < 2 {
+		t.Errorf("the owner's scope appears %d times, so at least one exit from a task never restores it", got)
+	}
+	// The task-entry update has to be ahead of the frame that starts the step's
+	// first completion, which is the request that collided.
+	entry := strings.Index(source, `"X-Slng-Agent-Id": "`+routerAgentID+`:task.collect"`)
+	initialize := strings.Index(source, "await flow.initialize(")
+	if entry < 0 || initialize < 0 || entry > initialize {
+		t.Errorf("the task's scope is not queued before the flow is initialised (scope at %d, initialize at %d)", entry, initialize)
+	}
+}
+
+// FR-042. A fallback model on the same site is the same prompt asking, so it asks
+// under the same scope: a failover must not move a site into a cache of its own,
+// where its warmth would never build.
+//
+// This checks the structure rather than a fixture with a chain in it, for two
+// reasons. A router fallback chain cannot be built today at all: validation holds
+// every router profile in a livekit package to being the entry agent's, and
+// Pipecat emits no generated fallback, so a test with one in it fails at
+// validation rather than proving anything. And the structure is the stronger
+// claim anyway. On livekit the scope lives on the asking class and the header dict
+// is built in exactly one place, so no member of a chain can carry a different
+// one; FallbackAdapter.chat forwards extra_kwargs to whichever inner service it
+// picks (livekit-agents llm/fallback_adapter.py:152-192).
+func TestSlngRouterFallbackCannotSplitASiteScope(t *testing.T) {
+	agent := routerFixture(t)
+	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, "agent.py")
+	if got := strings.Count(source, target.SlngAgentIDHeader); got != 1 {
+		t.Errorf("the agent id header is written in %d places, want 1: with more than one, a chain member can carry a scope of its own", got)
+	}
+	if !strings.Contains(source, target.SlngAgentIDHeader+`": agent._slng_scope`) {
+		t.Errorf("the one header site does not read the asking class's own scope:\n%s", source)
+	}
+}
+
+// FR-040b. A task carries its own scope without its own model object, so adding
+// one to a package does not add a service, a client or a connection pool.
+func TestSlngRouterTaskAddsNoModelObject(t *testing.T) {
+	withTask := routerFixture(t)
+	withoutTask := routerFixture(t)
+	delete(withoutTask.Tasks, "confirm")
+	withoutTask.TaskGroups["triage"] = ir.TaskGroup{
+		Steps: []string{"collect"}, ContextScope: ir.ContextIsolated,
+		Then: ir.GroupReturn, Merge: ir.GroupMergeResults,
+	}
+	for _, tc := range routerTargets() {
+		with, _ := emitAgentSource(t, withTask, tc.provider, tc.module)
+		without, _ := emitAgentSource(t, withoutTask, tc.provider, tc.module)
+		builder := "OpenAILLMService("
+		if tc.provider == ir.ProviderLiveKit {
+			builder = "openai.LLM("
+		}
+		if got, want := strings.Count(with, builder), strings.Count(without, builder); got != want {
+			t.Errorf("%s: a task adds %d model objects (%d with, %d without); a scope is a header value, not a service", tc.provider, got-want, got, want)
 		}
 	}
 }
@@ -163,11 +317,34 @@ func TestSlngRouterEmitsExactlyOneSessionID(t *testing.T) {
 		for _, match := range expr.FindAllStringSubmatch(all, -1) {
 			found[strings.TrimSpace(match[1])] = true
 		}
-		if len(found) != 1 || !found["slng_session_id"] {
-			t.Errorf("%s: session id expressions %v, want exactly {slng_session_id}", tc.provider, found)
+		// The guarantees do not change and neither do the bans below: one
+		// expression per target, created once where the call begins, never
+		// through anything the process shares between calls. Only the spelling
+		// changes, and only on the targets where it had to.
+		//
+		// On pipecat the value is still a builder argument, and the worker keeps
+		// it on self so a task's header swap can carry it. On livekit it moved
+		// onto the session's user data object, because the header set now travels
+		// per request and every agent and task class has to reach it from a
+		// method body.
+		// A target may spell the one value more than once, the way a prompt is
+		// already spelled twice, once for a constructor and once for a method
+		// body. What is checked is that every spelling is a per-call read and
+		// that the set is closed: an expression not on the list is a new route
+		// to the value that nobody has thought about.
+		wantExprs, wantCreate := []string{"slng_session_id", "self._slng_session_id"}, "slng_session_id = str(uuid.uuid4())"
+		if tc.provider == ir.ProviderLiveKit {
+			wantExprs = []string{"session.userdata.slng_session_id"}
+			wantCreate = "Userdata(slng_session_id=str(uuid.uuid4()))"
+		}
+		for _, want := range wantExprs {
+			delete(found, want)
+		}
+		for leftover := range found {
+			t.Errorf("%s: session id expression %q is not one of %v", tc.provider, leftover, wantExprs)
 		}
 		// Created once, where the call begins.
-		if got := strings.Count(source, "slng_session_id = str(uuid.uuid4())"); got != routerSessionSites(tc.provider) {
+		if got := strings.Count(source, wantCreate); got != routerSessionSites(tc.provider) {
 			t.Errorf("%s: creates the session id %d times, want %d", tc.provider, got, routerSessionSites(tc.provider))
 		}
 		// Never through anything the process shares between calls.
@@ -389,6 +566,10 @@ func TestSlngRouterEmitsNothingWithoutABinding(t *testing.T) {
 			"X-Slng-Agent-Id", "X-Slng-Session-Id", "slng_config", "template_variables",
 			"_slng_template_variables", "_slng_config_", "_slng_vertex_credentials",
 			"slng_session_id", "_SLNG_VARIABLE_LIMIT", "context-router.slng.ai",
+			// The per-request scope machinery. A new symbol not on this list is a
+			// symbol that could start leaking into a package with no router
+			// binding without anything noticing.
+			"_SlngScoped", "_slng_llm_node", "_slng_scope",
 		} {
 			if strings.Contains(all, banned) {
 				t.Errorf("%s: a package with no router binding emits %q", tc.provider, banned)

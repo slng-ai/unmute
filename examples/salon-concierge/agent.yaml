@@ -33,7 +33,6 @@ models:
       params:
         world_part_override: eu
         reasoning_effort: "none"
-        slng_pure_proxy: true
   speak:
     voice:
       provider: slng

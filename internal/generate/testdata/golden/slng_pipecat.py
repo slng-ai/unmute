@@ -93,10 +93,16 @@ def require_env() -> None:
 # The router answers a repeated turn from its cache instead of calling the model.
 # That is why a router-bound system prompt below keeps its placeholders instead of
 # being rendered here: the router substitutes them from template_variables, so the
-# prompt it sees is identical on every call, which is what lets a turn repeat. The
-# agent id scopes that cache and is one value for this whole package. A first turn
-# never caches, and the router decides which later turns are repeatable, so a
-# repeat served by the model is expected rather than a fault.
+# prompt it sees is identical on every call, which is what lets a turn repeat. A
+# first turn never caches, and the router decides which later turns are
+# repeatable, so a repeat served by the model is expected rather than a fault.
+#
+# The agent id header scopes that cache, and it is one value per prompt rather
+# than one for the package: each agent and each task sends the authored agent_id,
+# a colon, then its own name. The cache key is the last exchange and carries no
+# system prompt, so two prompts under one scope get served each other's answers.
+# A task runs on its owner's service here, so entering one swaps its scope in and
+# every way out swaps the owner's back.
 
 
 def _slng_config_fast_reasoning() -> dict:
@@ -310,7 +316,7 @@ def build_billing_llm(state=None, *, slng_session_id):
         settings=OpenAILLMService.Settings(
             model="gpt-5.6-luna",
             system_instruction=BILLING_PROMPT,
-            extra={"extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(state, ("customer_id",))}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3", "X-Slng-Session-Id": slng_session_id}, "reasoning_effort": "none"},
+            extra={"extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(state, ("customer_id",))}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:billing", "X-Slng-Session-Id": slng_session_id}, "reasoning_effort": "none"},
         ),
     )
 
@@ -329,6 +335,10 @@ class BillingAgent(LLMWorker):
     def __init__(self, state=None, context=None, call_context=None, *, slng_session_id) -> None:
         self.state = state
         self.context = context
+        # Kept on self because a task's headers are swapped in from a method
+        # body, where the constructor's parameter is out of scope, and a whole
+        # header dict has to carry this along with the scope.
+        self._slng_session_id = slng_session_id
 
         llm = build_billing_llm(state, slng_session_id=slng_session_id)
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
@@ -360,7 +370,7 @@ def build_intake_llm(state=None, *, slng_session_id):
         settings=OpenAILLMService.Settings(
             model="gpt-5.6-luna",
             system_instruction=INTAKE_PROMPT,
-            extra={"extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(state, ("customer_id",))}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3", "X-Slng-Session-Id": slng_session_id}, "reasoning_effort": "none"},
+            extra={"extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(state, ("customer_id",))}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": slng_session_id}, "reasoning_effort": "none"},
         ),
     )
 
@@ -379,6 +389,10 @@ class IntakeAgent(LLMWorker):
     def __init__(self, state=None, context=None, call_context=None, *, slng_session_id) -> None:
         self.state = state
         self.context = context
+        # Kept on self because a task's headers are swapped in from a method
+        # body, where the constructor's parameter is out of scope, and a whole
+        # header dict has to carry this along with the scope.
+        self._slng_session_id = slng_session_id
 
         llm = build_intake_llm(state, slng_session_id=slng_session_id)
         super().__init__("intake", llm=llm, pipeline=Pipeline([llm, build_intake_tts()]), bridged=())
@@ -386,8 +400,17 @@ class IntakeAgent(LLMWorker):
     async def on_activated(self, args) -> None:
         # A Flow replaces this worker's system instruction with its task role.
         # Re-entry restores the owning agent before tools/messages run.
+        # And its cache scope with it: a task that handed the conversation on
+        # rather than returning left this service holding the task's scope, so
+        # re-entry has to take it back or this agent would answer as the task.
+        # Only the extra_headers key travels: a settings update merges the extra
+        # dict key by key, so the inline configuration and the reasoning setting
+        # survive untouched.
         await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(system_instruction=INTAKE_PROMPT),
+            delta=LLMSettings(
+                system_instruction=INTAKE_PROMPT,
+                extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": self._slng_session_id}},
+            ),
         ))
         await super().on_activated(args)
 
@@ -444,6 +467,13 @@ class IntakeAgent(LLMWorker):
         # restoration erases that call and the unchanged request delegates again.
         await self.flush_pipeline()
         self._run_collect_snapshot = (copy.deepcopy(self.context.get_messages()), self.context.tools)
+        # The step's own cache scope, queued before the node is entered so it is
+        # ahead of the frame that triggers the step's first completion. That
+        # first request is the one that collided: it asks with the task's prompt,
+        # so it has to ask under the task's scope, not this agent's.
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:task.collect", "X-Slng-Session-Id": self._slng_session_id}}),
+        ))
         await flow.initialize(self._run_collect_node_collect())
 
     def _run_collect_node_collect(self) -> NodeConfig:
@@ -475,7 +505,10 @@ class IntakeAgent(LLMWorker):
         # tools); only the typed results cross back (merge: results, N13).
         messages, tools = self._run_collect_snapshot
         await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(system_instruction=INTAKE_PROMPT),
+            delta=LLMSettings(system_instruction=INTAKE_PROMPT,
+                # The owner's cache scope goes back with its prompt. A leaked
+                # task scope is the same defect pointing the other way.
+                extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": self._slng_session_id}}),
         ))
         await self.flush_pipeline()
         self.context.set_messages(messages + [{
@@ -506,6 +539,13 @@ class IntakeAgent(LLMWorker):
         # restoration erases that call and the unchanged request delegates again.
         await self.flush_pipeline()
         self._run_triage_snapshot = (copy.deepcopy(self.context.get_messages()), self.context.tools)
+        # The step's own cache scope, queued before the node is entered so it is
+        # ahead of the frame that triggers the step's first completion. That
+        # first request is the one that collided: it asks with the task's prompt,
+        # so it has to ask under the task's scope, not this agent's.
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:task.collect", "X-Slng-Session-Id": self._slng_session_id}}),
+        ))
         await flow.initialize(self._run_triage_node_collect())
 
     def _run_triage_node_collect(self) -> NodeConfig:
@@ -534,6 +574,12 @@ class IntakeAgent(LLMWorker):
 
     async def _run_triage_finish_collect(self, args, flow_manager):
         self._run_triage_results["collect"] = dict(args)
+        # The next step is a different prompt site, so it asks under a different
+        # cache scope. Queued before the node is handed back, for the same reason
+        # the first step's was.
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:task.confirm", "X-Slng-Session-Id": self._slng_session_id}}),
+        ))
         return {"status": "ok", "result": self._run_triage_results["collect"]}, self._run_triage_node_confirm()
 
     def _run_triage_node_confirm(self) -> NodeConfig:
@@ -559,7 +605,10 @@ class IntakeAgent(LLMWorker):
         # tools); only the typed results cross back (merge: results, N13).
         messages, tools = self._run_triage_snapshot
         await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(system_instruction=INTAKE_PROMPT),
+            delta=LLMSettings(system_instruction=INTAKE_PROMPT,
+                # The owner's cache scope goes back with its prompt. A leaked
+                # task scope is the same defect pointing the other way.
+                extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": self._slng_session_id}}),
         ))
         await self.flush_pipeline()
         self.context.set_messages(messages + [{
