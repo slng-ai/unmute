@@ -17,13 +17,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/slng-ai/unmute/internal/devmetrics"
 	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/style"
 	"github.com/slng-ai/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -322,13 +322,15 @@ func selectDevTarget(cmd *cobra.Command, root, requested string) (string, error)
 		}
 		return "", fmt.Errorf("dev %s: multiple targets declared; pass --target <name>: %s", root, strings.Join(choices, ", "))
 	}
-	selected := targets[0].Name
-	options := make([]huh.Option[string], 0, len(targets))
+	options := make([]tui.Option, 0, len(targets))
 	for _, candidate := range targets {
-		options = append(options, huh.NewOption(fmt.Sprintf("%s  ·  %s", candidate.Name, candidate.Provider), candidate.Name))
+		options = append(options, tui.Option{
+			Label: fmt.Sprintf("%s  ·  %s", candidate.Name, candidate.Provider),
+			Value: candidate.Name,
+		})
 	}
-	if err := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Target to run").Options(options...).Value(&selected))).
-		WithInput(cmd.InOrStdin()).WithOutput(cmd.OutOrStdout()).Run(); err != nil {
+	selected, err := tui.SelectOne(cmd.InOrStdin(), cmd.OutOrStdout(), "Target to run", options)
+	if err != nil {
 		return "", fmt.Errorf("dev %s: select target: %w", root, err)
 	}
 	return selected, nil

@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/charmbracelet/huh"
 )
 
 var updateAccessible = flag.Bool("update-accessible", false, "rewrite the accessible transcript golden")
@@ -45,10 +43,10 @@ func accessibleCases() []accessibleCase {
 			name:  "select",
 			input: "2\n",
 			run: func(r *fieldRunner) error {
-				_, _, err := r.selectOne("Models", "Pick the role to edit.", []huh.Option[string]{
-					huh.NewOption("Listen (STT)  ·  deepgram", "listen"),
-					huh.NewOption("Reason (LLM)  ·  openai", "reason"),
-					huh.NewOption("← Back", actionBack),
+				_, _, err := r.selectOne("Models", "Pick the role to edit.", []menuChoice{
+					newChoice("Listen (STT)  ·  deepgram", "listen"),
+					newChoice("Reason (LLM)  ·  openai", "reason"),
+					newChoice("← Back", actionBack),
 				}, true)
 				return err
 			},
@@ -57,9 +55,9 @@ func accessibleCases() []accessibleCase {
 			name:  "select_not_backable",
 			input: "1\n",
 			run: func(r *fieldRunner) error {
-				_, _, err := r.selectOne("Target", "", []huh.Option[string]{
-					huh.NewOption("pipecat", "pipecat"),
-					huh.NewOption("livekit", "livekit"),
+				_, _, err := r.selectOne("Target", "", []menuChoice{
+					newChoice("pipecat", "pipecat"),
+					newChoice("livekit", "livekit"),
 				}, false)
 				return err
 			},
@@ -150,9 +148,9 @@ func TestAccessibleEndOfInputAborts(t *testing.T) {
 		run   func(*fieldRunner) error
 	}{
 		{"select", "", func(r *fieldRunner) error {
-			_, _, err := r.selectOne("Models", "", []huh.Option[string]{
-				huh.NewOption("Listen", "listen"),
-				huh.NewOption("← Back", actionBack),
+			_, _, err := r.selectOne("Models", "", []menuChoice{
+				newChoice("Listen", "listen"),
+				newChoice("← Back", actionBack),
 			}, true)
 			return err
 		}},
@@ -169,7 +167,7 @@ func TestAccessibleEndOfInputAborts(t *testing.T) {
 			if err == nil {
 				t.Fatal("end of input was accepted as an answer; it must abort")
 			}
-			if !strings.Contains(err.Error(), "menu") && !errors.Is(err, huh.ErrUserAborted) {
+			if !strings.Contains(err.Error(), "menu") && !errors.Is(err, errAborted) {
 				t.Errorf("abort error is not the recorded one: %v", err)
 			}
 		})
@@ -185,10 +183,10 @@ func TestAccessibleScreenReaderAffordances(t *testing.T) {
 
 	var buf bytes.Buffer
 	_, _, err := newRunner(strings.NewReader("2\n"), &buf, true).selectOne(
-		"Models", "Pick the role to edit.", []huh.Option[string]{
-			huh.NewOption("Listen (STT)", "listen"),
-			huh.NewOption("Reason (LLM)", "reason"),
-			huh.NewOption("← Back", actionBack),
+		"Models", "Pick the role to edit.", []menuChoice{
+			newChoice("Listen (STT)", "listen"),
+			newChoice("Reason (LLM)", "reason"),
+			newChoice("← Back", actionBack),
 		}, true)
 	if err != nil {
 		t.Fatal(err)

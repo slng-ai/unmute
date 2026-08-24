@@ -3,7 +3,6 @@ package tui
 import (
 	"testing"
 
-	"github.com/charmbracelet/huh"
 	"github.com/slng-ai/unmute/internal/scaffold"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
@@ -17,7 +16,7 @@ func TestCreateMenuLeadsWithTheScaffoldDefault(t *testing.T) {
 	if len(options) == 0 {
 		t.Fatal("the create target menu is empty")
 	}
-	if got := options[0].Value; got != scaffold.DefaultTarget {
+	if got := options[0].value; got != scaffold.DefaultTarget {
 		t.Errorf("the create menu preselects %q while the scaffold writes %q; "+
 			"the console and the constant have drifted apart", got, scaffold.DefaultTarget)
 	}
@@ -40,7 +39,7 @@ func TestMaintainMenuLeadsWithThePackagesOwnTarget(t *testing.T) {
 			if len(options) == 0 {
 				t.Fatal("the maintain target menu is empty")
 			}
-			if got := options[0].Value; got != current {
+			if got := options[0].value; got != current {
 				t.Errorf("opening a %s package preselects %q; the maintain menu must "+
 					"follow the package, not the scaffold default", current, got)
 			}
@@ -55,13 +54,13 @@ func TestBothMenusStillOfferEveryShippedTarget(t *testing.T) {
 		string(targetcap.Pipecat): true,
 		string(targetcap.LiveKit): true,
 	}
-	for name, options := range map[string][]huh.Option[string]{
+	for name, options := range map[string][]menuChoice{
 		"create":   createTargetOptions(),
 		"maintain": maintainTargetOptions(string(targetcap.LiveKit)),
 	} {
 		seen := map[string]bool{}
 		for _, option := range options {
-			seen[option.Value] = true
+			seen[option.value] = true
 		}
 		for value := range want {
 			if !seen[value] {
