@@ -2735,22 +2735,38 @@ func parsePhrases(value string) []string {
 	return phrases
 }
 
-func validateOptionalNonNegativeInteger(value string) error {
-	if strings.TrimSpace(value) == "" {
-		return nil
+// optional accepts a blank answer and applies check to anything else.
+// required rejects a blank answer with its own message and otherwise applies
+// check. Between them they cover every "and it may be empty" / "and it must not
+// be empty" rule here, so a new rule is a composition rather than a
+// thirteenth near-identical wrapper.
+func optional(check func(string) error) func(string) error {
+	return func(value string) error {
+		if strings.TrimSpace(value) == "" {
+			return nil
+		}
+		return check(value)
 	}
+}
+
+func required(message string, check func(string) error) func(string) error {
+	return func(value string) error {
+		if strings.TrimSpace(value) == "" {
+			return errors.New(message)
+		}
+		if check == nil {
+			return nil
+		}
+		return check(value)
+	}
+}
+
+func validateNonNegativeInteger(value string) error {
 	number, err := strconv.Atoi(value)
 	if err != nil || number < 0 {
 		return errors.New("value must be a non-negative integer")
 	}
 	return nil
-}
-
-func validateOptionalDuration(value string) error {
-	if strings.TrimSpace(value) == "" {
-		return nil
-	}
-	return validateDuration(value)
 }
 
 func validateDuration(value string) error {
@@ -3071,6 +3087,16 @@ func validatePositiveInteger(value string) error {
 	return nil
 }
 
+// The composed rules. Each message is the one the field printed before, because
+// an author reads it and a changed message is a changed interface.
+var (
+	validateOptionalDuration           = optional(validateDuration)
+	validateOptionalNonNegativeInteger = optional(validateNonNegativeInteger)
+	validateRequiredBasic              = required("value is required", validateBasic)
+	validateRequiredText               = required("value is required", nil)
+	validateRequiredObject             = required("JSON object is required", validateParams)
+)
+
 func validateName(name string) error {
 	if filepath.IsAbs(name) {
 		return errors.New("agent directory must be relative")
@@ -3096,13 +3122,6 @@ func validateBasic(value string) error {
 	return nil
 }
 
-func validateRequiredBasic(value string) error {
-	if strings.TrimSpace(value) == "" {
-		return errors.New("value is required")
-	}
-	return validateBasic(value)
-}
-
 var (
 	languagePattern   = regexp.MustCompile(`^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$`)
 	identifierPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`)
@@ -3123,25 +3142,11 @@ func validateIdentifier(value string) error {
 	return nil
 }
 
-func validateRequiredText(value string) error {
-	if strings.TrimSpace(value) == "" {
-		return errors.New("value is required")
-	}
-	return nil
-}
-
 func validateEnvName(value string) error {
 	if !envNamePattern.MatchString(value) {
 		return errors.New("value must be an environment variable name")
 	}
 	return nil
-}
-
-func validateRequiredObject(value string) error {
-	if strings.TrimSpace(value) == "" {
-		return errors.New("JSON object is required")
-	}
-	return validateParams(value)
 }
 
 func validateVariableDefault(variableType, value string) error {

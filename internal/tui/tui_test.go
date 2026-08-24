@@ -1893,3 +1893,72 @@ func TestHeroArtFitsAndMatchesItsWidth(t *testing.T) {
 		t.Error("at heroArtWidth heroLogo should draw the art, not fall back")
 	}
 }
+
+// TestValidatorMessagesAreStable pins every console input rule: the same
+// accept/reject decision, and the same message text.
+//
+// The message is part of the interface, not an implementation detail. An author
+// reads it and acts on it, so a rule rewritten to read better in Go but worded
+// differently on screen is a change to the product. The rules were collapsed
+// onto two combinators (optional/required) in feature 018; this is what proves
+// the collapse changed none of them.
+func TestValidatorMessagesAreStable(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		check   func(string) error
+		value   string
+		wantErr string // "" means the value must be accepted
+	}{
+		{"optional duration blank", validateOptionalDuration, "", ""},
+		{"optional duration valid", validateOptionalDuration, "1500ms", ""},
+		{"optional duration zero", validateOptionalDuration, "0s", "value must be a positive Go duration"},
+		{"optional duration junk", validateOptionalDuration, "soon", "value must be a positive Go duration"},
+
+		{"duration valid", validateDuration, "2s", ""},
+		{"duration negative", validateDuration, "-1s", "value must be a positive Go duration"},
+
+		{"optional non-negative blank", validateOptionalNonNegativeInteger, "", ""},
+		{"optional non-negative zero", validateOptionalNonNegativeInteger, "0", ""},
+		{"optional non-negative negative", validateOptionalNonNegativeInteger, "-1", "value must be a non-negative integer"},
+		{"optional non-negative junk", validateOptionalNonNegativeInteger, "many", "value must be a non-negative integer"},
+
+		{"positive integer ok", validatePositiveInteger, "3", ""},
+		{"positive integer zero", validatePositiveInteger, "0", "value must be a positive integer"},
+
+		{"basic ok", validateBasic, "hello there", ""},
+		{"basic quote", validateBasic, `say "hi"`, "value must not contain quotes or newlines"},
+		{"basic newline", validateBasic, "one\ntwo", "value must not contain quotes or newlines"},
+
+		{"required basic blank", validateRequiredBasic, "   ", "value is required"},
+		{"required basic quote", validateRequiredBasic, `a "b"`, "value must not contain quotes or newlines"},
+		{"required basic ok", validateRequiredBasic, "fine", ""},
+
+		{"required text blank", validateRequiredText, "", "value is required"},
+		{"required text ok", validateRequiredText, "anything at all", ""},
+
+		{"required object blank", validateRequiredObject, "", "JSON object is required"},
+		{"required object ok", validateRequiredObject, `{"a":1}`, ""},
+		{"required object not an object", validateRequiredObject, `[1]`, "params must be a JSON object"},
+
+		{"identifier ok", validateIdentifier, "collect_name", ""},
+		{"identifier capital", validateIdentifier, "CollectName", "name must be lowercase snake_case"},
+
+		{"language ok", validateLanguage, "en-US", ""},
+		{"language junk", validateLanguage, "english!", "language must be a BCP-47 tag such as en or en-US"},
+
+		{"env name ok", validateEnvName, "OPENAI_API_KEY", ""},
+		{"env name lowercase", validateEnvName, "openai_key", "value must be an environment variable name"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.check(tc.value)
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Errorf("%q must be accepted, got %v", tc.value, err)
+			case tc.wantErr != "" && err == nil:
+				t.Errorf("%q must be rejected with %q, got nil", tc.value, tc.wantErr)
+			case tc.wantErr != "" && err.Error() != tc.wantErr:
+				t.Errorf("%q rejected with %q, want %q", tc.value, err, tc.wantErr)
+			}
+		})
+	}
+}
