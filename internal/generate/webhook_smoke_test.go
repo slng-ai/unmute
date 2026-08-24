@@ -2,16 +2,12 @@
 
 package generate
 
-import (
-	"testing"
+import "testing"
 
-	"github.com/slng-ai/unmute/internal/ir"
-)
-
-// L4 smoke for the webhook side of the variables surface. The public outbound
-// example uses self-contained Python tools, so these tests rewrite its resolved
-// tools to webhooks in memory. They then prove the full request against a real
-// in-process HTTP server without making the live example depend on an API.
+// L4 smoke for the webhook side of the variables surface. No shipped example
+// has a webhook tool, so useWebhookTools (smoke_fixture_test.go) adds two to the
+// resolved salon package in memory. They then prove the full request against a
+// real in-process HTTP server without making the live example depend on an API.
 //
 // Nothing external is contacted: the server is a stdlib handler on 127.0.0.1.
 
@@ -77,8 +73,10 @@ class _Params:
         self.result = value
 
 
-state = bot.build_state({"to_number": "+15551230000"})
-agent = bot.ReminderAgent(state=state, context=None, call_context=None)
+state = bot.build_state()
+# Set here, not hydrated: this pipecat target has no telephony plane.
+state.dialed_number = "+15551230000"
+agent = bot.ConciergeAgent(state=state, context=None, call_context=None, slng_session_id="smoke")
 
 # 1. A tool whose injected values are all available: the request goes out.
 params = _Params()
@@ -131,7 +129,7 @@ userdata = generated.Userdata()
 generated._hydrate_call_start(userdata, generated._dispatched_call_start({}))
 userdata.dialed_number = "+15551230000"
 ctx = SimpleNamespace(userdata=userdata)
-desk = generated.Reminder()
+desk = generated.Concierge()
 
 # 1. All injected values available: the request goes out.
 result = asyncio.run(desk.confirm_appointment(ctx))
@@ -188,8 +186,10 @@ class _Params:
         self.result = value
 
 
-state = bot.build_state({"to_number": "+15551230000"})
-agent = bot.ReminderAgent(state=state, context=None, call_context=None)
+state = bot.build_state()
+# Set here, not hydrated: this pipecat target has no telephony plane.
+state.dialed_number = "+15551230000"
+agent = bot.ConciergeAgent(state=state, context=None, call_context=None, slng_session_id="smoke")
 asyncio.run(agent.confirm_appointment(_Params()))
 
 assert captured["count"] == 1, captured
@@ -225,7 +225,7 @@ import agent as generated  # noqa: E402
 userdata = generated.Userdata()
 generated._hydrate_call_start(userdata, generated._dispatched_call_start({}))
 userdata.dialed_number = "+15551230000"
-asyncio.run(generated.Reminder().confirm_appointment(SimpleNamespace(userdata=userdata)))
+asyncio.run(generated.Concierge().confirm_appointment(SimpleNamespace(userdata=userdata)))
 
 assert captured["count"] == 1, captured
 assert captured["headers"].get("x-api-key") == "test-token-abc123", captured["headers"]
@@ -248,32 +248,4 @@ print("livekit api_key + startup check ok:", captured["headers"].get("x-api-key"
 
 func TestSmokeLiveKitAPIKeySchemeAndStartupCheck(t *testing.T) {
 	runLiveKitSmokeScript(t, "salon-concierge", nil, useAPIKeyAuth, livekitAPIKeySmokeScript)
-}
-
-// useWebhookTools keeps webhook generation covered without making a public
-// example depend on a private service.
-func useWebhookTools(agent *ir.Agent) {
-	for name, path := range map[string]string{
-		"confirm_appointment":    "/customers/{{customer_id}}/appointments/confirm",
-		"reschedule_appointment": "/customers/{{customer_id}}/appointments",
-	} {
-		tool := agent.Tools[name]
-		tool.Execution = ir.ToolWebhook
-		tool.Handler, tool.HandlerSource = "", ""
-		tool.URLEnv, tool.Path = "SALON_API_URL", path
-		tool.Auth = &ir.ToolAuth{Type: ir.ToolAuthBearer, TokenEnv: "SALON_API_TOKEN"}
-		agent.Tools[name] = tool
-	}
-	agent.Secrets = append(agent.Secrets, "SALON_API_URL", "SALON_API_TOKEN")
-}
-
-// useAPIKeyAuth switches the synthetic webhook fixture to the other supported
-// auth scheme.
-func useAPIKeyAuth(agent *ir.Agent) {
-	useWebhookTools(agent)
-	for _, name := range []string{"confirm_appointment", "reschedule_appointment"} {
-		tool := agent.Tools[name]
-		tool.Auth = &ir.ToolAuth{Type: ir.ToolAuthAPIKey, TokenEnv: "SALON_API_TOKEN", Header: ir.DefaultAPIKeyHeader}
-		agent.Tools[name] = tool
-	}
 }
