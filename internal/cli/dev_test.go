@@ -640,15 +640,10 @@ func TestDevToRejectsInboundOnlyTarget(t *testing.T) {
 	}
 }
 
-// TestDevWebRejectsManagedProvider: a managed provider has no local dev runner
-// and is refused before generation or any Docker preflight (SPEC I.dev).
-func TestDevWebRejectsManagedProvider(t *testing.T) {
-	dir := copySafeCore(t)
-	_, err := run(t, "dev", dir, "--target", "vapi")
-	if err == nil || !strings.Contains(err.Error(), "its dev runner is not implemented") {
-		t.Fatalf("vapi dev error = %v", err)
-	}
-}
+// `dev` used to refuse the managed target with "its dev runner is not
+// implemented". Both managed targets are retired, so every declared target now
+// has a dev runner and there is nothing to refuse. An undeclared instance is
+// still refused — see TestSelectDevTargetRejectsUnknownInstance below.
 
 func TestSelectDevTargetRejectsUnknownInstance(t *testing.T) {
 	dir := copySafeCore(t)

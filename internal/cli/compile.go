@@ -66,8 +66,6 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 			for _, file := range artifact.Files {
 				fmt.Fprintln(cmd.OutOrStdout(), "generated", filepath.Join(outDir, file.Path))
 			}
-		case generate.ManagedTarget:
-			fmt.Fprintf(cmd.OutOrStdout(), "%s: managed target — run `unmute apply %s --target %s`\n", resolved.Name, dir, resolved.Name)
 		}
 		printContract(cmd.OutOrStdout(), resolved.Name, resolved.Provider, artifact.Notes)
 		printTelephonyPlan(cmd.OutOrStdout(), resolved.Name, artifact.Telephony)

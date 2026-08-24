@@ -25,14 +25,8 @@ func TestDefaultTableIsCompleteAndTyped(t *testing.T) {
 			}
 		}
 	}
-	if table.Role(Turn, Vapi) != Integrated {
-		t.Fatal("Vapi turn role must be integrated")
-	}
 	if err := DefaultCatalog().CheckVendor(LiveKit, Speak, "elevenlabs", false); err != nil {
 		t.Fatalf("livekit speak vendor elevenlabs must validate: %v", err)
-	}
-	if got := table.HistorySupport(HistorySummary, Vapi); got.Kind != HistoryFail || got.Note == "" {
-		t.Fatalf("Vapi summary history = %#v", got)
 	}
 	// The Provisional tag is produced by telephony routes that have a real
 	// adapter but no credentialed smoke yet. It used to be exercised through a
@@ -52,23 +46,25 @@ func TestDefaultTableIsCompleteAndTyped(t *testing.T) {
 	if !provisionalSeen {
 		t.Error("no route carries the Provisional tag; the tag has lost its only producer")
 	}
-	if table.Capability(FieldInactivity, LiveKit).Tag != Warn || table.Capability(FieldMaxDuration, Deepgram).Tag != Warn {
+	if table.Capability(FieldInactivity, LiveKit).Tag != Warn || table.Capability(FieldMaxDuration, Pipecat).Tag != Warn {
 		t.Fatal("warn-tagged lifecycle fields must produce target warnings")
 	}
-	// Both tracing providers are gated the same way: the code drivers own a
-	// process to instrument, the managed targets do not.
+	// Tracing needs a process to instrument, which every remaining target has.
+	// The other half of this check used to assert both fields were Gated on the
+	// two managed targets; those are retired, so only the passing half is left.
 	for _, field := range []Field{FieldTracingLangfuse, FieldTracingCoval} {
 		if table.Capability(field, LiveKit).Tag != Core || table.Capability(field, Pipecat).Tag != Core {
 			t.Fatalf("%s must pass on code drivers", field)
 		}
-		for _, provider := range []Provider{Vapi, Deepgram} {
-			capability := table.Capability(field, provider)
-			if capability.Tag != Gated {
-				t.Errorf("%s passed on %s", field, provider)
-			}
-			// A gated row with no words leaves the author guessing, which is the
-			// thing "fail loud" exists to prevent.
-			if capability.Note == "" {
+	}
+
+	// A gated row with no words leaves the author guessing, which is the thing
+	// "fail loud" exists to prevent. This used to be checked only on the two
+	// managed targets; it is a property of every gated row, so it is checked on
+	// every gated row.
+	for field, byProvider := range table.Fields {
+		for provider, capability := range byProvider {
+			if capability.Tag == Gated && capability.Note == "" {
 				t.Errorf("%s denies %s without saying why", field, provider)
 			}
 		}
@@ -80,11 +76,6 @@ func TestBuiltinToolsPassOnCodeDriversOnly(t *testing.T) {
 	if table.Capability(FieldToolBuiltin, LiveKit).Tag != Core || table.Capability(FieldToolBuiltin, Pipecat).Tag != Core {
 		t.Fatal("builtin tools must pass on LiveKit and Pipecat")
 	}
-	for _, provider := range []Provider{Vapi, Deepgram} {
-		if table.Capability(FieldToolBuiltin, provider).Tag != Gated {
-			t.Errorf("builtin tools passed on %s", provider)
-		}
-	}
 }
 
 func TestAgentTransferAnnouncePassesOnGeneratedDriversOnly(t *testing.T) {
@@ -92,11 +83,6 @@ func TestAgentTransferAnnouncePassesOnGeneratedDriversOnly(t *testing.T) {
 	for _, provider := range []Provider{LiveKit, Pipecat} {
 		if got := table.Capability(FieldTransferAnnounce, provider); got.Tag != Core {
 			t.Errorf("agent transfer announce gated on %s: %#v", provider, got)
-		}
-	}
-	for _, provider := range []Provider{Vapi, Deepgram} {
-		if got := table.Capability(FieldTransferAnnounce, provider); got.Tag != Gated || got.Note == "" {
-			t.Errorf("agent transfer announce passed on %s: %#v", provider, got)
 		}
 	}
 }
@@ -116,13 +102,6 @@ func TestTelephonyControlsResolveCarrierAndTransport(t *testing.T) {
 		// Vapi and Deepgram have no route and no connection, so after the route
 		// moved into the connection file no author can write a carrier these
 		// rows would see. The four rows that conditioned on one lost the
-		// condition rather than becoming impossible to satisfy; each keeps its
-		// Twilio requirement as a comment in table.go for whoever builds the
-		// driver (spec FR-001a, research R11).
-		{"vapi warm with no carrier", WarmTransfer, Vapi, "", "", Core},
-		{"deepgram warm with no carrier", WarmTransfer, Deepgram, "", "", Core},
-		{"deepgram cold with no carrier", ColdTransfer, Deepgram, "", "", Core},
-		{"deepgram voicemail with no carrier", VoicemailDetection, Deepgram, "", "", Core},
 		// The routed controls still gate, and on both halves of the route. A
 		// driverless target has no transport either, so removing carrier from
 		// targets changed nothing here (task T015c).
@@ -467,7 +446,7 @@ func TestNoVendorVariableWearsTheUnmutePrefix(t *testing.T) {
 func TestToolAnnounceCapabilityRows(t *testing.T) {
 	table := Default()
 	for provider, want := range map[Provider]Tag{
-		LiveKit: Core, Pipecat: Core, Vapi: Gated, Deepgram: Gated,
+		LiveKit: Core, Pipecat: Core,
 	} {
 		got := table.Capability(FieldToolAnnounce, provider)
 		if got.Tag != want {

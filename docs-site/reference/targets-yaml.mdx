@@ -27,7 +27,7 @@ targets:
 | Key | Type | Required | Default | Allowed values | Meaning |
 |---|---|---|---|---|---|
 | `targets` | map | yes | — | one or more target instance names | target definitions selected by `--target` |
-| `targets.<name>.provider` | string | yes | — | `livekit`, `pipecat`, `vapi`, `deepgram` | target provider; only LiveKit and Pipecat emit runnable projects today |
+| `targets.<name>.provider` | string | yes | — | `livekit`, `pipecat` | target provider |
 | `targets.<name>.version` | string | for code targets | — | exact `x.y.z` in the supported window for LiveKit and Pipecat | framework version pinned in an emitted project |
 | `targets.<name>.pins` | map of strings | no | — | known LiveKit package names to semantic versions | LiveKit package overrides; other providers do not consume them |
 | `targets.<name>.sdk_language` | string | no | — | `python` when written | SDK used by an emitted project |

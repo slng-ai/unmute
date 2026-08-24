@@ -265,9 +265,8 @@ the tool result is `transfer_started`.
 | Option | Refused on | Why |
 |---|---|---|
 | `briefing` | Pipecat, Deepgram | Pipecat has no warm transfer, so there is no briefing to lower |
-| `requires:` on a transfer | Vapi | Vapi has no machine-checked transfer guard |
-| `include_tool_calls: false` on transfer context | Pipecat, Vapi | the Pipecat driver does not shape transfer context yet |
-| a variables subset on transfer context | Pipecat, Vapi | Pipecat accepts context, not a subset. Vapi accepts `variables: all` only |
+| `include_tool_calls: false` on transfer context | Pipecat | the Pipecat driver does not shape transfer context yet |
+| a variables subset on transfer context | Pipecat | Pipecat accepts context, not a subset |
 
 ## The working packages
 

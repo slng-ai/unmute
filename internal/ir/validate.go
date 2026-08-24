@@ -603,7 +603,19 @@ const (
 func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *TargetValidation) {
 	provider := targetcap.Provider(resolved.Provider)
 	if !slices.Contains(targetcap.Providers, provider) {
-		row.Errors = add(row.Errors, fmt.Sprintf("unknown provider %q", resolved.Provider))
+		// A retired provider used to work, so "unknown" is true and useless.
+		// Say what happened and what the supported values are (Principle II).
+		supported := make([]string, 0, len(targetcap.Providers))
+		for _, p := range targetcap.Providers {
+			supported = append(supported, string(p))
+		}
+		if note, retired := targetcap.Retired[provider]; retired {
+			row.Errors = add(row.Errors, fmt.Sprintf("provider %q was retired: %s. Supported providers: %s",
+				resolved.Provider, note, strings.Join(supported, ", ")))
+			return
+		}
+		row.Errors = add(row.Errors, fmt.Sprintf("unknown provider %q. Supported providers: %s",
+			resolved.Provider, strings.Join(supported, ", ")))
 		return
 	}
 	if targetcap.IsCode(provider) && resolved.Version == "" {

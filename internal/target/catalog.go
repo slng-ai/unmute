@@ -136,7 +136,6 @@ func DefaultCatalog() Catalog {
 	var entries []Entry
 	entries = append(entries, pipecatCatalog...)
 	entries = append(entries, livekitCatalog...)
-	entries = append(entries, deepgramCatalog...)
 	return Catalog{entries: entries}
 }
 

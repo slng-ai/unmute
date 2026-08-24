@@ -1,6 +1,29 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 4.0.1 -> 5.0.0
+Bump rationale: MAJOR. Technology and Boundaries no longer permits validation to
+cover more targets than generation. A provider with no driver is not a target.
+
+Modified in 5.0.0:
+- The bullet "Pipecat and LiveKit have shipped drivers; validation may cover more
+  targets than generation" is replaced. It permitted `vapi` and `deepgram` to be
+  accepted target values that validate and then fail at compile with "driver is
+  not implemented". Both are retired.
+- The targets-and-vendors sentence stays and gains a clause, because retiring
+  the Deepgram *target* while keeping the Deepgram *model vendor* is exactly the
+  distinction that bullet exists to protect.
+
+Reason: a documented surface that never emitted a runnable project. An author
+could write `provider: vapi`, watch `validate` pass, and only learn at compile
+that nothing would be produced. The capability tables carried four columns to
+describe two working drivers.
+
+What contributors do differently: a capability row now supplies two values, not
+four. A new target provider arrives with its driver, not ahead of it.
+
+Previous report
+---------------
 Version change: 4.0.0 -> 4.0.1
 Bump rationale: PATCH. Clarifies one bullet under Principle V to match shipped
 behavior. The principle itself is unchanged: whatever compiles can still be
@@ -155,8 +178,11 @@ Four commands take an author from nothing to a voice they can talk to:
 - `internal/`, not `pkg/`; one file per command under `internal/cli/`.
 - Go structs derive schemas. Do not hand-write schema JSON.
 - Secret values appear in no package, generated file, or report.
-- Targets and model vendors are different concepts. Pipecat and LiveKit have
-  shipped drivers; validation may cover more targets than generation.
+- Targets and model vendors are different concepts, and the distinction is
+  load-bearing: a vendor name and a target name can be the same word.
+- A provider is a target only when a driver emits a runnable project for it.
+  Pipecat and LiveKit are the targets. A provider with no driver is not accepted
+  as a target value, so `validate` and `compile` agree about what exists.
 - Unmute does not buy phone numbers or provision carrier-side applications or
   SIP trunks.
 
@@ -194,4 +220,4 @@ topology change.
   knob needs a concrete reason. Without one, do less.
 - Rules added to `CLAUDE.md` need a failing gate or the label `(advisory)`.
 
-**Version**: 4.0.1 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-19
+**Version**: 5.0.0 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-24

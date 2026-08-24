@@ -1,4 +1,4 @@
-# One instance per primary target. The same portable source compiles to all four.
+# One instance per target. The same portable source compiles to both.
 # Each instance carries provider/version plus
 # a `models:` override map, keyed by model name, for the
 # entries this target cannot run as defined in agent.yaml (N15). An override
@@ -29,31 +29,3 @@ targets:
     version: "1.7.0"
     # no model overrides: the agent.yaml defaults (SLNG + OpenAI + deepgram STT
     # + local silero VAD) run as defined
-
-  vapi:
-    provider: vapi
-    models:
-      # turn is integrated on Vapi; the vad entry is unused there. Endpointing
-      # intent comes from the conversation block, not from a bound model.
-      front_desk:
-        provider: elevenlabs
-        voice: cgSgspJ2msm6clMCkdW9
-      specialist:
-        provider: elevenlabs
-        voice: EXAVITQu4vr4xnSDxMaL
-
-  deepgram:
-    provider: deepgram
-    version: "1"
-    models:
-      # turn is integrated into listen on Deepgram: turn thresholds ride the
-      # transcriber override's params, because that is where Deepgram puts them.
-      transcriber:
-        model: flux
-        params:
-          eot_threshold: 0.7
-      # both voices below are Deepgram voices, or a fixed third-party list
-      front_desk:
-        model: aura-2-thalia-en
-      specialist:
-        model: aura-2-orion-en

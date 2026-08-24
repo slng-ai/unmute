@@ -541,8 +541,8 @@ func TestRunSelectTarget(t *testing.T) {
 	if got.Agent.Data.Target != "pipecat" {
 		t.Fatalf("target = %q", got.Agent.Data.Target)
 	}
-	if !strings.Contains(output.String(), "Vapi and Deepgram are unavailable") {
-		t.Fatalf("missing unavailable-driver explanation:\n%s", output.String())
+	if !strings.Contains(output.String(), "LiveKit and Pipecat both emit a runnable project") {
+		t.Fatalf("target picker does not say what the choice means:\n%s", output.String())
 	}
 }
 
@@ -1128,26 +1128,16 @@ func TestV31CatalogueHintUsesEntryArityAndLanguageSlot(t *testing.T) {
 	}
 }
 
-func TestV29UnavailableChoiceNamesGateAndOffersBack(t *testing.T) {
-	// Vapi still gates local tools; pipecat's gate lifted 2026-07-17 (T14).
-	var output bytes.Buffer
-	tool := scaffold.Tool{}
-	back, err := chooseToolExecution(newRunner(strings.NewReader("2\n1\n5\n"), &output, true), string(targetcap.Vapi), &tool)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !back {
-		t.Fatal("unavailable choice did not permit Back")
-	}
-	want := targetcap.Default().Capability(targetcap.FieldToolLocal, targetcap.Vapi).Note
-	if !strings.Contains(output.String(), want) || !strings.Contains(output.String(), "Identity → Target") || !strings.Contains(output.String(), "← Back") {
-		t.Fatalf("unavailable choice omitted exact gate, target guidance, or Back:\n%s", output.String())
-	}
-}
+// V29 covered the console's gated-choice affordance: name the exact gate, point
+// at Identity → Target, and still offer Back. Every tool-execution kind is now
+// `core` on both remaining targets, so no tool choice is gated and the scenario
+// cannot be built. The affordance itself is untouched in chooseToolExecution;
+// it simply has no tool field left to trigger it. Reintroducing coverage means
+// finding a gated field that the picker actually reads.
 
 func TestTUIMatchesCapabilityTable(t *testing.T) {
 	table := targetcap.Default()
-	providers := []targetcap.Provider{targetcap.LiveKit, targetcap.Pipecat, targetcap.Deepgram, targetcap.Vapi}
+	providers := targetcap.Providers
 	kindFields := map[targetcap.Field]bool{}
 	for _, kind := range toolExecutionKinds {
 		if kind.Field != "" {
@@ -1176,26 +1166,13 @@ func TestTUIMatchesCapabilityTable(t *testing.T) {
 }
 
 func TestV42ExecutionPickerDerivesFromTable(t *testing.T) {
-	// Gated: mcp on Deepgram surfaces the table row's own note, then Back.
-	// (Pipecat emits MCP sources since N40, so its row is no longer a gate.)
-	var output bytes.Buffer
-	tool := scaffold.Tool{Name: "book_table"}
-	back, err := chooseToolExecution(newRunner(strings.NewReader("3\n1\n5\n"), &output, true), string(targetcap.Deepgram), &tool)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !back {
-		t.Fatal("gated mcp choice did not permit Back")
-	}
-	note := targetcap.Default().Capability(targetcap.FieldToolMCP, targetcap.Deepgram).Note
-	if !strings.Contains(output.String(), note) || !strings.Contains(output.String(), "Identity → Target") {
-		t.Fatalf("gated mcp choice omitted the table note or target guidance:\n%s", output.String())
-	}
-
+	// The gated half of this test used mcp on Deepgram. Both remaining targets
+	// mark every tool-execution kind `core`, so only the available path is
+	// reachable; that is what is checked here.
 	// Available: mcp on LiveKit selects, clearing any local handler state.
-	output.Reset()
-	tool = scaffold.Tool{Name: "book_table", Execution: "local", Handler: "tools/book_table.py"}
-	back, err = chooseToolExecution(newRunner(strings.NewReader("3\n"), &output, true), string(targetcap.LiveKit), &tool)
+	var output bytes.Buffer
+	tool := scaffold.Tool{Name: "book_table", Execution: "local", Handler: "tools/book_table.py"}
+	back, err := chooseToolExecution(newRunner(strings.NewReader("3\n"), &output, true), string(targetcap.LiveKit), &tool)
 	if err != nil {
 		t.Fatal(err)
 	}

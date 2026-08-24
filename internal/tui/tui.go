@@ -227,7 +227,7 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 		}
 		switch choice {
 		case "target":
-			selected, back, err := runner.selectOne("Target / orchestrator", runner.describe("Vapi and Deepgram are unavailable: their generators are not implemented yet."), createTargetOptions(), true)
+			selected, back, err := runner.selectOne("Target / orchestrator", runner.describe("LiveKit and Pipecat both emit a runnable project."), createTargetOptions(), true)
 			if err != nil {
 				return Result{}, false, err
 			}
