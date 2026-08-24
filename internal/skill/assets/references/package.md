@@ -267,7 +267,7 @@ yet. `peak_sessions` and `max_sessions` must also be positive,
 be a positive Go duration such as `5m`.
 
 `provider` takes one of two values, `langfuse` or `coval`. Tracing works on the
-`pipecat` and `livekit` targets and is refused on `vapi` and `deepgram`.
+`pipecat` and `livekit` targets, which are the only two.
 
 | provider | secrets it needs | use it for |
 |---|---|---|
@@ -343,7 +343,7 @@ provider with different settings, for example `pipecat_twilio` and
 
 | Field | What it is |
 |---|---|
-| `provider` | `livekit`, `pipecat`, `vapi`, or `deepgram`; only the first two generate and run |
+| `provider` | `livekit` or `pipecat` |
 | `version` | required exact `x.y.z` framework version for code targets |
 | `pins` | LiveKit-only known package pins, name to semantic version |
 | `sdk_language` | `python` when written |
@@ -382,13 +382,15 @@ the entry instead of merging it, so repeat every field that entry needs.
 |---|---|---|
 | `pipecat` | yes | yes |
 | `livekit` | yes | yes |
-| `vapi` | yes | no |
-| `deepgram` | yes | no |
 
-Validation is deliberately wider than generation. A package can be checked
-against Vapi or Deepgram without a driver existing for them, and `unmute
-compile` fails by name for a provider with no driver. When you tell a user a
-target is supported, say which of the two you mean.
+Those are the only two. A provider earns a place here by having a driver that
+emits a runnable project, so validate and compile agree about what exists.
+
+`vapi` and `deepgram` used to be accepted as validation-only targets and were
+retired on 2026-08-24. Naming either as a target is refused. Note that
+`deepgram` is still a **model vendor** — `slng/deepgram/nova:3-en` and similar
+are unaffected. A target and a model vendor are different things that can share
+a word.
 
 LiveKit and Pipecat versions are exact three-part versions in this release's
 supported window. Unmute never widens the pin. `pins` accepts only packages the

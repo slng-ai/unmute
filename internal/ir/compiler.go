@@ -619,10 +619,8 @@ type Target struct {
 type Provider string
 
 const (
-	ProviderLiveKit  Provider = "livekit"
-	ProviderPipecat  Provider = "pipecat"
-	ProviderVapi     Provider = "vapi"
-	ProviderDeepgram Provider = "deepgram"
+	ProviderLiveKit Provider = "livekit"
+	ProviderPipecat Provider = "pipecat"
 )
 
 type Bindings struct {

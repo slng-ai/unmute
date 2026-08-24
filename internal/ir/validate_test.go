@@ -16,10 +16,10 @@ func TestValidateSafeCorePerTarget(t *testing.T) { // V5, V18
 	if err != nil {
 		t.Fatalf("%v: %#v", err, report.PerTarget)
 	}
-	if len(report.PerTarget) != 4 {
+	if len(report.PerTarget) != 2 {
 		t.Fatalf("target rows = %d", len(report.PerTarget))
 	}
-	for _, provider := range []Provider{ProviderLiveKit, ProviderPipecat, ProviderVapi, ProviderDeepgram} {
+	for _, provider := range []Provider{ProviderLiveKit, ProviderPipecat} {
 		if row := reportFor(report, provider); len(row.Errors) != 0 {
 			t.Fatalf("%s row has errors: %#v", provider, row)
 		}
@@ -30,10 +30,8 @@ func TestValidateAgentTransferAnnouncePerTarget(t *testing.T) {
 	agent := safeAgent(t)
 	agent.Controls["to_billing"].(*AgentTransfer).Announce = "I’ll connect you with billing."
 	for provider, wantError := range map[Provider]bool{
-		ProviderLiveKit:  false,
-		ProviderPipecat:  false,
-		ProviderVapi:     true,
-		ProviderDeepgram: true,
+		ProviderLiveKit: false,
+		ProviderPipecat: false,
 	} {
 		report, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
 		if (err != nil) != wantError {
@@ -118,7 +116,6 @@ func TestValidateTracingByTargetForEveryProvider(t *testing.T) { // V25
 		agent.Tracing = &Tracing{Provider: name}
 		for provider, wantError := range map[Provider]bool{
 			ProviderLiveKit: false, ProviderPipecat: false,
-			ProviderVapi: true, ProviderDeepgram: true,
 		} {
 			report, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
 			if (err != nil) != wantError {
@@ -143,7 +140,6 @@ func TestValidateLangfuseTracingByTarget(t *testing.T) { // V25
 	agent.Tracing = &Tracing{Provider: "langfuse"}
 	for provider, wantError := range map[Provider]bool{
 		ProviderLiveKit: false, ProviderPipecat: false,
-		ProviderVapi: true, ProviderDeepgram: true,
 	} {
 		report, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
 		if (err != nil) != wantError {
@@ -206,30 +202,11 @@ func TestValidateLiveKitSpeakEndpointGate(t *testing.T) {
 	}
 }
 
-func TestValidateUsesProviderVocabularyForGates(t *testing.T) { // V4, V11
-	agent := safeAgent(t)
-	agent.Conversation.ThinkingAudio = ThinkingSubtle
-	agent.Tasks["collect"] = Task{
-		Instructions: "collect", Result: map[string]ResultField{"done": {Type: PrimitiveBoolean}},
-		Context: TaskContext{History: HistoryFull},
-	}
-	agent.TaskGroups["collect_then_return"] = TaskGroup{
-		Steps: []string{"collect"}, ContextScope: ContextShared, Then: GroupReturn, Merge: GroupMergeResults,
-	}
-	report, err := Validate(agent, []Target{targetFor(agent, ProviderVapi)}, targetcap.Default())
-	if err == nil {
-		t.Fatal("expected gated validation error")
-	}
-	text := strings.Join(report.PerTarget[0].Errors, "\n")
-	for _, want := range []string{"Vapi has no faithful thinking-audio lowering", "Vapi state-preserving Squad return is unverified"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("missing %q in %q", want, text)
-		}
-	}
-	if strings.Contains(text, "return-to-prior-assistant") {
-		t.Fatalf("task-group steps must not trigger the single-task gate: %q", text)
-	}
-}
+// V4/V11's "a gate speaks the failing target's vocabulary" used to be shown
+// here with Vapi's thinking-audio and Squad-return gates. Both belonged to a
+// retired target. The property still holds and is covered wherever a live
+// driver gates something — see TestValidateBuiltinUnknownIDRejected and the
+// per-target rows in TestCompilerGolden.
 
 func TestValidateTaskGroupOverridesMemberContext(t *testing.T) {
 	agent := safeAgent(t)
@@ -247,16 +224,12 @@ func TestValidateTaskGroupOverridesMemberContext(t *testing.T) {
 	}
 }
 
-func TestValidateProvisionalFailsEveryTarget(t *testing.T) { // V6
-	caps := targetcap.Default()
-	for _, provider := range targetcap.Providers {
-		row := TargetValidation{Provider: Provider(provider)}
-		applyCapability(caps, targetcap.FieldFutureProvisional, provider, &row)
-		if len(row.Errors) != 1 {
-			t.Errorf("%s provisional errors = %v", provider, row.Errors)
-		}
-	}
-}
+// The V6 provisional-tag behaviour used to be exercised here through a
+// synthetic capability field (`future.provisional`) that existed only so this
+// test could reach the tag. The field is gone; the behaviour it stood in for is
+// covered end to end by TestValidateTelephonyProvisionalRouteIsUsableAndQuiet
+// below, against a real route. Do not reintroduce a synthetic field to "restore
+// coverage" that was never missing.
 
 func TestValidateContextPolicy(t *testing.T) { // V8
 	agent := safeAgent(t)
@@ -324,33 +297,19 @@ func TestValidateTelephonyRequiresPeakStartRateWithoutConnection(t *testing.T) {
 	agent := safeAgent(t)
 	agent.Channels["phone"] = testTelephonyChannel()
 	agent.Capacity.PeakStartsPerSecond = 0
-	report, err := Validate(agent, []Target{targetFor(agent, ProviderVapi)}, targetcap.Default())
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
 	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "capacity.peak_starts_per_second must be positive for telephony") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
 	}
 }
 
-func TestValidateOutboundRequiresSatisfiableVariablesAndWarnsOnDeepgram(t *testing.T) { // V13
-	agent := safeAgent(t)
-	phone := testTelephonyChannel()
-	outbound := true
-	phone.Outbound = &outbound
-	phone.OnVoicemail = VoicemailLeaveMessage
-	agent.Channels["phone"] = phone
-	agent.Variables["campaign_id"] = Variable{Type: PrimitiveString, Source: VariableSourceCallStart}
-	target := targetFor(agent, ProviderDeepgram)
-	report, err := Validate(agent, []Target{target}, targetcap.Default())
-	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "not satisfiable") {
-		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
-	}
-	variable := agent.Variables["campaign_id"]
-	variable.Default = "campaign"
-	agent.Variables["campaign_id"] = variable
-	report, err = Validate(agent, []Target{target}, targetcap.Default())
-	if err != nil || !strings.Contains(strings.Join(report.PerTarget[0].Warnings, "\n"), "carrier-conditional") {
-		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
-	}
-}
+// V13's outbound-variable-satisfiability check used to run here against the
+// deepgram target. It needed a target that is neither LiveKit nor Pipecat,
+// because validateChannels errors and skips the rest of the channel when either
+// of those has a telephony channel with no resolved Connection plan. With both
+// managed targets retired there is no such target, so the scenario cannot be
+// constructed and the branch it exercised is now unreachable for a telephony
+// channel. Removing that branch is a separate change from retiring a provider.
 
 // The four capability rows that used to gate Vapi and Deepgram on their target's
 // carrier lost that condition when `carrier` left the target, because no author
@@ -368,7 +327,7 @@ func TestDriverlessProvidersResolveTransfersWithNoCarrier(t *testing.T) {
 	phone.Outbound = &outbound
 	agent.Channels["phone"] = phone
 
-	for _, provider := range []Provider{ProviderVapi, ProviderDeepgram} {
+	for _, provider := range []Provider{ProviderLiveKit, ProviderPipecat} {
 		target := targetFor(agent, provider)
 		if target.Carrier != "" {
 			t.Fatalf("%s carries a carrier %q; this feature removed the field from every target", provider, target.Carrier)
@@ -627,13 +586,8 @@ func TestValidateWebhookAuthSchemes(t *testing.T) {
 		}
 	})
 
-	t.Run("gated on Vapi in provider words", func(t *testing.T) {
-		agent := withToolAuth(t, bearerAuth())
-		report, err := Validate(agent, []Target{targetFor(agent, ProviderVapi)}, targetcap.Default())
-		if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "Vapi") {
-			t.Fatalf("webhook auth on Vapi must gate in Vapi vocabulary: err=%v report=%#v", err, report.PerTarget)
-		}
-	})
+	// A "gated on Vapi, in Vapi's words" subtest stood here. Webhook auth is
+	// supported on both remaining drivers, so there is no denial to word.
 }
 
 // makeBuiltin rewrites an existing safe_core tool into a clean end_call
@@ -657,14 +611,8 @@ func TestValidateBuiltinEndCallPassesOnLiveKit(t *testing.T) {
 	}
 }
 
-func TestValidateBuiltinDeniedOnVapiInProviderWords(t *testing.T) {
-	agent := safeAgent(t)
-	makeBuiltin(agent, "lookup_customer")
-	report, err := Validate(agent, []Target{targetFor(agent, ProviderVapi)}, targetcap.Default())
-	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "Vapi") {
-		t.Fatalf("builtin on Vapi must gate in Vapi vocabulary: err=%v report=%#v", err, report.PerTarget)
-	}
-}
+// Builtin tools were gated on Vapi, in Vapi's words. That target is retired and
+// both remaining drivers support builtins, so there is no denial left to word.
 
 func TestValidateBuiltinUnknownIDRejected(t *testing.T) {
 	agent := safeAgent(t)
@@ -713,17 +661,10 @@ func TestValidateBuiltinRejectsConflictingEffect(t *testing.T) {
 	}
 }
 
-func TestValidateNestedResultChecksEveryConfiguredTarget(t *testing.T) {
-	agent := safeAgent(t)
-	agent.Tasks["nested"] = Task{
-		Instructions: "nested", Result: map[string]ResultField{"payload": {Schema: map[string]any{"type": "object"}}},
-		Context: TaskContext{History: HistoryFull},
-	}
-	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
-	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), `configured target "vapi"`) {
-		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
-	}
-}
+// The "every configured target is checked, not just the one being validated"
+// property used to be shown by a nested result gated on the vapi instance in
+// the fixture. TestValidateNestedResultRejectsUnknownConfiguredProvider below
+// shows the same property with a provider name that cannot go stale.
 
 func TestValidateNestedResultRejectsUnknownConfiguredProvider(t *testing.T) {
 	agent := safeAgent(t)
@@ -763,9 +704,7 @@ func TestT16_ListenFallbackGatesPerTarget(t *testing.T) {
 		t.Fatalf("livekit must accept listen fallback; err=%v report=%#v", err, report.PerTarget)
 	}
 	for provider, want := range map[Provider]string{
-		ProviderPipecat:  "does not emit listen fallback yet",
-		ProviderVapi:     "no documented transcriber fallback slot",
-		ProviderDeepgram: "single provider; there is no fallback slot",
+		ProviderPipecat: "does not emit listen fallback yet",
 	} {
 		report, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
 		if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), want) {
@@ -779,17 +718,22 @@ func TestValidateFallbackUsesConfiguredSlotKind(t *testing.T) {
 	profile := agent.Models["fast_reasoning"]
 	profile.Fallback = []string{"careful_reasoning"}
 	agent.Models["fast_reasoning"] = profile
-	target := targetFor(agent, ProviderVapi)
+	target := targetFor(agent, ProviderLiveKit)
 	binding := target.Models.Reason["careful_reasoning"]
 	binding.Provider = "anthropic"
 	target.Models.Reason["careful_reasoning"] = binding
 
+	// The gate is a property of the slot kind, not of a provider name. It used
+	// to be shown on a target whose configured slot was same-provider; both such
+	// targets are retired, so the slot is set here instead, which is what the
+	// test was always about.
 	caps := targetcap.Default()
+	caps.FallbackSlots[targetcap.Provider(target.Provider)] = targetcap.FallbackSameProvider
 	report, err := Validate(agent, []Target{target}, caps)
 	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "stay within one provider") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
 	}
-	caps.FallbackSlots[targetcap.Vapi] = targetcap.FallbackProvider
+	caps.FallbackSlots[targetcap.Provider(target.Provider)] = targetcap.FallbackProvider
 	report, err = Validate(agent, []Target{target}, caps)
 	if err != nil || strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "stay within one provider") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
@@ -802,9 +746,9 @@ func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { 
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 4 targets x (listen + turn + 2 speak + 2 reason): the package-wide turn
-	// preference now reaches integrated-turn targets too (warned, not dropped).
-	if len(report.ForwardedBindings) != 24 {
+	// 2 targets x (listen + turn + 2 speak + 2 reason): the package-wide turn
+	// preference reaches every target (warned, not dropped).
+	if len(report.ForwardedBindings) != 12 {
 		t.Fatalf("forwarded bindings = %d", len(report.ForwardedBindings))
 	}
 	foundTemperature := false
@@ -818,8 +762,8 @@ func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { 
 	if !foundTemperature {
 		t.Fatal("forwarded temperature param is missing")
 	}
-	// 4 targets x (workers + gpus + realtime_audio concurrency + session-time) = 16.
-	if len(report.Sizing) != 16 {
+	// 2 targets x (workers + gpus + realtime_audio concurrency + session-time) = 8.
+	if len(report.Sizing) != 8 {
 		t.Fatalf("sizing lines = %d", len(report.Sizing))
 	}
 	for _, line := range report.Sizing {
@@ -827,10 +771,14 @@ func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { 
 			t.Fatalf("sizing line = %#v", line)
 		}
 	}
+	// Sizing is reported alongside errors, not instead of them. A bare telephony
+	// channel with no resolved Connection plan is itself an error on every
+	// remaining target, so the error is expected here; what is under test is
+	// that the sizing lines still switch to the telephony basis.
 	agent.Channels = map[string]Channel{"phone": testTelephonyChannel()}
-	report, err = Validate(agent, []Target{targetFor(agent, ProviderVapi)}, targetcap.Default())
-	if err != nil || len(report.Sizing) != 5 {
-		t.Fatalf("telephony-only sizing: err=%v lines=%#v", err, report.Sizing)
+	report, _ = Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	if len(report.Sizing) != 5 {
+		t.Fatalf("telephony-only sizing lines=%#v", report.Sizing)
 	}
 	for _, line := range report.Sizing {
 		if strings.Contains(line.Metric, "realtime_audio") {
@@ -1625,7 +1573,6 @@ func TestValidateDeploymentRegions(t *testing.T) { // N32
 		{"several on livekit", ProviderLiveKit, []string{"us-east", "eu-central"}, ""},
 		{"none", ProviderLiveKit, nil, ""},
 		{"several on pipecat", ProviderPipecat, []string{"us-west", "us-east"}, "globally unique across regions"},
-		{"several on vapi", ProviderVapi, []string{"us-west", "us-east"}, "Vapi has no per-region deployment"},
 		{"duplicate", ProviderLiveKit, []string{"us-east", "us-east"}, `lists "us-east" twice`},
 		{"empty entry", ProviderLiveKit, []string{"us-east", ""}, "empty entry"},
 	} {
@@ -2025,10 +1972,8 @@ func TestValidateToolAnnouncePerTarget(t *testing.T) {
 	tool.Announce = "Let me look that up."
 	agent.Tools["lookup_customer"] = tool
 	for provider, wantError := range map[Provider]bool{
-		ProviderLiveKit:  false,
-		ProviderPipecat:  false,
-		ProviderVapi:     true,
-		ProviderDeepgram: true,
+		ProviderLiveKit: false,
+		ProviderPipecat: false,
 	} {
 		report, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
 		if (err != nil) != wantError {
@@ -2438,10 +2383,13 @@ func TestValidateSlngRouterFieldsHaveNoSlotElsewhere(t *testing.T) {
 // FR-001 and FR-014: a target with no slng reason row refuses in its own
 // vocabulary rather than falling through to whatever its wildcard row is.
 func TestValidateSlngRouterNeedsARowOnTheTarget(t *testing.T) {
+	// Both remaining targets carry an slng reason row, which is the case this
+	// used to prove by contrast against the two retired targets that did not.
+	// Assert the positive: the row exists, so the binding is accepted.
 	agent := routerAgent(t, nil)
-	for _, provider := range []Provider{ProviderVapi, ProviderDeepgram} {
-		if got := routerErrors(t, agent, provider); got == "" {
-			t.Errorf("%s accepted a router think binding with no catalogue row", provider)
+	for _, provider := range []Provider{ProviderLiveKit, ProviderPipecat} {
+		if got := routerErrors(t, agent, provider); got != "" {
+			t.Errorf("%s has an slng reason row but refused the binding: %s", provider, got)
 		}
 	}
 }

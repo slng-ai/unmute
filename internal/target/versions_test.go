@@ -78,8 +78,9 @@ func TestCheckVersionAgainstWindow(t *testing.T) {
 		{name: "not a version", provider: LiveKit, version: "latest", wantErr: "not a semantic version"},
 		{name: "empty", provider: LiveKit, version: "", wantErr: "requires a framework version"},
 
-		// A provider with no driver has no window to be outside of.
-		{name: "driverless provider", provider: Vapi, version: "9.9.9"},
+		// An unknown provider has no window to be outside of. Every provider in
+		// Providers now has a driver, so this case uses a name that is not one.
+		{name: "unknown provider", provider: Provider("nothing-here"), version: "9.9.9"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

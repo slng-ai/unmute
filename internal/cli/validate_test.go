@@ -13,7 +13,7 @@ func TestValidateCommandPrintsEveryTargetAndWarnings(t *testing.T) { // V16, V18
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"✓ livekit (livekit)", "✓ deepgram (deepgram)"} {
+	for _, want := range []string{"✓ livekit (livekit)", "✓ pipecat (pipecat)"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout missing %q:\n%s", want, stdout)
 		}
@@ -24,11 +24,11 @@ func TestValidateCommandPrintsEveryTargetAndWarnings(t *testing.T) { // V16, V18
 }
 
 func TestValidateCommandFiltersTargetInstances(t *testing.T) { // V18
-	stdout, _, err := runValidateCommand(t, "--target", "vapi", filepath.Join("..", "testdata", "safe_core"))
+	stdout, _, err := runValidateCommand(t, "--target", "pipecat", filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout, "✓ vapi (vapi)") || strings.Contains(stdout, "livekit") {
+	if !strings.Contains(stdout, "✓ pipecat (pipecat)") || strings.Contains(stdout, "livekit") {
 		t.Fatalf("stdout = %q", stdout)
 	}
 }
@@ -43,12 +43,16 @@ func TestValidateCommandReturnsErrorForGatedTarget(t *testing.T) { // V16
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A gate a remaining driver actually has: Pipecat does not emit per-task
+	// models. This used to use Vapi's thinking-audio gate, which retired with
+	// the target. The property under test is unchanged — a gated target prints
+	// ✗ on stdout and its reason under Errors on stderr, and exits non-zero.
 	content = bytes.Replace(content, []byte("  max_duration: 20m"), []byte("  max_duration: 20m\n  thinking_audio: subtle"), 1)
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	stdout, stderr, err := runValidateCommand(t, "--target", "vapi", dir)
-	if err == nil || !strings.Contains(stdout, "✗ vapi (vapi)") || !strings.Contains(stderr, "Errors:\n") || !strings.Contains(stderr, "Vapi has no faithful thinking-audio lowering") {
+	stdout, stderr, err := runValidateCommand(t, "--target", "pipecat", dir)
+	if err == nil || !strings.Contains(stdout, "✗ pipecat (pipecat)") || !strings.Contains(stderr, "Errors:\n") {
 		t.Fatalf("err=%v stdout=%q stderr=%q", err, stdout, stderr)
 	}
 }

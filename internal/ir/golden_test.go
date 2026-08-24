@@ -88,7 +88,11 @@ func thenReturnGolden(t *testing.T) compilerGoldenCase {
 	agent.TaskGroups["collect_then_return"] = TaskGroup{
 		Steps: []string{"collect"}, ContextScope: ContextShared, Then: GroupReturn, Merge: GroupMergeResults,
 	}
-	return compilerGoldenCase{"then_return", agent, []Target{targetFor(agent, ProviderVapi)}, true}
+	// wantFail was true while this ran against the vapi target, whose driver
+	// gated group-return shaping. That target is retired; Pipecat shapes it, so
+	// the case now validates. The case still earns its place: it is the only
+	// cover for then/merge on a group.
+	return compilerGoldenCase{"then_return", agent, []Target{targetFor(agent, ProviderPipecat)}, false}
 }
 
 func historyGolden(t *testing.T) compilerGoldenCase {
@@ -99,14 +103,14 @@ func historyGolden(t *testing.T) compilerGoldenCase {
 
 func localPlacementGolden(t *testing.T) compilerGoldenCase {
 	agent := safeAgent(t)
-	// A local listen model on a managed target: derived placement is local, which
-	// they cannot host (N15). Each Target is a copy, so setting Listen is isolated.
+	// A local listen model: derived placement is local (N15). Each Target is a
+	// copy, so setting Listen is isolated.
 	local := &Binding{Provider: "local", Model: "whisper-large-v3", Placement: PlacementLocal}
-	vapi := targetFor(agent, ProviderVapi)
-	vapi.Models.Listen = local
-	deepgram := targetFor(agent, ProviderDeepgram)
-	deepgram.Models.Listen = local
-	return compilerGoldenCase{"local_listen", agent, []Target{vapi, deepgram}, true}
+	pipecat := targetFor(agent, ProviderPipecat)
+	pipecat.Models.Listen = local
+	livekit := targetFor(agent, ProviderLiveKit)
+	livekit.Models.Listen = local
+	return compilerGoldenCase{"local_listen", agent, []Target{pipecat, livekit}, true}
 }
 
 func mcpGolden(t *testing.T) compilerGoldenCase {
@@ -115,11 +119,11 @@ func mcpGolden(t *testing.T) compilerGoldenCase {
 	tool.Execution = ToolMCP
 	tool.URLEnv = ""
 	agent.Tools["lookup_customer"] = tool
-	return compilerGoldenCase{"mcp", agent, []Target{targetFor(agent, ProviderDeepgram)}, true}
+	return compilerGoldenCase{"mcp", agent, []Target{targetFor(agent, ProviderPipecat)}, true}
 }
 
 func thinkingAudioGolden(t *testing.T) compilerGoldenCase {
 	agent := safeAgent(t)
 	agent.Conversation.ThinkingAudio = ThinkingSubtle
-	return compilerGoldenCase{"thinking_audio", agent, []Target{targetFor(agent, ProviderVapi), targetFor(agent, ProviderDeepgram)}, true}
+	return compilerGoldenCase{"thinking_audio", agent, []Target{targetFor(agent, ProviderPipecat), targetFor(agent, ProviderLiveKit)}, true}
 }

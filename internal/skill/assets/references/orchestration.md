@@ -431,13 +431,9 @@ Raise these **before** you write files, not after validate fails.
 | Shape or option | Refused on | What it says |
 |---|---|---|
 | `model:` on a task | Pipecat | the Pipecat driver does not emit per-task model yet |
-| `include_tool_calls: false` on a transfer context | Pipecat, Vapi | the Pipecat driver does not shape transfer context yet |
-| a variables subset on a transfer context | Pipecat, Vapi | Pipecat accepts context, not a subset. Vapi accepts `variables: all` only |
+| `include_tool_calls: false` on a transfer context | Pipecat | the Pipecat driver does not shape transfer context yet |
+| a variables subset on a transfer context | Pipecat | Pipecat accepts context, not a subset |
 | `task_groups` | LiveKit warns | LiveKit TaskGroup is experimental. It compiles and runs |
-| `tasks` at all | Vapi | Vapi return-to-prior-assistant is unverified |
-| `context_scope: isolated` | Vapi | Vapi cannot isolate task-group context |
-| `requires:` on a transfer | Vapi | Vapi has no machine-checked transfer guard |
-| a nested task result | Vapi | Vapi cannot enforce nested task results |
 
 ### Task history by target
 

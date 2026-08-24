@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/huh"
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/scaffold"
 	packagespec "github.com/slng-ai/unmute/internal/spec"
@@ -44,7 +43,7 @@ func discoverPackages(root string) ([]string, error) {
 			found = append(found, path)
 		}
 	}
-	sort.Strings(found)
+	slices.Sort(found)
 	return found, nil
 }
 
@@ -54,13 +53,13 @@ func openExisting(runner *fieldRunner) error {
 		if err != nil {
 			return fmt.Errorf("discover packages: %w", err)
 		}
-		options := make([]huh.Option[string], 0, len(paths)+2)
+		options := make([]menuChoice, 0, len(paths)+2)
 		for _, path := range paths {
-			options = append(options, huh.NewOption(filepath.Base(path), path))
+			options = append(options, newChoice(filepath.Base(path), path))
 		}
 		options = append(options,
-			huh.NewOption("Enter a path manually", "manual"),
-			huh.NewOption("← Back", actionBack),
+			newChoice("Enter a path manually", "manual"),
+			newChoice("← Back", actionBack),
 		)
 		choice, _, err := runner.selectOne("Open an existing agent", "", options, true)
 		if err != nil {
@@ -208,8 +207,8 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 				value.AttachTasks = append(value.AttachTasks, taskName)
 			}
 		}
-		sort.Strings(value.AttachTo)
-		sort.Strings(value.AttachTasks)
+		slices.Sort(value.AttachTo)
+		slices.Sort(value.AttachTasks)
 		data.Tools = append(data.Tools, value)
 	}
 
@@ -479,10 +478,10 @@ func editMaintained(runner *fieldRunner, agent *maintainedAgent) error {
 	for {
 		options := editorSectionOptions(agent.data)
 		options = append(options,
-			huh.NewOption("Validate", "validate"),
-			huh.NewOption("Compile", "compile"),
-			huh.NewOption("Save", "save"),
-			huh.NewOption("← Back", actionBack),
+			newChoice("Validate", "validate"),
+			newChoice("Compile", "compile"),
+			newChoice("Save", "save"),
+			newChoice("← Back", actionBack),
 		)
 		choice, _, err := runner.selectOne(agent.data.Name, "Maintain existing package; Save regenerates confirmed package files.", options, true)
 		if err != nil {
@@ -645,8 +644,8 @@ func affectedFiles(root, candidate string, created []string) ([]string, []string
 			removals = append(removals, rel)
 		}
 	}
-	sort.Strings(affected)
-	sort.Strings(removals)
+	slices.Sort(affected)
+	slices.Sort(removals)
 	return affected, removals, nil
 }
 
@@ -673,7 +672,7 @@ func knownPackageFiles(root string) ([]string, error) {
 			return nil, err
 		}
 	}
-	sort.Strings(files)
+	slices.Sort(files)
 	return files, nil
 }
 
@@ -691,8 +690,8 @@ func confirmRewrite(runner *fieldRunner, affected, removals, losses []string) (b
 			lines = append(lines, "- "+loss)
 		}
 	}
-	choice, back, err := runner.selectOne("Save regenerated package?", runner.describe(strings.Join(lines, "\n")), []huh.Option[string]{
-		huh.NewOption("Rewrite listed files", "confirm"), huh.NewOption("← Back", actionBack),
+	choice, back, err := runner.selectOne("Save regenerated package?", runner.describe(strings.Join(lines, "\n")), []menuChoice{
+		newChoice("Rewrite listed files", "confirm"), newChoice("← Back", actionBack),
 	}, true)
 	return err == nil && !back && choice == "confirm", err
 }

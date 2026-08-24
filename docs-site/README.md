@@ -28,11 +28,11 @@ mint a11y                                               # contrast and media alt
    `internal/target/catalog_*.go` is the provider truth.
 2. **Every YAML snippet was run through `./bin/unmute validate`** in a scratch
    package, and every example the site names validates and compiles.
-3. **Only two targets generate and run here**: Pipecat and LiveKit Agents.
-   Vapi and Deepgram may appear in the configuration reference only as
-   validation-only provider values; never present them as deployable runtimes.
-   ElevenLabs and Deepgram also appear as model vendors where the catalog lists
-   them.
+3. **There are two targets**: Pipecat and LiveKit Agents. Those are the only
+   values `provider` accepts. Vapi and Deepgram were retired as targets on
+   2026-08-24; do not reintroduce them. Deepgram and ElevenLabs still appear as
+   *model vendors* where the catalog lists them, which is a different thing from
+   a target and must not be written as one.
 4. **Plain language, short sentences, no em or en dashes as punctuation.**
 5. **Pages state what the product does and what the CLI prints.** Notes about
    how an author checked the documentation belong in the pull request, not the

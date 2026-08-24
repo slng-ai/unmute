@@ -24,7 +24,7 @@ func TestV49ConsoleFrameGolden(t *testing.T) {
 				{label: "Behavior"}, {label: "Integrations"}, {label: "Lifecycle"},
 			},
 		},
-		choices: []choice{
+		choices: []menuChoice{
 			{"Listen (STT)  ·  deepgram", "listen"},
 			{"Reason (LLM)  ·  openai", "reason"},
 			{"Speak (TTS)  ·  cartesia", "speak"},

@@ -126,9 +126,8 @@ build.
 
 **Never edit `build/`.** It is rewritten on every compile. Change the package.
 
-Generation reaches only providers with a shipped driver. Pipecat and LiveKit
-generate. Vapi and Deepgram validate and then fail by name at compile, which is
-the honest behaviour, not a bug.
+A provider is a target only when a driver emits a runnable project for it.
+Pipecat and LiveKit are the two. Naming anything else is refused at validate.
 
 ## Talk to it
 

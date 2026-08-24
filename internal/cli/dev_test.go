@@ -573,19 +573,27 @@ func TestSelectDevTargetRequiresNameForMultipleWithoutTTY(t *testing.T) {
 // It stays registered and hidden precisely so this message is possible: an
 // author with `--console` in their shell history gets told the mode moved,
 // not cobra's bare "unknown flag".
+// TestDevConsoleRemoved pins that --console is gone from the command surface.
+//
+// It used to assert the opposite of what it asserts now. The flag was kept
+// registered and hidden, rejecting with a bespoke "--console was removed"
+// message, on the reasoning that cobra's bare "unknown flag" would leave an
+// author unsure whether they had misremembered the name. Feature 018 retired
+// that tombstone: the mode has been gone long enough that a registered flag
+// whose only behaviour is announcing its own absence is upkeep with no reader.
+// Cobra's own error names the flag, which is the information that was missing.
 func TestDevConsoleRemoved(t *testing.T) {
 	dir := copySafeCore(t)
 	_, err := run(t, "dev", dir, "--target", "pipecat", "--console")
 	if err == nil {
 		t.Fatal("--console must fail; it was removed")
 	}
-	for _, want := range []string{"--console was removed", "browser"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("removed-flag error %q must mention %q", err, want)
-		}
+	// Cobra names the flag, so the author still learns which flag was wrong.
+	if !strings.Contains(err.Error(), "console") {
+		t.Errorf("removed-flag error %q must still name the flag", err)
 	}
-	if strings.Contains(err.Error(), "unknown flag") {
-		t.Errorf("removed-flag error fell through to cobra: %v", err)
+	if !strings.Contains(err.Error(), "unknown flag") {
+		t.Errorf("expected cobra's unknown-flag error now that the tombstone is gone, got: %v", err)
 	}
 }
 
@@ -632,15 +640,10 @@ func TestDevToRejectsInboundOnlyTarget(t *testing.T) {
 	}
 }
 
-// TestDevWebRejectsManagedProvider: a managed provider has no local dev runner
-// and is refused before generation or any Docker preflight (SPEC I.dev).
-func TestDevWebRejectsManagedProvider(t *testing.T) {
-	dir := copySafeCore(t)
-	_, err := run(t, "dev", dir, "--target", "vapi")
-	if err == nil || !strings.Contains(err.Error(), "its dev runner is not implemented") {
-		t.Fatalf("vapi dev error = %v", err)
-	}
-}
+// `dev` used to refuse the managed target with "its dev runner is not
+// implemented". Both managed targets are retired, so every declared target now
+// has a dev runner and there is nothing to refuse. An undeclared instance is
+// still refused — see TestSelectDevTargetRejectsUnknownInstance below.
 
 func TestSelectDevTargetRejectsUnknownInstance(t *testing.T) {
 	dir := copySafeCore(t)

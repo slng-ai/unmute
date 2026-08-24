@@ -1,21 +1,3 @@
-=== deepgram listen deepgram ===
-matrix row (no code injection)
-
-=== deepgram speak aws_polly ===
-matrix row (no code injection)
-
-=== deepgram speak cartesia ===
-matrix row (no code injection)
-
-=== deepgram speak deepgram ===
-matrix row (no code injection)
-
-=== deepgram speak elevenlabs ===
-matrix row (no code injection)
-
-=== deepgram speak openai ===
-matrix row (no code injection)
-
 === livekit listen assemblyai ===
 binding:  provider=assemblyai model=model-1
 class:    assemblyai.STT

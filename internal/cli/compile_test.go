@@ -240,8 +240,11 @@ func TestCompileSurfacesPerTargetDiagnostics(t *testing.T) {
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The diagnostic this surfaced was Vapi's thinking-audio gate. That target
+	// is retired; naming it now fails as an undeclared instance, which is still
+	// compile reporting a per-target problem rather than a bare exit code.
 	_, _, err = runCompileCommand(t, "--target", "vapi", dir)
-	if err == nil || !strings.Contains(err.Error(), "Vapi has no faithful thinking-audio lowering") {
+	if err == nil || !strings.Contains(err.Error(), `target instance "vapi" is not declared`) {
 		t.Fatalf("err = %v", err)
 	}
 }

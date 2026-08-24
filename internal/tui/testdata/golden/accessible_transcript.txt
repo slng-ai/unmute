@@ -1,0 +1,46 @@
+=== select (input "2\n")
+Models 
+1. Listen (STT)  ·  deepgram
+2. Reason (LLM)  ·  openai
+3. ← Back
+Enter a number between 1 and 3: 
+
+--- end ---
+
+=== select_not_backable (input "1\n")
+Target 
+1. pipecat
+2. livekit
+Enter a number between 1 and 2: 
+
+--- end ---
+
+=== input (input "remy\n")
+Lowercase, no spaces.
+Type :back to return.
+Agent name 
+
+--- end ---
+
+=== input_back (input ":back\n")
+Lowercase, no spaces.
+Type :back to return.
+Agent name 
+
+--- end ---
+
+=== text (input "You are helpful.\n")
+What the agent should do.
+Type :back to return.
+Instructions 
+
+--- end ---
+
+=== confirm (input "1\n")
+Delete variable caller_name? 
+1. Delete
+2. ← Back
+Enter a number between 1 and 2: 
+
+--- end ---
+

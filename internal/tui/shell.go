@@ -47,7 +47,14 @@ const (
 	kindText
 )
 
-type choice struct{ label, value string }
+// menuChoice is one option in a menu: what the reader sees, and what the flow
+// gets back. Both renderers consume it directly — the interactive model and the
+// accessible prompt loop — so there is no second option type and nothing to
+// convert between them.
+type menuChoice struct{ label, value string }
+
+// newChoice reads as a call at the hundreds of sites that build menus.
+func newChoice(label, value string) menuChoice { return menuChoice{label: label, value: value} }
 
 // sideItem is one row of the section sidebar.
 type sideItem struct {
@@ -71,7 +78,7 @@ type fieldReq struct {
 	kind     fieldKind
 	title    string
 	desc     string
-	choices  []choice
+	choices  []menuChoice
 	initial  string
 	backable bool
 	validate func(string) error

@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
@@ -80,14 +79,14 @@ func TestRunQuit(t *testing.T) {
 
 func TestV23HomeHeroShowsWordmark(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
-	view := renderField(t, 90, 24, fieldReq{kind: kindSelect, ctx: viewCtx{hero: true}, choices: []choice{{"Create a new agent", actionCreate}, {"Quit", actionQuit}}})
+	view := renderField(t, 90, 24, fieldReq{kind: kindSelect, ctx: viewCtx{hero: true}, choices: []menuChoice{{"Create a new agent", actionCreate}, {"Quit", actionQuit}}})
 	if !strings.Contains(view, "UNMUTE//") {
 		t.Fatalf("home hero omits Unmute wordmark:\n%s", view)
 	}
 }
 
 func TestV23HeaderBadgeShownOnEditorScreens(t *testing.T) {
-	view := renderField(t, 90, 24, fieldReq{kind: kindSelect, title: "Models", backable: true, ctx: viewCtx{breadcrumb: "Create › Models"}, choices: []choice{{"Listen", "listen"}, {"← Back", actionBack}}})
+	view := renderField(t, 90, 24, fieldReq{kind: kindSelect, title: "Models", backable: true, ctx: viewCtx{breadcrumb: "Create › Models"}, choices: []menuChoice{{"Listen", "listen"}, {"← Back", actionBack}}})
 	if !strings.Contains(view, "UNMUTE//") {
 		t.Fatalf("editor header omits Unmute badge:\n%s", view)
 	}
@@ -96,8 +95,8 @@ func TestV23HeaderBadgeShownOnEditorScreens(t *testing.T) {
 func TestV26LogoRendersInsideProgram(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	screens := map[string]string{
-		"home":   renderField(t, 90, 24, fieldReq{kind: kindSelect, ctx: viewCtx{hero: true}, choices: []choice{{"Quit", actionQuit}}}),
-		"editor": renderField(t, 90, 24, fieldReq{kind: kindSelect, title: "Models", backable: true, choices: []choice{{"Listen", "l"}, {"← Back", actionBack}}}),
+		"home":   renderField(t, 90, 24, fieldReq{kind: kindSelect, ctx: viewCtx{hero: true}, choices: []menuChoice{{"Quit", actionQuit}}}),
+		"editor": renderField(t, 90, 24, fieldReq{kind: kindSelect, title: "Models", backable: true, choices: []menuChoice{{"Listen", "l"}, {"← Back", actionBack}}}),
 	}
 	for name, view := range screens {
 		if !strings.Contains(view, "UNMUTE//") {
@@ -128,7 +127,7 @@ func TestInteractivePathImportsNoHuh(t *testing.T) {
 		}
 		for _, imp := range parsed.Imports {
 			if strings.Contains(imp.Path.Value, "charmbracelet/huh") {
-				t.Errorf("%s imports huh; the interactive path must stay huh-free", file)
+				t.Errorf("%s imports huh; the console depends on no form library at all now", file)
 			}
 		}
 	}
@@ -154,7 +153,7 @@ func TestV33NoticeRendersScrollableOutput(t *testing.T) {
 func TestV35InteractiveMenuDefaultsToFirstRow(t *testing.T) {
 	req := fieldReq{
 		kind: kindSelect, title: "Variables", backable: true, initial: "type",
-		choices: []choice{{"Type  ·  string", "type"}, {"Default  ·  —", "default"}, {"← Back", actionBack}},
+		choices: []menuChoice{{"Type  ·  string", "type"}, {"Default  ·  —", "default"}, {"← Back", actionBack}},
 	}
 	view := renderField(t, 90, 24, req)
 	if !strings.Contains(view, "› Type") {
@@ -186,7 +185,7 @@ func TestV45PaletteOpensAndFuzzyFilters(t *testing.T) {
 	sized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	withReq, _ := sized.(console).Update(requestMsg{ok: true, request: fieldReq{
 		kind: kindSelect, title: "Menu", backable: true,
-		choices: []choice{{"Identity", "i"}, {"Models", "m"}, {"Behavior", "b"}, {"← Back", actionBack}},
+		choices: []menuChoice{{"Identity", "i"}, {"Models", "m"}, {"Behavior", "b"}, {"← Back", actionBack}},
 	}})
 	opened, _ := withReq.(console).Update(tea.KeyMsg{Type: tea.KeyCtrlP})
 	typed := opened.(console)
@@ -211,7 +210,7 @@ func TestV45EveryActionIsInPalette(t *testing.T) {
 	sized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	withReq, _ := sized.(console).Update(requestMsg{ok: true, request: fieldReq{
 		kind: kindSelect, title: "Menu", backable: true,
-		choices: []choice{{"Identity", "i"}, {"Models", "m"}, {"Lifecycle", "l"}, {"← Back", actionBack}},
+		choices: []menuChoice{{"Identity", "i"}, {"Models", "m"}, {"Lifecycle", "l"}, {"← Back", actionBack}},
 	}})
 	opened, _ := withReq.(console).Update(tea.KeyMsg{Type: tea.KeyCtrlP})
 	view := opened.(console).View()
@@ -226,7 +225,7 @@ func TestV46BreakpointsPickLayout(t *testing.T) {
 	req := fieldReq{
 		kind: kindSelect, title: "Models", backable: true,
 		ctx:     viewCtx{sidebar: []sideItem{{label: "Identity", active: true}}},
-		choices: []choice{{"Listen", "l"}, {"← Back", actionBack}},
+		choices: []menuChoice{{"Listen", "l"}, {"← Back", actionBack}},
 	}
 	if wide := renderField(t, 100, 24, req); !strings.Contains(wide, "SECTIONS") {
 		t.Errorf("wide layout should show the sidebar:\n%s", wide)
@@ -237,7 +236,7 @@ func TestV46BreakpointsPickLayout(t *testing.T) {
 }
 
 func TestV46TooSmallShowsMessage(t *testing.T) {
-	view := renderField(t, 40, 12, fieldReq{kind: kindSelect, title: "X", choices: []choice{{"a", "a"}}})
+	view := renderField(t, 40, 12, fieldReq{kind: kindSelect, title: "X", choices: []menuChoice{{"a", "a"}}})
 	if !strings.Contains(strings.ToLower(view), "too small") {
 		t.Fatalf("a tiny terminal should show the too-small message:\n%s", view)
 	}
@@ -248,7 +247,7 @@ func TestV46ResizeRelayouts(t *testing.T) {
 	req := requestMsg{ok: true, request: fieldReq{
 		kind: kindSelect, title: "Models", backable: true,
 		ctx:     viewCtx{sidebar: []sideItem{{label: "Identity", active: true}}},
-		choices: []choice{{"a", "a"}, {"← Back", actionBack}},
+		choices: []menuChoice{{"a", "a"}, {"← Back", actionBack}},
 	}}
 	big, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	shown, _ := big.(console).Update(req)
@@ -268,7 +267,7 @@ func TestV44LayoutHasHeaderSidebarEditorFooter(t *testing.T) {
 			breadcrumb: "agent › Models", target: "pipecat",
 			sidebar: []sideItem{{label: "Identity"}, {label: "Models", active: true}, {label: "Listen", child: true}, {label: "Behavior"}, {label: "Integrations"}, {label: "Lifecycle"}},
 		},
-		choices: []choice{{"Listen", "listen"}, {"← Back", actionBack}},
+		choices: []menuChoice{{"Listen", "listen"}, {"← Back", actionBack}},
 	}
 	view := renderField(t, 100, 24, req)
 	for _, want := range []string{"UNMUTE//", "SECTIONS", "Identity", "Lifecycle", "Models", "Listen", "back"} {
@@ -292,7 +291,7 @@ func TestV44SidebarShowsActiveSection(t *testing.T) {
 	req := fieldReq{
 		kind: kindSelect, title: "Models", backable: true,
 		ctx:     viewCtx{sidebar: []sideItem{{label: "Identity"}, {label: "Models", active: true}, {label: "Listen", child: true}}},
-		choices: []choice{{"Listen", "listen"}, {"← Back", actionBack}},
+		choices: []menuChoice{{"Listen", "listen"}, {"← Back", actionBack}},
 	}
 	view := renderField(t, 100, 24, req)
 	if !strings.Contains(view, "› Models") {
@@ -305,18 +304,18 @@ func TestV44SidebarShowsActiveSection(t *testing.T) {
 
 func TestV35MenusDefaultToFirstActionAndBackLast(t *testing.T) {
 	runner := newRunner(strings.NewReader("\n"), &bytes.Buffer{}, true)
-	choice, back, err := runner.selectOne("Actions", "", []huh.Option[string]{
-		huh.NewOption("First action", "first"),
-		huh.NewOption("Second action", "second"),
-		huh.NewOption("← Back", actionBack),
+	choice, back, err := runner.selectOne("Actions", "", []menuChoice{
+		newChoice("First action", "first"),
+		newChoice("Second action", "second"),
+		newChoice("← Back", actionBack),
 	}, true)
 	if err != nil || back || choice != "first" {
 		t.Fatalf("default choice = %q, back = %v, error = %v; want first action", choice, back, err)
 	}
 
-	_, _, err = runner.selectOne("Broken", "", []huh.Option[string]{
-		huh.NewOption("← Back", actionBack),
-		huh.NewOption("Action", "action"),
+	_, _, err = runner.selectOne("Broken", "", []menuChoice{
+		newChoice("← Back", actionBack),
+		newChoice("Action", "action"),
 	}, true)
 	if err == nil || !strings.Contains(err.Error(), "Back action must be last") {
 		t.Fatalf("misordered Back error = %v", err)
@@ -340,8 +339,8 @@ func TestV34EditorSectionsStayGrouped(t *testing.T) {
 		t.Fatalf("section count = %d, want %d", len(options), len(want))
 	}
 	for i := range want {
-		if options[i].Value != want[i].value || !strings.HasPrefix(options[i].Key, want[i].label) {
-			t.Errorf("section %d = (%q, %q), want (%q, prefix %q)", i, options[i].Value, options[i].Key, want[i].value, want[i].label)
+		if options[i].value != want[i].value || !strings.HasPrefix(options[i].label, want[i].label) {
+			t.Errorf("section %d = (%q, %q), want (%q, prefix %q)", i, options[i].value, options[i].label, want[i].value, want[i].label)
 		}
 	}
 }
@@ -368,7 +367,7 @@ func TestV37EveryScreenShowsBackAffordance(t *testing.T) {
 		name string
 		req  fieldReq
 	}{
-		{"select", fieldReq{kind: kindSelect, title: "Select", choices: []choice{{"Act", "act"}, {"← Back", actionBack}}, backable: true}},
+		{"select", fieldReq{kind: kindSelect, title: "Select", choices: []menuChoice{{"Act", "act"}, {"← Back", actionBack}}, backable: true}},
 		{"input", fieldReq{kind: kindInput, title: "Input", backable: true}},
 		{"text", fieldReq{kind: kindText, title: "Text", backable: true}},
 	} {
@@ -403,7 +402,7 @@ func TestV37EveryScreenShowsBackAffordance(t *testing.T) {
 		run         func(*fieldRunner) error
 	}{
 		{"select", "2\n", func(runner *fieldRunner) error {
-			_, _, err := runner.selectOne("Select", "", []huh.Option[string]{huh.NewOption("Act", "act"), huh.NewOption("← Back", actionBack)}, true)
+			_, _, err := runner.selectOne("Select", "", []menuChoice{newChoice("Act", "act"), newChoice("← Back", actionBack)}, true)
 			return err
 		}},
 		{"confirm", "2\n", func(runner *fieldRunner) error {
@@ -439,7 +438,7 @@ func TestV37ConstrainedMenuPinsBackInFooter(t *testing.T) {
 	req := fieldReq{
 		kind:  kindSelect,
 		title: "user_verified",
-		choices: []choice{
+		choices: []menuChoice{
 			{"Description", "description"}, {"Execution", "execution"},
 			{"Webhook URL env", "url"}, {"Input schema", "input"},
 			{"Output schema", "output"}, {"Attached to", "attach"},
@@ -458,7 +457,7 @@ func TestV38MultiFieldFlowsUseOverviewMenus(t *testing.T) {
 	data := scaffold.Data{}
 	var output bytes.Buffer
 	err := editVariables(newRunner(strings.NewReader("1\ncustomer_id\n"), &output, true), &data)
-	if !errors.Is(err, huh.ErrUserAborted) {
+	if !errors.Is(err, errAborted) {
 		t.Fatalf("variable overview error = %v, want ErrUserAborted", err)
 	}
 	for _, field := range []string{"Type  ·", "Default  ·", "Source  ·", "← Back"} {
@@ -473,7 +472,7 @@ func TestV38BindingOverviewShowsAllFieldsAndReturns(t *testing.T) {
 	data.SetTarget("pipecat")
 	var output bytes.Buffer
 	err := editBinding(newRunner(strings.NewReader("1\n1\n"), &output, true), &data, targetcap.Speak)
-	if !errors.Is(err, huh.ErrUserAborted) {
+	if !errors.Is(err, errAborted) {
 		t.Fatalf("binding overview error = %v, want ErrUserAborted", err)
 	}
 	for _, field := range []string{"Provider  ·", "Distributor  ·", "Model  ·", "Voice  ·", "Language  ·", "Additional config  ·", "← Back"} {
@@ -504,7 +503,7 @@ func TestV24DistributorRowAppearsOnlyForMultipleRoutes(t *testing.T) {
 		binding := scaffold.Binding{Provider: routes[0], Model: brand + "/model"}
 		var output bytes.Buffer
 		err := editBindingFor(newRunner(strings.NewReader(""), &output, true), string(framework), role, &binding)
-		if !errors.Is(err, huh.ErrUserAborted) {
+		if !errors.Is(err, errAborted) {
 			t.Fatalf("binding overview error = %v, want ErrUserAborted", err)
 		}
 		if got := strings.Contains(output.String(), "Distributor  ·"); got != wantMultiple {
@@ -542,8 +541,8 @@ func TestRunSelectTarget(t *testing.T) {
 	if got.Agent.Data.Target != "pipecat" {
 		t.Fatalf("target = %q", got.Agent.Data.Target)
 	}
-	if !strings.Contains(output.String(), "Vapi and Deepgram are unavailable") {
-		t.Fatalf("missing unavailable-driver explanation:\n%s", output.String())
+	if !strings.Contains(output.String(), "LiveKit and Pipecat both emit a runnable project") {
+		t.Fatalf("target picker does not say what the choice means:\n%s", output.String())
 	}
 }
 
@@ -622,7 +621,7 @@ func TestV18VariablesMenuShowsSavedItems(t *testing.T) {
 	data := scaffold.Data{Variables: []scaffold.Variable{{Name: "customer_id", Type: "string", Source: "call_start"}}}
 	var output bytes.Buffer
 	err := editVariables(newRunner(strings.NewReader(""), &output, true), &data)
-	if !errors.Is(err, huh.ErrUserAborted) {
+	if !errors.Is(err, errAborted) {
 		t.Fatalf("editVariables() error = %v, want ErrUserAborted", err)
 	}
 	if !strings.Contains(output.String(), "customer_id") {
@@ -634,7 +633,7 @@ func TestV18ToolsMenuUsesNeutralNameAndShowsExecution(t *testing.T) {
 	data := scaffold.Data{Target: "pipecat"}
 	var output bytes.Buffer
 	err := editTools(newRunner(strings.NewReader("1\nlookup_customer\n2\n"), &output, true), &data)
-	if !errors.Is(err, huh.ErrUserAborted) {
+	if !errors.Is(err, errAborted) {
 		t.Fatalf("editTools() error = %v, want ErrUserAborted", err)
 	}
 	for _, want := range []string{"Add tool", "Webhook", "Local Python"} {
@@ -806,7 +805,7 @@ func TestV19HandoffShowsExistingVariablesAsChoices(t *testing.T) {
 	data.Agents = []scaffold.Agent{{Name: "billing", Instructions: "Handle billing.", Reason: data.Reason, Speak: data.Speak}}
 	var output bytes.Buffer
 	err := editHandoffs(newRunner(strings.NewReader("1\nto_billing\n4\n"), &output, true), &data)
-	if !errors.Is(err, huh.ErrUserAborted) {
+	if !errors.Is(err, errAborted) {
 		t.Fatalf("editHandoffs() error = %v, want ErrUserAborted", err)
 	}
 	for _, want := range []string{"assistant", "billing", "customer_id"} {
@@ -821,7 +820,7 @@ func TestV19TaskShowsExistingToolsAsChoices(t *testing.T) {
 	data.SetTarget("pipecat")
 	var output bytes.Buffer
 	err := editTasks(newRunner(strings.NewReader("1\ncollect\n2\n"), &output, true), &data)
-	if !errors.Is(err, huh.ErrUserAborted) {
+	if !errors.Is(err, errAborted) {
 		t.Fatalf("editTasks() error = %v, want ErrUserAborted", err)
 	}
 	if !strings.Contains(output.String(), "lookup_customer") {
@@ -834,7 +833,7 @@ func TestV22TaskResultExplainsPrefilledShape(t *testing.T) {
 	data.SetTarget("pipecat")
 	var output bytes.Buffer
 	err := editTasks(newRunner(strings.NewReader("1\ncollect\n4\n"), &output, true), &data)
-	if !errors.Is(err, huh.ErrUserAborted) {
+	if !errors.Is(err, errAborted) {
 		t.Fatalf("editTasks() error = %v, want ErrUserAborted", err)
 	}
 	for _, want := range []string{`{"result":"string"}`, "Each key becomes one returned field"} {
@@ -1108,7 +1107,7 @@ func TestV31ProviderOptionsMirrorCatalog(t *testing.T) {
 		options := providerOptions(key.framework, key.role)
 		got := make([]string, len(options))
 		for i := range options {
-			got[i] = options[i].Value
+			got[i] = options[i].value
 		}
 		if !slices.Equal(got, brands) {
 			t.Errorf("%s/%s options = %v, catalogue brands = %v", key.framework, key.role, got, brands)
@@ -1129,26 +1128,16 @@ func TestV31CatalogueHintUsesEntryArityAndLanguageSlot(t *testing.T) {
 	}
 }
 
-func TestV29UnavailableChoiceNamesGateAndOffersBack(t *testing.T) {
-	// Vapi still gates local tools; pipecat's gate lifted 2026-07-17 (T14).
-	var output bytes.Buffer
-	tool := scaffold.Tool{}
-	back, err := chooseToolExecution(newRunner(strings.NewReader("2\n1\n5\n"), &output, true), string(targetcap.Vapi), &tool)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !back {
-		t.Fatal("unavailable choice did not permit Back")
-	}
-	want := targetcap.Default().Capability(targetcap.FieldToolLocal, targetcap.Vapi).Note
-	if !strings.Contains(output.String(), want) || !strings.Contains(output.String(), "Identity → Target") || !strings.Contains(output.String(), "← Back") {
-		t.Fatalf("unavailable choice omitted exact gate, target guidance, or Back:\n%s", output.String())
-	}
-}
+// V29 covered the console's gated-choice affordance: name the exact gate, point
+// at Identity → Target, and still offer Back. Every tool-execution kind is now
+// `core` on both remaining targets, so no tool choice is gated and the scenario
+// cannot be built. The affordance itself is untouched in chooseToolExecution;
+// it simply has no tool field left to trigger it. Reintroducing coverage means
+// finding a gated field that the picker actually reads.
 
 func TestTUIMatchesCapabilityTable(t *testing.T) {
 	table := targetcap.Default()
-	providers := []targetcap.Provider{targetcap.LiveKit, targetcap.Pipecat, targetcap.Deepgram, targetcap.Vapi}
+	providers := targetcap.Providers
 	kindFields := map[targetcap.Field]bool{}
 	for _, kind := range toolExecutionKinds {
 		if kind.Field != "" {
@@ -1177,26 +1166,13 @@ func TestTUIMatchesCapabilityTable(t *testing.T) {
 }
 
 func TestV42ExecutionPickerDerivesFromTable(t *testing.T) {
-	// Gated: mcp on Deepgram surfaces the table row's own note, then Back.
-	// (Pipecat emits MCP sources since N40, so its row is no longer a gate.)
-	var output bytes.Buffer
-	tool := scaffold.Tool{Name: "book_table"}
-	back, err := chooseToolExecution(newRunner(strings.NewReader("3\n1\n5\n"), &output, true), string(targetcap.Deepgram), &tool)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !back {
-		t.Fatal("gated mcp choice did not permit Back")
-	}
-	note := targetcap.Default().Capability(targetcap.FieldToolMCP, targetcap.Deepgram).Note
-	if !strings.Contains(output.String(), note) || !strings.Contains(output.String(), "Identity → Target") {
-		t.Fatalf("gated mcp choice omitted the table note or target guidance:\n%s", output.String())
-	}
-
+	// The gated half of this test used mcp on Deepgram. Both remaining targets
+	// mark every tool-execution kind `core`, so only the available path is
+	// reachable; that is what is checked here.
 	// Available: mcp on LiveKit selects, clearing any local handler state.
-	output.Reset()
-	tool = scaffold.Tool{Name: "book_table", Execution: "local", Handler: "tools/book_table.py"}
-	back, err = chooseToolExecution(newRunner(strings.NewReader("3\n"), &output, true), string(targetcap.LiveKit), &tool)
+	var output bytes.Buffer
+	tool := scaffold.Tool{Name: "book_table", Execution: "local", Handler: "tools/book_table.py"}
+	back, err := chooseToolExecution(newRunner(strings.NewReader("3\n"), &output, true), string(targetcap.LiveKit), &tool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1305,12 +1281,12 @@ func TestV24ProviderBrandsAreUniqueAndExposeDistributors(t *testing.T) {
 	for key := range pairs {
 		seen := map[string]bool{}
 		for _, option := range providerOptions(key.framework, key.role) {
-			if seen[option.Value] {
-				t.Errorf("%s/%s repeats provider brand %q", key.framework, key.role, option.Value)
+			if seen[option.value] {
+				t.Errorf("%s/%s repeats provider brand %q", key.framework, key.role, option.value)
 			}
-			seen[option.Value] = true
-			if routes := catalog.Distributors(key.framework, key.role, option.Value); len(routes) == 0 {
-				t.Errorf("%s/%s provider brand %q has no distributor", key.framework, key.role, option.Value)
+			seen[option.value] = true
+			if routes := catalog.Distributors(key.framework, key.role, option.value); len(routes) == 0 {
+				t.Errorf("%s/%s provider brand %q has no distributor", key.framework, key.role, option.value)
 			}
 		}
 	}
@@ -1351,7 +1327,7 @@ func TestV25SavedResourcesOfferDelete(t *testing.T) {
 			data := base()
 			var output bytes.Buffer
 			err := tc.open(newRunner(strings.NewReader(tc.input), &output, true), &data)
-			if !errors.Is(err, huh.ErrUserAborted) {
+			if !errors.Is(err, errAborted) {
 				t.Fatalf("editor error = %v, want ErrUserAborted", err)
 			}
 			if !strings.Contains(output.String(), "Delete") {
@@ -1399,7 +1375,7 @@ func TestV25InvalidSavedResourcesRemainAvailableForRepair(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var output bytes.Buffer
 			err := tc.open(newRunner(strings.NewReader("1\n"), &output, true), &tc.data)
-			if !errors.Is(err, huh.ErrUserAborted) {
+			if !errors.Is(err, errAborted) {
 				t.Fatalf("editor error = %v, want ErrUserAborted", err)
 			}
 			if !strings.Contains(output.String(), "Delete") {
@@ -1499,7 +1475,7 @@ func TestValidateDuration(t *testing.T) {
 func TestRunEOFAborts(t *testing.T) {
 	t.Chdir(t.TempDir())
 	_, err := RunConsole(strings.NewReader("1\nagent\n"), &bytes.Buffer{}, true, nil)
-	if !errors.Is(err, huh.ErrUserAborted) {
+	if !errors.Is(err, errAborted) {
 		t.Fatalf("Run() error = %v, want ErrUserAborted", err)
 	}
 }
@@ -1892,5 +1868,74 @@ func TestHeroArtFitsAndMatchesItsWidth(t *testing.T) {
 	}
 	if !strings.Contains(heroLogo(heroArtWidth), "█") {
 		t.Error("at heroArtWidth heroLogo should draw the art, not fall back")
+	}
+}
+
+// TestValidatorMessagesAreStable pins every console input rule: the same
+// accept/reject decision, and the same message text.
+//
+// The message is part of the interface, not an implementation detail. An author
+// reads it and acts on it, so a rule rewritten to read better in Go but worded
+// differently on screen is a change to the product. The rules were collapsed
+// onto two combinators (optional/required) in feature 018; this is what proves
+// the collapse changed none of them.
+func TestValidatorMessagesAreStable(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		check   func(string) error
+		value   string
+		wantErr string // "" means the value must be accepted
+	}{
+		{"optional duration blank", validateOptionalDuration, "", ""},
+		{"optional duration valid", validateOptionalDuration, "1500ms", ""},
+		{"optional duration zero", validateOptionalDuration, "0s", "value must be a positive Go duration"},
+		{"optional duration junk", validateOptionalDuration, "soon", "value must be a positive Go duration"},
+
+		{"duration valid", validateDuration, "2s", ""},
+		{"duration negative", validateDuration, "-1s", "value must be a positive Go duration"},
+
+		{"optional non-negative blank", validateOptionalNonNegativeInteger, "", ""},
+		{"optional non-negative zero", validateOptionalNonNegativeInteger, "0", ""},
+		{"optional non-negative negative", validateOptionalNonNegativeInteger, "-1", "value must be a non-negative integer"},
+		{"optional non-negative junk", validateOptionalNonNegativeInteger, "many", "value must be a non-negative integer"},
+
+		{"positive integer ok", validatePositiveInteger, "3", ""},
+		{"positive integer zero", validatePositiveInteger, "0", "value must be a positive integer"},
+
+		{"basic ok", validateBasic, "hello there", ""},
+		{"basic quote", validateBasic, `say "hi"`, "value must not contain quotes or newlines"},
+		{"basic newline", validateBasic, "one\ntwo", "value must not contain quotes or newlines"},
+
+		{"required basic blank", validateRequiredBasic, "   ", "value is required"},
+		{"required basic quote", validateRequiredBasic, `a "b"`, "value must not contain quotes or newlines"},
+		{"required basic ok", validateRequiredBasic, "fine", ""},
+
+		{"required text blank", validateRequiredText, "", "value is required"},
+		{"required text ok", validateRequiredText, "anything at all", ""},
+
+		{"required object blank", validateRequiredObject, "", "JSON object is required"},
+		{"required object ok", validateRequiredObject, `{"a":1}`, ""},
+		{"required object not an object", validateRequiredObject, `[1]`, "params must be a JSON object"},
+
+		{"identifier ok", validateIdentifier, "collect_name", ""},
+		{"identifier capital", validateIdentifier, "CollectName", "name must be lowercase snake_case"},
+
+		{"language ok", validateLanguage, "en-US", ""},
+		{"language junk", validateLanguage, "english!", "language must be a BCP-47 tag such as en or en-US"},
+
+		{"env name ok", validateEnvName, "OPENAI_API_KEY", ""},
+		{"env name lowercase", validateEnvName, "openai_key", "value must be an environment variable name"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.check(tc.value)
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Errorf("%q must be accepted, got %v", tc.value, err)
+			case tc.wantErr != "" && err == nil:
+				t.Errorf("%q must be rejected with %q, got nil", tc.value, tc.wantErr)
+			case tc.wantErr != "" && err.Error() != tc.wantErr:
+				t.Errorf("%q rejected with %q, want %q", tc.value, err, tc.wantErr)
+			}
+		})
 	}
 }

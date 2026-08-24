@@ -88,12 +88,7 @@ func TestCheckVendor(t *testing.T) {
 		endpoint bool
 		wantErr  string // "" = must pass; otherwise a substring of the error
 	}{
-		{Deepgram, Listen, "deepgram", false, ""},
-		{Deepgram, Listen, "openai", false, "has no slot"},
-		{Deepgram, Speak, "aws_polly", false, ""},
-		{Deepgram, Speak, "open_ai", false, ""}, // Deepgram's own spelling
-		{Vapi, Speak, "anything", false, ""},    // no rows = unrestricted (D10)
-		{Pipecat, Listen, "", false, ""},        // empty defers to the target default
+		{Pipecat, Listen, "", false, ""}, // empty defers to the target default
 		{Pipecat, Listen, "acme", false, "endpoint_env"},
 		{Pipecat, Listen, "acme", true, ""}, // OpenAI-compatible custom endpoint
 		{Pipecat, Speak, "slng", true, "endpoint_env has no slot"},

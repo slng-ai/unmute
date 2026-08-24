@@ -38,7 +38,7 @@ func TestBuildSafeCore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if agent.EntryAgent != "intake" || len(agent.Targets) != 4 {
+	if agent.EntryAgent != "intake" || len(agent.Targets) != 2 {
 		t.Fatalf("unexpected IR: entry=%q targets=%d", agent.EntryAgent, len(agent.Targets))
 	}
 	if !strings.Contains(agent.Agents["intake"].Instructions, "front desk") {

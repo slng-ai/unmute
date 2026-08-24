@@ -7,6 +7,7 @@ import (
 
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/style"
 	"github.com/slng-ai/unmute/internal/target"
 	"github.com/spf13/cobra"
 )
@@ -48,13 +49,13 @@ func runValidate(cmd *cobra.Command, dir string, names []string) error {
 	report, validateErr := ir.Validate(agent, targets, target.Default())
 	out := cmd.OutOrStdout()
 	printHeader(out, "validate "+displayDir(dir))
-	u := newUI(out)
+	u := style.For(out)
 	for _, row := range report.PerTarget {
-		status := u.ok("✓")
+		status := u.Ok("✓")
 		if len(row.Errors) > 0 {
-			status = u.fail("✗")
+			status = u.Failed("✗")
 		}
-		fmt.Fprintf(out, "%s %s (%s)\n", status, u.accent(row.Name), row.Provider)
+		fmt.Fprintf(out, "%s %s (%s)\n", status, u.Accent(row.Name), row.Provider)
 	}
 	// Prerequisites first, because they are the thing an author has to go and ask
 	// someone else for, and the lead time is theirs, not ours. Exit code stays 0:

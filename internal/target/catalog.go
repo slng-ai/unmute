@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 )
 
@@ -137,7 +136,6 @@ func DefaultCatalog() Catalog {
 	var entries []Entry
 	entries = append(entries, pipecatCatalog...)
 	entries = append(entries, livekitCatalog...)
-	entries = append(entries, deepgramCatalog...)
 	return Catalog{entries: entries}
 }
 
@@ -183,7 +181,7 @@ func (c Catalog) Vendors(fw Provider, role Role) []string {
 			out = append(out, e.Vendor)
 		}
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -201,7 +199,7 @@ func (c Catalog) Brands(fw Provider, role Role) []string {
 			out = append(out, e.Distributes...)
 		}
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return slices.Compact(out)
 }
 
@@ -216,7 +214,7 @@ func (c Catalog) Distributors(fw Provider, role Role, brand string) []string {
 			out = append(out, e.Vendor)
 		}
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return slices.Compact(out)
 }
 
@@ -248,7 +246,7 @@ func (c Catalog) RolesFor(fw Provider, vendor string) []string {
 			out = append(out, string(e.Role))
 		}
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 

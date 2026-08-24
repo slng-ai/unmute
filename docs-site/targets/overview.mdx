@@ -5,8 +5,8 @@ description: "What a target is, what targets.yaml holds, and how one package com
 
 A target is one place your agent can run. Unmute generates two:
 **Pipecat** and **LiveKit Agents**. Both are code targets, which means
-`unmute compile` writes a Python project you own. The configuration also accepts
-Vapi and Deepgram for validation only; no project is emitted for them.
+`unmute compile` writes a Python project you own. These are the only two values
+`provider` accepts.
 
 ## targets.yaml
 
@@ -33,7 +33,7 @@ is yours: a package with two Twilio setups might call them `pipecat_twilio` and
 
 | Field | What it does |
 |---|---|
-| `provider` | `pipecat` or `livekit`; `vapi` and `deepgram` validate only |
+| `provider` | `pipecat` or `livekit` |
 | `version` | the exact framework version required for code targets |
 | `sdk_language` | the SDK language, `python` |
 | `pins` | known LiveKit package pins; other providers do not consume them |

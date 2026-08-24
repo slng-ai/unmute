@@ -194,8 +194,6 @@ func TestValidateGatesVariableFeatures(t *testing.T) {
 	}{
 		{ProviderLiveKit, false},
 		{ProviderPipecat, false},
-		{ProviderVapi, true},
-		{ProviderDeepgram, true},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			target := targetFor(agent, tc.provider)
