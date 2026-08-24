@@ -336,7 +336,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	for name := range agent.Channels {
 		channelNames = append(channelNames, name)
 	}
-	sort.Strings(channelNames)
+	slices.Sort(channelNames)
 	for _, name := range channelNames {
 		ch := agent.Channels[name]
 		// The connector route places outbound calls in the bridge (Twilio call +
@@ -531,7 +531,7 @@ func fillLiveKitTelephonyCommon(telephony *livekitTelephony, agent *ir.Agent, pl
 	for variable := range plan.SystemSources {
 		sourceVariables = append(sourceVariables, variable)
 	}
-	sort.Strings(sourceVariables)
+	slices.Sort(sourceVariables)
 	for _, variable := range sourceVariables {
 		telephony.SystemSources = append(telephony.SystemSources, livekitSystemSource{
 			Variable: variable, Source: string(plan.SystemSources[variable]),
@@ -630,7 +630,7 @@ func buildLiveKitSIPTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*liv
 	for key := range plan.Environment {
 		environmentKeys = append(environmentKeys, key)
 	}
-	sort.Strings(environmentKeys)
+	slices.Sort(environmentKeys)
 	for _, key := range environmentKeys {
 		if !allowed[key] {
 			return nil, fmt.Errorf("livekit SIP route does not accept connection environment key %q", key)
@@ -1463,7 +1463,7 @@ func livekitToolArgs(input map[string]any) []livekitArg {
 	for k := range props {
 		names = append(names, k)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	args := make([]livekitArg, 0, len(names))
 	for _, n := range names {
 		pt := "str"
@@ -1603,7 +1603,7 @@ func livekitDeps(data livekitData) []string {
 	if data.Telephony != nil && data.Telephony.Transport == "connector" {
 		deps = append(deps, "aiohttp", "twilio")
 	}
-	sort.Strings(deps)
+	slices.Sort(deps)
 	return deps
 }
 

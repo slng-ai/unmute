@@ -247,16 +247,12 @@ func TestValidateTaskGroupOverridesMemberContext(t *testing.T) {
 	}
 }
 
-func TestValidateProvisionalFailsEveryTarget(t *testing.T) { // V6
-	caps := targetcap.Default()
-	for _, provider := range targetcap.Providers {
-		row := TargetValidation{Provider: Provider(provider)}
-		applyCapability(caps, targetcap.FieldFutureProvisional, provider, &row)
-		if len(row.Errors) != 1 {
-			t.Errorf("%s provisional errors = %v", provider, row.Errors)
-		}
-	}
-}
+// The V6 provisional-tag behaviour used to be exercised here through a
+// synthetic capability field (`future.provisional`) that existed only so this
+// test could reach the tag. The field is gone; the behaviour it stood in for is
+// covered end to end by TestValidateTelephonyProvisionalRouteIsUsableAndQuiet
+// below, against a real route. Do not reintroduce a synthetic field to "restore
+// coverage" that was never missing.
 
 func TestValidateContextPolicy(t *testing.T) { // V8
 	agent := safeAgent(t)

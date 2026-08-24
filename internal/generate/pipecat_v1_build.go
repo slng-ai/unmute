@@ -950,8 +950,9 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	// one stays the bare module constant it always was.
 	profile, router := slngRouterBinding(agent, target, def.Model)
 	prompt := promptExpr(promptConst, def.Instructions, pipecatStateExpr, router)
-	llm, err := agentLLMService(target.Models.Reason[def.Model], prompt, env,
-		pipecatSlngSite(agent, target, profile, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name}))
+	llm, err := resolvePipecatService(targetcap.Reason, target.Models.Reason[def.Model], env,
+		pipecatSlngSite(agent, target, profile, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name}),
+		pyKV{Key: "system_instruction", Value: prompt})
 	if err != nil {
 		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 	}
@@ -1161,7 +1162,7 @@ func sortedResultNames(result map[string]ir.ResultField) []string {
 	for name := range result {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names
 }
 
@@ -1643,11 +1644,6 @@ func pipecatRuntimeHeaders(tgt ir.Target, profile string, site targetcap.SlngSit
 // agentLLMService builds an agent's LLM; the prompt nests into Settings as
 // system_instruction (the workers-model shape, driver-pipecat C2), referenced
 // through its module constant so builder and restore share one copy (V2).
-func agentLLMService(binding ir.Binding, promptRef string, env *envSet, site slngSite) (pipecatService, error) {
-	return resolvePipecatService(targetcap.Reason, binding, env, site,
-		pyKV{Key: "system_instruction", Value: promptRef})
-}
-
 // serviceUsesLanguage reports whether a service emits a language kwarg, which
 // resolvePipecatService wraps in the Language(...) enum — so bot.py imports
 // Language only then (N16: language is per-model and often unset).
@@ -1674,7 +1670,7 @@ func forwardParams(params map[string]any) []pyKV {
 	for k := range params {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	out := make([]pyKV, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, pyKV{Key: k, Value: pyLiteral(params[k])})
@@ -1722,7 +1718,7 @@ func pyLiteral(v any) string {
 		for k := range value {
 			keys = append(keys, k)
 		}
-		sort.Strings(keys)
+		slices.Sort(keys)
 		pairs := make([]string, len(keys))
 		for i, k := range keys {
 			pairs[i] = strconv.Quote(k) + ": " + pyLiteral(value[k])
@@ -1738,7 +1734,7 @@ func sortedAgentNames(agent *ir.Agent) []string {
 	for name := range agent.Agents {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names
 }
 
@@ -1747,7 +1743,7 @@ func sortedVarNames(agent *ir.Agent) []string {
 	for name := range agent.Variables {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names
 }
 

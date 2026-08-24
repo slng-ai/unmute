@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1967,7 +1966,7 @@ func taskResultNames(result string) []string {
 	for name := range fields {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names
 }
 
@@ -1978,7 +1977,7 @@ func assignmentVariables(raw string) []string {
 	for name := range assignments {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names
 }
 

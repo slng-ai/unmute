@@ -2,8 +2,6 @@ package target
 
 import (
 	"fmt"
-	"maps"
-	"slices"
 )
 
 // LiveKit entries. Contract: the livekit_v1 driver templates, the supported
@@ -462,7 +460,3 @@ func LiveKitTurnVersion(model string) (string, error) {
 	}
 	return version, nil
 }
-
-// LiveKitTurnModels lists the recognised identities, sorted, for a document or
-// an error that has to name them.
-func LiveKitTurnModels() []string { return slices.Sorted(maps.Keys(liveKitTurnModels)) }

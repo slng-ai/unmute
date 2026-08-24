@@ -34,10 +34,23 @@ func TestDefaultTableIsCompleteAndTyped(t *testing.T) {
 	if got := table.HistorySupport(HistorySummary, Vapi); got.Kind != HistoryFail || got.Note == "" {
 		t.Fatalf("Vapi summary history = %#v", got)
 	}
-	for _, provider := range Providers {
-		if table.Capability(FieldFutureProvisional, provider).Tag != Provisional {
-			t.Errorf("provisional field passed on %s", provider)
+	// The Provisional tag is produced by telephony routes that have a real
+	// adapter but no credentialed smoke yet. It used to be exercised through a
+	// synthetic capability field invented for the purpose; that field is gone,
+	// so the tag is checked where it actually comes from.
+	provisionalSeen := false
+	for _, route := range TelephonyRoutes() {
+		for _, evidence := range route.Features {
+			if evidence.Tag == Provisional {
+				provisionalSeen = true
+				if evidence.Note == "" || evidence.Docs == "" || evidence.Verified == "" {
+					t.Errorf("provisional route %v feature %s lacks evidence: %#v", route.Key, evidence.Feature, evidence)
+				}
+			}
 		}
+	}
+	if !provisionalSeen {
+		t.Error("no route carries the Provisional tag; the tag has lost its only producer")
 	}
 	if table.Capability(FieldInactivity, LiveKit).Tag != Warn || table.Capability(FieldMaxDuration, Deepgram).Tag != Warn {
 		t.Fatal("warn-tagged lifecycle fields must produce target warnings")

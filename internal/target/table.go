@@ -87,7 +87,6 @@ const (
 	FieldToolInject            Field = "tools.inject"
 	FieldWebhookPath           Field = "tools.webhook.path"
 	FieldTemplates             Field = "templates.session_start"
-	FieldFutureProvisional     Field = "future.provisional"
 )
 
 type Capability struct {
@@ -472,7 +471,6 @@ func Default() Table {
 				deny(Vapi, "Vapi's own dynamic-variable spelling is unverified here; unmute does not guess at a provider's template syntax"),
 				deny(Deepgram, "the Deepgram driver does not render templates; its template variables are substitution-time and visible to project members (SCHEMA 4.4)"),
 			),
-			FieldFutureProvisional: provisional(),
 		},
 		Controls: map[TelephonyControl]map[Provider]ControlCapability{
 			ColdTransfer: controls(
@@ -585,14 +583,6 @@ func field(overrides ...override) map[Provider]Capability {
 	}
 	for _, override := range overrides {
 		values[override.provider] = override.value
-	}
-	return values
-}
-
-func provisional() map[Provider]Capability {
-	values := make(map[Provider]Capability, len(Providers))
-	for _, provider := range Providers {
-		values[provider] = Capability{Tag: Provisional, Note: "field is provisional on every target"}
 	}
 	return values
 }

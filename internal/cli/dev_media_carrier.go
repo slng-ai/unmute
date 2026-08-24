@@ -19,7 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -84,10 +84,10 @@ func twilioSignature(uri string, params url.Values, token string) string {
 	for name := range params {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	for _, name := range names {
 		values := append([]string(nil), params[name]...)
-		sort.Strings(values)
+		slices.Sort(values)
 		for _, value := range values {
 			payload += name + value
 		}

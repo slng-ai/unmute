@@ -55,7 +55,7 @@ func loweredInject(tool ir.Tool, variables map[string]ir.Variable, stateExpr str
 	for key := range tool.Inject {
 		keys = append(keys, key)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	values := make([]injectedValue, 0, len(keys))
 	for _, key := range keys {
 		values = append(values, injectedValue{Key: key, Expr: injectExpr(tool.Inject[key], stateExpr)})
@@ -85,7 +85,7 @@ func neededVars(tool ir.Tool, variables map[string]ir.Variable) []neededVar {
 	for key := range tool.Inject {
 		keys = append(keys, key)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for _, key := range keys {
 		if text, ok := tool.Inject[key].(string); ok {
 			collect(text)
@@ -198,7 +198,7 @@ func captureFields(agent *ir.Agent) []string {
 			names = append(names, name)
 		}
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names
 }
 
@@ -452,7 +452,7 @@ func reportVariables(agent *ir.Agent) []reportVariable {
 	for name := range agent.Variables {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	out := make([]reportVariable, 0, len(names))
 	for _, name := range names {
 		variable := agent.Variables[name]

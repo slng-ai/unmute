@@ -44,7 +44,7 @@ func discoverPackages(root string) ([]string, error) {
 			found = append(found, path)
 		}
 	}
-	sort.Strings(found)
+	slices.Sort(found)
 	return found, nil
 }
 
@@ -208,8 +208,8 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 				value.AttachTasks = append(value.AttachTasks, taskName)
 			}
 		}
-		sort.Strings(value.AttachTo)
-		sort.Strings(value.AttachTasks)
+		slices.Sort(value.AttachTo)
+		slices.Sort(value.AttachTasks)
 		data.Tools = append(data.Tools, value)
 	}
 
@@ -645,8 +645,8 @@ func affectedFiles(root, candidate string, created []string) ([]string, []string
 			removals = append(removals, rel)
 		}
 	}
-	sort.Strings(affected)
-	sort.Strings(removals)
+	slices.Sort(affected)
+	slices.Sort(removals)
 	return affected, removals, nil
 }
 
@@ -673,7 +673,7 @@ func knownPackageFiles(root string) ([]string, error) {
 			return nil, err
 		}
 	}
-	sort.Strings(files)
+	slices.Sort(files)
 	return files, nil
 }
 

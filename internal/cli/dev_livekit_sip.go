@@ -101,7 +101,11 @@ func ensureLiveKitSIPRecords(ctx context.Context, out io.Writer, targetName stri
 			return fmt.Errorf("give the reused LiveKit inbound trunk this run's credential: %w", err)
 		}
 	}
-	fmt.Fprintf(out, "%s: LiveKit inbound trunk %s (%s)\n", targetName, trunkID, createdOrReused(reused))
+	verb := "created"
+	if reused {
+		verb = "reused"
+	}
+	fmt.Fprintf(out, "%s: LiveKit inbound trunk %s (%s)\n", targetName, trunkID, verb)
 
 	dispatchName := "unmute " + targetName + " inbound"
 	// The agent name, or empty on a route whose agent is not a LiveKit worker.
@@ -125,13 +129,6 @@ func ensureLiveKitSIPRecords(ctx context.Context, out io.Writer, targetName stri
 	// works in one cannot fail in the other for want of a record
 	// (SCHEMA N33, 2026-08-12; local case added 2026-08-20).
 	return nil
-}
-
-func createdOrReused(reused bool) string {
-	if reused {
-		return "reused"
-	}
-	return "created"
 }
 
 // mintLiveKitSIPAdminToken returns a short-lived HS256 JWT with the SIP

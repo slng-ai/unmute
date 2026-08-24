@@ -29,7 +29,7 @@ import (
 
 func newDevCmd() *cobra.Command {
 	var uiPort, botPort, targetName, publicURL, to string
-	var noOpen, verbose, console, telephony, carrier, noWebhook bool
+	var noOpen, verbose, telephony, carrier, noWebhook bool
 	var vars []string
 
 	cmd := &cobra.Command{
@@ -87,10 +87,6 @@ func newDevCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if console {
-				return errors.New("dev: --console was removed. " +
-					"Run `unmute dev " + root + "` to talk to the agent in your browser")
-			}
 			if telephony {
 				return runDevTelephony(cmd, root, selected, devTelephonyOptions{
 					publicValue: publicURL, botPort: botPort, to: to,
@@ -109,12 +105,6 @@ func newDevCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&vars, "var", nil, "seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open the browser automatically")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "follow container/agent logs on stderr (default: write to the log file only)")
-	// Registered, hidden, and rejected on use. The flag is gone, but it is in
-	// shell history and in older documentation, and cobra's bare "unknown flag"
-	// would leave an author guessing whether they misremembered the name or the
-	// mode itself went away.
-	cmd.Flags().BoolVar(&console, "console", false, "removed: use the browser dev loop")
-	_ = cmd.Flags().MarkHidden("console")
 	cmd.Flags().BoolVar(&telephony, "telephony", false, "run the selected target's resolved telephony route (no browser UI)")
 	cmd.Flags().BoolVar(&carrier, "carrier", false, "reach the route through your own carrier: managed tunnel, webhook rewrite, restore on exit (requires --telephony)")
 	cmd.Flags().StringVar(&publicURL, "public-url", "", "exact public HTTPS origin for routes with carrier callbacks (requires --carrier)")

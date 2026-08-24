@@ -23,6 +23,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -99,7 +100,7 @@ func AssistantNames() []string {
 	for name := range assistants {
 		out = append(out, name)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -114,7 +115,7 @@ func Assistants() []string {
 		}
 		out = append(out, name)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -226,7 +227,7 @@ func (b Bundle) Plan(project string, dest Destination, force bool) (DestinationP
 	for name := range embedded {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 
 	for _, name := range names {
 		want := embedded[name]
