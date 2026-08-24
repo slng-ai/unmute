@@ -7,6 +7,8 @@ import "testing"
 // L4 smoke for the variables surface (variable_secrets_specs.md T12): the
 // emitted render helper, the refusal gate, and the generated capture tool are
 // exercised against the real SDK in a real venv. Opt-in (`make smoke`).
+// addReminderVariables (smoke_fixture_test.go) adds the sources this suite
+// drives; the salon ships one, so none of the three would be emitted without it.
 
 // pipecatVariablesSmokeScript imports the emitted bot, then drives the three
 // pieces directly: rendering with and without a value, the refusal that keeps a
@@ -18,11 +20,8 @@ import os
 
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
-# The emitted telephony module builds a Redis client at import, so this one env
-# needs a real scheme. Nothing connects: the helpers under test never use it.
-os.environ["REDIS_URL"] = "redis://127.0.0.1:6379/0"
-# Input variables are required on this outbound package: supply them the way
-# unmute dev --var does.
+# The fixture's dispatch variables are what the render assertions read, so they
+# are supplied the way unmute dev --var does.
 os.environ["UNMUTE_CALL_START"] = json.dumps(
     {"name": "Ada", "customer_id": "cus_1042", "appointment_time": "tomorrow at 3 pm"}
 )
@@ -31,9 +30,12 @@ import bot  # noqa: E402
 
 # A conversation variable is not a call-context field: it must never appear in
 # the startup check, or every call would fail before the greeting (B3).
-state = bot.build_state({"to_number": "+15551230000"})
+state = bot.build_state()
 assert state.name == "Ada", state.name
-assert state.dialed_number == "+15551230000", state.dialed_number
+# Not hydrated: this pipecat target has no telephony plane. The field is still on
+# State, which is what every tool reads it off.
+assert state.dialed_number is None, state.dialed_number
+state.dialed_number = "+15551230000"
 assert state.reschedule_to is None, state.reschedule_to
 
 # Rendering substitutes the value and leaves the literal alone.
@@ -55,7 +57,7 @@ state.reschedule_to = "Friday at 4"
 assert bot._refusal("reschedule_appointment", state, [("reschedule_to", "the new slot")]) == ""
 
 # The generated capture tool writes the state and reports what it saved.
-agent = bot.ReminderAgent(state=state, context=None, call_context=None)
+agent = bot.ConciergeAgent(state=state, context=None, call_context=None, slng_session_id="smoke")
 saved = {}
 
 
@@ -71,14 +73,14 @@ assert saved == {"saved": ["reschedule_to"]}, saved
 
 # A second dispatch payload lands on a fresh state.
 os.environ["UNMUTE_CALL_START"] = json.dumps({"name": "Grace", "customer_id": "cus_7", "appointment_time": "Monday"})
-dispatched = bot.build_state({"to_number": "+15551230000"})
+dispatched = bot.build_state()
 assert dispatched.name == "Grace", dispatched.name
 
 print("pipecat variables ok")
 `
 
 func TestSmokePipecatVariablesRenderRefuseAndCapture(t *testing.T) {
-	runPipecatSmokeScript(t, "salon-concierge", nil, nil, pipecatVariablesSmokeScript)
+	runPipecatSmokeScript(t, "salon-concierge", nil, addReminderVariables, pipecatVariablesSmokeScript)
 }
 
 // livekitVariablesSmokeScript does the same against the emitted LiveKit agent:
@@ -116,11 +118,11 @@ generated._hydrate_call_start(fresh, values)
 assert fresh.name == "Grace", fresh.name
 
 # The capture tool is a real function tool on the agent class.
-assert hasattr(generated.Reminder, "update_variables"), "update_variables missing"
+assert hasattr(generated.Concierge, "update_variables"), "update_variables missing"
 
 print("livekit variables ok")
 `
 
 func TestSmokeLiveKitVariablesRenderRefuseAndCapture(t *testing.T) {
-	runLiveKitSmokeScript(t, "salon-concierge", nil, nil, livekitVariablesSmokeScript)
+	runLiveKitSmokeScript(t, "salon-concierge", nil, addReminderVariables, livekitVariablesSmokeScript)
 }

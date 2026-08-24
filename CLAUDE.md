@@ -45,7 +45,6 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | no color literal outside `internal/style` | `internal/style/style_test.go` |
 | example READMEs name every transport; every `examples/` link resolves | `internal/generate/examples_test.go` |
 | every emitted task prompt names its finish call and an escape, every finish takes the reserved `unserved_request`, and the owner is told to read it | `internal/generate/task_prompt_test.go`, `internal/ir/validate_test.go` |
-| every emitted task prompt names its finish call and an escape, every finish takes the reserved `unserved_request`, and the owner is told to read it | `internal/generate/task_prompt_test.go`, `internal/ir/validate_test.go` |
 | the skill's tool kinds, vendors, providers and doc pointers match the code | `internal/skill/agreement_test.go` |
 | every command and flag the skill names exists | `internal/cli/skill_bundle_test.go` |
 | the docs-site CLI pages quote each command's `Usage:` line, not just its flags | `internal/cli/help_capture_test.go` |
@@ -58,6 +57,7 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | a local telephony run performs no write outside the machine, on any exit path, transfers included | `internal/generate/pipecat_local_plane_test.go`, `internal/generate/pipecat_cloud_websocket_test.go` |
 | the emitted transfer document and the plane's reading of it stay in agreement | `internal/generate` (emitted shape) + `internal/cli` (the reading), one gate each |
 | the docs-site transfer table matches the route table, both directions | `internal/docsite/transfer_table_test.go` |
+| an L4 smoke fixture still compiles the salon package, and the emitted Python keeps the names its script calls | `internal/generate/smoke_fixture_test.go` |
 | checked-in Python is clean | CI `python`, `ruff check .` |
 | no known-vulnerable dependency or stdlib | CI `vuln`, `govulncheck ./...` |
 | release config still builds 6 platforms with version stamps | CI `release-config` |
