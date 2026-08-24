@@ -261,6 +261,27 @@ The system prompt goes to the router with its `{{"{{"}}name{{"}}"}}` placeholder
 intact, and this call's values travel beside it. That is what lets a personalised
 prompt still repeat. A value over 4000 characters is truncated with a warning on
 stderr and the call continues: an over-long variable never ends a call.
+
+**The values are read again for every request**, in `_slng_llm_node`, not once
+when the session was built. So a value this call learns partway through, from a
+verification step or a lookup, is in the prompt from the next turn on. A name with
+no value yet is still sent, as an empty string, because a placeholder the router
+was given no value for is a 422 that would end the call.
+
+Which values may fill those placeholders is a rule, not a preference. A
+placeholder is for a value this agent **says**: a caller's name, a company name,
+an appointment detail read back aloud. Those are the values that make an answer
+personal, and a personal answer is one the router would otherwise refuse to keep.
+
+A value that changes **what the answer is** does not belong in one, however much
+it varies per call. The reply language is the clearest case: two callers who chose
+different languages would share one cached answer and one of them would hear the
+wrong language. Write a steering value into the prompt text instead, and if two
+variants must never receive each other's answers, give each its own `agent_id`,
+which is the only thing that partitions the cache.
+
+Nothing checks this. The compiler will not judge a value by its name, so a
+steering value in a placeholder fails silently and only on a real call.
 {{if .Slng.Vertex}}
 The Vertex credential variable may hold the key JSON, that JSON base64 encoded, or
 a path to the key file. The agent decides which at startup, in that order, and
@@ -273,8 +294,22 @@ base64 < service-account.json | tr -d '\n'
 {{end}}
 ### Reading the response
 
-Three response headers say which path answered. They are the only way to check
-this is working:
+**Every think request logs one line saying where its answer came from**, at info
+level, in every run:
+
+```
+slng router: scope=<agent_id>:concierge source=cache layer=l2_exact request_id=req_...
+slng router: scope=<agent_id>:concierge source=llm model=<model> request_id=req_...
+```
+
+`source=cache` means no model ran. Repeat an exchange and watch it change: that
+is the whole check, and it needs no dashboard. `layer` appears only on a hit,
+`model` only on a live answer, and `request_id` is what to quote to SLNG support.
+Count the lines if you want a hit rate; nothing aggregates them for you.
+
+The line comes from a response hook on the client this project builds itself,
+because neither framework surfaces a response header. Those headers are the same
+three below, which is what the hook reads:
 
 | Header | Values | Meaning |
 |---|---|---|
@@ -308,6 +343,7 @@ off the stream.
 | the agent refuses to start naming three accepted shapes | a Vertex credential is not JSON, not base64 of JSON, and not a readable file path | fix the value |
 | 422 `missing_template_variables` | a literal `{{"{{"}}` in the prompt that is not a placeholder | remove or rephrase it: the router reads any `{{"{{"}}` as a placeholder |
 | answers stay slow across deploys | the agent id changed between them | keep one stable id and bump it deliberately |
+| every turn says `source=llm` and the answers read back a number or a name | the value is rendered into the prompt, or the agent reformats it before saying it, so the stored copy holds the real thing and is refused | put the value in a `{{"{{"}}placeholder{{"}}"}}`, and give it the exact shape the agent speaks: the router substitutes back only where the answer holds the value character for character |
 
 {{end}}## Deploy
 

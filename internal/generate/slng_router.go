@@ -68,11 +68,50 @@ type slngSite struct {
 	// Pipecat, which builds one service per agent and can carry the scope where
 	// it already carries everything else.
 	HeadersPerRequest bool
+	// ClientExpr is the expression for the router client this construction is
+	// given, empty on a target that lets the framework build its own.
+	//
+	// One client per call, held on the call's own state object, because that is
+	// where a construction inside an agent method can still reach it. The same
+	// split SessionExpr makes, and for the same reason.
+	ClientExpr string
+	// BodyPerRequest says the body extension travels with each request too,
+	// which is what makes the variable snapshot current rather than frozen at
+	// the moment the model object was built.
+	//
+	// True on LiveKit, and the mechanism is the same trap as the header one
+	// field over: the plugin copies the per-request extra_kwargs first and then
+	// overwrites extra_body from its own options (livekit-plugins-openai
+	// llm.py:956-959, read at the pinned version). So a constructor body does
+	// not merely win, it wins in silence while the emitted per-request source
+	// still reads correctly.
+	//
+	// False on Pipecat, which keeps the body on the service and refreshes it
+	// with a settings delta when the call writes a variable. A delta merges the
+	// `extra` dict key by key (pipecat services/settings.py apply_update), so a
+	// body-only delta leaves the site's scope header alone.
+	//
+	// False for the LiveKit summarizer, which needs nothing per request: it is
+	// built inside an agent method at handoff time, so its construction is the
+	// moment of its request and its snapshot is current already.
+	BodyPerRequest bool
 }
 
 // slngConfigFunc names the emitted configuration helper for one think profile.
 // Profile names are already snake_case, so the name needs no transform.
 func slngConfigFunc(profile string) string { return "_slng_config_" + profile }
+
+// slngRouterClass is the emitted service subclass Pipecat needs: its only seam
+// for a response hook is overriding how the service builds its client. Here
+// rather than in a template because the driver assigns it as a call's class.
+//
+// The provenance line's own text lives in the two templates that write it, as
+// literal Python. It was briefly a table here, which bought nothing: no Go code
+// reads the field names, both templates already carry the hook verbatim, and
+// TestSlngRouterProvenanceLineHasOneOwner holds the field set and its order by
+// reading what the drivers wrote. The contract is in
+// specs/016-router-template-variables/contracts/provenance-log.md.
+const slngRouterClass = "_SlngRouterLLMService"
 
 // slngConfigHelper is one emitted configuration function.
 type slngConfigHelper struct {
@@ -107,6 +146,29 @@ type slngHelpers struct {
 	// because a reader checking a log line wants to recognise the value they are
 	// looking at.
 	Scopes []string
+	// ClientBaseURL is the endpoint the emitted client is built with, and the
+	// flag that a target builds its own client at all, which is the only way to
+	// attach a response hook. Set on LiveKit, empty on Pipecat, which overrides
+	// how its service builds one instead.
+	ClientBaseURL string
+	// ClientKeyEnv is the credential's environment variable name. Threaded from
+	// internal/target rather than spelled in the template, because that package
+	// owns provider facts and a rename there has to reach emitted Python. The
+	// emitted helper and class names above are ours, not a provider's, so they
+	// are written literally.
+	ClientKeyEnv string
+	// RouterClass names the emitted service subclass, on the target that needs
+	// one. Set on Pipecat, empty on LiveKit, which takes a client instead.
+	RouterClass string
+	// RequestBody is the body extension as a Python dict literal, set only on a
+	// target that sends it per request. The template writes it into its own
+	// request path, where the variable snapshot is read again for every turn
+	// instead of once for the call.
+	//
+	// One value per package rather than one per profile, and validation is what
+	// makes that safe: on livekit every router profile has to be the entry
+	// agent's, so a package has exactly one.
+	RequestBody string
 }
 
 // Any reports whether the package needs the router machinery at all.
@@ -284,15 +346,37 @@ func slngRequestHeaders(site slngSite) map[string]any {
 	}
 }
 
-// slngRequestExtras is what a router think request carries beyond the prompt: the
-// body extension holding the inline configuration and the variable snapshot, and
-// on a target that fixes them at construction, the identity headers too.
+// slngClientArgs replaces a router construction's credential and endpoint
+// arguments with the client the package builds itself.
 //
-// A site whose headers travel per request gets no header dict here. On LiveKit
-// that is not an optimisation but a requirement: a constructor extra_headers
-// replaces the per-request one instead of merging, so leaving it in place would
-// silently win over the scope and the emitted source would still look right.
-func slngRequestExtras(site slngSite, pureProxy bool) map[string]any {
+// Both values move into that helper rather than being passed twice. The plugin
+// ignores api_key and base_url entirely once it is given a client, so leaving
+// them here would emit two arguments that do nothing and a reader would have to
+// work out which pair the request actually used.
+//
+// Only the two named arguments go. Everything else the catalogue put on the call,
+// the model above all, stays where it is.
+func slngClientArgs(args []pyKV, expr string) []pyKV {
+	if expr == "" {
+		return args
+	}
+	rest := slices.DeleteFunc(args, func(arg pyKV) bool {
+		return arg.Key == "api_key" || arg.Key == "base_url"
+	})
+	return append([]pyKV{{Key: "client", Value: expr}}, rest...)
+}
+
+// slngRequestBody is the body extension one router think request carries beyond
+// the prompt: the inline model configuration, the variable snapshot, and the
+// author's pure-proxy switch when it is on.
+//
+// One owner, two readers, the same arrangement as the header dict below it. A
+// target that fixes the body at construction reads it through
+// slngRequestExtras; a target that sends it per request reads it through
+// slngHelpers.RequestBody and writes it into its own request path. A second
+// spelling of this dict is how one of the two would come to send a stale
+// snapshot.
+func slngRequestBody(site slngSite, pureProxy bool) map[string]any {
 	body := map[string]any{"slng_config": pyExpr(site.ConfigFunc + "()")}
 	if pureProxy {
 		body[slngPureProxyParam] = true
@@ -301,7 +385,24 @@ func slngRequestExtras(site slngSite, pureProxy bool) map[string]any {
 		body["template_variables"] = pyExpr(fmt.Sprintf("_slng_template_variables(%s, (%s))",
 			slngStateExpr(site.StateExpr), pyTuple(site.Names)))
 	}
-	extras := map[string]any{"extra_body": body}
+	return body
+}
+
+// slngRequestExtras is what a router think construction carries: whichever of
+// the two dicts this target does not send per request.
+//
+// A site whose headers travel per request gets no header dict here, and a site
+// whose body travels per request gets no body. On LiveKit both are absent, and
+// that is not an optimisation but a requirement: the plugin applies its own
+// constructor options after the per-request ones, so either dict left here would
+// silently win while the emitted per-request source still looked right. A
+// LiveKit router construction therefore carries no router extras at all, which
+// is what the gate in livekit_v1_test.go holds.
+func slngRequestExtras(site slngSite, pureProxy bool) map[string]any {
+	extras := map[string]any{}
+	if !site.BodyPerRequest {
+		extras["extra_body"] = slngRequestBody(site, pureProxy)
+	}
 	if !site.HeadersPerRequest {
 		extras["extra_headers"] = slngRequestHeaders(site)
 	}

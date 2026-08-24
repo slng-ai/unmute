@@ -42,9 +42,12 @@ first response.
 6. On a no, or on a second unclear answer, finish with action `none` and save
    nothing. If they change a detail, treat it as a new request: check
    availability again and ask the question again.
-7. Finish with what the tool returned. The booking specialist speaks it. Only
-   finish when the change is saved, or when there is nothing you can do. There
-   is no "still working" finish: while the conversation is live, speak instead.
+7. Finish with what the tool returned. The booking specialist confirms it in
+   one short sentence and does not repeat the details, so your own confirmation
+   question in step 4 is the last time the caller hears the service, the day,
+   and the time. Only finish when the change is saved, or when there is nothing
+   you can do. There is no "still working" finish: while the conversation is
+   live, speak instead.
 
 ## Escalation
 

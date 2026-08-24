@@ -98,3 +98,58 @@ func TestReasonParamsStayFlatKwargsOnLiveKit(t *testing.T) {
 		t.Error("agent.py wraps params in extra={...}; the LiveKit openai row declares no overflow field, so kwargs stay flat")
 	}
 }
+
+// FR-009. Unmute never adds a sampling parameter an author did not write.
+//
+// The rule exists because support is per model and not knowable here. Measured
+// 2026-08-24 against the live router: `temperature: 7` came back as the
+// upstream's own 400, "Invalid 'temperature': decimal above maximum value.
+// Expected a value <= 2", which proves the router forwards the field verbatim.
+// So a parameter unmute invents reaches a real provider and is that provider's
+// error to report, on a package that never asked for it. Some models refuse the
+// field outright, and the only honest answer to that is not to send one.
+//
+// The other half of FR-009, that no per-model table of accepted parameters is
+// kept here, is a design constraint rather than a property of emitted output.
+// There is nothing for a test to read, so this gate covers the half that has a
+// witness: what the driver wrote.
+//
+// It also guards the opposite mistake. `temperature: 0` was measured returning
+// three distinct phrasings in three reads, so pinning it buys no stabler cache
+// key, and a future reader tempted to inject one as a cache optimisation should
+// find this failing first.
+func TestReasonParamsNeverInventsSampling(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Nothing authored anywhere a sampling value can be authored: neither the
+	// typed fields nor the passthrough params. Whatever appears in the request
+	// after that is something the compiler chose by itself. The fixture writes
+	// `temperature: 0.4` as a typed field, and clearing it is the point: with the
+	// author's value gone, an emitted one has no author.
+	for name, def := range pkg.Agent.Models.Think {
+		def.Params = nil
+		def.Temperature = nil
+		def.TopP = nil
+		pkg.Agent.Models.Think[name] = def
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every sampling field a chat completion accepts and some models refuse.
+	sampling := []string{"temperature", "top_p", "top_k", "frequency_penalty", "presence_penalty", "seed"}
+	for _, tc := range routerTargets() {
+		artifact, err := Generate(agent, targetByProvider(t, agent, tc.provider), target.Default())
+		if err != nil {
+			t.Fatalf("%s: generate: %v", tc.provider, err)
+		}
+		module := artifactFile(t, artifact, tc.module)
+		for _, field := range sampling {
+			if strings.Contains(module, field+"=") || strings.Contains(module, `"`+field+`"`) {
+				t.Errorf("%s: emitted %s for a binding whose author wrote no params; a model that refuses the field would fail a package that never asked for it", tc.provider, field)
+			}
+		}
+	}
+}

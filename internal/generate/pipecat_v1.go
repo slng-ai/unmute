@@ -76,7 +76,18 @@ type pipecatAgent struct {
 	// It exists because a task borrows this worker's service: entering one swaps
 	// the task's scope in, and every way out has to swap this back or the owner
 	// would keep answering under the task's cache scope.
-	SlngHeaders       string
+	SlngHeaders string
+	// SlngBody is this agent's router body extension, as a Python literal
+	// spelled for a method body, and it is how a value the call learns partway
+	// through reaches the router. Empty unless this agent's think profile is a
+	// router binding whose prompts reference a variable.
+	//
+	// This target has no per-request seam, so the body sits on the service and is
+	// refreshed where the call writes a variable. That is enough because the only
+	// writes are at call start and when a task finishes, and each is followed by
+	// a turn rather than concurrent with one. A settings delta merges `extra` key
+	// by key, so a body-only delta leaves the site's scope header alone.
+	SlngBody          string
 	LLM               pipecatService
 	TTS               pipecatService
 	Tools             []pipecatTool

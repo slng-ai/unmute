@@ -127,6 +127,12 @@ Two things you will notice:
 One more consequence worth planning for: hit rates build over calls either way. A
 fresh id is a cold cache, so bump it deliberately rather than as housekeeping.
 
+**If we have pre-warmed answers for you, they are arranged against a scope, not
+against your `agent_id`.** So an arrangement made before your package sent one
+scope per prompt reaches nothing, and the same is true after any id bump. The
+generated runbook prints the exact list of scopes your package sends; that list is
+what we need to redo it.
+
 Compiling refuses a scope that will not fit. The value leaves as an HTTP header
 and the bound is 128 characters, counted on the finished scope rather than on the
 `agent_id` alone, so a long id plus a long agent name can be refused where the id
@@ -282,16 +288,133 @@ so turns can still repeat.
 This applies to the system prompt only. Greetings, tool arguments, injected
 values, and webhook paths keep rendering locally exactly as before.
 
-Two details worth knowing:
+The values are read again for every request, not once when the call started. So a
+value your call learns partway through, from a verification step or a lookup, is in
+the prompt from the next turn on.
 
-- A variable with no value yet sends an empty string, never the word "None".
+That is also why a router-bound prompt may name a variable that has no value when
+the call begins, where a prompt on a direct provider may not. A direct prompt is
+rendered once, before the call, so an unset variable leaves a hole in it and
+compiling refuses. A router-bound prompt is never rendered here at all, so there is
+no hole to leave: name a `source: conversation` variable or one a task assigns, and
+the value arrives when the call learns it. That is what makes a placeholder worth using for
+something the caller tells you during the call, rather than only for what you knew
+before it began.
+
+Three details worth knowing:
+
+- A variable with no value yet sends an empty string, never the word "None". It is
+  still sent: a placeholder the router was given no value for is a 422, and a 422
+  mid-call ends the call.
 - A value over 4000 characters is truncated with a warning on stderr, and the call
   continues. An over-long value is not a reason to drop a live call.
+- On Pipecat the refresh happens where the call writes the value rather than on
+  every request, because that framework offers no per-request hook. The effect is
+  the same for every path a package can take today, since the only writes are at
+  call start and when a step finishes.
+
+### Which values belong in a placeholder
+
+A placeholder is for a value your agent **says**: the caller's name, the company
+name, an appointment detail read back aloud. Those are the values that make an
+answer personal, and personal answers are the ones the router otherwise refuses to
+keep. Supplied as a value, the stored copy holds the placeholder instead of the
+name, so the turn caches like any other and the next caller hears their own name
+in it.
+
+A value that changes **what the answer is** does not belong in one, however much
+it varies per call. The reply language is the clearest case:
+
+```markdown Wrong
+Reply to the caller in {{session_language}}.
+```
+
+Two callers who chose different languages would share one cached answer and one of
+them would hear the wrong language. Write a steering value into the prompt text
+instead, and if two variants must never receive each other's answers, give each
+its own `agent_id`: the agent id is the only thing that partitions the cache.
+
+Nothing checks this for you. The compiler will not judge a value by its name, so a
+steering value in a placeholder fails silently and only in production.
+
+### Give the value the shape the agent says it in
+
+A placeholder only earns its keep while the router can recognise the value in the
+answer. It substitutes back where the answer holds the value **character for
+character**, so a value the model tidies up on its way out, a phone number it
+regroups, a date it rewrites, leaves the real thing in the stored copy. The
+personal-data scan then refuses to share that copy, and the turn stops caching.
+
+Measured against the live EU router on 2026-08-24, three reads per arm on fresh
+scopes:
+
+| Value supplied | The model said it back | Served from cache |
+|---|---|---|
+| `555 070 1222` | unchanged | yes, 109ms on the third read |
+| `5550404111` | unchanged | yes, on the second read |
+| `+15550707444` | regrouped, so the value never appeared | **never, 0 of 3** |
+
+Nothing reports this. There is no error, no warning, and the caller hears a
+correct answer every time. The only symptom is a hit rate of zero.
+
+So write the format into the variable's own `description`, and make whatever
+produces the value follow it. A task that returns a phone number should say what
+shape it returns it in, the way `examples/salon-concierge` does:
+
+```yaml agent.yaml
+variables:
+  customer_phone:
+    type: string
+    description: >-
+      The caller's confirmed phone number, as the verification task returns it:
+      digit groups separated by single spaces, with no plus sign, brackets or
+      dashes.
+```
+
+### What the router will not cache, whatever you do
+
+Three rules decide this, and none of them is about your placeholders:
+
+| The answer | Why |
+|---|---|
+| holds personal data a scan flags | it would be replayed to the next caller |
+| contains a tool call | the turn is an instruction to act, not an answer |
+| follows a tool result | the result is this caller's data |
+
+There is a fourth rule, and unlike these three a placeholder does beat it: the
+router refuses to store an answer **holding a number in any script**, because a
+number in a reply is usually caller-specific. A number the agent says from a
+placeholder is not in the stored copy at all, so that answer caches like any
+other. Measured above. A number the agent renders itself, or one it reformats
+before saying, falls under the rule.
+
+So an agent that quotes times and prices from its own working sees fewer hits
+than one that asks questions, and that is the numeric rule working rather than a
+fault. Where those numbers are per-call values the agent reads back, a
+placeholder turns them into hits. The first turn of every call is always the
+model either way: there is no preceding turn to have cached.
 
 ## Checking that it is working
 
-Three response headers carry the whole story. They are the only way to see which
-path answered.
+**Read the run's own log.** Every think request writes one line, at info level, in
+every run, deployed or local:
+
+```
+slng router: scope=clinic-scheduler-v1:concierge source=cache layer=l2_exact request_id=req_...
+slng router: scope=clinic-scheduler-v1:concierge source=llm model=gpt-5.6-luna request_id=req_...
+```
+
+`source=cache` means no model ran. Repeat an exchange and watch it change: that is
+the check, and it needs no dashboard and no code of yours. `layer` appears only on
+a hit, `model` only on a live answer, `request_id` is what to quote to us. Nothing
+aggregates the lines, so a hit rate is a count of them.
+
+Do not read a hit off the clock instead. A hit has been measured at 396ms and a
+generation faster than that, so latency alone tells you nothing on any single
+turn.
+
+The line is built from three response headers, which the generated project reads
+through a hook on its own HTTP client because neither framework surfaces them.
 
 | Header | Values | Meaning |
 |---|---|---|

@@ -79,6 +79,87 @@ values = bot._slng_template_variables(state, ("never_set",))
 assert values["never_set"] == "", repr(values["never_set"])
 assert bot._slng_template_variables(None, ("never_set",))["never_set"] == ""
 
+# --- the provenance hook ------------------------------------------------------
+# Emitted, and run. A golden proves the line was written; only calling it proves
+# what the line says, and this is the one helper whose failure mode is silence.
+import asyncio
+
+
+class _Headers(dict):
+    """Just enough of httpx's header mapping: case-insensitive get and [] ."""
+
+    def __init__(self, pairs):
+        super().__init__({k.lower(): v for k, v in pairs.items()})
+
+    def get(self, key, default=None):
+        return super().get(key.lower(), default)
+
+    def __getitem__(self, key):
+        return super().__getitem__(key.lower())
+
+
+class _Request:
+    def __init__(self, headers):
+        self.headers = _Headers(headers)
+
+
+class _Response:
+    def __init__(self, request_headers, headers):
+        self.request = _Request(request_headers)
+        self.headers = _Headers(headers)
+        # Reading either of these would consume the stream the framework is about
+        # to iterate, so touching them at all is the defect.
+        self.text = property(lambda self: 1 / 0)
+
+    def read(self):
+        raise AssertionError("the hook read the response body, which is not there yet")
+
+
+lines = []
+
+
+class _Log:
+    def info(self, message):
+        lines.append(message)
+
+    def debug(self, *args, **kwargs):
+        pass
+
+
+real_logger, bot.logger = bot.logger, _Log()
+try:
+    scope = "smoke-router-v1:concierge"
+    # A cache hit: layer present, model absent.
+    asyncio.run(bot._slng_log_provenance(_Response(
+        {"X-Slng-Agent-Id": scope},
+        {"x-slng-response-source": "cache", "x-slng-cache-layer": "l2_exact",
+         "x-slng-request-id": "req_smoke_1"},
+    )))
+    # A live answer: model present, layer absent.
+    asyncio.run(bot._slng_log_provenance(_Response(
+        {"X-Slng-Agent-Id": scope},
+        {"x-slng-response-source": "llm", "x-slng-model": "gpt-5.6-luna",
+         "x-slng-request-id": "req_smoke_2"},
+    )))
+    # No scope header: not a router think request, so no line and no error.
+    asyncio.run(bot._slng_log_provenance(_Response({}, {"x-slng-request-id": "req_smoke_3"})))
+    # And a response that would raise on any header read: the hook swallows it,
+    # because a log line must never end a call.
+    class _Hostile:
+        request = property(lambda self: 1 / 0)
+
+    asyncio.run(bot._slng_log_provenance(_Hostile()))
+finally:
+    bot.logger = real_logger
+
+assert len(lines) == 2, lines
+assert lines[0] == (
+    "slng router: scope=" + scope + " source=cache layer=l2_exact request_id=req_smoke_1"
+), lines[0]
+assert lines[1] == (
+    "slng router: scope=" + scope + " source=llm model=gpt-5.6-luna request_id=req_smoke_2"
+), lines[1]
+
 print("slng router helpers ok")
 `
 
@@ -103,10 +184,10 @@ func TestSmokeSlngRouterHelpers(t *testing.T) {
 			agent.Targets[name] = target
 		}
 		agent.Secrets = append(agent.Secrets, "SMOKE_GCP_KEY")
-		// The salon prompts reference no variables, so nothing would emit the
-		// snapshot helper. The placeholder goes on here rather than in the example,
-		// because the two example packages are a matched pair for measurement and
-		// a variable in one of them is a line of difference that buys nothing.
+		// The entry agent's prompt references no variable of its own: the example
+		// puts {{customer_name}} on the three specialists, because the concierge
+		// speaks before anyone has offered a name. The snapshot helper is emitted
+		// either way, and this makes the entry prompt exercise it too.
 		entry := agent.Agents[agent.EntryAgent]
 		entry.Instructions += "\n\nThe caller is {{customer_name}}."
 		agent.Agents[agent.EntryAgent] = entry

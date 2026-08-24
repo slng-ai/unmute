@@ -232,10 +232,52 @@ decision the author is making rather than an implementation detail.
   travel beside it, which is what makes a personalised prompt cacheable.
   Greetings, tool arguments, injected values and webhook paths keep rendering
   locally.
+- **Write a per-call value the agent speaks as a placeholder, not into the prompt
+  text.** A caller's name, the company name, an appointment detail read back: put
+  `{{customer_name}}` in the prompt, declare the variable, and let the router
+  substitute. The stored answer then holds the placeholder rather than the name,
+  so it can be cached at all and it is shared across callers, each hearing their
+  own value. Measured 2026-08-24: an answer stored as "Absolutely, Rajesh" came
+  back for the next caller as "Absolutely, Sarah", from cache, in 182ms against
+  1216ms. Rendered into the prompt text yourself, that same answer is withheld
+  from the cache as personal data.
+- **A placeholder's value must be in the exact form the agent speaks it.** The
+  router puts the placeholder back only where the answer holds the value
+  character for character, so a value the model reformats while saying it leaves
+  the real thing in the stored copy and the turn silently stops caching. Measured
+  2026-08-24, three reads per arm on fresh scopes: a phone number supplied as
+  digit groups separated by single spaces was echoed verbatim and the third read
+  was served from cache in 109ms, while the same digits supplied with a leading
+  country-code plus and no spaces were regrouped by the model, so the value never
+  appeared in the answer and none of the three reads was served. Tell an author to write the
+  format into the variable's `description` and to have whatever produces the
+  value normalise to it. There is no error and no warning; the only symptom is a
+  hit rate of zero.
+- **This is what makes a number-bearing answer cacheable.** The router otherwise
+  refuses to store any answer containing a number, so an agent that reads a phone
+  number, a booking reference or a time back aloud pays the model for every one of
+  those turns. Supplied as a placeholder, in the form it is spoken, that same
+  answer caches like any other. Do not tell an author numbers can never cache.
+- **A value that steers the answer is not a placeholder.** The reply language is
+  the clearest case: two callers who chose different languages would share one
+  cached answer and one would hear the wrong one. Write a steering value into the
+  prompt text, and if two variants must never receive each other's answers give
+  each its own `agent_id`. The compiler does not check this and cannot: it would
+  be judging a value from its name.
+- The values are read again for every request, so a value the call learns partway
+  through is in the prompt from the next turn. A referenced name with no value yet
+  is still sent, as an empty string; an unsupplied name is a 422 mid-call.
 - Streamed responses carry no usage on either path, so token savings cannot be
   read off the stream.
-- Three response headers are the only way to check which path answered:
+- Three response headers say which path answered:
   `x-slng-response-source`, `x-slng-cache-layer`, `x-slng-model`.
+- **An emitted agent reports where each answer came from.** Every think request
+  logs one line at info level, in every run, not only locally:
+  `slng router: scope=<id>:<site> source=cache layer=l2_exact request_id=...`, or
+  `source=llm model=<model>` on a live answer. Tell an author to read that line
+  rather than to guess from latency: a hit has been measured as slow as 396ms and
+  a generation as fast as a hit. Nothing aggregates the lines, so a hit rate is a
+  count of them.
 
 Full page: [Context Router](https://docs.slng.ai/context-router/). The two salon
 examples, `salon-concierge` and `optimized-salon-concierge`, are the same package

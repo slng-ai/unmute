@@ -73,10 +73,33 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 			return err
 		}
 	}
+	// An agent prompt is a session-start site, with one exception: a router-bound
+	// one is never rendered here at all. It travels to the SLNG Context Router
+	// with its placeholders intact and the router substitutes them, once per
+	// request, from the values sent beside it. So "no value when the prompt is
+	// built" does not describe that site: there is no build, and the value the
+	// request carries is the one the call holds at that moment.
+	//
+	// Which makes a value the call learns later exactly the case worth authoring
+	// there: a name the caller offers mid-conversation, or a field a task
+	// assigns. Before this exception the only way to write either was to render
+	// the value into the prompt text, which is the thing that stops the answer
+	// being cached at all.
+	//
+	// So the allowance is every declared variable rather than a chosen subset.
+	// The restriction exists because a session-start render of an unset variable
+	// produces a prompt with a hole in it; a router-bound prompt has no
+	// session-start render to produce one.
+	assigned := assignedVariables(agent)
+	allVariables := sortedKeys(agent.Variables)
 	for _, name := range sortedKeys(pkg.Agent.Agents) {
 		raw := pkg.Agent.Agents[name]
 		site := fmt.Sprintf("agent %q instructions", name)
-		if err := checkTemplateSite(pkg, agent, raw.Instructions, "", site, pkg.Markdown[raw.Instructions], true); err != nil {
+		var lateBound []string
+		if routerPrompt(pkg, agent, name) {
+			lateBound = allVariables
+		}
+		if err := checkTemplateSite(pkg, agent, raw.Instructions, "", site, pkg.Markdown[raw.Instructions], true, lateBound...); err != nil {
 			return err
 		}
 	}
@@ -89,7 +112,6 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 	// moment renders empty, never the word "None", so the prompt can say what
 	// empty means (B: multi-task booked nothing because the appointment task
 	// could not see the customer id, 2026-08-15).
-	assigned := assignedVariables(agent)
 	for _, name := range sortedKeys(pkg.Agent.Tasks) {
 		raw := pkg.Agent.Tasks[name]
 		site := fmt.Sprintf("task %q instructions", name)
@@ -118,6 +140,23 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 		}
 	}
 	return nil
+}
+
+// routerPrompt reports whether this agent's think profile sends its prompt to the
+// SLNG Context Router, which is what makes the prompt a late-bound site rather
+// than a session-start one.
+//
+// Read from the package's own models block rather than from a resolved target,
+// because this check runs once for the package. A per-target override that turns
+// the profile into a direct provider makes the prompt render locally again, and
+// an unset variable there renders empty rather than failing, the same way a task
+// prompt has always behaved.
+func routerPrompt(pkg *packagespec.Package, agent *Agent, name string) bool {
+	profile := pkg.Agent.Agents[name].Model
+	if profile == "" {
+		profile = pkg.Agent.Agents[agent.EntryAgent].Model
+	}
+	return pkg.Agent.Models.Think[profile].Provider == ProviderSlngRouter
 }
 
 // assignedVariables lists every variable a delegate control writes from a task
