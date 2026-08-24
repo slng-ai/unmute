@@ -102,6 +102,45 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			redacts: "sk-live-pretend-key-value",
 		},
 		{
+			// A direct-provider agent prompt is a session-start site: it is
+			// rendered once, before the call, so a variable with no value yet
+			// leaves a hole in it. This is the refusal the router case below is
+			// an exception to, and it is here so the pair reads as a pair.
+			name: "an agent prompt may not name a variable that has no value yet",
+			mutet: func(pkg *packagespec.Package) {
+				pkg.Agent.Variables["caller_alias"] = packagespec.Variable{Type: "string", Source: "conversation"}
+				intake := pkg.Agent.Agents["intake"]
+				pkg.Markdown[intake.Instructions] += "\n\nThe caller goes by {{caller_alias}}."
+			},
+			want: "has no value when the prompt is built",
+		},
+		{
+			// The exception, and the reason this feature is authorable at all. A
+			// router-bound prompt is never rendered here: it travels to the SLNG
+			// Context Router with its placeholders intact and the router
+			// substitutes them per request, from the values sent beside it. So
+			// there is no session-start render to leave a hole in, and a value the
+			// call learns later is exactly what belongs there.
+			//
+			// Both variable kinds, because they arrive by different routes: one
+			// the caller offers mid-conversation, one a task assigns on finishing.
+			name: "a router-bound agent prompt may name a late-bound variable",
+			mutet: func(pkg *packagespec.Package) {
+				think := pkg.Agent.Models.Think["fast_reasoning"]
+				think.Provider = ProviderSlngRouter
+				think.Model = "gpt-5.6-luna"
+				think.AgentID = "converge-router-v1"
+				think.Upstream = &packagespec.Upstream{Provider: "openai"}
+				think.Params = map[string]any{"world_part_override": "eu", "reasoning_effort": "none"}
+				pkg.Agent.Models.Think["fast_reasoning"] = think
+				pkg.Agent.Secrets = append(pkg.Agent.Secrets, "SLNG_API_KEY")
+				pkg.Agent.Variables["caller_alias"] = packagespec.Variable{Type: "string", Source: "conversation"}
+				intake := pkg.Agent.Agents["intake"]
+				pkg.Markdown[intake.Instructions] += "\n\nThe caller goes by {{caller_alias}}."
+			},
+			want: "",
+		},
+		{
 			name: "the capture tool name is reserved",
 			mutet: func(pkg *packagespec.Package) {
 				pkg.Agent.Tools = append(pkg.Agent.Tools, CaptureToolName)

@@ -60,6 +60,75 @@ turning cache serving off entirely and giving up the speed the router is here fo
 It is gone. Cache serving is on, and nothing in the emitted output asks the router
 to stop.
 
+The values behind the prompt's placeholders are read again for every request, so a
+value this call learns partway through is in the prompt from the next turn on
+rather than being whatever it was when the call started. A name with no value yet
+is still sent, as an empty string, because a placeholder the router was given no
+value for is a 422 that would end the call.
+
+### Why the phone number is a placeholder, and why its format matters
+
+The booking specialist can tell the caller which number is on file, and that
+number is `{{customer_phone}}` in its prompt rather than text this package renders
+itself. The router refuses to store any answer containing a number, so an agent
+that reads one back aloud normally pays the model for every one of those turns.
+Through a placeholder it does not: the stored copy holds no number at all.
+
+That only works while the router can find the value in the answer. It substitutes
+back where the answer holds the value **character for character**, so the shape
+the number arrives in decides whether anything caches at all. Measured 2026-08-24
+against the live EU router, three reads per arm on fresh scopes:
+
+| Value supplied | The model said it back | Served from cache |
+|---|---|---|
+| `555 070 1222` | unchanged | yes, 109ms on the third read |
+| `+15550707444` | regrouped, so the value never appeared | never, 0 of 3 |
+
+Nothing reports the failure. The caller hears a correct answer either way and the
+hit rate is simply zero. That is why `customer_phone`'s description names the
+format, and why `tasks/verify-customer.md` says what shape to return the number
+in rather than leaving it to the model.
+
+### One placeholder, in one prompt
+
+`customer_id` stays out of every prompt: it is never spoken, so a placeholder
+would buy no cache hit. The caller's name is not a variable at all, and neither
+of those is only tidiness.
+
+The compiler sends **one set of names per think profile**, the union of every
+name any router-bound prompt on that profile references. All four agents and both
+tasks share the `reasoning` profile here, so whatever this package declares and
+references is sent on all six requests, not only on the prompt that says it.
+
+That matters because of a rule in the router's own guide: its sharing scan refuses
+any cached answer that still contains one of the values you sent for that call,
+matching whole words and word beginnings. So every extra value narrows what can be
+shared. A caller's first name is short enough to appear inside an unrelated word
+in some answer somewhere; a phone number in this shape is not. One long, specific
+value the agent actually says is the cheapest thing to send.
+
+The counterpart holds too: the complaint and chat specialists never say a number,
+so they carry no placeholder. That does not change what is sent, because the name
+set is a union, but a prompt should not hold a value it has no use for.
+
+Every think request also logs one line saying where its answer came from, so
+whether any of this is working is a question you answer by reading the run:
+
+```
+slng router: scope=optimized-salon-concierge-v8:concierge source=cache layer=l2_exact request_id=req_...
+```
+
+Say the same thing twice in a row and watch `source=` change from `llm` to
+`cache`. Expect `llm` on the first turn of every call, on every turn that calls a
+tool, and on the turn after a tool result: none of those can be cached.
+
+One rule to carry into your own package: a placeholder is for a value the agent
+**says**. A value that changes **what the answer is**, the reply language above
+all, belongs in the prompt text. Two callers who chose different languages would
+otherwise share one cached answer and one of them would hear the wrong language.
+Nothing warns you: the compiler cannot tell a spoken value from a steering one by
+its name.
+
 ## How the call moves
 
 The concierge verifies the caller once by phone number, saves `customer_id`,

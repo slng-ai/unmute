@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from urllib.parse import quote
 
 import httpx
+from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -114,6 +115,71 @@ def _slng_config_fast_reasoning() -> dict:
     name of an environment variable.
     """
     return {"tiers": {"1": [{"endpoint": {"api_key": os.environ["OPENAI_API_KEY"], "url": "https://api.openai.com/v1"}, "model": "gpt-5.6-luna", "weight": 100}]}}
+
+async def _slng_log_provenance(response) -> None:
+    """Say where this answer came from, once per think request.
+
+    The router states this only in response headers, and neither framework hands
+    them to us, so a hook on the client is the one place that sees them. Without
+    it the question an operator actually asks about a cache, whether it is
+    working, has no answer in this run's own log.
+
+    Three rules, from httpx's own event-hooks documentation, each of which would
+    be a live-call defect if broken. It has to be async, because a sync callable
+    on an AsyncClient is never awaited. It reads headers only: the hook runs
+    before the body is read, so touching the body would consume the stream the
+    framework is about to iterate. And it cannot raise, because a raising
+    response hook fails the request it was only meant to describe.
+
+    It also logs only a router think request. The scope header is what lets the
+    line name a scope at all, so a request without one is a request this hook
+    could not describe.
+    """
+    try:
+        scope = response.request.headers.get("X-Slng-Agent-Id")
+        if not scope:
+            return
+        # Field order is the contract, and the gate reads it off this line.
+        fields = ["scope=" + scope]
+        fields.append("source=" + response.headers.get("x-slng-response-source", "unknown"))
+        if response.headers.get("x-slng-cache-layer"):
+            fields.append("layer=" + response.headers["x-slng-cache-layer"])
+        if response.headers.get("x-slng-model"):
+            fields.append("model=" + response.headers["x-slng-model"])
+        fields.append("request_id=" + response.headers.get("x-slng-request-id", "unknown"))
+        logger.info("slng router: " + " ".join(fields))
+    except Exception:  # noqa: BLE001 - a log line must never end a call
+        logger.debug("could not read the router's provenance headers", exc_info=True)
+
+
+
+class _SlngRouterLLMService(OpenAILLMService):
+    """The router's LLM service, plus a response hook on the client it builds.
+
+    Overriding create_client is the only seam this framework offers for it: the
+    service builds its own AsyncOpenAI and hands us neither the raw response nor
+    its headers, and the router states where an answer came from only in headers.
+
+    The connection limits restate the base class's own (pipecat
+    services/openai/base_llm.py create_client at the pinned version). Restating
+    them is deliberate. Anything different here would change connection reuse,
+    which is a latency change nobody asked for and nothing would report.
+    """
+
+    def create_client(self, api_key=None, base_url=None, **kwargs):
+        return AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            http_client=DefaultAsyncHttpxClient(
+                limits=httpx.Limits(
+                    max_keepalive_connections=100,
+                    max_connections=1000,
+                    keepalive_expiry=None,
+                ),
+                event_hooks={"response": [_slng_log_provenance]},
+            ),
+        )
+
 
 
 _SLNG_VARIABLE_LIMIT = 4000
@@ -224,6 +290,7 @@ require_env()
 @dataclass
 class State:
     """Typed call variables (SCHEMA 4.4), shared across agents."""
+    caller_alias: str | None = None  # What the caller says to call them.
     customer_id: str | None = None
     verified: bool = False
 
@@ -291,7 +358,7 @@ You are the billing specialist for Acme Support. This is a phone call, so keep e
 - If the caller is not satisfied, explain what a human support team would need to review.
 
 
-The caller is {{customer_id}}."""
+The caller is {{customer_id}}, who goes by {{caller_alias}}."""
 INTAKE_PROMPT = """# Intake agent (placeholder prompt)
 
 You are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
@@ -302,7 +369,7 @@ You are the front desk voice agent for Acme Support. This is a phone call, so ke
 - Never guess account details. If you cannot find the customer, say so and ask again.
 
 
-The caller is {{customer_id}}."""
+The caller is {{customer_id}}, who goes by {{caller_alias}}."""
 
 
 # --- agents -----------------------------------------------------------------
@@ -310,13 +377,13 @@ The caller is {{customer_id}}."""
 
 
 def build_billing_llm(state=None, *, slng_session_id):
-    return OpenAILLMService(
+    return _SlngRouterLLMService(
         api_key=os.environ["SLNG_API_KEY"],
         base_url="https://eu.context-router.slng.ai/v1",
         settings=OpenAILLMService.Settings(
             model="gpt-5.6-luna",
             system_instruction=BILLING_PROMPT,
-            extra={"extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(state, ("customer_id",))}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:billing", "X-Slng-Session-Id": slng_session_id}, "reasoning_effort": "none"},
+            extra={"extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(state, ("caller_alias", "customer_id"))}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:billing", "X-Slng-Session-Id": slng_session_id}, "reasoning_effort": "none"},
         ),
     )
 
@@ -344,6 +411,28 @@ class BillingAgent(LLMWorker):
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
 
 
+    @_direct_tool(cancel_on_interruption=False)
+    async def update_variables(self, params: FunctionCallParams, caller_alias: str | None = None):
+        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them.
+
+        Args:
+            caller_alias (str | None): What the caller says to call them.
+        """
+        saved = []
+        if caller_alias is not None:
+            self.state.caller_alias = caller_alias
+            saved.append("caller_alias")
+        if saved:
+            # The third place this call writes a variable, and the one that made
+            # the other two insufficient: a value the caller offers arrives here,
+            # not at a task result. The router substitutes these into the prompt's
+            # placeholders, so the value has to reach it before the next turn
+            # asks. Body only, so the speaking site's cache scope stays put.
+            await self.queue_frame(LLMUpdateSettingsFrame(
+                delta=LLMSettings(extra={"extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(self.state, ("caller_alias", "customer_id"))}}),
+            ))
+        await params.result_callback({"saved": saved})
+
 
     @_direct_tool
     async def get_invoice(self, params: FunctionCallParams, customer_id: str):
@@ -364,13 +453,13 @@ class BillingAgent(LLMWorker):
 
 
 def build_intake_llm(state=None, *, slng_session_id):
-    return OpenAILLMService(
+    return _SlngRouterLLMService(
         api_key=os.environ["SLNG_API_KEY"],
         base_url="https://eu.context-router.slng.ai/v1",
         settings=OpenAILLMService.Settings(
             model="gpt-5.6-luna",
             system_instruction=INTAKE_PROMPT,
-            extra={"extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(state, ("customer_id",))}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": slng_session_id}, "reasoning_effort": "none"},
+            extra={"extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(state, ("caller_alias", "customer_id"))}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": slng_session_id}, "reasoning_effort": "none"},
         ),
     )
 
@@ -414,6 +503,28 @@ class IntakeAgent(LLMWorker):
         ))
         await super().on_activated(args)
 
+
+    @_direct_tool(cancel_on_interruption=False)
+    async def update_variables(self, params: FunctionCallParams, caller_alias: str | None = None):
+        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them.
+
+        Args:
+            caller_alias (str | None): What the caller says to call them.
+        """
+        saved = []
+        if caller_alias is not None:
+            self.state.caller_alias = caller_alias
+            saved.append("caller_alias")
+        if saved:
+            # The third place this call writes a variable, and the one that made
+            # the other two insufficient: a value the caller offers arrives here,
+            # not at a task result. The router substitutes these into the prompt's
+            # placeholders, so the value has to reach it before the next turn
+            # asks. Body only, so the speaking site's cache scope stays put.
+            await self.queue_frame(LLMUpdateSettingsFrame(
+                delta=LLMSettings(extra={"extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(self.state, ("caller_alias", "customer_id"))}}),
+            ))
+        await params.result_callback({"saved": saved})
 
 
     @_direct_tool(cancel_on_interruption=False)

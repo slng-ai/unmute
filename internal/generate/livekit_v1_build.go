@@ -409,6 +409,26 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		return livekitData{}, err
 	}
 	data.Slng = slng
+	// The body this target sends with every request, rendered from the entry
+	// agent's site because validation holds every router profile in a livekit
+	// package to being that one. Empty when the package has no router binding,
+	// which is what keeps a non-router package byte-identical.
+	if profile, router := slngRouterBinding(agent, tgt, agent.Agents[agent.EntryAgent].Model); router {
+		binding := tgt.Models.Reason[profile]
+		site := livekitSlngSite(agent, tgt, profile)
+		data.Slng.RequestBody = pyLiteral(slngRequestBody(site, slngPureProxy(binding)))
+		// This target builds its own client, because attaching a response hook is
+		// the only way to see the router's provenance headers and the plugin gives
+		// no other seam. So the two values it would have passed to the client it
+		// builds itself come here instead.
+		if url, ok := targetcap.SlngRouterBaseURL(slngRegion(binding)); ok {
+			data.Slng.ClientBaseURL = url
+			data.Slng.ClientKeyEnv = targetcap.SlngRouterKeyEnv
+			// That client is built with httpx, so the import is needed whether or
+			// not this package has a webhook tool.
+			data.NeedsHTTPX = true
+		}
+	}
 	// A router package gets a Userdata object whether or not it declares
 	// variables: the per-call session id lives there now, and a class reaching
 	// it from a method body is the only way the header set can travel per
@@ -1126,7 +1146,12 @@ func livekitTTSService(binding ir.Binding, env *envSet) (livekitService, error) 
 }
 
 func livekitChainService(binding ir.Binding, env *envSet, site slngSite) (livekitService, error) {
-	return resolveLiveKitService(targetcap.Reason, binding, env, site)
+	svc, err := resolveLiveKitService(targetcap.Reason, binding, env, site)
+	if err != nil {
+		return livekitService{}, err
+	}
+	svc.Call.Args = slngClientArgs(svc.Call.Args, site.ClientExpr)
+	return svc, nil
 }
 
 // livekitEndpointingDelay renders the turn binding's silence window as seconds
@@ -1222,9 +1247,14 @@ func livekitSlngSite(agent *ir.Agent, tgt ir.Target, profile string) slngSite {
 		Names:             slngTemplateNames(agent, tgt, profile),
 		ConfigFunc:        slngConfigFunc(profile),
 		HeadersPerRequest: true,
+		BodyPerRequest:    true,
+		ClientExpr:        livekitEntryClientExpr,
 	}
 	if len(agent.Variables) > 0 {
-		site.StateExpr = livekitSlngStateExpr
+		// The node's own name for the state object, not the entrypoint local:
+		// the body is rendered where the request is made, and _slng_llm_node is
+		// a module function whose only handle on the call is the session.
+		site.StateExpr = livekitNodeStateExpr
 	}
 	return site
 }
@@ -1245,7 +1275,12 @@ func livekitSummarySite(agent *ir.Agent, tgt ir.Target, profile string) slngSite
 		return site
 	}
 	site.HeadersPerRequest = false
+	// The body stays at construction here, and that is already current rather
+	// than frozen: this site is built inside an agent method at handoff time, so
+	// its construction is the moment of its request.
+	site.BodyPerRequest = false
 	site.SessionExpr = livekitRuntimeSessionIDExpr
+	site.ClientExpr = livekitRuntimeClientExpr
 	if site.StateExpr != "" {
 		site.StateExpr = livekitRuntimeStateExpr
 	}
@@ -1259,9 +1294,18 @@ func livekitSummarySite(agent *ir.Agent, tgt ir.Target, profile string) slngSite
 // the telephony call context and that is a different thing.
 const (
 	livekitSessionIDExpr        = "slng_state.slng_session_id"
-	livekitSlngStateExpr        = "slng_state"
 	livekitRuntimeSessionIDExpr = "self.session.userdata.slng_session_id"
 	livekitRuntimeStateExpr     = "self.session.userdata"
+	// livekitNodeStateExpr is the third of the three, and the one the per-request
+	// body is rendered with: _slng_llm_node is a module function, so it has
+	// neither the entrypoint's locals nor a `self`, only the session it reads off
+	// the asking agent.
+	livekitNodeStateExpr = "session.userdata"
+	// The router client, in the two scopes that build a router model: the
+	// entrypoint local it was just assigned to, and an agent method reaching the
+	// same object through the session.
+	livekitEntryClientExpr   = "slng_state.slng_client"
+	livekitRuntimeClientExpr = "self.session.userdata.slng_client"
 )
 
 // livekitSessionIDField is the field the per-call session id occupies on the user

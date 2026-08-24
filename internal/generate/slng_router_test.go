@@ -57,9 +57,19 @@ func routerFixture(t *testing.T) *ir.Agent {
 	}
 	// The placeholder goes on after Build, because the prompt bodies come from
 	// files. It is what makes this fixture exercise the raw-prompt seam too.
+	//
+	// Two variables, and the second one is here because its absence hid a defect.
+	// customer_id is written when a task finishes; caller_alias is written by the
+	// generated capture tool when the caller offers it. Those are different write
+	// sites, and a fixture with only the first let a refresh that covered only the
+	// first look complete.
+	agent.Variables["caller_alias"] = ir.Variable{
+		Type: ir.PrimitiveString, Source: ir.VariableSourceConversation,
+		Description: "What the caller says to call them.",
+	}
 	for _, name := range []string{"intake", "billing"} {
 		def := agent.Agents[name]
-		def.Instructions += "\n\nThe caller is {{customer_id}}."
+		def.Instructions += "\n\nThe caller is {{customer_id}}, who goes by {{caller_alias}}."
 		agent.Agents[name] = def
 	}
 	agent.Tasks["collect"] = ir.Task{
@@ -222,17 +232,229 @@ func TestSlngRouterScopesAgreeAcrossTargets(t *testing.T) {
 	}
 }
 
-// The one thing a scope count cannot see. The plugin replaces the whole
-// extra_headers entry from the constructor value rather than merging it
-// (livekit-plugins-openai llm.py:960-962), so a router model still built with
-// extra_headers would silently win over the per-request scope while the emitted
-// source looked right. The summarizer is the exception and has none in this
-// fixture, which uses full history.
-func TestSlngRouterLiveKitPassesNoConstructorHeaders(t *testing.T) {
+// The one thing a scope count cannot see, now for both dicts. The plugin copies
+// the per-request extra_kwargs first and then overwrites extra_body and
+// extra_headers from its own constructor options (livekit-plugins-openai
+// llm.py:956-962), so either dict left at construction silently wins over the
+// per-request one while the emitted source still looks right. For the headers
+// that costs the per-site scope; for the body it costs FR-001, because the
+// snapshot in a constructor body is the one taken when the call started.
+//
+// The summarizer is the exception and keeps both at construction. It is built
+// inside an agent method at handoff time, so its construction is the moment of
+// its request, and this fixture uses full history so it emits none at all.
+func TestSlngRouterLiveKitPassesNoConstructorExtras(t *testing.T) {
 	agent := routerFixture(t)
 	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, "agent.py")
-	if strings.Contains(source, "extra_headers={") {
-		t.Errorf("livekit builds a router model with extra_headers at construction, which overwrites the per-request scope:\n%s", source)
+	for _, banned := range []struct{ text, cost string }{
+		{"extra_headers={", "overwrites the per-request scope"},
+		{"extra_body={", "freezes the variable snapshot at the moment the call started"},
+	} {
+		if strings.Contains(source, banned.text) {
+			t.Errorf("livekit builds a router model with %s at construction, which %s:\n%s", banned.text, banned.cost, source)
+		}
+	}
+}
+
+// FR-001 and FR-002. The per-request dict carries the whole body extension, not
+// half of it, and it carries it on every site of both targets.
+//
+// Both halves in one gate on purpose: they travel together and the failure of
+// leaving one behind at the constructor looks like nothing at all. A request
+// missing slng_config reaches a router with no model configuration; a request
+// missing template_variables reaches the model with an empty placeholder.
+//
+// The LiveKit task path is named explicitly because it is not the same code
+// path. A task reaches the node through _RetryEmptyTaskResponseMixin, which
+// overrides llm_node for its own placeholder stripping and dispatches to the
+// module function, and PR #134 recorded that a second copy of that body is
+// exactly how a task comes to send the wrong scope. One copy of the body means
+// one snapshot too.
+func TestSlngRouterSendsTheWholeBodyPerRequest(t *testing.T) {
+	agent := routerFixture(t)
+	for _, tc := range routerTargets() {
+		source, _ := emitAgentSource(t, agent, tc.provider, tc.module)
+		for _, want := range []string{`"slng_config": _slng_config_fast_reasoning()`, `"template_variables": _slng_template_variables(`} {
+			if !strings.Contains(source, want) {
+				t.Errorf("%s: the request body does not carry %s", tc.provider, want)
+			}
+		}
+		if tc.provider != ir.ProviderLiveKit {
+			continue
+		}
+		// One body, one node, and the retry mixin dispatching into it rather
+		// than writing its own.
+		if got := strings.Count(source, `"template_variables": _slng_template_variables(`); got != 1 {
+			t.Errorf("livekit writes the snapshot in %d places, want 1: a second copy is how a task sends a stale one", got)
+		}
+		if !strings.Contains(source, "return _slng_llm_node(self, chat_ctx, tools, model_settings)") {
+			t.Errorf("livekit's task retry path does not dispatch into the one node that builds the body:\n%s", source)
+		}
+	}
+}
+
+// FR-005, the half a scope gate cannot see. A router site whose prompts
+// reference no variable sends no template_variables key at all, rather than an
+// empty dict. An empty dict is not free: it is a field the router then scans, and
+// it makes a package that authored nothing look like one that authored something.
+func TestSlngRouterOmitsTheSnapshotWithNoNames(t *testing.T) {
+	agent := routerFixture(t)
+	// Same fixture with the placeholders taken back out of every prompt.
+	for name, def := range agent.Agents {
+		def.Instructions = strings.ReplaceAll(def.Instructions, "\n\nThe caller is {{customer_id}}.", "")
+		agent.Agents[name] = def
+	}
+	for name, task := range agent.Tasks {
+		task.Instructions = strings.ReplaceAll(task.Instructions, " for {{customer_id}}", "")
+		agent.Tasks[name] = task
+	}
+	for _, tc := range routerTargets() {
+		source, _ := emitAgentSource(t, agent, tc.provider, tc.module)
+		if strings.Contains(source, "template_variables") && !strings.Contains(source, "# ") {
+			t.Errorf("%s: a package whose prompts reference no variable still sends template_variables", tc.provider)
+		}
+		if !strings.Contains(source, "_slng_config_fast_reasoning()") {
+			t.Errorf("%s: dropping the snapshot also dropped the model configuration", tc.provider)
+		}
+	}
+}
+
+// FR-001, the spelling of the defect this feature exists to fix. The snapshot is
+// read from the object the call writes into, at the point of the request, and
+// never from a name bound once in the entrypoint.
+//
+// `slng_state` is that entrypoint local on livekit. A snapshot rendered with it
+// can only be evaluated where it is in scope, which is the session construction,
+// which is once per call. So the presence of that name inside the per-request
+// node is the exact shape of the freeze, and its absence is the fix.
+func TestSlngRouterSnapshotReadsLiveState(t *testing.T) {
+	agent := routerFixture(t)
+	for _, tc := range routerTargets() {
+		source, _ := emitAgentSource(t, agent, tc.provider, tc.module)
+		want := "_slng_template_variables(session.userdata,"
+		frozen := "_slng_template_variables(slng_state,"
+		if tc.provider == ir.ProviderPipecat {
+			want = "_slng_template_variables(state,"
+			frozen = ""
+		}
+		if !strings.Contains(source, want) {
+			t.Errorf("%s: the snapshot does not read the live state object (want %s)", tc.provider, want)
+		}
+		if frozen != "" && strings.Contains(source, frozen) {
+			t.Errorf("%s: the snapshot reads %s, an entrypoint local bound once per call, which is the freeze this feature removes", tc.provider, frozen)
+		}
+	}
+}
+
+// FR-003 and FR-004, neither of which had a gate anywhere before this.
+//
+// FR-003 is the rule that keeps a live call alive: the router answers a request
+// referencing a {{name}} it was not given with a 422, so a name whose value is
+// not known yet is still supplied, as an empty string. The emitted helper is
+// where that happens, and the tuple of names is what makes it happen for every
+// referenced name rather than the ones that happen to be set.
+//
+// FR-004 is the truncation. Its only other check is in the opt-in smoke tier, so
+// after moving the body this one holds the wiring in the default suite: the
+// snapshot still routes through the helper that truncates, rather than a literal
+// dict assembled at the call site.
+func TestSlngRouterSuppliesEveryNameAndTruncates(t *testing.T) {
+	agent := routerFixture(t)
+	for _, tc := range routerTargets() {
+		source, _ := emitAgentSource(t, agent, tc.provider, tc.module)
+		// Every referenced name is passed, whether or not the call knows it yet,
+		// and both write kinds are represented: one a task assigns, one the caller
+		// offers.
+		if !strings.Contains(source, `("caller_alias", "customer_id")`) {
+			t.Errorf("%s: the snapshot does not supply every referenced name; an unsupplied name is a 422 mid-call", tc.provider)
+		}
+		// And the values come from the helper, which is what fills an unset name
+		// with "" and truncates an over-long one.
+		for _, want := range []string{
+			`values[name] = text`,
+			`text = "" if value is None else str(value)`,
+			`if len(text) > _SLNG_VARIABLE_LIMIT:`,
+			`text = text[:_SLNG_VARIABLE_LIMIT]`,
+		} {
+			if !strings.Contains(source, want) {
+				t.Errorf("%s: the snapshot helper no longer %q; an unset name would send None and an over-long one would reach the router whole", tc.provider, want)
+			}
+		}
+	}
+}
+
+// FR-001 on Pipecat, where the mechanism is a refresh rather than a hook. Every
+// place the call writes a variable is followed by a settings delta carrying the
+// body, and that delta carries no extra_headers key.
+//
+// The second half matters as much as the first. A settings update merges the
+// `extra` dict key by key (pipecat services/settings.py apply_update: "keys
+// present in the delta overwrite keys in the target"), so a body-only delta
+// leaves the site's scope alone, and a delta that named extra_headers as well
+// would replace the scope of whichever site is speaking.
+func TestSlngRouterPipecatRefreshesTheBodyOnEveryWrite(t *testing.T) {
+	agent := routerFixture(t)
+	// The fixture's delegates assign nothing, so give one an assignment: that is
+	// the only way a call writes a variable mid-conversation, and it is the whole
+	// case this gate is about. The pairing is arbitrary because the compiler does
+	// not care which field feeds which variable, only that a write is followed by
+	// a refresh.
+	agent.Controls["run_collect"] = &ir.Delegate{
+		Kind: ir.ControlDelegate, Task: "collect", When: "Collect the caller's account details.",
+		Assign: map[string]string{"customer_id": "result.tier"},
+	}
+	source, _ := emitAgentSource(t, agent, ir.ProviderPipecat, "bot.py")
+	// Every place the emitted module assigns into the call state, not just the
+	// ones this test remembered to think of. A task result is one; the generated
+	// capture tool is another, and it is the one a caller-offered name arrives
+	// through. Counting the writes rather than naming them is what makes a fourth
+	// write site fail here instead of shipping.
+	writes := regexp.MustCompile(`self\.state\.[a-z_]+ = `).FindAllString(source, -1)
+	if len(writes) < 2 {
+		t.Fatalf("the fixture exercises %d state write sites, want at least the task result and the capture tool: %v", len(writes), writes)
+	}
+	if got := strings.Count(source, `extra={"extra_body":`); got < len(writes) {
+		t.Errorf("%d state writes (%v) and %d body refreshes; a value written where nothing refreshes never reaches the router", len(writes), writes, got)
+	}
+	// The refresh dict names the body only. Anything that also named the headers
+	// would hand the speaking site somebody else's scope.
+	for _, line := range strings.Split(source, "\n") {
+		if strings.Contains(line, `"extra_body": {"slng_config"`) && strings.Contains(line, "X-Slng-Agent-Id") && strings.Contains(line, "LLMSettings") {
+			t.Errorf("a refresh delta carries the scope header as well as the body, which replaces the speaking site's scope:\n%s", line)
+		}
+	}
+}
+
+// FR-001 for the one site that needs no per-request path. The summarizer is built
+// inside an agent method at handoff time, so its construction is the moment of
+// its request: its extras stay where they are, and they include the snapshot.
+//
+// It is here because it is the site the fix for the others could quietly break.
+// Moving every body per request and forgetting this one leaves a summarizer with
+// no model configuration at all.
+func TestSlngRouterSummarizerKeepsConstructionExtras(t *testing.T) {
+	agent := routerFixture(t)
+	// history: summary on a handoff is what builds a summarizer at all, and it
+	// needs a profile named to do the summarising. The router profile is the one
+	// this package has, which is also the case worth gating: the summarizer then
+	// asks the router too, under its own scope.
+	for name, task := range agent.Tasks {
+		task.Context = ir.TaskContext{History: ir.HistorySummary, Summarizer: "fast_reasoning"}
+		agent.Tasks[name] = task
+	}
+	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, "agent.py")
+	if !strings.Contains(source, ":summary") {
+		t.Fatalf("no summarizer scope in the emitted module, so this gate is watching nothing:\n%s", source)
+	}
+	// Its extras stay at construction, and they carry the whole body.
+	for _, want := range []string{
+		"_slng_template_variables(self.session.userdata,",
+		"_slng_config_fast_reasoning()",
+		`"X-Slng-Agent-Id": "` + routerAgentID + `:summary"`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("the summarizer construction does not carry %s; moving every body per request left this site with nothing:\n%s", want, source)
+		}
 	}
 }
 
@@ -273,7 +495,10 @@ func TestSlngRouterPipecatRestoresTheOwnerScope(t *testing.T) {
 func TestSlngRouterFallbackCannotSplitASiteScope(t *testing.T) {
 	agent := routerFixture(t)
 	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, "agent.py")
-	if got := strings.Count(source, target.SlngAgentIDHeader); got != 1 {
+	// Written, not merely mentioned. The provenance hook reads this header off the
+	// request it is describing, which is a read and cannot carry a scope of its
+	// own; counting every mention would fail on that and say nothing true.
+	if got := strings.Count(source, target.SlngAgentIDHeader+`": `); got != 1 {
 		t.Errorf("the agent id header is written in %d places, want 1: with more than one, a chain member can carry a scope of its own", got)
 	}
 	if !strings.Contains(source, target.SlngAgentIDHeader+`": agent._slng_scope`) {
@@ -525,8 +750,8 @@ func TestSlngRouterShipsOnlyThePromptRaw(t *testing.T) {
 		source, _ := emitAgentSource(t, agent, tc.provider, tc.module)
 		// The prompt constant keeps its placeholder and is never wrapped in a
 		// local render, because the router substitutes it.
-		if !strings.Contains(source, "The caller is {{customer_id}}.") {
-			t.Errorf("%s: the router prompt lost its placeholder", tc.provider)
+		if !strings.Contains(source, "The caller is {{customer_id}}, who goes by {{caller_alias}}.") {
+			t.Errorf("%s: the router prompt lost its placeholders", tc.provider)
 		}
 		for _, rendered := range []string{"_render(INTAKE_PROMPT", "_render(BILLING_PROMPT"} {
 			if strings.Contains(source, rendered) {
@@ -673,5 +898,105 @@ func TestSlngRouterPureProxyRidesTheBody(t *testing.T) {
 				t.Error("emitted source mentions slng_pure_proxy with none authored")
 			}
 		})
+	}
+}
+
+// slngProvenanceKeys is the line's field set and its order, from
+// contracts/provenance-log.md. One list, read by two gates, because the claim is
+// that both drivers write the same line.
+var slngProvenanceKeys = []string{"scope=", "source=", "layer=", "model=", "request_id="}
+
+// FR-008. One helper per target, and both targets logging the same fields in the
+// same order.
+//
+// The order is part of the contract because a person greps this line and a script
+// parses it. Two drivers drifting into two orders is the kind of difference nobody
+// notices until a parser written against one is pointed at the other.
+func TestSlngRouterProvenanceLineHasOneOwner(t *testing.T) {
+	agent := routerFixture(t)
+	for _, tc := range routerTargets() {
+		source, _ := emitAgentSource(t, agent, tc.provider, tc.module)
+		if got := strings.Count(source, "def _slng_log_provenance("); got != 1 {
+			t.Errorf("%s: the provenance helper is defined %d times, want 1", tc.provider, got)
+		}
+		at := -1
+		for _, key := range slngProvenanceKeys {
+			next := strings.Index(source, key)
+			if next < 0 {
+				t.Errorf("%s: the provenance line has no %s field", tc.provider, key)
+				continue
+			}
+			if next < at {
+				t.Errorf("%s: %s is written out of the contract's order (%v)", tc.provider, key, slngProvenanceKeys)
+			}
+			at = next
+		}
+		// The prefix a reader greps for.
+		if !strings.Contains(source, `"slng router: "`) {
+			t.Errorf("%s: the line has no stable prefix to grep for", tc.provider)
+		}
+		// And the safety rules, each of which is a live-call defect if dropped:
+		// async on an async client, headers only because the body is unread, and
+		// never raising into the request path.
+		for _, want := range []struct{ text, why string }{
+			{"async def _slng_log_provenance(", "a sync hook on an AsyncClient is never awaited"},
+			{"except Exception:", "a hook that raises fails the request it was only meant to describe"},
+		} {
+			if !strings.Contains(source, want.text) {
+				t.Errorf("%s: the hook is missing %q: %s", tc.provider, want.text, want.why)
+			}
+		}
+		if strings.Contains(source, "response.read()") || strings.Contains(source, "response.text") {
+			t.Errorf("%s: the hook reads the response body, which the framework is about to stream", tc.provider)
+		}
+		// The discriminator, so the hook describes only what it can name.
+		if !strings.Contains(source, "request.headers.get("+`"`+target.SlngAgentIDHeader+`"`) {
+			t.Errorf("%s: the hook does not decide from the request's own scope header whether to log", tc.provider)
+		}
+	}
+}
+
+// FR-005 for the provenance line. A package with no router think binding emits no
+// hook, no client of its own and no line, so nothing about it changes.
+func TestSlngRouterProvenanceAbsentWithoutARouterBinding(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range routerTargets() {
+		_, all := emitAgentSource(t, agent, tc.provider, tc.module)
+		for _, banned := range []string{"_slng_log_provenance", "slng router: ", "_slng_router_client"} {
+			if strings.Contains(all, banned) {
+				t.Errorf("%s: a package with no router binding emits %q", tc.provider, banned)
+			}
+		}
+	}
+}
+
+// The one thing this hook costs, and the reason it is a gate. Passing a client to
+// the plugin sets `_owns_client = False` and its aclose() then closes nothing
+// (livekit-plugins-openai llm.py:161 and 178-180), so a client we build is a
+// client we have to close. A worker serving call after call would otherwise leak
+// one connection pool per session.
+func TestSlngRouterLiveKitClosesTheClientItOwns(t *testing.T) {
+	agent := routerFixture(t)
+	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, "agent.py")
+	// Built once, in the entrypoint, and held on the call's own state object so a
+	// construction inside an agent method reaches the same one.
+	if got := strings.Count(source, "= _slng_router_client()"); got != 1 {
+		t.Errorf("the router client is built in %d places, want 1: a second one is a second connection pool with no owner", got)
+	}
+	if !strings.Contains(source, "client=slng_state.slng_client") {
+		t.Errorf("the session model is not given the client this call owns, so its response hook never runs:\n%s", source)
+	}
+	if !strings.Contains(source, "ctx.add_shutdown_callback") {
+		t.Error("the emitted entrypoint registers no shutdown callback, so the client it owns is never closed")
+	}
+	if !strings.Contains(source, ".slng_client.close()") {
+		t.Error("nothing closes the router client; the plugin closes only a client it built itself")
 	}
 }

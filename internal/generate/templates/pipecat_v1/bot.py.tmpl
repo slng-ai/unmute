@@ -48,6 +48,7 @@ import aiohttp
 import aiohttp
 {{end}}{{end}}{{if .NeedsHTTPX}}
 import httpx
+{{end}}{{if .Slng.RouterClass}}from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}{{if .SIP}}from livekit.api import AccessToken{{if .SIP.ColdDestination}}, LiveKitAPI{{end}}, VideoGrants
 {{if .SIP.ColdDestination}}from livekit.protocol.models import ParticipantInfo
@@ -186,7 +187,72 @@ def _slng_vertex_credentials(name: str) -> dict:
         f"{name} must hold a GCP service-account key in one of three shapes: "
         f"the key JSON, that JSON base64 encoded, or a path to the key file"
     )
-{{end}}{{if .Slng.Variables}}
+{{end}}
+async def _slng_log_provenance(response) -> None:
+    """Say where this answer came from, once per think request.
+
+    The router states this only in response headers, and neither framework hands
+    them to us, so a hook on the client is the one place that sees them. Without
+    it the question an operator actually asks about a cache, whether it is
+    working, has no answer in this run's own log.
+
+    Three rules, from httpx's own event-hooks documentation, each of which would
+    be a live-call defect if broken. It has to be async, because a sync callable
+    on an AsyncClient is never awaited. It reads headers only: the hook runs
+    before the body is read, so touching the body would consume the stream the
+    framework is about to iterate. And it cannot raise, because a raising
+    response hook fails the request it was only meant to describe.
+
+    It also logs only a router think request. The scope header is what lets the
+    line name a scope at all, so a request without one is a request this hook
+    could not describe.
+    """
+    try:
+        scope = response.request.headers.get({{pyq .Slng.AgentIDHeader}})
+        if not scope:
+            return
+        # Field order is the contract, and the gate reads it off this line.
+        fields = ["scope=" + scope]
+        fields.append("source=" + response.headers.get("x-slng-response-source", "unknown"))
+        if response.headers.get("x-slng-cache-layer"):
+            fields.append("layer=" + response.headers["x-slng-cache-layer"])
+        if response.headers.get("x-slng-model"):
+            fields.append("model=" + response.headers["x-slng-model"])
+        fields.append("request_id=" + response.headers.get("x-slng-request-id", "unknown"))
+        logger.info("slng router: " + " ".join(fields))
+    except Exception:  # noqa: BLE001 - a log line must never end a call
+        logger.debug("could not read the router's provenance headers", exc_info=True)
+
+{{if .Slng.RouterClass}}
+
+class {{.Slng.RouterClass}}(OpenAILLMService):
+    """The router's LLM service, plus a response hook on the client it builds.
+
+    Overriding create_client is the only seam this framework offers for it: the
+    service builds its own AsyncOpenAI and hands us neither the raw response nor
+    its headers, and the router states where an answer came from only in headers.
+
+    The connection limits restate the base class's own (pipecat
+    services/openai/base_llm.py create_client at the pinned version). Restating
+    them is deliberate. Anything different here would change connection reuse,
+    which is a latency change nobody asked for and nothing would report.
+    """
+
+    def create_client(self, api_key=None, base_url=None, **kwargs):
+        return AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            http_client=DefaultAsyncHttpxClient(
+                limits=httpx.Limits(
+                    max_keepalive_connections=100,
+                    max_connections=1000,
+                    keepalive_expiry=None,
+                ),
+                event_hooks={"response": [_slng_log_provenance]},
+            ),
+        )
+{{end}}
+{{if .Slng.Variables}}
 
 _SLNG_VARIABLE_LIMIT = {{.Slng.Limit}}
 
@@ -957,6 +1023,15 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{range $.Capture.Fields}}        if {{.}} is not None:
             self.state.{{.}} = {{.}}
             saved.append({{pyq .}})
+{{end}}{{if .SlngBody}}        if saved:
+            # The third place this call writes a variable, and the one that made
+            # the other two insufficient: a value the caller offers arrives here,
+            # not at a task result. The router substitutes these into the prompt's
+            # placeholders, so the value has to reach it before the next turn
+            # asks. Body only, so the speaking site's cache scope stays put.
+            await self.queue_frame(LLMUpdateSettingsFrame(
+                delta=LLMSettings(extra={"extra_body": {{.SlngBody}}}),
+            ))
 {{end}}        await params.result_callback({"saved": saved})
 {{end}}
 {{range .Transfers}}
@@ -1204,7 +1279,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             response.raise_for_status()
             await params.result_callback(response.json())
 {{end}}{{if and .EndsCall (not .ColdDestination)}}        await params.llm.push_frame(EndFrame())
-{{end}}{{end}}{{$agentPromptExpr := .RuntimePromptExpr}}{{$agentSlngHeaders := .SlngHeaders}}{{range $d := .Delegates}}
+{{end}}{{end}}{{$agentPromptExpr := .RuntimePromptExpr}}{{$agentSlngHeaders := .SlngHeaders}}{{$agentSlngBody := .SlngBody}}{{range $d := .Delegates}}
     @_direct_tool
     async def {{$d.MethodName}}(self, params: FunctionCallParams):
         """{{$d.When}}"""
@@ -1366,6 +1441,18 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 
     async def _{{$d.MethodName}}_complete_{{$t.Name}}(self):
 {{end}}{{if not (and $d.HasTransfers (ne $d.Then "end"))}}{{range $d.Assign}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
+{{end}}{{if and $d.Assign $agentSlngBody}}        # The router substitutes these into the prompt's placeholders, so the value
+        # this step just learned has to reach it before the next turn asks. A
+        # settings delta merges `extra` key by key, so this body-only one leaves
+        # the speaking site's cache scope exactly where it is.
+        #
+        # Here rather than per request because this framework offers no
+        # per-request seam, and here is enough: the only writes are at call start
+        # and at a step finishing, and each is followed by a turn. A tool that
+        # wrote state mid-turn would carry the previous value for that one turn.
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(extra={"extra_body": {{$agentSlngBody}}}),
+        ))
 {{end}}{{end}}{{if eq $d.Then "end"}}{{if $agentSlngHeaders}}        # The terminal node's goodbye is spoken by this agent, not by the step,
         # so the owner's cache scope goes back first.
         await self.queue_frame(LLMUpdateSettingsFrame(
@@ -1400,6 +1487,11 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         }])
         self.context.set_tools(tools)
 {{end}}{{if and $d.HasTransfers (ne $d.Then "end")}}{{range $d.Assign}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
+{{end}}{{if and $d.Assign $agentSlngBody}}        # Same refresh as the other assignment path: the value reaches the router
+        # before the next turn asks under it.
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(extra={"extra_body": {{$agentSlngBody}}}),
+        ))
 {{end}}{{end}}        return {"status": "ok"}, None
 {{end}}{{end}}{{end}}{{if eq $d.Then "end"}}
     def _{{$d.MethodName}}_end_node(self) -> NodeConfig:

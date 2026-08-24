@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Annotated
 from urllib.parse import quote
 import httpx
+from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
 from pydantic import Field
@@ -52,7 +53,7 @@ You are the billing specialist for Acme Support. This is a phone call, so keep e
 - If the caller is not satisfied, explain what a human support team would need to review.
 
 
-The caller is {{customer_id}}."""
+The caller is {{customer_id}}, who goes by {{caller_alias}}."""
 
 INTAKE_PROMPT = """# Intake agent (placeholder prompt)
 
@@ -64,7 +65,7 @@ You are the front desk voice agent for Acme Support. This is a phone call, so ke
 - Never guess account details. If you cannot find the customer, say so and ask again.
 
 
-The caller is {{customer_id}}."""
+The caller is {{customer_id}}, who goes by {{caller_alias}}."""
 
 COLLECT_PROMPT = """Ask for the caller's email and confirm the account for {{customer_id}}.
 
@@ -132,6 +133,76 @@ def _slng_config_fast_reasoning() -> dict:
     """
     return {"tiers": {"1": [{"endpoint": {"api_key": os.environ["OPENAI_API_KEY"], "url": "https://api.openai.com/v1"}, "model": "gpt-5.6-luna", "weight": 100}]}}
 
+async def _slng_log_provenance(response) -> None:
+    """Say where this answer came from, once per think request.
+
+    The router states this only in response headers, and neither framework hands
+    them to us, so a hook on the client is the one place that sees them. Without
+    it the question an operator actually asks about a cache, whether it is
+    working, has no answer in this run's own log.
+
+    Three rules, from httpx's own event-hooks documentation, each of which would
+    be a live-call defect if broken. It has to be async, because a sync callable
+    on an AsyncClient is never awaited. It reads headers only: the hook runs
+    before the body is read, so touching the body would consume the stream the
+    framework is about to iterate. And it cannot raise, because a raising
+    response hook fails the request it was only meant to describe.
+
+    It also logs only a router think request. The scope header is what lets the
+    line name a scope at all, so a request without one is a request this hook
+    could not describe.
+    """
+    try:
+        scope = response.request.headers.get("X-Slng-Agent-Id")
+        if not scope:
+            return
+        # Field order is the contract, and the gate reads it off this line.
+        fields = ["scope=" + scope]
+        fields.append("source=" + response.headers.get("x-slng-response-source", "unknown"))
+        if response.headers.get("x-slng-cache-layer"):
+            fields.append("layer=" + response.headers["x-slng-cache-layer"])
+        if response.headers.get("x-slng-model"):
+            fields.append("model=" + response.headers["x-slng-model"])
+        fields.append("request_id=" + response.headers.get("x-slng-request-id", "unknown"))
+        logger.info("slng router: " + " ".join(fields))
+    except Exception:  # noqa: BLE001 - a log line must never end a call
+        logger.debug("could not read the router's provenance headers", exc_info=True)
+
+
+
+def _slng_router_client() -> AsyncOpenAI:
+    """The router client, built here so a response hook can read its headers.
+
+    The plugin builds its own client when it is given none, and it exposes no
+    hook, no raw response and no header callback. Passing one in is the only
+    supported seam (livekit-plugins-openai llm.py, the `client` argument), so the
+    provenance line above costs this function.
+
+    Every value restates the plugin's own default at the pinned version
+    (llm.py:161-176): retries off, and that exact httpx timeout and limit set.
+    Restating them is the point. Anything different here would be a change to
+    retry or connection behaviour that nobody asked for and nothing would report.
+
+    Passing a client also means owning it: the plugin closes only a client it
+    built itself (`_owns_client`), so the entrypoint closes this one on shutdown.
+    """
+    return AsyncOpenAI(
+        api_key=os.environ["SLNG_API_KEY"],
+        base_url="https://eu.context-router.slng.ai/v1",
+        max_retries=0,
+        http_client=httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=15.0, read=5.0, write=5.0, pool=5.0),
+            follow_redirects=True,
+            limits=httpx.Limits(
+                max_connections=50,
+                max_keepalive_connections=50,
+                keepalive_expiry=120,
+            ),
+            event_hooks={"response": [_slng_log_provenance]},
+        ),
+    )
+
+
 
 _SLNG_VARIABLE_LIMIT = 4000
 
@@ -181,6 +252,7 @@ def _render(text: str, userdata, *, quote_values: bool = False) -> str:
 # Typed session state (SCHEMA 4.4): tasks assign into it, transfers read it.
 @dataclass
 class Userdata:
+    caller_alias: str | None = None  # What the caller says to call them.
     customer_id: str | None = None
     verified: bool | None = False
     # One value per call, set where the call begins. It groups this call's think
@@ -189,6 +261,10 @@ class Userdata:
     # in an entrypoint local because the header set now travels per request, so
     # every agent and task class has to be able to reach it from a method body.
     slng_session_id: str = ""
+    # And the router client, for the same reason: the summarizer is built inside
+    # an agent method, where the entrypoint's local is out of scope. One client
+    # per call, so the pool and its response hook are the call's own.
+    slng_client: AsyncOpenAI | None = None
 
 
 # --- job metadata ------------------------------------------------------------
@@ -266,15 +342,21 @@ class IgnorePhrasesMixin:
 
 # --- router cache scope ------------------------------------------------------
 async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
-    """Agent.default.llm_node, plus the asking class's own router cache scope.
+    """Agent.default.llm_node, plus everything this request's own scope and
+    values.
 
-    One model object serves every agent and task in this session, so the scope
-    cannot be a constructor value: it would be the same for all of them, and two
-    prompt sites sharing one scope is exactly the collision this prevents. It has
-    to be the whole header dict rather than the one header, because the plugin
-    replaces the extra_headers entry instead of merging it
-    (livekit-plugins-openai llm.py:960-962, read at the pinned version), which is
-    also why no router model is built with extra_headers at all.
+    One model object serves every agent and task in this session, so neither the
+    scope nor the variable values can be a constructor value. The scope would be
+    the same for all of them, which is the collision this prevents; the values
+    would be the ones the call started with, which is never the ones that matter.
+
+    Both dicts are written whole rather than by key, and both are written here
+    rather than at construction, for one reason read out of the plugin: it copies
+    the per-request extra_kwargs first and then overwrites extra_body and
+    extra_headers from its own constructor options (livekit-plugins-openai
+    llm.py:956-962, read at the pinned version). So a constructor value does not
+    merely win, it wins in silence. That is why no router model here is built
+    with either field.
 
     The body restates the framework's own default (livekit-agents 1.6.10,
     agents/voice/agent.py:524-545), because that default passes no per-request
@@ -309,6 +391,9 @@ async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
                 "X-Slng-Agent-Id": agent._slng_scope,
                 "X-Slng-Session-Id": session.userdata.slng_session_id,
             },
+            # Rebuilt for every request, which is the point: a value this call
+            # learns partway through reaches the model from the next turn on.
+            "extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(session.userdata, ("caller_alias", "customer_id"))},
         },
     ) as stream:
         async for chunk in stream:
@@ -357,6 +442,15 @@ class Billing(_SlngScoped, IgnorePhrasesMixin, Agent):
             resp.raise_for_status()
             return resp.json()
 
+    @function_tool
+    async def update_variables(self, ctx: RunContext, caller_alias: str | None = None) -> str:
+        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them."""
+        saved = []
+        if caller_alias is not None:
+            ctx.userdata.caller_alias = caller_alias
+            saved.append("caller_alias")
+        return "Saved: " + ", ".join(saved) if saved else "Nothing new to save."
+
 
 
 class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
@@ -391,6 +485,15 @@ class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
             )
             resp.raise_for_status()
             return resp.json()
+
+    @function_tool
+    async def update_variables(self, ctx: RunContext, caller_alias: str | None = None) -> str:
+        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them."""
+        saved = []
+        if caller_alias is not None:
+            ctx.userdata.caller_alias = caller_alias
+            saved.append("caller_alias")
+        return "Saved: " + ", ".join(saved) if saved else "Nothing new to save."
 
 
     @function_tool
@@ -621,6 +724,15 @@ class Collect(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict])
             return resp.json()
 
     @function_tool
+    async def update_variables(self, ctx: RunContext, caller_alias: str | None = None) -> str:
+        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them."""
+        saved = []
+        if caller_alias is not None:
+            ctx.userdata.caller_alias = caller_alias
+            saved.append("caller_alias")
+        return "Saved: " + ", ".join(saved) if saved else "Nothing new to save."
+
+    @function_tool
     async def finish(self, ctx: RunContext, tier: str, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> None:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
@@ -638,6 +750,15 @@ class Confirm(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict])
     async def on_enter(self) -> None:
         # The task's own instructions describe this step; let them drive the opening.
         self.session.generate_reply()
+
+    @function_tool
+    async def update_variables(self, ctx: RunContext, caller_alias: str | None = None) -> str:
+        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them."""
+        saved = []
+        if caller_alias is not None:
+            ctx.userdata.caller_alias = caller_alias
+            saved.append("caller_alias")
+        return "Saved: " + ", ".join(saved) if saved else "Nothing new to save."
 
     @function_tool
     async def finish(self, ctx: RunContext, confirmed: bool, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> None:
@@ -667,10 +788,19 @@ async def entrypoint(ctx: JobContext) -> None:
     # this file already writes a "session_id" into the telephony call context and
     # that is a different thing.
     slng_state = Userdata(slng_session_id=str(uuid.uuid4()))
+    # This client is ours, so closing it is ours too: the plugin closes only a
+    # client it built itself. Without this a worker leaks one connection pool per
+    # call it serves.
+    slng_state.slng_client = _slng_router_client()
+
+    async def _close_slng_client() -> None:
+        await slng_state.slng_client.close()
+
+    ctx.add_shutdown_callback(_close_slng_client)
     session = AgentSession[Userdata](
         userdata=slng_state,
         stt=deepgram.STT(api_key=os.environ["DEEPGRAM_API_KEY"], model="nova-3"),
-        llm=openai.LLM(api_key=os.environ["SLNG_API_KEY"], base_url="https://eu.context-router.slng.ai/v1", model="gpt-5.6-luna", extra_body={"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(slng_state, ("customer_id",))}, reasoning_effort="none"),
+        llm=openai.LLM(client=slng_state.slng_client, model="gpt-5.6-luna", reasoning_effort="none"),
         tts=elevenlabs.TTS(api_key=os.environ["ELEVEN_API_KEY"], voice_id="cgSgspJ2msm6clMCkdW9"),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(version="v1-mini"),

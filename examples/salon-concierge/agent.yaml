@@ -5,6 +5,16 @@ variables:
   customer_id:
     type: string
     description: Verified customer ID. It is assigned by the verification task and never spoken.
+  customer_phone:
+    type: string
+    description: >-
+      The caller's confirmed phone number, as the verification task returns it:
+      digit groups separated by single spaces, with no plus sign, brackets or
+      dashes. That exact shape is load-bearing rather than cosmetic. The Context
+      Router only puts the placeholder back where the answer holds the value
+      character for character, so a number the agent reformats while speaking it
+      leaves real digits in the stored copy, the personal-data scan refuses to
+      share it, and the turn stops caching with no error to notice.
 
 secrets:
   - OPENAI_API_KEY
@@ -27,7 +37,7 @@ models:
     reasoning:
       provider: slng
       model: gpt-5.6-luna
-      agent_id: optimized-salon-concierge-v3
+      agent_id: optimized-salon-concierge-v8
       upstream:
         provider: openai
       params:
@@ -103,6 +113,7 @@ tasks:
       - find_or_create_customer
     result:
       customer_id: string
+      customer_phone: string
       status:
         enum:
           - existing
@@ -145,6 +156,7 @@ controls:
       the phone number back and needs a yes before it looks anyone up.
     assign:
       customer_id: result.customer_id
+      customer_phone: result.customer_phone
 
   manage_booking:
     kind: delegate

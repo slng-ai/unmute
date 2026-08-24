@@ -267,6 +267,54 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 			}
 		}
 	}
+	// A receiving specialist joins a conversation that is already running, so its
+	// opening turn continues rather than greets. All three prompts used to open
+	// with "Use their name once, early", which is an instruction to address the
+	// caller up front: on a live Pipecat WebRTC call on 2026-08-24 that came out
+	// as a bare "Hi", because a blank value drops the name and leaves the
+	// greeting behind.
+	for _, name := range []string{"booking_specialist", "complaint_specialist", "chat_with_me"} {
+		body := resolved.Agents[name].Instructions
+		requireText(name, body,
+			"You join a conversation that is already running",
+			"never open")
+		for _, banned := range []string{"once, early", "early, and not again"} {
+			if strings.Contains(body, banned) {
+				t.Errorf("%s tells the agent to use the caller's name early, which turns a handoff into a greeting: %q", name, banned)
+			}
+		}
+	}
+
+	// The caller hears the booking once, not twice. The task's confirmation
+	// question has to restate the service, the day and the time, because it is
+	// the yes-gate and nothing said before it counts as a yes. That makes the
+	// relay afterwards the redundant one, so the relay is what stays short.
+	// Heard on a live call on 2026-08-24: "haircut at 15" in the confirmation
+	// question and again in the outcome. Both halves are held, because either
+	// one drifting alone brings the repetition back.
+	requireText("booking_specialist", resolved.Agents["booking_specialist"].Instructions,
+		"Do not\n   list the service, day, and time again")
+	requireText("booking task", resolved.Tasks["booking"].Instructions,
+		"Say the whole thing back in one sentence and ask one yes-or-no question",
+		"does not repeat the details")
+
+	// One placeholder, in the one prompt that says the value. The compiler sends
+	// the union of every name any prompt on the think profile references, so an
+	// extra value reaches all six sites whatever their own prompt holds; and the
+	// router's sharing scan refuses any cached answer still containing a value
+	// sent for that call, matching whole words and word beginnings. So a short
+	// value like a first name costs sharing across every site and buys it back
+	// only where a prompt says it. A phone number in this shape is long and
+	// specific enough not to. The blank rule is here because the value is absent
+	// until verification returns, which is most of the call.
+	requireText("booking_specialist", resolved.Agents["booking_specialist"].Instructions,
+		"{{customer_phone}}", "It can be blank")
+	for _, name := range []string{"complaint_specialist", "chat_with_me", "concierge"} {
+		if strings.Contains(resolved.Agents[name].Instructions, "{{") {
+			t.Errorf("%s carries a placeholder but never says the value: a prompt should not hold one it has no use for", name)
+		}
+	}
+
 	// Verification is one phone number, nothing else. Spelling a name over a
 	// transcriber is the slowest and least reliable thing a caller can be asked
 	// to do, and the number alone identifies the record.
@@ -284,6 +332,16 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if _, named := verification.Result["customer_name"]; named {
 		t.Error("verification still returns customer_name; the phone number is the identity")
 	}
+	// The number this task returns is the value every later prompt substitutes,
+	// so the shape it comes back in is part of the contract and not a style
+	// note. Asking for the number is already in the prompt above; this is only
+	// about how it is written down on the way out.
+	requireText("verification", verification.Instructions,
+		"digit groups separated by single spaces",
+		"A country code is simply the first group")
+	if _, returned := verification.Result["customer_phone"]; !returned {
+		t.Error("verification no longer returns customer_phone, so the specialists' {{customer_phone}} has no value and the router answers their first request with a 422")
+	}
 	verificationDelegate, ok := resolved.Controls["verify_customer"].(*ir.Delegate)
 	if !ok {
 		t.Fatalf("verify_customer = %#v, want delegate", resolved.Controls["verify_customer"])
@@ -292,6 +350,13 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		"reads the phone number back", "needs a yes before it looks anyone up")
 	if _, assigned := verificationDelegate.Assign["customer_name"]; assigned {
 		t.Error("verify_customer still assigns customer_name")
+	}
+	// Assigned from the result rather than captured from speech: a task result
+	// lands on both drivers by the same path customer_id already proves, while a
+	// conversation-sourced value depends on the capture tool firing, which is
+	// the write site Pipecat missed once already.
+	if got := verificationDelegate.Assign["customer_phone"]; got != "result.customer_phone" {
+		t.Errorf("verify_customer assigns customer_phone from %q, want result.customer_phone", got)
 	}
 	lookup := resolved.Tools["find_or_create_customer"]
 	requireText("customer lookup", lookup.Description,
@@ -956,7 +1021,7 @@ func TestExampleReadmesNameTheirDeclaredTransports(t *testing.T) {
 // agent, one per task. Four agents and two tasks on one think profile is the
 // shape that collided, so it is the shape worth naming here in full.
 func salonScopes() []string {
-	const id = "optimized-salon-concierge-v3"
+	const id = "optimized-salon-concierge-v8"
 	return []string{
 		id + ":concierge",
 		id + ":booking_specialist",
@@ -1046,4 +1111,139 @@ func TestRouterScopeSurfacesDoNotContradictTheCompiler(t *testing.T) {
 			t.Errorf("%s describes the cache scope and never mentions the task. prefix, so a reader does not learn that a task has its own scope", surface)
 		}
 	}
+}
+
+// FR-010. The four surfaces carry the two facts this feature adds, and the skill
+// is in the list because it is the surface with no other reader.
+//
+// A prose gate is a weak gate and this one knows it: a person still has to read
+// these files, because a surface can name a thing and describe it wrongly. What
+// it catches is the specific way this change half-lands. The compiler surfaces
+// have their own gates and the docs do not, so a rewrite that updates the runbook
+// and forgets the skill leaves every coding agent writing packages that render a
+// per-call name into the prompt text, which is the exact thing this feature
+// exists to stop, and nothing anywhere fails.
+func TestRouterSurfacesCarryThePlaceholderAndProvenanceFacts(t *testing.T) {
+	root := filepath.Join("..", "..")
+	for _, surface := range []struct {
+		path  string
+		facts []string
+	}{
+		{filepath.Join("internal", "generate", "templates", "livekit_v1", "README.md.tmpl"), []string{"slng router: ", "every request"}},
+		{filepath.Join("internal", "generate", "templates", "pipecat_v1", "README.md.tmpl"), []string{"slng router: ", "refreshed whenever the call writes one"}},
+		{filepath.Join("examples", "salon-concierge", "README.md"), []string{"slng router: ", "{{customer_phone}}"}},
+		{filepath.Join("docs-site", "optimization", "context-router.mdx"), []string{"slng router: ", "read again for every request"}},
+		// The skill, which is what a coding assistant reads before it writes a
+		// package. Both facts, because it is the only surface that decides what
+		// gets authored in the first place.
+		{filepath.Join("internal", "skill", "assets", "references", "models.md"), []string{"slng router: ", "as a placeholder, not into the prompt"}},
+	} {
+		body, err := os.ReadFile(filepath.Join(root, surface.path))
+		if err != nil {
+			t.Fatalf("%s: %v", surface.path, err)
+		}
+		for _, fact := range surface.facts {
+			if !strings.Contains(string(body), fact) {
+				t.Errorf("%s does not carry %q; a fact only some surfaces state is a fact a reader is told the opposite of somewhere else", surface.path, fact)
+			}
+		}
+	}
+}
+
+// FR-006 and FR-013 on the package a reader opens, plus the one thing the scope
+// list above cannot see: that the constant in this file still describes the
+// package rather than a version of it that has moved on.
+//
+// The example is where an author learns what a placeholder is for, so three
+// claims have to hold together. Its prompts reference only names it declares,
+// because a name the router is not given is a 422 mid-call. Its spoken per-call
+// value is a placeholder, because that is the whole demonstration. And the value
+// that is never spoken stays out of every prompt: putting an identifier in a
+// placeholder widens what the router is asked to substitute and buys nothing.
+func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// FR-013. The scope list in this file names an id; the package authors one.
+	// When a prompt change bumps the id, this is what makes updating both a
+	// single deliberate step instead of a silent divergence.
+	authored := resolved.Models["reasoning"].AgentID
+	if want := strings.TrimSuffix(salonScopes()[0], ":concierge"); authored != want {
+		t.Errorf("the package authors agent_id %q and this file's scope list expects %q. Bumping the id is correct when a prompt changes, so update salonScopes() in the same commit", authored, want)
+	}
+
+	// Every referenced name is declared. ir.Validate holds this too; here it is
+	// on the shipped package rather than a fixture.
+	for kind, bodies := range map[string]map[string]string{
+		"agent": promptBodies(resolved.Agents),
+		"task":  taskBodies(resolved.Tasks),
+	} {
+		for name, body := range bodies {
+			for _, ref := range ir.TemplateRefs(body) {
+				if _, declared := resolved.Variables[ref]; !declared {
+					t.Errorf("%s %q references {{%s}}, which the package does not declare: the router answers an unsupplied name with a 422 mid-call", kind, name, ref)
+				}
+			}
+		}
+	}
+
+	// The spoken value is a placeholder somewhere, or the example demonstrates
+	// nothing. The silent one is a placeholder nowhere.
+	all := strings.Join(append(mapValues(promptBodies(resolved.Agents)), mapValues(taskBodies(resolved.Tasks))...), "\n")
+	if !strings.Contains(all, "{{customer_phone}}") {
+		t.Error("no prompt in the example uses {{customer_phone}}, so every answer that says the number is still refused by the router's number rule and the example teaches nothing about caching one")
+	}
+	// The format rule is the feature, not decoration. Measured against the live
+	// EU router on 2026-08-24, three reads per arm on fresh throwaway scopes:
+	// values written "555 070 1222" came back echoed character for character and
+	// the third read was served from cache in 109ms; the same numbers written
+	// "+15550707444" were reformatted by the model, so the value never appeared
+	// in the answer, and none of the three reads was served. The router puts the
+	// placeholder back only where the answer holds the value exactly, so a
+	// description that does not pin the shape costs every number-bearing turn
+	// its cache, with no error anywhere to notice.
+	phone, declared := resolved.Variables["customer_phone"]
+	if !declared {
+		t.Fatal("the package declares no customer_phone")
+	}
+	for _, want := range []string{"single spaces", "character for character"} {
+		if !strings.Contains(phone.Description, want) {
+			t.Errorf("customer_phone description omits %q: without the format rule the value is reformatted when spoken and the turn silently stops caching", want)
+		}
+	}
+	if strings.Contains(all, "{{customer_id}}") {
+		t.Error("a prompt uses {{customer_id}}, which the package's own description says is never spoken. An identifier in a placeholder widens what the router substitutes and buys no cache hit")
+	}
+}
+
+// promptBodies and taskBodies flatten the two prompt-bearing maps to name and
+// body, which is all the assertions above read.
+func promptBodies(agents map[string]ir.AgentDef) map[string]string {
+	out := make(map[string]string, len(agents))
+	for name, def := range agents {
+		out[name] = def.Instructions
+	}
+	return out
+}
+
+func taskBodies(tasks map[string]ir.Task) map[string]string {
+	out := make(map[string]string, len(tasks))
+	for name, task := range tasks {
+		out[name] = task.Instructions
+	}
+	return out
+}
+
+func mapValues(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for _, v := range m {
+		out = append(out, v)
+	}
+	return out
 }
