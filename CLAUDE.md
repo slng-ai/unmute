@@ -43,6 +43,9 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | errors wrapped with `%w` and matched with `errors.Is`/`As`, never `==` | `errorlint` |
 | L1–L3 green, zero Python, no data races | CI `test`, `go test -race ./...` |
 | no color literal outside `internal/style` | `internal/style/style_test.go` |
+| every direct dependency is on the allowlist | `internal/cli/deps_test.go` |
+| no declaration is reachable only from its own definition | `internal/cli/reachability_test.go` (`deadcode -test ./...`) |
+| every symbol a template names still exists in Go | `internal/scaffold/template_symbols_test.go` |
 | example READMEs name every transport; every `examples/` link resolves | `internal/generate/examples_test.go` |
 | every emitted task prompt names its finish call and an escape, every finish takes the reserved `unserved_request`, and the owner is told to read it | `internal/generate/task_prompt_test.go`, `internal/ir/validate_test.go` |
 | the skill's tool kinds, vendors, providers and doc pointers match the code | `internal/skill/agreement_test.go` |
@@ -63,6 +66,13 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | release config still builds 6 platforms with version stamps | CI `release-config` |
 | emitted Python is valid | `make smoke`, opt-in, never the PR gate |
 | the local telephony planes work end to end with no accounts | `make rig`, opt-in, needs a container runtime, never the PR gate |
+
+A note on the third gate, because it looks redundant next to the second and is
+not. `deadcode` walks the call graph and cannot see through `text/template`, so
+a method called only from a template reads as dead to it, to `go vet`, to the
+linter and to the compiler. Deleting one produces a green build and a broken
+`unmute init`. An over-engineering audit of this tree proposed deleting six of
+them at once. The two gates cover different things; neither replaces the other.
 
 Ratchet only: a gate that starts failing gets the **code** fixed, not the gate loosened. A disabled check carries its reason inline, the way `.golangci.yml` explains every `errcheck` exclusion and every `forbidigo` pattern, and the single `//nolint` in the tree explains itself at the call site in `main.go`. One rule is still advisory: `ty check` over the examples, because every finding it has today is an unresolved `pipecat`/`livekit` import, and installing those SDKs is `make smoke`'s job.
 
