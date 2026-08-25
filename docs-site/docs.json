@@ -25,11 +25,11 @@
   "redirects": [
     {
       "source": "/dev/telephony",
-      "destination": "/dev/local-telephony"
+      "destination": "/telephony/overview"
     },
     {
       "source": "/dev/webhooks-and-tunnels",
-      "destination": "/dev/local-telephony"
+      "destination": "/telephony/overview"
     },
     {
       "source": "/telephony/first-phone-call",
@@ -57,7 +57,7 @@
     },
     {
       "source": "/telephony/webhooks-and-tunnels",
-      "destination": "/dev/local-telephony"
+      "destination": "/telephony/overview"
     },
     {
       "source": "/build/tools",
@@ -150,8 +150,7 @@
         "public": true,
         "icon": "terminal",
         "pages": [
-          "dev/overview",
-          "dev/local-telephony"
+          "dev/overview"
         ]
       },
       {

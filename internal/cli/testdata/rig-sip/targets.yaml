@@ -1,5 +1,0 @@
-targets:
-  pipecat:
-    provider: pipecat
-    version: "1.7.0"
-    connection: trunk

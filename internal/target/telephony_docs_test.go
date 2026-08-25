@@ -17,8 +17,8 @@ func TestTelephonyDocsContract(t *testing.T) {
 			"peak_starts_per_second",
 			"One target selects exactly one route and one connection",
 			"cloud-websocket",
-			"carrier-websocket",
 			"daily-sip",
+			"connector",
 			"no adapter, so this route is refused at validation",
 		},
 		"docs-site/reference/connections-yaml.mdx": {
@@ -26,8 +26,8 @@ func TestTelephonyDocsContract(t *testing.T) {
 			"## Which environment keys a route accepts",
 			"account_sid",
 			"sip_address",
-			"api_key",
-			"auth_id",
+			"sip_username",
+			"from_number",
 			"## One target, one connection",
 			"not accepted by route",
 		},
@@ -49,7 +49,6 @@ func TestCarrierlessDailyAuthoringIsNotDocumented(t *testing.T) {
 	root := filepath.Join("..", "..")
 	for _, path := range []string{
 		"docs-site/telephony/overview.mdx",
-		"docs-site/dev/local-telephony.mdx",
 		"docs-site/transfers/overview.mdx",
 		"docs-site/reference/connections-yaml.mdx",
 		"internal/generate/templates/pipecat_v1/README.md.tmpl",

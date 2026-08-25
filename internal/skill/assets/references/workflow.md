@@ -137,27 +137,26 @@ unmute dev
 
 Opens the browser and runs the selected target locally. Pipecat runs under
 `uv` so browser WebRTC can reach it; LiveKit runs under Docker Compose with a
-local LiveKit server. Other flags:
+local LiveKit server. `unmute dev` is browser-only: it covers the prompt, the
+tools, and the models, and it stops exactly where a phone call would start.
+There is no local telephony run, so never offer one. Flags:
 
 | Flag | What it does |
 |---|---|
-| none | browser audio; `uv` for Pipecat, Docker for LiveKit |
-| `--telephony` | the selected phone route; Pipecat `cloud-websocket` runs locally with `uv`, while other runnable routes use Compose |
+| `--port` | port for the local dev UI (default `8765`) |
+| `--bot-port` | host port for the local agent runtime (default `7860`) |
+| `--target` | target instance name; required without a TTY when the package declares more than one |
 | `--var name=value` | seed a `call_start` variable, repeatable |
-
-For a local Pipecat `cloud-websocket` phone run, Unmute opens a temporary
-HTTPS/WSS tunnel, points the Twilio number at `POST /`, streams audio through
-`wss://<tunnel-host>/ws`, and restores the previous webhook on exit.
-`--no-webhook` leaves the number untouched; `--public-url` uses an HTTPS origin
-the user already forwards to the agent.
-
-A local LiveKit SIP run proves the trunk, dispatch, and worker wiring. It does
-not expose SIP signaling or RTP through the laptop. A real inbound call needs
-public SIP/RTP ingress; an HTTPS tunnel does not provide it.
+| `--no-open` | do not open the browser automatically |
+| `--verbose` | follow container/agent logs on stderr |
 
 `--var` is the local stand-in for the dispatch payload production sends. Each
 value is parsed against the declared type, and an undeclared name is refused
 rather than accepted and dropped.
+
+A phone call is verified after deploy, against a real carrier, never with
+`unmute dev`. See `telephony.md` and `transfers.md` for what that means for a
+route and for a transfer.
 
 A dev run puts back every outward change it made when it exits, including on
 `ctrl-c`.

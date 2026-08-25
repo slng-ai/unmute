@@ -27,12 +27,13 @@ variables:
 |---|---|---|
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
 | `conversation` | the model, through `update_variables` | during the call |
-| `session_id`, `call_id`, `direction`, `from_number`, `to_number`, `carrier`, `connection` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `sip` or `connector` |
-| `stream_id` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `connector`, not `sip` |
+| `session_id`, `call_id`, `direction`, `from_number`, `to_number`, `carrier`, `connection` | the phone adapter | LiveKit `sip` or `connector` only |
+| `stream_id` | the phone adapter | LiveKit `connector` only, not `sip` |
 
-The selected route must prove it supplies a system source. Pipecat `daily-sip`
-and `cloud-websocket` supply none today. An inbound code-target phone channel
-also requires a default for every `call_start` variable.
+The selected route must prove it supplies a system source. **No Pipecat route
+grants a call-source variable today**, `daily-sip` and `cloud-websocket` alike:
+naming one on a Pipecat target is refused at validation. An inbound code-target
+phone channel also requires a default for every `call_start` variable.
 
 Declaring any `source: conversation` variable creates a tool called
 `update_variables` in the generated project. You do not write it and you do not

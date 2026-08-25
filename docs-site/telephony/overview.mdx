@@ -84,10 +84,7 @@ its own `build/<target>/` directory.
 | Target | Transport | Carrier | How the call arrives |
 |---|---|---|---|
 | Pipecat | `cloud-websocket` | Twilio | Pipecat Cloud terminates the carrier's media stream itself. Nothing of yours is hosted. |
-| Pipecat | `carrier-websocket` | Twilio, Telnyx, Plivo | a generated adapter of yours terminates the carrier's media stream |
-| Pipecat | `carrier-websocket` | Exotel | no adapter, so this route is refused at validation |
-| Pipecat | `daily-sip` | Twilio | your carrier forwards into the same Daily room through a helper you run |
-| Pipecat | `sip` | Twilio, Telnyx, Plivo | a SIP trunk carries the call into a LiveKit SIP service you run, which tells your agent about it |
+| Pipecat | `daily-sip` | Twilio | your carrier forwards the call into a Daily room through a helper you host, and Pipecat Cloud runs the agent |
 | LiveKit Agents | `sip` | Twilio, Telnyx, Plivo | a SIP trunk carries the call into LiveKit SIP |
 | LiveKit Agents | `sip` | Exotel | no adapter, so this route is refused at validation |
 | LiveKit Agents | `connector` | Twilio | a generated bridge turns Twilio Media Streams into a LiveKit room |
@@ -97,18 +94,12 @@ its own `build/<target>/` directory.
 | Route | Deploys to |
 |---|---|
 | Pipecat `cloud-websocket` | Pipecat Cloud |
-| Pipecat `carrier-websocket` | Pipecat Cloud |
 | Pipecat `daily-sip` | Pipecat Cloud, plus the public helper you host |
-| Pipecat `sip` | nothing managed: you run the four containers yourself |
 | LiveKit `sip` | LiveKit Cloud, or a LiveKit deployment of your own |
 | LiveKit `connector` | LiveKit Cloud |
 
-<Note>
-  Pipecat `sip` is the one route with no managed platform anywhere in it, so it
-  emits no deployment manifest. It also **receives calls only**: there is no
-  dial-out path, so `outbound: true` is refused on it by name. The compiler
-  prints the setup its own steps need, and the emitted `README.md` carries them.
-</Note>
+Every route above deploys to a managed platform, so a phone call reaches this
+agent only once it is deployed. There is no route with nothing to deploy.
 
 The Pipecat Daily helper exposes one public `/call` webhook. It requires the
 exact HTTPS base URL in `UNMUTE_PUBLIC_URL` (an optional path is allowed) and
@@ -134,12 +125,23 @@ The transport is not a detail. It decides what the agent can do on a call.
 
 [Transfers](/transfers/overview) covers which route can reach a human, and how.
 
-## Testing a route before you deploy it
+## A phone call is verified after you deploy
 
-Most of these routes run on your own machine with no carrier account at all, and
-that is the loop to build in. [Call your agent
-locally](/dev/local-telephony) is the one page for it: which plane each route
-gets, what a local call proves, and what it cannot tell you.
+A phone call reaches an agent that is deployed. There is no local phone loop.
+[`unmute dev`](/dev/overview) runs the agent in your browser, and that loop
+covers the prompt, the tools, and the models. It stops exactly where the phone
+leg starts.
+
+To hear a real call: compile, deploy to the route's platform, finish the
+carrier setup, then call the number.
+
+```sh
+unmute compile my-agent
+```
+
+[Deploy to LiveKit Cloud](/deploy/livekit-cloud) or
+[deploy to Pipecat Cloud](/deploy/pipecat-cloud) covers the rest, one platform
+at a time.
 
 ## Where to go next
 
@@ -148,12 +150,12 @@ gets, what a local call proves, and what it cannot tell you.
     Make the agent dial out, and give the call its values.
   </Card>
   <Card title="Inbound calls" icon="phone-incoming" href="/telephony/inbound-calls">
-    A real call arriving on the route that works from a laptop.
+    Take a real call, once the route is deployed.
   </Card>
   <Card title="Get your Twilio details" icon="key" href="/telephony/twilio">
     Which console value fills which name.
   </Card>
-  <Card title="Call your agent locally" icon="play" href="/dev/local-telephony">
-    The whole local loop, with no carrier account.
+  <Card title="The dev loop" icon="play" href="/dev/overview">
+    Check the prompt, the tools, and the models in your browser first.
   </Card>
 </Columns>

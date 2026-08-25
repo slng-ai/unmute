@@ -219,17 +219,13 @@ func TestTelephonySetupRunbookHoldsItsContract(t *testing.T) {
 		"### At LiveKit",
 		"bash telephony-setup.sh",
 		"lk cloud auth",
-		// The local half is a plane now, and these are the claims that
-		// replaced "proves the local trunk, dispatch, and worker wiring": a
-		// developer can place the call, and the runbook still says what it does
-		// not prove.
-		"runs this route on a local plane",
-		"an address to dial and a credential to dial it with",
-		"calls/<run>/<name>.wav",
-		"### What a local call does not prove",
+		// There is no local phone half any more. What the runbook has to say
+		// instead is where verification happens, and why here is not it.
+		"### Verifying it",
+		"no local phone step",
 		"publicly routable SIP signalling and RTP ingress",
 		"laptop behind normal NAT",
-		"--carrier` is the one that places a real call",
+		"talk to it in the browser",
 		// FR-007: what cold transfer needs, and what its failure line means.
 		"Cold transfer needs nothing at LiveKit",
 		"cannot be tested from the Agent Console",

@@ -129,7 +129,7 @@ func TestTelephonyControlRequiresExactCarrierAndTransport(t *testing.T) {
 		},
 	}}
 	for _, route := range []struct{ transport, carrier string }{
-		{"carrier-websocket", "telnyx"},
+		{"cloud-websocket", "telnyx"},
 		{"sip", "twilio"},
 	} {
 		if got := table.Control(ColdTransfer, Pipecat, route.transport, route.carrier); got.Tag != Gated {
@@ -139,12 +139,14 @@ func TestTelephonyControlRequiresExactCarrierAndTransport(t *testing.T) {
 }
 
 func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
-	exact := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"}
+	exact := TelephonyKey{Provider: Pipecat, Transport: "cloud-websocket", Carrier: "twilio"}
 	if got := ResolveTelephonyFeature(exact, TelephonyInbound); got.Tag != Provisional || got.Docs == "" || got.Verified == "" || got.Smoke {
 		t.Fatalf("exact route evidence = %#v", got)
 	}
 	for _, key := range []TelephonyKey{
-		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"},
+		// A carrier the transport does not have, and a transport the provider does
+		// not have. Both must resolve gated rather than partially matching.
+		{Provider: Pipecat, Transport: "cloud-websocket", Carrier: "telnyx"},
 		{Provider: Pipecat, Transport: "sip", Carrier: "twilio"},
 	} {
 		if got := ResolveTelephonyFeature(key, TelephonyFeature(WarmTransfer)); got.Tag != Gated {
@@ -177,19 +179,20 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 	if !ok || len(optional) != 0 || strings.Join(required, ",") != "account_sid,auth_token,from_number" {
 		t.Fatalf("exact environment vocabulary = required %v optional %v ok %v", required, optional, ok)
 	}
+	// The opposite of the connector's runtime facts, and the defining property of
+	// this route: the platform terminates the carrier's stream, so the package
+	// hosts no process, no endpoint and no supplied environment name of its own.
+	// The block that used to sit here asserted a process, four endpoints and three
+	// supplied names, all facts of the carrier-websocket route that is now gone.
 	runtime := TelephonyRoutes()[exact]
-	if len(runtime.Processes) != 1 || len(runtime.PublicEndpoints) != 4 || len(runtime.ManualSteps) == 0 {
-		t.Fatalf("Pipecat route runtime facts = %#v", runtime)
+	if len(runtime.Processes) != 0 || len(runtime.PublicEndpoints) != 0 {
+		t.Fatalf("the platform-hosted route must host nothing: %#v", runtime)
 	}
-	// Every runtime name on this route is supplied rather than authored: the
-	// Compose graph starts the Redis, and `unmute dev` mints the public URL and
-	// the outbound token. The last two were missing from this list while the dev
-	// command already minted them, so .env.example asked the author to fill in
-	// blanks nobody fills in (FR-018c). ir.Build scopes the list to what a given
-	// package's route actually requires, so an inbound-only package drops the
-	// outbound token.
-	if strings.Join(runtime.LocallySuppliedEnvironment, ",") != "REDIS_URL,UNMUTE_OUTBOUND_TOKEN,UNMUTE_PUBLIC_URL" {
-		t.Fatalf("Pipecat locally supplied environment = %v", runtime.LocallySuppliedEnvironment)
+	if len(runtime.ManualSteps) == 0 {
+		t.Fatal("the carrier steps on this route are dictated, so the row must summarise them")
+	}
+	if len(runtime.LocallySuppliedEnvironment) != 0 {
+		t.Fatalf("nothing is supplied locally on this route: %v", runtime.LocallySuppliedEnvironment)
 	}
 	// The Daily carrier leg (SCHEMA N37): five provisional features, no call
 	// sources, and every granted feature carries its docs and its date.
@@ -211,16 +214,9 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 			t.Fatalf("daily carrier feature %s = %#v, want gated", feature, got)
 		}
 	}
-	telnyx := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"}
-	required, optional, ok = TelephonyEnvironment(telnyx)
-	if !ok || len(optional) != 0 || strings.Join(required, ",") != "api_key,public_key,connection_id,from_number" {
-		t.Fatalf("Telnyx environment vocabulary = required %v optional %v ok %v", required, optional, ok)
-	}
-	plivo := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "plivo"}
-	required, optional, ok = TelephonyEnvironment(plivo)
-	if !ok || len(optional) != 0 || strings.Join(required, ",") != "auth_id,auth_token,from_number" {
-		t.Fatalf("Plivo environment vocabulary = required %v optional %v ok %v", required, optional, ok)
-	}
+	// Telnyx and Plivo had their own REST vocabularies on carrier-websocket. That
+	// transport is gone and Pipecat's surviving phone routes are Twilio only, so
+	// the per-carrier vocabulary that remains is LiveKit's, asserted below.
 	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
 		livekitSIP := TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: carrier}
 		required, optional, ok = TelephonyEnvironment(livekitSIP)
@@ -231,7 +227,7 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 			t.Fatalf("LiveKit SIP %s warm transfer evidence = %#v", carrier, got)
 		}
 	}
-	exotel := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "exotel"}
+	exotel := TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: "exotel"}
 	if got := ResolveTelephonyFeature(exotel, TelephonyRouteSelected); got.Tag != Gated || !strings.Contains(got.Note, "does not support route") {
 		t.Fatalf("Exotel unauthenticated WebSocket route = %#v", got)
 	}
@@ -279,9 +275,6 @@ func TestV1_TransfersCompileOnlyOnNativeRoutes(t *testing.T) {
 	}
 	noPrimitive := []TelephonyKey{
 		{Provider: LiveKit, Transport: "connector", Carrier: "twilio"},
-		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"},
-		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"},
-		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "plivo"},
 	}
 	for _, key := range noPrimitive {
 		coldGot := ResolveTelephonyFeature(key, cold)

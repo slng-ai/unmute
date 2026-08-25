@@ -1,6 +1,40 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 5.0.0 -> 6.0.0
+Bump rationale: MAJOR. Principle V is redefined. `dev` no longer promises a
+local stand-in for a carrier, and the bullet that governed such a stand-in
+("local input stands in for production input") is removed rather than reworded,
+because the thing it governed no longer exists.
+
+Modified in 6.0.0:
+- Principle V's `dev` bullet: `dev` is the browser loop and nothing else. The
+  Docker-unless-it-breaks-the-test rule stays; its second exception (a route
+  whose platform terminates the carrier's stream) goes with the local phone run.
+- Principle V gains a bullet saying where telephony is verified: on a deployed
+  agent, against a real carrier. Cold and warm transfer with it.
+- Principle V drops "local input stands in for production input instead of
+  creating another behavior path". It existed to bind the local telephony
+  planes, and every plane is deleted.
+
+Reason: the local telephony dev path created more complexity than it earned. A
+carrier reaches an agent over publicly routable signalling and media ingress,
+which a developer's machine does not have, so a local plane could confirm the
+wiring on that machine and nothing about going live. The two Pipecat route
+families that deployed nowhere are removed with it; every telephony route the
+compiler emits now deploys to LiveKit Cloud or Pipecat Cloud.
+
+Contributors do differently: do not add a local phone loop, a carrier stand-in,
+or a test level that imitates one. Verify telephony by deploying. `make rig` and
+the `rig` build tag are gone, so the test levels are L1 to L3 (required) and L4
+smoke (opt-in).
+
+Convention for the next amendment: put the new report at the top of this comment
+and push the one it replaces down under "Previous report". Trim the oldest when
+this comment reaches three reports.
+
+Previous report
+---------------
 Version change: 4.0.1 -> 5.0.0
 Bump rationale: MAJOR. Technology and Boundaries no longer permits validation to
 cover more targets than generation. A provider with no driver is not a target.
@@ -21,56 +55,6 @@ describe two working drivers.
 
 What contributors do differently: a capability row now supplies two values, not
 four. A new target provider arrives with its driver, not ahead of it.
-
-Previous report
----------------
-Version change: 4.0.0 -> 4.0.1
-Bump rationale: PATCH. Clarifies one bullet under Principle V to match shipped
-behavior. The principle itself is unchanged: whatever compiles can still be
-spoken to, through the same four commands.
-
-Modified in 4.0.1:
-- Principle V's `dev` bullet said the generated project runs "in Docker". That
-  was already false in two shipped cases: the Pipecat browser loop runs the bot
-  as a host process so browser WebRTC can reach host-reachable ICE candidates
-  (see internal/generate/templates/pipecat_v1/compose.dev.yaml.tmpl), and the
-  cloud-websocket route runs it under `uv` because that route's platform
-  terminates the carrier's stream. The bullet now states the rule actually
-  followed: Docker unless containerizing would break the thing under test.
-- The same bullet now says a local stand-in for a carrier is not the generated
-  project. Local telephony planes stand in for a carrier, so they are governed
-  by "local input stands in for production input" rather than by this bullet.
-
-Reason: found by `/speckit-analyze` on specs/015-local-telephony-rigs, which
-correctly flagged the Docker bullet as a constitution conflict. The conflict
-predated that feature. Fixing the text rather than diluting the principle.
-
-Contributors do nothing differently. No gate changes.
-
-Convention for the next amendment: put the new report at the top of this comment
-and push the one it replaces down under "Previous report". The file used to hold
-only the current report, so history lived in git alone; keeping the previous one
-inline costs four lines and answers "when did this bullet change" without a
-blame walk. Trim the oldest when this comment reaches three reports.
-
-Previous report
----------------
-Version change: 3.0.0 -> 4.0.0
-Bump rationale: MAJOR. Principle IV no longer makes a hand-written schema
-document the highest authority. Feature specs become ignored local work and
-the public documentation site becomes the only user-doc tree.
-
-Modified in 4.0.0:
-- Principle III defines one owner for code facts, architecture, public usage,
-  contributor rules, and local planning.
-- Principle IV changes from "the document wins" to "the owner wins".
-- Workflow makes Spec Kit artifacts local and reduces the maintained emitted
-  behavior surfaces from five to four.
-
-Reason: the old hierarchy required every behavior change to update both
-`docs/` and `docs-site/`. Those copies drifted. The repository now derives
-machine contracts from Go, keeps one architecture document, and writes public
-guidance once.
 -->
 
 # Unmute Constitution
@@ -156,15 +140,17 @@ Four commands take an author from nothing to a voice they can talk to:
 - `init` refuses to overwrite a non-empty directory.
 - `validate` loads, builds, and validates without writing an artifact.
 - `compile` validates before writing one artifact directory per target.
-- `dev` runs the generated project locally, in Docker wherever the topology
-  allows. It runs as a host process where Docker would break the thing under
-  test: Pipecat browser WebRTC, which needs host-reachable ICE candidates, and
-  a route whose platform terminates the carrier's stream. A local stand-in for
-  a carrier is not the generated project and is not bound by this bullet.
+- `dev` runs the generated project locally and serves one browser session to
+  talk to it. That is its whole surface. It runs the project in Docker wherever
+  the topology allows, and as a host process where Docker would break the thing
+  under test: Pipecat browser WebRTC, which needs host-reachable ICE candidates.
+- `dev` stands in for no carrier. A phone call reaches an agent that is
+  deployed, so telephony, cold transfer and warm transfer are verified after
+  deploy, against a real carrier. The compiler's job on that path is to emit
+  everything the deployed agent and its operator need, and to say so in the
+  runbook; it is not to imitate a carrier on the author's machine.
 - `skill` is outside this path. It installs the offline coding-agent bundle
   and MUST NOT read, write, or validate an agent package.
-- Local input stands in for production input instead of creating another
-  behavior path.
 - Local development restores borrowed external state on every exit path.
 
 ## Technology and Boundaries
@@ -220,4 +206,4 @@ topology change.
   knob needs a concrete reason. Without one, do less.
 - Rules added to `CLAUDE.md` need a failing gate or the label `(advisory)`.
 
-**Version**: 5.0.0 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-24
+**Version**: 6.0.0 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-25

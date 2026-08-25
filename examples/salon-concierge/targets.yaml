@@ -20,11 +20,3 @@ targets:
     version: "1.7.0"
     connection: twilio_voice
     deployment_region: eu-central
-
-  # The same agent on the trunk instead of the media stream: no managed platform
-  # anywhere in it, so the four containers a local run starts are the four you
-  # run in production. Receives calls only, which is what this line does.
-  pipecat_sip:
-    provider: pipecat
-    version: "1.7.0"
-    connection: twilio_sip

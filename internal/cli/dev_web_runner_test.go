@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/spf13/cobra"
 )
 
 // fakeDevDocker installs a docker stand-in that traces every call (with a few
@@ -162,7 +164,7 @@ func TestDevComposeTearsDownOnInterrupt(t *testing.T) {
 	}
 	t.Cleanup(func() { composeCommand = restore })
 
-	cmd, out := telephonyTestCommand(t)
+	cmd, out := devTestCommand(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { time.Sleep(300 * time.Millisecond); cancel() }()
 	err := runDevCompose(ctx, cmd, devWebRun{
@@ -204,7 +206,7 @@ func TestDevComposeHoldsAFailedBuildOpen(t *testing.T) {
 	}
 	t.Cleanup(func() { composeCommand = restore })
 
-	cmd, out := telephonyTestCommand(t)
+	cmd, out := devTestCommand(t)
 	stream := newDevStream()
 	ctx, cancel := context.WithCancel(context.Background())
 	released := make(chan struct{})
@@ -255,4 +257,16 @@ func TestDevComposeHoldsAFailedBuildOpen(t *testing.T) {
 	if !strings.Contains(string(logged), "failed to solve") {
 		t.Errorf("build failure missing from the log:\n%s\n%s", logged, out.String())
 	}
+}
+
+// devTestCommand is a cobra command wired to one buffer, for the dev helpers
+// that take a *cobra.Command only to write to it.
+func devTestCommand(t *testing.T) (*cobra.Command, *bytes.Buffer) {
+	t.Helper()
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetContext(t.Context())
+	return cmd, &out
 }

@@ -82,9 +82,8 @@ them as a starting point and then measure.
 
 ## Production concerns, both targets
 
-- **Redis** is needed for LiveKit SIP, a multi-node self-hosted LiveKit Server,
-  and Pipecat's `carrier-websocket` route. Pipecat `cloud-websocket` and
-  `daily-sip` do not use it.
+- **Redis** is needed for LiveKit SIP and a multi-node self-hosted LiveKit
+  Server. Pipecat `cloud-websocket` and `daily-sip` do not use it.
 - **Separate environments.** Keep production and staging apart, and never point
   a development worker at a production server.
 - **Logs.** Workers and the Pipecat application log to stdout. Ship those logs.
@@ -110,12 +109,10 @@ reachable. Cross-network calls need STUN or TURN; the generated SmallWebRTC
 configuration does not add ICE servers today, so treat that as required work
 before a self-hosted browser deployment.
 
-Only Pipecat's `carrier-websocket` phone route runs the full phone agent on
-your infrastructure. Give it public HTTPS and WSS on port 443, WebSocket
-timeouts longer than the longest call, `UNMUTE_PUBLIC_URL`, and shared Redis.
-The `cloud-websocket` route hosts nothing of yours. The `daily-sip` carrier
-form emits only a small webhook helper; the deployed agent still exposes no
-inbound service.
+Pipecat's phone routes both stay light on your infrastructure. The
+`cloud-websocket` route hosts nothing of yours: Pipecat Cloud terminates the
+carrier's media itself. The `daily-sip` carrier form emits only a small
+webhook helper; the deployed agent still exposes no inbound service.
 
 Scale by active sessions, not HTTP request rate. Keep each long-lived
 WebSocket on the replica that accepted it, and give shutdown enough time to
@@ -123,6 +120,13 @@ drain the longest call. LiveKit distributes jobs to registered workers; do not
 put a load balancer in front of those workers.
 
 ## Phone routes
+
+<Note>
+  A phone call reaches an agent that is deployed. Deploy it, finish the
+  carrier setup below, then call the number: that is how you confirm the
+  phone path works. `unmute dev` covers the prompt, tools, and models in the
+  browser, and stops where the phone leg starts.
+</Note>
 
 If the target declares a phone route, the generated README carries the carrier
 steps: the markup to paste, the trunk to configure, or the number to attach.

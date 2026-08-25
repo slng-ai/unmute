@@ -134,13 +134,9 @@ starts. That file is the first place to look when the page loads but nothing
 speaks, and it is where a failure to start explains itself. It holds everything
 the process printed, measurement lines included, so it always matches the run.
 
-| Mode | Log file |
-|---|---|
-| `unmute dev` in the browser | `build/<target>/dev.log` |
-| `unmute dev --telephony` | `build/<target>/telephony.log` |
-
-The path is printed with the ready line, exactly as you will see it. From
-inside a scaffolded package, run with no argument, that reads:
+The log file is always `build/<target>/dev.log`. The path is printed with the
+ready line, exactly as you will see it. From inside a scaffolded package, run
+with no argument, that reads:
 
 ```text
   ▸ http://localhost:8765/?agent=livekit
@@ -209,24 +205,20 @@ LIVEKIT_HOST_PORT=7890 LIVEKIT_TCP_HOST_PORT=7891 LIVEKIT_UDP_HOST_PORT=7892 \
   unmute dev examples/subagents --target livekit --port 8766
 ```
 
-## The two ways to run
+## The one way to run
 
-Shown from inside the package. Anywhere else, name it first, as in
-`unmute dev my-agent --telephony`.
-
-| Command | You talk through | Needs |
-|---|---|---|
-| `unmute dev` | a local web page | `uv` for Pipecat; Docker for LiveKit |
-| `unmute dev --telephony` | the target's phone route | Docker, or `uv` on Pipecat `cloud-websocket`; no carrier account |
-
-Which plane each route gets, what a local call proves, and what it cannot tell
-you are on [call your agent locally](/dev/local-telephony).
+`unmute dev` always talks through your browser. There is no local phone route.
+A phone call reaches an agent that is deployed, so telephony is verified after
+you deploy: [phone calls](/telephony/overview) covers what a route is, and
+[deploy to LiveKit Cloud](/deploy/livekit-cloud) or
+[deploy to Pipecat Cloud](/deploy/pipecat-cloud) put an agent where a real call
+can reach it.
 
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="Call your agent locally" icon="phone" href="/dev/local-telephony">
-    One command, a real phone codec, and no carrier account.
+  <Card title="Phone calls" icon="phone" href="/telephony/overview">
+    What each route means, and how a call reaches a deployed agent.
   </Card>
   <Card title="dev reference" icon="book" href="/reference/cli/dev">
     Every flag, with defaults and requirements.

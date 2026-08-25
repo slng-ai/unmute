@@ -383,7 +383,7 @@ func TestValidateTelephonyProvisionalRouteIsUsableAndQuiet(t *testing.T) {
 	phone := pkg.Agent.Channels["phone"]
 	phone.RequiredControls = []string{"hangup"}
 	pkg.Agent.Channels["phone"] = phone
-	routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
+	routeTarget(pkg, "pipecat", "primary_phone", "cloud-websocket", "twilio")
 	agent, err := Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -409,7 +409,7 @@ func TestValidateOutboundWithoutVoicemailRaisesNoVoicemailError(t *testing.T) {
 	outbound := true
 	phone.Outbound = &outbound
 	pkg.Agent.Channels["phone"] = phone
-	routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
+	routeTarget(pkg, "pipecat", "primary_phone", "cloud-websocket", "twilio")
 	agent, err := Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -431,7 +431,7 @@ func TestValidatePipecatOnVoicemailStillErrors(t *testing.T) {
 	phone.Outbound = &outbound
 	phone.OnVoicemail = "hangup"
 	pkg.Agent.Channels["phone"] = phone
-	routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
+	routeTarget(pkg, "pipecat", "primary_phone", "cloud-websocket", "twilio")
 	agent, err := Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -446,7 +446,7 @@ func TestValidatePipecatOnVoicemailStillErrors(t *testing.T) {
 func TestValidateTelephonyPlanRejectsOrphanRedisAndUnknownConsumers(t *testing.T) { // telephony V13, V23
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
-	routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
+	routeTarget(pkg, "pipecat", "primary_phone", "cloud-websocket", "twilio")
 	agent, err := Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -495,6 +495,45 @@ func TestValidateExotelTelephonyFailsClosedWithoutAuthenticatedWebSocket(t *test
 	}
 	if strings.Contains(err.Error(), "with exotel") {
 		t.Errorf("the refusal suggests exotel, which is the refusal the author just hit: %v", err)
+	}
+}
+
+// The two Pipecat routes that deployed to no managed platform are gone, and a
+// package that names one is refused before generation (spec FR-008).
+//
+// No new refusal was written for this. validateRoute already refuses anything
+// absent from the selectable route table and lists what the provider does have,
+// so deleting the rows is the whole change. What this test holds is that the
+// refusal keeps *naming the transport* and keeps *suggesting only routes that
+// deploy*: a suggestion list that offered one of these back would send an author
+// to a route they cannot run anywhere.
+func TestValidateRefusesTheRoutesThatDeployNowhere(t *testing.T) {
+	for _, transport := range []string{"carrier-websocket", "sip"} {
+		t.Run(transport, func(t *testing.T) {
+			pkg := loadSafeCore(t)
+			enableTelephony(pkg)
+			routeTarget(pkg, "pipecat", "primary_phone", transport, "twilio")
+			_, err := Build(pkg)
+			if err == nil {
+				t.Fatalf("(pipecat, %s, twilio) compiled; it deploys to no managed platform and has no local loop", transport)
+			}
+			for _, want := range []string{transport, "pipecat supports:"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the refusal is missing %q: %v", want, err)
+				}
+			}
+			// The surviving Pipecat phone routes, and nothing else, may be offered.
+			// Matched on the whole suggestion list rather than by substring: the
+			// surviving `daily-sip` ends in "sip", so a naive check for "sip with"
+			// reports a route that is fine.
+			_, suggestions, ok := strings.Cut(err.Error(), "pipecat supports: ")
+			if !ok {
+				t.Fatalf("the refusal carries no suggestion list: %v", err)
+			}
+			if got := strings.TrimSuffix(suggestions, "."); got != "cloud-websocket with twilio; daily-sip with twilio" {
+				t.Errorf("suggestions = %q; only the routes that deploy to Pipecat Cloud may be offered", got)
+			}
+		})
 	}
 }
 
@@ -1295,7 +1334,7 @@ func TestV12_WarmTransferRequiresOutboundDirection(t *testing.T) {
 		human := pkg.Agent.Controls["to_human"]
 		human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
 		pkg.Agent.Controls["to_human"] = human
-		routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
+		routeTarget(pkg, "pipecat", "primary_phone", "cloud-websocket", "twilio")
 		agent, err := Build(pkg)
 		if err != nil {
 			t.Fatal(err)
@@ -1348,7 +1387,7 @@ func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
 	human = pkg.Agent.Controls["to_human"]
 	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
 	pkg.Agent.Controls["to_human"] = human
-	routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
+	routeTarget(pkg, "pipecat", "primary_phone", "cloud-websocket", "twilio")
 	agent, err = Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -1487,21 +1526,29 @@ func TestValidatePipecatDailyCarrierServiceSet(t *testing.T) {
 		t.Fatalf("a redis service on the Daily carrier route must fail by name, got:\n%s", joined)
 	}
 
-	// The carrier-websocket routes still require it.
+	// A route that does require it still does. The contrast used to be a Pipecat
+	// carrier-websocket target; that route is gone and no surviving Pipecat route
+	// runs a coordination store, so the contrast is LiveKit sip, which does.
 	cwPkg := loadSafeCore(t)
 	enableTelephony(cwPkg)
-	routeTarget(cwPkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
+	routeTarget(cwPkg, "livekit", "primary_phone", "sip", "twilio")
+	cwPkg.Connections["primary_phone"] = packagespec.Connection{
+		Transport: "sip", Carrier: "twilio", Environment: map[string]string{
+			"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME",
+			"sip_password": "TWILIO_SIP_PASSWORD", "from_number": "TWILIO_PHONE_NUMBER",
+		},
+	}
 	cwAgent, err := Build(cwPkg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cwTarget := cwAgent.Targets["pipecat"]
+	cwTarget := cwAgent.Targets["livekit"]
 	cwPlan := *cwTarget.Telephony
 	cwPlan.Services = []string{"application"}
 	cwTarget.Telephony = &cwPlan
 	report, _ = Validate(cwAgent, []Target{cwTarget}, targetcap.Default())
 	if joined = strings.Join(report.PerTarget[0].Errors, "\n"); !strings.Contains(joined, "telephony service redis is required") {
-		t.Fatalf("the carrier-websocket routes must still require redis, got:\n%s", joined)
+		t.Fatalf("a route that runs a coordination store must still require redis, got:\n%s", joined)
 	}
 }
 
@@ -1530,30 +1577,36 @@ func TestValidatePipecatDailyCarrierRefusesCallSources(t *testing.T) {
 			if !strings.Contains(joined, "daily-sip") {
 				t.Errorf("the refusal must name the route, got:\n%s", joined)
 			}
-			if !strings.Contains(joined, "carrier-websocket") {
+			// Where it does work. No Pipecat route fills call sources, so the
+			// only useful answer is a LiveKit one, and the message has to give it
+			// rather than leaving the author to go looking.
+			if !strings.Contains(joined, "livekit, connector") {
 				t.Errorf("the refusal must name where the source does work, got:\n%s", joined)
 			}
 
-			// The same declaration passes where the fill path exists.
-			cwPkg := dailyCarrierPackage(t)
+			// The same declaration passes where the fill path exists. That used to
+			// be the Pipecat carrier-websocket adapter. With that route gone, no
+			// Pipecat route fills call sources at all, so the contrast is the
+			// LiveKit Twilio connector: the surviving route whose bridge reads the
+			// carrier's stream and writes these attributes.
+			cwPkg := loadSafeCore(t)
+			enableTelephony(cwPkg)
 			cwPkg.Agent.Variables = map[string]packagespec.Variable{}
 			cwPkg.Agent.Variables["caller_fact"] = packagespec.Variable{Type: "string", Source: string(source)}
-			cw := cwPkg.Targets["pipecat"]
-			cw.Connection = "primary_phone"
-			cwPkg.Targets = map[string]packagespec.Target{"pipecat": cw}
-			cwPkg.Connections = map[string]packagespec.Connection{"primary_phone": {
-				Transport: "carrier-websocket", Carrier: "twilio", Environment: map[string]string{
+			routeTarget(cwPkg, "livekit", "primary_phone", "connector", "twilio")
+			cwPkg.Connections["primary_phone"] = packagespec.Connection{
+				Transport: "connector", Carrier: "twilio", Environment: map[string]string{
 					"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
 					"from_number": "TWILIO_PHONE_NUMBER",
 				},
-			}}
+			}
 			cwAgent, err := Build(cwPkg)
 			if err != nil {
 				t.Fatal(err)
 			}
-			report, _ = Validate(cwAgent, []Target{cwAgent.Targets["pipecat"]}, targetcap.Default())
+			report, _ = Validate(cwAgent, []Target{cwAgent.Targets["livekit"]}, targetcap.Default())
 			if joined = strings.Join(report.PerTarget[0].Errors, "\n"); strings.Contains(joined, "source."+string(source)) {
-				t.Fatalf("the carrier-websocket route fills %s, so it must not be refused there:\n%s", source, joined)
+				t.Fatalf("the connector route fills %s, so it must not be refused there:\n%s", source, joined)
 			}
 		})
 	}
@@ -1877,20 +1930,29 @@ func TestValidatePipecatCloudWebsocketHostsNothing(t *testing.T) {
 
 	// And the routes that do run something still require it: the relaxation is
 	// keyed on this route, not on Pipecat.
+	// The other direction: on a route that does host a process, an empty process
+	// list is still an error. The contrast used to be carrier-websocket and is now
+	// LiveKit sip, the surviving route that runs the operator's own container.
 	cwPkg := loadSafeCore(t)
 	enableTelephony(cwPkg)
-	routeTarget(cwPkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
+	routeTarget(cwPkg, "livekit", "primary_phone", "sip", "twilio")
+	cwPkg.Connections["primary_phone"] = packagespec.Connection{
+		Transport: "sip", Carrier: "twilio", Environment: map[string]string{
+			"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME",
+			"sip_password": "TWILIO_SIP_PASSWORD", "from_number": "TWILIO_PHONE_NUMBER",
+		},
+	}
 	cwAgent, err := Build(cwPkg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cwTarget := cwAgent.Targets["pipecat"]
+	cwTarget := cwAgent.Targets["livekit"]
 	cwPlan := *cwTarget.Telephony
 	cwPlan.Processes = nil
 	cwTarget.Telephony = &cwPlan
 	report, _ = Validate(cwAgent, []Target{cwTarget}, targetcap.Default())
 	if joined := strings.Join(report.PerTarget[0].Errors, "\n"); !strings.Contains(joined, "no runtime process") {
-		t.Fatalf("a process-free carrier-websocket plan must still fail, got:\n%s", joined)
+		t.Fatalf("a process-free plan on a route that hosts one must still fail, got:\n%s", joined)
 	}
 }
 
@@ -1906,7 +1968,7 @@ func TestValidatePipecatCloudWebsocketRefusesCallSources(t *testing.T) {
 	}
 	report, _ := Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
 	joined := strings.Join(report.PerTarget[0].Errors, "\n")
-	for _, want := range []string{"source.from_number", "cloud-websocket", "carrier-websocket"} {
+	for _, want := range []string{"source.from_number", "cloud-websocket", "livekit, connector"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the refusal is missing %q, got:\n%s", want, joined)
 		}
@@ -2506,81 +2568,6 @@ func TestValidateEndpointingDelayIsATurnFieldAndPositive(t *testing.T) {
 			}
 		})
 	}
-}
-
-// A transfer destination the local plane has no endpoint for is refused before
-// anything starts, naming the destination and what the plane does run. This is
-// a defect rather than a call that times out, and it should be read at compile
-// time instead of watched failing on a phone.
-func TestValidateRefusesADestinationThePlaneCannotReach(t *testing.T) {
-	pkg := loadSafeCore(t)
-	enableTelephony(pkg)
-	routeTarget(pkg, "livekit", "primary_phone", "sip", "twilio")
-	connection := pkg.Connections["primary_phone"]
-	connection.Environment = map[string]string{
-		"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME",
-		"sip_password": "TWILIO_SIP_PASSWORD", "from_number": "TWILIO_PHONE_NUMBER",
-	}
-	pkg.Connections["primary_phone"] = connection
-	pkg.Agent.Controls["to_human"] = packagespec.Control{
-		Kind: "human_transfer", Cold: &packagespec.ColdTransfer{Destination: "billing_line"},
-	}
-	if pkg.Agent.Destinations == nil {
-		pkg.Agent.Destinations = map[string]string{}
-	}
-	pkg.Agent.Destinations["billing_line"] = "BILLING_PHONE_NUMBER"
-	billing := pkg.Agent.Agents["billing"]
-	billing.Tools = append(billing.Tools, "to_human")
-	pkg.Agent.Agents["billing"] = billing
-
-	agent, err := Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolved := agent.Targets["livekit"]
-	// The build derives one endpoint per declared destination, so the state this
-	// refuses cannot be authored. It is reachable by a plane that stopped
-	// deriving one, which is what this drops the endpoint to simulate.
-	endpoints := resolved.Telephony.LocalEndpoints
-	if len(endpoints) < 2 {
-		t.Fatalf("the plane derived %d endpoints; this test no longer describes it", len(endpoints))
-	}
-	kept := []TelephonyLocalEndpoint{}
-	for _, endpoint := range endpoints {
-		if endpoint.Role != TelephonyRoleDestination {
-			kept = append(kept, endpoint)
-		}
-	}
-	resolved.Telephony.LocalEndpoints = kept
-	resolved.Telephony.Services = removeService(resolved.Telephony.Services, "telephony_destinations")
-	report, err := Validate(agent, []Target{resolved}, targetcap.Default())
-	joined := strings.Join(report.PerTarget[0].Errors, "\n")
-	if err == nil || !strings.Contains(joined, `transfer destination "billing_line" has no endpoint`) {
-		t.Fatalf("a destination with no endpoint was accepted: err=%v\n%s", err, joined)
-	}
-
-	// Two endpoints answering to one name is an ambiguous transfer and one
-	// recording overwriting another. The reachable case is a destination
-	// declared with the caller endpoint's own name.
-	resolved.Telephony.LocalEndpoints = append(endpoints, TelephonyLocalEndpoint{
-		Role: TelephonyRoleDestination, Name: "billing_line", Service: "telephony_destinations",
-		Address: "10.185.61.21", Port: 5060, Recording: "billing_line.wav",
-	})
-	report, err = Validate(agent, []Target{resolved}, targetcap.Default())
-	joined = strings.Join(report.PerTarget[0].Errors, "\n")
-	if err == nil || !strings.Contains(joined, `collides with another endpoint of the same name`) {
-		t.Fatalf("two endpoints sharing a name was accepted: err=%v\n%s", err, joined)
-	}
-}
-
-func removeService(services []string, drop string) []string {
-	kept := make([]string, 0, len(services))
-	for _, service := range services {
-		if service != drop {
-			kept = append(kept, service)
-		}
-	}
-	return kept
 }
 
 // TestValidateEndpointingDelayLiveKitFloor is the compile-time half of a runtime
