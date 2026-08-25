@@ -4,6 +4,7 @@ package cli
 
 import (
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -134,4 +135,65 @@ func TestSmokeDevLiveKitServerStarts(t *testing.T) {
 	if !slices.Contains(strings.Fields(string(output)), "livekit_server") {
 		t.Fatalf("livekit_server not running: %s", output)
 	}
+}
+
+func artifactFileContent(t *testing.T, artifact generate.Artifact, path string) string {
+	t.Helper()
+	for _, file := range artifact.Files {
+		if file.Path == path {
+			return string(file.Content)
+		}
+	}
+	t.Fatalf("artifact missing %s", path)
+	return ""
+}
+
+// smokeEnvValue is the placeholder one generated environment name gets. The
+// values are deliberately fake and the public URL uses the reserved .invalid
+// TLD (RFC 2606), so nothing here is a credential and no host is reachable.
+func smokeEnvValue(name string) string {
+	if name == "UNMUTE_PUBLIC_URL" {
+		return "https://smoke.invalid" // must parse as an HTTPS origin
+	}
+	return "unmute-smoke-placeholder"
+}
+
+// placeholderArtifactEnvironment gives every name the project requires a
+// placeholder value, so an ambient credential in the developer's shell can
+// never make this test pass for the wrong reason. Placeholders rather than
+// blanks: a name that is present but empty reads as unset to the generated
+// startup check.
+//
+// It reads the **telephony plan's** required environment rather than
+// `.env.example`. Those are two different lists on purpose: `.env.example` holds
+// the names the author supplies, and the route's own values are deliberately
+// absent from it (FR-018), because a to-do list whose entries are not the
+// reader's to do is not a to-do list. `unmute dev` supplies them at run time;
+// this test has to stand in for that, so it reads the complete list — the same
+// one `compile-report.json` carries under `required_env`.
+//
+// Reading the env file here was what broke when the two lists diverged: the
+// container started, `/readyz` demanded `UNMUTE_PUBLIC_URL`, and nothing had
+// set it. That is the failure mode research D14 predicted for a human operator,
+// arriving first in a test, which is where it should arrive.
+func placeholderArtifactEnvironment(env []string, plan *generate.TelephonyRuntimePlan, example string) []string {
+	names := map[string]bool{}
+	if plan != nil {
+		for _, name := range plan.RequiredEnv {
+			names[name] = true
+		}
+	}
+	for _, line := range strings.Split(example, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if name, _, ok := strings.Cut(line, "="); ok && name != "" {
+			names[name] = true
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(names)) {
+		env = setChildEnv(env, name, smokeEnvValue(name))
+	}
+	return env
 }

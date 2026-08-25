@@ -188,7 +188,7 @@ func TestRunDevPipecatRejectsBusyAgentPort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd, _ := telephonyTestCommand(t)
+	cmd, _ := devTestCommand(t)
 	err = runDevPipecat(t.Context(), cmd, t.TempDir(), devWebRun{root: "pkg", botPort: port})
 	if err == nil || !strings.Contains(err.Error(), "already in use") {
 		t.Fatalf("busy port error = %v", err)

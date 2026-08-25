@@ -1,4 +1,4 @@
-transport: carrier-websocket
+transport: cloud-websocket
 carrier: twilio
 environment:
   account_sid: TWILIO_ACCOUNT_SID

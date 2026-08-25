@@ -21,7 +21,7 @@ read two side by side and see only the difference that matters.
 
 | What the user wants | Package | What it shows |
 |---|---|---|
-| one full release-readiness project | `examples/salon-concierge` | verification task, booking task group, four-agent handoffs, SQLite tools, Coval tracing, cold manager transfer, browser audio, and inbound-only phone routes on three targets, one per local telephony plane; every tool is local, so it starts with no external tool server |
+| one full release-readiness project | `examples/salon-concierge` | verification task, booking task group, four-agent handoffs, in-process tool state, Coval tracing, cold manager transfer, browser audio, and an inbound phone route on each of its two targets; every tool is local, so it starts with no external tool server |
 | the smallest thing that runs, and one prompt with every tool | `examples/simple-prompt` | **Start here.** One agent, browser audio, local tools, no Twilio and no API to stand up. Also the baseline for both targets. |
 | a step with a definite typed answer | `examples/multi-task` | one agent, two tasks it delegates to, `result:` and `assign:` |
 | steps that must happen in a fixed order | `examples/task-groups` | three ordered tasks, `context_scope: shared`, and the LiveKit experimental warning |

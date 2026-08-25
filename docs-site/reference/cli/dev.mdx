@@ -1,6 +1,6 @@
 ---
 title: "unmute dev"
-description: "Every flag, with defaults, requirements, and what each mode ignores."
+description: "Every flag, with defaults, and what the command does not do."
 ---
 
 ```text expandable wrap
@@ -13,33 +13,25 @@ Usage:
   unmute dev [agent-dir] [flags]
 
 Flags:
-      --bot-port string     host port for the local agent runtime (with Compose, UNMUTE_DEV_PORT or UNMUTE_TELEPHONY_PORT) (default "7860")
-      --carrier             reach the route through your own carrier: managed tunnel, webhook rewrite, restore on exit (requires --telephony)
-  -h, --help                help for dev
-      --no-open             do not open the browser automatically
-      --no-webhook          do not touch the carrier number's webhook configuration (requires --carrier; point it at the printed public URL yourself)
-      --port string         port for the local dev UI (default "8765")
-      --public-url string   exact public HTTPS origin for routes with carrier callbacks (requires --carrier)
-      --target string       target instance name (required without a TTY when multiple exist)
-      --telephony           run the selected target's resolved telephony route (no browser UI)
-      --to string           E.164 number to dial for an outbound telephony test (requires --telephony and an outbound-capable target)
-      --var stringArray     seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)
-      --verbose             follow container/agent logs on stderr (default: write to the log file only)
+      --bot-port string   host port for the local agent runtime (with Compose, UNMUTE_DEV_PORT) (default "7860")
+  -h, --help              help for dev
+      --no-open           do not open the browser automatically
+      --port string       port for the local dev UI (default "8765")
+      --target string     target instance name (required without a TTY when multiple exist)
+      --var stringArray   seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)
+      --verbose           follow container/agent logs on stderr (default: write to the log file only)
 ```
 
-## Two modes
+## One mode: the browser
 
-| Mode | Command | What runs |
-|---|---|---|
-| browser | `unmute dev ./agent` | Pipecat under `uv` or LiveKit under Compose, plus a local page |
-| telephony | `unmute dev ./agent --telephony` | the route's local topology, with no browser UI |
+`unmute dev ./agent` compiles the package, starts the selected target's runtime,
+and opens a page you talk through. Pipecat runs under `uv`; LiveKit runs under
+Docker Compose. That is the whole command.
 
-Pipecat browser mode needs `uv`; LiveKit browser mode needs Docker. Telephony
-mode depends on the route: most local topologies use Docker Compose, the
-Pipecat cloud-websocket route starts the generated agent with `uv`, and
-Pipecat Daily has no local phone topology. The Pipecat cloud-websocket route
-can receive a real Twilio call through its temporary HTTPS/WSS tunnel. A local
-LiveKit SIP stack does not expose public SIP or RTP by itself.
+There is no phone mode. A phone call reaches an agent that is deployed, so
+telephony is tested after you deploy: `unmute compile ./agent`, deploy the
+emitted project, then call the number. The emitted `README.md` has the setup
+steps for the route you chose.
 
 ## Flags in detail
 
@@ -51,12 +43,12 @@ LiveKit SIP stack does not expose public SIP or RTP by itself.
 </ResponseField>
 
 <ResponseField name="--port" type="string" default="8765">
-  The port of the local page you talk through. Browser mode only.
+  The port of the local page you talk through.
 </ResponseField>
 
 <ResponseField name="--bot-port" type="string" default="7860">
   The host port the agent uses. Pipecat passes it to the local `uv` process.
-  Compose paths receive `UNMUTE_DEV_PORT` or `UNMUTE_TELEPHONY_PORT`.
+  Compose paths receive it as `UNMUTE_DEV_PORT`.
 </ResponseField>
 
 <ResponseField name="--no-open">
@@ -65,8 +57,7 @@ LiveKit SIP stack does not expose public SIP or RTP by itself.
 
 <ResponseField name="--verbose">
   Follow the container and agent logs on standard error. Without it, they go
-  only to `build/<target>/dev.log` in browser mode or
-  `build/<target>/telephony.log` in phone mode.
+  only to `build/<target>/dev.log`.
 </ResponseField>
 
 <ResponseField name="--var" type="name=value">
@@ -76,55 +67,24 @@ LiveKit SIP stack does not expose public SIP or RTP by itself.
   for the dispatch payload production sends.
 </ResponseField>
 
-<ResponseField name="--telephony">
-  Run the target's resolved telephony route instead of the browser UI. This
-  starts the local pieces; it does not make a local SIP stack publicly
-  reachable.
-</ResponseField>
+## Flags that were removed
 
-<ResponseField name="--carrier">
-  Reach the route through your own carrier account instead of keeping the run
-  on this machine: the managed tunnel, the webhook rewrite, and its restore on
-  exit. Requires `--telephony`. Everything `--carrier` does is a request to
-  your carrier in your name, so it is never the default.
-</ResponseField>
+`--telephony`, `--carrier`, `--public-url`, `--to` and `--no-webhook` ran a
+phone call on this machine. They are gone, and passing one now gets cobra's
+`unknown flag` error.
 
-<ResponseField name="--public-url" type="string">
-  The exact public HTTPS origin for routes with carrier callbacks. Skips the
-  managed tunnel, so the origin must already forward to the local agent port.
-  Requires `--carrier`, because only a carrier run has a public origin at all.
-  Must be HTTPS, with an optional path and nothing else. It cannot expose
-  LiveKit SIP or RTP.
-</ResponseField>
+There is no local replacement for them. Telephony is verified on a deployed
+agent: `unmute compile ./agent`, deploy the emitted project, follow the
+Telephony setup section of its README, then call your number.
 
-<ResponseField name="--to" type="E.164">
-  Request one outbound test call once the route is healthy. Requires
-  `--telephony` and a target whose phone channel declares `outbound: true`.
-  The Pipecat cloud-websocket route cannot place that call locally, so it
-  prints the emitted deployment command instead.
-</ResponseField>
-
-<ResponseField name="--no-webhook">
-  Do not touch the carrier number's webhook configuration. Requires
-  `--carrier`. On callback routes, point the number at the exact inbound URL
-  printed by the run. Pipecat `cloud-websocket` uses `POST /`; generated
-  Pipecat `carrier-websocket` and LiveKit `connector` apps use
-  `POST /telephony/inbound`.
-</ResponseField>
-
-## Requirements between flags
+## Errors it checks first
 
 ```text wrap
-unmute: dev: --carrier requires --telephony
-unmute: dev: --public-url requires --carrier (a local telephony run has no public origin)
-unmute: dev: --to requires --telephony
-unmute: dev: --to must be an E.164 number like +15551234567, got "4155550123"
 unmute: dev examples/simple-prompt: multiple targets declared; pass --target <name>: livekit (livekit), pipecat (pipecat)
 unmute: dev examples/simple-prompt: target instance "nope" is not declared
 ```
 
-Each of these is checked before a local process, Docker, a tunnel, or a carrier
-is touched.
+Both are checked before a local process or Docker is touched.
 
 ## Environment
 
@@ -135,9 +95,8 @@ once.
 
 ## Cleanup
 
-Ctrl-c stops the Compose stack or direct `uv` process, kills the managed tunnel
-if there was one, and restores the carrier webhook if it was changed. Named
-data volumes are kept.
+Ctrl-c stops the Compose stack or the direct `uv` process. Named data volumes
+are kept.
 
 ## Where to go next
 
@@ -146,6 +105,6 @@ data volumes are kept.
     The same command, explained rather than listed.
   </Card>
   <Card title="Telephony" icon="phone" href="/telephony/overview">
-    What `--telephony` runs.
+    How a phone call reaches a deployed agent.
   </Card>
 </Columns>

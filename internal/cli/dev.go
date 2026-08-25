@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,17 +18,14 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/slng-ai/unmute/internal/devmetrics"
-	"github.com/slng-ai/unmute/internal/generate"
-	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/style"
-	"github.com/slng-ai/unmute/internal/target"
 	"github.com/slng-ai/unmute/internal/tui"
 	"github.com/spf13/cobra"
 )
 
 func newDevCmd() *cobra.Command {
-	var uiPort, botPort, targetName, publicURL, to string
-	var noOpen, verbose, telephony, carrier, noWebhook bool
+	var uiPort, botPort, targetName string
+	var noOpen, verbose bool
 	var vars []string
 
 	cmd := &cobra.Command{
@@ -43,27 +39,6 @@ func newDevCmd() *cobra.Command {
 			root, err := packageDir(cmd, args)
 			if err != nil {
 				return err
-			}
-			if !telephony && carrier {
-				return errors.New("dev: --carrier requires --telephony")
-			}
-			// Both of these exist only to manage a public origin, and only a
-			// carrier run has one: the default loop never leaves the machine.
-			// So they name --carrier rather than --telephony, which is the mode
-			// that can actually use the value.
-			if !carrier && publicURL != "" {
-				return errors.New("dev: --public-url requires --carrier (a local telephony run has no public origin)")
-			}
-			if !carrier && noWebhook {
-				return errors.New("dev: --no-webhook requires --carrier (a local telephony run never touches your carrier's number)")
-			}
-			if !telephony && to != "" {
-				return errors.New("dev: --to requires --telephony")
-			}
-			if to != "" {
-				if err := validateDialTarget(to); err != nil {
-					return err
-				}
 			}
 
 			// Input variables ride one JSON payload the generated runtimes read
@@ -87,12 +62,6 @@ func newDevCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if telephony {
-				return runDevTelephony(cmd, root, selected, devTelephonyOptions{
-					publicValue: publicURL, botPort: botPort, to: to,
-					carrier: carrier, noWebhook: noWebhook, verbose: verbose,
-				})
-			}
 			// Default local mode: start the selected target's WebRTC runtime and
 			// serve one web UI for both Pipecat and LiveKit.
 			return runDevWeb(cmd, root, selected, uiPort, botPort, noOpen, verbose)
@@ -100,121 +69,12 @@ func newDevCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&uiPort, "port", "8765", "port for the local dev UI")
-	cmd.Flags().StringVar(&botPort, "bot-port", "7860", "host port for the local agent runtime (with Compose, UNMUTE_DEV_PORT or UNMUTE_TELEPHONY_PORT)")
+	cmd.Flags().StringVar(&botPort, "bot-port", "7860", "host port for the local agent runtime (with Compose, UNMUTE_DEV_PORT)")
 	cmd.Flags().StringVar(&targetName, "target", "", "target instance name (required without a TTY when multiple exist)")
 	cmd.Flags().StringArrayVar(&vars, "var", nil, "seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open the browser automatically")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "follow container/agent logs on stderr (default: write to the log file only)")
-	cmd.Flags().BoolVar(&telephony, "telephony", false, "run the selected target's resolved telephony route (no browser UI)")
-	cmd.Flags().BoolVar(&carrier, "carrier", false, "reach the route through your own carrier: managed tunnel, webhook rewrite, restore on exit (requires --telephony)")
-	cmd.Flags().StringVar(&publicURL, "public-url", "", "exact public HTTPS origin for routes with carrier callbacks (requires --carrier)")
-	cmd.Flags().StringVar(&to, "to", "", "E.164 number to dial for an outbound telephony test (requires --telephony and an outbound-capable target)")
-	cmd.Flags().BoolVar(&noWebhook, "no-webhook", false, "do not touch the carrier number's webhook configuration (requires --carrier; point it at the printed public URL yourself)")
 	return cmd
-}
-
-// runDevTelephony is the fail-closed gate: loading and generation reject
-// every provisional or gated route before any tunnel, Docker, or carrier
-// call (SPEC V5). The post-gate orchestration lives in execDevTelephony.
-func runDevTelephony(cmd *cobra.Command, root, targetName string, opts devTelephonyOptions) error {
-	agent, targets, err := loadPackage(root, []string{targetName})
-	if err != nil {
-		return fmt.Errorf("dev %s: %w", root, err)
-	}
-	resolved := targets[0]
-	// The Daily carrier route has a plan, so it would otherwise fall through to the
-	// generic "no executable telephony topology" line below, which is false: it has
-	// a topology, it just is not one this command can run for you.
-	if resolved.Provider == ir.ProviderPipecat && resolved.Transport == "daily-sip" && resolved.Carrier != "" {
-		return fmt.Errorf("dev %s: target %q reaches its phone calls through your own carrier (%s) on the Pipecat Daily route, "+
-			"and the piece that answers the carrier is the emitted telephony_helper.py, which you run yourself; "+
-			"this command cannot run it for you because your carrier has to be able to reach it. "+
-			"Run `unmute compile %s` and follow the Telephony setup section of the emitted README, which is the helper "+
-			"beside a tunnel, two commands. To talk to this agent right now with no phone at all, "+
-			"use `unmute dev %s` in the browser",
-			root, resolved.Name, resolved.Carrier, root, root)
-	}
-	// The platform-terminated carrier route runs the phone path locally with one
-	// command. It gets its own orchestration rather than the Compose graph below,
-	// because production on this route hosts nothing: there is no compose file, no
-	// helper, and no endpoint of ours, so the local session is the compiled agent,
-	// a tunnel, and the number borrowed for the length of it.
-	if devCloudWebsocketRoute(resolved) {
-		plan := generate.TelephonyRuntimePlanFor(resolved)
-		if plan == nil {
-			return fmt.Errorf("dev %s: target %q has no resolved telephony route", root, resolved.Name)
-		}
-		if opts.to != "" && !planHasTelephonyFeature(plan, "outbound") {
-			return fmt.Errorf("dev %s: --to needs an outbound-capable target; %q has no outbound direction (set channels.phone outbound: true)", root, resolved.Name)
-		}
-		artifact, err := generate.Generate(agent, resolved, target.Default())
-		if err != nil {
-			return fmt.Errorf("dev %s: %w", root, err)
-		}
-		if err := execDevCloudWebsocket(cmd, root, resolved.Name, artifact.Telephony, artifact.Files, opts); err != nil {
-			return fmt.Errorf("dev %s: %w", root, err)
-		}
-		return nil
-	}
-	plan := generate.TelephonyRuntimePlanFor(resolved)
-	if plan == nil {
-		return fmt.Errorf("dev %s: target %q has no resolved telephony route", root, resolved.Name)
-	}
-	// --to only makes sense for an outbound-capable target; reject before
-	// generate or any child process (SPEC V3, V6).
-	if opts.to != "" && !planHasTelephonyFeature(plan, "outbound") {
-		return fmt.Errorf("dev %s: --to needs an outbound-capable target; %q has no outbound direction (set channels.phone outbound: true)", root, resolved.Name)
-	}
-	artifact, err := generate.Generate(agent, resolved, target.Default())
-	if err != nil {
-		return fmt.Errorf("dev %s: %w", root, err)
-	}
-	if artifact.Telephony == nil || len(artifact.Telephony.Services) == 0 {
-		return fmt.Errorf("dev %s: target %q has no executable telephony topology", root, resolved.Name)
-	}
-	if err := execDevTelephony(cmd, root, resolved.Name, artifact.Telephony, artifact.Files, opts); err != nil {
-		return fmt.Errorf("dev %s: %w", root, err)
-	}
-	return nil
-}
-
-func parseTelephonyPublicURL(value string) (*url.URL, error) {
-	if value == "" {
-		return nil, errors.New("--public-url must be an HTTPS origin with an optional path, got an empty value")
-	}
-	parsed, err := url.Parse(value)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return nil, fmt.Errorf("--public-url must be an HTTPS origin with an optional path, got %q", value)
-	}
-	parsed.Path = strings.TrimSuffix(parsed.Path, "/")
-	return parsed, nil
-}
-
-func printDevTelephonyPlan(out io.Writer, name string, plan *generate.TelephonyRuntimePlan, public *url.URL) {
-	fmt.Fprintf(out, "%s: telephony route provider=%s transport=%s carrier=%s coordination=%s\n", name, plan.Route.Provider, plan.Route.Transport, plan.Route.Carrier, plan.Coordination)
-	printDevTelephonyEndpoints(out, name, plan, public)
-	for _, step := range plan.ManualSteps {
-		fmt.Fprintf(out, "%s: setup: %s\n", name, step)
-	}
-	fmt.Fprintf(out, "%s: local services: %s\n", name, strings.Join(plan.Services, ", "))
-	for _, reason := range plan.Reasons {
-		fmt.Fprintf(out, "%s: coordination reason %s -> %s\n", name, reason.Name, strings.Join(reason.Consumers, ", "))
-	}
-}
-
-// printDevTelephonyEndpoints prints the exact public callback URLs once the
-// origin is known (TELEPHONY.md step 6); a nil public prints nothing.
-func printDevTelephonyEndpoints(out io.Writer, name string, plan *generate.TelephonyRuntimePlan, public *url.URL) {
-	if public == nil {
-		return
-	}
-	for _, endpoint := range plan.PublicEndpoints {
-		base := strings.TrimSuffix(public.String(), "/")
-		if endpoint.Method == "WS" {
-			base = "wss" + strings.TrimPrefix(base, "https")
-		}
-		fmt.Fprintf(out, "%s: %s %s %s%s\n", name, endpoint.Name, endpoint.Method, base, endpoint.Path)
-	}
 }
 
 func setChildEnv(env []string, name, value string) []string {
@@ -226,23 +86,6 @@ func setChildEnv(env []string, name, value string) []string {
 		}
 	}
 	return append(filtered, prefix+value)
-}
-
-func missingEnvironment(names, env []string) []string {
-	values := make(map[string]bool, len(env))
-	for _, entry := range env {
-		name, value, ok := strings.Cut(entry, "=")
-		if ok && value != "" {
-			values[name] = true
-		}
-	}
-	var missing []string
-	for _, name := range names {
-		if !values[name] {
-			missing = append(missing, name)
-		}
-	}
-	return missing
 }
 
 // spinner draws a single-line braille spinner on a TTY and is a no-op printer

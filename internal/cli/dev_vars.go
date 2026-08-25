@@ -14,21 +14,6 @@ import (
 // The generated runtimes read it only when the call context supplies nothing.
 const CallStartEnv = "UNMUTE_CALL_START"
 
-func callStartFromEnv(env []string) (map[string]any, error) {
-	values := map[string]any{}
-	raw := envValue(env, CallStartEnv)
-	if raw == "" {
-		return values, nil
-	}
-	if err := json.Unmarshal([]byte(raw), &values); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", CallStartEnv, err)
-	}
-	if values == nil {
-		return nil, fmt.Errorf("%s must be a JSON object", CallStartEnv)
-	}
-	return values, nil
-}
-
 // callStartPayload turns repeated --var name=value flags into the JSON object the
 // generated runtime expects. Each value is parsed against its declared type, and
 // a name the package never declares is refused: accepting it here and dropping it
@@ -96,4 +81,18 @@ func parseVarValue(kind ir.PrimitiveType, raw string) (any, error) {
 	default:
 		return raw, nil
 	}
+}
+
+// envValue returns the value of name in a KEY=VALUE env slice ("" when the
+// name is empty or unset).
+func envValue(env []string, name string) string {
+	if name == "" {
+		return ""
+	}
+	for _, entry := range env {
+		if value, ok := strings.CutPrefix(entry, name+"="); ok {
+			return value
+		}
+	}
+	return ""
 }
