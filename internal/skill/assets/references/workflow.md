@@ -158,8 +158,9 @@ A phone call is verified after deploy, against a real carrier, never with
 `unmute dev`. See `telephony.md` and `transfers.md` for what that means for a
 route and for a transfer.
 
-A dev run puts back every outward change it made when it exits, including on
-`ctrl-c`.
+A dev run changes nothing outside the machine. It touches no carrier account, no
+phone number, and no deployed agent, so there is nothing for it to undo on the
+way out.
 
 **When the question is latency, do not guess.** A dev run measures every turn
 and shows the numbers under it in the browser: end to end, time to first byte per

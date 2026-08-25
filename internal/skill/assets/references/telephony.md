@@ -25,9 +25,11 @@ one and say plainly which you picked and what it cannot do.
 | LiveKit Agents | `sip` | Exotel | no adapter, so this route is refused at validation |
 | LiveKit Agents | `connector` | Twilio | a generated bridge turns Twilio Media Streams into a LiveKit room |
 
-These four are the only routes that exist. There is no self-hosted Pipecat SIP
-route and no Pipecat carrier-websocket route for Telnyx or Plivo; do not offer
-either.
+Four of those five rows are routes an author can pick; the Exotel row is listed
+so its refusal is not a surprise. Pipecat has no self-hosted `sip` route and no
+`carrier-websocket` route for any carrier. Both were removed. Never offer
+either, and never offer Telnyx or Plivo on a Pipecat target: those two carriers
+reach a package only through LiveKit `sip`.
 
 The emitted Pipecat Daily helper is a public ingress, not an open start API. Set
 the exact public HTTPS base URL named by its generated runbook. The helper

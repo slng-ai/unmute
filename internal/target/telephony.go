@@ -133,7 +133,7 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 			"get LIVEKIT_URL and the API key pair from the LiveKit Cloud project settings, or from a self-hosted LiveKit Server configuration; a self-hosted deployment configures LiveKit Server and LiveKit SIP with the same Redis deployment",
 			"point the carrier's origination URI at the LiveKit project SIP URI with transport=tcp (the LiveKit Cloud project settings page, or lk project list --json with the p_ prefix dropped from ProjectId); for a self-hosted deployment, deploy LiveKit SIP with public SIP signaling and RTP ports and point origination at that public SIP endpoint instead",
 			"get the selected carrier SIP address, username, password, and phone number from its SIP trunking console; these four reach the deployed agent's dial-out path directly, so no outbound trunk is registered",
-			"for inbound calls only, run bash telephony-setup.sh from the build directory: it resolves the inbound trunk by phone number and creates the trunk and dispatch rule, so no record ID is ever copied by hand (unmute dev --telephony creates the local records itself)",
+			"for inbound calls only, run bash telephony-setup.sh from the build directory: it resolves the inbound trunk by phone number and creates the trunk and dispatch rule, so no record ID is ever copied by hand",
 		}
 		routes[key] = route
 	}
@@ -331,7 +331,7 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	route.AutoWebhookEndpoint = "inbound"
 	route.ManualSteps = []string{
 		"get the Account SID and Auth Token from the Twilio Console account dashboard and select a Voice-capable number",
-		"for production, configure the Twilio number voice webhook as POST to the reported inbound endpoint (unmute dev --telephony sets it automatically and prints the previous value)",
+		"configure the Twilio number voice webhook as POST to the deployed inbound endpoint reported below",
 		"deploy a self-hosted LiveKit Server and set LIVEKIT_URL and the API key pair to it; the bridge and worker connect out to it, so it needs no public SIP or RTP",
 	}
 	routes[connector] = route

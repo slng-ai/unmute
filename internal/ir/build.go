@@ -1143,8 +1143,7 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		{Name: "admission", Consumers: []string{"application"}},
 	}
 	if resolved.Provider == ProviderPipecat && resolved.Transport == "cloud-websocket" {
-		// One service, and it is the agent: the platform hosts it in production and
-		// `unmute dev --telephony` runs the same application locally. No Redis,
+		// One service, and it is the agent: the platform hosts it. No Redis,
 		// because nothing here outlives a call, and none of the Pipecat correlation
 		// reasons, because each names a Redis-backed record this route never keeps.
 		// The route row's empty Processes says the operator runs nothing; this says

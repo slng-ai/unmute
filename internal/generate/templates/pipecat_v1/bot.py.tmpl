@@ -1642,11 +1642,11 @@ def build_stt():
             await runner.cancel(reason="agent worker startup failed")
             return
         pipeline_started.set()
-{{if or (eq .Transport "daily-sip") (eq .Transport "carrier-websocket") (eq .Transport "cloud-websocket")}}
+{{if or (eq .Transport "daily-sip") (eq .Transport "cloud-websocket")}}
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        # Telephony transports (carrier WebSocket, Daily SIP) have no RTVI
-        # client-ready handshake: the carrier opens a raw media WebSocket and
+        # Telephony transports (Daily SIP, the platform's carrier stream) have
+        # no RTVI client-ready handshake: the carrier opens the media stream and
         # the bot initiates once that connection is open and main's StartFrame
         # has traversed (Pipecat Twilio dial-in flow; SPEC V2).
 {{if .CloudWebsocket}}        #

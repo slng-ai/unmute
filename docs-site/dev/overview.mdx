@@ -24,6 +24,15 @@ That names a package sitting somewhere else, which is why it carries a path.
 The argument is optional: inside a package, `unmute dev` on its own runs the
 directory you are standing in, and every path it prints is relative to there.
 
+## The one way to run
+
+`unmute dev` always talks through your browser. There is no local phone route.
+A phone call reaches an agent that is deployed, so telephony is verified after
+you deploy: [phone calls](/telephony/overview) covers what a route is, and
+[deploy to LiveKit Cloud](/deploy/livekit-cloud) or
+[deploy to Pipecat Cloud](/deploy/pipecat-cloud) put an agent where a real call
+can reach it.
+
 ## What it does, in order
 
 <Steps>
@@ -204,15 +213,6 @@ overlap. Move signaling, TCP fallback, and UDP media as one set:
 LIVEKIT_HOST_PORT=7890 LIVEKIT_TCP_HOST_PORT=7891 LIVEKIT_UDP_HOST_PORT=7892 \
   unmute dev examples/subagents --target livekit --port 8766
 ```
-
-## The one way to run
-
-`unmute dev` always talks through your browser. There is no local phone route.
-A phone call reaches an agent that is deployed, so telephony is verified after
-you deploy: [phone calls](/telephony/overview) covers what a route is, and
-[deploy to LiveKit Cloud](/deploy/livekit-cloud) or
-[deploy to Pipecat Cloud](/deploy/pipecat-cloud) put an agent where a real call
-can reach it.
 
 ## Where to go next
 
