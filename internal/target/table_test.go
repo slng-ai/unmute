@@ -9,6 +9,60 @@ import (
 	"testing"
 )
 
+// fieldConstant matches one Field constant declaration. gofmt fixes the shape,
+// so a regexp reads it as reliably as a parser would and costs three lines
+// instead of thirty. It takes the block form and the standalone one, because a
+// constant declared outside a const block is still a constant: matching only the
+// block would fail this test on a plain refactor and blame a missing row for it.
+var fieldConstant = regexp.MustCompile(`(?m)^(?:\t|const )?(Field\w+)\s+Field = "(.+)"$`)
+
+// TestEveryFieldConstantHasARow is the complement of
+// TestDefaultTableIsCompleteAndTyped, and neither can stand in for the other:
+// that test ranges table.Fields, so it visits keys, and a Field constant that is
+// never a key is never visited.
+//
+// FieldReasonLocal spent its whole life in that blind spot. It was declared,
+// read by ir.Validate on every locally placed reason model, and claimed as
+// emitted by both drivers, while never being a key. Table.Capability handed back
+// a zero Capability, whose empty tag matches no case in applyCapabilityValue, so
+// an author who wrote `placement: local` on a think model got
+// `capability "models.placement.local" has no livekit tag` — an internal message
+// where a capability answer belonged — on both shipped targets.
+//
+// So this reads the constants out of the source rather than out of the map. It
+// reads the whole package, not just table.go: a scan that only knows one file
+// fails whenever a constant is declared next door, and reports it as a missing
+// row, which sends the reader to the wrong place. The count check closes the
+// other half: a row keyed by a bare string, with no constant behind it, is
+// nothing ir.Validate can ever ask for.
+func TestEveryFieldConstantHasARow(t *testing.T) {
+	fields := Default().Fields
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var declared [][]string
+	for _, source := range sources {
+		if strings.HasSuffix(source, "_test.go") {
+			continue
+		}
+		content, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		declared = append(declared, fieldConstant.FindAllStringSubmatch(string(content), -1)...)
+	}
+	// Also fails at zero, which is what a stale regexp looks like.
+	if len(declared) != len(fields) {
+		t.Errorf("this package declares %d Field constants but Default().Fields holds %d rows", len(declared), len(fields))
+	}
+	for _, match := range declared {
+		if _, ok := fields[Field(match[2])]; !ok {
+			t.Errorf("%s (%q) is declared but has no row in Default().Fields, so it resolves to an untagged capability", match[1], match[2])
+		}
+	}
+}
+
 func TestDefaultTableIsCompleteAndTyped(t *testing.T) {
 	table := Default()
 	for field, providers := range table.Fields {
