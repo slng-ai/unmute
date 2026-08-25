@@ -737,6 +737,12 @@ func sitePages(t *testing.T) []string {
 		if err != nil {
 			return err
 		}
+		// snippets/ holds reusable fragments. Mintlify never renders one as a
+		// standalone page, so a snippet is not a path a reader can open and does
+		// not belong in this list.
+		if entry.IsDir() && entry.Name() == "snippets" && filepath.Dir(path) == root {
+			return fs.SkipDir
+		}
 		if entry.IsDir() || filepath.Ext(path) != ".mdx" {
 			return nil
 		}

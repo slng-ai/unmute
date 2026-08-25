@@ -55,20 +55,35 @@ mint a11y                                               # contrast and media alt
 9. **No provider-branded environment variable name is used as an invalid
    example.** A name that starts with a digit is the point; whose product it looks
    like is not. The neutral `2FACTOR_*` names are what the site uses.
+10. **The version this site describes is stated once, in
+    `snippets/unmute-version.mdx`, and never typed into a page.** A page that
+    names a version imports `unmuteVersion` and renders it. The release
+    automation rewrites that one line when a tag is cut, so a typed literal goes
+    stale the moment the next release ships and nothing tells you.
+11. **`changelog.mdx` is derived, not written.** Its one source of truth is the
+    GitHub Release that GoReleaser publishes, and
+    `scripts/render_changelog.py` turns that into an entry. Edit the release on
+    GitHub and re-run the script; do not edit an entry by hand, because the next
+    render will not know you did. The page's lead paragraph is the exception:
+    the script never touches anything above the `{/* changelog:entries */}`
+    marker.
 
 ## The structure
 
-Seven top-level groups, 50 pages: Get started, Build the agent, Develop and
-test, Phone calls, Targets and models, Deploy, and Reference. Build the agent
-nests Tools and Orchestration; Phone calls nests Transfers; Targets and models
-nests Targets and Models; Reference nests CLI.
+Eleven top-level groups, 56 pages: Get started, Build the agent, Configuration
+files, Develop and test, Tracing, Phone calls, Targets and models, Optimization,
+Deploy, CLI, and Releases. Build the agent nests Tools and Orchestration; Phone
+calls nests Transfers; Targets and models nests Targets and Models. Releases
+holds the single `changelog` page.
 
 Top-level groups are section headers, not clickable roots. Their overview pages
 appear first in the group. Nested groups use clickable roots for Tools,
 Orchestration, Transfers, Targets, and CLI. The site does not add automatic
 directory listings because those roots already have useful hand-written cards
 or tables. Every `.mdx` file must appear exactly once as either a page entry or
-a nested group root in `docs.json`.
+a nested group root in `docs.json`. `snippets/` is the one exception: Mintlify
+never renders a file there as a standalone page, so a snippet has no navigation
+entry and the structure test skips that directory.
 
 ## Tests hold the parts that can be held
 
@@ -80,6 +95,9 @@ Prose rots. These facts cannot:
 | `internal/cli/help_capture_test.go` | `internal/cli/testdata/help.txt` still matches the cobra tree, and every flag in it appears on the CLI page that documents that command (two tests) |
 | `internal/target/providers_docsite_test.go` | `models/{stt,tts,llm}.mdx` list exactly the catalog's vendors per target per role, with SLNG first; and `models/turn-detection.mdx` carries no vendor list, because the `turn` role has no catalog entries (two tests) |
 | `internal/spec/tools_docsite_test.go` | `build/tools/overview.mdx` names exactly the execution blocks the `Tool` struct has |
+| `internal/docsite/version_test.go` | `snippets/unmute-version.mdx` holds one valid version, the installation and quickstart pages import it, and no other page hardcodes a version literal (three tests) |
+| `internal/docsite/changelog_test.go` | `changelog.mdx` runs newest first, every entry has a label, a version and a link to its own release, the newest entry matches the version snippet, the insert marker survives, and no entry keeps a heading, an em or en dash, or a commit hash (five tests) |
+| `internal/skill/markdown_surface_test.go` | `docs.json` declares the contextual menu in order and states the two facts agents get wrong, and `start/coding-agents.mdx` names all three Markdown endpoints and the suffix rule (three tests) |
 
 `reference/connections-yaml` deliberately has no test: its three shapes are backed
 by two shipped examples and one scratch package, and every telephony example is

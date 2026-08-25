@@ -104,6 +104,35 @@ When it fails: run `unmute skill install` again, confirm the directory for your
 assistant from the table above exists, and start a new session so the
 assistant picks it up.
 
+## Read this site as Markdown
+
+The skill teaches an assistant how to write a package. This section is the other
+half: how an assistant reads the site itself. Every page here is served as
+Markdown as well as HTML, so an assistant does not have to work from scraped
+HTML.
+
+| What | Where | Use it for |
+|---|---|---|
+| One page as Markdown | add `.md` to any page URL, for example [`/start/coding-agents.md`](https://unmute.mintlify.app/start/coding-agents.md) | pointing an assistant at the one page that answers the question in front of it |
+| The index | [`/llms.txt`](https://unmute.mintlify.app/llms.txt) | letting an assistant see every page and its description, then fetch the ones it needs |
+| The whole site | [`/llms-full.txt`](https://unmute.mintlify.app/llms-full.txt) | one file with every page in it, for a tool that wants the lot in a single fetch |
+
+Prefer `/llms.txt` and then one page. It is a few kilobytes, and it lets the
+assistant choose. `/llms-full.txt` is the entire site in one file, which is
+hundreds of kilobytes and will crowd out the rest of a context window.
+
+Every page also carries a menu in its top right corner that copies the page as
+Markdown, opens the Markdown, or opens the page in a chat with ChatGPT or
+Claude. That is the fastest way to hand one page to an assistant that cannot
+fetch a URL itself.
+
+<Tip>
+  These endpoints are the current site, so they always match what is published.
+  The installed skill is version matched to your binary and works offline. Use
+  the skill for how to author a package, and these endpoints when you want the
+  page a reader would see.
+</Tip>
+
 ## Build the salon agent
 
 This is one build, start to finish. It is the shape of

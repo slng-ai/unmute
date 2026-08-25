@@ -22,6 +22,20 @@
   "styling": {
     "eyebrows": "breadcrumbs"
   },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude"
+    ]
+  },
+  "markdown": {
+    "instructions": [
+      "Unmute compiles to exactly two targets: Pipecat and LiveKit Agents. Those are the only values `provider` accepts in `targets.yaml`. Deepgram and ElevenLabs appear in these docs as model vendors, which is not the same thing as a target.",
+      "The Go structs in `internal/spec` and `internal/ir` are the schema truth. Check a field against them, or run `unmute validate`, rather than against what you remember."
+    ]
+  },
   "redirects": [
     {
       "source": "/dev/telephony",
@@ -243,6 +257,14 @@
           "reference/cli/compile",
           "reference/cli/dev",
           "reference/cli/skill"
+        ]
+      },
+      {
+        "group": "Releases",
+        "public": true,
+        "icon": "tag",
+        "pages": [
+          "changelog"
         ]
       }
     ]
