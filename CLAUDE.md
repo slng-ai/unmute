@@ -45,6 +45,7 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | no color literal outside `internal/style` | `internal/style/style_test.go` |
 | every direct dependency is on the allowlist | `internal/cli/deps_test.go` |
 | no declaration is reachable only from its own definition | `internal/cli/reachability_test.go` (`deadcode -test ./...`) |
+| every declared capability `Field` constant has a row in the table | `internal/target/table_test.go` (`TestEveryFieldConstantHasARow`) |
 | every symbol a template names still exists in Go | `internal/scaffold/template_symbols_test.go` |
 | example READMEs name every transport; every `examples/` link resolves | `internal/generate/examples_test.go` |
 | every emitted task prompt names its finish call and an escape, every finish takes the reserved `unserved_request`, and the owner is told to read it | `internal/generate/task_prompt_test.go`, `internal/ir/validate_test.go` |

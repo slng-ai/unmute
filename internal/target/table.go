@@ -237,6 +237,11 @@ func Default() Table {
 		Fields: map[Field]map[Provider]Capability{
 			FieldListenLocal: field(),
 			FieldSpeakLocal:  field(),
+			// Same answer as its two siblings, and for the same reason:
+			// placement is forwarded, not lowered. A code driver emits the same
+			// service call either way and runs wherever the author runs it, so
+			// there is nothing for a local reason model to be gated on.
+			FieldReasonLocal: field(),
 			FieldSpeakEndpoint: field(
 				deny(LiveKit, "LiveKit has no OpenAI-compatible speak wildcard: its openai plugin TTS carries no language slot (N14), so a custom speak endpoint cannot be catalogued"),
 			),
