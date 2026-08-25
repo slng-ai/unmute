@@ -1,0 +1,401 @@
+---
+title: "Changelog"
+description: "What changed in each release of the Unmute CLI, newest first."
+rss: true
+---
+
+Every release of the Unmute CLI, newest first. Each entry is that release's
+notes as published, and it links to the release on GitHub, where the binaries,
+the checksums and the full commit list live.
+
+An entry describes the release it shipped with, not how Unmute behaves today.
+The guide is the current answer. Where an entry mentions the Context Router, the
+[Context Router page](/optimization/context-router) is the page that explains
+how the router decides which turns to treat as repeatable, and which upstream
+kinds were validated live here.
+
+{/* changelog:entries */}
+
+<Update label="August 2026" description="v0.2.5" tags={["CLI"]}>
+
+Per-site Context Router cache scopes.
+
+Fixes a cache collision where agents sharing one authored agent_id could be
+served each other's cached replies. The router keys its cache on the last
+exchange with no system prompt, so in a multi-agent package a specialist's
+opening turn could get the concierge's cached line.
+
+Highlights:
+- Every prompt site now gets its own cache scope derived from the authored
+  id: "&lt;id>:&lt;agent>", "&lt;id>:task.&lt;name>", "&lt;id>:summary". Authoring is
+  unchanged: still one agent_id per package.
+- LiveKit sets the header per request in an emitted _slng_llm_node, since
+  constructor-level extra_headers would replace per-request values.
+- Pipecat switches scope on task entry and restores the owner's scope on
+  every exit path: finish, next step, transfers, terminal node, and error
+  rollback.
+- New gates: one scope per prompt site on every target, no constructor
+  extra_headers on LiveKit, scope restore on each Pipecat exit path, and
+  the name pattern excludes the scope separator.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.2.5)
+
+</Update>
+
+<Update label="August 2026" description="v0.2.4" tags={["CLI"]}>
+
+A phone call that works, a dev loop that shows the numbers, and a faster LiveKit turn.
+
+Highlights:
+
+Local telephony you can test end to end
+  The (pipecat, sip) inbound route compiled and passed its goldens but could
+  not answer a phone. Six defects, each found by placing a real call against
+  the local SIP plane: no telephony.py for the containers uvicorn CMD, no
+  route telling the bot about a call, telephony-setup.sh emitted without the
+  JSON files it reads, a two-phase startup that created trunk records against
+  a server that was not running, a greeting that waited on an RTVI handshake
+  no phone call fires, and a hangup handler installed on an event the
+  transport does not have. Cold transfer now reads the participant identity
+  off the room instead of passing a sid the platform answers 404 for.
+  salon-concierge ships a pipecat_sip target on the same trunk as its livekit
+  target, so the docs are one command again instead of "copy this other
+  example and edit two files". Three telephony pages merged into one
+  dev/local-telephony page with redirects, and first-phone-call is now
+  inbound-calls to pair with outbound-calls. Two test gates got honest: the
+  live-call banner test no longer reads the real PATH for sox, and the
+  barge-in gate reads its counters under the lock that writes them, so it
+  stops failing a call where the barge-in actually worked.
+
+Metrics, logs, and tool timings in the dev UI
+  Every emitted project now carries dev_metrics.py and prints one framed JSON
+  line per turn to stdout. No collector, no exporter, nothing over the
+  network. internal/devmetrics owns the lines shape and is the only decoder.
+  The producers stay inert unless UNMUTE_DEV_METRICS is set, and the artifact
+  is byte-identical with the switch on and off. The switch now also reaches
+  the containers that run an agent, which is why the LiveKit half shipped
+  wired correctly and never switched on.
+  The dev page gained a logs view fed by server-sent events, and the listener
+  now binds before the target starts, so a failed container build is visible
+  instead of invisible on exactly the runs whose output you need. Output
+  produced before the browser loads is replayed on connect, and Last-EventID
+  is honoured so a reconnect resumes rather than repeats.
+  Each agent turn carries its own timing line: end to end, time to first byte
+  per service, and how long the reply took to stream. Every tool the turn
+  called gets its own row above the reply it delayed, which is where it
+  happened in the timeline. Handoffs are no longer reported as tools: a
+  LiveKit delegate that does not return until its whole flow finishes was
+  reporting as a single 51-second tool call. An unreported value renders as a
+  dash and never as 0.00.
+  The transcript shows one row per spoken turn instead of one per recognizer
+  fragment, which was nine rows for one sentence on gradium/stt:default. The
+  mic control states which of three things is true, M toggles it, and holding
+  SPACE talks, so barge-in can be tested deliberately. New docs page under
+  Develop and test explains where the time goes in a voice turn, with field
+  meanings read from pipecat 1.7.0 and livekit-agents 1.6.10 themselves.
+
+Coval as a first-class tracing integration
+  tracing: provider: coval compiles to a project that sends Covals canonical
+  spans on both code targets, with no correlation code written by the package
+  author. Both of Covals correlation routes are used: a call Coval placed
+  exports against the simulation ID on the call, and any other call is
+  registered as a Coval conversation when it ends and exports against the
+  conversation ID that comes back. That second route is what puts a local
+  unmute dev run in Covals Trace Search. Spans are held, capped, and flushed
+  once an ID arrives, so nothing before correlation is lost.
+  The two targets reach the span tree differently, because the frameworks
+  differ. Pipecat already nests its spans the way Coval wants, so they are
+  renamed in flight. LiveKits shape cannot be fixed by renaming, since a
+  spans parent is fixed when it starts, so the LiveKit module leaves
+  LiveKits own OpenTelemetry off and builds Covals tree from session
+  events, using only numbers LiveKit measured itself. Each llm span carries
+  the prompt that round actually ran on, under the same attribute names on
+  both targets. A number that was never measured is left off rather than sent
+  as zero.
+
+LiveKit turn latency, measured across three calls per setting
+  A session of live latency work on salon-concierge, with every claim taken
+  from three calls rather than one, because two calls on an identical build
+  differed by 1.1s of mean silence.
+  - The transcriber, not any endpointing number, was buying a two-second
+    penalty per turn: a turn whose transcription_delay reached 1.0s got the
+    2.5s max_delay instead of the 0.58s floor. deepgram/nova:3 finalises in
+    0.159s mean against gradiums 0.999s, with the same words in every
+    transcript.
+  - endpointing_delay now sets the silence window it always claimed to. On
+    LiveKit it renders as the prewarmed Silero VADs min_silence_duration
+    instead of an endpointing min_delay that could never fire before the VAD
+    reported end of speech, so every authored value under 0.55s used to be
+    silently inert. Under 250ms is now a compile error, not a first-call
+    crash. Unset stays byte-identical and no golden moved.
+  - Warm TTS standby stays, with the claim corrected: it is worth about 40ms
+    of caller-visible time, not the 610ms first reported, plus a real floor
+    improvement from 221ms to 58ms on the best segment. The earlier number
+    was the websocket handshake, which was already off the callers path.
+  - Control hops came out of the turn. Verification asks for a phone number
+    only, booking is one task instead of a three-step group, and finish calls
+    in a scripted booking drop from 7 to 2. Tool state moved from SQLite to
+    memory, so get_current_date went from 245ms to 7.7us. llm ttfb over ten
+    samples: 1.212s to 0.895s. Authored prompt text is down 61%.
+  - A delegated task no longer answers its parents in-flight call. LiveKit
+    injects the still-running delegate call and a placeholder result into the
+    context the task generates from, so the caller heard an apology for a
+    failure that had not happened. The strip keys on the SDKs own
+    __lk_running_placeholder__ marker. Scripted bookings went from eleven or
+    twelve agent turns to seven.
+  - announce: is a new optional scalar on a webhook or local tool file: one
+    fixed sentence the agent speaks as the tool starts. The wait is not the
+    tool, which returns in 1 to 14ms here, it is the second LLM round trip
+    and the TTS after it. Works on both code drivers, including tools listed
+    on a Pipecat task, which a wrong capability claim had refused.
+  - docs-site gained a top-level Optimization group and the skill gained
+    references/latency.md, both carrying the seven settings that looked
+    promising and were not, with reasons, so nobody repeats that day.
+
+The SLNG Context Router, fully integrated
+  provider: slng on the think role puts the Context Router in front of your
+  own reasoning model. A repeated turn is answered from cache; a miss goes to
+  the upstream you name, so you keep your model, your provider, and the bill
+  for turns that reach it. Authoring is agent_id, upstream, and
+  params.world_part_override for the regional base URL, over five upstream
+  spellings across openai, openai-compat, azure, vertex and bedrock.
+  On LiveKit it lowers to extra_headers and extra_body on openai.LLM; on
+  Pipecat it merges through OpenAILLMService.Settings.extra. No subclass
+  ships on either. A router-bound system prompt keeps its &#123;&#123;placeholders}}
+  and the values ride alongside in template_variables, so a personalised
+  prompt can still be a cache hit.
+  salon-concierge is now the one place the binding is demonstrated, and it
+  runs in slng_pure_proxy, which keeps every cache write so the cache still
+  warms while nothing is replayed. That is load-bearing rather than belt and
+  braces: the cache key is the (assistant speech, user speech) pair with no
+  system prompt, so two agents in one package can share an entry, and a live
+  call had one agent served anothers line.
+
+Also in this release:
+  - A locked-down step can hand the caller back instead of refusing. Every
+    task prompt now ends with the compilers own escape, and every generated
+    finish takes a reserved optional unserved_request that the owning agent
+    is told to read.
+  - A receiving agent gets its handoffs back after the opening turn. The loop
+    guard used LiveKits IGNORE_ON_ENTER, whose filter leaks into everything
+    the opening reply starts, so one call offered the booking specialist a
+    single tool for ten turns.
+  - The pipecat delegate history snapshot is a deep copy, so a history entry
+    that is not a plain dict survives the snapshot and restore round trip.
+  - The (pipecat, carrier-websocket, *) routes stop teaching a Pipecat Cloud
+    deploy they have no manifest for, and carry the self-hosted section they
+    were missing.
+  - Firecrawl MCP is fully out of both salon examples, gradium STT is in the
+    catalog, and the examples are down to five: four structural packages plus
+    salon-concierge, which keeps the only shipped telephony route.
+  - The SLNG marks are replaced with the Unmute brand.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.2.4)
+
+</Update>
+
+<Update label="August 2026" description="v0.2.3" tags={["CLI"]}>
+
+Fix for local dev and docs update.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.2.3)
+
+</Update>
+
+<Update label="August 2026" description="v0.2.2" tags={["CLI"]}>
+
+Hardened orchestration, production-ready examples, and regional deployments.
+
+Highlights:
+- Hardens task orchestration across LiveKit and Pipecat, including shared task results, response handling, and session isolation.
+- Strengthens telephony and cold transfers with validated phone routes, call-scoped environment variables, idle-resume handling, and safer local cleanup.
+- Makes Pipecat startup and observability safer with ordered workers, process-safe Langfuse and MCP tracing, and clearer default logging.
+- Adds the full salon concierge example with browser and telephony flows, booking tools, runtime date handling, and release smoke gates.
+- Adds a regional speech infrastructure example and deployment guidance for choosing provider regions.
+- Fixes scaffold environment keys and dotenv loading.
+- Makes the public docs easier to navigate and aligns task, tool, onboarding, and installed-skill guidance.
+
+Included pull requests: #92 to #96 and #98 to #119.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.2.2)
+
+</Update>
+
+<Update label="August 2026" description="v0.2.1" tags={["CLI"]}>
+
+Upgraded runtimes, verified examples, and clearer docs.
+
+Highlights:
+- Upgrades and pins LiveKit Agents 1.6.10 and pipecat-ai 1.7.0, while removing deprecated run modes.
+- Restructures the public documentation into a clearer user journey and corrects CLI, deployment, telephony, secrets, variables, and schema guidance.
+- Makes the CLI easier to use from an agent folder, defaults new packages to LiveKit, and improves phone-route setup guidance.
+- Completes a fresh live sweep of every supported example across browser, outbound, inbound, SIP, Twilio, tasks, handoffs, and transfers.
+- Fixes task-context restoration, repeated delegation, LiveKit handoff loops, outbound call-start variables, LiveKit SIP dispatch authorization, and Pipecat Twilio cold-transfer shutdown.
+- Makes the outbound reminder self-contained and removes the unverified Pipecat Daily transfer example.
+
+Included pull requests: #84, #85, #86, #90, and #91.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.2.1)
+
+</Update>
+
+<Update label="August 2026" description="v0.2.0" tags={["CLI"]}>
+
+Unmute 0.2.0 makes the first agent run reliable, adds coding-agent
+support, and opens Windows installation.
+
+**Highlights**
+
+- Update through Homebrew on macOS or install through Scoop on Windows.
+- Install the bundled coding-agent skill with `unmute skill install`.
+- LiveKit and Pipecat examples now complete real provider-backed
+conversations.
+- Agent handoffs are more reliable.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.2.0)
+
+</Update>
+
+<Update label="August 2026" description="v0.1.2" tags={["CLI"]}>
+
+`brew install slng-ai/tap/unmute` works.
+
+v0.1.1 published every archive but never pushed the cask. The tap upload was
+still switched off, and a skipped step does not fail a run, so the release went
+green with nothing to install. This turns it on.
+
+Nothing in the CLI changed. On an archive or a clone of v0.1.1 you are not
+missing a fix.
+
+`winget install slng.unmute` is still closed and will say so.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.1.2)
+
+</Update>
+
+<Update label="August 2026" description="v0.1.1" tags={["CLI"]}>
+
+The first release of Unmute, a command line compiler for voice agents.
+
+You write a small package of YAML and Markdown that says who the agent is, which
+models it uses, and which tools it can call. Unmute turns that into a real Python
+project for the orchestrator you picked. The project it writes is yours: pinned
+dependencies, a Dockerfile, a runbook, and no dependency on Unmute at runtime.
+Unmute compiles ahead of time and is never in the call path.
+
+**What is in this release**
+
+**Four commands.** `init` scaffolds a package, `validate` checks it against its
+targets and names the file and the line when a field is wrong, `compile` writes
+one project per target under `build/`, and `dev` compiles, runs the agent locally
+and lets you talk to it in the browser. Add `--console` and you talk over the
+terminal mic and speaker with no Docker in the way. `validate` prints one status
+line per target, and every refusal names the fix.
+
+**Two code targets, one agent.** The same package compiles for Pipecat and for
+LiveKit. Nothing in `agent.yaml` mentions either one. Where a runtime cannot run
+a model as defined, `targets.yaml` overrides that single entry by name and the
+agent itself does not change.
+
+**Models named once.** Every listen, think, speak and turn model is declared once
+and referenced by name. Point `brain` at a different model and every agent using
+it follows. A provider catalogue turns each binding into code, so the emitted
+service carries its own import, its dependency pin and its required environment
+variable, and a provider with no slot on a framework fails by name instead of
+quietly emitting the wrong class. Pipecat covers anthropic, assemblyai, cartesia,
+deepgram, deepseek, elevenlabs, google, gradium, groq, inworld, mistral, openai,
+openrouter, qwen, rime, sarvam, slng, soniox and speechmatics. LiveKit covers the
+same ground through its native per vendor plugins, plus aws, azure and gemini. An
+unknown vendor is still legal as a custom OpenAI compatible endpoint, and
+`provider: local` runs the Silero turn detector on your own machine.
+
+**Multi-agent, tasks and task groups.** Any number of agents, with
+`agent_transfer` between them and history you control per transfer (full,
+messages, last n, summary or reset). Delegates run a single task or a task group
+and return where the contract says they return. Task groups can chain, hand over
+or end. A task can name its own model, so one stage can be cheaper or stronger
+than the rest of the conversation. Both drivers lower all of this to native
+primitives: Pipecat Flows on the owning agent, and LiveKit AgentTask sequences
+with typed session state.
+
+**Tools, four ways.** A webhook tool with bearer or API key auth. A local Python
+handler in `tools/<name>.py`, copied in beside the agent. An MCP server as a tool
+source on both code targets, with optional transport and an optional list of the
+server tools to offer. And prebuilt tools from the registry, `end_call` in v1,
+with an optional closing line. `inject` adds values to a tool call that the model
+never sees and cannot overwrite, which is where a user id or a captured slot
+rides along.
+
+**Variables and secrets.** Typed input variables, usable in templates, injected
+into tool calls and captured back out of the conversation. `secrets` lists every
+environment name the author wrote, and the compiler cross checks the secrets your
+local handlers actually read. Every `*_env` field is a name and never a value, so
+a pasted URL or key fails validation instead of landing in the spec. Seed a
+variable for a local session with `unmute dev --var name=value`, the stand in for
+a real dispatch payload.
+
+**Telephony.** Real phone calls on the routes each platform ships: LiveKit SIP
+with a Twilio trunk, the LiveKit Twilio connector, the Pipecat carrier WebSocket
+route, and Pipecat on Daily, either with a Daily number or with your own carrier.
+`unmute dev --telephony` runs the resolved route end to end from your laptop:
+it brings up the routes Compose graph, opens a managed tunnel, points the Twilio
+webhook at it and writes the local LiveKit SIP trunk records, so a first phone
+call takes no manual setup. `--to` places an outbound test call, and
+`--public-url` or `--no-webhook` hand the carrier callback back to you. Local
+runs need no cloud account, only a carrier account and what runs on your machine.
+
+**Human transfer.** Cold and warm handoffs written as `cold:` and `warm:` blocks,
+with their parameters in the shape block. Each route uses the platforms own
+primitive and the generated code never owns the audio path: SIP REFER on LiveKit
+SIP, Dailys room reroute on both Daily number forms, and a carrier markup
+replacement on the Pipecat carrier stream. Warm transfer lands on LiveKit SIP,
+with your briefing and the transcript going to the person who picks up. Where a
+platform has no primitive, `validate` refuses and names the routes that work.
+Generated transfer tools log which control fired, and a cold transfer refuses in
+words when the session is not a phone call.
+
+**Tracing.** A `tracing` block that lowers to each platforms native
+integration, with Langfuse examples on both targets.
+
+**Secrets that match reality.** Compiled output carries a `.env.example` holding
+exactly the variables that agent needs, and the generated project checks them at
+startup instead of failing mid call.
+
+**A runbook per build.** Each `build/<target>/` gets its own `README.md`,
+`Dockerfile`, `compose.dev.yaml`, the platform deploy file, and a
+`compile-report.json` recording what was resolved, which catalogue entry produced
+each service and when that entry was last checked against upstream docs.
+
+**Examples that run.** `examples/` holds packages that each compile for both
+targets: `salon-support` needs nothing but a browser and two keys,
+`twilio-telephony-hello` places a real phone call, `multi-task`, `task-groups`
+and `subagents` cover staged conversations, `mcp-example` wires an MCP server,
+and three transfer examples cover the three mechanisms.
+
+**Getting it**
+
+One static binary for darwin, linux and windows, on amd64 and arm64.
+
+```sh
+brew install slng-ai/tap/unmute              # macOS
+winget install slng.unmute                   # Windows
+go install github.com/slng-ai/unmute@latest  # anywhere with Go 1.24+
+```
+
+Archives are on the release page, each holding the binary, the LICENSE and the
+README, alongside a signed `checksums.txt` and one SBOM per archive.
+`unmute --version` reports its own commit and build date.
+
+MIT licensed.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.1.1)
+
+</Update>
+
+<Update label="August 2026" description="v0.1.0" tags={["CLI"]}>
+
+One tag push releases unmute
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.1.0)
+
+</Update>

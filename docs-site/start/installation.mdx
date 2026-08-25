@@ -3,6 +3,8 @@ title: "Installation"
 description: "Install Unmute on macOS, Windows, or Linux and check the one Quickstart prerequisite."
 ---
 
+import { unmuteVersion } from '/snippets/unmute-version.mdx';
+
 Unmute is one static binary. Pick your operating system and install it. Normal
 use does not need Go.
 
@@ -48,6 +50,13 @@ use does not need Go.
     ```
   </Tab>
 </Tabs>
+
+## Which version this site describes
+
+This site describes Unmute **{unmuteVersion}**. Compare it with what
+`unmute --version` prints. If your binary is older, upgrade before you follow a
+page here, because a field or a flag on the page may not exist in your build.
+The [changelog](/changelog) says what changed in each release.
 
 ## What you need to run an agent
 

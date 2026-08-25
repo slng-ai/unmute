@@ -11,6 +11,17 @@ import (
 
 const siteRoot = "../../docs-site"
 
+// snippetsDir holds reusable fragments, not pages. Mintlify never renders a
+// file under it as a standalone page, so the two walks below skip it: demanding
+// a navigation entry for a snippet would fail for the wrong reason, and a
+// snippet has no frontmatter to check.
+const snippetsDir = "snippets"
+
+// skipSnippets is the WalkDir clause both page walks share.
+func skipSnippets(path string, entry fs.DirEntry) bool {
+	return entry.IsDir() && entry.Name() == snippetsDir && filepath.Dir(path) == siteRoot
+}
+
 type navigation struct {
 	Groups []group `json:"groups"`
 }
@@ -42,8 +53,14 @@ func TestNavigationMatchesPages(t *testing.T) {
 	}
 
 	err = filepath.WalkDir(siteRoot, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || filepath.Ext(path) != ".mdx" {
+		if err != nil {
 			return err
+		}
+		if skipSnippets(path, entry) {
+			return fs.SkipDir
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".mdx" {
+			return nil
 		}
 		rel, err := filepath.Rel(siteRoot, path)
 		if err != nil {
@@ -93,8 +110,14 @@ func collectPages(t *testing.T, current group, listed map[string]int) {
 func TestPagesHaveCleanStructure(t *testing.T) {
 	titles := map[string]string{}
 	err := filepath.WalkDir(siteRoot, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || filepath.Ext(path) != ".mdx" {
+		if err != nil {
 			return err
+		}
+		if skipSnippets(path, entry) {
+			return fs.SkipDir
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".mdx" {
+			return nil
 		}
 		raw, err := os.ReadFile(path)
 		if err != nil {

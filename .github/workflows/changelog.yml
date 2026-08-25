@@ -1,0 +1,70 @@
+# The docs changelog writes itself. A maintainer pushes a v* tag, release.yml
+# builds and publishes the GitHub Release, and this run turns that release into
+# an entry on docs-site/changelog.mdx and moves the version marker the site
+# shows. Nobody types a changelog.
+#
+# Why this triggers on `release: published` rather than being a job appended to
+# release.yml, for two independent reasons:
+#   1. it also fires for a release edited by hand, so correcting release notes
+#      and re-publishing updates the page too;
+#   2. a docs failure cannot fail the binary release.
+#
+# Three facts a maintainer needs before changing this file:
+#
+#   The `docs:` subject is load bearing. .goreleaser.yaml excludes `docs:` from
+#   its generated notes, so this run's own commit stays out of the next
+#   release's changelog. Rename the prefix and every release afterwards carries
+#   a line about its own changelog commit.
+#
+#   The push is the deploy. The Mintlify GitHub App is connected to this
+#   repository and builds docs-site/ from main, so there is nothing to call
+#   afterwards and no Mintlify secret to hold. GITHUB_TOKEN deliberately does
+#   not start further Actions runs, which is what stops this from looping; the
+#   App's own webhook is separate from that and still sees the push.
+#
+#   Committing to main is a choice, not a constraint. main is unprotected today.
+#   If a pre-release branch is adopted later, the only change needed is the
+#   branch this job checks out and pushes to, on the two lines marked below.
+name: Changelog
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write # commit the rendered entry back to the branch
+
+jobs:
+  changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The branch, not the tag. A release event otherwise checks out the
+          # tagged commit, and a commit there would reach no branch at all.
+          # Change this line and the push below together.
+          ref: main
+
+      - name: Render the release into the changelog
+        env:
+          # gh is preinstalled on the runner and reads the release through it.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: python3 scripts/render_changelog.py "$TAG"
+
+      - name: Commit and push
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs-site/changelog.mdx docs-site/snippets/unmute-version.mdx
+          # A re-run of a release already on the page renders nothing, so there
+          # is nothing staged. That is the expected path, not a failure: failed
+          # releases get re-run in this repository.
+          if git diff --cached --quiet; then
+            echo "$TAG is already in the docs; nothing to commit"
+            exit 0
+          fi
+          git commit -m "docs: add $TAG to the changelog"
+          git push origin HEAD:main # change with the ref above
