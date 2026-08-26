@@ -228,10 +228,10 @@ want different treatment. `mode: keyword` is the one with a structural
 consequence: it uses BM25, needs no embedding service, no credential and no
 network call, and the emitted image installs no embeddings package. `min_score`
 needs care, and needs `mode: meaning` to do anything useful: these are similarity
-scores, not probabilities, measured 0.21 to 0.62 on the example corpus, so a value
-near 1 returns nothing, and on `hybrid` the unscored keyword results pass through
-any cutoff. See [Knowledge bases](/build/tools/knowledge) for the measured cost of
-each cutoff. `top_k` times `chunk_size` is roughly what reaches
+scores, not probabilities, and in practice they land well below 1, so a value near
+1 returns nothing, and on `hybrid` the unscored keyword results pass through any
+cutoff. See [Knowledge bases](/build/tools/knowledge) for how to set it.
+`top_k` times `chunk_size` is roughly what reaches
 the model on every lookup, and the compiler warns above about 1500 tokens.
 
 A tool reaches a base by name, with a

@@ -189,9 +189,8 @@ Four things to expect at run time:
   it. Every worker process reads the whole corpus, so the cost is per process
   rather than per deployment.
 - **Bake the index into the image and that cost disappears.** Without it each
-  process embeds the corpus itself: measured, a 200-page corpus is 1670 passages,
-  17 embedding requests and 9.2 seconds, and a local run used 15 processes. Baked,
-  startup is a disk read. Measured on this example: **92 ms against 1831 ms**.
+  process embeds the corpus itself, once per process, so a larger corpus and more
+  workers both cost more startup time. Baked, startup is a disk read instead.
 
   ```sh
   docker build --build-arg KNOWLEDGE_BAKE=1{{range .Knowledge.Credentials}} \

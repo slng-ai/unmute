@@ -157,7 +157,7 @@ Four things to expect at run time:
 - **Bake the index into the image to make that import cheap.** Without it every
   cold container embeds the corpus before it can accept a session, and image
   warm-up is already the thing that decides how quickly a scale-up starts serving.
-  Measured on this example: **114 ms against 1831 ms**.
+  Baked, that import is a disk read instead.
 
   ```sh
   docker build --build-arg KNOWLEDGE_BAKE=1{{range .Knowledge.Credentials}} \

@@ -2184,8 +2184,8 @@ func knowledgeCutoffWarning(agent *Agent) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"knowledge base sets min_score above %g, which measurement shows starts dropping real answers: %s. "+
-			"These are similarity scores, not probabilities: on the example corpus they ran 0.21 to 0.62, "+
+		"knowledge base sets min_score above %g, which starts dropping real answers: %s. "+
+			"These are similarity scores, not probabilities: in practice they land well below 1, "+
 			"so a cutoff near 1 returns nothing at all. Check it against your own documents before shipping",
 		MinScoreWarn, strings.Join(loud, ", "))
 }

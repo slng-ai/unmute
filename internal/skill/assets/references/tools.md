@@ -112,8 +112,8 @@ knowledge:
 ```yaml
 # tools/look_up_refund_policy.yaml
 description: >-
-  Look up the salon's refund and complaints policy. Use this before you state
-  any refund, redo, timescale, or goodwill offer, so you quote the policy
+  Look up the company's refund and complaints policy. Use this before you state
+  any refund, replacement, timescale, or goodwill offer, so you quote the policy
   instead of guessing it.
 announce: "Let me check the policy."
 knowledge:
@@ -143,19 +143,16 @@ user's situation matches a column:
 | `keyword` | the words themselves (BM25) | **no** | codes, names, prices, part numbers; or the user cannot send documents to a third party; or they want no per-lookup latency |
 | `hybrid` | both, interleaved | yes | the default, and the right answer when unsure |
 
-Measured recall, five question sets:
-
-| `mode` | rare tokens | ordinary | paraphrase | 200pp exact | 200pp described |
-|---|---|---|---|---|---|
-| `meaning` | 13/15 | 10/10 | 8/10 | 1/8 | 0/8 |
-| `keyword` | 15/15 | 10/10 | 6/10 | 8/8 | 3/8 |
-| `hybrid` | 14/15 | 10/10 | 8/10 | 8/8 | 1/8 |
+`meaning` wins paraphrase, which is the only thing it is for. `keyword` wins exact
+terms, and holds up better as a corpus grows. `hybrid` takes both, which is why it
+is the default.
 
 **`keyword` is the one to remember.** It needs no embedding service, no credential
-in `secrets:`, makes no network call, and runs in about 1 ms. If the user is
-nervous about sending documents to OpenAI, this is the answer. It produces no
-scores, so `min_score` is refused with it. Do not sell it on image size: that is
-now 166 MB against 178 MB, because no mode installs a vector store any more.
+in `secrets:`, and makes no network call, so a lookup is local memory access rather
+than a round trip. If the user is nervous about sending documents to a third party,
+this is the answer. It produces no scores, so `min_score` is refused with it. Do
+not sell it on image size: the difference is small, because no mode installs a
+vector store.
 
 ### Tell the user to bake the index into the image
 
@@ -167,9 +164,8 @@ docker build --build-arg KNOWLEDGE_BAKE=1 \
   --secret id=OPENAI_API_KEY,env=OPENAI_API_KEY .
 ```
 
-Measured: startup 1831 ms without, 92 ms with, same answers. Use the credential the
-chosen embedding service needs, and the generated `README.md` prints the exact
-command. Both flags are required, and the credential must be a `--secret` rather
+Startup becomes a disk read, with the same answers. Use the credential the chosen
+embedding service needs, and the generated `README.md` prints the exact command. Both flags are required, and the credential must be a `--secret` rather
 than a `--build-arg` so it never lands in a layer.
 
 Mention it whenever a package declares `knowledge:` with a mode that embeds. It does
@@ -180,7 +176,7 @@ still needs the credential in `secrets:`.
 ### When to set the retrieval fields
 
 **Leave them alone unless the user's documents give you a reason.** The defaults
-are measured: 22 of 22 recall at 3, about 200 tokens of retrieved text per lookup.
+suit prose, and send about 200 tokens of retrieved text per lookup.
 
 Set them when the shape of the document calls for it:
 
@@ -190,26 +186,18 @@ Set them when the shape of the document calls for it:
 | Lists: prices, opening hours, specifications | `chunk_size: 220`, `chunk_overlap: 40` |
 | A caller will quote a long passage back | wider `chunk_size`, and `top_k: 5` |
 
-The list case is not hypothetical. At the default 90 tokens the salon's price
-list split mid-run and "how much is a cut and finish" ranked an opening-hours
-passage above the price.
+The list case is the one that bites. At the default 90 tokens a table of prices
+splits mid row, so a service name lands in one passage and its price in the next,
+and a question about the price ranks something else above it.
 
 **`top_k` times `chunk_size` is what reaches the model on every lookup**, during
 a phone call. Above about 1500 tokens the compiler warns. Do not raise both.
 
 **Do not set `min_score` unless the user asks for it, and push back if they name
-a high value.** These are similarity scores, not probabilities: measured 0.21 to
-0.62 on the example corpus, so `0.9` reads like "high confidence" and in fact
-returns nothing. Measured cost per cutoff on `mode: meaning`, 18 answerable
-questions and 5 off-topic ones:
-
-| `min_score` | Real answers kept | Off-topic questions silenced |
-|---|---|---|
-| none | 17/18 | 0/5 |
-| `0.20` | 17/18 | 4/5 |
-| `0.25` | 17/18 | 5/5 |
-| `0.40` | 12/18 | 5/5 |
-| `0.90` | 0/18 | 5/5 |
+a high value.** These are similarity scores, not probabilities: in practice they
+land well below 1, so `0.9` reads like "high confidence" and in fact returns
+nothing. The gap between a genuine answer and an off-topic question is far smaller
+than the 0 to 1 range suggests.
 
 **It only works on `mode: meaning`.** On `hybrid` the keyword half returns
 unscored passages that survive every cutoff, so a cutoff there removes real
@@ -224,8 +212,10 @@ check it before shipping. Above `0.25` the compiler warns.
 | `huggingface` | `HF_TOKEN` |
 | `bedrock` | the AWS credential chain, so nothing to declare |
 
-Use `openai` unless the user asks for something else. It is the one verified by
-measurement. `bedrock` declares no variable in `secrets:`, because it
+Use `openai` unless the user asks for something else. `embed:` is per base, so two
+bases in one package can use different services, and the emitted project installs a
+client only for the services actually named. `huggingface` is the hosted Inference
+API, not a local model. `bedrock` declares no variable in `secrets:`, because it
 authenticates through the AWS credential chain.
 
 ### What to write, and what not to
@@ -238,10 +228,10 @@ authenticates through the AWS credential chain.
 - **Give each agent only the bases it should see.** An agent gets a base by
   being given its tool, so a refunds tool on the concierge means the concierge
   can quote refund policy. That is the whole access model.
-- **Do not add a mode, a chunk size, a result count or a relevance threshold.**
-  None exists. Every lookup searches the same way, returns at most 3 passages,
-  and filters nothing by score, because measurement showed a genuine hit scored
-  0.697 and a completely off-topic question scored 0.718.
+- **Do not set `mode`, `chunk_size`, `chunk_overlap`, `top_k` or `min_score`
+  without a reason from the user's own documents.** All five exist, and all five
+  default to something sensible. Reach for them when the shape of the document
+  calls for it, per the two sections above, not by habit.
 - **Do not put `input:` or `output:` on the tool.** Refused, with the line number.
 
 ### Two things to tell the user
