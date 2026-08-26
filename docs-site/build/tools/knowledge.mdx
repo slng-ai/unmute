@@ -353,6 +353,13 @@ stray image is not an error.
 nothing in a running agent, or in a deployed one, until you compile and deploy
 again.
 
+A base that no tool searches is a warning at compile, not an error, because it is
+read and indexed at every start and never queried. A base where no document yields
+any text stops the deployment, the same as a missing credential. A lookup that
+fails mid-call does **not** end the call: the agent is told the lookup is
+unavailable and says so, and the reason goes to the process log rather than into
+the model's context, because a model handed a provider error can read it aloud.
+
 Indexing happens before the agent takes calls, so a caller never waits for it. It
 runs once per worker process, so every worker indexes the whole corpus at start:
 more workers means more startup work, with the same content in each. That is what
@@ -369,71 +376,6 @@ Nothing is filtered by score unless you set `min_score`, because a score that lo
 low can still be the right answer. The tool tells the model in words that the
 results may not answer the question, so it says it does not know rather than
 offering the closest thing it found.
-
-## Every message you can provoke
-
-**Compile time.** These stop the build.
-
-```text
-livekit: tool "look_up_policy" names knowledge base "policy" which is not
-  declared in knowledge: (declared: policies, pricing)
-```
-
-```text
-livekit: knowledge base "policies": documents folder "knowledge/policies" holds no
-  file of a supported type (looked for .txt, .md, .pdf)
-```
-
-```text
-livekit: knowledge base "pricing" has unknown embed "cohere"
-  (supported: bedrock, gemini, huggingface, openai)
-```
-
-```text
-livekit: knowledge base "pricing" uses embed "openai", which needs
-  OPENAI_API_KEY in secrets:
-```
-
-```text
-livekit: knowledge base "hr": name must be 3 to 64 characters of [a-z0-9_]
-```
-
-```text
-livekit: knowledge base "pricing": chunk_overlap 240 is larger than chunk_size 220,
-  which the splitter refuses: overlap is how much two neighbouring passages share,
-  so it has to fit inside one
-```
-
-```text
-livekit: knowledge base "pricing": chunk_size must be at least 1 token, got 0
-livekit: knowledge base "pricing": top_k must be at least 1, got 0: a lookup that
-  returns nothing has no reason to exist
-```
-
-A base declared and used by no tool is a **warning**, and the build succeeds. It
-is worth saying, because it is read and indexed at every start and never queried.
-
-**Startup.** These happen when the agent runs, because they need a PDF parser the
-compiler does not have.
-
-Some documents unreadable, at least one readable: a warning, and the agent starts.
-
-```text
-warning: knowledge "policies": skipping scanned-appendix.pdf, no text layer
-knowledge "policies": 1 of 2 documents indexed
-```
-
-Nothing readable: the process exits and the deployment never reaches ready, the
-same as a missing credential.
-
-```text
-knowledge "policies": no document yielded any text (scanned-policy.pdf).
-  A PDF with no text layer needs OCR before it can be searched.
-```
-
-A lookup that fails mid-call does **not** end the call. The agent is told the
-lookup is unavailable and says so; the reason goes to the process log, never into
-the model's context, because a model handed a provider error can read it aloud.
 
 ## The compile report
 
