@@ -165,6 +165,42 @@ answers from what it knows, says plainly when it cannot check something, and
 hands off for booking or complaint work. For a remote tool over MCP, see
 [MCP servers](../../docs-site/build/tools/mcp.mdx).
 
+## Two knowledge bases
+
+The salon has paperwork, and the agents quote it instead of guessing. Two folders
+under `knowledge/`, each a separate in-memory index:
+
+| Base | Folder | The tool | Which agent holds it |
+|---|---|---|---|
+| `refunds` | `knowledge/refunds/` | `look_up_refund_policy` | `complaint_specialist` |
+| `services` | `knowledge/services/` | `look_up_salon_info` | `concierge` |
+
+**An agent reaches a knowledge base by being given its tool, and that is the whole
+access model.** The concierge can quote a price and cannot quote refund policy;
+the complaint specialist is the other way round. Move a tool onto another agent
+and that agent can quote that document, so tool attachment is the thing to get
+right.
+
+Both documents are fictional, and both PDFs are committed, so this works with no
+setup beyond `OPENAI_API_KEY`.
+
+Three things worth knowing before you change them:
+
+- **Content is fixed until the next compile.** Each folder is read, split and
+  embedded once when the agent starts, and held in memory. Editing a PDF changes
+  nothing until you compile and deploy again.
+- **The documents ride in the image.** `unmute compile` copies them into
+  `build/<target>/knowledge/`, byte for byte, because a managed platform offers
+  no mounted storage to read them from.
+- **A scanned PDF fails at startup, not at compile.** Deciding whether a PDF
+  yields text needs a parser the compiler does not have. A document with no text
+  layer is named and skipped, and a base where nothing yields text stops the
+  deployment. If a PDF is a photo of a page, run it through OCR first.
+
+Ask the concierge a price and the complaint specialist a timescale. Then ask each
+one the other's question: neither should answer from a document it was not given,
+and neither should invent one.
+
 ## Local data
 
 All eight local tools share one in-process store: dicts of customers,
@@ -192,7 +228,7 @@ Common values:
 
 | Name | Purpose |
 |---|---|
-| `OPENAI_API_KEY` | reasoning model |
+| `OPENAI_API_KEY` | reasoning model, and the knowledge bases' embeddings at startup |
 | `SLNG_API_KEY` | speech and transcription models |
 | `COVAL_API_KEY` | Coval trace ingest |
 

@@ -138,6 +138,16 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		Carrier:    pkg.Connections[tgt.Connection].Carrier,
 	}
 	data.Pins = jsonText(tgt.Pins)
+	// Read so it survives the rewrite. The console offers no editor for it: the
+	// folder is a path on disk the console cannot check and the author already
+	// knows. Carrying it is not optional though, because maintain rewrites
+	// agent.yaml from this struct and a section absent here is a section deleted.
+	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.Knowledge)) {
+		base := pkg.Agent.Knowledge[name]
+		data.Knowledge = append(data.Knowledge, scaffold.KnowledgeBase{
+			Name: name, Documents: base.Documents, Embed: base.Embed,
+		})
+	}
 	if def, ok := effectiveModelDef(pkg, tgt, "listen"); ok {
 		data.Listen = scaffoldBinding(def)
 	}
@@ -196,6 +206,8 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 			value.MCPTransport, value.MCPTools = tool.MCP.Transport, tool.MCP.Tools
 		case tool.Builtin != nil:
 			value.Builtin, value.Instructions = tool.Builtin.ID, tool.Builtin.Instructions
+		case tool.Knowledge != nil:
+			value.KnowledgeBase = tool.Knowledge.Base
 		}
 		for agentName, definition := range pkg.Agent.Agents {
 			if slices.Contains(definition.Tools, name) {

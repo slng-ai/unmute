@@ -1172,7 +1172,7 @@ func TestV42ExecutionPickerDerivesFromTable(t *testing.T) {
 	// Available: mcp on LiveKit selects, clearing any local handler state.
 	var output bytes.Buffer
 	tool := scaffold.Tool{Name: "book_table", Execution: "local", Handler: "tools/book_table.py"}
-	back, err := chooseToolExecution(newRunner(strings.NewReader("3\n"), &output, true), string(targetcap.LiveKit), &tool)
+	back, err := chooseToolExecution(newRunner(strings.NewReader("3\n"), &output, true), &scaffold.Data{Target: string(targetcap.LiveKit)}, &tool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1187,7 +1187,7 @@ func TestV42ExecutionPickerDerivesFromTable(t *testing.T) {
 func TestV40LocalPythonSelectionScaffoldsHandler(t *testing.T) {
 	tool := scaffold.Tool{Name: "lookup_customer", Execution: "webhook", URLEnv: "LOOKUP_URL", Input: `{"type":"object"}`}
 	var output bytes.Buffer
-	back, err := chooseToolExecution(newRunner(strings.NewReader("2\n"), &output, true), string(targetcap.LiveKit), &tool)
+	back, err := chooseToolExecution(newRunner(strings.NewReader("2\n"), &output, true), &scaffold.Data{Target: string(targetcap.LiveKit)}, &tool)
 	if err != nil {
 		t.Fatal(err)
 	}

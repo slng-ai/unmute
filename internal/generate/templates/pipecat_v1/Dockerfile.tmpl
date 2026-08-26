@@ -37,7 +37,24 @@ FROM dailyco/pipecat-base:0.1.27-py3.12
 # put a distribution named after the project beside the real pipecat package it
 # depends on.
 COPY pyproject.toml ./
-RUN uv pip install -r pyproject.toml
+# --link-mode=copy is not a preference, it is load-bearing.
+#
+# uv installs by hardlinking out of its own cache, so every installed file has
+# st_nlink=2. NLTK ships a path-hardening module that refuses to open any
+# multiply-linked file, on the grounds that a hardlink can point at an inode
+# outside the root (CWE-59), and llama-index-core reads its bundled stopword list
+# through NLTK. The result is that indexing dies at startup, in every worker
+# process, with a security error that names neither uv nor hardlinking as the cause:
+#
+#     PermissionError: Security Violation [pathsec.open]: refusing multiply-linked
+#     file '.../llama_index/core/_static/nltk_cache/corpora/stopwords/english'
+#     (st_nlink=2)
+#
+# A plain open() on that file succeeds, which is what makes it confusing: only
+# NLTK's hardened opener refuses it. Copying instead of linking makes st_nlink=1 and
+# the check passes. Verified 2026-08-26: without this the emitted image builds and
+# then fails to index; with it, both bases index.
+RUN uv pip install --link-mode=copy -r pyproject.toml
 
 # Bake NLTK's sentence tokenizer into the image. Pipecat's TTS splits text into
 # sentences with it, and without it here the container downloads it on first
@@ -65,6 +82,57 @@ RUN mkdir -p "$NLTK_DATA" && \
 COPY bot.py ./
 {{if .Tracing}}COPY tracing.py ./
 {{end}}{{if .LocalTools}}COPY tools/ ./tools/
+{{end}}{{if .Knowledge.Knowledge}}# knowledge.py and the documents it reads. Both lines are needed, and for the
+# same reason tools/ is: bot.py imports knowledge at module scope, and
+# knowledge.py reads knowledge/<base>/ from the working directory. Leave either
+# out and the container starts, raises, and the deployment never reaches ready
+# while its own log looks healthy.
+#
+# The documents ride in the image because a managed platform offers no mounted
+# storage to read them from.
+COPY knowledge.py ./
+COPY knowledge/ ./knowledge/
+
+# Bake the knowledge index into the image, so that no worker process embeds the
+# corpus at startup.
+#
+# Measured 2026-08-26 on one process: a 200-page corpus is 1670 passages, 17
+# embedding requests and 9.2 seconds. That cost is per process, not per
+# deployment, and a local LiveKit dev run used 15 processes, so a deployment paid
+# it 15 times over and paid it again on every scale-up. A burst of scale-ups is
+# also the most likely way to meet an embedding rate limit, and a failure in
+# prewarm means the worker never reports ready.
+#
+# The credential is mounted as a build secret, so it is available to this step and
+# is not written into any layer. If it is not mounted the bake is SKIPPED, not
+# failed: the runtime falls back to embedding at startup, which is correct and was
+# the only behaviour before this existed. The emitted module logs a warning when it
+# takes that path, so the cost is never silent.
+#
+# A caller's question is still embedded per lookup, so the run time still needs the
+# same credential. This removes the corpus cost, not the query cost.
+# Off by default, and the default is not silent. The value is referenced inside the
+# RUN below so it lands in the layer's cache key: a secret does not, so a
+# conditional that only tested for the mounted file would reuse whichever layer was
+# built first, forever, whichever way that build went.
+ARG KNOWLEDGE_BAKE=0
+RUN {{range .Knowledge.Credentials}}--mount=type=secret,id={{.}} {{end}}\
+    set -e; \
+    if [ "$KNOWLEDGE_BAKE" != "1" ]; then \
+      echo "unmute: KNOWLEDGE_BAKE is not 1, so the index is not baked into this image."; \
+      echo "unmute: every worker process will embed the corpus at startup instead. To bake it in:"; \
+      echo "unmute:   docker build --build-arg KNOWLEDGE_BAKE=1{{range .Knowledge.Credentials}} --secret id={{.}},env={{.}}{{end}} ."; \
+      exit 0; \
+    fi; \
+{{- range .Knowledge.Credentials}}
+    if [ ! -f /run/secrets/{{.}} ]; then \
+      echo "unmute: KNOWLEDGE_BAKE=1 needs {{.}} as a build secret:"; \
+      echo "unmute:   docker build --build-arg KNOWLEDGE_BAKE=1 --secret id={{.}},env={{.}} ."; \
+      exit 1; \
+    fi; \
+    export {{.}}="$(cat /run/secrets/{{.}})"; \
+{{- end}}
+    python -c "import logging; logging.basicConfig(level=logging.INFO, format='unmute: %(message)s'); import knowledge; knowledge.bake()"
 {{end}}
 # No CMD: the base image imports bot.py and calls its bot() itself. A local
 # browser run overrides the command instead (see compose.dev.yaml).

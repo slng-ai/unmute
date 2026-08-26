@@ -6,8 +6,10 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -25,6 +27,7 @@ func Load(dir string) (*Package, error) {
 		Connections: make(map[string]Connection),
 		Markdown:    make(map[string]string),
 		Handlers:    make(map[string]string),
+		Documents:   make(map[string][]byte),
 		files:       make(map[string][]byte),
 	}
 	if err := pkg.readYAML("agent.yaml", &pkg.Agent); err != nil {
@@ -95,7 +98,51 @@ func Load(dir string) (*Package, error) {
 		}
 		pkg.Markdown[path] = string(content)
 	}
+	if err := pkg.readKnowledge(); err != nil {
+		return nil, err
+	}
 	return pkg, nil
+}
+
+// KnowledgeExtensions are the document types a knowledge base reads. The emitted
+// project reads them with LlamaIndex's SimpleDirectoryReader, which handles all
+// three; anything else in the folder is not an input, so it is neither read nor
+// copied into the artifact.
+var KnowledgeExtensions = []string{".txt", ".md", ".pdf"}
+
+// readKnowledge reads every supported document in every declared knowledge base
+// into Documents, keyed by its artifact path.
+//
+// A folder that does not exist, or that holds no supported file, is left empty
+// here rather than reported here: ir.Validate owns that message (FR-009), and it
+// names the folder and the base. Load stopping first would put an authoring rule
+// in the wrong package and produce a worse message.
+func (p *Package) readKnowledge() error {
+	root, err := os.OpenRoot(p.Root)
+	if err != nil {
+		return fmt.Errorf("package path: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	for name, base := range p.Agent.Knowledge {
+		if base.Documents == "" {
+			continue // required-field message belongs to validation
+		}
+		entries, err := fs.ReadDir(root.FS(), filepath.ToSlash(base.Documents))
+		if err != nil {
+			continue // missing or unreadable folder: FR-009, reported by validation
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !slices.Contains(KnowledgeExtensions, strings.ToLower(filepath.Ext(entry.Name()))) {
+				continue
+			}
+			content, err := readWithin(p.Root, filepath.Join(base.Documents, entry.Name()))
+			if err != nil {
+				return fmt.Errorf("knowledge base %q: %w", name, err)
+			}
+			p.Documents[path.Join("knowledge", name, entry.Name())] = content
+		}
+	}
+	return nil
 }
 
 func (p *Package) readConnections() error {

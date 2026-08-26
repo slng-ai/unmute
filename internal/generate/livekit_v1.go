@@ -277,6 +277,7 @@ type livekitTool struct {
 	Args             []livekitArg
 	Local            bool   // execution: local — call the copied handler module
 	Builtin          string // execution: builtin — prebuilt registry id (renders into tools=, not a method)
+	KnowledgeBase    string // execution: knowledge — the base this tool searches
 	Instructions     string // builtin end_call closing message → end_instructions
 	EndsConversation bool   // effect: ends_conversation — shutdown after the call
 	Announce         string // one fixed sentence spoken as the tool starts; "" = silent
@@ -372,6 +373,9 @@ type livekitData struct {
 	Slng        slngHelpers
 	Deps        []string
 	RequiredEnv []string
+	// Knowledge is the shared knowledge-module data: the declared bases and the
+	// deduplicated embedding imports across them.
+	Knowledge knowledgeData
 	// AuthorEnv is the half of RequiredEnv the author supplies. Everything else
 	// — the route's own values, which `unmute dev` sets locally and a platform
 	// or operator sets at deploy time — is absent from every author-facing file
@@ -478,6 +482,8 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolOutput:            true, // tool returns response.json()
 	targetcap.FieldToolLocal:             true, // handler copied + wrapped
 	targetcap.FieldToolBuiltin:           true, // prebuilt end_call → beta EndCallTool
+	targetcap.FieldToolKnowledge:         true, // knowledge.py + one @function_tool per lookup
+	targetcap.FieldToolKnowledgeTask:     true, // the same method on an AgentTask's tools surface
 	targetcap.FieldToolMCP:               true, // mcp.MCPToolset mounts on the tools surface (N40)
 	targetcap.FieldToolMCPTask:           true, // the same mount on an AgentTask's tools surface
 	targetcap.FieldToolAuth:              true, // _bearer Authorization header off token_env
@@ -615,6 +621,8 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 	if data.Tracing {
 		outputs = append(outputs, struct{ tmpl, path string }{tracingTemplate(data.TracingProvider), "tracing.py"})
 	}
+	// Only when the package declares a knowledge base: the module imports
+	// llama-index, which is only in .Deps for the same reason.
 	connector := data.Telephony != nil && data.Telephony.Transport == "connector"
 	planeFiles := false
 	if data.Telephony != nil {
@@ -676,6 +684,16 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 			return nil, err
 		}
 		files = append(files, emitted...)
+	}
+	// The knowledge module is the shared one, rendered from templates/knowledge/
+	// rather than from this driver's tree: it has no framework in it, so a second
+	// copy would be a second owner of one surface.
+	if len(data.Knowledge.Knowledge) > 0 {
+		content, err := renderKnowledgeModule(data.Knowledge)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, File{Path: "knowledge.py", Content: content})
 	}
 	// Both clouds build from this directory, and LiveKit caps the uploaded
 	// context at 1 GB, so local run leftovers are excluded too.

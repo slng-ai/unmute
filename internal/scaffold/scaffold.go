@@ -130,14 +130,18 @@ type Data struct {
 	Reason            Binding
 	Speak             Binding
 	Variables         []Variable
-	Tools             []Tool
-	Agents            []Agent
-	Handoffs          []Handoff
-	Tasks             []Task
-	TaskGroups        []TaskGroup
-	HumanTransfers    []HumanTransfer
-	Fallbacks         []ModelFallback
-	Capacity          Capacity
+	// Knowledge is the package's knowledge: section. The console does not edit
+	// it, but it has to carry it: maintain rewrites agent.yaml from this struct,
+	// so a field absent here is a field silently deleted from the author's file.
+	Knowledge      []KnowledgeBase
+	Tools          []Tool
+	Agents         []Agent
+	Handoffs       []Handoff
+	Tasks          []Task
+	TaskGroups     []TaskGroup
+	HumanTransfers []HumanTransfer
+	Fallbacks      []ModelFallback
+	Capacity       Capacity
 }
 
 // Binding is one concrete role choice collected by the wizard. Params is an
@@ -178,10 +182,21 @@ type Tool struct {
 	// edit them (SCHEMA N40).
 	MCPTransport string
 	MCPTools     []string
-	Input        string // JSON Schema object
-	Output       string // optional JSON Schema object
-	AttachTo     []string
-	AttachTasks  []string
+	// KnowledgeBase names the knowledge: entry a knowledge tool searches.
+	KnowledgeBase string
+	Input         string // JSON Schema object
+	Output        string // optional JSON Schema object
+	AttachTo      []string
+	AttachTasks   []string
+}
+
+// KnowledgeBase is one knowledge: entry: a folder of documents and the service
+// that embeds them. Carried through maintenance, not edited by the console: the
+// folder is a path on disk the console cannot verify and the author already knows.
+type KnowledgeBase struct {
+	Name      string
+	Documents string
+	Embed     string
 }
 
 // DefaultTools are the prebuilt tools every new agent starts with: the

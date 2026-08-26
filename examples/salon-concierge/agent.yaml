@@ -32,6 +32,26 @@ secrets:
 destinations:
   manager_line: MANAGER_PHONE_NUMBER
 
+# Two folders of documents the agents can search, so an answer about a price or a
+# refund comes from the salon's own paperwork instead of from what the model
+# happens to remember. Each folder is read, split and embedded once when the agent
+# starts, and held in memory, so content is fixed until the next compile.
+#
+# They are separate on purpose. An agent gets a knowledge base by being given its
+# tool, so the concierge can quote prices and cannot quote refund policy, and the
+# complaint specialist is the other way round.
+knowledge:
+  refunds:
+    documents: knowledge/refunds
+  services:
+    documents: knowledge/services
+    # A price list, not prose. At the default 90 tokens the list splits mid-run,
+    # so "how much is a cut and finish" ranked an opening-hours passage above the
+    # price: the price line ended up as the tail of a chunk about something else.
+    # A wider window keeps each service with its own price and duration.
+    chunk_size: 220
+    chunk_overlap: 40
+
 models:
   think:
     reasoning:
@@ -72,6 +92,7 @@ agents:
     voice: voice
     tools:
       - verify_customer
+      - look_up_salon_info
       - to_booking
       - to_complaints
       - to_chat
@@ -92,6 +113,7 @@ agents:
     voice: voice
     tools:
       - record_complaint
+      - look_up_refund_policy
       - to_manager
       - to_booking
       - to_chat
@@ -213,6 +235,8 @@ controls:
 
 tools:
   - find_or_create_customer
+  - look_up_refund_policy
+  - look_up_salon_info
   - list_bookings
   - get_current_date
   - check_availability

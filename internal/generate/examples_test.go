@@ -169,10 +169,15 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		}
 	}
 
-	// Every tool here is a local Python handler, so nothing remote has to be
-	// reachable before the greeting. The MCP path is exercised by
+	// Every action tool here is a local Python handler, so nothing remote has to
+	// be reachable before the greeting. The MCP path is exercised by
 	// examples/mcp-example instead; this example used to carry a Firecrawl
 	// web_search tool and no longer does.
+	//
+	// The two knowledge tools are the exception, and they are not remote in the
+	// same sense: they read documents compiled into the image. They do reach an
+	// embedding service at startup, which is why the example declares
+	// OPENAI_API_KEY, and never during a call.
 	for name, agent := range resolved.Agents {
 		if slices.Contains(agent.Tools, "web_search") {
 			t.Errorf("agent %q still lists the removed web_search tool: %v", name, agent.Tools)
@@ -184,8 +189,50 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		}
 	}
 	for name, tool := range resolved.Tools {
+		if tool.Execution == ir.ToolKnowledge {
+			continue // checked below, by base and by which agent holds it
+		}
 		if tool.Execution != ir.ToolLocal || tool.Handler != "tools/salon.py" {
 			t.Errorf("tool %q = %#v, want shared local Python handler", name, tool)
+		}
+	}
+	// The two knowledge bases, and the isolation that is the point of having two.
+	//
+	// An agent gets a knowledge base by being given its tool, so this is the whole
+	// access model: the concierge can quote prices and cannot quote refund policy,
+	// and the complaint specialist is the other way round. A tool added to the
+	// wrong agent here is a real leak, not a style slip, so it is a test.
+	for base, wantFolder := range map[string]string{
+		"refunds":  "knowledge/refunds",
+		"services": "knowledge/services",
+	} {
+		declared, ok := resolved.Knowledge[base]
+		if !ok {
+			t.Errorf("knowledge base %q is not declared", base)
+			continue
+		}
+		if declared.Documents != wantFolder {
+			t.Errorf("knowledge base %q documents = %q, want %q", base, declared.Documents, wantFolder)
+		}
+		if declared.Embed != "openai" {
+			t.Errorf("knowledge base %q embed = %q, want the resolved default", base, declared.Embed)
+		}
+		if len(declared.Files) == 0 {
+			t.Errorf("knowledge base %q carries no documents, so the compiler read nothing", base)
+		}
+	}
+	for tool, wantAgent := range map[string]string{
+		"look_up_refund_policy": "complaint_specialist",
+		"look_up_salon_info":    "concierge",
+	} {
+		for name, agent := range resolved.Agents {
+			holds := slices.Contains(agent.Tools, tool)
+			if holds && name != wantAgent {
+				t.Errorf("agent %q holds %q, which only %q should: an agent given the tool can quote the document", name, tool, wantAgent)
+			}
+			if !holds && name == wantAgent {
+				t.Errorf("agent %q does not hold %q", name, tool)
+			}
 		}
 	}
 	// chat_with_me answers from the model and routes onward, so everything it

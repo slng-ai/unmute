@@ -87,13 +87,14 @@ exactly one execution block that says where the action runs.
 Ask:
 
 ```text
-In Unmute, what are the four ways a tool can run?
+In Unmute, what are the five ways a tool can run?
 ```
 
-A correct answer names all four: an HTTP `webhook:`, a `local:` Python handler
-in the package, a remote `mcp:` server, and `builtin:`, whose registry holds
-exactly one id, `end_call`. A very good answer also mentions the two blocks
-that exist in the schema but no target emits.
+A correct answer names all five: an HTTP `webhook:`, a `local:` Python handler
+in the package, a remote `mcp:` server, `builtin:`, whose registry holds exactly
+one id, `end_call`, and `knowledge:`, a search over a folder of your own
+documents. A very good answer also mentions the two blocks that exist in the
+schema but no target emits.
 
 This question is the check because it cannot be guessed. It is a closed list
 out of this project's own schema, so a model that has not read the skill either

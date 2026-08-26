@@ -157,3 +157,60 @@ func TestSmokeFixturesGenerateAndKeepTheirPythonSurface(t *testing.T) {
 		}
 	}
 }
+
+// TestKnowledgeSmokeKeepsItsPythonSurface is the same guard for the knowledge
+// smoke, and it exists for the same reason: three commits once broke `make smoke`
+// silently because the scripts named emitted symbols and nothing pinned them.
+//
+// The knowledge smoke reaches further into the module than the others do, because
+// the parts worth proving are private: _exact and _merge are where the measured
+// 15/15 lives, and an assertion on look_up alone with a mock embedder would not
+// touch either. So every name it uses is pinned here, in the default suite, where
+// a rename fails in seconds instead of waiting for someone to run `make smoke`.
+func TestKnowledgeSmokeKeepsItsPythonSurface(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agent.Knowledge) == 0 {
+		t.Fatal("the salon example declares no knowledge base, so the knowledge smoke is asserting nothing")
+	}
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		t.Run(string(provider), func(t *testing.T) {
+			artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
+			if err != nil {
+				t.Fatalf("the knowledge smoke fixture no longer generates: %v", err)
+			}
+			emitted := artifactFile(t, artifact, "knowledge.py")
+			for _, symbol := range []string{
+				"def build_indexes(", "async def look_up(", "def _merge(", "def _index(",
+				"_INDEXES", "SETTINGS", "_embed_refunds(", "_embed_services(",
+				"BM25Retriever.from_defaults(",
+			} {
+				if !strings.Contains(emitted, symbol) {
+					t.Errorf("knowledge.py is missing %q, so the smoke script that names it cannot run", symbol)
+				}
+			}
+			// The smoke reads collection.count() and collection.get(), so the
+			// collection has to still be the second half of the tuple.
+			if !strings.Contains(emitted, "_INDEXES: dict[str, dict]") {
+				t.Error("the index map shape changed; the smoke reads entry[\"vector\"] and entry[\"keyword\"]")
+			}
+			// And the documents have to be in the artifact, or the smoke indexes
+			// nothing and passes for the wrong reason.
+			var documents int
+			for _, file := range artifact.Files {
+				if strings.HasPrefix(file.Path, "knowledge/") {
+					documents++
+				}
+			}
+			if documents != 2 {
+				t.Errorf("artifact carries %d knowledge documents, want the example's 2", documents)
+			}
+		})
+	}
+}

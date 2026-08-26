@@ -49,6 +49,7 @@ import aiohttp
 {{end}}{{end}}{{if .NeedsHTTPX}}
 import httpx
 {{end}}{{if .Slng.RouterClass}}from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+{{end}}{{if .Knowledge.Knowledge}}import knowledge
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}{{if .SIP}}from livekit.api import AccessToken{{if .SIP.ColdDestination}}, LiveKitAPI{{end}}, VideoGrants
 {{if .SIP.ColdDestination}}from livekit.protocol.models import ParticipantInfo
@@ -119,7 +120,21 @@ def _configure_logging() -> None:
 
 
 MAIN_NAME = {{pyq .MainName}}
-{{if .CloudWebsocket}}# What every session needs, whatever channel it arrives on. What a *phone call*
+{{if .Knowledge.Knowledge}}
+# Read, split and embed every knowledge base at module import, which is once per
+# container rather than once per session.
+#
+# Pipecat Cloud imports this module and then calls bot() for each session, and it
+# keeps a warm container for about five minutes after one ends, so this cost is
+# amortised across every session that lands on it. It is deliberately not inside
+# bot(): there it would run per session and a caller would wait for it.
+#
+# A failure here raises during import, so the container never reaches ready and
+# the platform refuses the start. That is the intent: an agent that cannot read
+# its documents should not take calls.
+_configure_logging()
+knowledge.build_indexes()
+{{end}}{{if .CloudWebsocket}}# What every session needs, whatever channel it arrives on. What a *phone call*
 # adds is CALL_REQUIRED_ENV below, checked separately, so this package still runs
 # in the browser with nothing but model keys (V10/B3).
 {{else}}# Provider credentials only. The telephony route's environment (Redis, carrier
@@ -926,6 +941,9 @@ async def {{.MethodName}}(params: FunctionCallParams{{range .Args}}, {{.Name}}: 
         )
     )
 {{end}}    await params.result_callback({"ended": True})
+{{else if .KnowledgeBase}}    await params.result_callback(
+        await knowledge.look_up({{pyq .KnowledgeBase}}, query)
+    )
 {{else if .Local}}    result = tools.{{.Name}}.{{.Name}}({{.CallKwargs}})
     if inspect.isawaitable(result):
         result = await result
@@ -1255,6 +1273,9 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             )
         )
 {{end}}        await params.result_callback({"ended": True})
+{{else if .KnowledgeBase}}        await params.result_callback(
+            await knowledge.look_up({{pyq .KnowledgeBase}}, query)
+        )
 {{else if .Local}}{{if .NeedsState}}        state = self.state
 {{end}}{{if .Needed}}        refusal = _refusal({{pyq .Name}}, state, {{.NeededLiteral}})
         if refusal:
@@ -1522,7 +1543,8 @@ async def _flow_tool_{{.Name}}(args, flow_manager{{if .NeedsState}}, state=None{
     # a handler (pipecat.flows.manager, pipecat-ai 1.7.0). Queued after the
     # refusal check, so a refused call stays silent.
     await flow_manager.worker.queue_frame(TTSSpeakFrame({{pyq .Announce}}))
-{{end}}{{if .Local}}    result = tools.{{.Name}}.{{.Name}}(**dict(args){{range .Inject}}, {{.Key}}={{.Expr}}{{end}})
+{{end}}{{if .KnowledgeBase}}    return await knowledge.look_up({{pyq .KnowledgeBase}}, dict(args)["query"])
+{{else if .Local}}    result = tools.{{.Name}}.{{.Name}}(**dict(args){{range .Inject}}, {{.Key}}={{.Expr}}{{end}})
     if inspect.isawaitable(result):
         result = await result
     return result

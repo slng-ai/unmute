@@ -85,6 +85,8 @@ const (
 	FieldToolClient            Field = "tools.execution.client"
 	FieldToolProviderHosted    Field = "tools.execution.provider_hosted"
 	FieldToolBuiltin           Field = "tools.execution.builtin"
+	FieldToolKnowledge         Field = "tools.execution.knowledge"
+	FieldToolKnowledgeTask     Field = "tasks.tools.execution.knowledge"
 	FieldToolAuth              Field = "tools.auth"
 	FieldToolInterruption      Field = "tools.interruption.non_default"
 	FieldToolAnnounce          Field = "tools.announce"
@@ -342,6 +344,21 @@ func Default() Table {
 			FieldToolBuiltin: field(
 			// LiveKit + Pipecat host the end_call prebuilt; the rest still lack
 			// a lowering.
+			),
+			// Core on both since 2026-08-25, when the Pipecat lowering landed.
+			// It started denied on Pipecat on purpose: constitution 5.0.0 retired
+			// the vapi and deepgram targets for the inverse, validating and then
+			// failing at compile with "driver is not implemented", which taught an
+			// author nothing until the last step.
+			// internal/generate/knowledge_agreement_test.go asserts Core on both
+			// and asserts both drivers emit the same contract, so this row and the
+			// two lowerings cannot drift apart.
+			FieldToolKnowledge: field(),
+			// Scope, not kind, and the same seam FieldToolMCPTask records: a
+			// Pipecat task tool is a flows handler holding a FlowManager, not a
+			// decorated function holding FunctionCallParams.
+			FieldToolKnowledgeTask: field(
+				deny(Pipecat, "the Pipecat driver cannot scope a knowledge tool to a task: list it on the agent instead"),
 			),
 			FieldToolAuth: field(
 			// The code drivers own the request, so they can send the header;

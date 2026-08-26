@@ -26,3 +26,31 @@ dev = ["ruff==0.15.7", "ty"]
 
 [tool.uv]
 package = false
+{{- if .Knowledge.AnyKeyword}}
+
+# llama-index-retrievers-bm25 declares pystemmer<3, and PyStemmer 2.2.0.3 publishes
+# no linux aarch64 wheel (nor musllinux aarch64, nor win_arm64). This image is
+# always Linux, so the host OS is irrelevant and the architecture decides
+# everything: on arm64 the resolver falls back to the source distribution, neither
+# base image carries a compiler, and the build fails outright while passing in
+# x86_64 CI.
+#
+#     fatal error: stdlib.h: No such file or directory
+#     error: Command '['gcc', ...]' returned non-zero exit status 1
+#
+# PyStemmer 3.1.0 publishes wheels for linux x86_64 and aarch64, musllinux on both
+# arches, macOS on both, and Windows x86/amd64/arm64, cp38 through cp314. It is
+# strictly better covered than anything the declared pin allows, which is why this
+# is one override rather than a per-platform special case. It drops i686 and PyPy,
+# and no base image here is either.
+#
+# Adding a toolchain instead was measured at roughly 400 MB and a slower build, for
+# a compiler the image never needs again.
+#
+# Verified 2026-08-26 in both base images and on both architectures, through the
+# retriever rather than a bare import: BM25 retrieval works on 3.1.0, and so does
+# stemming, which is the only reason the dependency exists at all (a query for
+# "closing" still matches a passage that says "closed"). Remove this when the
+# retriever relaxes its own pin.
+override-dependencies = ["pystemmer>=3.1.0,<4"]
+{{- end}}

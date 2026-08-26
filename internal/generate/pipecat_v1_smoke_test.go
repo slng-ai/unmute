@@ -2633,8 +2633,36 @@ func runPipecatSmokeScript(t *testing.T, example string, mutate func(*ir.Target)
 	runGeneratedPipecatSmokeScript(t, artifact, script)
 }
 
+// knowledgeSmokeStub is prepended to every emitted-project smoke script.
+//
+// A Pipecat bot.py builds its knowledge indexes at module import, which is right
+// for the platform — the readiness probe absorbs the cost so no caller waits for
+// it — and wrong for a test that only wants to import the module and look at it.
+// Importing would reach a real embedding service, and in a smoke environment that
+// is a 401.
+//
+// So the stub replaces each `_embed_<base>` with MockEmbedding *before* anything
+// imports bot. `knowledge` lands in sys.modules already patched, and bot's own
+// `import knowledge` picks up the patched module. Reading, text-layer detection,
+// splitting, indexing and both halves of the search still run for real; only the
+// hosted call is stubbed.
+//
+// Silent when the package declares no knowledge base, which is most of them.
+const knowledgeSmokeStub = `
+try:
+    import knowledge as _knowledge
+
+    from llama_index.core.embeddings import MockEmbedding
+
+    for _name in [n for n in vars(_knowledge) if n.startswith("_embed_")]:
+        setattr(_knowledge, _name, lambda: MockEmbedding(embed_dim=8))
+except ImportError:
+    pass  # no knowledge base in this package
+`
+
 func runGeneratedPipecatSmokeScript(t *testing.T, artifact Artifact, script string) {
 	t.Helper()
+	script = knowledgeSmokeStub + script
 	dir := t.TempDir()
 	for _, file := range artifact.Files {
 		out := filepath.Join(dir, file.Path)

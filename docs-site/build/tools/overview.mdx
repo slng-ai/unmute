@@ -49,7 +49,7 @@ their names look like extra tool inputs in the description.
 The one block near the bottom is the execution: it says how the tool runs. Every
 tool file has exactly one.
 
-## The six execution blocks
+## The seven execution blocks
 
 | Block | The tool is | Where it is taught |
 |---|---|---|
@@ -59,6 +59,7 @@ tool file has exactly one.
 | `builtin:` | a tool the runtime already has, selected by id | [Prebuilt tools](/build/tools/prebuilt) |
 | `client:` | a tool the caller's own application fulfils | gated, see below |
 | `provider_hosted:` | a tool the model provider runs itself | gated, see below |
+| `knowledge:` | a search over a folder of your own documents | [Knowledge bases](/build/tools/knowledge) |
 
 Exactly one, and the compiler holds you to it. Two blocks:
 
@@ -71,7 +72,7 @@ None at all, where the message is also the list:
 
 ```text wrap
 tools/check_availability.yaml: no execution block: add one of webhook, local, mcp, builtin,
-  client, provider_hosted
+  client, provider_hosted, knowledge
 ```
 
 ### The two gated blocks
@@ -109,6 +110,7 @@ Both blocks have no fields, but YAML still needs an explicit body: write
 | `builtin` | `id` | yes | closed registry id; `end_call` is the only id today |
 | `builtin` | `instructions` | no | instruction applied by the prebuilt as it runs |
 | `client`, `provider_hosted` | none | — | explicit empty block only |
+| `knowledge` | `base` | yes | the name of a knowledge base declared in `knowledge:` in `agent.yaml` |
 
 ## Which fields the block allows
 
@@ -117,16 +119,20 @@ The contract fields are shared, with one exception that matters:
 | Field | Required | Where it is legal |
 |---|---|---|
 | `description` | yes, except on `builtin:` and `mcp:` | optional on `builtin:`, illegal on `mcp:`, legal everywhere else |
-| `input` | yes on tool contracts | illegal on `builtin:` and `mcp:`, required everywhere else |
-| `output` | no | illegal on `builtin:` and `mcp:`; author-side only elsewhere, not sent to the model, not included in the compile report, and not enforced at run time |
+| `input` | yes on tool contracts | illegal on `builtin:`, `mcp:` and `knowledge:`, required everywhere else |
+| `output` | no | illegal on `builtin:`, `mcp:` and `knowledge:`; author-side only elsewhere, not sent to the model, not included in the compile report, and not enforced at run time |
 | `inject` | no | `webhook:` and `local:` only; values must be scalars |
 | `interruption` | no | everywhere except `mcp:` |
-| `effect` | no | everywhere except `mcp:` |
-| `announce` | no | `webhook:` and `local:` only; a fixed sentence, no `{{variables}}` |
+| `effect` | no | everywhere except `mcp:` and `knowledge:` |
+| `announce` | no | `webhook:`, `local:` and `knowledge:` only; a fixed sentence, no `{{variables}}` |
 
 An `mcp:` file carries none of them, because the server owns each tool's contract.
 A `builtin:` file takes no `input` or `output`. The registry supplies its contract
 and default description, and your `description` is added on top if you write one.
+A `knowledge:` file takes no `input`, `output`, `inject` or `effect` either: the
+tool asks for one string and returns passages, so there is nothing to describe and
+nothing to merge into. It does take `description` and `announce`, and you should
+write both.
 
 ## The three behavior fields
 

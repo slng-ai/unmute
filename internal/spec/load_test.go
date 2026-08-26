@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -222,6 +223,15 @@ func TestLoadToolShape(t *testing.T) {
 		{"mcp with effect", "mcp:\n  url_env: PROBE_MCP_URL\neffect: returns_data\n", "tools/probe.yaml:3: remove `effect`"},
 		{"mcp with inject", "mcp:\n  url_env: PROBE_MCP_URL\ninject:\n  caller: \"1\"\n", "tools/probe.yaml:3: remove `inject`"},
 		{"mcp with interruption", "mcp:\n  url_env: PROBE_MCP_URL\ninterruption: cancel\n", "tools/probe.yaml:3: remove `interruption`"},
+		// A knowledge tool owns both sides of its contract, so input, output,
+		// inject and effect have nowhere to go. Unlike mcp, description,
+		// announce and interruption stay legal, which the table below proves.
+		{"knowledge with input", head + "\nknowledge:\n  base: refunds\n", "tools/probe.yaml:2: remove `input`"},
+		{"knowledge with output", "description: Probe.\nknowledge:\n  base: refunds\noutput: { type: object }\n", "tools/probe.yaml:4: remove `output`"},
+		{"knowledge with inject", "description: Probe.\nknowledge:\n  base: refunds\ninject:\n  caller: \"1\"\n", "tools/probe.yaml:4: remove `inject`"},
+		{"knowledge with effect", "description: Probe.\nknowledge:\n  base: refunds\neffect: returns_data\n", "tools/probe.yaml:4: remove `effect`"},
+		{"knowledge beside webhook", "description: Probe.\ninput: { type: object }\nwebhook:\n  url_env: PROBE_URL\nknowledge:\n  base: refunds\n", "two execution blocks"},
+		{"empty knowledge block", "description: Probe.\nknowledge:\n", "block is empty"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Load(writeToolPackage(t, tc.body))
@@ -244,6 +254,8 @@ func TestLoadToolShape(t *testing.T) {
 		{"inline builtin block", "description: Probe.\n\nbuiltin: { id: end_call }\n", "builtin"},
 		{"explicit empty client", head + "\nclient: {}\n", "client"},
 		{"mcp", "mcp:\n  url_env: PROBE_MCP_URL\n", "mcp"},
+		{"knowledge", "description: Probe.\nknowledge:\n  base: refunds\n", "knowledge"},
+		{"knowledge with announce", "description: Probe.\nannounce: Let me check.\ninterruption: cancel\nknowledge:\n  base: refunds\n", "knowledge"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pkg, err := Load(writeToolPackage(t, tc.body))
@@ -311,5 +323,67 @@ func TestLoadToolAnnounceRefusedOnMCPFile(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error must contain %q: %v", want, err)
 		}
+	}
+}
+
+// TestLoadKnowledgeDocuments: the compiler reads document bytes and nothing else.
+// A `.png` beside the documents is not an input, so it is neither read nor copied;
+// a `.pdf` survives byte-for-byte, which is the whole point of []byte over string.
+//
+// A missing folder is deliberately NOT an error here. ir.Validate owns that
+// message (FR-009) because it can name the base as well as the folder, and Load
+// stopping first would put an authoring rule in the wrong package.
+func TestLoadKnowledgeDocuments(t *testing.T) {
+	dir := t.TempDir()
+	binary := []byte("%PDF-1.7\n\x00\x01\x02 binary \xff\xfe trailer\n")
+	files := map[string][]byte{
+		"agent.yaml": []byte("version: 1\nentry_agent: intake\n" +
+			"models:\n  think:\n    m: { provider: openai, model: gpt-4o-mini }\n" +
+			"  speak:\n    v: { provider: slng, model: \"slng/deepgram/aura:2-en\", voice: aura-2-thalia-en }\n" +
+			"knowledge:\n  refunds:\n    documents: kb/refunds\n  absent:\n    documents: kb/nowhere\n" +
+			"agents:\n  intake:\n    instructions: instructions.md\n    model: m\n    voice: v\n    tools: []\n" +
+			"channels:\n  web: { kind: realtime_audio }\n"),
+		"instructions.md":        []byte("Be brief.\n"),
+		"targets.yaml":           []byte("targets:\n  livekit:\n    provider: livekit\n    version: \"1.5.2\"\n    sdk_language: python\n"),
+		"kb/refunds/policy.pdf":  binary,
+		"kb/refunds/addendum.md": []byte("# Addendum\n"),
+		"kb/refunds/logo.png":    []byte("not an input"),
+		"kb/refunds/.DS_Store":   []byte("not an input either"),
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pkg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if pkg.Agent.Knowledge["refunds"].Documents != "kb/refunds" {
+		t.Errorf("documents = %q", pkg.Agent.Knowledge["refunds"].Documents)
+	}
+	if got := pkg.Agent.Knowledge["refunds"].Embed; got != "" {
+		t.Errorf("embed = %q, want empty: the default is applied at Build, not Load", got)
+	}
+	want := map[string]bool{
+		"knowledge/refunds/addendum.md": true,
+		"knowledge/refunds/policy.pdf":  true,
+	}
+	for key := range pkg.Documents {
+		if !want[key] {
+			t.Errorf("read %q, which is not a supported document", key)
+		}
+	}
+	for key := range want {
+		if _, ok := pkg.Documents[key]; !ok {
+			t.Errorf("did not read %q", key)
+		}
+	}
+	if got := pkg.Documents["knowledge/refunds/policy.pdf"]; !bytes.Equal(got, binary) {
+		t.Errorf("pdf bytes changed in transit: got %q", got)
 	}
 }

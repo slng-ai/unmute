@@ -33,7 +33,24 @@ FROM dailyco/pipecat-base:0.1.27-py3.12
 # put a distribution named after the project beside the real pipecat package it
 # depends on.
 COPY pyproject.toml ./
-RUN uv pip install -r pyproject.toml
+# --link-mode=copy is not a preference, it is load-bearing.
+#
+# uv installs by hardlinking out of its own cache, so every installed file has
+# st_nlink=2. NLTK ships a path-hardening module that refuses to open any
+# multiply-linked file, on the grounds that a hardlink can point at an inode
+# outside the root (CWE-59), and llama-index-core reads its bundled stopword list
+# through NLTK. The result is that indexing dies at startup, in every worker
+# process, with a security error that names neither uv nor hardlinking as the cause:
+#
+#     PermissionError: Security Violation [pathsec.open]: refusing multiply-linked
+#     file '.../llama_index/core/_static/nltk_cache/corpora/stopwords/english'
+#     (st_nlink=2)
+#
+# A plain open() on that file succeeds, which is what makes it confusing: only
+# NLTK's hardened opener refuses it. Copying instead of linking makes st_nlink=1 and
+# the check passes. Verified 2026-08-26: without this the emitted image builds and
+# then fails to index; with it, both bases index.
+RUN uv pip install --link-mode=copy -r pyproject.toml
 
 # Bake NLTK's sentence tokenizer into the image. Pipecat's TTS splits text into
 # sentences with it, and without it here the container downloads it on first

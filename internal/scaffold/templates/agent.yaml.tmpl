@@ -152,7 +152,15 @@ agents:
 [[end]][[if .EndAfter]]    end_after: [[.EndAfter]]
 [[end]][[end]][[if .MaxDuration]]  max_duration: [[.MaxDuration]]
 [[end]][[if .ThinkingAudio]]  thinking_audio: [[.ThinkingAudio]]
-[[end]][[if .HumanTransfers]]
+[[end]][[if .Knowledge]]
+# Folders of documents the agents can search. Each one is read, split and
+# embedded once when the agent starts, and held in memory, so content is fixed
+# until the next compile. A tool with a `knowledge:` block points at one by name.
+knowledge:
+[[range .Knowledge]]  [[.Name]]:
+    documents: [[.Documents]]
+[[if .Embed]]    embed: [[.Embed]]
+[[end]][[end]][[end]][[if .HumanTransfers]]
 # Who this agent escalates to. A value is the UPPER_SNAKE name of an environment
 # variable holding the number, read at call time: agent.yaml is the portable
 # half of a package, so a phone number does not belong in it.

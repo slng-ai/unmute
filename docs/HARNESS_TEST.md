@@ -129,3 +129,135 @@ Record the result in the package's
 Use only the date/revision, target/case, sanitized trace or session ID, ordered
 action counts, final SQLite counts/status, carrier child-leg or SIP outcome,
 and pass/fail result. Never paste raw traces or caller data.
+
+## Knowledge base retrieval gate
+
+Whether the agent answers from the documents or from the model. A confident wrong
+answer and a confident right answer sound identical on a call, so this gate reads
+the log rather than trusting the voice.
+
+Three things can fail independently, and separating them is the whole point of the
+order below: retrieval can fail, the model can fail to call the tool, or the model
+can call it and ignore the result.
+
+### Step 0: prove retrieval without a call
+
+Do this first, always. It takes seconds and it removes two layers.
+
+```sh
+unmute compile examples/salon-concierge
+python scripts/check_knowledge_retrieval.py examples/salon-concierge/build/livekit \
+  --quiet-index \
+  refunds  "what does reference RC-2026-04 cover"                        "RC-2026-04" \
+  services "what does a cut cost when I book it with a colour service"   "twenty-eight euros" \
+  services "can I split the bill across three cards"                     "two cards" \
+  refunds  "what happens if I asked for something against the stylist advice" "half price"
+```
+
+Every line must say `HIT`. A `MISS` means retrieval itself is wrong and no call
+will tell you more than this did. An `ERROR` means the index never built: read the
+startup log for a missing credential or an unreadable document.
+
+Run it in the built image instead if you want the environment that ships:
+
+```sh
+docker build -t kb examples/salon-concierge/build/livekit
+docker run --rm -e OPENAI_API_KEY="$OPENAI_API_KEY" -v "$PWD/scripts:/s" kb \
+  python /s/check_knowledge_retrieval.py . --quiet-index \
+  refunds "what does reference RC-2026-04 cover" "RC-2026-04"
+```
+
+### Step 0b: check the baked index, if the image carries one
+
+A deployed image should have the index baked in, and the way to be sure is to start
+it with a credential that cannot work. It should still index, because nothing is
+embedded at startup:
+
+```sh
+docker build --build-arg KNOWLEDGE_BAKE=1 \
+  --secret id=OPENAI_API_KEY,env=OPENAI_API_KEY \
+  -t kb examples/salon-concierge/build/livekit
+docker run --rm -e OPENAI_API_KEY=sk-invalid kb \
+  python -c "import logging; logging.basicConfig(level=logging.INFO); \
+             import knowledge; knowledge.build_indexes()"
+```
+
+Expect `loaded from the baked index, nothing embedded` per base. If it raises a 401
+instead, the bake did not happen: check that both the build argument and the secret
+were passed. `unmute dev` does not bake, so a dev run logs a warning saying it is
+embedding at startup, which is correct there.
+
+### Step 1: the live call, one target at a time
+
+```sh
+unmute dev examples/salon-concierge --target livekit --verbose
+```
+
+Before speaking, wait for one line per base. It is the proof that documents were
+compiled in and indexed, and it names the settings actually in force:
+
+```text
+knowledge 'refunds': 12 passages indexed (mode hybrid, chunk_size 90, overlap 20, top_k 3)
+knowledge 'services': 5 passages indexed (mode hybrid, chunk_size 220, overlap 40, top_k 3)
+```
+
+A passage count of 0, or no line at all, means stop: there is nothing to retrieve
+and everything the agent says next is invented.
+
+Then say these, waiting for each answer. Each one is a fact that exists only in
+the documents, so a model cannot produce it from training:
+
+1. “What does reference R C twenty twenty-six oh four cover?” → must say it is the
+   refund and complaints policy.
+2. “If I book a cut together with a colour, what does the cut cost?” → **twenty-eight
+   euros**, not the full cut price.
+3. “Can I split the bill across three cards?” → no, **two** at most.
+4. “I asked for something the stylist advised against, and I signed the card. Do I
+   get a refund?” → no refund, a redo at **half price**.
+5. “Which morning is the quiet studio session?” → **Tuesday**.
+
+Then the negative control, which matters as much as the rest:
+
+6. “Do you fit hair extensions?” → the agent must say it does not have that
+   information. The documents never mention extensions. If it invents a price or a
+   duration here, retrieval is working and grounding is not.
+
+While each answer plays, watch for the pair of lines that says a lookup actually
+ran:
+
+```text
+knowledge 'services': returned 3 result(s) in 215 ms
+```
+
+That line carries a count and a duration and never the caller's words or the
+passages, so it is safe to keep on in any environment.
+
+### Step 2: the same script on Pipecat
+
+```sh
+unmute dev examples/salon-concierge --target pipecat --verbose
+```
+
+Same startup lines, same six questions, same expected answers. The knowledge
+module is one shared file, so a difference between the two targets is a difference
+in how the tool is registered, not in retrieval.
+
+### Reading a failure
+
+| What you see | What it means |
+|---|---|
+| Step 0 says `MISS` | Retrieval is wrong. Fix it there; a call adds nothing. |
+| No `passages indexed` line | Nothing was compiled in, or the index died. Read further up the log. |
+| Answer is right, no `returned N result(s)` line | The model answered from training and never called the tool. Its description is the thing to change, not the retrieval. |
+| `returned N result(s)` present, answer still wrong | The tool was called and the result ignored or misread. A prompt problem. |
+| `error": "lookup unavailable"` in the transcript | The lookup raised. The process log has the real reason; the model is deliberately told nothing it could read aloud. |
+| Negative control answered confidently | Grounding problem, not a retrieval problem. |
+
+### Trying the retrieval modes
+
+`mode` is per base, and the difference is audible on the right question. Set
+`mode: keyword` on `services` in `agent.yaml`, recompile, and ask question 2
+again: it should still land, with no embedding call at all and a lookup under
+2 ms. Then ask a question that shares no words with the document, such as “what
+will it set me back for a trim and a blow dry”, and expect it to do worse than
+`hybrid` did. That contrast is the reason the default is `hybrid`.
