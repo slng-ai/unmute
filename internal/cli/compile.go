@@ -152,6 +152,13 @@ func printContract(out io.Writer, name string, provider ir.Provider, notes gener
 	for _, s := range notes.Sizing {
 		fmt.Fprintf(out, "%s: sizing %s=%s [%s] (%s)\n", name, s.Metric, s.Value, s.Status, s.Basis)
 	}
+	// Driver notes are facts about what the artifact will do that no binding or
+	// sizing line covers: today, what each knowledge base carries (FR-015). The
+	// target name prefixes them like every other line here, because two targets
+	// each print their own and an unprefixed pair would be indistinguishable.
+	for _, note := range notes.Notes {
+		fmt.Fprintf(out, "%s: %s\n", name, note)
+	}
 }
 
 // routerRegion reads the authored router region off a binding's params.

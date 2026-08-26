@@ -104,9 +104,9 @@ can invent an identifier a server assigns. SLNG's `tool_refs` entries require
 `attachment_id`, `tool_id` and `version`, so a name has to become an id before
 the body is accepted.
 
-This includes a curated capability. A builtin such as `end_call` needs nothing
-*created*, and it still has a `tool_id` that has to be filled in. Only an agent
-with no tools at all posts unchanged.
+This includes a curated capability. A `builtin:` tool needs nothing *created*,
+because SLNG already has it, and it still has a `tool_id` that has to be filled
+in. Only an agent with no tools at all posts unchanged.
 
 A package with a `local:` or `webhook:` tool needs more: each tool body created
 first, then its new id filled in.

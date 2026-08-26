@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode"
 
+	packagespec "github.com/slng-ai/unmute/internal/spec"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
@@ -74,8 +75,12 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	global = append(global, validateConfiguredTargets(agent, caps)...)
 	global = append(global, slngOneAgentIDPerPackage(agent)...)
 	global = append(global, slngScopeErrors(agent)...)
+	global = append(global, knowledgeErrors(agent)...)
 	globalWarnings = add(globalWarnings, undeclaredSecretWarning(agent))
 	globalWarnings = add(globalWarnings, unusedConnectionWarning(agent))
+	globalWarnings = add(globalWarnings, unusedKnowledgeWarning(agent))
+	globalWarnings = add(globalWarnings, knowledgeBudgetWarning(agent))
+	globalWarnings = add(globalWarnings, knowledgeCutoffWarning(agent))
 	report := ValidateReport{PerTarget: make([]TargetValidation, 0, len(targets))}
 	failed := 0
 	for _, resolved := range targets {
@@ -387,9 +392,11 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 		// author wrote a real sentence.
 		if tool.Announce != "" {
 			switch tool.Execution {
-			case ToolWebhook, ToolLocal:
+			// A knowledge lookup is a body to speak before, the same as a
+			// webhook call, so FR-029 reuses this field rather than adding one.
+			case ToolWebhook, ToolLocal, ToolKnowledge:
 			default:
-				errors = add(errors, fmt.Sprintf("tool %q announce is legal for webhook and local execution only", name))
+				errors = add(errors, fmt.Sprintf("tool %q announce is legal for webhook, local and knowledge execution only", name))
 			}
 			// Fixed sentence, same rule as the transfer announcement: a
 			// rendered line would need the variable set to be in scope at the
@@ -405,11 +412,33 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 		// An mcp file carries no per-tool contract at all: the server announces
 		// each tool at run time (N40). spec.Load rejects the fields with a line
 		// number, so reaching here means the IR was built in code.
+		// A knowledge tool owns both sides of its contract too, but keeps its
+		// description: unlike an mcp server, nothing else can say what is in the
+		// folder. spec.Load rejects input and output with a line number, so the
+		// arm below covers only an IR built in code.
+		if tool.Execution == ToolKnowledge {
+			if tool.Input != nil || tool.Output != nil {
+				errors = add(errors, fmt.Sprintf("tool %q knowledge execution takes no input or output: the tool owns its own schema", name))
+			}
+			if tool.KnowledgeBase == "" {
+				errors = add(errors, fmt.Sprintf("tool %q base is required for knowledge execution", name))
+			} else if _, ok := agent.Knowledge[tool.KnowledgeBase]; !ok {
+				declared := sortedKeys(agent.Knowledge)
+				if len(declared) == 0 {
+					errors = add(errors, fmt.Sprintf("tool %q names knowledge base %q, and no knowledge: section is declared in agent.yaml", name, tool.KnowledgeBase))
+				} else {
+					errors = add(errors, fmt.Sprintf("tool %q names knowledge base %q which is not declared in knowledge: (declared: %s)",
+						name, tool.KnowledgeBase, strings.Join(declared, ", ")))
+				}
+			}
+		} else if tool.KnowledgeBase != "" {
+			errors = add(errors, fmt.Sprintf("tool %q base is legal for knowledge execution only", name))
+		}
 		if tool.Execution != ToolMCP {
 			if tool.Description == "" {
 				errors = add(errors, fmt.Sprintf("tool %q description is required", name))
 			}
-			if tool.Input["type"] != "object" {
+			if tool.Execution != ToolKnowledge && tool.Input["type"] != "object" {
 				errors = add(errors, fmt.Sprintf("tool %q input must be a JSON Schema object", name))
 			}
 			validateSchemaKeys(fmt.Sprintf("tool %q", name), "input", tool.Input, &schemas)
@@ -490,7 +519,7 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 				seen[selected] = true
 			}
 			validateToolAuth(name, tool.Auth, &errors)
-		case ToolClient, ToolProviderHosted:
+		case ToolKnowledge, ToolClient, ToolProviderHosted:
 			if tool.Handler != "" || tool.URLEnv != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler/url_env does not match execution %q", name, tool.Execution))
 			}
@@ -1717,6 +1746,8 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 			applyCapability(caps, targetcap.FieldToolProviderHosted, provider, row)
 		case ToolBuiltin:
 			applyCapability(caps, targetcap.FieldToolBuiltin, provider, row)
+		case ToolKnowledge:
+			applyCapability(caps, targetcap.FieldToolKnowledge, provider, row)
 		}
 		if tool.Auth != nil {
 			applyCapability(caps, targetcap.FieldToolAuth, provider, row)
@@ -1751,6 +1782,9 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 		for _, ref := range task.Tools {
 			if agent.Tools[ref].Execution == ToolMCP {
 				applyCapability(caps, targetcap.FieldToolMCPTask, provider, row)
+			}
+			if agent.Tools[ref].Execution == ToolKnowledge {
+				applyCapability(caps, targetcap.FieldToolKnowledgeTask, provider, row)
 			}
 			if agent.Tools[ref].Announce != "" {
 				applyCapability(caps, targetcap.FieldToolAnnounceTask, provider, row)
@@ -2002,6 +2036,184 @@ func undeclaredSecretWarning(agent *Agent) string {
 		return ""
 	}
 	return "environment variables referenced but not declared in secrets: " + strings.Join(missing, ", ")
+}
+
+// knowledgeNamePattern is what a knowledge base name may be.
+//
+// Both bounds are ours, and readability is the whole reason for them. The name is
+// a folder under knowledge/, a key in the emitted module's settings, and a word in
+// every report and log line about the base, so one or two characters is too short
+// to identify anything and 512 is not a thing an author meant to type.
+//
+// The lower bound used to be Chroma's: it refused a collection name under three
+// characters, and this pattern inherited the number. That store is gone and the
+// bound stayed, because three is still a sensible floor for a name a human reads.
+var knowledgeNamePattern = regexp.MustCompile(`^[a-z0-9_]{3,64}$`)
+
+// knowledgeErrors holds the compile-time half of the knowledge base rules:
+// FR-009 (the folder), FR-011 (the service), FR-016 (its credential) and the
+// name legality that keeps a runtime InvalidArgumentError from being the first
+// the author hears of it.
+//
+// What is deliberately absent: any check on document content. Deciding whether a
+// PDF yields text needs a parser the compiler does not have, so that is a startup
+// failure instead (FR-010).
+func knowledgeErrors(agent *Agent) []string {
+	var errors []string
+	for _, name := range sortedKeys(agent.Knowledge) {
+		base := agent.Knowledge[name]
+		if !knowledgeNamePattern.MatchString(name) {
+			errors = add(errors, fmt.Sprintf("knowledge base %q: name must be 3 to 64 characters of [a-z0-9_]", name))
+		}
+		switch {
+		case base.Documents == "":
+			errors = add(errors, fmt.Sprintf("knowledge base %q: documents is required: name the folder holding its documents", name))
+		case len(base.Files) == 0:
+			// One message for both "the folder is not there" and "the folder
+			// holds nothing we can read", because the author's next action is
+			// the same either way and the compiler cannot always tell them
+			// apart without another stat.
+			errors = add(errors, fmt.Sprintf("knowledge base %q: documents folder %q holds no file of a supported type (looked for %s)",
+				name, base.Documents, strings.Join(packagespec.KnowledgeExtensions, ", ")))
+		}
+		// The retrieval settings. Each bound is a thing that actually breaks, not a
+		// taste: SentenceSplitter refuses chunk_size <= 0 outright, and refuses an
+		// overlap larger than the size with "Got a larger chunk overlap (25) than
+		// chunk size (20)". Measured against llama-index 2026-08-26.
+		switch {
+		case base.ChunkSize < 1:
+			errors = add(errors, fmt.Sprintf("knowledge base %q: chunk_size must be at least 1 token, got %d", name, base.ChunkSize))
+		case base.ChunkSize > MaxChunkSize:
+			errors = add(errors, fmt.Sprintf("knowledge base %q: chunk_size %d is above the %d token limit: a passage that long is an essay, and %d of them is the model's whole context",
+				name, base.ChunkSize, MaxChunkSize, base.TopK))
+		}
+		if base.ChunkOverlap < 0 {
+			errors = add(errors, fmt.Sprintf("knowledge base %q: chunk_overlap cannot be negative, got %d", name, base.ChunkOverlap))
+		}
+		// Equal is legal; larger is what the splitter refuses.
+		if base.ChunkSize >= 1 && base.ChunkOverlap > base.ChunkSize {
+			errors = add(errors, fmt.Sprintf("knowledge base %q: chunk_overlap %d is larger than chunk_size %d, which the splitter refuses: overlap is how much two neighbouring passages share, so it has to fit inside one",
+				name, base.ChunkOverlap, base.ChunkSize))
+		}
+		// The scores are similarities, not probabilities: measured 0.207 to 0.446 on
+		// the example corpus. So the legal range is 0 to 1 but the *useful* range is
+		// far narrower, which the warning below is for.
+		if base.MinScore < 0 || base.MinScore > 1 {
+			errors = add(errors, fmt.Sprintf("knowledge base %q: min_score must be between 0 and 1, got %g", name, base.MinScore))
+		}
+		switch {
+		case base.TopK < 1:
+			errors = add(errors, fmt.Sprintf("knowledge base %q: top_k must be at least 1, got %d: a lookup that returns nothing has no reason to exist", name, base.TopK))
+		case base.TopK > MaxTopK:
+			errors = add(errors, fmt.Sprintf("knowledge base %q: top_k %d is above the limit of %d", name, base.TopK, MaxTopK))
+		}
+		if !slices.Contains(KnowledgeModes, base.Mode) {
+			legal := make([]string, 0, len(KnowledgeModes))
+			for _, mode := range KnowledgeModes {
+				legal = append(legal, string(mode))
+			}
+			errors = add(errors, fmt.Sprintf("knowledge base %q has unknown mode %q (supported: %s)",
+				name, base.Mode, strings.Join(legal, ", ")))
+		}
+		// A cutoff only filters something if something is scored, and only the
+		// meaning-based half scores. Silently accepting it on a keyword-only base
+		// would let an author believe they had filtered when they had not.
+		if base.MinScore > 0 && !base.Mode.Scores() {
+			errors = add(errors, fmt.Sprintf("knowledge base %q sets min_score with mode %q, which produces no scores to filter: use mode meaning or hybrid, or drop min_score",
+				name, base.Mode))
+		}
+		service, ok := targetcap.LookupEmbeddingService(base.Embed)
+		if !ok {
+			errors = add(errors, fmt.Sprintf("knowledge base %q has unknown embed %q (supported: %s)",
+				name, base.Embed, strings.Join(targetcap.EmbeddingServiceNames(), ", ")))
+			continue
+		}
+		// Named, never carried: the check is that the name is declared, and the
+		// message prints the name, which is not a secret.
+		//
+		// Only when the mode actually embeds. A keyword-only base makes no
+		// embedding call at all, so requiring its credential would refuse a
+		// package that is complete.
+		if base.Mode.Embeds() && service.CredentialEnv != "" && !slices.Contains(agent.Secrets, service.CredentialEnv) {
+			errors = add(errors, fmt.Sprintf("knowledge base %q uses embed %q, which needs %s in secrets:",
+				name, base.Embed, service.CredentialEnv))
+		}
+	}
+	return errors
+}
+
+// knowledgeBudgetWarning reports a knowledge base that sends the model a lot of
+// retrieved text per lookup.
+//
+// A warning, never an error: a large budget is a legitimate choice for a dense
+// reference document. It is worth saying because the cost is invisible in the
+// authoring file — top_k and chunk_size are two small numbers that multiply into
+// the model's context on every single lookup, during a phone call.
+func knowledgeBudgetWarning(agent *Agent) string {
+	var loud []string
+	for _, name := range sortedKeys(agent.Knowledge) {
+		base := agent.Knowledge[name]
+		if budget := base.TopK * base.ChunkSize; budget > TokenBudgetWarn {
+			loud = append(loud, fmt.Sprintf("%s (top_k %d x chunk_size %d = about %d tokens)",
+				name, base.TopK, base.ChunkSize, budget))
+		}
+	}
+	if len(loud) == 0 {
+		return ""
+	}
+	return "knowledge base sends the model a lot of retrieved text per lookup, which costs latency on every call: " + strings.Join(loud, ", ")
+}
+
+// knowledgeCutoffWarning reports a relevance cutoff high enough to start dropping
+// real answers.
+//
+// This warns rather than refusing because the useful band is a property of the
+// author's own corpus. It warns at all because the failure is silent: a cutoff set
+// too high does not error, it just makes the agent say it does not know, on every
+// question, and the score scale is not what most people expect. Measured on the
+// example corpus 2026-08-26, 0.25 costs nothing, 0.30 loses two real answers of
+// eighteen, 0.40 loses four, 0.50 loses seven, and nothing scores above 0.63.
+func knowledgeCutoffWarning(agent *Agent) string {
+	var loud []string
+	for _, name := range sortedKeys(agent.Knowledge) {
+		if score := agent.Knowledge[name].MinScore; score > MinScoreWarn {
+			loud = append(loud, fmt.Sprintf("%s (min_score %g)", name, score))
+		}
+	}
+	if len(loud) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"knowledge base sets min_score above %g, which starts dropping real answers: %s. "+
+			"These are similarity scores, not probabilities: in practice they land well below 1, "+
+			"so a cutoff near 1 returns nothing at all. Check it against your own documents before shipping",
+		MinScoreWarn, strings.Join(loud, ", "))
+}
+
+// unusedKnowledgeWarning reports a declared knowledge base no tool searches. A
+// warning rather than an error, because the package still compiles and runs; but
+// worth saying, because every process start reads and embeds it, which costs
+// startup time and embedding calls for something nothing will ever query.
+func unusedKnowledgeWarning(agent *Agent) string {
+	if len(agent.Knowledge) == 0 {
+		return ""
+	}
+	used := make(map[string]bool, len(agent.Knowledge))
+	for _, tool := range agent.Tools {
+		if tool.Execution == ToolKnowledge {
+			used[tool.KnowledgeBase] = true
+		}
+	}
+	var unused []string
+	for _, name := range sortedKeys(agent.Knowledge) {
+		if !used[name] {
+			unused = append(unused, name)
+		}
+	}
+	if len(unused) == 0 {
+		return ""
+	}
+	return "knowledge base declared but no tool uses it, so it is embedded at every start and never read: " + strings.Join(unused, ", ")
 }
 
 func validateConversation(conversation *Conversation, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {

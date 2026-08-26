@@ -62,6 +62,7 @@ capacity:
 | `variables` | map | no | — | lower snake case names | per-call values |
 | `secrets` | list of strings | no | — | UPPER_SNAKE names | environment values the generated project reads |
 | `destinations` | map of strings | when `human_transfer` is used | — | lower snake case names to UPPER_SNAKE env names | phone destinations controls may use |
+| `knowledge` | map | no | — | 3 to 64 characters of `[a-z0-9_]` | folders of documents a tool can search |
 | `agents` | map | yes | — | one or more lower snake case names | agent prompts, models, and callable names |
 | `tasks` | map | no | — | lower snake case names | delegated steps |
 | `task_groups` | map | no | — | lower snake case names | ordered task sequences |
@@ -195,6 +196,50 @@ agent.yaml:60: destination "billing_line" is a literal. agent.yaml is
 ```
 
 The model never sees a number, and cannot dial one that is not listed here.
+
+## `knowledge`
+
+```yaml
+knowledge:
+  refunds:
+    documents: knowledge/refunds
+  services:
+    documents: knowledge/services
+    embed: openai
+```
+
+Folders of your own documents an agent can search, so it quotes them instead of
+guessing. Each folder is read, split and embedded once when the agent starts, and
+held in memory, so content is fixed until the next compile.
+
+| Field | Required | Default | Meaning |
+|---|---|---|---|
+| map key | yes | — | 3 to 64 characters of `[a-z0-9_]`. It is also the folder name inside the build and the search collection's name |
+| `documents` | yes | — | folder path relative to the package root, holding `.txt`, `.md` or `.pdf` files |
+| `embed` | no | `openai` | embedding service |
+| `mode` | no | `hybrid` | `meaning` (vector), `keyword` (BM25), or `hybrid` |
+| `chunk_size` | no | `90` | passage size in tokens, 1 to 2048 |
+| `chunk_overlap` | no | `20` | tokens two neighbouring passages share; 0 or more, never larger than `chunk_size` |
+| `top_k` | no | `3` | passages a lookup returns, 1 to 20 |
+| `min_score` | no | none | drop results scoring below this, 0 to 1 |
+
+The five retrieval fields are per base, because a price list and a prose policy
+want different treatment. `mode: keyword` is the one with a structural
+consequence: it uses BM25, needs no embedding service, no credential and no
+network call, and the emitted image installs no embeddings package. `min_score`
+needs care, and needs `mode: meaning` to do anything useful: these are similarity
+scores, not probabilities, and in practice they land well below 1, so a value near
+1 returns nothing, and on `hybrid` the unscored keyword results pass through any
+cutoff. See [Knowledge bases](/build/tools/knowledge) for how to set it.
+`top_k` times `chunk_size` is roughly what reaches
+the model on every lookup, and the compiler warns above about 1500 tokens.
+
+A tool reaches a base by name, with a
+[`knowledge:` block](/build/tools/knowledge), and an agent reaches it by being
+given that tool. There is no retrieval mode and no relevance threshold.
+
+Full behaviour, every message, and what a lookup gives the model:
+[Knowledge bases](/build/tools/knowledge).
 
 ## `agents`
 
@@ -380,12 +425,12 @@ exactly one execution block says how it runs.
 | Field | What it is |
 |---|---|
 | `description` | what the model reads |
-| `input` | JSON Schema of the parameters the model fills; required except on `builtin` and `mcp`, where it is illegal |
-| `output` | optional author-side JSON Schema of the result; illegal on `builtin` and `mcp`, and elsewhere not sent to the model, not emitted in the compile report, and not enforced at run time |
+| `input` | JSON Schema of the parameters the model fills; required except on `builtin`, `mcp` and `knowledge`, where it is illegal |
+| `output` | optional author-side JSON Schema of the result; illegal on `builtin`, `mcp` and `knowledge`, and elsewhere not sent to the model, not emitted in the compile report, and not enforced at run time |
 | `inject` | hidden scalar arguments; string values may carry `{{variables}}`; legal on `webhook` and `local` |
 | `interruption` | `provider_default`, `continue`, `cancel` |
 | `effect` | `returns_data`, `ends_conversation` |
-| `announce` | one fixed sentence spoken as the tool starts; no `{{variables}}`; legal on `webhook` and `local`; absent means nothing is spoken |
+| `announce` | one fixed sentence spoken as the tool starts; no `{{variables}}`; legal on `webhook`, `local` and `knowledge`; absent means nothing is spoken |
 
 | Execution block | Fields |
 |---|---|
@@ -393,8 +438,12 @@ exactly one execution block says how it runs.
 | `webhook` | required `url_env`; optional `path` and `auth`; a non-empty path starts with `/` |
 | `mcp` | required `url_env`; optional `transport`, `auth`, and non-empty unique `tools` entries |
 | `builtin` | required `id`; optional `instructions` |
+| `knowledge` | required `base`, naming an entry in [`knowledge:`](#knowledge) |
 | `client` | no fields; write `client: {}`; gated on every target today |
 | `provider_hosted` | no fields; write `provider_hosted: {}`; gated on every target today |
+
+A `knowledge` file takes no `input`, `output`, `inject` or `effect`: the tool owns
+both sides of its contract, taking one string and returning passages.
 
 An `mcp` file is the block and nothing else. The seven contract fields above are
 all illegal on one, because the server describes its own tools.

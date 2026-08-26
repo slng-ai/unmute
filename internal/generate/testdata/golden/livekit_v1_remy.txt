@@ -29,7 +29,24 @@ WORKDIR /app
 RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml ./
-RUN uv pip install --system .
+# --link-mode=copy is not a preference, it is load-bearing.
+#
+# uv installs by hardlinking out of its own cache, so every installed file has
+# st_nlink=2. NLTK ships a path-hardening module that refuses to open any
+# multiply-linked file, on the grounds that a hardlink can point at an inode
+# outside the root (CWE-59), and llama-index-core reads its bundled stopword list
+# through NLTK. The result is that indexing dies at startup, in every worker
+# process, with a security error that names neither uv nor hardlinking as the cause:
+#
+#     PermissionError: Security Violation [pathsec.open]: refusing multiply-linked
+#     file '.../llama_index/core/_static/nltk_cache/corpora/stopwords/english'
+#     (st_nlink=2)
+#
+# A plain open() on that file succeeds, which is what makes it confusing: only
+# NLTK's hardened opener refuses it. Copying instead of linking makes st_nlink=1 and
+# the check passes. Verified 2026-08-26: without this the emitted image builds and
+# then fails to index; with it, both bases index.
+RUN uv pip install --system --link-mode=copy .
 
 # LiveKit Cloud requires a non-root run user. It owns /app because the agent
 # downloads model files on first run and would otherwise have nowhere to write:
@@ -37,6 +54,7 @@ RUN uv pip install --system .
 RUN useradd --home-dir /app --shell /usr/sbin/nologin appuser \
  && chown appuser:appuser /app
 COPY --chown=appuser:appuser . .
+
 USER appuser
 
 # LiveKit Cloud and the worker runner both start this image. The module CLI
@@ -809,7 +827,9 @@ class _RetryEmptyTaskResponseMixin:
                         "The response after the tool result was empty. Use the tool "
                         "result already in context. Do not repeat that operation or "
                         "call another operation. Produce the task's next valid "
-                        "response now; call finish only if the task is complete."
+                        "response now, using what the caller has already told you "
+                        "rather than asking again; call finish only if the task is "
+                        "complete."
                         if attempt == 0
                         else "The finish retry was also empty. This is the second "
                         "retry. Use the existing tool result without repeating any "
@@ -817,13 +837,25 @@ class _RetryEmptyTaskResponseMixin:
                         "finish only if the task is complete."
                     )
                 else:
+                    # "Do not ask again" is the load-bearing half.
+                    #
+                    # Without it a retry points the model at the task instructions
+                    # and it restarts the script: observed on a live call, the
+                    # caller answered "tomorrow if possible", the response came
+                    # back empty, and the retry asked "what day would you like?"
+                    # again. The caller's turn is in the copied context the whole
+                    # time; the instruction just has to say to use it.
                     recovery = (
                         "The previous response was empty. Follow the current task "
-                        "instructions and produce its next valid response now."
+                        "instructions and produce its next valid response now. The "
+                        "caller's turns are already in context: use what they have "
+                        "already told you, and never ask again for something they "
+                        "have answered."
                         if attempt == 0
                         else "The prior retry was also empty. This is the second "
                         "retry. Follow the current task instructions and produce "
-                        "its next non-empty valid response now."
+                        "its next non-empty valid response now, using what the "
+                        "caller has already said rather than asking again."
                     )
                 request_chat_ctx.items[instructions_index] = instructions.model_copy(
                     update={

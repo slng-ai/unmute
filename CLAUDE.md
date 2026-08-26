@@ -64,6 +64,7 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | a route that hosts nothing says so everywhere: no tunnel, helper or hosting word in its emitted runbook | `internal/generate/pipecat_cloud_websocket_test.go` |
 | the emitted transfer document and the plane's reading of it stay in agreement | `internal/generate` (emitted shape) + `internal/cli` (the reading), one gate each |
 | the docs-site transfer table matches the route table, both directions | `internal/docsite/transfer_table_test.go` |
+| the docs-site tool tables match the capability table on all three targets, and the page's own count of execution blocks is right | `internal/docsite/tool_table_test.go` |
 | an L4 smoke fixture still compiles the salon package, and the emitted Python keeps the names its script calls | `internal/generate/smoke_fixture_test.go` |
 | the docs-site states one version, in one snippet, and no page hardcodes a version literal that disagrees | `internal/docsite/version_test.go` |
 | the docs-site declares its Markdown surface, and the coding-agents page names all three endpoints | `internal/skill/markdown_surface_test.go` |

@@ -45,7 +45,7 @@ The block near the bottom says how the tool runs. **Every tool file has exactly
 one execution block.** Two is an error, and none is an error whose message is
 also the list of what you could have written.
 
-## The six execution blocks
+## The seven execution blocks
 
 | Block | The tool is | Reach for it when |
 |---|---|---|
@@ -55,22 +55,24 @@ also the list of what you could have written.
 | `builtin:` | a tool the runtime already has, selected by id | you want `end_call`, which is the only one |
 | `client:` | a tool the caller's own application fulfils | never yet. Gated, see below |
 | `provider_hosted:` | a tool the model provider runs itself | never yet. Gated, see below |
+| `knowledge:` | a search over a folder of the user's own documents | the user has policies, price lists, or manuals the agent should quote instead of guess |
 
 ### Which fields each block allows
 
 | Field | Required | Legal on |
 |---|---|---|
 | `description` | yes, except on `builtin:` and `mcp:` | everywhere else |
-| `input` | yes, except on `builtin:` and `mcp:` | everywhere else |
-| `output` | no | everywhere except `builtin:` and `mcp:` — but see below |
+| `input` | yes, except on `builtin:`, `mcp:` and `knowledge:` | everywhere else |
+| `output` | no | everywhere except `builtin:`, `mcp:` and `knowledge:` — but see below |
 | `inject` | no | `webhook:` and `local:` only |
 | `interruption` | no | everywhere except `mcp:` |
-| `effect` | no | everywhere except `mcp:` |
-| `announce` | no | `webhook:` and `local:` only |
+| `effect` | no | everywhere except `mcp:` and `knowledge:` |
+| `announce` | no | `webhook:`, `local:` and `knowledge:` only |
 
 An `mcp:` file is the block and nothing else, because the server owns each
 tool's contract. A `builtin:` file needs no `description` or `input`, because
-the registry supplies both.
+the registry supplies both. A `knowledge:` file takes no `input` or `output`
+either, because the tool owns both: it asks for one string and returns passages.
 
 **`output:` is author-side documentation, not a contract with the model.** The
 compiler checks that it is a JSON Schema object, but no generator sends it to
@@ -90,6 +92,158 @@ Do not write one, and do not offer one as an option. They are listed here so
 that a refusal a user meets reads as a decision rather than a bug.
 If you need to show the refusal, YAML requires `client: {}` or
 `provider_hosted: {}`; a bare empty block is itself invalid.
+
+## Knowledge bases
+
+The user has documents and wants the agent to answer from them instead of
+guessing. Two parts: a `knowledge:` section in `agent.yaml` naming a folder, and
+one tool per base.
+
+```yaml
+# agent.yaml
+knowledge:
+  refunds:
+    documents: knowledge/refunds
+  services:
+    documents: knowledge/services
+    embed: openai              # optional; openai is the default
+```
+
+```yaml
+# tools/look_up_refund_policy.yaml
+description: >-
+  Look up the company's refund and complaints policy. Use this before you state
+  any refund, replacement, timescale, or goodwill offer, so you quote the policy
+  instead of guessing it.
+announce: "Let me check the policy."
+knowledge:
+  base: refunds
+```
+
+| Field | Required | Default | Rule |
+|---|---|---|---|
+| map key in `knowledge:` | yes | — | 3 to 64 characters of `[a-z0-9_]` |
+| `documents` | yes | — | folder path relative to the package root, holding `.txt`, `.md` or `.pdf` files |
+| `embed` | no | `openai` | one of the supported services below |
+| `mode` | no | `hybrid` | `meaning`, `keyword`, or `hybrid` |
+| `chunk_size` | no | `90` | passage size in **tokens**, 1 to 2048 |
+| `chunk_overlap` | no | `20` | tokens two neighbouring passages share; never larger than `chunk_size` |
+| `top_k` | no | `3` | passages a lookup returns, 1 to 20 |
+| `min_score` | no | none | drop results below this score, 0 to 1. See the warning below |
+| `base` on the tool | yes | — | names a base declared in `knowledge:` |
+
+### Which mode to write
+
+Default to leaving `mode` out, which gives `hybrid`. Choose deliberately when the
+user's situation matches a column:
+
+| `mode` | Searches by | Needs a key | When to write it |
+|---|---|---|---|
+| `meaning` | what the question means | yes | callers paraphrase, and the documents use different words than they do |
+| `keyword` | the words themselves (BM25) | **no** | codes, names, prices, part numbers; or the user cannot send documents to a third party; or they want no per-lookup latency |
+| `hybrid` | both, interleaved | yes | the default, and the right answer when unsure |
+
+`meaning` wins paraphrase, which is the only thing it is for. `keyword` wins exact
+terms, and holds up better as a corpus grows. `hybrid` takes both, which is why it
+is the default.
+
+**`keyword` is the one to remember.** It needs no embedding service, no credential
+in `secrets:`, and makes no network call, so a lookup is local memory access rather
+than a round trip. If the user is nervous about sending documents to a third party,
+this is the answer. It produces no scores, so `min_score` is refused with it. Do
+not sell it on image size: the difference is small, because no mode installs a
+vector store.
+
+### Tell the user to bake the index into the image
+
+Every worker process embeds the corpus at startup otherwise, and that is paid again
+on every scale-up. One extra build flag removes it:
+
+```sh
+docker build --build-arg KNOWLEDGE_BAKE=1 \
+  --secret id=OPENAI_API_KEY,env=OPENAI_API_KEY .
+```
+
+Startup becomes a disk read, with the same answers. Use the credential the chosen
+embedding service needs, and the generated `README.md` prints the exact command. Both flags are required, and the credential must be a `--secret` rather
+than a `--build-arg` so it never lands in a layer.
+
+Mention it whenever a package declares `knowledge:` with a mode that embeds. It does
+not apply to `mode: keyword`, which embeds nothing, though baking still saves the
+splitting work. A lookup embeds the caller's question either way, so the run time
+still needs the credential in `secrets:`.
+
+### When to set the retrieval fields
+
+**Leave them alone unless the user's documents give you a reason.** The defaults
+suit prose, and send about 200 tokens of retrieved text per lookup.
+
+Set them when the shape of the document calls for it:
+
+| The user's documents | What to write |
+|---|---|
+| Prose: policies, manuals, FAQs | nothing; the defaults |
+| Lists: prices, opening hours, specifications | `chunk_size: 220`, `chunk_overlap: 40` |
+| A caller will quote a long passage back | wider `chunk_size`, and `top_k: 5` |
+
+The list case is the one that bites. At the default 90 tokens a table of prices
+splits mid row, so a service name lands in one passage and its price in the next,
+and a question about the price ranks something else above it.
+
+**`top_k` times `chunk_size` is what reaches the model on every lookup**, during
+a phone call. Above about 1500 tokens the compiler warns. Do not raise both.
+
+**Do not set `min_score` unless the user asks for it, and push back if they name
+a high value.** These are similarity scores, not probabilities: in practice they
+land well below 1, so `0.9` reads like "high confidence" and in fact returns
+nothing. The gap between a genuine answer and an off-topic question is far smaller
+than the 0 to 1 range suggests.
+
+**It only works on `mode: meaning`.** On `hybrid` the keyword half returns
+unscored passages that survive every cutoff, so a cutoff there removes real
+answers and silences nothing. If a user wants one, suggest `0.25` and `mode:
+meaning`, tell them the band depends on their own documents, and tell them to
+check it before shipping. Above `0.25` the compiler warns.
+
+| Embedding service | Credential to declare in `secrets:` |
+|---|---|
+| `openai` *(default)* | `OPENAI_API_KEY` |
+| `gemini` | `GEMINI_API_KEY` |
+| `huggingface` | `HF_TOKEN` |
+| `bedrock` | the AWS credential chain, so nothing to declare |
+
+Use `openai` unless the user asks for something else. `embed:` is per base, so two
+bases in one package can use different services, and the emitted project installs a
+client only for the services actually named. `huggingface` is the hosted Inference
+API, not a local model. `bedrock` declares no variable in `secrets:`, because it
+authenticates through the AWS credential chain.
+
+### What to write, and what not to
+
+- **Write a real `description`.** It is the only thing that tells the model when
+  to look something up rather than answer from memory. Say what is in the folder
+  and when to check it, as the example above does.
+- **Write an `announce`.** A lookup takes a moment, and silence sounds like a
+  dropped call.
+- **Give each agent only the bases it should see.** An agent gets a base by
+  being given its tool, so a refunds tool on the concierge means the concierge
+  can quote refund policy. That is the whole access model.
+- **Do not set `mode`, `chunk_size`, `chunk_overlap`, `top_k` or `min_score`
+  without a reason from the user's own documents.** All five exist, and all five
+  default to something sensible. Reach for them when the shape of the document
+  calls for it, per the two sections above, not by habit.
+- **Do not put `input:` or `output:` on the tool.** Refused, with the line number.
+
+### Two things to tell the user
+
+- **Content is fixed until the next compile.** The documents are read, split and
+  embedded once when the agent starts. Editing a PDF changes nothing until they
+  compile and deploy again.
+- **A scanned PDF fails at startup, not at compile.** Deciding whether a PDF
+  yields text needs a parser the compiler does not have, so a document with no
+  text layer is named and skipped at startup, and a base where nothing yields
+  text stops the deployment. If their PDF is a photo of a page, it needs OCR
+  first.
 
 ## Webhook tools
 

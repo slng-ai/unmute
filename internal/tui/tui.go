@@ -993,6 +993,7 @@ var toolExecutionKinds = []toolExecutionKind{
 	{Value: "local", Name: "Local Python", Field: targetcap.FieldToolLocal},
 	{Value: "mcp", Name: "MCP server", Field: targetcap.FieldToolMCP},
 	{Value: "builtin", Name: "Prebuilt", Field: targetcap.FieldToolBuiltin},
+	{Value: "knowledge", Name: "Knowledge base", Field: targetcap.FieldToolKnowledge},
 }
 
 // toolExecutionGate returns the capability row gating kind on target; ok is
@@ -1005,14 +1006,16 @@ func toolExecutionGate(kind toolExecutionKind, target string) (targetcap.Capabil
 	return capability, capability.Tag != targetcap.Gated
 }
 
-func chooseToolExecution(runner *fieldRunner, target string, tool *scaffold.Tool) (bool, error) {
+func chooseToolExecution(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) (bool, error) {
+	target := data.Target
 	for {
 		handler := filepath.ToSlash(filepath.Join("tools", tool.Name+".py"))
 		detail := map[string]string{
-			"webhook": "HTTP endpoint from an environment variable",
-			"local":   "creates " + handler + " when saved",
-			"mcp":     "server address from an environment variable",
-			"builtin": "provider prebuilt tool (end_call)",
+			"webhook":   "HTTP endpoint from an environment variable",
+			"local":     "creates " + handler + " when saved",
+			"mcp":       "server address from an environment variable",
+			"builtin":   "provider prebuilt tool (end_call)",
+			"knowledge": knowledgeDetail(data),
 		}
 		options := make([]menuChoice, 0, len(toolExecutionKinds)+1)
 		for _, kind := range toolExecutionKinds {
@@ -1064,8 +1067,59 @@ func chooseToolExecution(runner *fieldRunner, target string, tool *scaffold.Tool
 		} else {
 			tool.Builtin, tool.Instructions = "", ""
 		}
+		if selected == "knowledge" {
+			// The tool owns its own schema (one string, the caller's question)
+			// and its own result, so input and output have nowhere to go.
+			tool.URLEnv, tool.Input, tool.Output = "", "", ""
+			if len(data.Knowledge) == 0 {
+				// Nothing to point at. Refusing here beats writing a tool that
+				// names a base agent.yaml never declares, which compiles to an
+				// error the author then has to trace back to this menu.
+				if err := showNotice(runner, "Knowledge base",
+					"No knowledge: section is declared in agent.yaml. Add one there, naming a folder "+
+						"of .txt, .md or .pdf files, then choose this again."); err != nil {
+					return false, err
+				}
+				continue
+			}
+			if back, err := chooseKnowledgeBase(runner, data, tool); err != nil || back {
+				return back, err
+			}
+		} else {
+			tool.KnowledgeBase = ""
+		}
 		return false, nil
 	}
+}
+
+// knowledgeDetail is the picker's one-line hint for the knowledge kind: how many
+// bases are declared, because the answer decides whether the choice leads anywhere.
+func knowledgeDetail(data *scaffold.Data) string {
+	switch len(data.Knowledge) {
+	case 0:
+		return "needs a knowledge: section in agent.yaml first"
+	case 1:
+		return "searches " + data.Knowledge[0].Name
+	default:
+		return fmt.Sprintf("searches one of %d declared knowledge bases", len(data.Knowledge))
+	}
+}
+
+// chooseKnowledgeBase picks which declared base the tool searches. A menu rather
+// than a text field: the legal values are known, and a typo here becomes a
+// compile error the author has to trace back to this screen.
+func chooseKnowledgeBase(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) (bool, error) {
+	options := make([]menuChoice, 0, len(data.Knowledge)+1)
+	for _, base := range data.Knowledge {
+		options = append(options, newChoice(base.Name+"  ·  "+base.Documents, base.Name))
+	}
+	options = append(options, newChoice("← Back", actionBack))
+	choice, _, err := runner.selectOne("Knowledge base", "Which documents this tool searches.", options, true)
+	if err != nil || choice == actionBack {
+		return choice == actionBack, err
+	}
+	tool.KnowledgeBase = choice
+	return false, nil
 }
 
 func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) error {
@@ -1079,6 +1133,18 @@ func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) err
 				newChoice("Description  ·  "+oneLine(tool.Description), "description"),
 				newChoice("Prebuilt  ·  "+cmp.Or(tool.Builtin, "end_call"), "execution"),
 				newChoice("Goodbye message  ·  "+cmp.Or(oneLine(tool.Instructions), "provider default"), "instructions"),
+				newChoice("Attached to  ·  "+toolAttachmentLabel(data, *tool), "attach"),
+				newChoice("Delete tool", "delete"),
+				newChoice("← Back", actionBack),
+			}
+		case tool.ExecutionKind() == "knowledge":
+			// No input, output or URL: the tool owns its schema and its result.
+			// The description is the one thing worth editing, because it is what
+			// tells the model when to look something up at all.
+			options = []menuChoice{
+				newChoice("Description  ·  "+oneLine(tool.Description), "description"),
+				newChoice("Execution  ·  knowledge", "execution"),
+				newChoice("Knowledge base  ·  "+cmp.Or(tool.KnowledgeBase, "none"), "base"),
 				newChoice("Attached to  ·  "+toolAttachmentLabel(data, *tool), "attach"),
 				newChoice("Delete tool", "delete"),
 				newChoice("← Back", actionBack),
@@ -1130,7 +1196,11 @@ func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) err
 				return err
 			}
 		case "execution":
-			if _, err := chooseToolExecution(runner, data.Target, tool); err != nil {
+			if _, err := chooseToolExecution(runner, data, tool); err != nil {
+				return err
+			}
+		case "base":
+			if _, err := chooseKnowledgeBase(runner, data, tool); err != nil {
 				return err
 			}
 		case "url":

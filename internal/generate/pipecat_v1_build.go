@@ -195,7 +195,13 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		}
 	}
 	data.Inline = inlineEligible(&data)
+	knowledge, err := loweredKnowledge(agent, env)
+	if err != nil {
+		return pipecatData{}, err
+	}
+	data.Knowledge = knowledge
 	data.Imports, data.Extras, data.Deps = collectImportsExtras(data)
+	data.Deps = append(data.Deps, knowledgeDeps(data.Knowledge)...)
 	if data.DailyCarrier != nil {
 		// The operator-run ingress helper verifies Twilio's signature before its
 		// platform-keyed start request. Twilio's SDK is the one carrier SDK this
@@ -1069,8 +1075,24 @@ func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env 
 		Auth:       loweredAuth(tool.Auth),
 		Local:      tool.Execution == ir.ToolLocal, HandlerSource: tool.HandlerSource,
 		Builtin: tool.Builtin, Instructions: tool.Instructions,
-		EndsCall: tool.Effect == ir.ToolEndsConversation, Interruption: interruptionValue(tool.Interruption),
+		KnowledgeBase: tool.KnowledgeBase,
+		EndsCall:      tool.Effect == ir.ToolEndsConversation, Interruption: interruptionValue(tool.Interruption),
 		Announce: tool.Announce,
+	}
+	if tool.Execution == ir.ToolKnowledge {
+		// The tool owns its own schema, so the one parameter is fixed here rather
+		// than derived from an input the author never wrote. Same shape as
+		// LiveKit's, which is FR-026.
+		built.Description = knowledgeDescription(tool.Description)
+		built.Args = []pipecatArg{{
+			Name: "query", PyType: "str", Required: true,
+			Description: knowledgeQueryDescription,
+		}}
+		built.InputProps = pyLiteral(map[string]any{
+			"query": map[string]any{"type": "string", "description": knowledgeQueryDescription},
+		})
+		built.InputRequired = pyLiteral([]any{"query"})
+		return built
 	}
 	built.Args = append(built.Args, inputFields(tool.Input)...)
 	argNames := make([]string, 0, len(built.Args))

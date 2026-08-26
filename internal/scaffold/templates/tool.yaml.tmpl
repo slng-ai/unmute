@@ -2,7 +2,10 @@
 [[end]]builtin:
   id: [[.Builtin]]
 [[if .Instructions]]  instructions: [[quote .Instructions]]
-[[end]][[else if eq .ExecutionKind "mcp"]]mcp:
+[[end]][[else if eq .ExecutionKind "knowledge"]]description: [[quote .Description]]
+knowledge:
+  base: [[.KnowledgeBase]]
+[[else if eq .ExecutionKind "mcp"]]mcp:
   url_env: [[.URLEnv]]
 [[if .MCPTransport]]  transport: [[.MCPTransport]]
 [[end]][[if .Auth]]  auth:

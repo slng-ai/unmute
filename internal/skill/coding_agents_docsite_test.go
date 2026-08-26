@@ -64,18 +64,22 @@ func TestCodingAgentsTableCoversEveryAssistant(t *testing.T) {
 }
 
 // TestCodingAgentsPageProofPromptMatchesTheSkill holds the check the page tells
-// a reader to run. The page claims a right answer names the four execution
-// blocks a target actually emits, so those four have to still be the four the
-// bundle teaches. A fifth becoming usable makes the page's check wrong.
+// a reader to run. The page claims a right answer names the execution blocks a
+// target actually emits, so those have to still be the ones the bundle teaches.
+// A new kind becoming usable makes the page's check wrong, which is what this
+// test is for: `knowledge:` became the fifth on 2026-08-25 and this fired.
 func TestCodingAgentsPageProofPromptMatchesTheSkill(t *testing.T) {
 	page := codingAgents(t)
 
-	for _, block := range []string{"webhook:", "local:", "mcp:", "builtin:"} {
+	for _, block := range []string{"webhook:", "local:", "mcp:", "builtin:", "knowledge:"} {
 		if !strings.Contains(page, "`"+block+"`") {
-			t.Errorf("%s does not name `%s` in its proof answer; the four kinds the page checks for must be the four the bundle teaches", codingAgentsPage, block)
+			t.Errorf("%s does not name `%s` in its proof answer; the kinds the page checks for must be the ones the bundle teaches", codingAgentsPage, block)
 		}
 	}
-	if !strings.Contains(bundleFile(t, "references/tools.md"), "## The six execution blocks") {
-		t.Errorf("references/tools.md no longer has six execution blocks, so the four the page asks about may have changed; re-check %s", codingAgentsPage)
+	if !strings.Contains(page, "the five ways a tool can run") {
+		t.Errorf("%s asks for a different count than the five emitted kinds", codingAgentsPage)
+	}
+	if !strings.Contains(bundleFile(t, "references/tools.md"), "## The seven execution blocks") {
+		t.Errorf("references/tools.md no longer has seven execution blocks, so the kinds the page asks about may have changed; re-check %s", codingAgentsPage)
 	}
 }

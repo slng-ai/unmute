@@ -15,7 +15,12 @@ type Package struct {
 	Root     string            `json:"-" yaml:"-"`
 	Markdown map[string]string `json:"-" yaml:"-"`
 	Handlers map[string]string `json:"-" yaml:"-"` // local tool handler sources, by path
-	files    map[string][]byte
+	// Documents holds each knowledge base document, keyed by the path it takes
+	// inside the artifact (knowledge/<base>/<file>). []byte, not string, because
+	// a PDF is binary, and read but never parsed: the compiler has no PDF parser
+	// and needs none, because the emitted project reads the original at startup.
+	Documents map[string][]byte `json:"-" yaml:"-"`
+	files     map[string][]byte
 }
 
 // Location returns the first source line containing token in a package file.
@@ -43,20 +48,66 @@ type AgentFile struct {
 	// an environment variable holding the number. A destination is who this agent
 	// escalates to, which is the same desk whichever carrier reaches it, so it
 	// lives here rather than on a target.
-	Destinations map[string]string    `json:"destinations,omitempty" yaml:"destinations,omitempty"`
-	Agents       map[string]AgentDef  `json:"agents" yaml:"agents"`
-	Tasks        map[string]Task      `json:"tasks,omitempty" yaml:"tasks,omitempty"`
-	TaskGroups   map[string]TaskGroup `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
-	Controls     map[string]Control   `json:"controls,omitempty" yaml:"controls,omitempty"`
-	Tools        []string             `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Conversation *Conversation        `json:"conversation,omitempty" yaml:"conversation,omitempty"`
-	Tracing      *Tracing             `json:"tracing,omitempty" yaml:"tracing,omitempty"`
-	Channels     map[string]Channel   `json:"channels" yaml:"channels"`
-	Capacity     *Capacity            `json:"capacity,omitempty" yaml:"capacity,omitempty"`
+	Destinations map[string]string `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+	// Knowledge maps a name onto a folder of documents the agents read from.
+	// Package-level, beside Models and Destinations, because a corpus belongs to
+	// the package: two tools over one folder is normal, and putting the folder on
+	// the tool would re-index the same documents once per tool reading them.
+	Knowledge    map[string]KnowledgeDef `json:"knowledge,omitempty" yaml:"knowledge,omitempty"`
+	Agents       map[string]AgentDef     `json:"agents" yaml:"agents"`
+	Tasks        map[string]Task         `json:"tasks,omitempty" yaml:"tasks,omitempty"`
+	TaskGroups   map[string]TaskGroup    `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
+	Controls     map[string]Control      `json:"controls,omitempty" yaml:"controls,omitempty"`
+	Tools        []string                `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Conversation *Conversation           `json:"conversation,omitempty" yaml:"conversation,omitempty"`
+	Tracing      *Tracing                `json:"tracing,omitempty" yaml:"tracing,omitempty"`
+	Channels     map[string]Channel      `json:"channels" yaml:"channels"`
+	Capacity     *Capacity               `json:"capacity,omitempty" yaml:"capacity,omitempty"`
 }
 
 type Tracing struct {
 	Provider string `json:"provider" yaml:"provider"`
+}
+
+// KnowledgeDef is one knowledge base: a folder of documents, the service that
+// embeds them, and how the documents are cut up and searched.
+//
+// The three retrieval fields are pointers so an absent field is distinguishable
+// from a zero one: `chunk_overlap: 0` is a legal choice and must not read as
+// "unset, use the default".
+//
+// Still absent, and still on purpose: no embedding model (the service pins one),
+// no relevance threshold (measurement found a genuine hit at 0.291 against an
+// off-topic question at 0.293, so no cutoff separates them), and no retrieval
+// mode (every lookup searches the same way).
+type KnowledgeDef struct {
+	// Documents is a folder path relative to the package root. A folder, never a
+	// single file, so adding a second document needs no authoring change.
+	Documents string `json:"documents" yaml:"documents"`
+	// Embed names an embedding service. Empty resolves to openai at Build.
+	Embed string `json:"embed,omitempty" yaml:"embed,omitempty"`
+	// ChunkSize is the passage size in TOKENS, not characters. Absent resolves to
+	// ir.DefaultChunkSize.
+	ChunkSize *int `json:"chunk_size,omitempty" yaml:"chunk_size,omitempty"`
+	// ChunkOverlap is how many tokens consecutive passages share, so a sentence
+	// split across a boundary is still whole in one of them. Absent resolves to
+	// ir.DefaultChunkOverlap.
+	ChunkOverlap *int `json:"chunk_overlap,omitempty" yaml:"chunk_overlap,omitempty"`
+	// TopK is how many passages a lookup returns. Absent resolves to
+	// ir.DefaultTopK.
+	TopK *int `json:"top_k,omitempty" yaml:"top_k,omitempty"`
+	// Mode is how a lookup searches: meaning, keyword, or hybrid. Absent resolves
+	// to ir.DefaultKnowledgeMode.
+	Mode string `json:"mode,omitempty" yaml:"mode,omitempty"`
+	// MinScore drops results scoring below it, where higher is closer. Absent
+	// means no filtering, which is the default and the measured behaviour.
+	//
+	// A pointer, and absent by default, because measurement says most values hurt:
+	// on the salon corpus 0.20 costs nothing and removes one off-topic question,
+	// 0.25 already loses a real answer, and 0.40 loses nine of twelve. The scores
+	// are similarities in roughly the 0.15 to 0.45 band, not probabilities, so a
+	// value like 0.9 returns nothing at all.
+	MinScore *float64 `json:"min_score,omitempty" yaml:"min_score,omitempty"`
 }
 
 // ModelSections is the central models map, grouped by kind (N15): the section
@@ -277,12 +328,13 @@ type Tool struct {
 	// so there is nothing here to merge into (validate.go, SCHEMA N40).
 	Inject map[string]any `json:"inject,omitempty" yaml:"inject,omitempty"`
 
-	Webhook        *ToolWebhook  `json:"webhook,omitempty" yaml:"webhook,omitempty"`
-	Local          *ToolLocal    `json:"local,omitempty" yaml:"local,omitempty"`
-	MCP            *ToolMCP      `json:"mcp,omitempty" yaml:"mcp,omitempty"`
-	Builtin        *ToolBuiltin  `json:"builtin,omitempty" yaml:"builtin,omitempty"`
-	Client         *ToolNoFields `json:"client,omitempty" yaml:"client,omitempty"`
-	ProviderHosted *ToolNoFields `json:"provider_hosted,omitempty" yaml:"provider_hosted,omitempty"`
+	Webhook        *ToolWebhook   `json:"webhook,omitempty" yaml:"webhook,omitempty"`
+	Local          *ToolLocal     `json:"local,omitempty" yaml:"local,omitempty"`
+	MCP            *ToolMCP       `json:"mcp,omitempty" yaml:"mcp,omitempty"`
+	Builtin        *ToolBuiltin   `json:"builtin,omitempty" yaml:"builtin,omitempty"`
+	Client         *ToolNoFields  `json:"client,omitempty" yaml:"client,omitempty"`
+	ProviderHosted *ToolNoFields  `json:"provider_hosted,omitempty" yaml:"provider_hosted,omitempty"`
+	Knowledge      *ToolKnowledge `json:"knowledge,omitempty" yaml:"knowledge,omitempty"`
 
 	Interruption string `json:"interruption,omitempty" yaml:"interruption,omitempty"`
 	Effect       string `json:"effect,omitempty" yaml:"effect,omitempty"`
@@ -334,6 +386,14 @@ type ToolLocal struct {
 	// catalogue and read nothing per tool, so this field is refused there rather
 	// than dropped. FieldToolDependencies is the row that says so.
 	Dependencies []string `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
+}
+
+// ToolKnowledge is the `knowledge:` block: a lookup over one knowledge base
+// declared in the package's knowledge: section. One field, because the tool owns
+// its own schema (one string, the caller's question) and its own result shape
+// (passages with sources and scores), so input: and output: have nowhere to go.
+type ToolKnowledge struct {
+	Base string `json:"base" yaml:"base"`
 }
 
 // ToolMCP is the `mcp:` block: one remote MCP server used as a tool source
@@ -392,6 +452,8 @@ func (t Tool) ExecutionKind() string {
 		return "client"
 	case t.ProviderHosted != nil:
 		return "provider_hosted"
+	case t.Knowledge != nil:
+		return "knowledge"
 	}
 	return ""
 }

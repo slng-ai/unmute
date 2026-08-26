@@ -1615,7 +1615,7 @@ func runLiveKitSmokeScript(t *testing.T, example string, mutate func(*ir.Target)
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, "smoke_check.py"), []byte(script), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "smoke_check.py"), []byte(knowledgeSmokeStub+script), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

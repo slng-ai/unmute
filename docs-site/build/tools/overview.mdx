@@ -1,6 +1,6 @@
 ---
 title: "Tools"
-description: "What a tool is, the six ways one can run, and how you decide which an agent may call."
+description: "What a tool is, the seven ways one can run, how each target treats them, and how you attach one to an agent."
 ---
 
 A tool is two things: a contract the model sees, and something that runs when the
@@ -49,7 +49,7 @@ their names look like extra tool inputs in the description.
 The one block near the bottom is the execution: it says how the tool runs. Every
 tool file has exactly one.
 
-## The six execution blocks
+## The seven execution blocks
 
 | Block | The tool is | Where it is taught |
 |---|---|---|
@@ -59,6 +59,7 @@ tool file has exactly one.
 | `builtin:` | a tool the runtime already has, selected by id | [Prebuilt tools](/build/tools/prebuilt) |
 | `client:` | a tool the caller's own application fulfils | gated, see below |
 | `provider_hosted:` | a tool the model provider runs itself | gated, see below |
+| `knowledge:` | a search over a folder of your own documents | [Knowledge bases](/build/tools/knowledge) |
 
 Exactly one, and the compiler holds you to it. Two blocks:
 
@@ -71,7 +72,7 @@ None at all, where the message is also the list:
 
 ```text wrap
 tools/check_availability.yaml: no execution block: add one of webhook, local, mcp, builtin,
-  client, provider_hosted
+  client, provider_hosted, knowledge
 ```
 
 ### The two gated blocks
@@ -94,6 +95,94 @@ meet reads as a decision rather than a bug.
 Both blocks have no fields, but YAML still needs an explicit body: write
 `client: {}` or `provider_hosted: {}`.
 
+## How each target treats a tool
+
+The same tool file compiles to three different runtimes, and they do not all
+support the same things. This table is the capability table, which is what the
+compiler actually reads, so a `no` here is a refusal you will meet at compile time
+rather than a surprise on a call.
+
+| Tool kind | LiveKit | Pipecat | SLNG |
+|---|---|---|---|
+| `webhook:` | yes | yes | yes |
+| `local:` | yes | yes | yes |
+| `builtin:` | yes | yes | yes |
+| `mcp:` | yes | yes | yes, with a warning |
+| `knowledge:` | yes | yes | **no** |
+| `client:` | no | no | no |
+| `provider_hosted:` | no | no | no |
+
+Three of those rows are worth a sentence.
+
+**`knowledge:` needs a runtime of ours to live in.** LiveKit and Pipecat compile to
+a Python project, so the documents ride in the image and the search runs in the
+process. The SLNG target writes a deployment body and SLNG runs the agent, so
+there is no image to carry a folder and no process of ours to index it in. Put the
+facts in the agent's instructions, or compile to a code target.
+
+**`mcp:` on SLNG warns rather than fails.** Unmute writes the server and tool by
+name, and SLNG also wants a hash of the schemas read from the live server's own
+tool list. That cannot be computed at compile time, so the push step finishes it.
+
+**`client:` and `provider_hosted:` are names with nothing behind them.** They exist
+in the schema and no target emits them. They are documented so a refusal reads as
+a decision rather than a bug.
+
+### Attaching a tool to a task
+
+A tool listed on a task rather than on an agent is a narrower thing, and two kinds
+are not available everywhere:
+
+| Tool kind on a task | LiveKit | Pipecat | SLNG |
+|---|---|---|---|
+| `mcp:` | yes | **no**, list it on the agent | yes |
+| `knowledge:` | yes | **no**, list it on the agent | **no** |
+| everything else | yes | yes | no tasks at all |
+
+Pipecat's reason is the same for both: a task tool there is a flows handler holding
+a `FlowManager`, not a decorated function holding `FunctionCallParams`. The SLNG
+target writes one agent with one prompt, so it has no tasks to scope anything to.
+
+### The behavior fields
+
+| Field | LiveKit | Pipecat | SLNG |
+|---|---|---|---|
+| `announce` | yes | yes | yes |
+| `inject` | yes | yes | yes |
+| `auth` | yes | yes | yes |
+| `interruption` other than `provider_default` | warns | yes | **no** |
+
+LiveKit runs a tool to completion, so a per-tool interruption value has nothing to
+act on and it says so. SLNG owns its own turn taking and has no per-tool setting at
+all.
+
+<Note>
+Every refusal above names the target and tells you what to do instead. If you get
+one you do not understand, `unmute validate` prints the same message with the tool
+name attached.
+</Note>
+
+## Choosing a kind
+
+Work down this list and stop at the first one that fits.
+
+| If the tool needs to | Use | Why not the others |
+|---|---|---|
+| end the call | `builtin:` | the runtime already has it; do not write your own |
+| answer from your own documents | `knowledge:` | a webhook to a search service is a network hop and a service to run |
+| call an API you already have | `webhook:` | no code of yours to deploy, and the URL is an environment variable |
+| run logic, or touch something with no HTTP API | `local:` | it ships inside the image, so it costs no network hop |
+| offer a whole catalogue of tools someone else maintains | `mcp:` | one block instead of a file per tool |
+
+**Prefer fewer tools.** Every tool is text in the model's context on every turn,
+and two tools with overlapping descriptions is the most common reason a model calls
+the wrong one. A tool the agent list does not name is not offered at all, which is
+the cheapest way to narrow a choice.
+
+**Write the description as an instruction, not a label.** `description` and
+`input` are the whole of what the model knows. Say when to call it, and say when
+not to.
+
 ## Fields inside each execution block
 
 | Block | Field | Required | Values and defaults |
@@ -106,9 +195,10 @@ Both blocks have no fields, but YAML still needs an explicit body: write
 | `mcp` | `transport` | no | `sse` or `streamable_http`; omitted lets the SDK infer it from the URL |
 | `mcp` | `auth` | no | bearer or API-key authentication |
 | `mcp` | `tools` | no | non-empty, unique server tool names; omitted means all tools |
-| `builtin` | `id` | yes | closed registry id; `end_call` is the only id today |
+| `builtin` | `id` | yes | an id from the closed registry, listed on the [prebuilt tools](/build/tools/prebuilt) page |
 | `builtin` | `instructions` | no | instruction applied by the prebuilt as it runs |
 | `client`, `provider_hosted` | none | — | explicit empty block only |
+| `knowledge` | `base` | yes | the name of a knowledge base declared in `knowledge:` in `agent.yaml` |
 
 ## Which fields the block allows
 
@@ -117,16 +207,20 @@ The contract fields are shared, with one exception that matters:
 | Field | Required | Where it is legal |
 |---|---|---|
 | `description` | yes, except on `builtin:` and `mcp:` | optional on `builtin:`, illegal on `mcp:`, legal everywhere else |
-| `input` | yes on tool contracts | illegal on `builtin:` and `mcp:`, required everywhere else |
-| `output` | no | illegal on `builtin:` and `mcp:`; author-side only elsewhere, not sent to the model, not included in the compile report, and not enforced at run time |
+| `input` | yes on tool contracts | illegal on `builtin:`, `mcp:` and `knowledge:`, required everywhere else |
+| `output` | no | illegal on `builtin:`, `mcp:` and `knowledge:`; author-side only elsewhere, not sent to the model, not included in the compile report, and not enforced at run time |
 | `inject` | no | `webhook:` and `local:` only; values must be scalars |
 | `interruption` | no | everywhere except `mcp:` |
-| `effect` | no | everywhere except `mcp:` |
-| `announce` | no | `webhook:` and `local:` only; a fixed sentence, no `{{variables}}` |
+| `effect` | no | everywhere except `mcp:` and `knowledge:` |
+| `announce` | no | `webhook:`, `local:` and `knowledge:` only; a fixed sentence, no `{{variables}}` |
 
 An `mcp:` file carries none of them, because the server owns each tool's contract.
 A `builtin:` file takes no `input` or `output`. The registry supplies its contract
 and default description, and your `description` is added on top if you write one.
+A `knowledge:` file takes no `input`, `output`, `inject` or `effect` either: the
+tool asks for one string and returns passages, so there is nothing to describe and
+nothing to merge into. It does take `description` and `announce`, and you should
+write both.
 
 ## The three behavior fields
 
@@ -187,7 +281,7 @@ version, the tool speaks the fixed one, and the caller hears both.
 
 | Rule | What happens if you break it |
 |---|---|
-| legal on `webhook:` and `local:` only | refused by tool name; an `mcp:` file is refused at load, with the line number |
+| legal on `webhook:`, `local:` and `knowledge:` only | refused by tool name; an `mcp:` file is refused at load, with the line number |
 | a fixed sentence, no `{{variables}}` | refused by tool name |
 | a blank value reads as absent | nothing is spoken and nothing is emitted |
 | on Pipecat, list the tool on an agent, not on a task | refused by name, telling you to move it |
@@ -214,7 +308,7 @@ Every `tools:` entry in `agent.yaml` is a string name:
 ```yaml agent.yaml
 tools:
   - check_availability
-  - end_call
+  - cancel_booking
 
 agents:
   appointment_desk:
@@ -223,7 +317,7 @@ agents:
     voice: voice
     tools:
       - check_availability
-      - end_call
+      - cancel_booking
 ```
 
 For a task-scoped tool, attach the same loaded name to the task instead:
@@ -271,5 +365,8 @@ list first.
   </Card>
   <Card title="Prebuilt tools" icon="package" href="/build/tools/prebuilt">
     The ones the runtime already has.
+  </Card>
+  <Card title="Knowledge bases" icon="book-open" href="/build/tools/knowledge">
+    Answer from a folder of your own documents.
   </Card>
 </Columns>

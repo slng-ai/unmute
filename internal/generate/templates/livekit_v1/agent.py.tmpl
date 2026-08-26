@@ -71,8 +71,21 @@ the file defines a callable named like the tool; sync or async). */ -}}
 {{- end}}
         return result
 {{end -}}
+{{- /* knowledge_tool renders one knowledge lookup as a @function_tool method.
+The index is built in prewarm and read from the job's userdata, so a lookup
+never reads a file and never re-indexes (FR-017). */ -}}
+{{define "knowledge_tool"}}
+    @function_tool
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict:
+        {{triple .Description}}
+{{- if .Announce}}
+        # Not awaited, on purpose: see the same line in webhook_tool.
+        self.session.say({{pyq .Announce}})
+{{- end}}
+        return await knowledge.look_up({{pyq .KnowledgeBase}}, query)
+{{end -}}
 {{- /* method_tool dispatches on execution. */ -}}
-{{define "method_tool"}}{{if .Local}}{{template "local_tool" .}}{{else}}{{template "webhook_tool" .}}{{end}}{{end -}}
+{{define "method_tool"}}{{if .KnowledgeBase}}{{template "knowledge_tool" .}}{{else if .Local}}{{template "local_tool" .}}{{else}}{{template "webhook_tool" .}}{{end}}{{end -}}
 {{- /* capture_tool is the generated update_variables tool: the model saves what
 it learns mid-call into the session userdata (variable_secrets_specs.md V6). */ -}}
 {{define "capture_tool"}}
@@ -188,7 +201,8 @@ from livekit.agents.voice import MetricsCollectedEvent
 from livekit.plugins import {{join .PluginModules ", "}}
 
 from dev_metrics import install_dev_metrics
-{{if .Tracing}}{{if eq .TracingProvider "coval"}}from tracing import setup_coval
+{{if .Knowledge.Knowledge}}import knowledge
+{{end}}{{if .Tracing}}{{if eq .TracingProvider "coval"}}from tracing import setup_coval
 {{else}}from tracing import setup_langfuse
 {{end}}{{end}}
 
@@ -1492,7 +1506,9 @@ class _RetryEmptyTaskResponseMixin:
                         "The response after the tool result was empty. Use the tool "
                         "result already in context. Do not repeat that operation or "
                         "call another operation. Produce the task's next valid "
-                        "response now; call finish only if the task is complete."
+                        "response now, using what the caller has already told you "
+                        "rather than asking again; call finish only if the task is "
+                        "complete."
                         if attempt == 0
                         else "The finish retry was also empty. This is the second "
                         "retry. Use the existing tool result without repeating any "
@@ -1500,13 +1516,25 @@ class _RetryEmptyTaskResponseMixin:
                         "finish only if the task is complete."
                     )
                 else:
+                    # "Do not ask again" is the load-bearing half.
+                    #
+                    # Without it a retry points the model at the task instructions
+                    # and it restarts the script: observed on a live call, the
+                    # caller answered "tomorrow if possible", the response came
+                    # back empty, and the retry asked "what day would you like?"
+                    # again. The caller's turn is in the copied context the whole
+                    # time; the instruction just has to say to use it.
                     recovery = (
                         "The previous response was empty. Follow the current task "
-                        "instructions and produce its next valid response now."
+                        "instructions and produce its next valid response now. The "
+                        "caller's turns are already in context: use what they have "
+                        "already told you, and never ask again for something they "
+                        "have answered."
                         if attempt == 0
                         else "The prior retry was also empty. This is the second "
                         "retry. Follow the current task instructions and produce "
-                        "its next non-empty valid response now."
+                        "its next non-empty valid response now, using what the "
+                        "caller has already said rather than asking again."
                     )
                 request_chat_ctx.items[instructions_index] = instructions.model_copy(
                     update={
@@ -1633,6 +1661,13 @@ def prewarm(proc: JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load(min_silence_duration={{.EndpointingDelay}})
 {{- else}}
     proc.userdata["vad"] = silero.VAD.load()
+{{- end}}
+{{- if .Knowledge.Knowledge}}
+    # Read, split and embed every knowledge base here, not on the call path.
+    # LiveKit documents prewarm as the place for static data a job needs, and it
+    # runs once per worker process before any job is accepted, so a caller never
+    # waits for indexing and a failure stops the worker from reporting ready.
+    knowledge.build_indexes()
 {{- end}}
 
 

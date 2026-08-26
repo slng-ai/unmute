@@ -131,7 +131,8 @@
               "build/tools/webhook",
               "build/tools/python",
               "build/tools/mcp",
-              "build/tools/prebuilt"
+              "build/tools/prebuilt",
+              "build/tools/knowledge"
             ]
           },
           {

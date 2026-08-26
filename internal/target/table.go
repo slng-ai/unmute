@@ -93,6 +93,8 @@ const (
 	FieldToolClient            Field = "tools.execution.client"
 	FieldToolProviderHosted    Field = "tools.execution.provider_hosted"
 	FieldToolBuiltin           Field = "tools.execution.builtin"
+	FieldToolKnowledge         Field = "tools.execution.knowledge"
+	FieldToolKnowledgeTask     Field = "tasks.tools.execution.knowledge"
 	FieldToolAuth              Field = "tools.auth"
 	FieldToolInterruption      Field = "tools.interruption.non_default"
 	FieldToolAnnounce          Field = "tools.announce"
@@ -426,6 +428,27 @@ func Default() Table {
 				// reference is written by name and needs no tool body.
 				allow(Slng),
 			),
+			// Core on both since 2026-08-25, when the Pipecat lowering landed.
+			// It started denied on Pipecat on purpose: constitution 5.0.0 retired
+			// the vapi and deepgram targets for the inverse, validating and then
+			// failing at compile with "driver is not implemented", which taught an
+			// author nothing until the last step.
+			// internal/generate/knowledge_agreement_test.go asserts Core on both
+			// and asserts both drivers emit the same contract, so this row and the
+			// two lowerings cannot drift apart.
+			// The two code drivers emit the module that reads the documents. The
+			// slng target emits a README and pushes a spec, so there is no image to
+			// carry the folder and nothing to build an index in.
+			FieldToolKnowledge: field(
+				deny(Slng, slngNoKnowledge("a knowledge base")),
+			),
+			// Scope, not kind, and the same seam FieldToolMCPTask records: a
+			// Pipecat task tool is a flows handler holding a FlowManager, not a
+			// decorated function holding FunctionCallParams.
+			FieldToolKnowledgeTask: field(
+				deny(Pipecat, "the Pipecat driver cannot scope a knowledge tool to a task: list it on the agent instead"),
+				deny(Slng, slngNoKnowledge("a task-scoped knowledge base")),
+			),
 			FieldToolAuth: field(
 				// The code drivers own the request, so they can send the header. SLNG
 				// takes auth in the tool body instead: ApiRequestConfig.auth is none,
@@ -593,6 +616,19 @@ func slngNoPlacement(role string) string {
 
 func slngNoTasks(what string) string {
 	return "slng target writes one agent with one prompt, so " + what + " has nowhere to go: fold the step into the agent's instructions, or compile to livekit or pipecat which emit multi-task agents"
+}
+
+// slngNoKnowledge is why the slng target refuses a knowledge base.
+//
+// The two code drivers emit knowledge.py and copy the documents beside it, so the
+// index is built inside the image they produce. The slng target emits a README and
+// pushes a spec: there is no image, nothing to copy the folder into, and no process
+// of ours to build an index in.
+func slngNoKnowledge(what string) string {
+	return "slng target pushes a spec and emits no runtime of its own, so " + what +
+		" has nowhere to be read or searched: drop the knowledge: tool and put the " +
+		"facts in the agent's instructions, or compile to livekit or pipecat which " +
+		"emit the search module and carry the documents in the image"
 }
 
 func slngNoHandoff(what string) string {

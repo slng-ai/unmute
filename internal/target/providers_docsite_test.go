@@ -117,3 +117,48 @@ func contains(list []string, want string) bool {
 	}
 	return false
 }
+
+// TestEmbeddingServicesDocsiteMatchesTable holds the embedding-service table
+// against the two surfaces that repeat it: the public page an author lands on,
+// and the skill a coding agent reads before it writes a package.
+//
+// Both directions, because both failures are real. A service in the table and not
+// on the page is a feature nobody can find; a service on the page and not in the
+// table is a compile error the page told the author to write.
+//
+// The credential is checked too. A page naming the wrong variable sends the author
+// to set something the agent never reads, and the symptom is a startup failure
+// that names a variable they believe they already set.
+func TestEmbeddingServicesDocsiteMatchesTable(t *testing.T) {
+	surfaces := map[string]string{
+		"docs-site page": filepath.Join("..", "..", "docs-site", "build", "tools", "knowledge.mdx"),
+		"skill":          filepath.Join("..", "skill", "assets", "references", "tools.md"),
+	}
+	for label, path := range surfaces {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		page := string(raw)
+		for _, name := range EmbeddingServiceNames() {
+			service, _ := LookupEmbeddingService(name)
+			if !strings.Contains(page, "`"+name+"`") {
+				t.Errorf("%s does not name embedding service %q", label, name)
+			}
+			if service.CredentialEnv != "" && !strings.Contains(page, service.CredentialEnv) {
+				t.Errorf("%s names %q without its credential %s", label, name, service.CredentialEnv)
+			}
+		}
+		// The other direction: an `embed:` value the page invents.
+		row := regexp.MustCompile("(?m)^\\| `([a-z0-9_]+)`(?: \\*\\(default\\)\\*)? \\| `?([A-Z_]+)`? \\|")
+		for _, match := range row.FindAllStringSubmatch(page, -1) {
+			service, ok := LookupEmbeddingService(match[1])
+			if !ok {
+				continue // some other table on the page; the loop above is the binding one
+			}
+			if service.CredentialEnv != match[2] {
+				t.Errorf("%s says %q needs %s, the table says %s", label, match[1], match[2], service.CredentialEnv)
+			}
+		}
+	}
+}

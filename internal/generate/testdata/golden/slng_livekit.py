@@ -667,7 +667,9 @@ class _RetryEmptyTaskResponseMixin:
                         "The response after the tool result was empty. Use the tool "
                         "result already in context. Do not repeat that operation or "
                         "call another operation. Produce the task's next valid "
-                        "response now; call finish only if the task is complete."
+                        "response now, using what the caller has already told you "
+                        "rather than asking again; call finish only if the task is "
+                        "complete."
                         if attempt == 0
                         else "The finish retry was also empty. This is the second "
                         "retry. Use the existing tool result without repeating any "
@@ -675,13 +677,25 @@ class _RetryEmptyTaskResponseMixin:
                         "finish only if the task is complete."
                     )
                 else:
+                    # "Do not ask again" is the load-bearing half.
+                    #
+                    # Without it a retry points the model at the task instructions
+                    # and it restarts the script: observed on a live call, the
+                    # caller answered "tomorrow if possible", the response came
+                    # back empty, and the retry asked "what day would you like?"
+                    # again. The caller's turn is in the copied context the whole
+                    # time; the instruction just has to say to use it.
                     recovery = (
                         "The previous response was empty. Follow the current task "
-                        "instructions and produce its next valid response now."
+                        "instructions and produce its next valid response now. The "
+                        "caller's turns are already in context: use what they have "
+                        "already told you, and never ask again for something they "
+                        "have answered."
                         if attempt == 0
                         else "The prior retry was also empty. This is the second "
                         "retry. Follow the current task instructions and produce "
-                        "its next non-empty valid response now."
+                        "its next non-empty valid response now, using what the "
+                        "caller has already said rather than asking again."
                     )
                 request_chat_ctx.items[instructions_index] = instructions.model_copy(
                     update={

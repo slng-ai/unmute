@@ -616,3 +616,87 @@ func TestToolAnnounceCapabilityRows(t *testing.T) {
 		}
 	}
 }
+
+// TestKnowledgeCapabilityRows: the agent-scoped kind is Core on both targets,
+// because both drivers emit a lowering. The task-scoped kind stays gated on
+// Pipecat, and for a different reason: a Pipecat task tool is a flows handler
+// holding a FlowManager rather than a decorated function holding
+// FunctionCallParams, which is the same seam FieldToolMCPTask records.
+//
+// The agent row started denied on Pipecat and was flipped on 2026-08-25 when the
+// lowering landed. It started that way because constitution 5.0.0 retired the
+// vapi and deepgram targets for the inverse condition: they validated, then
+// failed at compile with "driver is not implemented".
+//
+// internal/generate/knowledge_agreement_test.go asserts the same thing from the
+// emitter's side, so this row and the two lowerings cannot drift apart.
+func TestKnowledgeCapabilityRows(t *testing.T) {
+	table := Default()
+	// The two drivers that emit a runtime, named rather than ranged over: a third
+	// target that emits none must not quietly satisfy this by being added to
+	// Providers. slng is checked separately below, and refused.
+	for _, provider := range []Provider{LiveKit, Pipecat} {
+		if got := table.Capability(FieldToolKnowledge, provider); got.Tag != Core {
+			t.Errorf("%s on %s = %q, want %q", FieldToolKnowledge, provider, got.Tag, Core)
+		}
+	}
+	// slng emits a README and pushes a spec, so there is no image to carry the
+	// documents and no process to index them. Refused, with a reason, both scopes.
+	for _, f := range []Field{FieldToolKnowledge, FieldToolKnowledgeTask} {
+		got := table.Capability(f, Slng)
+		if got.Tag != Gated {
+			t.Errorf("%s on slng = %q, want %q: the target emits no runtime to search in", f, got.Tag, Gated)
+		}
+		if strings.TrimSpace(got.Note) == "" {
+			t.Errorf("%s is refused on slng with no note, so the author is told nothing", f)
+		}
+	}
+	if got := table.Capability(FieldToolKnowledgeTask, LiveKit); got.Tag != Core {
+		t.Errorf("task-scoped knowledge on livekit = %q, want %q", got.Tag, Core)
+	}
+	got := table.Capability(FieldToolKnowledgeTask, Pipecat)
+	if got.Tag != Gated {
+		t.Errorf("task-scoped knowledge on pipecat = %q, want %q", got.Tag, Gated)
+	}
+	if strings.TrimSpace(got.Note) == "" {
+		t.Error("task-scoped knowledge is gated on pipecat with no note, so the author is told nothing")
+	}
+}
+
+// TestEmbeddingServiceTable: every row carries the facts the emitted project and
+// the docs need, and the default resolves. The Verified date is not decoration:
+// CLAUDE.md requires provider claims to be checked against current official
+// documentation, and a row with no date cannot be audited.
+func TestEmbeddingServiceTable(t *testing.T) {
+	names := EmbeddingServiceNames()
+	if len(names) == 0 {
+		t.Fatal("no embedding services, so this test would pass for the wrong reason")
+	}
+	for _, name := range names {
+		service, ok := LookupEmbeddingService(name)
+		if !ok {
+			t.Fatalf("%s is listed but does not resolve", name)
+		}
+		if service.Name != name {
+			t.Errorf("%s: Name = %q", name, service.Name)
+		}
+		for label, value := range map[string]string{
+			"Model": service.Model, "PythonDep": service.PythonDep,
+			"PythonModule": service.PythonModule, "PythonClass": service.PythonClass,
+			"Docs": service.Docs, "Verified": service.Verified,
+		} {
+			if strings.TrimSpace(value) == "" {
+				t.Errorf("%s: %s is empty", name, label)
+			}
+		}
+		if !strings.HasPrefix(service.PythonDep, "llama-index-embeddings-") {
+			t.Errorf("%s: PythonDep = %q, want a llama-index-embeddings-* package", name, service.PythonDep)
+		}
+	}
+	if _, ok := LookupEmbeddingService(DefaultEmbeddingService); !ok {
+		t.Errorf("the default embedding service %q is not in the table", DefaultEmbeddingService)
+	}
+	if _, ok := LookupEmbeddingService("cohere"); ok {
+		t.Error("an unsupported service resolved")
+	}
+}

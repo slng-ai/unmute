@@ -1,8 +1,10 @@
 package ir
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -73,6 +75,8 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	if pkg.Agent.Tracing != nil {
 		out.Tracing = &Tracing{Provider: pkg.Agent.Tracing.Provider}
 	}
+	out.Knowledge = buildKnowledge(pkg)
+	out.Documents = pkg.Documents
 	for name, variable := range pkg.Agent.Variables {
 		out.Variables[name] = Variable{
 			Type: PrimitiveType(variable.Type), Default: variable.Default,
@@ -524,6 +528,8 @@ func buildTool(name string, raw packagespec.Tool) Tool {
 	case raw.Builtin != nil:
 		tool.Builtin = raw.Builtin.ID
 		tool.Instructions = raw.Builtin.Instructions
+	case raw.Knowledge != nil:
+		tool.KnowledgeBase = raw.Knowledge.Base
 	}
 	tool.Interruption = ToolInterruption(raw.Interruption)
 	if tool.Interruption == "" {
@@ -550,6 +556,64 @@ func buildTool(name string, raw packagespec.Tool) Tool {
 	// settled value and none has to decide what " " means.
 	tool.Announce = strings.TrimSpace(raw.Announce)
 	return tool
+}
+
+// buildKnowledge resolves the knowledge: section: the embedding-service default
+// lands here so every generator and the report read a settled value, and the file
+// list comes from what spec.Load actually read rather than from a second listing
+// of the folder.
+//
+// A base whose folder is missing arrives here with no files, and Validate refuses
+// it by name (FR-009). Build does not second-guess that: its job is to resolve,
+// not to judge.
+func buildKnowledge(pkg *packagespec.Package) map[string]KnowledgeBase {
+	if len(pkg.Agent.Knowledge) == 0 {
+		return nil
+	}
+	bases := make(map[string]KnowledgeBase, len(pkg.Agent.Knowledge))
+	for name, raw := range pkg.Agent.Knowledge {
+		embed := raw.Embed
+		if embed == "" {
+			embed = targetcap.DefaultEmbeddingService
+		}
+		prefix := path.Join("knowledge", name) + "/"
+		var files []string
+		for key := range pkg.Documents {
+			if rest, ok := strings.CutPrefix(key, prefix); ok {
+				files = append(files, rest)
+			}
+		}
+		slices.Sort(files)
+		bases[name] = KnowledgeBase{
+			Name: name, Documents: raw.Documents, Embed: embed, Files: files,
+			// Pointers, so `chunk_overlap: 0` survives as a choice rather than
+			// reading as unset.
+			ChunkSize:    intOr(raw.ChunkSize, DefaultChunkSize),
+			ChunkOverlap: intOr(raw.ChunkOverlap, DefaultChunkOverlap),
+			TopK:         intOr(raw.TopK, DefaultTopK),
+			Mode:         KnowledgeMode(cmp.Or(raw.Mode, string(DefaultKnowledgeMode))),
+			MinScore:     floatOr(raw.MinScore, 0),
+		}
+	}
+	return bases
+}
+
+// intOr resolves an optional authored int to a settled value, so every generator
+// and the compile report read a number rather than deciding what absent means.
+func intOr(authored *int, fallback int) int {
+	if authored == nil {
+		return fallback
+	}
+	return *authored
+}
+
+// floatOr is intOr for a float. Absent and zero mean the same thing for the one
+// field that uses it, so there is no pointer to preserve past this point.
+func floatOr(authored *float64, fallback float64) float64 {
+	if authored == nil {
+		return fallback
+	}
+	return *authored
 }
 
 // buildToolAuth resolves an auth block: the scheme's own default lands here so

@@ -15,10 +15,17 @@ type Agent struct {
 	// entry's Kind records its section (names are one namespace, N15).
 	Models map[string]ModelDef `json:"models" yaml:"models"`
 	// Listen/Turn are the resolved selection names into Models ("" = none).
-	Listen       string                `json:"listen,omitempty" yaml:"listen,omitempty"`
-	Turn         string                `json:"turn,omitempty" yaml:"turn,omitempty"`
-	Variables    map[string]Variable   `json:"variables,omitempty" yaml:"variables,omitempty"`
-	Secrets      []string              `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	Listen    string              `json:"listen,omitempty" yaml:"listen,omitempty"`
+	Turn      string              `json:"turn,omitempty" yaml:"turn,omitempty"`
+	Variables map[string]Variable `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Secrets   []string            `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	// Knowledge is the resolved knowledge: section, one entry per declared base.
+	Knowledge map[string]KnowledgeBase `json:"knowledge,omitempty" yaml:"knowledge,omitempty"`
+	// Documents holds each knowledge base document, keyed by its artifact path
+	// (knowledge/<base>/<file>). Excluded from both derived schemas, the same way
+	// Tool.HandlerSource is: it is file content travelling to the artifact
+	// writer, not a field an author writes or a debug reader wants to see.
+	Documents    map[string][]byte     `json:"-" yaml:"-"`
 	Agents       map[string]AgentDef   `json:"agents" yaml:"agents"`
 	Tasks        map[string]Task       `json:"tasks,omitempty" yaml:"tasks,omitempty"`
 	TaskGroups   map[string]TaskGroup  `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
@@ -35,6 +42,129 @@ type Agent struct {
 type Tracing struct {
 	Provider string `json:"provider" yaml:"provider"`
 }
+
+// KnowledgeBase is one resolved knowledge base: a folder of documents, the
+// service that embeds them, and the files found in it.
+//
+// There is no Passages field and no Passage type. Splitting happens at startup
+// inside the emitted project, so the compiler holds no opinion about passages;
+// precomputing them here would be a second source of truth that can disagree
+// with the documents it came from.
+type KnowledgeBase struct {
+	// Name is the authored name, which is also the artifact subfolder name and the
+	// key into the emitted module's settings. Validation has proven it is legal.
+	Name string `json:"name" yaml:"name"`
+	// Documents is the authored folder path, kept for the compile report.
+	Documents string `json:"documents" yaml:"documents"`
+	// Embed is the resolved embedding service, never empty after Build.
+	Embed string `json:"embed" yaml:"embed"`
+	// Files are the document file names found, sorted, so the report and the
+	// golden read the same way twice.
+	Files []string `json:"files,omitempty" yaml:"files,omitempty"`
+	// ChunkSize, ChunkOverlap and TopK are the resolved retrieval settings, never
+	// zero after Build applies the defaults. Held per base rather than globally
+	// because a price list and a prose policy want different passage sizes, which
+	// is the whole reason they are authorable.
+	ChunkSize    int `json:"chunk_size" yaml:"chunk_size"`
+	ChunkOverlap int `json:"chunk_overlap" yaml:"chunk_overlap"`
+	TopK         int `json:"top_k" yaml:"top_k"`
+	// Mode is the resolved retrieval mode, never empty after Build.
+	Mode KnowledgeMode `json:"mode" yaml:"mode"`
+	// MinScore is the authored cutoff, or 0 for none. Zero and absent mean the
+	// same thing here on purpose: a cutoff of 0 filters nothing, because every
+	// score is above it.
+	MinScore float64 `json:"min_score,omitempty" yaml:"min_score,omitempty"`
+}
+
+// The retrieval defaults, and the one place they are written.
+//
+// 90 tokens is roughly 360 characters or 65 words, so three of them is about 200
+// tokens of retrieved text per lookup. LlamaIndex's own default is 1024, which
+// would put a small essay in the model's context per result.
+//
+// These are defaults now rather than constants: measurement found that a price
+// list splits badly at 90 tokens, ranking an opening-hours passage above the
+// price a caller asked for. Recall at 3 still held, but that is luck at three
+// results rather than design, so the author can now say what their documents
+// look like.
+const (
+	DefaultChunkSize    = 90
+	DefaultChunkOverlap = 20
+	DefaultTopK         = 3
+
+	// MaxChunkSize and MaxTopK are sanity bounds, not provider limits. The real
+	// cost is what reaches the model: TopK * ChunkSize tokens per lookup, on a
+	// voice call where the whole latency budget is a few hundred milliseconds.
+	MaxChunkSize = 2048
+	MaxTopK      = 20
+	// TokenBudgetWarn is where a package earns a warning for how much retrieved
+	// text it sends the model per lookup. Not an error: a big budget is a real
+	// choice for a dense reference document, it is just rarely what someone meant.
+	TokenBudgetWarn = 1500
+)
+
+// KnowledgeMode is how a lookup searches.
+//
+// Three, because measurement found no single winner. Recall across five question
+// sets on the example corpus and a 200-page synthetic one:
+//
+//	                      adversarial  normal  paraphrase  big/verbatim  big/described
+//	KnowledgeMeaning        13/15       10/10    8/10         1/8           0/8
+//	KnowledgeKeyword        15/15       10/10    6/10         8/8           3/8
+//	KnowledgeHybrid         14/15       10/10    8/10         8/8           1/8
+//
+// Meaning wins paraphrase, which is what it is for. Keyword wins rare tokens and
+// scale, and costs no network call at all. Hybrid is best-or-tied on four of the
+// five, which is why it is the default.
+type KnowledgeMode string
+
+const (
+	// KnowledgeMeaning is dense vector search: it matches what a question means,
+	// so it finds a passage whose words the caller never said.
+	KnowledgeMeaning KnowledgeMode = "meaning"
+	// KnowledgeKeyword is BM25 over the passages: it matches the words themselves,
+	// ranked. It needs no embedding service, no credential and no network, which
+	// makes it the only mode that runs entirely offline.
+	KnowledgeKeyword KnowledgeMode = "keyword"
+	// KnowledgeHybrid runs both and interleaves them, so each gets slots the other
+	// cannot crowd out.
+	KnowledgeHybrid KnowledgeMode = "hybrid"
+
+	DefaultKnowledgeMode = KnowledgeHybrid
+)
+
+// KnowledgeModes is every legal value, in the order an error message lists them.
+var KnowledgeModes = []KnowledgeMode{KnowledgeMeaning, KnowledgeKeyword, KnowledgeHybrid}
+
+// Embeds reports whether the mode needs an embedding service at all. Keyword-only
+// retrieval does not, so such a package needs no credential, makes no network call
+// and installs no embeddings package.
+func (m KnowledgeMode) Embeds() bool { return m != KnowledgeKeyword }
+
+// Scores reports whether results carry a relevance score, which only the
+// meaning-based half produces. A min_score on a keyword-only base would filter
+// nothing, so validation says so rather than letting it look effective.
+func (m KnowledgeMode) Scores() bool { return m.Embeds() }
+
+// Keywords reports whether the mode ranks words directly, which is what needs
+// BM25. Only meaning-based retrieval does not, and such a package should neither
+// import the retriever nor install it.
+func (m KnowledgeMode) Keywords() bool { return m != KnowledgeMeaning }
+
+// MinScoreWarn is where a relevance cutoff starts costing real answers.
+//
+// Re-measured 2026-08-26 against SimpleVectorStore, on the salon corpus: 18
+// answerable questions against 5 off-topic ones. Everything up to and including
+// 0.25 keeps all 17 answers the corpus can actually produce; 0.30 loses two, 0.40
+// loses four, 0.50 loses seven. On mode: meaning, 0.25 also silences all 5
+// off-topic questions, which makes it the one value that costs nothing and buys
+// something. Observed similarities ran 0.211 to 0.623.
+//
+// So the useful band sits at or below this line. A warning rather than a limit,
+// because the band is a property of the author's corpus and not of the feature —
+// but a value above it is far more often a misunderstanding of the scale than a
+// deliberate choice.
+const MinScoreWarn = 0.25
 
 // TracingProviders is the allowlist both Build and Validate read, so the two
 // cannot drift into disagreeing about which providers exist.
@@ -372,9 +502,12 @@ type Tool struct {
 	Interruption ToolInterruption `json:"interruption,omitempty" yaml:"interruption,omitempty"`
 	Effect       ToolEffect       `json:"effect,omitempty" yaml:"effect,omitempty"`
 	// Announce is one fixed sentence spoken as the tool starts, so a slow call
-	// is not silence. Webhook and local only; blank means no announcement, so no
-	// driver has to interpret whitespace.
+	// is not silence. Webhook, local and knowledge only; blank means no
+	// announcement, so no driver has to interpret whitespace.
 	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
+	// KnowledgeBase names the base this tool searches (knowledge only).
+	// Validation has proven the name is declared.
+	KnowledgeBase string `json:"knowledge_base,omitempty" yaml:"knowledge_base,omitempty"`
 }
 
 type ToolExecution string
@@ -386,6 +519,7 @@ const (
 	ToolProviderHosted ToolExecution = "provider_hosted"
 	ToolBuiltin        ToolExecution = "builtin"
 	ToolMCP            ToolExecution = "mcp"
+	ToolKnowledge      ToolExecution = "knowledge"
 )
 
 // ToolAuth is a resolved webhook authentication scheme (SCHEMA §5). Defaults

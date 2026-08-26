@@ -190,6 +190,7 @@ type pipecatTool struct {
 	InputProps      string // Python literal: the input schema's properties object
 	InputRequired   string // Python literal: the input schema's required list
 	Builtin         string // execution: builtin — prebuilt registry id (bodyless end tool)
+	KnowledgeBase   string // execution: knowledge — the base this tool searches
 	Instructions    string // builtin end_call goodbye → developer message before EndFrame
 	EndsCall        bool
 	Interruption    string // "cancel" | "continue" | "" (provider default)
@@ -470,7 +471,10 @@ type pipecatData struct {
 	HasIsolated          bool // any isolated group (ContextStrategy RESET import)
 	NeedsLanguage        bool // any emitted service sets a language kwarg (Language enum import, N16)
 	Inline               bool // single agent, no bus: LLM inline in the pipeline (F3)
-	NeedsMCP             bool // any mcp tool source: MCPClient import + lifecycle (N40)
+	// Knowledge is the shared knowledge-module data: the declared bases and the
+	// deduplicated embedding imports across them.
+	Knowledge knowledgeData
+	NeedsMCP  bool // any mcp tool source: MCPClient import + lifecycle (N40)
 	// MCPParamsImports are the mcp.client.session_group parameter classes the
 	// emitted bot actually constructs, so the import lists neither less nor
 	// more than the file uses.
@@ -526,6 +530,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolLocal:            true, // @tool awaiting tools/<name>.py (T14, V13)
 	targetcap.FieldToolMCP:              true, // one MCPClient per source, started at setup (N40)
 	targetcap.FieldToolBuiltin:          true, // prebuilt end_call → bodyless end tool
+	targetcap.FieldToolKnowledge:        true, // knowledge.py + one decorated function per lookup
 	targetcap.FieldToolAuth:             true, // _bearer Authorization header off token_env
 	targetcap.FieldToolInterruption:     true, // cancel_on_interruption
 	targetcap.FieldToolAnnounce:         true, // TTSSpeakFrame queued before the handler body
@@ -637,6 +642,16 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 			return nil, err
 		}
 		files = append(files, File{Path: o.path, Content: content})
+	}
+	// The knowledge module is the shared one, rendered from templates/knowledge/
+	// rather than from this driver's tree: it has no framework in it, so a second
+	// copy would be a second owner of one surface.
+	if len(data.Knowledge.Knowledge) > 0 {
+		content, err := renderKnowledgeModule(data.Knowledge)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, File{Path: "knowledge.py", Content: content})
 	}
 	// Same set as the LiveKit driver's: secrets never reach the image, and a local
 	// `uv run` in this directory leaves a virtualenv behind that would otherwise

@@ -1977,7 +1977,8 @@ func TestValidatePipecatCloudWebsocketRefusesCallSources(t *testing.T) {
 
 // TestValidateToolAnnounceLegalExecutionOnly: the line needs a body to speak
 // before, so it follows inject's rule. Every other execution kind is refused by
-// tool name, and a webhook or local tool passes (FR-002).
+// tool name, and a webhook, local or knowledge tool passes (FR-002, and FR-029
+// for the third, which reuses this field rather than adding one).
 func TestValidateToolAnnounceLegalExecutionOnly(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -1986,6 +1987,7 @@ func TestValidateToolAnnounceLegalExecutionOnly(t *testing.T) {
 	}{
 		{"webhook", ToolWebhook, false},
 		{"local", ToolLocal, false},
+		{"knowledge", ToolKnowledge, false},
 		{"builtin", ToolBuiltin, true},
 		{"client", ToolClient, true},
 		{"provider_hosted", ToolProviderHosted, true},
@@ -1998,10 +2000,19 @@ func TestValidateToolAnnounceLegalExecutionOnly(t *testing.T) {
 			if tc.execution == ToolLocal {
 				tool.Handler, tool.URLEnv = "tools/lookup_customer.py", ""
 			}
+			if tc.execution == ToolKnowledge {
+				tool.URLEnv, tool.Input, tool.Output = "", nil, nil
+				tool.KnowledgeBase = "refunds"
+				agent.Knowledge = map[string]KnowledgeBase{
+					"refunds": {Name: "refunds", Documents: "knowledge/refunds", Embed: "openai", Files: []string{"policy.pdf"},
+						Mode: DefaultKnowledgeMode, ChunkSize: DefaultChunkSize, ChunkOverlap: DefaultChunkOverlap, TopK: DefaultTopK},
+				}
+				agent.Secrets = append(agent.Secrets, "OPENAI_API_KEY")
+			}
 			agent.Tools["lookup_customer"] = tool
 			report, _ := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
 			joined := strings.Join(report.PerTarget[0].Errors, "\n")
-			const want = `tool "lookup_customer" announce is legal for webhook and local execution only`
+			const want = `tool "lookup_customer" announce is legal for webhook, local and knowledge execution only`
 			if got := strings.Contains(joined, want); got != tc.wantError {
 				t.Errorf("announce refused = %v, want %v: %#v", got, tc.wantError, report.PerTarget[0].Errors)
 			}
@@ -2621,5 +2632,388 @@ func TestValidateEndpointingDelayLiveKitFloor(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// knowledgeAgent is a package with one knowledge base and one tool searching it,
+// which every case below then breaks one way.
+func knowledgeAgent(t *testing.T) *Agent {
+	t.Helper()
+	agent := safeAgent(t)
+	agent.Knowledge = map[string]KnowledgeBase{
+		"refunds": {Name: "refunds", Documents: "knowledge/refunds", Embed: "openai", Files: []string{"policy.pdf"},
+			Mode: DefaultKnowledgeMode, ChunkSize: DefaultChunkSize, ChunkOverlap: DefaultChunkOverlap, TopK: DefaultTopK},
+	}
+	agent.Secrets = append(agent.Secrets, "OPENAI_API_KEY")
+	slices.Sort(agent.Secrets)
+	tool := agent.Tools["lookup_customer"]
+	tool.Execution, tool.KnowledgeBase = ToolKnowledge, "refunds"
+	tool.URLEnv, tool.Input, tool.Output, tool.Handler = "", nil, nil, ""
+	tool.Description = "Look up the salon's refund policy."
+	agent.Tools["lookup_customer"] = tool
+	return agent
+}
+
+// TestValidateKnowledgeCompileErrors walks every compile-time message in
+// contracts/authoring.md. Each case asserts the message names the offending value
+// and, where there is a legal set, lists it: an error that says only "invalid"
+// makes the author guess, which is the failure Fail Loud exists to prevent.
+func TestValidateKnowledgeCompileErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		break_ func(*Agent)
+		want   []string
+	}{
+		{
+			// FR-012. The declared list is in the message so the author can see
+			// the name they meant to type.
+			name: "undeclared base",
+			break_: func(a *Agent) {
+				tool := a.Tools["lookup_customer"]
+				tool.KnowledgeBase = "refund"
+				a.Tools["lookup_customer"] = tool
+			},
+			want: []string{`"lookup_customer"`, `"refund"`, "not declared", "declared: refunds"},
+		},
+		{
+			name:   "no knowledge section at all",
+			break_: func(a *Agent) { a.Knowledge = nil },
+			want:   []string{`"refunds"`, "no knowledge: section is declared"},
+		},
+		{
+			// FR-009. Build leaves Files empty for a folder that is missing or
+			// holds nothing readable, so both arrive here as the same case.
+			name:   "folder holds nothing readable",
+			break_: func(a *Agent) { base := a.Knowledge["refunds"]; base.Files = nil; a.Knowledge["refunds"] = base },
+			want:   []string{`"refunds"`, `"knowledge/refunds"`, "no file of a supported type", ".pdf"},
+		},
+		{
+			name:   "documents missing",
+			break_: func(a *Agent) { base := a.Knowledge["refunds"]; base.Documents = ""; a.Knowledge["refunds"] = base },
+			want:   []string{`"refunds"`, "documents is required"},
+		},
+		{
+			// FR-011, and the message lists what is supported because the author
+			// cannot be expected to guess the spelling of a service.
+			name:   "unknown embed",
+			break_: func(a *Agent) { base := a.Knowledge["refunds"]; base.Embed = "cohere"; a.Knowledge["refunds"] = base },
+			want:   []string{`"refunds"`, `"cohere"`, "supported: bedrock, gemini, huggingface, openai"},
+		},
+		{
+			// FR-016. The name is printed; the value never is, because there is
+			// no value here to print.
+			name: "credential not declared",
+			break_: func(a *Agent) {
+				a.Secrets = slices.DeleteFunc(a.Secrets, func(s string) bool { return s == "OPENAI_API_KEY" })
+			},
+			want: []string{`"refunds"`, `"openai"`, "OPENAI_API_KEY in secrets:"},
+		},
+		{
+			// A two-character name is refused for readability: it names a folder,
+			// a settings key and every log line about the base. It was Chroma's
+			// own rule before that store was dropped, and the bound outlived it.
+			name: "name too short",
+			break_: func(a *Agent) {
+				a.Knowledge = map[string]KnowledgeBase{"hr": {Name: "hr", Documents: "knowledge/hr", Embed: "openai", Files: []string{"a.md"},
+					Mode: DefaultKnowledgeMode, ChunkSize: DefaultChunkSize, ChunkOverlap: DefaultChunkOverlap, TopK: DefaultTopK}}
+				tool := a.Tools["lookup_customer"]
+				tool.KnowledgeBase = "hr"
+				a.Tools["lookup_customer"] = tool
+			},
+			want: []string{`"hr"`, "3 to 64 characters of [a-z0-9_]"},
+		},
+		{
+			name: "name has illegal characters",
+			break_: func(a *Agent) {
+				a.Knowledge = map[string]KnowledgeBase{"Refund Policy": {Name: "Refund Policy", Documents: "kb", Embed: "openai", Files: []string{"a.md"},
+					Mode: DefaultKnowledgeMode, ChunkSize: DefaultChunkSize, ChunkOverlap: DefaultChunkOverlap, TopK: DefaultTopK}}
+				tool := a.Tools["lookup_customer"]
+				tool.KnowledgeBase = "Refund Policy"
+				a.Tools["lookup_customer"] = tool
+			},
+			want: []string{`"Refund Policy"`, "3 to 64 characters of [a-z0-9_]"},
+		},
+		{
+			// spec.Load refuses these with a line number, so reaching validation
+			// means the IR was built in code. The message still has to be right.
+			name: "input on a knowledge tool",
+			break_: func(a *Agent) {
+				tool := a.Tools["lookup_customer"]
+				tool.Input = map[string]any{"type": "object"}
+				a.Tools["lookup_customer"] = tool
+			},
+			want: []string{`"lookup_customer"`, "takes no input or output", "owns its own schema"},
+		},
+		{
+			name: "base on a webhook tool",
+			break_: func(a *Agent) {
+				tool := a.Tools["escalate"]
+				tool.KnowledgeBase = "refunds"
+				a.Tools["escalate"] = tool
+			},
+			want: []string{`"escalate"`, "base is legal for knowledge execution only"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := knowledgeAgent(t)
+			tc.break_(agent)
+			report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+			if err == nil {
+				t.Fatalf("want a validation failure, got none: %#v", report.PerTarget[0].Errors)
+			}
+			joined := strings.Join(report.PerTarget[0].Errors, "\n")
+			for _, want := range tc.want {
+				if !strings.Contains(joined, want) {
+					t.Errorf("message must contain %q, got:\n%s", want, joined)
+				}
+			}
+		})
+	}
+}
+
+// TestValidateKnowledgeAccepted: the shape in contracts/authoring.md compiles,
+// including two bases where only one is searched by any one tool, and no
+// credential is ever printed as a value.
+func TestValidateKnowledgeAccepted(t *testing.T) {
+	agent := knowledgeAgent(t)
+	if _, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default()); err != nil {
+		t.Fatalf("the documented shape must compile: %v", err)
+	}
+	if got := agent.Knowledge["refunds"].Embed; got != "openai" {
+		t.Errorf("embed = %q, want the resolved default", got)
+	}
+}
+
+// TestValidateKnowledgeUnusedWarns: declared and never searched is a warning and
+// exit 0, not a failure. It is worth saying because every process start reads and
+// embeds it, so the cost is real even though the package runs.
+func TestValidateKnowledgeUnusedWarns(t *testing.T) {
+	agent := knowledgeAgent(t)
+	agent.Knowledge["archive"] = KnowledgeBase{Name: "archive", Documents: "knowledge/archive", Embed: "openai", Files: []string{"old.md"},
+		Mode: DefaultKnowledgeMode, ChunkSize: DefaultChunkSize, ChunkOverlap: DefaultChunkOverlap, TopK: DefaultTopK}
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	if err != nil {
+		t.Fatalf("an unused knowledge base must not fail the build: %v", err)
+	}
+	joined := strings.Join(report.PerTarget[0].Warnings, "\n")
+	for _, want := range []string{"archive", "embedded at every start and never read"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("warning must contain %q, got:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "refunds") {
+		t.Errorf("the base a tool does use must not be warned about:\n%s", joined)
+	}
+}
+
+// TestValidateKnowledgeOnBothTargets holds FR-013 from the validation side.
+//
+// Both targets now accept a knowledge tool, because both drivers emit one. The
+// agent-scoped row was denied on Pipecat until 2026-08-25, which was the point:
+// constitution 5.0.0 retired the vapi and deepgram targets for validating what
+// could not compile, so this kind stayed closed on Pipecat until its lowering
+// existed.
+//
+// The task-scoped row is still gated on Pipecat, for a different reason: a task
+// tool there is a flows handler holding a FlowManager, not a decorated function.
+// That refusal has to name the target and say why.
+func TestValidateKnowledgeOnBothTargets(t *testing.T) {
+	for _, provider := range []Provider{ProviderLiveKit, ProviderPipecat} {
+		agent := knowledgeAgent(t)
+		if _, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default()); err != nil {
+			t.Errorf("a knowledge tool must compile on %s: %v", provider, err)
+		}
+	}
+
+	agent := knowledgeAgent(t)
+	agent.Tasks = map[string]Task{
+		"verify": {Instructions: "Verify the caller.", Tools: []string{"lookup_customer"}},
+	}
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	if err == nil {
+		t.Fatal("a knowledge tool scoped to a Pipecat task must be refused")
+	}
+	joined := strings.Join(report.PerTarget[0].Errors, "\n")
+	if !strings.Contains(joined, "scope a knowledge tool to a task") {
+		t.Errorf("the refusal must say what to do instead, got:\n%s", joined)
+	}
+}
+
+// TestValidateKnowledgeRetrievalSettings: every bound here is something that
+// actually breaks, not a matter of taste.
+//
+// SentenceSplitter refuses chunk_size <= 0 with a pydantic ValidationError, and
+// refuses an overlap larger than the size with "Got a larger chunk overlap (25)
+// than chunk size (20), should be smaller." Both measured against llama-index on
+// 2026-08-26. Catching them at compile is the difference between an authoring
+// error and a container that will not start.
+func TestValidateKnowledgeRetrievalSettings(t *testing.T) {
+	set := func(a *Agent, size, overlap, topK int) {
+		base := a.Knowledge["refunds"]
+		base.ChunkSize, base.ChunkOverlap, base.TopK = size, overlap, topK
+		a.Knowledge["refunds"] = base
+	}
+	for _, tc := range []struct {
+		name                string
+		size, overlap, topK int
+		want                []string
+	}{
+		{"chunk_size zero", 0, 0, 3, []string{"chunk_size must be at least 1 token", "got 0"}},
+		{"chunk_size negative", -5, 0, 3, []string{"chunk_size must be at least 1 token"}},
+		{"chunk_size too large", MaxChunkSize + 1, 20, 3, []string{"above the", "token limit"}},
+		{"overlap negative", 90, -1, 3, []string{"chunk_overlap cannot be negative"}},
+		// The splitter's own refusal, caught earlier.
+		{"overlap larger than size", 90, 91, 3, []string{"chunk_overlap 91 is larger than chunk_size 90", "which the splitter refuses"}},
+		{"top_k zero", 90, 20, 0, []string{"top_k must be at least 1", "no reason to exist"}},
+		{"top_k too large", 90, 20, MaxTopK + 1, []string{"top_k", "above the limit"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := knowledgeAgent(t)
+			set(agent, tc.size, tc.overlap, tc.topK)
+			report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+			if err == nil {
+				t.Fatalf("want a failure, got none: %#v", report.PerTarget[0].Errors)
+			}
+			joined := strings.Join(report.PerTarget[0].Errors, "\n")
+			for _, want := range tc.want {
+				if !strings.Contains(joined, want) {
+					t.Errorf("message must contain %q, got:\n%s", want, joined)
+				}
+			}
+		})
+	}
+
+	// Legal edges. Overlap equal to size is accepted by the splitter, so it is
+	// accepted here: a bound that is stricter than the thing it protects turns a
+	// working package into a refused one.
+	for _, tc := range []struct {
+		name                string
+		size, overlap, topK int
+	}{
+		{"defaults", DefaultChunkSize, DefaultChunkOverlap, DefaultTopK},
+		{"no overlap at all", 90, 0, 3},
+		{"overlap equal to size", 40, 40, 1},
+		{"a wide window for a price list", 220, 40, 3},
+		{"the upper bounds", MaxChunkSize, 0, MaxTopK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := knowledgeAgent(t)
+			set(agent, tc.size, tc.overlap, tc.topK)
+			if _, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default()); err != nil {
+				t.Errorf("chunk_size %d overlap %d top_k %d must compile: %v", tc.size, tc.overlap, tc.topK, err)
+			}
+		})
+	}
+}
+
+// TestKnowledgeDefaultsAreAppliedAtBuild: an absent field resolves, and an
+// authored zero survives.
+//
+// The pointer types exist for the second half. `chunk_overlap: 0` is a legal
+// choice — no overlap at all — and a plain int would make it indistinguishable
+// from "unset", so Build would silently replace it with 20.
+func TestKnowledgeDefaultsAreAppliedAtBuild(t *testing.T) {
+	pkg := loadSafeCore(t)
+	zero := 0
+	pkg.Agent.Knowledge = map[string]packagespec.KnowledgeDef{
+		"defaulted": {Documents: "kb"},
+		"explicit":  {Documents: "kb", ChunkOverlap: &zero},
+	}
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := agent.Knowledge["defaulted"]
+	if got.ChunkSize != DefaultChunkSize || got.ChunkOverlap != DefaultChunkOverlap || got.TopK != DefaultTopK {
+		t.Errorf("defaults not applied: %+v", got)
+	}
+	if explicit := agent.Knowledge["explicit"]; explicit.ChunkOverlap != 0 {
+		t.Errorf("an authored chunk_overlap of 0 was replaced by the default: %+v", explicit)
+	}
+}
+
+// TestKnowledgeBudgetWarns: top_k and chunk_size are two small numbers that
+// multiply into the model's context on every lookup, during a phone call. A large
+// product is a legitimate choice for a dense reference document, so this warns
+// and the build succeeds.
+func TestKnowledgeBudgetWarns(t *testing.T) {
+	agent := knowledgeAgent(t)
+	base := agent.Knowledge["refunds"]
+	base.ChunkSize, base.TopK = 500, 8 // 4000 tokens a lookup
+	agent.Knowledge["refunds"] = base
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	if err != nil {
+		t.Fatalf("a large budget is a choice, not an error: %v", err)
+	}
+	joined := strings.Join(report.PerTarget[0].Warnings, "\n")
+	for _, want := range []string{"refunds", "top_k 8", "chunk_size 500", "4000 tokens"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("warning must contain %q, got:\n%s", want, joined)
+		}
+	}
+	// And the default package does not warn, or the warning is noise.
+	plain := knowledgeAgent(t)
+	quiet, err := Validate(plain, []Target{targetFor(plain, ProviderLiveKit)}, targetcap.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(quiet.PerTarget[0].Warnings, "\n"), "retrieved text per lookup") {
+		t.Error("the defaults must not warn")
+	}
+}
+
+// TestValidateKnowledgeMinScore: the range is 0 to 1, and a value above the
+// measured-useful band warns rather than failing.
+//
+// It warns because the failure is silent. A cutoff set too high produces no error
+// and no empty-index message; the agent simply says it does not know, on every
+// question. And the scale is not what most people expect: these are similarity
+// scores, measured 0.207 to 0.446 on the example corpus, so a value like 0.9 —
+// which reads like a confident probability — returns nothing at all.
+func TestValidateKnowledgeMinScore(t *testing.T) {
+	set := func(a *Agent, score float64) {
+		base := a.Knowledge["refunds"]
+		base.MinScore = score
+		a.Knowledge["refunds"] = base
+	}
+	for _, score := range []float64{-0.1, 1.5} {
+		agent := knowledgeAgent(t)
+		set(agent, score)
+		report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+		if err == nil {
+			t.Fatalf("min_score %g must be refused", score)
+		}
+		if !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "min_score must be between 0 and 1") {
+			t.Errorf("min_score %g: %v", score, report.PerTarget[0].Errors)
+		}
+	}
+	// Inside the useful band: accepted, and quiet.
+	for _, score := range []float64{0, 0.15, 0.2, MinScoreWarn} {
+		agent := knowledgeAgent(t)
+		set(agent, score)
+		report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+		if err != nil {
+			t.Errorf("min_score %g must compile: %v", score, err)
+			continue
+		}
+		if strings.Contains(strings.Join(report.PerTarget[0].Warnings, "\n"), "min_score above") {
+			t.Errorf("min_score %g is inside the measured band and must not warn", score)
+		}
+	}
+	// Above it: accepted, and loud. 0.9 is the value a reader who thinks these are
+	// probabilities reaches for, so it is the case worth naming.
+	for _, score := range []float64{0.4, 0.9} {
+		agent := knowledgeAgent(t)
+		set(agent, score)
+		report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+		if err != nil {
+			t.Fatalf("min_score %g is the author's call, not an error: %v", score, err)
+		}
+		joined := strings.Join(report.PerTarget[0].Warnings, "\n")
+		for _, want := range []string{"min_score above", "dropping real answers", "similarity scores, not probabilities"} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("min_score %g: warning must contain %q, got:\n%s", score, want, joined)
+			}
+		}
 	}
 }

@@ -19,6 +19,42 @@ var updateLiveKitV1 = flag.Bool("update-livekit", false, "rewrite the livekit v1
 // TestLiveKitV1RemyGolden emits the Remy example (agent handoff + task groups +
 // the SLNG plugin) to LiveKit and compares the full file set byte-for-byte
 // (driver-livekit T8/T9/T10, V11/V12). Zero Python.
+// TestLiveKitTaskRetryDoesNotRestartTheScript holds a repetition seen on a live
+// call.
+//
+// When a task's response comes back empty the emitted code retries, and the retry
+// instruction used to say only "follow the current task instructions and produce
+// its next valid response". Pointed at the script rather than the conversation, the
+// model restarted it: the caller had already said "tomorrow if possible" and was
+// asked "what day would you like?" a second time.
+//
+// The caller's turns are in the copied context throughout, so this is purely a
+// wording defect, and wording is exactly what no other gate here reads.
+func TestLiveKitTaskRetryDoesNotRestartTheScript(t *testing.T) {
+	agent := salonAgent(t)
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	py := artifactFile(t, artifact, "agent.py")
+	if !strings.Contains(py, "task response was empty; retrying") {
+		t.Fatal("the empty-response retry must exist: without it a task turn goes silent")
+	}
+	// Each of the three recovery strings by its own distinctive phrase: the first
+	// attempt, the second, and the post-tool case. Counting a common word like
+	// "already" would pass on unrelated prose elsewhere in the file, which is a
+	// gate that looks like coverage and is not.
+	for _, want := range []string{
+		"never ask again for something they",
+		"rather than asking again",
+		"using what the caller has already told you",
+	} {
+		if !strings.Contains(py, want) {
+			t.Errorf("a retry instruction must forbid re-asking: missing %q", want)
+		}
+	}
+}
+
 func TestLiveKitV1RemyGolden(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {

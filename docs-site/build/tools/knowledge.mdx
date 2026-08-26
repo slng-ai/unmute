@@ -1,0 +1,383 @@
+---
+title: "Knowledge bases"
+description: "Point a tool at a folder of your own documents, and the agent answers from them instead of guessing."
+---
+
+You have policies, price lists, or manuals, and you want the agent to quote them
+rather than invent something close. Put the documents in a folder, name the folder
+in `agent.yaml`, and give an agent a tool that searches it.
+
+```yaml agent.yaml
+knowledge:
+  policies:
+    documents: knowledge/policies
+  pricing:
+    documents: knowledge/pricing
+```
+
+```yaml tools/look_up_policy.yaml
+description: >-
+  Look up the company's refund and complaints policy. Use this before you state
+  any refund, replacement, timescale, or goodwill offer, so you quote the policy
+  instead of guessing it.
+announce: "Let me check the policy."
+knowledge:
+  base: policies
+```
+
+Then attach the tool to the agents that should see that folder:
+
+```yaml agent.yaml
+agents:
+  complaint_specialist:
+    tools:
+      - look_up_policy
+```
+
+That is the whole surface. Everything below is optional tuning.
+
+## Which agent sees which documents
+
+**An agent reaches a knowledge base by being given its tool.** There is no allow
+list and nothing else to configure.
+
+So a tool on the wrong agent is a real leak, not an untidiness: an agent given
+`look_up_policy` can quote refund policy to anyone it talks to. Two tools over one
+base is fine and normal; the same tool on every agent means every agent can quote
+that folder.
+
+## The `knowledge:` section
+
+| Field | Required | Default | Rule |
+|---|---|---|---|
+| map key | yes | — | 3 to 64 characters of `[a-z0-9_]`. It becomes the search collection's name, and the folder name inside the build |
+| `documents` | yes | — | folder path relative to the package root |
+| `embed` | no | `openai` | one of the [embedding models](#embedding-models) below |
+| `mode` | no | `hybrid` | `meaning`, `keyword`, or `hybrid` |
+| `chunk_size` | no | `90` | passage size in **tokens**, 1 to 2048 |
+| `chunk_overlap` | no | `20` | tokens two neighbouring passages share; 0 or more, and never larger than `chunk_size` |
+| `top_k` | no | `3` | how many passages a lookup returns, 1 to 20 |
+| `min_score` | no | none | drop results scoring below this, 0 to 1. Read [Filtering by score](#filtering-by-score) before setting it |
+
+Every field is **per base**, because different documents want different treatment.
+A folder of prose and a folder of price rows can sit in the same package with
+different settings.
+
+## How the search works
+
+Three modes, and they answer different kinds of question.
+
+### `mode: meaning`
+
+Vector search. Each passage and each caller question is turned into a vector by an
+embedding model, and the passages closest to the question win.
+
+What it is for: **the caller's words and the document's words are different.**
+Someone asks "when will the money land back in my account" and the document says
+"five to seven working days". They share no distinctive word, so nothing that
+matches on words can find it. This is the case vector search exists for.
+
+Where it struggles: an exact string. A reference code, a surname, a part number, a
+price read off a letter. It also gets weaker as a corpus grows, because more
+passages of similar prose means more near neighbours competing with the right one.
+
+Needs an embedding model, so it needs a credential and one network call per lookup.
+
+### `mode: keyword`
+
+BM25, a ranking function over the words themselves. A word the caller says is
+matched against the words in each passage, with rarer words counting for more.
+Stemming is included, so a question about "closing" still matches a passage that
+says "closed".
+
+What it is for: **the caller says the exact thing.** Codes, names, model numbers,
+prices. It also holds up as a corpus grows, because a rare word stays rare.
+
+Where it struggles: paraphrase. Nothing that matches on words can bridge two ways
+of saying the same thing.
+
+**`keyword` needs nothing.** No embedding model, no credential in `secrets:`, no
+network call, and the emitted image installs no embeddings package. A lookup is
+local memory access rather than a round trip, and the index builds in a fraction
+of the time an embedded one takes. If your documents cannot be sent to a third
+party, this is the mode that answers that.
+
+```yaml
+knowledge:
+  policies:
+    documents: knowledge/policies
+    mode: keyword          # offline, instant, no key
+```
+
+A `keyword` base produces **no relevance scores**. BM25 scores sit on a different
+scale from vector similarities, and giving the model two incomparable numbers in
+one field would be worse than giving it none. `min_score` on a `keyword` base is
+refused at compile rather than silently doing nothing.
+
+### `mode: hybrid` (the default)
+
+Both, run separately and interleaved, so each half gets slots the other cannot
+take. A question that only paraphrase can answer and a question that only an exact
+term can answer both work, without you deciding in advance which kind your callers
+will ask.
+
+This is the default because it is rarely the wrong answer. It needs an embedding
+model, the same as `meaning`.
+
+### Choosing
+
+| Your situation | Mode |
+|---|---|
+| Not sure yet | leave `mode` out, which gives `hybrid` |
+| Callers paraphrase, and your documents use different words than they do | `meaning` |
+| Callers quote codes, names, prices, part numbers | `keyword` |
+| Documents cannot leave your infrastructure | `keyword` |
+| You want no per-lookup network call | `keyword` |
+
+## Sizing the passages
+
+A document is split into passages before anything is searched, and a lookup
+returns whole passages. Three fields control that.
+
+`chunk_size` is how big a passage is, in tokens. Small passages are precise and
+can cut a fact in half. Large passages keep a fact whole and dilute it with
+neighbouring text.
+
+`chunk_overlap` is how much two neighbouring passages share, so a sentence cut
+across a boundary is still whole in one of them. Roughly a fifth of `chunk_size`
+is a reasonable starting point. `0` is legal and means no overlap at all.
+
+`top_k` is how many passages come back.
+
+| Your documents | Try |
+|---|---|
+| Prose: policies, manuals, FAQs | the defaults |
+| Lists: prices, opening hours, specifications | a wider `chunk_size`, 200 to 300, so a row stays with its own value |
+| Dense reference a caller quotes from | a wider `chunk_size`, and consider `top_k: 5` |
+
+The list case is the one that bites. At a narrow `chunk_size` a table of prices
+splits mid row, so the name of a service lands in one passage and its price in the
+next, and a question about the price ranks something else above it. Widening the
+window keeps each row with its own value:
+
+```yaml
+knowledge:
+  policies:
+    documents: knowledge/policies      # prose: the defaults are right
+  pricing:
+    documents: knowledge/pricing
+    chunk_size: 220                    # a price list: keep a row whole
+    chunk_overlap: 40
+```
+
+**`top_k` times `chunk_size` is what reaches the model on every lookup.** That is
+tokens on the way in and latency on every call, during a live conversation. Above
+about 1500 tokens the compiler warns:
+
+```text
+warning: livekit: knowledge base sends the model a lot of retrieved text per
+  lookup, which costs latency on every call: policies (top_k 8 x chunk_size 500
+  = about 4000 tokens)
+```
+
+A warning, not an error. A big budget is a real choice for a dense document. Raise
+one of the two rather than both.
+
+## Filtering by score
+
+`min_score` drops results scoring below it. It is **absent by default**, so nothing
+is filtered unless you ask for it.
+
+**These are similarity scores, not probabilities.** That is the whole difficulty
+with the field. They look like confidence values, so `0.9` reads like "only very
+good matches", when in practice scores land well below 1 and a cutoff that high
+returns nothing at all. A genuine answer and an off-topic question are separated by
+a much smaller gap than the 0 to 1 range suggests.
+
+Above `0.25` the compiler warns:
+
+```text
+warning: livekit: knowledge base sets min_score above 0.25, which starts dropping
+  real answers: policies (min_score 0.9). These are similarity scores, not
+  probabilities: in practice they land well below 1, so a cutoff near 1 returns
+  nothing at all. Check it against your own documents before shipping
+```
+
+<Warning>
+**`min_score` is a `mode: meaning` tool.** On `hybrid` the keyword half returns
+passages with no score, and a result with no score survives any cutoff. So on
+`hybrid` a cutoff can take real answers away and cannot reduce noise. On `keyword`
+it is refused at compile, because there are no comparable scores to compare.
+</Warning>
+
+Two behaviours worth knowing:
+
+- **An exact-term hit survives any cutoff**, because it has no score to compare.
+  It was found because the caller said a rare word verbatim, which is better
+  evidence than a similarity number.
+- **Every drop is logged**, with a count and never the question. Without that, a
+  cutoff set too high makes the agent say it does not know on every question with
+  nothing anywhere to explain why.
+
+**Set it against your own documents.** The useful band is a property of a corpus,
+not of the feature, and it moves when you change the documents or the passage size.
+Widening `chunk_size` does not move it the way you would expect: fewer, longer
+passages is fewer chances to match, so the weakest genuine score can stay where it
+is while an answer disappears entirely.
+
+Even with a cutoff, the tool still tells the model that results may not answer the
+question. A surviving result is not the same as an answer.
+
+## Embedding models
+
+`embed:` chooses the model that turns documents and questions into vectors. It
+applies to `meaning` and `hybrid`; `keyword` embeds nothing and ignores it.
+
+| `embed:` | Model | Credential to declare in `secrets:` |
+|---|---|---|
+| `openai` *(default)* | `text-embedding-3-small` | `OPENAI_API_KEY` |
+| `gemini` | `gemini-embedding-2-preview` | `GEMINI_API_KEY` |
+| `huggingface` | `BAAI/bge-small-en-v1.5` | `HF_TOKEN` |
+| `bedrock` | `cohere.embed-english-v3` | the AWS credential chain |
+
+Switching is one line, and it is per base, so two bases in the same package can use
+different services:
+
+```yaml agent.yaml
+knowledge:
+  policies:
+    documents: knowledge/policies
+    embed: gemini
+  pricing:
+    documents: knowledge/pricing
+    mode: keyword          # embeds nothing, so embed: is not read here
+
+secrets:
+  - GEMINI_API_KEY
+```
+
+Naming a different service changes nothing else. The same documents, the same tool,
+the same results shape. The emitted project installs the client for the services
+you actually name, and nothing for the ones you do not.
+
+Two rules the compiler enforces for you. An `embed:` value outside that table is
+refused with the supported list. A service that needs a credential and does not
+find it in `secrets:` is refused too, at compile, rather than failing when the
+agent starts.
+
+`bedrock` is the one that does not name a variable. It authenticates through the
+AWS credential chain, so `boto3` resolves an access key pair, a profile, a role or
+an instance identity, and a region, in its own order. Nothing has to be listed in
+`secrets:` for it, and nothing is checked at startup, because there is no single
+check that would be right for all of those paths.
+
+`huggingface` is the hosted Inference API, not a model running inside your image.
+All four services are network calls.
+
+Documents are sent to the chosen service once, when the agent starts, and each
+caller question is sent on each lookup. If that is not allowed for your documents,
+use `mode: keyword`, which sends nothing anywhere.
+
+## Skip the startup embedding
+
+By default every worker process embeds the documents when it starts. That is
+correct, and it is per process rather than per deployment, so it is paid again on
+every scale-up. On a large corpus it is the difference between a process that is
+ready immediately and one that spends seconds indexing first.
+
+Building with `KNOWLEDGE_BAKE=1` does the embedding once, at image build time, and
+every process then loads the finished index from disk:
+
+```sh
+docker build --build-arg KNOWLEDGE_BAKE=1 \
+  --secret id=OPENAI_API_KEY,env=OPENAI_API_KEY .
+```
+
+Startup drops to a disk read, and the answers are identical. The generated
+`README.md` prints the exact command for your package, with the credential your
+embedding service needs.
+
+<Note>
+The credential arrives as a **build secret**, so it is never written into an image
+layer. Both flags are needed: the build argument is what puts the decision in
+Docker's cache key, and without it a build that once ran without the secret would
+keep reusing that layer and silently skip the bake.
+</Note>
+
+A lookup still embeds the caller's question, so the run time needs the same
+credential whether or not you bake. This removes the document cost, not the query
+cost. Leave the flags off and the image still works: the startup log says it is
+embedding instead, so the cost is never silent.
+
+**Rebuild the image when the documents or the retrieval fields change.** A baked
+index records the settings it was built under, and a mismatch is refused at startup
+rather than answered from the wrong passages.
+
+## The `knowledge:` block on a tool
+
+| Field | Required | Rule |
+|---|---|---|
+| `base` | yes | the name of a knowledge base declared in `knowledge:` |
+
+Legal beside it: `description`, `announce`, `interruption`.
+
+Refused beside it: `input`, `output`, `inject`, `effect`. The tool owns both sides
+of its contract, it takes one string, the caller's question, and returns passages,
+so there is nothing for those to describe.
+
+**Write a real `description`.** It is the only thing that tells the model when to
+look something up instead of answering from memory. Say what is in the folder and
+when to check it. **Write an `announce` too**: a lookup takes a moment, and silence
+sounds like a dropped call.
+
+## Document formats
+
+| Format | Note |
+|---|---|
+| `.txt` | read as written |
+| `.md` | read as written, markup included |
+| `.pdf` | text is extracted at startup. A PDF with no text layer is named and skipped **then**, not at compile time |
+
+Anything else in the folder is ignored without comment, so a `.DS_Store` or a
+stray image is not an error.
+
+## What happens, and when
+
+| When | What |
+|---|---|
+| `unmute compile` | checks the folder exists and holds a supported file, copies the documents into `build/<target>/knowledge/<name>/` byte for byte, and prints one line per base |
+| Agent startup | reads the documents, splits them into passages, indexes them, and holds the index in memory |
+| Each lookup | searches the index. No file is read and nothing is re-indexed |
+
+**Content is fixed until the next compile.** Editing a PDF in your package changes
+nothing in a running agent, or in a deployed one, until you compile and deploy
+again.
+
+A base that no tool searches is a warning at compile, not an error, because it is
+read and indexed at every start and never queried. A base where no document yields
+any text stops the deployment, the same as a missing credential. A lookup that
+fails mid-call does **not** end the call: the agent is told the lookup is
+unavailable and says so, and the reason goes to the process log rather than into
+the model's context, because a model handed a provider error can read it aloud.
+
+Indexing happens before the agent takes calls, so a caller never waits for it. It
+runs once per worker process, so every worker indexes the whole corpus at start:
+more workers means more startup work, with the same content in each. That is what
+[baking](#skip-the-startup-embedding) removes.
+
+## What a lookup gives the model
+
+At most `top_k` passages, each about `chunk_size` tokens, with the source file name
+and, on the modes that embed, a relevance score where a higher number is a closer
+match. Results are ordered best first. With the defaults that is 3 passages of
+about 90 tokens.
+
+Nothing is filtered by score unless you set `min_score`, because a score that looks
+low can still be the right answer. The tool tells the model in words that the
+results may not answer the question, so it says it does not know rather than
+offering the closest thing it found.
+
+## Where to go next
+
+- [Tools overview](/build/tools/overview) for the seven execution blocks
+- [Prebuilt tools](/build/tools/prebuilt) for the tools the runtime already has

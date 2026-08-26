@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// executionBlocks are the six execution-keyed block names (SCHEMA §5.2). The
+// executionBlocks are the seven execution-keyed block names (SCHEMA §5.2). The
 // block name is the execution kind; a tool file carries exactly one.
-var executionBlocks = []string{"webhook", "local", "mcp", "builtin", "client", "provider_hosted"}
+var executionBlocks = []string{"webhook", "local", "mcp", "builtin", "client", "provider_hosted", "knowledge"}
 
 // movedToolKeys are the top-level keys the block shape retired. A package
 // written against the old flat shape must say what to do, not just "unknown
@@ -36,17 +36,29 @@ var contractToolKeys = map[string]string{
 	"announce":     "the server owns each tool's speech",
 }
 
+// knowledgeToolKeys are the top-level fields a `knowledge:` tool cannot carry,
+// mapped to why. The tool owns both sides of its contract, so a schema written
+// here is a claim no driver reads, the same reasoning `mcp:` uses.
+//
+// Shorter than contractToolKeys on purpose: `description`, `announce` and
+// `interruption` ARE legal here. The author writes the description the model
+// reads, and a lookup is a body to speak before.
+var knowledgeToolKeys = map[string]string{
+	"input":  "the tool owns its schema: one string, the caller's question",
+	"output": "the tool owns its result: passages with their sources and scores",
+	"inject": "a lookup has no request body to merge into",
+	"effect": "a lookup returns data; ending the call is a `builtin:` tool",
+}
+
 // checkToolShape reports the file's shape errors before decoding, so a wrong
 // shape reads as a migration instruction with a line number rather than a
 // decoder complaint. It returns the one execution block it found, which Load
 // re-checks against the decoded tool: a block written with an empty body decodes
 // to nothing, and that has to name the file and line too.
 func checkToolShape(file string, content []byte) (keyLine, error) {
-	var blocks, contract []keyLine
+	var blocks, keys []keyLine
 	for _, key := range topLevelKeys(content) {
-		if _, isContract := contractToolKeys[key.Key]; isContract {
-			contract = append(contract, key)
-		}
+		keys = append(keys, key)
 		if hint, moved := movedToolKeys[key.Key]; moved {
 			return keyLine{}, fmt.Errorf("%s:%d: %q is no longer a top-level field: %s", file, key.Line, key.Key, hint)
 		}
@@ -64,8 +76,12 @@ func checkToolShape(file string, content []byte) (keyLine, error) {
 	}
 	switch len(blocks) {
 	case 1:
-		if blocks[0].Key == "mcp" && len(contract) > 0 {
-			return keyLine{}, mcpContractError(file, contract)
+		refused := map[string]map[string]string{
+			"mcp":       contractToolKeys,
+			"knowledge": knowledgeToolKeys,
+		}[blocks[0].Key]
+		if err := checkRefusedKeys(file, blocks[0].Key, refused, keys); err != nil {
+			return keyLine{}, err
 		}
 		return blocks[0], nil
 	case 0:
@@ -76,15 +92,31 @@ func checkToolShape(file string, content []byte) (keyLine, error) {
 	}
 }
 
-// mcpContractError names every contract field the mcp file declared, each with
-// its own line, so one edit pass removes them all instead of one per re-run.
-func mcpContractError(file string, contract []keyLine) error {
-	lines := make([]string, 0, len(contract))
-	for _, key := range contract {
-		lines = append(lines, fmt.Sprintf("%s:%d: remove `%s`: it is not legal on an `mcp:` tool, %s",
-			file, key.Line, key.Key, contractToolKeys[key.Key]))
+// checkRefusedKeys names every refused field the file declared, each with its own
+// line, so one edit pass removes them all instead of one per re-run.
+func checkRefusedKeys(file, block string, refused map[string]string, keys []keyLine) error {
+	var lines []string
+	for _, key := range keys {
+		reason, isRefused := refused[key.Key]
+		if !isRefused {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%s:%d: remove `%s`: it is not legal on %s `%s:` tool, %s",
+			file, key.Line, key.Key, article(block), block, reason))
+	}
+	if len(lines) == 0 {
+		return nil
 	}
 	return errors.New(strings.Join(lines, "\n"))
+}
+
+// article picks "an" or "a" so an error message reads like a sentence. Two block
+// names reach here; a table would be more machinery than the vowel test.
+func article(block string) string {
+	if strings.ContainsRune("aeiou", rune(block[0])) {
+		return "an"
+	}
+	return "a"
 }
 
 // checkToolBlockBody catches the block whose body is empty: `webhook:` with

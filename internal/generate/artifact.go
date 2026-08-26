@@ -2,6 +2,8 @@ package generate
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/slng-ai/unmute/internal/ir"
@@ -67,7 +69,9 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		if err != nil {
 			return Artifact{}, fmt.Errorf("generate %s livekit: %w", resolved.Name, err)
 		}
+		artifact.Files = append(artifact.Files, knowledgeFiles(agent)...)
 		artifact.Notes.Notes = append(artifact.Notes.Notes, emitted.Notes.Notes...)
+		artifact.Notes.Notes = append(artifact.Notes.Notes, knowledgeNotes(agent)...)
 		artifact.Notes.Warnings = append(artifact.Notes.Warnings, emitted.Notes.Warnings...)
 		return artifact, nil
 	case ir.ProviderPipecat:
@@ -79,7 +83,9 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		if err != nil {
 			return Artifact{}, fmt.Errorf("generate %s pipecat: %w", resolved.Name, err)
 		}
+		artifact.Files = append(artifact.Files, knowledgeFiles(agent)...)
 		artifact.Notes.Notes = append(artifact.Notes.Notes, emitted.Notes.Notes...)
+		artifact.Notes.Notes = append(artifact.Notes.Notes, knowledgeNotes(agent)...)
 		artifact.Notes.Warnings = append(artifact.Notes.Warnings, emitted.Notes.Warnings...)
 		return artifact, nil
 	case ir.ProviderSlng:
@@ -96,6 +102,49 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 	default:
 		return Artifact{}, fmt.Errorf("unsupported provider %q", resolved.Provider)
 	}
+}
+
+// knowledgeFiles copies each knowledge base document into the artifact, byte for
+// byte, at the path spec.Load already keyed it by.
+//
+// Verbatim is the requirement, not an implementation detail: a PDF is binary, and
+// a transformation would corrupt it silently. The failure would then appear as
+// bad retrieval on a phone call rather than as an error at compile, so the gate
+// is a byte-equality test (internal/generate/knowledge_artifact_test.go).
+//
+// The documents travel in the image because a managed platform offers no mounted
+// storage to read them from (FR-014).
+func knowledgeFiles(agent *ir.Agent) []File {
+	if len(agent.Documents) == 0 {
+		return nil
+	}
+	files := make([]File, 0, len(agent.Documents))
+	for _, path := range slices.Sorted(maps.Keys(agent.Documents)) {
+		files = append(files, File{Path: path, Content: agent.Documents[path]})
+	}
+	return files
+}
+
+// knowledgeNotes is the compile report's knowledge section (FR-015): what the
+// agent will read at every process start.
+//
+// No passage count. Splitting happens at startup, so a number here would be a
+// guess presented as a fact; the document count is what the compiler knows.
+func knowledgeNotes(agent *ir.Agent) []string {
+	if len(agent.Knowledge) == 0 {
+		return nil
+	}
+	notes := make([]string, 0, len(agent.Knowledge))
+	for _, name := range slices.Sorted(maps.Keys(agent.Knowledge)) {
+		base := agent.Knowledge[name]
+		documents := "documents"
+		if len(base.Files) == 1 {
+			documents = "document"
+		}
+		notes = append(notes, fmt.Sprintf("knowledge %q: %d %s, embed %s, fixed until next compile",
+			name, len(base.Files), documents, base.Embed))
+	}
+	return notes
 }
 
 // targetDiagnostics joins the per-target validation errors so the compile path

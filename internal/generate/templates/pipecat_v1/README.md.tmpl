@@ -134,7 +134,70 @@ While iterating on the source spec, `unmute dev <source-dir>` recompiles this
 project and runs it for you behind a dev client.
 
 
+{{- if .Knowledge.Knowledge}}
+## Knowledge bases
+
+The agent answers from these documents rather than from what the model
+remembers. Each folder was copied into this project by `unmute compile`.
+{{range .Knowledge.Knowledge}}
+- `{{.Name}}`, from `knowledge/{{.Name}}/`, {{if .Embeds}}embedded with `{{.EmbedModel}}`{{if .CredentialEnv}} (needs `{{.CredentialEnv}}`){{end}}{{else}}no embedding, so no credential and no network call{{end}}. `{{.Mode}}` search over passages of {{.ChunkSize}} tokens overlapping {{.ChunkOverlap}}, returning {{.TopK}} per lookup{{if .MinScore}}, dropping anything below {{.MinScore}}{{end}}
+{{- end}}
+
+Four things to expect at run time:
+
+- **Content is fixed until the next compile.** The documents in `knowledge/` are
+  what this project searches. Editing the originals in the source package changes
+  nothing here until you compile and deploy again.
+- **Indexing runs once per container, at import, not per session.** Pipecat Cloud
+  imports `bot.py` and then calls `bot()` for each session, and it keeps a warm
+  container for about five minutes after one ends, so the cost is amortised across
+  every session that lands on it. A failure raises during import, so the container
+  never reaches ready and the platform refuses the start. That is the intent: an
+  agent that cannot read its documents should not take calls.
+- **Bake the index into the image to make that import cheap.** Without it every
+  cold container embeds the corpus before it can accept a session, and image
+  warm-up is already the thing that decides how quickly a scale-up starts serving.
+  Baked, that import is a disk read instead.
+
+  ```sh
+  docker build --build-arg KNOWLEDGE_BAKE=1{{range .Knowledge.Credentials}} \
+    --secret id={{.}},env={{.}}{{end}} .
+  ```
+
+  The credential arrives as a build secret, so it is never written into a layer.
+  Leave the flags off and the image still works, and the log says at startup that
+  it is embedding instead. A lookup still embeds the caller's question, so the run
+  time needs the same credential either way: baking removes the corpus cost, not
+  the query cost.
+- **A document with no text layer is named and skipped at startup.** A scanned PDF
+  is an image of a page, and nothing can extract text from it without OCR. If some
+  documents are readable the agent still starts and the log says how many of how
+  many were indexed. If none are, the import fails.
+- **A lookup that fails does not end the call.** The agent is told the lookup is
+  unavailable and says so. The reason goes to this container's log and never into
+  the model's context, because a model handed a provider error can read it out
+  loud.
+
+**Importing `bot.py` builds the indexes, so a plain import needs a working
+embedding credential.** That is deliberate: the platform imports this module and
+its readiness probe does not pass until the import finishes, which is what keeps
+a caller from waiting for indexing. It does mean a tool that imports the module
+just to inspect it — a type checker, an editor, a script — reaches the embedding
+service too. Give it a valid key, or stub `knowledge._embed_<base>` before the
+import.
+
+Both `knowledge.py` and `knowledge/` have explicit `COPY` lines in the Dockerfile.
+That is not decoration: this image copies named files only, because `/app` belongs
+to the base image, and leaving either one out gives a container that starts,
+raises, and never reaches ready while its own log looks healthy.
+
+Nothing here writes outside the container. The index is in memory for the life of
+the process and is not persisted anywhere.
+{{- end}}
+
 {{- if .NeedsMCP}}
+
+
 
 ## MCP tool sources
 

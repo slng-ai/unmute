@@ -437,6 +437,11 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// The emitted mixin names llm.LLM to tell a per-class model override from
 	// the session default, the way the framework's own activity does.
 	data.NeedsLLM = data.NeedsLLM || slng.Any()
+	knowledge, err := loweredKnowledge(agent, env)
+	if err != nil {
+		return livekitData{}, err
+	}
+	data.Knowledge = knowledge
 	data.Deps = livekitDeps(data)
 	data.RequiredEnv = env.sorted()
 	// The startup check is derived from what the compiler knows it requires, not
@@ -1104,6 +1109,15 @@ func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variabl
 			EndsConversation: tool.Effect == ir.ToolEndsConversation,
 			Announce:         tool.Announce,
 		}, nil
+	case ir.ToolKnowledge:
+		// One string parameter, always, and the tool owns it: the author writes
+		// no input schema, so the args list is fixed here rather than derived.
+		return livekitTool{
+			Method: name, Description: knowledgeDescription(tool.Description),
+			KnowledgeBase: tool.KnowledgeBase,
+			Args:          []livekitArg{knowledgeQueryArg()},
+			Announce:      tool.Announce,
+		}, nil
 	case ir.ToolBuiltin:
 		// Prebuilt: no method, no args; the registry id picks the SDK helper.
 		return livekitTool{
@@ -1536,6 +1550,16 @@ func livekitGreetingFor(c *ir.Conversation) *livekitGreeting {
 	}
 }
 
+// knowledgeQueryArg is the one parameter a knowledge tool takes. The tool owns
+// it, so the author writes no input schema and this is not derived from one.
+func knowledgeQueryArg() livekitArg {
+	return livekitArg{
+		Name: "query", PyType: "str", Required: true,
+		Desc: knowledgeQueryDescription,
+		Anno: pyAnno("str", nil, knowledgeQueryDescription),
+	}
+}
+
 // livekitDeps builds the dependency list from the used entries: extras merge
 // onto the livekit-agents pin, standalone plugin packages keep their own
 // floors (user pins: override them per SCHEMA.md 6.1).
@@ -1559,6 +1583,13 @@ func livekitDeps(data livekitData) []string {
 	}
 	if data.NeedsMCP {
 		extras["mcp"] = true // without the extra the emitted import fails (N40)
+	}
+	// Knowledge bases only. These are the whole runtime cost of the feature, and a
+	// package with no knowledge: section pays none of it: the set measures about
+	// 178 MB installed (measured 2026-08-26, down from 433 MB before the Chroma
+	// store came out), and Pipecat Cloud's warm-up time varies with image size.
+	for _, pkg := range knowledgeDeps(data.Knowledge) {
+		packages[pkg] = true
 	}
 	// The author's declared version is the pin, exactly as it is on Pipecat.
 	constraint := "==" + data.Version

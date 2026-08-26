@@ -170,7 +170,54 @@ LiveKit still runs the tool to completion, which is what its per-tool
 `interruption:` warning is about.
 {{- end}}
 
+{{- if .Knowledge.Knowledge}}
+## Knowledge bases
+
+The agent answers from these documents rather than from what the model
+remembers. Each folder was copied into this project by `unmute compile`.
+{{range .Knowledge.Knowledge}}
+- `{{.Name}}`, from `knowledge/{{.Name}}/`, {{if .Embeds}}embedded with `{{.EmbedModel}}`{{if .CredentialEnv}} (needs `{{.CredentialEnv}}`){{end}}{{else}}no embedding, so no credential and no network call{{end}}. `{{.Mode}}` search over passages of {{.ChunkSize}} tokens overlapping {{.ChunkOverlap}}, returning {{.TopK}} per lookup{{if .MinScore}}, dropping anything below {{.MinScore}}{{end}}
+{{- end}}
+
+Four things to expect at run time:
+
+- **Content is fixed until the next compile.** The documents in
+  `knowledge/` are what this project searches. Editing the originals in the
+  source package changes nothing here until you compile and deploy again.
+- **Indexing runs once per worker process, at startup, not per call.** It
+  happens in `prewarm`, before any job is accepted, so a caller never waits for
+  it. Every worker process reads the whole corpus, so the cost is per process
+  rather than per deployment.
+- **Bake the index into the image and that cost disappears.** Without it each
+  process embeds the corpus itself, once per process, so a larger corpus and more
+  workers both cost more startup time. Baked, startup is a disk read instead.
+
+  ```sh
+  docker build --build-arg KNOWLEDGE_BAKE=1{{range .Knowledge.Credentials}} \
+    --secret id={{.}},env={{.}}{{end}} .
+  ```
+
+  The credential arrives as a build secret, so it is never written into a layer.
+  Leave the flags off and the image still works, and the log says at startup that
+  it is embedding instead. A lookup still embeds the caller's question, so the run
+  time needs the same credential either way: baking removes the corpus cost, not
+  the query cost.
+- **A document with no text layer is named and skipped at startup.** A scanned
+  PDF is an image of a page, and nothing can extract text from it without OCR.
+  If some documents are readable the agent still starts and the log says how
+  many of how many were indexed. If none are, the process exits and the
+  deployment never reaches ready, the same as a missing credential.
+- **A lookup that fails does not end the call.** The agent is told the lookup is
+  unavailable and says so. The reason goes to this process's log and never into
+  the model's context, because a model handed a provider error can read it out
+  loud.
+
+Nothing here writes outside the container. The index is in memory for the life
+of the process and is not persisted anywhere.
+{{- end}}
+
 {{- if .NeedsMCP}}
+
 
 ## MCP tool sources
 
