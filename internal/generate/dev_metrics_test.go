@@ -76,7 +76,9 @@ func TestDevMetricsIsEmittedEvenWhenNothingElseIs(t *testing.T) {
 	}
 }
 
-func generateFor(t *testing.T, pkgName string, provider ir.Provider) Artifact {
+// agentFor loads and builds a testdata package, for tests that mutate the agent
+// before generating.
+func agentFor(t *testing.T, pkgName string) *ir.Agent {
 	t.Helper()
 	pkg, err := spec.Load(filepath.Join("..", "testdata", pkgName))
 	if err != nil {
@@ -86,6 +88,12 @@ func generateFor(t *testing.T, pkgName string, provider ir.Provider) Artifact {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return agent
+}
+
+func generateFor(t *testing.T, pkgName string, provider ir.Provider) Artifact {
+	t.Helper()
+	agent := agentFor(t, pkgName)
 	artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
 	if err != nil {
 		t.Fatal(err)

@@ -1397,6 +1397,16 @@ func buildConversation(raw *packagespec.Conversation) *Conversation {
 			Enabled: raw.Interruption.Enabled, MinimumWords: raw.Interruption.MinimumWords,
 			IgnorePhrases: raw.Interruption.IgnorePhrases,
 		}
+		// nil stays nil and empty stays empty: the difference is what tells a
+		// target whether the author asked for no protection or said nothing at
+		// all, so this cannot go through a `len(...) > 0` guard.
+		if raw.Interruption.Protect != nil {
+			protect := make([]InterruptionProtect, 0, len(raw.Interruption.Protect))
+			for _, p := range raw.Interruption.Protect {
+				protect = append(protect, InterruptionProtect(p))
+			}
+			conversation.Interruption.Protect = protect
+		}
 	}
 	if raw.Inactivity != nil {
 		conversation.Inactivity = &Inactivity{

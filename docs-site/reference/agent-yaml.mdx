@@ -478,6 +478,7 @@ conversation:
 | `greeting.speaks_first` | `agent` or `user` |
 | `greeting.text` | the opening line, requires `speaks_first: agent` |
 | `interruption.enabled` | required when `interruption` is present |
+| `interruption.protect` | `greeting`, `tool_calls`, or both. Pipecat only. Names the stretches the caller cannot talk over while barge-in stays on elsewhere. A phone route protects the greeting by default, because a phone leg has no echo cancellation and the agent would otherwise hear its own opening line and cut itself off. Set `protect: []` for no protection. Refused alongside `enabled: false`, which already mutes the whole call. |
 | `interruption.minimum_words` | how much speech counts as an interruption |
 | `interruption.ignore_phrases` | phrases that do not interrupt |
 | `inactivity.nudge_after`, `inactivity.end_after` | durations |

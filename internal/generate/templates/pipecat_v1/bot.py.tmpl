@@ -81,7 +81,7 @@ from pipecat.runner.utils import create_transport
 {{end}}{{if .NeedsTurnStrategies}}from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
-{{end}}{{if .NeedsUserMute}}from pipecat.turns.user_mute.always_user_mute_strategy import AlwaysUserMuteStrategy
+{{end}}{{if .UserMuteStrategies}}from pipecat.turns.user_mute import {{join .UserMuteStrategies ", "}}
 {{end}}{{if not .Inline}}from pipecat.workers.llm import {{if not (and .Tracing (or .NeedsFunctionCalls .NeedsMCP))}}LLMWorker, {{end}}LLMWorkerActivationArgs{{if .NeedsFunctionCalls}}, tool{{end}}
 {{else if .NeedsFunctionCalls}}from pipecat.workers.llm import tool
 {{end}}from pipecat.workers.runner import WorkerRunner
@@ -1370,8 +1370,12 @@ def build_stt():
                 start=[MinWordsUserTurnStartStrategy(min_words={{.Interrupt.MinWords}})],
                 stop=[SpeechTimeoutUserTurnStopStrategy()],
             ),
-{{end}}{{end}}{{if .NeedsUserMute}}            # interruption.enabled: false — the caller cannot talk over the agent.
-            user_mute_strategies=[AlwaysUserMuteStrategy()],
+{{end}}{{end}}{{if .UserMuteStrategies}}            # The stretches of the call the caller cannot talk over, lowered from
+            # conversation.interruption. On a phone route the greeting is
+            # protected by default: a phone leg has no echo cancellation, so
+            # without this the agent hears its own opening line and cuts itself
+            # off. Barge-in stays on everywhere else.
+            user_mute_strategies=[{{range $i, $s := .UserMuteStrategies}}{{if $i}}, {{end}}{{$s}}(){{end}}],
 {{end}}{{if .Inactivity}}            user_idle_timeout={{.Inactivity.NudgeSecs}},
 {{end}}        ),
     )
@@ -1490,8 +1494,12 @@ def build_stt():
                 start=[MinWordsUserTurnStartStrategy(min_words={{.Interrupt.MinWords}})],
                 stop=[SpeechTimeoutUserTurnStopStrategy()],
             ),
-{{end}}{{end}}{{if .NeedsUserMute}}            # interruption.enabled: false — the caller cannot talk over the agent.
-            user_mute_strategies=[AlwaysUserMuteStrategy()],
+{{end}}{{end}}{{if .UserMuteStrategies}}            # The stretches of the call the caller cannot talk over, lowered from
+            # conversation.interruption. On a phone route the greeting is
+            # protected by default: a phone leg has no echo cancellation, so
+            # without this the agent hears its own opening line and cuts itself
+            # off. Barge-in stays on everywhere else.
+            user_mute_strategies=[{{range $i, $s := .UserMuteStrategies}}{{if $i}}, {{end}}{{$s}}(){{end}}],
 {{end}}{{if .Inactivity}}            user_idle_timeout={{.Inactivity.NudgeSecs}},
 {{end}}        ),
     )

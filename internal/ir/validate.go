@@ -594,8 +594,24 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 				errors = append(errors, validateDuration("conversation.inactivity.end_after", inactivity.EndAfter)...)
 			}
 		}
-		if interruption := agent.Conversation.Interruption; interruption != nil && interruption.Enabled == nil {
-			errors = add(errors, "conversation.interruption.enabled is required")
+		if interruption := agent.Conversation.Interruption; interruption != nil {
+			if interruption.Enabled == nil {
+				errors = add(errors, "conversation.interruption.enabled is required")
+			}
+			for _, protect := range interruption.Protect {
+				switch protect {
+				case ProtectGreeting, ProtectToolCalls:
+				default:
+					errors = add(errors, fmt.Sprintf("conversation.interruption.protect has unknown entry %q: use %q or %q", protect, ProtectGreeting, ProtectToolCalls))
+				}
+			}
+			// enabled: false already mutes the caller for every word the agent
+			// speaks, so naming a stretch to protect on top of it is a
+			// contradiction rather than a narrowing, and silently ignoring one of
+			// the two would be worse than saying so.
+			if interruption.Enabled != nil && !*interruption.Enabled && len(interruption.Protect) > 0 {
+				errors = add(errors, "conversation.interruption.protect has no meaning when enabled is false, which already stops the caller talking over the whole call: drop protect, or set enabled: true to keep barge-in outside the protected stretches")
+			}
 		}
 	}
 	return errors, schemas.notes
@@ -2260,6 +2276,9 @@ func validateConversation(conversation *Conversation, provider targetcap.Provide
 		}
 		if len(interruption.IgnorePhrases) > 0 {
 			applyCapability(caps, targetcap.FieldInterruptionIgnore, provider, row)
+		}
+		if len(interruption.Protect) > 0 {
+			applyCapability(caps, targetcap.FieldInterruptionProtect, provider, row)
 		}
 	}
 	if conversation.Inactivity != nil {

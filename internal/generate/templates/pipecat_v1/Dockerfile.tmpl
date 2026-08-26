@@ -54,6 +54,11 @@ RUN mkdir -p "$NLTK_DATA" && \
 # v0.1.0 through v0.1.2 and broke five of the eleven examples, `unmute dev`
 # included, because compose.dev.yaml runs this same image with no bind mount.
 COPY bot.py ./
+# dev_metrics.py is emitted unconditionally and imported at bot.py's module
+# scope, so this line is unconditional too. Leaving it out is the same failure
+# tools/ was: the container starts, raises ModuleNotFoundError before it ever
+# answers /bot, and the deployment never reaches ready.
+COPY dev_metrics.py ./
 {{if .Tracing}}COPY tracing.py ./
 {{end}}{{if .LocalTools}}COPY tools/ ./tools/
 {{end}}{{if .Knowledge.Knowledge}}# knowledge.py and the documents it reads. Both lines are needed, and for the

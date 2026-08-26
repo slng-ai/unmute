@@ -343,6 +343,24 @@ The package environment must contain `MANAGER_PHONE_NUMBER`, matching
 `agent.yaml` and the generated `.env.example`. `SUPERVISOR_PHONE_NUMBER` is not
 an alias.
 
+## Testing this on a real phone
+
+Hold the handset to your ear. Do not use speakerphone, for the same reason the
+browser loop asks for headphones: a phone leg has no echo cancellation, so an
+open speaker sends the agent's own voice back into the microphone.
+
+The Pipecat build protects the greeting for you, because that is where the echo
+does the most damage. Everything after the opening line is still interruptible,
+so on speakerphone the agent will still hear itself mid-call, be cut off, and
+carry a garbled turn in its context for the rest of the conversation. A real
+call on 2026-08-26 produced a first user turn reading `hi you've reached`, which
+is the agent's own greeting, and every answer after that was built on it.
+
+Deploy with `--min-agents 1`. This package carries two knowledge bases, and an
+unbaked index is embedded at import before the server binds, which on a cold
+start can push the container past the point where the session gives up. The
+symptom is a session that never reaches the bot at all rather than a slow one.
+
 ## Release conversation script
 
 Use a future date when testing bookings. Start a new worker, then run the first
