@@ -211,7 +211,14 @@ func TestTelephonySetupRunbookHoldsItsContract(t *testing.T) {
 		"twilio api:core:sip:credential-lists:credentials:create",
 		"twilio api:trunking:v1:trunks:credential-lists:create",
 		"twilio api:trunking:v1:trunks:phone-numbers:create",
-		"--transfer-mode enable-all --transfer-caller-id from-transferee",
+		// from-transferor, not from-transferee. Measured on a live call
+		// 2026-08-26: a UK trunk presenting the caller's Spanish number to a
+		// Spanish carrier had every transfer refused as it was offered, seen as
+		// `486 Busy Here` and a zero second, zero cost leg in the Twilio log.
+		// The runbook has to name the value that connects, and say what the
+		// other one costs.
+		"--transfer-mode enable-all --transfer-caller-id from-transferor",
+		"486 Busy",
 		"#### Check the carrier side",
 		// The password is typed at a prompt, never written into the block or a file.
 		"read -rsp \"SIP password: \" SIP_PASSWORD",

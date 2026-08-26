@@ -95,14 +95,48 @@ prints the exact TwiML Bin markup, with your region and agent name already
 filled in; paste it into a TwiML Bin in the Twilio Console and point the
 number's voice configuration at it.
 
-For `livekit`, follow [LiveKit Cloud](/deploy/livekit-cloud): `lk agent
-create`, then run `bash telephony-setup.sh` from `build/livekit` to create
-the inbound trunk and dispatch rule. Then do the [Twilio Console
-steps](/telephony/twilio#set-up-the-livekit-sip-trunk-in-twilio-console) to
-attach your number to the trunk.
+For `livekit`, follow [LiveKit Cloud](/deploy/livekit-cloud) to deploy with `lk
+agent create`, then do the [Twilio Console
+steps](/telephony/twilio#set-up-the-livekit-sip-trunk-in-twilio-console) and the
+LiveKit records below. All three are required.
 
 Each generated `build/<target>/README.md` is the runbook of record: it names
 your region, your agent, and your secret set.
+
+## Create the LiveKit records
+
+Setting up the trunk in Twilio gets the call as far as LiveKit. LiveKit then
+rejects it, because nothing in your project claims that number yet. Two records
+fix that, and your build generates both along with the script that creates them:
+
+```sh
+cd build/livekit
+bash telephony-setup.sh
+```
+
+| Record | What it does |
+|---|---|
+| inbound trunk | claims your phone number for this LiveKit project |
+| dispatch rule | sends calls on that trunk to your agent, one room per caller |
+
+Three things about the script are worth knowing:
+
+- **Run it after the agent exists.** The dispatch rule names the agent, so
+  `lk agent create` comes first.
+- **It needs `lk` and `jq` on your PATH.** It checks for both and names the
+  missing one before it creates anything.
+- **Running it again is safe.** It finds records by your phone number rather
+  than by an ID, so nothing has to be copied anywhere, and whatever already
+  exists is reused.
+
+Check what it made:
+
+```sh
+lk sip inbound list
+lk sip dispatch list
+```
+
+A number that no inbound trunk lists is a number LiveKit will not answer for.
 
 ## Call the number
 
@@ -114,6 +148,10 @@ A number attached to a SIP trunk ignores its voice configuration, so it cannot
 also point at a TwiML Bin. Take the number off the trunk to test the `pipecat`
 target, and follow the [Twilio Console steps](/telephony/twilio#set-up-the-livekit-sip-trunk-in-twilio-console)
 to put it back for the `livekit` target.
+
+If you want both routes live at once, [give each one its own
+number](/telephony/twilio#give-each-route-its-own-number). Two numbers cost less
+attention than swapping one.
 
 ## If the call does not arrive
 
@@ -136,7 +174,33 @@ to put it back for the `livekit` target.
   <Accordion title="the call rings and drops with no agent, on livekit">
     Work backwards: does `lk sip inbound list` show a trunk claiming your
     number, does `lk sip dispatch list` show a rule for it naming this agent,
-    and does `lk agent status` show the agent up.
+    and does `lk agent status` show the agent up. A missing trunk or rule means
+    [the setup script](#create-the-livekit-records) has not run.
+  </Accordion>
+  <Accordion title="the call rings and rings, and nobody ever answers">
+    A LiveKit SIP call is answered when something in the room publishes audio,
+    so a job that dies before the agent starts speaking leaves the caller
+    listening to ringing until LiveKit gives up three minutes later.
+
+    The usual cause is a secret that is declared but not deployed. The generated
+    agent checks its phone environment the moment it sees a SIP caller, so a
+    missing name fails the job there, on a real call only, and never in the
+    browser dev loop. Compare the two lists:
+
+    ```sh
+    lk agent secrets
+    cat build/livekit/.env.example
+    ```
+
+    Every name in the second belongs in the first. Add what is missing to
+    `.env`, then `lk agent update-secrets --secrets-file .env`, which restarts
+    the agent.
+  </Accordion>
+  <Accordion title="the number never reaches livekit at all">
+    Check the trunk's **Origination** tab. The URI must be your project's SIP
+    address with `;transport=tcp`, and that host is your LiveKit project id
+    without its `p_` prefix, not the subdomain in `LIVEKIT_URL`. See
+    [pointing origination at LiveKit](/telephony/twilio#set-up-the-livekit-sip-trunk-in-twilio-console).
   </Accordion>
 </AccordionGroup>
 

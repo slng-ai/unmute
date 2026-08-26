@@ -1,18 +1,33 @@
 ---
 title: "Get your Twilio details"
-description: "Which value in the Twilio console fills which name in your connection file, per route."
+description: "Which value in the Twilio console fills which name in your connection file, per route, and the console setup each route needs."
 sidebarTitle: "Twilio setup"
 ---
 
 A connection file holds environment variable **names**. This page is about the
 values behind them: where each one lives in your Twilio account, and which key it
-belongs to.
+belongs to. It also covers the console setup those values assume, because a
+correct connection file over a half-configured trunk still gets you nothing.
 
 <Note>
   Unmute never buys a number, creates a trunk, or changes anything on your carrier
   account, at compile time or afterward. Every value below is one you set yourself,
   in the Twilio Console.
 </Note>
+
+## Give each route its own number
+
+A number attached to a SIP trunk ignores its voice configuration completely, and
+does so silently. So one number cannot serve a TwiML Bin and a SIP trunk at the
+same time. If you want both routes live, buy a second number:
+
+| Number | Route | What it points at |
+|---|---|---|
+| the first | Pipecat `cloud-websocket` | a TwiML Bin, set in the number's voice configuration |
+| the second | LiveKit `sip` | a SIP trunk, set on the number's configuration page |
+
+You can also swap a single number back and forth, and the last step of the trunk
+setup below covers that. Two numbers is less work after the first day.
 
 ## Which values you need depends on the route
 
@@ -24,8 +39,7 @@ belongs to.
 
 The two groups are different credentials, not two names for one thing. The account
 trio identifies your account to Twilio's REST API. The four SIP values are one
-trunk's own dial-out settings, and they live in a different part of the console. One
-number can serve both, one target at a time.
+trunk's own dial-out settings, and they live in a different part of the console.
 
 ## First, a voice-capable number
 
@@ -77,6 +91,20 @@ This part differs by route, and it is the part to get right:
   silently, so the markup or webhook you set would simply never be consulted.
 </Warning>
 
+## The two sides of a SIP trunk
+
+The trunk setup below asks you to configure two tabs that sound similar and do
+opposite things. Knowing which is which is what lets you debug a call later.
+
+| Tab | Direction | What it is for |
+|---|---|---|
+| **Termination** | out of Twilio | your agent dialing out, which means outbound calls and warm transfers |
+| **Origination** | into your infrastructure | inbound calls reaching LiveKit SIP |
+
+An inbound-only agent still declares all four SIP names, because the route
+requires them whichever direction it uses, and a cold transfer needs the trunk
+even though the caller only ever rang in.
+
 ## Set up the LiveKit SIP trunk in Twilio Console
 
 Here the call arrives over a Twilio Elastic SIP trunk. Configure it in the
@@ -89,41 +117,62 @@ shows the same Console screens.
     In Twilio Console, go to **Elastic SIP Trunking**, **Manage**, **Trunks**.
     Open the trunk used by LiveKit, or create one if none exists. Do not change a
     shared trunk that is serving another route.
+
+    A new trunk starts with every feature off, so none of the steps below are
+    inherited from a trunk you set up before.
   </Step>
 
   <Step title="Set termination and authentication">
     On **Termination**, choose a unique Termination SIP URI ending in
     `pstn.twilio.com`. Under **Authentication**, select or create a Credential
     List with a username and password. Save the trunk.
+
+    This is the dial-out side. Its domain and credential become three of your
+    four SIP values.
   </Step>
 
-  <Step title="Point origination at LiveKit Cloud">
-    On **Origination**, select **Add new Origination URI**. Paste the SIP URI from
-    your LiveKit Cloud project settings and append `;transport=tcp`, for example
+  <Step title="Point origination at LiveKit">
+    On **Origination**, select **Add new Origination URI**. Paste your project's
+    SIP address and append `;transport=tcp`, for example
     `sip:abc123def.sip.livekit.cloud;transport=tcp`. Keep it enabled, then add and
-    save it. Do not derive this value from `LIVEKIT_URL`: the project URL and SIP
-    address can have different subdomains.
+    save it.
+
+    The host is your LiveKit project id without its `p_` prefix. Read the id from
+    `lk project list`:
+
+    ```sh
+    lk project list
+    ```
+
+    A project whose id is `p_abc123def` has the SIP address
+    `abc123def.sip.livekit.cloud`. Do not derive this value from `LIVEKIT_URL` or
+    from the project's own subdomain: the two are usually different strings, and a
+    wrong host here gives you a number that rings and never connects.
   </Step>
 
   <Step title="Attach the phone number">
     First record the number's current Voice routing so you can restore it later.
     On the trunk's **Numbers** tab, choose **Associate a Number with this Trunk**,
-    select your existing voice-capable number, choose this SIP trunk for Voice,
-    and save. A number attached to a trunk ignores its normal voice webhook.
+    select your voice-capable number, choose this SIP trunk for Voice, and save.
+    A number attached to a trunk ignores its normal voice webhook.
+
+    You can do the same from the number's own page: **Phone Numbers**, the number,
+    **Configuration details**, then pick **SIP Trunk** as the handler and select
+    this trunk.
   </Step>
 
   <Step title="Allow calls to transfer">
-    In the trunk's **General settings** or **Features**, enable **Call Transfer
-    (SIP REFER)** and **PSTN Transfer**. Set the transfer target's caller ID to
-    **Transferee**, so the person receiving the transfer sees the original caller.
-    Save the trunk.
+    In the trunk's **General settings**, enable **Call Transfer (SIP REFER)** and
+    tick **Enable PSTN Transfer**. Then set **Caller ID for Transfer Target**, and
+    read the section below before you choose, because the wrong value here fails
+    every transfer with no useful error. Save the trunk.
   </Step>
 
-  <Step title="Test and restore the number">
-    Call the attached number. When testing is complete, return to **Numbers** and
-    disassociate it from the trunk, then restore the Voice routing you recorded.
-    Disassociating keeps the number in your Twilio account; it does not delete the
-    number or the existing trunk.
+  <Step title="Test, and restore the number if you are sharing it">
+    Call the attached number. If this number also serves another route, return to
+    **Numbers** when you are done, disassociate it from the trunk, and restore the
+    Voice routing you recorded. Disassociating keeps the number in your Twilio
+    account; it does not delete the number or the existing trunk.
   </Step>
 </Steps>
 
@@ -149,6 +198,66 @@ environment:
 The names are plain SIP names rather than Twilio ones because the generated code
 can dial through any SIP carrier with them.
 
+## Caller ID for a transfer target
+
+A cold transfer is a SIP REFER: Twilio receives it and places a **new call** to the
+destination. The trunk decides what caller ID that new call presents, and the two
+choices behave very differently.
+
+| Setting | The transfer target sees | Use it when |
+|---|---|---|
+| **Transferee** | the original caller's number | the destination's carrier accepts a number your account does not own, which is usually the case within one country |
+| **Transferor** | your Twilio number | anything else, and always when the transfer crosses a border |
+
+Transferee is the nicer behaviour, because the person receiving the transfer sees
+the customer rather than your own line. It only works where the receiving carrier
+tolerates a caller ID that belongs to nobody on your account. Present a Spanish
+mobile number from a UK trunk to a Spanish carrier and it is rejected on the spot.
+
+**How that failure looks**, so you recognise it rather than debugging your agent:
+
+- The agent logs `cold transfer failed after 0s: SIP call failed: 486 Busy Here`.
+- Twilio's call log shows a **child call** under the original call, with the
+  original caller's number in `From`, status **Busy**, duration **0 sec**, cost
+  blank, and no PCAP.
+
+Zero seconds and no cost means the leg was rejected as it was offered and never
+reached the destination, so nothing rang and nobody was busy. Switch the trunk to
+Transferor and place the call again. A genuine busy signal costs time and money,
+and the record shows both.
+
+## Two different things are called a trunk
+
+This trips people up when they follow the LiveKit setup after the Twilio one:
+
+| Trunk | Lives in | Created by | Does what |
+|---|---|---|---|
+| Elastic SIP Trunk | your Twilio account | you, in the console | carries the call between Twilio and LiveKit |
+| Inbound trunk | your LiveKit project | `telephony-setup.sh` in your build | tells LiveKit that your number belongs to this project |
+
+Finishing the Twilio side is half the job. LiveKit rejects a call whose number no
+inbound trunk claims, so the generated script has to run too. See
+[inbound calls](/telephony/inbound-calls#create-the-livekit-records) for what it
+creates and when to run it.
+
+## If your trunk is in a Twilio Region
+
+Twilio can hold resources in a region such as Ireland (IE1) rather than in the
+default one. If you set a number's **Active Region** and create the trunk there,
+three things change:
+
+- The trunk gets a SID that the default API cannot see. A lookup returns
+  `404 not found` even though the console shows the trunk.
+- Regional endpoints such as `api.dublin.ie1.twilio.com` need
+  [regional API credentials](https://www.twilio.com/docs/global-infrastructure/manage-regional-api-credentials).
+  Your account SID and auth token get `401 Authenticate` there.
+- The number's Active Region and its trunk must be in the same region, and the
+  console only shows you the configuration for the region you are viewing.
+
+None of this changes what Unmute generates. It changes what you can inspect, and
+which console view tells you the truth, so note the region before you start
+comparing settings against a guide.
+
 ## Then declare the names
 
 Two files, and neither holds a value:
@@ -164,6 +273,12 @@ Every name your connection maps belongs in `secrets:` too, which is what puts it
 the generated `.env.example` and the startup check. The values go in `.env` locally,
 and in your platform's secret store for a deployment.
 
+<Warning>
+  A name you declare and never set is not caught at compile time. It is caught on
+  the call, and the caller hears ringing that never ends. See [the call rings and
+  nobody answers](/telephony/inbound-calls#if-the-call-does-not-arrive).
+</Warning>
+
 ## Where this page's facts come from
 
 The key names and which route accepts which are read from this repository's own
@@ -173,8 +288,10 @@ route table, and they match the connection files in
 The Console workflow was checked against
 [Twilio's step-by-step Elastic SIP Trunking guide](https://www.twilio.com/en-us/blog/elastic-sip-trunking-step-by-step-setup)
 and [Twilio's SIP Trunking documentation](https://www.twilio.com/docs/sip-trunking)
-on 2026-08-18. The account dashboard location of the Account SID and auth token
-comes from this repository's generated runbooks; the Twilio pages name the two
+on 2026-08-18. The transfer caller ID behaviour, the shape of a rejected transfer
+leg, and the regional isolation notes come from a live inbound call and its Twilio
+call logs on 2026-08-26. The account dashboard location of the Account SID and auth
+token comes from this repository's generated runbooks; the Twilio pages name the two
 values without giving a console path for them.
 
 Your build's `build/<target>/README.md` is the authority for your route, because it
@@ -188,5 +305,8 @@ was generated from your package and names your region and your number.
   </Card>
   <Card title="Your first phone call" icon="phone-incoming" href="/telephony/inbound-calls">
     Take a real call, once you deploy.
+  </Card>
+  <Card title="Transfers on LiveKit" icon="phone-forwarded" href="/transfers/livekit">
+    Hand the caller to a person.
   </Card>
 </Columns>
