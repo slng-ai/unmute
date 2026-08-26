@@ -350,8 +350,15 @@ type Tool struct {
 	Instructions  string         `json:"instructions,omitempty" yaml:"instructions,omitempty"`
 	Handler       string         `json:"handler,omitempty" yaml:"handler,omitempty"`
 	HandlerSource string         `json:"-" yaml:"-"` // local handler file content, loaded by spec.Load
-	URLEnv        string         `json:"url_env,omitempty" yaml:"url_env,omitempty"`
-	// Path is the webhook path appended to URLEnv's base URL; may hold templates.
+	// Dependencies are the local handler's exact `name==version` pins, as the
+	// author wrote them. Canonicalisation happens where they are emitted.
+	Dependencies []string `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
+	URLEnv       string   `json:"url_env,omitempty" yaml:"url_env,omitempty"`
+	// BaseURL is a webhook's literal base URL, for a target that stores the URL
+	// rather than reading it from the agent's environment. Empty on every tool a
+	// code driver emits, which is why they never read it.
+	BaseURL string `json:"base_url,omitempty" yaml:"base_url,omitempty"`
+	// Path is the webhook path appended to the base URL; may hold templates.
 	Path string `json:"path,omitempty" yaml:"path,omitempty"`
 	// Inject holds hidden request values, merged into the call and never shown to
 	// the model. String values may hold {{variable}} tokens.
@@ -618,9 +625,13 @@ type Target struct {
 
 type Provider string
 
+// These mirror target.Providers. The list is short enough that two hand-written
+// copies were cheaper than a dependency edge, and TestProviderEnumMatchesTargets
+// in schema_test.go fails when they disagree.
 const (
 	ProviderLiveKit Provider = "livekit"
 	ProviderPipecat Provider = "pipecat"
+	ProviderSlng    Provider = "slng"
 )
 
 type Bindings struct {

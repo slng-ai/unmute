@@ -19,6 +19,11 @@ smoke:   ; go test -timeout 20m -tags smoke ./...
 # The rig compiles a package with the binary under test, so a stale bin/unmute
 # would make a green rig meaningless. Built first, every time.
 rig:     ; $(MAKE) build && go test -timeout 20m -tags rig ./...
+# The vendored SLNG conformance fixtures, re-fetched and compared against the
+# checked-in digests. Needs network and no credentials, which is why it is opt-in
+# and out of the PR gate: story 6 exists to notice the day the two repositories
+# drift, and a vendored copy with no refresh check cannot notice anything.
+contracts: ; go test -tags contracts -run TestSlngContractsHaveNotDrifted ./internal/generate/
 lint:    ; golangci-lint run
 fmt:     ; gofmt -w . && go vet ./...
 install: ; go install -ldflags "$(LDFLAGS)" .
@@ -30,4 +35,4 @@ docs:    ; cd docs-site && npx --yes mint dev --no-open
 # {{ .Env.GH_PAT }} template is never evaluated (verified 2026-08-14).
 release-dry: ; goreleaser release --snapshot --clean --skip=sign
 
-.PHONY: build test smoke rig lint fmt install docs release-dry
+.PHONY: build test smoke rig contracts lint fmt install docs release-dry

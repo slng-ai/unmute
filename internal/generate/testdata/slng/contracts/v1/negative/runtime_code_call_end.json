@@ -1,0 +1,24 @@
+{
+  "contract": "backend_proxy",
+  "error_contains": "call_end",
+  "payload": {
+    "type": "backend_proxy",
+    "id": "22222222-2222-4222-8222-222222222222",
+    "name": "summarize_call",
+    "description": "Summarize a completed call",
+    "source": "system",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "execution_policy": null,
+    "locked_arguments": {},
+    "target_kind": "code",
+    "system": {
+      "triggers": [{"event": "call_end", "source_attachment_id": null}],
+      "arguments": []
+    }
+  }
+}

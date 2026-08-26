@@ -1,6 +1,34 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 5.0.0 -> 6.0.0
+Bump rationale: MAJOR. Technology and Boundaries redefines what makes a target.
+A driver that owns its whole output makes a target, whether that output is a
+runnable project or a deployment body for a platform that runs the agent.
+
+Modified in 6.0.0:
+- "A provider is a target only when a driver emits a runnable project for it"
+  is replaced. It described the two drivers that existed when it was written and
+  excluded a third that produces real, complete output of a different shape.
+- The thing the old rule protected is kept word for word: a provider that
+  validates and then produces nothing is still forbidden. That was the actual
+  failure it was written against, and it survives the redefinition intact.
+- Principle V gains one sentence. `dev` runs the generated project locally, and
+  a target that emits no project has none to run. The slng target has no `dev`;
+  an author talks to a SLNG agent through the platform's own web session.
+
+Reason: the slng target compiles a package into an agent body and a runbook for
+a platform that hosts the agent. Nothing about it validates and produces
+nothing, which is what 5.0.0 was written to stop. Shipping it under the old text
+would have left the constitution stating something false about the shipped code,
+which Principle IV forbids more strongly than this amendment costs.
+
+What contributors do differently: a capability row now supplies three values,
+not two. A new target still arrives with its driver, and the driver still owns
+the whole output. What is no longer required is that the output be Python.
+
+Previous report
+---------------
 Version change: 4.0.1 -> 5.0.0
 Bump rationale: MAJOR. Technology and Boundaries no longer permits validation to
 cover more targets than generation. A provider with no driver is not a target.
@@ -53,31 +81,14 @@ only the current report, so history lived in git alone; keeping the previous one
 inline costs four lines and answers "when did this bullet change" without a
 blame walk. Trim the oldest when this comment reaches three reports.
 
-Previous report
----------------
-Version change: 3.0.0 -> 4.0.0
-Bump rationale: MAJOR. Principle IV no longer makes a hand-written schema
-document the highest authority. Feature specs become ignored local work and
-the public documentation site becomes the only user-doc tree.
-
-Modified in 4.0.0:
-- Principle III defines one owner for code facts, architecture, public usage,
-  contributor rules, and local planning.
-- Principle IV changes from "the document wins" to "the owner wins".
-- Workflow makes Spec Kit artifacts local and reduces the maintained emitted
-  behavior surfaces from five to four.
-
-Reason: the old hierarchy required every behavior change to update both
-`docs/` and `docs-site/`. Those copies drifted. The repository now derives
-machine contracts from Go, keeps one architecture document, and writes public
-guidance once.
 -->
 
 # Unmute Constitution
 
-Unmute is a Go compiler. It reads one voice-agent package and writes a native
-LiveKit or Pipecat project. These principles bind every change. Day-to-day
-commands and detailed gates live in `CLAUDE.md`.
+Unmute is a Go compiler. It reads one voice-agent package and writes what the
+chosen target needs: a native LiveKit or Pipecat project, or a deployment body
+for a platform that runs the agent. These principles bind every change.
+Day-to-day commands and detailed gates live in `CLAUDE.md`.
 
 ## Core Principles
 
@@ -160,7 +171,9 @@ Four commands take an author from nothing to a voice they can talk to:
   allows. It runs as a host process where Docker would break the thing under
   test: Pipecat browser WebRTC, which needs host-reachable ICE candidates, and
   a route whose platform terminates the carrier's stream. A local stand-in for
-  a carrier is not the generated project and is not bound by this bullet.
+  a carrier is not the generated project and is not bound by this bullet. A
+  target that emits no project has none to run, so it has no `dev`: an author
+  talks to a hosted agent through its own platform's session.
 - `skill` is outside this path. It installs the offline coding-agent bundle
   and MUST NOT read, write, or validate an agent package.
 - Local input stands in for production input instead of creating another
@@ -180,9 +193,11 @@ Four commands take an author from nothing to a voice they can talk to:
 - Secret values appear in no package, generated file, or report.
 - Targets and model vendors are different concepts, and the distinction is
   load-bearing: a vendor name and a target name can be the same word.
-- A provider is a target only when a driver emits a runnable project for it.
-  Pipecat and LiveKit are the targets. A provider with no driver is not accepted
-  as a target value, so `validate` and `compile` agree about what exists.
+- A provider is a target when a driver owns its whole output end to end. Some
+  drivers emit a runnable project; some emit a deployment body for a platform
+  that runs the agent. What is forbidden is a provider that validates and then
+  produces nothing. A provider with no driver is not accepted as a target value,
+  so `validate` and `compile` agree about what exists.
 - Unmute does not buy phone numbers or provision carrier-side applications or
   SIP trunks.
 
@@ -220,4 +235,4 @@ topology change.
   knob needs a concrete reason. Without one, do less.
 - Rules added to `CLAUDE.md` need a failing gate or the label `(advisory)`.
 
-**Version**: 5.0.0 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-24
+**Version**: 6.0.0 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-25

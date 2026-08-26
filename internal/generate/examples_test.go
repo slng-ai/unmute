@@ -644,11 +644,12 @@ func TestPublicExamplePackages(t *testing.T) {
 			directories = append(directories, entry.Name())
 		}
 	}
-	// Five packages: four structural, and salon-concierge as the composite
-	// release fixture that also carries the only shipped telephony route. The
-	// focused telephony, outbound, transfer, MCP and regional examples were
-	// removed 2026-08-21; route guards remain against internal test fixtures.
-	want := []string{"multi-task", "salon-concierge", "simple-prompt", "subagents", "task-groups"}
+	// Six packages: four structural, salon-concierge as the composite release
+	// fixture that also carries the only shipped telephony route, and
+	// slng-support as the only one that emits no runnable project. The focused
+	// telephony, outbound, transfer, MCP and regional examples were removed
+	// 2026-08-21; route guards remain against internal test fixtures.
+	want := []string{"multi-task", "salon-concierge", "simple-prompt", "slng-support", "subagents", "task-groups"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}

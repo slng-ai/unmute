@@ -507,10 +507,12 @@ func buildTool(name string, raw packagespec.Tool) Tool {
 	switch {
 	case raw.Webhook != nil:
 		tool.URLEnv = raw.Webhook.URLEnv
+		tool.BaseURL = raw.Webhook.BaseURL
 		tool.Path = raw.Webhook.Path
 		tool.Auth = buildToolAuth(raw.Webhook.Auth)
 	case raw.Local != nil:
 		tool.Handler = raw.Local.Handler
+		tool.Dependencies = raw.Local.Dependencies
 		if tool.Handler == "" {
 			tool.Handler = filepath.Join("tools", name+".py")
 		}

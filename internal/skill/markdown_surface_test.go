@@ -97,9 +97,11 @@ func TestAgentInstructionsNameTheTwoFactsAgentsGetWrong(t *testing.T) {
 	joined := strings.ToLower(strings.Join(section.Instructions, "\n"))
 
 	// The target set. Vapi and Deepgram were retired as targets on 2026-08-24
-	// and Deepgram remains a model vendor, so the instructions have to say two
-	// and name both, not merely mention a target.
-	for _, want := range []string{"pipecat", "livekit agents", "two targets"} {
+	// and Deepgram remains a model vendor, so the instructions have to say how
+	// many there are and name each, not merely mention a target. slng joined on
+	// 2026-08-25 and is the reason the count moved: it is a target and a model
+	// vendor at once, which is the confusion this block exists to prevent.
+	for _, want := range []string{"pipecat", "livekit agents", "slng", "three targets"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("docs-site/docs.json markdown.instructions never says %q; an agent that does not know the target set invents a provider name", want)
 		}

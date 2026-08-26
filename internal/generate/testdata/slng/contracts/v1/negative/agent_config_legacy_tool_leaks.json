@@ -1,0 +1,38 @@
+{
+  "contract": "agent_config_v2",
+  "error_contains": "Extra inputs are not permitted",
+  "payload": {
+    "schema_version": 2,
+    "name": "Unsafe legacy agent",
+    "system_prompt": "Help",
+    "greeting": "Hello",
+    "language": "en",
+    "region": "eu-central",
+    "models": {
+      "stt": "soniox/speech-ai:rt-v4",
+      "llm": "google/gemini-2.5-flash",
+      "tts": "soniox/tts-rt:v1",
+      "tts_voice": "Maya"
+    },
+    "tool_mode": "legacy",
+    "tools": [
+      {
+        "type": "webhook",
+        "id": "99999999-9999-4999-8999-999999999999",
+        "name": "unsafe",
+        "description": "unsafe",
+        "url": "https://example.com",
+        "parameters": {"type": "object", "properties": {}},
+        "auth": {
+          "type": "bearer",
+          "secret_ref": "SAFE_REF",
+          "token": "SENTINEL_AUTH_SECRET"
+        },
+        "code_src": "SENTINEL_CODE_SOURCE",
+        "dependencies": ["SENTINEL_DEPENDENCY"],
+        "mcp_url": "https://SENTINEL_MCP_URL.example",
+        "unknown": {"nested": {"ciphertext": "SENTINEL_CIPHERTEXT"}}
+      }
+    ]
+  }
+}

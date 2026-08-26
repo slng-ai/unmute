@@ -1,0 +1,16 @@
+{
+  "json_schema": {
+    "dialect": "https://json-schema.org/draft/2020-12/schema",
+    "max_branches": 32,
+    "max_bytes": 65536,
+    "max_depth": 32,
+    "max_nodes": 2048,
+    "max_properties": 256,
+    "max_value_list": 256
+  },
+  "runtime": {
+    "max_dynamic_segments": 128,
+    "max_system_dependency_depth": 32,
+    "vault_name_pattern": "^[A-Z][A-Z0-9_]*$"
+  }
+}

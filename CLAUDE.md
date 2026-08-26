@@ -12,7 +12,7 @@ Unmute is written in Go, so you maintain **Go code**, but you also write some Py
 - Go 1.26 (pin in `go.mod`, and keep it on a Go line that still gets security patches, which is the newest two); `CGO_ENABLED=0` static binary; version stamped at link time, never hardcoded.
 - Direct deps — `cobra`, `goccy/go-yaml` (gives line/col on parse errors), `google/jsonschema-go` (**v0.x — pin the exact version, bump deliberately**), and the Charm TUI stack: `charmbracelet/bubbletea` + `bubbles` + `lipgloss` power the interactive console (custom MVU styled with Lip Gloss), while `charmbracelet/huh` v1.0.0 is scoped to the accessible/headless renderer only. **The interactive path imports no `huh`; Lip Gloss is expected there. All color lives in `internal/style` — no color literal anywhere else** (guarded by `internal/style/style_test.go`). Everything else is stdlib. **No new dep for what a few lines of stdlib do — justify any addition in the PR.** No `viper` until a real global config file exists.
 - `golangci-lint` from day one (`.golangci.yml`).
-- Make targets: `build test smoke rig lint fmt install`. `rig` is the credential-free local telephony check: a container runtime and no accounts.
+- Make targets: `build test smoke rig contracts lint fmt install`. `rig` is the credential-free local telephony check: a container runtime and no accounts. `contracts` re-fetches the published SLNG conformance fixtures and fails on a digest mismatch: network, no accounts.
 
 ## Command rules (cobra) — these are what make commands testable, not suggestions
 1. Build the tree with a `newRootCmd()` constructor; **no package-level `var rootCmd`** (fresh tree per call = flag isolation between tests).
@@ -45,7 +45,12 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | no color literal outside `internal/style` | `internal/style/style_test.go` |
 | every direct dependency is on the allowlist | `internal/cli/deps_test.go` |
 | no declaration is reachable only from its own definition | `internal/cli/reachability_test.go` (`deadcode -test ./...`) |
+| every declared capability `Field` constant has a row in the table | `internal/target/table_test.go` (`TestEveryFieldConstantHasARow`) |
 | every symbol a template names still exists in Go | `internal/scaffold/template_symbols_test.go` |
+| every capability row carries a deliberate value for a target `field()` does not seed, and every refusal names what to do instead | `internal/target/table_test.go` |
+| the console offers every shipped target, names each correctly, and offers no option validation refuses | `internal/tui/default_target_test.go` |
+| the slng target opens no socket to the SLNG agents API | `internal/ir/validate_slng_test.go` |
+| every surface naming a `voiceai` command names the same one, agent id included | `internal/target/slng_target_test.go` |
 | example READMEs name every transport; every `examples/` link resolves | `internal/generate/examples_test.go` |
 | every emitted task prompt names its finish call and an escape, every finish takes the reserved `unserved_request`, and the owner is told to read it | `internal/generate/task_prompt_test.go`, `internal/ir/validate_test.go` |
 | the skill's tool kinds, vendors, providers and doc pointers match the code | `internal/skill/agreement_test.go` |
@@ -69,6 +74,7 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | release config still builds 6 platforms with version stamps | CI `release-config` |
 | emitted Python is valid | `make smoke`, opt-in, never the PR gate |
 | the local telephony planes work end to end with no accounts | `make rig`, opt-in, needs a container runtime, never the PR gate |
+| the vendored SLNG conformance fixtures still match what the backend publishes | `make contracts`, opt-in, needs network, never the PR gate |
 
 A note on the third gate, because it looks redundant next to the second and is
 not. `deadcode` walks the call graph and cannot see through `text/template`, so
