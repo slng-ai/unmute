@@ -62,6 +62,8 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | every telephony route deploys to a managed platform: every Pipecat route emits a deploy manifest on the platform base image, and no LiveKit route emits one | `internal/generate/cloud_isolation_test.go` |
 | an inbound LiveKit SIP route emits the trunk and dispatch-rule records a call needs, and the one command that creates them | `internal/generate/livekit_telephony_setup_test.go` |
 | a route that hosts nothing says so everywhere: no tunnel, helper or hosting word in its emitted runbook | `internal/generate/pipecat_cloud_websocket_test.go` |
+| the Pipecat image copies every emitted module `bot.py` imports (its COPY lines are named, so a new module is a `ModuleNotFoundError` at startup) | `internal/generate/pipecat_image_imports_test.go` |
+| a Pipecat phone route protects the greeting, an authored `protect` overrides it, `[]` suppresses it, and every mute class named is imported | `internal/generate/pipecat_user_mute_test.go` |
 | the emitted transfer document and the plane's reading of it stay in agreement | `internal/generate` (emitted shape) + `internal/cli` (the reading), one gate each |
 | the docs-site transfer table matches the route table, both directions | `internal/docsite/transfer_table_test.go` |
 | the docs-site tool tables match the capability table on all three targets, and the page's own count of execution blocks is right | `internal/docsite/tool_table_test.go` |

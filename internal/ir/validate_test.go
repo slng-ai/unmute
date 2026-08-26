@@ -406,6 +406,32 @@ func TestValidateRequiresInterruptionEnabled(t *testing.T) {
 	}
 }
 
+// A misspelled protect entry would otherwise lower to no strategy at all: the
+// author asks for a protected greeting, compile stays green, and the agent
+// interrupts itself on the first phone call.
+func TestValidateRejectsUnknownInterruptionProtect(t *testing.T) {
+	agent := safeAgent(t)
+	agent.Conversation.Interruption.Protect = []InterruptionProtect{"greetings"}
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), `protect has unknown entry "greetings"`) {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+// enabled: false already mutes the whole call, so a protect list beside it is a
+// contradiction. Honouring one and dropping the other silently is the worse
+// outcome either way, so it is refused.
+func TestValidateRejectsInterruptionProtectWhenDisabled(t *testing.T) {
+	agent := safeAgent(t)
+	off := false
+	agent.Conversation.Interruption.Enabled = &off
+	agent.Conversation.Interruption.Protect = []InterruptionProtect{ProtectGreeting}
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "protect has no meaning when enabled is false") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
 func TestValidateCodeTelephonyRequiresResolvedPlan(t *testing.T) {
 	agent := safeAgent(t)
 	agent.Channels["phone"] = testTelephonyChannel()

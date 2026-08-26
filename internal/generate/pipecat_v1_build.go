@@ -173,7 +173,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		return pipecatData{}, err
 	}
 
-	applyConversation(agent.Conversation, &data)
+	applyConversation(agent.Conversation, target.Telephony != nil, &data)
 	data.Notes = append(data.Notes, serviceNotes(data)...)
 	if target.Models.Turn != nil {
 		data.Notes = append(data.Notes, "turn role lowers to on-device VAD (Silero); its binding is advisory")
@@ -1273,14 +1273,42 @@ func pyArgTypeDefault(jsonType string, required bool) (pyType, pyDefault string)
 // (templates/livekit_v1/agent.py.tmpl), so both drivers open a call the same way.
 const defaultGreetingInstruction = "Greet the caller and offer to help."
 
+// The pipecat.turns.user_mute class names, one per protected stretch. Named here
+// rather than written into the template so the import list and the argument list
+// cannot drift apart.
+const (
+	muteAlways                = "AlwaysUserMuteStrategy"
+	muteUntilFirstBotComplete = "MuteUntilFirstBotCompleteUserMuteStrategy"
+	muteFunctionCall          = "FunctionCallUserMuteStrategy"
+)
+
 // applyConversation lowers the conversation block into the template model:
 // greeting activation, interruption turn-strategies, idle timeout, max duration.
-func applyConversation(c *ir.Conversation, data *pipecatData) {
+//
+// telephony says the route carries a phone leg, which decides the interruption
+// default: see the comment on that branch.
+func applyConversation(c *ir.Conversation, telephony bool, data *pipecatData) {
 	var greeting *ir.Greeting
 	if c != nil {
 		greeting = c.Greeting
 	}
 	applyGreeting(greeting, data)
+	// A phone leg has no echo cancellation. A browser gets it from the platform,
+	// so a web route needs nothing here, but a caller on speakerphone sends the
+	// agent's own greeting back through their microphone, it is transcribed as
+	// caller speech, and the agent interrupts itself one second into the call.
+	// The garbled turn then sits in the model's context for the rest of the
+	// conversation and every later answer is built on it. Measured on a real call
+	// 2026-08-26: the model's first user turn read "hi you've reached".
+	//
+	// So a telephony route protects the greeting unless the author says otherwise.
+	// It is the narrowest default that fixes this: barge-in stays on for every
+	// turn after the opening line.
+	if telephony {
+		data.UserMuteStrategies = []string{muteUntilFirstBotComplete}
+		data.GreetingProtectedByRoute = true
+		data.Notes = append(data.Notes, "interruption: protecting the greeting, because a phone leg has no echo cancellation and the agent would otherwise interrupt itself; set conversation.interruption.protect to override, or to [] for none")
+	}
 	if c == nil {
 		return
 	}
@@ -1291,13 +1319,31 @@ func applyConversation(c *ir.Conversation, data *pipecatData) {
 		}
 		data.Interrupt = interrupt
 		// interruption.enabled: false lowers to the aggregator's always-mute
-		// strategy, which is Pipecat 1.5's mechanism for it (verified in the
-		// built image: AlwaysUserMuteStrategy, "always mutes the user while the
-		// bot is speaking"). The field used to be computed here and never
-		// rendered, so an author who declared "the caller cannot barge in" got a
-		// fully interruptible Pipecat agent while the LiveKit build from the same
-		// source honoured it (Wave C, 2026-08-15).
-		data.NeedsUserMute = !interrupt.Enabled
+		// strategy, which is Pipecat's mechanism for it (AlwaysUserMuteStrategy,
+		// "always mutes the user while the bot is speaking"). The field used to be
+		// computed here and never rendered, so an author who declared "the caller
+		// cannot barge in" got a fully interruptible Pipecat agent while the
+		// LiveKit build from the same source honoured it (Wave C, 2026-08-15).
+		//
+		// protect narrows that to named stretches. It supersedes the route default
+		// set above whenever the author wrote the key at all, including as an
+		// empty list, which is how they ask for no protection.
+		switch {
+		case !interrupt.Enabled:
+			data.UserMuteStrategies = []string{muteAlways}
+			data.GreetingProtectedByRoute = false
+		case c.Interruption.Protect != nil:
+			data.UserMuteStrategies = nil
+			data.GreetingProtectedByRoute = false
+			for _, protect := range c.Interruption.Protect {
+				switch protect {
+				case ir.ProtectGreeting:
+					data.UserMuteStrategies = append(data.UserMuteStrategies, muteUntilFirstBotComplete)
+				case ir.ProtectToolCalls:
+					data.UserMuteStrategies = append(data.UserMuteStrategies, muteFunctionCall)
+				}
+			}
+		}
 		if len(interrupt.IgnorePhrase) > 0 {
 			data.Notes = append(data.Notes, "interruption ignore_phrases emitted as IGNORE_PHRASES; short phrases are also suppressed by the min-words turn-start strategy")
 		}

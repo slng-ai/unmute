@@ -472,7 +472,12 @@ type Greeting struct {
 }
 
 type Interruption struct {
-	Enabled       *bool    `json:"enabled" yaml:"enabled"`
+	Enabled *bool `json:"enabled" yaml:"enabled"`
+	// Protect names the stretches of the call the caller cannot talk over while
+	// barge-in stays on everywhere else: "greeting", "tool_calls". An empty list
+	// is not the same as an absent one — it means protect nothing, and it is how
+	// an author turns off a default the target would otherwise apply.
+	Protect       []string `json:"protect,omitempty" yaml:"protect,omitempty"`
 	MinimumWords  int      `json:"minimum_words,omitempty" yaml:"minimum_words,omitempty"`
 	IgnorePhrases []string `json:"ignore_phrases,omitempty" yaml:"ignore_phrases,omitempty"`
 }

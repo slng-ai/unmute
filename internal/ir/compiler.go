@@ -584,10 +584,35 @@ const (
 	SpeaksFirstUser  SpeaksFirst = "user"
 )
 
+// InterruptionProtect names one stretch of the call the caller cannot talk over,
+// while barge-in stays on for the rest of it. `interruption.enabled: false` is
+// the whole call; this is the middle ground between that and nothing.
+type InterruptionProtect string
+
+const (
+	// ProtectGreeting keeps the opening line intact.
+	//
+	// This is the one that matters on a phone leg, because a phone leg has no
+	// echo cancellation: a caller on speakerphone sends the agent's own greeting
+	// back through their microphone, the transcriber reports it as caller
+	// speech, and the agent interrupts itself mid-sentence. The garbled turn
+	// then stays in the model's context for the rest of the call. Measured on a
+	// real call 2026-08-26: the first user turn read "hi you've reached", which
+	// is the agent's own greeting.
+	ProtectGreeting InterruptionProtect = "greeting"
+	// ProtectToolCalls keeps a running tool call from being cancelled by stray
+	// audio, so a caller's cough does not abandon a booking mid-write.
+	ProtectToolCalls InterruptionProtect = "tool_calls"
+)
+
 type Interruption struct {
-	Enabled       *bool    `json:"enabled" yaml:"enabled"`
-	MinimumWords  int      `json:"minimum_words,omitempty" yaml:"minimum_words,omitempty"`
-	IgnorePhrases []string `json:"ignore_phrases,omitempty" yaml:"ignore_phrases,omitempty"`
+	Enabled *bool `json:"enabled" yaml:"enabled"`
+	// Protect is nil when the author said nothing, which leaves the target free
+	// to apply its own default. An empty non-nil slice means the author asked
+	// for no protection, which suppresses that default.
+	Protect       []InterruptionProtect `json:"protect,omitempty" yaml:"protect,omitempty"`
+	MinimumWords  int                   `json:"minimum_words,omitempty" yaml:"minimum_words,omitempty"`
+	IgnorePhrases []string              `json:"ignore_phrases,omitempty" yaml:"ignore_phrases,omitempty"`
 }
 
 type Inactivity struct {

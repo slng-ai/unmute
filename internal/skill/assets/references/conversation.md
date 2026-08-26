@@ -29,6 +29,7 @@ conversation:
 | `interruption.enabled` | required whenever `interruption` is present |
 | `interruption.minimum_words` | how much speech counts as an interruption |
 | `interruption.ignore_phrases` | phrases that do not interrupt |
+| `interruption.protect` | `greeting`, `tool_calls`, or both; Pipecat only |
 | `inactivity.nudge_after`, `inactivity.end_after` | durations |
 | `max_duration` | a duration |
 | `thinking_audio` | `none` or `subtle` |
@@ -79,6 +80,33 @@ into.
 are the fix for an agent that stops talking every time the caller says "mm hm".
 Reach for `ignore_phrases` before turning interruption off, because an agent
 that cannot be interrupted is worse than one that stops too often.
+
+`protect` names the stretches the caller cannot talk over while barge-in stays on
+for the rest of the call. It takes `greeting`, `tool_calls`, or both, and it
+compiles on Pipecat only:
+
+```yaml
+  interruption:
+    enabled: true
+    protect: [greeting]
+```
+
+You rarely need to write it, because a phone route protects the greeting on its
+own and says so in the compile output. That default exists for a reason worth
+knowing: a phone leg has no echo cancellation. A caller on speakerphone sends the
+agent's own greeting back through their microphone, the transcriber reports it as
+caller speech, and the agent interrupts itself a second into the call. The
+garbled turn then sits in the model's context for the rest of the conversation
+and every later answer is built on top of it.
+
+Write `protect` when you want something other than that default: add
+`tool_calls` so a cough cannot abandon a booking mid-write, or set `protect: []`
+to ask for no protection at all. An empty list is not the same as leaving the key
+out, and that is the whole point of it: leaving it out accepts the route's
+default, and `[]` overrides it.
+
+`protect` and `enabled: false` are refused together, because `enabled: false`
+already mutes the caller for the whole call.
 
 ## Inactivity and duration
 

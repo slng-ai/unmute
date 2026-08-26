@@ -83,6 +83,7 @@ const (
 	FieldGreetingAbsent        Field = "conversation.greeting.absent"
 	FieldInterruptionMinWords  Field = "conversation.interruption.minimum_words"
 	FieldInterruptionIgnore    Field = "conversation.interruption.ignore_phrases"
+	FieldInterruptionProtect   Field = "conversation.interruption.protect"
 	FieldInactivity            Field = "conversation.inactivity"
 	FieldMaxDuration           Field = "conversation.max_duration"
 	FieldThinkingAudio         Field = "conversation.thinking_audio"
@@ -356,6 +357,19 @@ func Default() Table {
 			),
 			FieldInterruptionIgnore: field(
 				deny(Slng, "slng target takes interruptions as on or off and reads no phrase list: remove ignore_phrases, or compile to livekit or pipecat which match them"),
+			),
+			// Pipecat carries this natively: the aggregator takes one mute
+			// strategy per protected stretch, so "greeting" and "tool_calls" each
+			// lower to a class from pipecat.turns.user_mute.
+			//
+			// LiveKit could honour "greeting" by passing allow_interruptions=False
+			// to the say() that opens the call, but not a model-written opening,
+			// which goes through generate_reply and takes no such argument. Half a
+			// field is worse than none, so it is refused by name until both
+			// openings are wired.
+			FieldInterruptionProtect: field(
+				deny(LiveKit, "the LiveKit driver does not protect named stretches of a call yet: drop conversation.interruption.protect and use enabled: false to stop barge-in for the whole call, or compile to pipecat which mutes per stretch"),
+				deny(Slng, "slng target takes interruptions as on or off with no way to protect one stretch of a call: drop conversation.interruption.protect, or compile to pipecat which mutes per stretch"),
 			),
 			FieldInactivity: field(
 				warn(LiveKit, "LiveKit driver must range-check inactivity durations"),

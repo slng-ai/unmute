@@ -393,11 +393,21 @@ type pipecatData struct {
 	// NeedsEndAfter emits the _end_after helper, which the max-duration cap and
 	// the inactivity hangup share.
 	NeedsEndAfter bool
-	// NeedsUserMute emits the always-mute strategy for interruption.enabled:
-	// false, which is how Pipecat 1.5 expresses "the caller cannot barge in".
-	NeedsUserMute   bool
-	HasColdTransfer bool
-	Transport       string
+	// UserMuteStrategies are the pipecat.turns.user_mute class names the
+	// aggregator is given, in order. Empty means full barge-in.
+	//
+	// This used to be a single bool for interruption.enabled: false, which left
+	// no way to say "barge-in, but not over the greeting" — and that middle
+	// ground is the one a phone call needs, because a phone leg has no echo
+	// cancellation and the agent otherwise interrupts itself with its own
+	// greeting.
+	UserMuteStrategies []string
+	// GreetingProtectedByRoute records that the greeting mute came from the phone
+	// route's default rather than from the author, which is the difference the
+	// emitted runbook explains. False once the author writes protect themselves.
+	GreetingProtectedByRoute bool
+	HasColdTransfer          bool
+	Transport                string
 	// DailyParams is the parameter object the "daily" transport key constructs on
 	// the Daily route, where the generic one cannot work. Nil everywhere else, so
 	// no other route churns and no package carries a Daily import it never uses.
@@ -524,6 +534,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldGreetingAbsent:       true,
 	targetcap.FieldInterruptionMinWords: true, // MinWordsUserTurnStartStrategy
 	targetcap.FieldInterruptionIgnore:   true, // IGNORE_PHRASES
+	targetcap.FieldInterruptionProtect:  true, // user_mute_strategies, one class per protected stretch
 	targetcap.FieldInactivity:           true, // user_idle_timeout
 	targetcap.FieldMaxDuration:          true, // asyncio EndFrame timer
 	targetcap.FieldToolOutput:           true, // tool returns response.json()
