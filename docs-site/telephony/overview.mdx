@@ -112,6 +112,27 @@ starts nothing.
   the date it was checked. [Read the report fields](/reference/cli/compile#the-report).
 </Info>
 
+## What a working phone route takes
+
+Compiling is one of three parts, and the other two are things you do in someone
+else's console or CLI. Neither is optional, and skipping either gives you a
+number that rings and never connects.
+
+| | Pipecat `cloud-websocket` | LiveKit `sip` |
+|---|---|---|
+| **1. Carrier** | point the number at a TwiML Bin | attach the number to an Elastic SIP trunk, and point that trunk's origination at LiveKit |
+| **2. Platform** | `pipecat cloud deploy` | `lk agent create` |
+| **3. Platform records** | none | `bash telephony-setup.sh`, which claims the number in your LiveKit project and routes it to the agent |
+
+Step 3 is the one people miss, partly because two different things get called a
+trunk. The Elastic SIP trunk is Twilio's, and it carries the call. The inbound
+trunk is LiveKit's, and it says the number belongs to your project. LiveKit
+rejects a call whose number no inbound trunk claims, however correct the Twilio
+side is.
+
+[Twilio setup](/telephony/twilio) covers part 1, and
+[inbound calls](/telephony/inbound-calls) walks all three in order.
+
 ## What the transport decides
 
 The transport is not a detail. It decides what the agent can do on a call.

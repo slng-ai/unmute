@@ -915,8 +915,15 @@ one names the console path, and the CLI equivalent where Twilio has one.
    trunk, under Features: set Call Transfer (SIP REFER) to Enabled,
    tick Enable PSTN Transfer, and choose a Caller ID for Transfer Target. CLI:
    `twilio api trunking v1 trunks update --sid <trunk-sid> --transfer-mode
-   enable-all --transfer-caller-id from-transferee`. Transfer caller ID is a
+   enable-all --transfer-caller-id from-transferor`. Transfer caller ID is a
    trunk setting, never something one call can choose.
+
+   `from-transferor` presents your own number to the person receiving the
+   transfer, and connects anywhere. `from-transferee` presents the caller's
+   number instead, which reads better but only works where the receiving
+   carrier accepts a number your account does not own; across a border it is
+   usually refused, and every transfer then fails instantly with `486 Busy
+   Here` and a zero second, zero cost leg in the Twilio call log.
 {{- end}}
 
 LiveKit's own version of these steps is the
@@ -977,7 +984,7 @@ twilio api:trunking:v1:trunks:phone-numbers:create --trunk-sid "$TRUNK_SID" \
 # Step 6: allow transfers, including out to the phone network. Without this the
 # carrier rejects the cold transfer.
 twilio api:trunking:v1:trunks:update --sid "$TRUNK_SID" \
-  --transfer-mode enable-all --transfer-caller-id from-transferee
+  --transfer-mode enable-all --transfer-caller-id from-transferor
 {{- end}}
 
 # Finally, put the three termination values in .env:

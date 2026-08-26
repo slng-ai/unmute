@@ -79,9 +79,28 @@ mitigation rather than a hard time limit.
 
 ## The trunk has to allow it
 
-Cold transfer is a SIP REFER, so the trunk must permit transfers. Follow the
-[Twilio Console setup](/telephony/twilio#set-up-the-livekit-sip-trunk-in-twilio-console)
-to enable Call Transfer (SIP REFER), PSTN Transfer, and the Transferee caller ID.
+Cold transfer is a SIP REFER, so the trunk must permit transfers. In the trunk's
+**General settings**, three things have to be right, and a new trunk has none of
+them:
+
+| Setting | Value |
+|---|---|
+| Call Transfer (SIP REFER) | enabled |
+| Enable PSTN Transfer | ticked, for any `tel:` destination |
+| Caller ID for Transfer Target | see below |
+
+Twilio's transfer mode has a third value, `sip-only`, which allows SIP
+destinations and refuses PSTN ones. A phone number destination needs the PSTN
+box ticked.
+
+**Caller ID decides whether the transfer connects at all.** Transferee presents
+the original caller's number to the destination, which is the nicer behaviour
+and works where the receiving carrier accepts a number your account does not
+own. Transferor presents your own Twilio number, and is what to use when the
+transfer crosses a border. Getting this wrong fails every transfer instantly,
+with `486 Busy Here` and a zero second, zero cost call leg in Twilio's log.
+[The caller ID section](/telephony/twilio#caller-id-for-a-transfer-target) shows
+how to tell that apart from a destination that is genuinely busy.
 
 Caller ID for the transfer target is that trunk setting, never per call.
 Transfers to emergency numbers are not supported, and the referred leg keeps
