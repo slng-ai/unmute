@@ -10,10 +10,8 @@ belongs to.
 
 <Note>
   Unmute never buys a number, creates a trunk, or changes anything on your carrier
-  account at compile time. The one exception is deliberate and temporary:
-  on supported HTTP callback routes, [`unmute dev --telephony`](/dev/local-telephony)
-  points your number's voice webhook at the local run and puts the previous
-  value back when you stop it.
+  account, at compile time or afterward. Every value below is one you set yourself,
+  in the Twilio Console.
 </Note>
 
 ## Which values you need depends on the route
@@ -21,7 +19,6 @@ belongs to.
 | Target | `transport` | `environment` keys | Where they come from |
 |---|---|---|---|
 | Pipecat | `cloud-websocket` | `account_sid`, `auth_token`, `from_number` | the account dashboard, plus a number you own |
-| Pipecat | `carrier-websocket` | `account_sid`, `auth_token`, `from_number` | the same three |
 | LiveKit Agents | `connector` | `account_sid`, `auth_token`, `from_number` | the same three |
 | LiveKit Agents | `sip` | `sip_address`, `sip_username`, `sip_password`, `from_number` | an Elastic SIP trunk you create |
 
@@ -39,9 +36,9 @@ Whatever you buy or already own is the value of `from_number` (or `SIP_FROM_NUMB
 on the SIP route). It is also the caller identity the person you dial sees, and
 voice capability is the whole requirement on it.
 
-## The account trio: Pipecat routes and the LiveKit connector
+## The account trio: Pipecat cloud-websocket and the LiveKit connector
 
-These three routes talk to Twilio's REST API in your name, so they need the account
+These two routes talk to Twilio's REST API in your name, so they need the account
 credentials.
 
 | Connection key | The value | Where it is |
@@ -66,18 +63,13 @@ in the repository uses, so one `.env` drives all of them.
 
 This part differs by route, and it is the part to get right:
 
-- **`cloud-websocket`, in production**: the number points at a static piece of TwiML
-  in the console, which streams the call to Pipecat Cloud. There is no URL of yours
+- **`cloud-websocket`**: the number points at a static piece of TwiML in the
+  console, which streams the call to Pipecat Cloud. There is no URL of yours
   to configure, because nothing of yours is hosted. Your build's generated README
   dictates the exact markup, including the regional stream address, because that
   address comes from the region in your `targets.yaml`.
-- **`carrier-websocket` and `connector`, in production**: the number's voice webhook
-  points at the public URL of the service you host, as a POST.
-- **All three, locally**: `unmute dev --telephony` sets the voice webhook to its
-  own tunnel on every start and restores the previous value on exit, so you do
-  not touch the console to test. Pipecat `cloud-websocket` points at `POST /`,
-  which its local `uv` runner answers. Pipecat `carrier-websocket` and LiveKit
-  `connector` point at `POST /telephony/inbound` on the generated application.
+- **`connector`**: the number's voice webhook points at `POST /telephony/inbound`
+  on the public URL of the service you deploy.
 
 <Warning>
   Take the number off any SIP trunk before using it on one of these routes. A number
@@ -195,6 +187,6 @@ was generated from your package and names your region and your number.
     The file these values fill.
   </Card>
   <Card title="Your first phone call" icon="phone-incoming" href="/telephony/inbound-calls">
-    Take a real call on your laptop.
+    Take a real call, once you deploy.
   </Card>
 </Columns>

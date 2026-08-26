@@ -1,0 +1,82 @@
+# A support agent that runs on SLNG, and only on SLNG.
+#
+# SLNG hosts the agent, so there is no project to run and no infrastructure to
+# operate. `unmute compile --target slng` writes a deployment body and a runbook
+# into build/slng/, and the voiceai CLI pushes them.
+#
+# Every tool here is a builtin, which is deliberate. A builtin names a
+# capability SLNG already owns, so this package needs no tool bodies created
+# first and no names resolved to identifiers: the emitted agent.json is postable
+# exactly as written.
+#
+# What this package leaves out, and why:
+#   - a `turn:` section: SLNG owns its own turn taking, so a bound turn model
+#     reaches nothing
+#   - tasks, task groups, agent transfers: SLNG's agent carries one prompt
+#   - inactivity, max_duration, interruption thresholds: no field to hold them
+#   - tracing, capacity: unmute instruments and sizes no process here
+#
+# All five are refused at validate rather than dropped, so `unmute validate
+# --target slng` tells you before anything is written.
+
+version: 1
+entry_agent: support
+
+models:
+  think:
+    reasoning:
+      description: answers the caller
+      # Two fields, as on every target. SLNG names a model with the vendor and
+      # the model joined by a slash, and the slng driver joins these two when it
+      # writes the body. A model whose name already carries a slash, like the
+      # speak entry below, is passed through whole instead of joined twice.
+      #
+      # SLNG owns its model list, so unmute validates no vendor and checks no
+      # model name here. The compile report says which values it forwarded.
+      provider: openai
+      model: gpt-5.6-luna
+  speak:
+    front_desk:
+      description: warm, concise
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      description: default STT
+      provider: deepgram
+      model: slng/deepgram/nova:3-en
+      language: en
+
+variables:
+  # Declared with a default, so it appears in both of SLNG's variable maps: the
+  # declaration list and the defaults. A caller whose name is not supplied at
+  # dispatch is greeted with the default.
+  customer_name:
+    type: string
+    default: there
+
+agents:
+  support:
+    instructions: instructions.md
+    model: reasoning
+    voice: front_desk
+    tools:
+      - end_call
+
+tools:
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    # SLNG requires a greeting and speaks the string it is given, so it is
+    # written out here rather than left to the model. The token is a package
+    # variable, rendered by SLNG at the start of the call.
+    text: "Hi {{customer_name}}, you have reached Acme Support. How can I help?"
+  interruption:
+    enabled: true
+
+channels:
+  web:
+    kind: realtime_audio

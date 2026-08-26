@@ -7,11 +7,9 @@ not edit by hand — change the source spec and recompile.
 
 ```sh
 cp .env.example .env                      # then fill in your keys
-{{if .Telephony}}uv run uvicorn telephony:app --host 0.0.0.0 --port 7860
-{{else if .SIP}}docker compose -f compose.telephony.yaml up   # the whole plane, four containers
-{{else}}
+
 uv run bot.py -t webrtc                   # web: open the URL it prints
-{{end}}
+
 ```
 
 Pipecat logs default to `INFO`. Set `UNMUTE_LOG_LEVEL=DEBUG` only in a
@@ -119,34 +117,7 @@ In a group with `context_scope: shared`, each exact typed result enters the
 shared context before the next task starts. An isolated group carries no
 results between steps. The final `merge: results` map is keyed by task name.
 {{- end}}
-{{if .Telephony}}
-This project uses the
-`pipecat/carrier-websocket/{{.Telephony.Carrier}}` route and contains only that
-carrier adapter.
 
-The server exposes only the endpoints selected by the source channel:
-
-{{if .Telephony.HasInbound}}- Signed carrier ingress at `/telephony/inbound`.
-{{end}}{{if .Telephony.HasOutbound}}- Authenticated outbound start at
-  `/telephony/outbound`.
-{{end}}- One-use media URLs under `/telephony/ws/{token}`.
-- Signed status callbacks at `/telephony/status`.
-
-{{if .Telephony.HasInbound}}
-{{if eq .Telephony.Carrier "twilio"}}Configure the Twilio phone-number voice
-webhook to the inbound URL and its status callback to the status URL.
-{{else if eq .Telephony.Carrier "telnyx"}}Configure a Telnyx Voice API
-Application for API version 2, point its webhook URL at the inbound URL, and
-assign the phone number to that application.
-{{else if eq .Telephony.Carrier "plivo"}}Configure a Plivo Voice XML
-Application with its POST Answer URL set to the inbound URL and its Hangup URL
-set to the status URL, then assign the phone number to that application.
-{{end}}
-{{end}}The public origin must exactly match `UNMUTE_PUBLIC_URL` or signature
-validation will reject the request.
-
-This route remains provisional until its credentialed smoke passes.
-{{else}}
 `uv` installs the pinned dependencies on first run. The Pipecat dev runner
 serves a WebRTC test client you can open in the browser.
 {{if .DailyCarrier}}
@@ -158,17 +129,10 @@ That command is for talking to the agent right now, with no phone involved. For 
 real phone call through your own number, see **Telephony setup** below: deploy,
 then a few actions in your carrier's console, and nothing running on your side
 at all.
-{{end}}{{end}}
+{{end}}
 While iterating on the source spec, `unmute dev <source-dir>` recompiles this
 project and runs it for you behind a dev client.
-{{- if .Telephony}}
 
-**Test in the browser before you test on a phone.** `unmute dev <source-dir>`
-opens a browser session with no carrier credentials set and none checked, even
-though this package declares a phone channel. Get the prompt and the models
-right there, then add `--telephony`, which is where the route values below start
-mattering. The browser loop is the shortest one this project has.
-{{- end}}
 
 {{- if .Knowledge.Knowledge}}
 ## Knowledge bases
@@ -435,31 +399,7 @@ off the stream.
 | answers stay slow across deploys | the agent id changed between them | keep one stable id and bump it deliberately |
 | every turn says `source=llm` and the answers read back a number or a name | the value is rendered into the prompt, or the agent reformats it before saying it, so the stored copy holds the real thing and is refused | put the value in a `{{"{{"}}placeholder{{"}}"}}`, and give it the exact shape the agent speaks: the router substitutes back only where the answer holds the value character for character |
 
-{{end}}{{if .Telephony}}## Deploy it yourself
-
-This is the one Pipecat route with no managed-platform path, which is why this
-project has no deploy manifest and its `Dockerfile` starts from plain Python.
-The carrier connects to *your* adapter, so it has to be reachable.
-
-Build the generated `Dockerfile` into an image and run it behind:
-
-- **Public HTTPS and WSS on port 443.** The carrier posts to the inbound
-  endpoint and then opens the media socket, both on the same origin.
-- **`UNMUTE_PUBLIC_URL` set to that exact origin**, because signature validation
-  compares against it and a mismatch rejects every call.
-- **WebSocket idle timeouts longer than your longest call**, at every proxy in
-  front of the container.
-- **One Redis all replicas share** (`REDIS_URL`). The one-use media token is
-  minted on the inbound request and redeemed on the socket, and those two can
-  land on different replicas.
-
-`compose.telephony.yaml` is that shape for a single host. Scale by active
-sessions rather than request rate, and keep each socket on the replica that
-accepted it.
-
-See `docs-site/deploy/going-live.mdx` in the Unmute repository for the rest:
-sizing, logging, and the production concerns both targets share.
-{{else}}## Deploy to Pipecat Cloud
+{{end}}## Deploy to Pipecat Cloud
 
 Authenticate once first with `pipecat cloud auth login`. After that, one command
 does the first deploy and every later one: `pipecat cloud deploy` builds the image
@@ -529,7 +469,6 @@ No region is declared, so the agent goes to your organisation's default region
 explicit `--region` to both commands: a set in the wrong region cannot be read
 by the agent.{{end}} Set `deployment_region` on this target in `targets.yaml` to
 choose one, and `pipecat cloud regions list` to see what is available.
-{{- end}}
 {{- end}}
 {{if .DailyCarrier}}
 ## Telephony setup
@@ -840,108 +779,6 @@ What the caller hears, and what it means:
 
 The helper never starts half-configured: a missing value stops it at startup with
 the names printed, one per line. If it started, its own environment is complete.
-{{end}}{{if .SIP}}
-## Telephony setup
-
-This route hosts everything. There is no managed platform anywhere in it, which
-is why this project emits no deployment manifest and builds on a plain Python
-image: what you run locally is what you run in production.
-
-### The four containers
-
-| Container | What it does |
-|---|---|
-| `application` | this agent: `telephony.py` answers the room webhook, `bot.py` runs the call |
-| `livekit_server` | rooms, media, participants, and the webhook that announces them |
-| `livekit_sip` | terminates your carrier's SIP trunk and puts the caller in a room |
-| `redis` | coordination between the server and the SIP service (Valkey, BSD-3-Clause) |
-
-`docker compose -f compose.telephony.yaml up` brings all four up. The same file
-runs the local plane and describes the production topology; what changes in
-production is that LiveKit SIP needs publicly reachable SIP signalling and RTP
-ports, which a laptop behind NAT does not have.
-
-### How a call reaches this agent
-
-Worth reading once, because one line of configuration decides whether inbound
-works at all.
-
-An incoming call arrives at `livekit_sip`, which puts the caller in a room of
-their own and starts ringing. **The call is answered only when something joins
-that room and publishes audio.** Nothing else answers it: not the trunk, not the
-dispatch rule, not a timer.
-
-So something has to be told about the room, and on this route that is
-`telephony.py`. `livekit_server` POSTs each new room to `{{.SIP.WebhookPath}}`,
-the app verifies the delivery signature and starts a session, and the session
-joins the room — which is what answers the caller.
-
-The alternative would be for the dispatch rule to put the agent in the room
-itself, and that is what the LiveKit target does. It cannot work here: a dispatch
-rule can only dispatch a LiveKit *agent worker*, and this agent is a Pipecat bot.
-That is why the rule this project creates names no agent, and why the webhook is
-not optional. Without it every call rings for three minutes and is cut off.
-
-### Wire up your carrier
-
-{{range .CarrierSteps}}- {{.}}
-{{end}}
-For inbound calls, two things:
-
-1. `bash telephony-setup.sh` creates the two records an unsolicited call needs,
-   reading `sip-inbound-trunk.json` and `sip-dispatch-rule.json` from this
-   directory. It resolves the trunk by phone number, so no record identifier is
-   ever copied by hand.
-2. Point your LiveKit Server at this agent, so it hears about the rooms those
-   calls land in. In the server's own config:
-
-   ```yaml
-   webhook:
-     # one of the keys this server is configured with
-     api_key: your-api-key
-     urls:
-       - http://your-agent-host:7860{{.SIP.WebhookPath}}
-   ```
-
-   `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` on this agent must be that same
-   pair, because the pair is what signs the delivery and what verifies it. Skip
-   this and calls ring without ever being answered; see **How a call reaches this
-   agent** above.
-
-`unmute dev --telephony` does both of these for you on a local run.
-
-### Hear it locally first (optional)
-
-One command, before deploying anything, from the **source package**:
-
-```sh
-unmute dev --telephony <source-dir>
-```
-
-It brings the four containers up on your machine and prints an address and a
-per-run credential to dial from a softphone. **No carrier account and nothing
-leaving your machine**: the trunk terminates locally and the plane supplies the
-platform values the agent reads.
-
-The code is the same locally and deployed. Unlike the WebSocket routes there is
-no local-only transport branch, because the plane *is* the stack: the only
-difference is where `LIVEKIT_URL` points.
-{{if .SIP.ColdDestination}}
-### What a transfer does, and what it cannot do
-
-The agent speaks a short line, then moves the caller's own leg to the
-destination through one platform call and ends its own leg. The caller's leg is
-a real SIP leg, so nothing is dialled on their behalf and no audio bridges
-through this process after the handoff.
-
-Two limits worth knowing before you rely on it:
-
-- **A local run proves the handoff, never that a person answered.** Whether the
-  destination picks up is the one part no local run can witness.
-- **Warm transfer is not emitted on this route.** The stack under it can do a
-  warm handoff; this project has not built it on Pipecat. Warm compiles on a
-  `(livekit, sip)` trunk today, and the compiler says so if you declare one.
-{{end}}
 {{end}}{{if .CloudWebsocket}}
 ## Telephony setup
 
@@ -1103,41 +940,17 @@ feature. Deploy per **Deploy to Pipecat Cloud** above, wait for `ready`, and the
 number works.{{if .CloudWebsocket.CallEnv}} (This package places or redirects calls, so fill the
 names under **Required environment** and push the secret set before deploying.){{end}}
 
-### Hear it locally first (optional)
+### Hear it before the phone
 
-One command, before any deploy, from the **source package**:
+`unmute dev <source-dir>` opens a browser session with this same agent: the same
+prompt, the same tools, the same models, and no phone involved. Get the
+conversation right there.
 
-```sh
-unmute dev --telephony <source-dir>
-```
+The phone leg itself starts where that stops, and it starts at a deployed agent.
+Deploy, do the **Wire up Twilio** steps above, then call your number. A carrier
+reaches you over the public internet, so nothing running on your laptop can
+stand in for that.
 
-It starts this agent on your machine and calls it. **No Twilio account, no phone
-number, no tunnel, and nothing leaves your machine.** The command speaks Twilio's
-media-stream protocol to the agent over loopback, so "Twilio" here means the
-protocol and not the company: there is no account and no API request.
-
-It hands the agent credentials it minted for the run, in place of any real ones
-in your environment, and refuses to start if it cannot replace all of them. Then
-it places the call and connects your microphone to it, so you talk to the agent
-over the same 8 kHz codec a real caller gets. With [sox](https://sox.sourceforge.net)
-absent it plays a recorded fixture instead and says so.
-
-Both legs are recorded under `calls/<run>/` and the paths print on the way out.
-
-Three things worth knowing:
-
-- **Use headphones.** Your speaker feeding your microphone makes the agent
-  interrupt itself, which looks exactly like broken turn-taking.
-- **Nothing of yours is touched.** No markup is created, your TwiML Bin is not
-  read, and the number's voice configuration is left alone.
-- **A green local call is not reachability.** It proves the webhook, the
-  signature check, the returned markup, the media socket and two-way audio. It
-  says nothing about whether a carrier can reach you, which is what the
-  **Wire up Twilio** steps above are for.
-
-Add `--carrier` when you do want a real call through your own account: that adds
-the tunnel, points the number's voice configuration at it for the session, and
-restores the previous value on the way out, including on ctrl-c.
 {{if .CloudWebsocket.HasOutbound}}
 ### Place an outbound call
 
@@ -1424,9 +1237,8 @@ access and retention rules are approved.
 {{if .CarrierSteps}}## Carrier setup you have to do yourself
 
 Going live on this route needs real carrier configuration. Every step below is
-dictated by the route and none of them is performed by any local development
-run. A local run that completes proves the wiring on this machine and nothing
-about your carrier account.
+dictated by the route and none of them is done for you. Until they are done, the
+number does not reach this agent.
 
 {{range .CarrierSteps}}1. {{.}}
 {{end}}

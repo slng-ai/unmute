@@ -12,7 +12,7 @@ Unmute is written in Go, so you maintain **Go code**, but you also write some Py
 - Go 1.26 (pin in `go.mod`, and keep it on a Go line that still gets security patches, which is the newest two); `CGO_ENABLED=0` static binary; version stamped at link time, never hardcoded.
 - Direct deps — `cobra`, `goccy/go-yaml` (gives line/col on parse errors), `google/jsonschema-go` (**v0.x — pin the exact version, bump deliberately**), and the Charm TUI stack: `charmbracelet/bubbletea` + `bubbles` + `lipgloss` power the interactive console (custom MVU styled with Lip Gloss), while `charmbracelet/huh` v1.0.0 is scoped to the accessible/headless renderer only. **The interactive path imports no `huh`; Lip Gloss is expected there. All color lives in `internal/style` — no color literal anywhere else** (guarded by `internal/style/style_test.go`). Everything else is stdlib. **No new dep for what a few lines of stdlib do — justify any addition in the PR.** No `viper` until a real global config file exists.
 - `golangci-lint` from day one (`.golangci.yml`).
-- Make targets: `build test smoke rig lint fmt install`. `rig` is the credential-free local telephony check: a container runtime and no accounts.
+- Make targets: `build test smoke contracts lint fmt install`. `contracts` re-fetches the published SLNG conformance fixtures and fails on a digest mismatch: network, no accounts.
 
 ## Command rules (cobra) — these are what make commands testable, not suggestions
 1. Build the tree with a `newRootCmd()` constructor; **no package-level `var rootCmd`** (fresh tree per call = flag isolation between tests).
@@ -28,7 +28,7 @@ Go structs are the schema source for their own surface: `internal/spec` derives 
 `make test` (`go test -race ./...`) runs L1–L3 and needs **zero Python**:
 - L1 unit (pure logic, table-driven) · L2 in-process command tests (real tree, capture output) · L3 golden files (`-update` to regenerate).
 - L4 smoke (`make smoke`, build tag `smoke`) proves emitted Python is valid — opt-in, needs Python, never in the default suite or PR gate.
-- L5 rig (`make rig`, build tag `rig`) runs the local telephony planes end to end against the real emitted agent — opt-in, needs a container runtime and **no accounts**, never in the default suite or PR gate. Deliberately separate from smoke: folding a credential-free check into a target that needs credentials would defeat the reason it exists.
+- Telephony is verified on a **deployed** agent, against a real carrier. There is no local phone loop, and no test level stands in for one: `unmute dev` is the browser loop and it stops where the phone leg starts.
 - [`docs/HARNESS_TEST.md`](docs/HARNESS_TEST.md) is the reusable prompt for real end-to-end conversations across the examples.
 - [`docs/SELF_VERIFY.md`](docs/SELF_VERIFY.md) is how to check runtime behaviour **without** a person on the phone, and it is what to do before asking for a live call. Its first rule: find the layer the defect lives in and reproduce it there. A provider defect is usually one HTTP request, so it needs no audio, no tunnel and no simulated caller — [`scripts/replay_router_scopes.py`](scripts/replay_router_scopes.py) is the worked example. Coval evaluates conversations you push to it, so verification never waits on inbound reachability.
 
@@ -45,7 +45,12 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | no color literal outside `internal/style` | `internal/style/style_test.go` |
 | every direct dependency is on the allowlist | `internal/cli/deps_test.go` |
 | no declaration is reachable only from its own definition | `internal/cli/reachability_test.go` (`deadcode -test ./...`) |
+| every declared capability `Field` constant has a row in the table | `internal/target/table_test.go` (`TestEveryFieldConstantHasARow`) |
 | every symbol a template names still exists in Go | `internal/scaffold/template_symbols_test.go` |
+| every capability row carries a deliberate value for a target `field()` does not seed, and every refusal names what to do instead | `internal/target/table_test.go` |
+| the console offers every shipped target, names each correctly, and offers no option validation refuses | `internal/tui/default_target_test.go` |
+| the slng target opens no socket to the SLNG agents API | `internal/ir/validate_slng_test.go` |
+| every surface naming a `voiceai` command names the same one, agent id included | `internal/target/slng_target_test.go` |
 | example READMEs name every transport; every `examples/` link resolves | `internal/generate/examples_test.go` |
 | every emitted task prompt names its finish call and an escape, every finish takes the reserved `unserved_request`, and the owner is told to read it | `internal/generate/task_prompt_test.go`, `internal/ir/validate_test.go` |
 | the skill's tool kinds, vendors, providers and doc pointers match the code | `internal/skill/agreement_test.go` |
@@ -54,10 +59,9 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | a receiving agent's opening turn withholds its own handoffs, and no emitted tool carries the on-enter flag | `internal/generate/livekit_v1_test.go` |
 | an authored `endpointing_delay` reaches LiveKit's `min_delay` and Pipecat's `stop_secs`, and stays absent when unset | `internal/generate/endpointing_delay_test.go`, `internal/ir/validate_test.go` |
 | the console's target menus lead with the right target: create with `scaffold.DefaultTarget`, maintain with the package's own | `internal/tui/default_target_test.go` |
-| every route is assigned a local plane, and a managed-platform route's manifest, image and env carry nothing plane-only | `internal/target/telephony_test.go`, `internal/generate/cloud_isolation_test.go` |
-| a telephony route emits the module its own container command imports, and the records an inbound call needs | `internal/generate/pipecat_sip_test.go` |
-| an agent that a dispatch rule cannot dispatch is told about the call instead: the rule names no agent and the plane's server is pointed at the app, on that driver only | `internal/cli/dev_livekit_sip_test.go`, `internal/generate/pipecat_sip_test.go` |
-| a local telephony run performs no write outside the machine, on any exit path, transfers included | `internal/generate/pipecat_local_plane_test.go`, `internal/generate/pipecat_cloud_websocket_test.go` |
+| every telephony route deploys to a managed platform: every Pipecat route emits a deploy manifest on the platform base image, and no LiveKit route emits one | `internal/generate/cloud_isolation_test.go` |
+| an inbound LiveKit SIP route emits the trunk and dispatch-rule records a call needs, and the one command that creates them | `internal/generate/livekit_telephony_setup_test.go` |
+| a route that hosts nothing says so everywhere: no tunnel, helper or hosting word in its emitted runbook | `internal/generate/pipecat_cloud_websocket_test.go` |
 | the emitted transfer document and the plane's reading of it stay in agreement | `internal/generate` (emitted shape) + `internal/cli` (the reading), one gate each |
 | the docs-site transfer table matches the route table, both directions | `internal/docsite/transfer_table_test.go` |
 | an L4 smoke fixture still compiles the salon package, and the emitted Python keeps the names its script calls | `internal/generate/smoke_fixture_test.go` |
@@ -68,7 +72,7 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | no known-vulnerable dependency or stdlib | CI `vuln`, `govulncheck ./...` |
 | release config still builds 6 platforms with version stamps | CI `release-config` |
 | emitted Python is valid | `make smoke`, opt-in, never the PR gate |
-| the local telephony planes work end to end with no accounts | `make rig`, opt-in, needs a container runtime, never the PR gate |
+| the vendored SLNG conformance fixtures still match what the backend publishes | `make contracts`, opt-in, needs network, never the PR gate |
 
 A note on the third gate, because it looks redundant next to the second and is
 not. `deadcode` walks the call graph and cannot see through `text/template`, so

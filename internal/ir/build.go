@@ -511,10 +511,12 @@ func buildTool(name string, raw packagespec.Tool) Tool {
 	switch {
 	case raw.Webhook != nil:
 		tool.URLEnv = raw.Webhook.URLEnv
+		tool.BaseURL = raw.Webhook.BaseURL
 		tool.Path = raw.Webhook.Path
 		tool.Auth = buildToolAuth(raw.Webhook.Auth)
 	case raw.Local != nil:
 		tool.Handler = raw.Local.Handler
+		tool.Dependencies = raw.Local.Dependencies
 		if tool.Handler == "" {
 			tool.Handler = filepath.Join("tools", name+".py")
 		}
@@ -1207,8 +1209,7 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		{Name: "admission", Consumers: []string{"application"}},
 	}
 	if resolved.Provider == ProviderPipecat && resolved.Transport == "cloud-websocket" {
-		// One service, and it is the agent: the platform hosts it in production and
-		// `unmute dev --telephony` runs the same application locally. No Redis,
+		// One service, and it is the agent: the platform hosts it. No Redis,
 		// because nothing here outlives a call, and none of the Pipecat correlation
 		// reasons, because each names a Redis-backed record this route never keeps.
 		// The route row's empty Processes says the operator runs nothing; this says
@@ -1222,24 +1223,12 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		// record this route does not keep. Same Redis-free shape the LiveKit
 		// connector route already has.
 		services = []string{"application"}
-	} else if resolved.Provider == ProviderPipecat && route.LocalPlane != targetcap.LocalPlaneSIP {
-		reasons = append(reasons,
-			TelephonyCoordinationReason{Name: "call_correlation", Consumers: []string{"application"}},
-			TelephonyCoordinationReason{Name: "callback_idempotency", Consumers: []string{"application"}},
-		)
 	}
-	// The plane, not the provider. These are the plane's own services and the
-	// plane's own reason for a coordination store, and they are the same whichever
-	// driver's agent runs on it: reading the provider here left `(pipecat, sip)`
-	// claiming a two-container graph, so the dev command's first startup phase
-	// brought up the store alone and then tried to create trunk records against a
-	// LiveKit server that was not running.
-	//
-	// It also drops the two Pipecat correlation reasons on that route, above. Each
-	// names a Redis-backed record the carrier adapter keeps, and this route emits
-	// no carrier adapter: what it needs the store for is the server and the SIP
-	// service finding each other, which is exactly livekit_control_plane.
-	if route.LocalPlane == targetcap.LocalPlaneSIP {
+	// A LiveKit SIP route's topology is a LiveKit Server and a SIP service beside
+	// the agent, coordinating through a store. On LiveKit Cloud the platform runs
+	// all three; a self-hosted deployment runs them itself, which is why REDIS_URL
+	// is a name this route asks for.
+	if resolved.Provider == ProviderLiveKit && resolved.Transport == "sip" {
 		services = append(services, "livekit_server", "livekit_sip")
 		reasons = []TelephonyCoordinationReason{
 			{Name: "livekit_control_plane", Consumers: []string{"livekit_server", "livekit_sip"}},
@@ -1261,17 +1250,6 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 			{Name: "livekit_control_plane", Consumers: []string{"livekit_server"}},
 		}
 	}
-	// The SIP plane's endpoints, and the one service the dev command has to
-	// bring up for a transfer to have anywhere to land. The caller endpoint is
-	// deliberately absent from Services: only the unattended check runs it, and
-	// naming it here would start a container in every developer's run that
-	// nothing in that run dials.
-	planeEndpoints := sipPlaneEndpoints(route.LocalPlane, resolved.Destinations)
-	for _, endpoint := range planeEndpoints {
-		if endpoint.Role == TelephonyRoleDestination && !slices.Contains(services, endpoint.Service) {
-			services = append(services, endpoint.Service)
-		}
-	}
 	slices.Sort(services)
 	slices.SortFunc(reasons, func(a, b TelephonyCoordinationReason) int { return strings.Compare(a.Name, b.Name) })
 	return &TelephonyPlan{
@@ -1287,11 +1265,7 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		// for is the disagreement validateTelephonyPlan refuses.
 		LocalEnvironment:    intersect(route.LocallySuppliedEnvironment, requiredEnvironment),
 		AutoWebhookEndpoint: autoWebhook, ManualSteps: slices.Clone(route.ManualSteps),
-		LocalPlane:   string(route.LocalPlane),
-		CloudDeploys: route.CloudDeploys,
-		Services:     services, Coordination: coordination,
-		PlaneSubnet: planeSubnetFor(route.LocalPlane), PlaneSIPAddress: planeSIPAddressFor(route.LocalPlane),
-		LocalEndpoints:      planeEndpoints,
+		Services: services, Coordination: coordination,
 		CoordinationReasons: reasons, AdmissionOwner: admissionOwner,
 	}
 }
@@ -1610,68 +1584,4 @@ func intersect(names, keep []string) []string {
 		}
 	}
 	return out
-}
-
-// The SIP plane's addressing. These are literals rather than settings because
-// the plane is generated whole: nothing an author writes reaches them, and both
-// readers get them from the plan rather than from each other.
-//
-// The subnet sits outside Docker's own default address pools (172.17 to 172.31,
-// and 192.168.0.0/16). Measured 2026-08-20: a /24 inside those pools collides
-// with whatever Docker has already handed out and Compose then refuses the
-// entire run with "invalid pool request: Pool overlaps with other one on this
-// address space", which reads as a bug in this tool rather than as a clash.
-const (
-	planeSubnet           = "10.185.61.0/24"
-	planeSIPAddress       = "10.185.61.10"
-	planeCallerAddress    = "10.185.61.20"
-	planeDestinationsAddr = "10.185.61.21"
-	planeSIPPort          = 5060
-	planeCallerService    = "telephony_caller"
-	planeDestinationsSvc  = "telephony_destinations"
-)
-
-// TelephonyRoleCaller and TelephonyRoleDestination are the endpoint roles the
-// SIP plane has. The dialled role in data-model section 2 is not one of them
-// yet: an outbound call on this plane is answered by the destinations endpoint,
-// which already exists, so a third service would be a container with nothing
-// of its own to do.
-const (
-	TelephonyRoleCaller      = "caller"
-	TelephonyRoleDestination = "destination"
-)
-
-func planeSubnetFor(plane targetcap.TelephonyLocalPlane) string {
-	if plane != targetcap.LocalPlaneSIP {
-		return ""
-	}
-	return planeSubnet
-}
-
-func planeSIPAddressFor(plane targetcap.TelephonyLocalPlane) string {
-	if plane != targetcap.LocalPlaneSIP {
-		return ""
-	}
-	return planeSIPAddress
-}
-
-// sipPlaneEndpoints derives the endpoint set from the package's declared
-// destinations. Only the SIP plane has endpoints; the media-websocket plane is
-// the CLI speaking the carrier's protocol itself, with no container to name.
-func sipPlaneEndpoints(plane targetcap.TelephonyLocalPlane, destinations map[string]string) []TelephonyLocalEndpoint {
-	if plane != targetcap.LocalPlaneSIP {
-		return nil
-	}
-	endpoints := []TelephonyLocalEndpoint{{
-		Role: TelephonyRoleCaller, Name: TelephonyRoleCaller, Service: planeCallerService,
-		Address: planeCallerAddress, Port: planeSIPPort, Recording: TelephonyRoleCaller + ".wav",
-	}}
-	for _, name := range sortedKeys(destinations) {
-		endpoints = append(endpoints, TelephonyLocalEndpoint{
-			Role: TelephonyRoleDestination, Name: name, Service: planeDestinationsSvc,
-			Address: planeDestinationsAddr, Port: planeSIPPort, Recording: name + ".wav",
-			EnvName: DestinationEnv(destinations[name]),
-		})
-	}
-	return endpoints
 }

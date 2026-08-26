@@ -1261,9 +1261,19 @@ func TestRouterSurfacesSayOnlyWhatWasMeasured(t *testing.T) {
 		// symptom so a reader who sees it can search for it. Quoting an error is
 		// not sending someone to register anything, so the ban is on the
 		// instruction rather than on the string.
+		// "slng dashboard" stood in this list until 2026-08-25, as a proxy for
+		// "do not send a reader somewhere to register a model". It was safe while
+		// SLNG was only a model vendor here and had no dashboard this repository
+		// had any reason to name. The slng *target* changed that: its runbook
+		// legitimately sends an author to SLNG's dashboard to create a Vault entry
+		// or a trunk, which is neither registering a model nor configuring the
+		// router. Naming a real place for a real reason is not the defect this
+		// list exists to catch, so the pairings below replace the bare place name
+		// and every original sentence still fails.
 		for _, banned := range []string{
 			"register the model", "register a model", "registered model",
-			"register it against", "configure the model against", "byok", "slng dashboard",
+			"register it against", "configure the model against", "byok",
+			"model in the slng dashboard", "router in the slng dashboard",
 		} {
 			if strings.Contains(strings.ToLower(content), banned) {
 				t.Errorf("%s mentions %q; the configuration travels inline and nothing is registered anywhere", name, banned)

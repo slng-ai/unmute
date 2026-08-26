@@ -6,16 +6,18 @@ import (
 	"testing"
 )
 
-// The auto-webhook fact is carrier data backed by a CLI implementation. The
-// only implementation is Twilio (internal/cli/dev_twilio.go), so exactly the
-// Twilio routes carry it (Pipecat carrier-websocket and the LiveKit connector),
-// each naming a declared public endpoint. A fact on any non-Twilio route means
-// someone added data without a CLI implementation (SPEC V3, C5).
+// The auto-webhook fact says where a carrier's voice webhook points on a route
+// that publishes one. It has to name a public endpoint the same route declares,
+// or the compile report tells an operator to configure a URL nothing serves.
+//
+// One route carries it: LiveKit `connector`, the only surviving route that
+// publishes an HTTPS endpoint of its own. Nothing writes the webhook for the
+// operator now that the local carrier path is gone; the fact is emitted so the
+// runbook and the report can name the endpoint exactly (SPEC V3, C5).
 func TestTelephonyAutoWebhookIsATwilioFactOnly(t *testing.T) {
 	routes := TelephonyRoutes()
 	twilioRoutes := map[TelephonyKey]bool{
-		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"}: true,
-		{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}:         true,
+		{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}: true,
 	}
 	for key, route := range routes {
 		if route.AutoWebhookEndpoint == "" {
@@ -109,13 +111,11 @@ func TestTelephonyRuntimeEnvironmentCarriesNoTrunkIDs(t *testing.T) {
 func TestTelephonyRouteEnvironmentKeysHoldTheRenameLine(t *testing.T) {
 	routes := TelephonyRoutes()
 	want := map[TelephonyKey][]string{
-		{Provider: LiveKit, Transport: "sip", Carrier: "twilio"}:               {"sip_address", "sip_username", "sip_password", "from_number"},
-		{Provider: LiveKit, Transport: "sip", Carrier: "telnyx"}:               {"sip_address", "sip_username", "sip_password", "from_number"},
-		{Provider: LiveKit, Transport: "sip", Carrier: "plivo"}:                {"sip_address", "sip_username", "sip_password", "from_number"},
-		{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}:         {"account_sid", "auth_token", "from_number"},
-		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"}: {"account_sid", "auth_token", "from_number"},
-		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"}: {"api_key", "public_key", "connection_id", "from_number"},
-		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "plivo"}:  {"auth_id", "auth_token", "from_number"},
+		{Provider: LiveKit, Transport: "sip", Carrier: "twilio"}:             {"sip_address", "sip_username", "sip_password", "from_number"},
+		{Provider: LiveKit, Transport: "sip", Carrier: "telnyx"}:             {"sip_address", "sip_username", "sip_password", "from_number"},
+		{Provider: LiveKit, Transport: "sip", Carrier: "plivo"}:              {"sip_address", "sip_username", "sip_password", "from_number"},
+		{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}:       {"account_sid", "auth_token", "from_number"},
+		{Provider: Pipecat, Transport: "cloud-websocket", Carrier: "twilio"}: {"account_sid", "auth_token", "from_number"},
 	}
 	for key, expected := range want {
 		route, ok := routes[key]
@@ -226,7 +226,7 @@ func TestPipecatCloudWebsocketRefusesWarmTransferByNamingTheCost(t *testing.T) {
 	// A call source is refused too, and its refusal already names the routes that
 	// fill one, so an author who wants the caller's number has somewhere to go.
 	source := ResolveTelephonyFeature(key, "source.from_number")
-	if source.Tag != Gated || !strings.Contains(source.Note, "carrier-websocket") {
+	if source.Tag != Gated || !strings.Contains(source.Note, "livekit, connector") {
 		t.Errorf("call-source refusal = %q (%s), want gated and naming where sources work", source.Note, source.Tag)
 	}
 }
@@ -240,7 +240,7 @@ func TestSelectableTelephonyRoutesExcludesPlaceholderRows(t *testing.T) {
 	selectable := SelectableTelephonyRoutes()
 
 	for _, key := range []TelephonyKey{
-		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "exotel"},
+		// One placeholder row left. Its Pipecat twin went with carrier-websocket.
 		{Provider: LiveKit, Transport: "sip", Carrier: "exotel"},
 	} {
 		if _, ok := selectable[key]; ok {
@@ -265,119 +265,13 @@ func TestSelectableTelephonyRoutesExcludesPlaceholderRows(t *testing.T) {
 	}
 }
 
-// routePlaneExpectation is every row's two new facts, written out. A table of
-// expected values rather than a "is it non-zero" check, because that is the
-// only shape that fails when somebody adds a route and decides nothing: an
-// unlisted key is a failure here, and so is a listed key whose value moved.
-//
-// Gate P1 (contracts/local-planes.md) and task T104.
-var routePlaneExpectation = map[TelephonyKey]struct {
-	plane        TelephonyLocalPlane
-	cloudDeploys bool
-}{
-	// Pipecat's one self-hosted transport: a plain container and a Compose file,
-	// no deployment manifest.
-	{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"}: {LocalPlaneMediaWebsocket, false},
-	{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"}: {LocalPlaneMediaWebsocket, false},
-	{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "plivo"}:  {LocalPlaneMediaWebsocket, false},
-	// The two rows with an empty feature map. They compile to nothing, so they
-	// have no local loop to offer, and they are listed because the fields are
-	// assigned on every row.
-	{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "exotel"}: {LocalPlaneNone, false},
-	{Provider: LiveKit, Transport: "sip", Carrier: "exotel"}:               {LocalPlaneNone, true},
-	// Pipecat on the same plane, and the one row where CloudDeploys being false
-	// is the whole point: this route has no managed-platform path anywhere, which
-	// is what makes it the self-hosted answer (US3).
-	{Provider: Pipecat, Transport: "sip", Carrier: "twilio"}: {LocalPlaneSIP, false},
-	{Provider: Pipecat, Transport: "sip", Carrier: "telnyx"}: {LocalPlaneSIP, false},
-	{Provider: Pipecat, Transport: "sip", Carrier: "plivo"}:  {LocalPlaneSIP, false},
-	// A real SIP trunk in production, a real SIP stack locally.
-	{Provider: LiveKit, Transport: "sip", Carrier: "twilio"}: {LocalPlaneSIP, true},
-	{Provider: LiveKit, Transport: "sip", Carrier: "telnyx"}: {LocalPlaneSIP, true},
-	{Provider: LiveKit, Transport: "sip", Carrier: "plivo"}:  {LocalPlaneSIP, true},
-	// The carrier leg terminates in a third-party hosted service, so there is
-	// nothing on the machine to stand in for it.
-	{Provider: Pipecat, Transport: "daily-sip", Carrier: "twilio"}: {LocalPlaneNone, true},
-	// The platform terminates the same protocol the carrier-websocket routes use.
-	{Provider: Pipecat, Transport: "cloud-websocket", Carrier: "twilio"}: {LocalPlaneMediaWebsocket, true},
-	// The carrier streams media over a WebSocket into our own bridge.
-	{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}: {LocalPlaneMediaWebsocket, true},
-}
-
-// Gate P1, first half: the plane is decided on every row, including the rows
-// that refuse. LocalPlaneNone is a real value rather than the zero value
-// precisely so this test can tell a decision from an omission.
-func TestTelephonyLocalPlaneIsDecidedOnEveryRoute(t *testing.T) {
-	routes := TelephonyRoutes()
-	for key, route := range routes {
-		want, known := routePlaneExpectation[key]
-		if !known {
-			t.Errorf("route %+v has no expected plane: a new route must decide its "+
-				"local plane, and LocalPlaneNone is a legitimate answer", key)
-			continue
-		}
-		if route.LocalPlane == "" {
-			t.Errorf("route %+v has the zero-value plane, which means nobody decided; "+
-				"use LocalPlaneNone to say there is no local loop", key)
-		}
-		if route.LocalPlane != want.plane {
-			t.Errorf("route %+v plane = %q, want %q", key, route.LocalPlane, want.plane)
-		}
-	}
-	for key := range routePlaneExpectation {
-		if _, ok := routes[key]; !ok {
-			t.Errorf("expected route %+v left the table; this test guards a row that no longer exists", key)
-		}
-	}
-}
-
-// Gate P1, second half: the plane presents the mechanism the route's transport
-// actually uses. A route may not pick a more convenient plane than its carrier.
-func TestTelephonyLocalPlaneMatchesTheRouteTransport(t *testing.T) {
-	byTransport := map[string]TelephonyLocalPlane{
-		"sip":               LocalPlaneSIP,
-		"carrier-websocket": LocalPlaneMediaWebsocket,
-		"cloud-websocket":   LocalPlaneMediaWebsocket,
-		"connector":         LocalPlaneMediaWebsocket,
-		// The carrier leg is a hosted service, so no plane can present it.
-		"daily-sip": LocalPlaneNone,
-	}
-	for key, route := range SelectableTelephonyRoutes() {
-		want, known := byTransport[key.Transport]
-		if !known {
-			t.Errorf("transport %q has no plane mechanism recorded", key.Transport)
-			continue
-		}
-		if route.LocalPlane != want {
-			t.Errorf("route %+v on transport %q has plane %q, want %q: the plane must "+
-				"present the same call mechanism the carrier uses in production",
-				key, key.Transport, route.LocalPlane, want)
-		}
-	}
-}
-
-// T104. FR-024's refusal reads CloudDeploys and must never fire on a route that
-// can deploy to a managed platform, so the assertion covers both providers
-// rather than only the one that motivated the field. Inferring the value from
-// the provider would have rejected examples/salon-concierge.
-func TestTelephonyCloudDeploysIsDecidedAndNeverFalseOnLiveKit(t *testing.T) {
-	for key, route := range TelephonyRoutes() {
-		want, known := routePlaneExpectation[key]
-		if !known {
-			t.Errorf("route %+v has no expected CloudDeploys value", key)
-			continue
-		}
-		if route.CloudDeploys != want.cloudDeploys {
-			t.Errorf("route %+v CloudDeploys = %v, want %v", key, route.CloudDeploys, want.cloudDeploys)
-		}
-		if key.Provider == LiveKit && !route.CloudDeploys {
-			t.Errorf("LiveKit route %+v has CloudDeploys false. Every LiveKit route "+
-				"deploys either to LiveKit Cloud or to a server the author runs, "+
-				"chosen by where LIVEKIT_URL points, and FR-024's refusal must not "+
-				"fire on it", key)
-		}
-	}
-}
+// The CloudDeploys gate that used to live here is gone with the field. Every
+// telephony route deploys to a managed platform now, so a per-route flag saying
+// whether one does had nothing left to distinguish, and the refusal that read it
+// had no registered setting to refuse. What replaced the coverage:
+// internal/generate/cloud_isolation_test.go asserts every Pipecat route emits its
+// deployment manifest and builds on the platform base image, and that no LiveKit
+// route emits a Pipecat manifest.
 
 // Gate C7. `make rig` is deliberately credential-free, and the tag tracks a
 // credentialed check in CI. So a green rig must never promote a capability out

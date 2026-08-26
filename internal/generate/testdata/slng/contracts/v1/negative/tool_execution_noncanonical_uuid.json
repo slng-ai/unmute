@@ -1,0 +1,7 @@
+{
+  "contract": "tool_execution_path_params",
+  "error_contains": "canonical hyphenated",
+  "payload": {
+    "execution_id": "88888888888848888888888888888888"
+  }
+}

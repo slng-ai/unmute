@@ -1,0 +1,80 @@
+# Every tool shape the slng driver can emit, in one package, so the tool-body
+# tests have somewhere to read a real one from.
+#
+#   check_order   local:   -> a code body under tools/
+#   refund        webhook: -> an api_request body, with a templated path that
+#                             has to land in config_overrides rather than in the
+#                             tool's own config.url
+#   internal_docs mcp:     -> no file at all, one mcp_refs entry per listed tool
+#   end_call      builtin: -> no file, a named reference to a curated capability
+#
+# It also carries a Vault token in the greeting and a secret behind the webhook
+# tool, so the runbook has both kinds of Vault name to group.
+
+version: 1
+entry_agent: support
+
+secrets:
+  - REFUND_API_TOKEN
+  - REFUND_URL
+  - INTERNAL_DOCS_MCP_URL
+
+models:
+  think:
+    reasoning:
+      description: answers the caller
+      provider: openai
+      model: gpt-5.6-luna
+      temperature: 0.4
+  speak:
+    front_desk:
+      description: warm, concise
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      description: default STT
+      provider: deepgram
+      model: slng/deepgram/nova:3-en
+      language: en
+
+variables:
+  customer_name:
+    type: string
+    default: there
+  customer_id:
+    type: string
+    source: call_start
+    default: unknown
+
+agents:
+  support:
+    instructions: instructions.md
+    model: reasoning
+    voice: front_desk
+    tools:
+      - check_order
+      - refund
+      - internal_docs
+      - end_call
+
+tools:
+  - check_order
+  - refund
+  - internal_docs
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    # Two token kinds in one line on purpose: {{customer_name}} is a package
+    # variable SLNG renders from template_defaults, and {{$ACME_BRAND}} is a
+    # SLNG Vault variable nothing in this package declares.
+    text: "Hi {{customer_name}}, you have reached {{$ACME_BRAND}} support."
+  interruption:
+    enabled: true
+
+channels:
+  web:
+    kind: realtime_audio

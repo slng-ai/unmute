@@ -1,6 +1,6 @@
 ---
 title: "Inbound calls"
-description: "Take a real call from your own phone number, on the route that reaches a laptop."
+description: "Take a real call from your own phone number, once your agent is deployed."
 ---
 
 An inbound agent answers a call somebody else placed. The channel has to declare
@@ -15,15 +15,19 @@ channels:
 
 This page follows `examples/salon-concierge`, the shipped package with an
 inbound phone route. It declares `inbound: true` and no outbound, and it carries
-a target for each transport, so the same package proves the wiring on whichever
+a target for each platform, so the same package proves the wiring on whichever
 route you pick.
 
-<Note>
-  A first inbound call with **no carrier account at all** is the faster loop, and
-  it is a different command: see [call your agent
-  locally](/dev/local-telephony). This page is the real call, through your own
-  number.
-</Note>
+Check the prompt, the tools, and the models in your browser before you touch a
+carrier at all:
+
+```sh
+unmute dev examples/salon-concierge --target pipecat
+```
+
+That loop stops exactly where the phone leg starts. A phone call reaches an
+agent that is deployed, so the rest of this page is the real call, through
+your own number, once you deploy.
 
 ## Pick the target your carrier can reach
 
@@ -35,20 +39,19 @@ recommends for Twilio:
 | `pipecat` | `cloud-websocket` | your number points at a static TwiML Bin whose stream goes to Pipecat Cloud |
 | `livekit` | `sip` | your number is attached to a Twilio Elastic SIP Trunk pointed at LiveKit SIP |
 
-**Use the `pipecat` target for a real call that lands on your laptop.** Twilio
-reaches that route over HTTPS and WSS, which a tunnel can carry. SIP needs the
-carrier to reach a LiveKit Server and a LiveKit SIP service over public
-signalling and media addresses, which an HTTPS tunnel cannot provide. For
-`livekit`, use a LiveKit Cloud project or run both services at public addresses.
-The agent worker can still run on your laptop.
+Both deploy to a managed platform, so either one can take a real call once it
+is live. `pipecat` needs one console object, a TwiML Bin. `livekit` needs a
+full Elastic SIP Trunk and more console steps, and in return gets cold
+transfer, warm transfer, and voicemail detection. [The routes
+table](/telephony/overview#the-routes) lists what each transport can do.
 
 ## What you need
 
 - A Twilio account with a voice capable phone number.
-- [`uv`](https://docs.astral.sh/uv/getting-started/installation/) on your PATH.
-  This route starts the generated Pipecat agent with `uv run`.
-- `cloudflared` on your PATH for the managed tunnel (`brew install cloudflared`
-  on macOS), or your own tunnel and `--public-url`.
+- For `pipecat`: [Pipecat Cloud](/deploy/pipecat-cloud) set up, and `uv` on
+  your PATH to install its CLI.
+- For `livekit`: [LiveKit Cloud](/deploy/livekit-cloud) set up and the `lk`
+  CLI installed, or a LiveKit Server of your own.
 - Model provider keys.
 
 Put the values in `examples/salon-concierge/.env`:
@@ -73,40 +76,37 @@ you are only testing the `pipecat` target you can put any placeholder there. The
 [connections reference](/reference/connections-yaml) shows where each group of
 names comes from.
 
-You never set `UNMUTE_PUBLIC_URL` or `UNMUTE_OUTBOUND_TOKEN`. The dev command
-supplies those itself.
-
 <Warning>
   Every environment variable name must be a valid shell identifier: letters,
   digits, and underscores, never starting with a digit. A name like
   `2FACTOR_API_KEY` would fail when a platform exports it, so Unmute refuses the
-  name during validation, before it starts a tunnel or a local agent.
+  name during validation, before it deploys anything.
 </Warning>
 
-## Take the call
+## Deploy, then point the number at it
 
 ```sh
-unmute dev examples/salon-concierge --telephony --carrier --target pipecat
+unmute compile examples/salon-concierge
 ```
 
-`--carrier` is the part that reaches your account: without it the run stays on
-your machine and your number is never touched. What it changes, and what it puts
-back, is on [call your agent
-locally](/dev/local-telephony#when-you-do-want-a-real-call).
+For `pipecat`, follow [Pipecat Cloud](/deploy/pipecat-cloud): set the secret
+set, then `pipecat cloud deploy`. The generated `build/pipecat/README.md`
+prints the exact TwiML Bin markup, with your region and agent name already
+filled in; paste it into a TwiML Bin in the Twilio Console and point the
+number's voice configuration at it.
 
-Watch for three things in the output:
+For `livekit`, follow [LiveKit Cloud](/deploy/livekit-cloud): `lk agent
+create`, then run `bash telephony-setup.sh` from `build/livekit` to create
+the inbound trunk and dispatch rule. Then do the [Twilio Console
+steps](/telephony/twilio#set-up-the-livekit-sip-trunk-in-twilio-console) to
+attach your number to the trunk.
 
-1. the line saying your number's Twilio voice webhook was updated, and what it
-   was before,
-2. the local agent line with its temporary public origin and a note that quick
-   tunnel URLs rotate on every run,
-3. the call line: `call +1XXXXXXXXXX  ·  ctrl-c to stop`.
+Each generated `build/<target>/README.md` is the runbook of record: it names
+your region, your agent, and your secret set.
 
-Call that number. The agent answers and greets you. Speak, and it replies.
+## Call the number
 
-Ctrl-c stops the run and puts your number's previous voice configuration back.
-Your TwiML Bin is never touched, because the run answers Twilio's webhook itself
-at `POST /` and sends the media stream through `wss://<tunnel-host>/ws`.
+Call it. The agent answers and greets you. Speak, and it replies.
 
 ## One number, one target at a time
 
@@ -118,10 +118,6 @@ to put it back for the `livekit` target.
 ## If the call does not arrive
 
 <AccordionGroup>
-  <Accordion title="cloudflared not found on PATH">
-    Install it, or run your own tunnel and pass its HTTPS origin with
-    `--public-url https://your-tunnel.example`.
-  </Accordion>
   <Accordion title="phone number was not found on this Twilio account">
     The number in `TWILIO_PHONE_NUMBER` is not on the account behind
     `TWILIO_ACCOUNT_SID`, or it is not voice capable. Check it in the Twilio
@@ -132,13 +128,15 @@ to put it back for the `livekit` target.
     trial account that can only reach verified numbers. Fix it in the console
     and run again.
   </Accordion>
-  <Accordion title="missing telephony credentials">
-    The command lists exactly which names it could not find, before it starts
-    anything.
+  <Accordion title="the deployed agent never answers">
+    Check `pipecat cloud agent status pipecat` or `lk agent status` first: a
+    deploy that is not `ready` never picks up the call. Then check that every
+    name in `.env.example` is actually in the secret set you deployed with.
   </Accordion>
-  <Accordion title="nothing happened to my number at all">
-    The run had no `--carrier`, so it never asked your carrier for anything. That
-    is the default, and the route line says `no carrier involved`.
+  <Accordion title="the call rings and drops with no agent, on livekit">
+    Work backwards: does `lk sip inbound list` show a trunk claiming your
+    number, does `lk sip dispatch list` show a rule for it naming this agent,
+    and does `lk agent status` show the agent up.
   </Accordion>
 </AccordionGroup>
 
@@ -151,8 +149,8 @@ to put it back for the `livekit` target.
   <Card title="Get your Twilio details" icon="key" href="/telephony/twilio">
     Which console value fills which name.
   </Card>
-  <Card title="Call your agent locally" icon="play" href="/dev/local-telephony">
-    The same call, with no carrier account.
+  <Card title="The dev loop" icon="play" href="/dev/overview">
+    Check the prompt, the tools, and the models in your browser first.
   </Card>
   <Card title="Transfers" icon="phone-forwarded" href="/transfers/overview">
     Hand the caller to a person.

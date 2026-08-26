@@ -1,7 +1,6 @@
 package generate
 
 import (
-	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -14,13 +13,19 @@ import (
 type ArtifactKind string
 
 const (
+	// CodeTarget is a runnable project: Python, a Dockerfile, a runbook.
 	CodeTarget ArtifactKind = "code"
+	// BodyTarget is a deployment body for a platform that runs the agent: JSON
+	// documents and a runbook, with nothing to run locally. The kinds are
+	// separate because internal/cli writes them the same way and reports them
+	// differently, and because an unhandled kind must be an error rather than a
+	// silent no-op.
+	BodyTarget ArtifactKind = "body"
 )
 
 type Artifact struct {
 	Kind      ArtifactKind
 	Files     []File
-	Apply     *ApplyPlan
 	Notes     GenerateReport
 	Telephony *TelephonyRuntimePlan
 }
@@ -28,18 +33,6 @@ type Artifact struct {
 type File struct {
 	Path    string
 	Content []byte
-}
-
-type ApplyPlan struct {
-	CredentialEnv string
-	Steps         []ApplyStep
-}
-
-type ApplyStep struct {
-	Method    string
-	Endpoint  string
-	Body      json.RawMessage
-	CaptureID string
 }
 
 type GenerateReport struct {
@@ -93,6 +86,17 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		artifact.Files = append(artifact.Files, knowledgeFiles(agent)...)
 		artifact.Notes.Notes = append(artifact.Notes.Notes, emitted.Notes.Notes...)
 		artifact.Notes.Notes = append(artifact.Notes.Notes, knowledgeNotes(agent)...)
+		artifact.Notes.Warnings = append(artifact.Notes.Warnings, emitted.Notes.Warnings...)
+		return artifact, nil
+	case ir.ProviderSlng:
+		// No withTelephonyReport: unmute writes slng no carrier state, so there is
+		// no route plan to report and Telephony is nil above.
+		emitted, err := GenerateSlng(agent, resolved)
+		if err != nil {
+			return Artifact{}, fmt.Errorf("generate %s slng: %w", resolved.Name, err)
+		}
+		artifact.Files = emitted.Files
+		artifact.Notes.Notes = append(artifact.Notes.Notes, emitted.Notes.Notes...)
 		artifact.Notes.Warnings = append(artifact.Notes.Warnings, emitted.Notes.Warnings...)
 		return artifact, nil
 	default:
@@ -159,6 +163,8 @@ func artifactKind(provider ir.Provider) ArtifactKind {
 	switch provider {
 	case ir.ProviderLiveKit, ir.ProviderPipecat:
 		return CodeTarget
+	case ir.ProviderSlng:
+		return BodyTarget
 	default:
 		return ""
 	}

@@ -158,14 +158,6 @@ type livekitTelephony struct {
 	Greeting      *livekitGreeting
 	SystemSources []livekitSystemSource
 	CallStart     []livekitCallStart
-	// Plane and the three fields under it are the route's carrier-free
-	// development plane, derived in internal/ir. The Compose file assigns the
-	// addresses and the dev command dials them, so neither may compute them:
-	// they read the one plan.
-	Plane           string
-	PlaneSubnet     string
-	PlaneSIPAddress string
-	PlaneServices   []planeService
 }
 
 type livekitSystemSource struct {
@@ -624,27 +616,13 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 	// Only when the package declares a knowledge base: the module imports
 	// llama-index, which is only in .Deps for the same reason.
 	connector := data.Telephony != nil && data.Telephony.Transport == "connector"
-	planeFiles := false
 	if data.Telephony != nil {
 		// The connector runs the app plus a local LiveKit Server only (no Redis,
 		// no SIP bridge); its Compose and the bridge process differ from SIP.
 		if connector {
-			outputs = append(outputs,
-				struct{ tmpl, path string }{"compose.telephony.connector.yaml", "compose.telephony.yaml"},
-				struct{ tmpl, path string }{"telephony_bridge.py", "telephony_bridge.py"},
-			)
-		} else {
-			outputs = append(outputs, struct{ tmpl, path string }{"compose.telephony.yaml", "compose.telephony.yaml"})
-			// The plane's endpoint image and the SIP configuration it carries.
-			// Read the plane rather than the transport: the plane is the route
-			// fact that says a carrier-free loop exists, and Phase C's Pipecat
-			// SIP route gets these for the same reason without a second branch.
-			// The plane's own files come from the plane, not from this driver:
-			// the Pipecat SIP route runs the same endpoints and must not have a
-			// second copy of them.
-			if data.Telephony.Plane == string(targetcap.LocalPlaneSIP) {
-				planeFiles = true
-			}
+			// The bridge is the deployed webhook server this route answers
+			// carrier callbacks with, not a local anything.
+			outputs = append(outputs, struct{ tmpl, path string }{"telephony_bridge.py", "telephony_bridge.py"})
 		}
 	}
 	var files []File
@@ -653,33 +631,12 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		if err != nil {
 			return nil, err
 		}
-		if o.tmpl == "compose.telephony.yaml" {
-			// The plane's own topology is shared with the Pipecat SIP route, so
-			// this template holds only this driver's application service and the
-			// plane wraps it. One owner for the services both routes run.
-			content, err = renderSIPPlaneCompose(sipPlaneCompose{
-				ApplicationService: string(content),
-				PlaneSubnet:        data.Telephony.PlaneSubnet,
-				PlaneServices:      data.Telephony.PlaneServices,
-			})
-			if err != nil {
-				return nil, err
-			}
-		}
 		files = append(files, File{Path: o.path, Content: content})
 	}
-	// The operator's one command plus the endpoint image: plane artifacts, so the
-	// plane emits them. The script resolves the trunk by phone number and
-	// substitutes the JSON inputs itself, so no record ID is ever transcribed.
-	if planeFiles {
-		emitted, err := sipPlaneFiles(sipPlaneSetup{
-			Project: data.Project, AgentName: data.AgentName,
-			Carrier: data.Telephony.Carrier, FromNumberEnv: data.Telephony.FromNumberEnv,
-			// This driver's agent *is* a LiveKit worker, so the emitted rule
-			// dispatches it.
-			DispatchesWorker: true,
-			TracingProvider:  data.TracingProvider,
-		}, data.Telephony.HasInbound)
+	// The operator's one telephony command and the two records it feeds: how a
+	// call reaches the deployed agent.
+	if data.Telephony != nil && data.Telephony.Transport == "sip" && data.Telephony.HasInbound {
+		emitted, err := livekitSIPProvisioning(data)
 		if err != nil {
 			return nil, err
 		}
@@ -707,6 +664,77 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		}
 	}
 	return files, nil
+}
+
+// sipCallRoomPrefix is the room-name prefix the inbound dispatch rule gives
+// every call it creates a room for. The rule is `dispatchRuleIndividual`, so
+// LiveKit appends a unique suffix per caller: one room per call, and the prefix
+// tells a call apart from any other room on the same server.
+const sipCallRoomPrefix = "call-"
+
+// livekitSIPProvisioning is the operator's one telephony command and the two
+// records it feeds: the inbound trunk and the dispatch rule an unsolicited call
+// needs to find the agent. The script resolves the trunk by phone number and
+// substitutes the JSON itself, so no record ID is ever transcribed, and it names
+// both files by path, which is why all three are emitted together or not at all.
+//
+// Shapes re-verified 2026-08-12 with the LiveKit docs
+// (docs.livekit.io/telephony/start/sip-trunk-setup): an inbound trunk is a name
+// plus its numbers, and a dispatch rule is a name plus a rule, with
+// dispatchRuleIndividual and roomPrefix for one room per caller. A rule with no
+// trunk list matches every trunk in the project, which is why trunk_ids is always
+// written and the script refuses to create a rule without a resolved ID.
+func livekitSIPProvisioning(data livekitData) ([]File, error) {
+	script, err := renderLiveKitV1("telephony-setup.sh", data)
+	if err != nil {
+		return nil, err
+	}
+	encode := func(path string, value any) (File, error) {
+		content, err := json.MarshalIndent(value, "", "  ")
+		if err != nil {
+			return File{}, fmt.Errorf("encode %s: %w", path, err)
+		}
+		return File{Path: path, Content: append(content, '\n')}, nil
+	}
+	inbound := map[string]any{
+		"name":    data.Project + " " + data.Telephony.Carrier + " inbound",
+		"numbers": []string{"${" + data.Telephony.FromNumberEnv + "}"},
+	}
+	if data.TracingProvider == "coval" {
+		// Coval marks the call with a SIP header, and LiveKit only surfaces a
+		// header it was told about in advance. Map it explicitly rather than
+		// turning on blanket X- mapping: this names the one attribute the
+		// agent reads, in the one file the operator registers.
+		inbound["headers_to_attributes"] = map[string]string{
+			"X-Coval-Simulation-Id": "coval.simulation_id",
+		}
+	}
+	trunk, err := encode("sip-inbound-trunk.json", map[string]any{"trunk": inbound})
+	if err != nil {
+		return nil, err
+	}
+	dispatch := map[string]any{
+		"name": data.Project + " inbound",
+		// Substituted by telephony-setup.sh, not by the environment: no variable
+		// of this name is ever set or read anywhere.
+		"trunk_ids": []string{"${UNMUTE_SIP_TRUNK_ID}"},
+		"rule": map[string]any{
+			"dispatchRuleIndividual": map[string]any{"roomPrefix": sipCallRoomPrefix},
+		},
+	}
+	// This driver's agent is a LiveKit worker, which is the only kind of agent a
+	// dispatch rule can dispatch, so the rule always names it.
+	dispatch["roomConfig"] = map[string]any{
+		"agents": []map[string]any{{
+			"agentName": data.AgentName,
+			"metadata":  `{"direction":"inbound"}`,
+		}},
+	}
+	rule, err := encode("sip-dispatch-rule.json", map[string]any{"dispatch_rule": dispatch})
+	if err != nil {
+		return nil, err
+	}
+	return []File{{Path: "telephony-setup.sh", Content: script}, trunk, rule}, nil
 }
 
 func renderLiveKitV1(name string, data livekitData) ([]byte, error) {

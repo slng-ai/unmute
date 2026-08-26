@@ -35,11 +35,11 @@ read as "ready to ship":
 
 | `unmute dev` | production |
 |---|---|
-| a tunnel that rotates its URL on every run | a stable public origin the operator owns |
+| a browser session | a phone call through a real carrier |
+| reachable from your machine only | a public origin the platform owns |
 | Compose on a laptop | a container platform with scaling and restarts |
 | values from a local `.env` | values from a secret store |
 | one session at a time, usually | the `capacity:` numbers, and then real traffic |
-| every outward change undone on exit | changes that stay |
 
 ## Secrets in the generated project
 

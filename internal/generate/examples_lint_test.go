@@ -66,21 +66,6 @@ func TestPublicExamplesEmitLintCleanPython(t *testing.T) {
 					if !strings.HasSuffix(file.Path, ".py") {
 						continue
 					}
-					// The carrier-websocket adapter modules carry pre-existing unused
-					// imports (fastapi Response, _require_accepting) that predate
-					// this check and belong to a separate change. Everything this
-					// gate is here to protect — the driver's main module, the
-					// emitted call-forwarding helper, and the copied tool handlers
-					// — is covered.
-					//
-					// Named exactly rather than by prefix: telephony_helper.py
-					// shares the prefix and is new, so a prefix skip would exempt
-					// it from the one check that catches an undefined name in it.
-					if slices.Contains([]string{
-						"telephony.py", "telephony_shared.py", "telephony_state.py",
-					}, file.Path) {
-						continue
-					}
 					path := filepath.Join(dir, file.Path)
 					if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 						t.Fatal(err)
@@ -93,12 +78,7 @@ func TestPublicExamplesEmitLintCleanPython(t *testing.T) {
 				if len(python) == 0 {
 					continue
 				}
-				// --isolated ignores any ruff config above the temp dir (the
-				// stray-config trap compile_ruff_test.go already documents).
-				// E501 is line length, which emitted prompts legitimately exceed.
-				args := append([]string{"check", "--isolated", "--select", "E,F,W", "--ignore", "E501"}, python...)
-				output, err := exec.Command(ruff, args...).CombinedOutput()
-				if err != nil {
+				if output, err := ruffCheck(ruff, python...); err != nil {
 					t.Errorf("%s/%s emitted Python fails ruff check:\n%s", entry.Name(), name, output)
 				}
 			}
@@ -113,4 +93,50 @@ func sortedTargetNames(agent *ir.Agent) []string {
 	}
 	slices.Sort(names)
 	return names
+}
+
+// A shape no shipped example has, held to the same ruff standard.
+//
+// TestPublicExamplesEmitLintCleanPython above only sees `examples/`, and nothing
+// there declares a task whose tools include an agent transfer. So the emitted
+// rollback path for that shape had no lint coverage at all, and an
+// `except BaseException as error:` whose body never read `error` (ruff F841)
+// shipped in it. The only thing that caught it was TestSmokePipecatV1TaskTransferStopsFlow,
+// which needs Python, a venv and 18 seconds, and is not the PR gate.
+//
+// Emitted from the same fixture the smoke test uses, so the two cannot drift.
+func TestTaskTransferEmitsLintCleanPython(t *testing.T) {
+	ruff, err := exec.LookPath("ruff")
+	if err != nil {
+		t.Skip("ruff not installed")
+	}
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addPipecatTaskTransferFixture(agent)
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "bot.py")
+	if err := os.WriteFile(path, []byte(artifactFile(t, artifact, "bot.py")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := ruffCheck(ruff, path); err != nil {
+		t.Errorf("a task that transfers emits Python that fails ruff check:\n%s", output)
+	}
+}
+
+// ruffCheck runs the one ruff invocation both gates above use. --isolated
+// ignores any ruff config above the temp dir (the stray-config trap
+// compile_ruff_test.go already documents), and E501 is line length, which
+// emitted prompts legitimately exceed.
+func ruffCheck(ruff string, paths ...string) ([]byte, error) {
+	args := append([]string{"check", "--isolated", "--select", "E,F,W", "--ignore", "E501"}, paths...)
+	return exec.Command(ruff, args...).CombinedOutput()
 }

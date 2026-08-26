@@ -129,12 +129,12 @@ func mustReplace(t *testing.T, src, old, new string) string {
 
 func TestPrintTelephonyPlanUsesArtifactWithoutCarrierDispatch(t *testing.T) {
 	plan := &generate.TelephonyRuntimePlan{
-		Route:       ir.TelephonyKey{Provider: ir.ProviderPipecat, Transport: "carrier-websocket", Carrier: "twilio"},
+		Route:       ir.TelephonyKey{Provider: ir.ProviderPipecat, Transport: "cloud-websocket", Carrier: "twilio"},
 		RequiredEnv: []string{"TWILIO_AUTH_TOKEN"}, Coordination: "local", AdmissionOwner: "generated_runtime",
 	}
 	var out bytes.Buffer
 	printTelephonyPlan(&out, "phone", plan)
-	for _, want := range []string{"provider=pipecat", "transport=carrier-websocket", "carrier=twilio", "required env TWILIO_AUTH_TOKEN"} {
+	for _, want := range []string{"provider=pipecat", "transport=cloud-websocket", "carrier=twilio", "required env TWILIO_AUTH_TOKEN"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q: %s", want, out.String())
 		}

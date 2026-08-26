@@ -241,16 +241,10 @@ The Pipecat target uses the `cloud-websocket` transport and also needs
 inbound call and transfer. `PIPECAT_CLOUD_ORGANIZATION` is supplied by the route
 when deployed, not declared by the package. This route needs no `DAILY_API_KEY`.
 
-The `livekit` and `pipecat_sip` targets both use the `sip` transport and need
-`SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, and
-`SIP_FROM_NUMBER`. Local development supplies `LIVEKIT_URL`, `LIVEKIT_API_KEY`,
-`LIVEKIT_API_SECRET`, and `REDIS_URL`; LiveKit Cloud or your operator supplies
-them after deployment.
-
-`pipecat_sip` is the same agent on that trunk with a Pipecat bot in the room
-instead of a LiveKit worker. No managed platform sits behind it, so it emits no
-deployment manifest: the containers a local run starts are the ones you run in
-production. It receives calls only.
+The `livekit` target uses the `sip` transport and needs `SIP_TRUNK_HOSTNAME`,
+`SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, and `SIP_FROM_NUMBER`. LiveKit Cloud
+supplies `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` and the Redis
+behind its SIP service after you deploy; a self-hosted server needs them set.
 
 Secrets stay in `.env`. No credential or phone number belongs in this package.
 Traces and debug logs can include caller speech, model input and output, phone
@@ -319,47 +313,31 @@ Use `--target livekit` to run the same browser journey on LiveKit. A browser
 session does not read Twilio or SIP credentials. Pipecat browser development
 uses `uv`; LiveKit uses Docker Compose.
 
-## Test the local phone runtimes
+## Test the phone routes
 
-Both targets run carrier-free. **No Twilio account, no number, no tunnel.**
-
-Pipecat runs the generated phone-mode agent locally with `uv`, and the CLI is the
-carrier: it places the call over loopback and connects your microphone to it.
-
-```sh
-bin/unmute dev --telephony examples/salon-concierge --target pipecat
-```
-
-Talk to it and ask for a manager. This package declares a **cold** transfer to
-`manager_line`, so the handoff runs: the caller's leg leaves the agent, the
-destination leg is recorded, and the run prints how far it got. A local run never
-proves that a person answered, and it says so. Use headphones, or the agent hears
-itself and interrupts itself. Talking needs `sox` (`brew install sox`); without it
-the run plays a fixture and says which.
-
-LiveKit starts Redis, LiveKit Server, LiveKit SIP, and the agent locally, and
-prints an address and a per-run credential to dial from a softphone:
+You hear this agent on a phone once it is deployed. Both targets deploy to a
+managed platform, and the emitted `build/<target>/README.md` has the carrier
+steps for the route you chose:
 
 ```sh
-bin/unmute dev --telephony examples/salon-concierge --target livekit
+bin/unmute compile examples/salon-concierge
 ```
 
-The same trunk, with a Pipecat bot in the room instead of a LiveKit worker, is
-dialled exactly the same way:
+Deploy the `pipecat` target to Pipecat Cloud and the `livekit` target to LiveKit
+Cloud, do the carrier setup each runbook dictates, then call your number and ask
+for a manager. This package declares a **cold** transfer to `manager_line`, so
+the handoff runs: the caller's leg leaves the agent and goes to the destination.
+
+Nothing local stands in for that. A carrier reaches an agent over publicly
+routable SIP signalling and media ingress, which a laptop behind normal NAT does
+not have. What you can do locally is the conversation itself:
 
 ```sh
-bin/unmute dev --telephony examples/salon-concierge --target pipecat_sip
+bin/unmute dev examples/salon-concierge --target pipecat
 ```
 
-The local check proves service health, trunk and dispatch setup, how the agent is
-told about the call, and the conversation itself. It does not make the laptop reachable
-from a carrier; a real call needs public SIP signaling and RTP, and an HTTPS
-tunnel is not enough.
-
-`--carrier` is the flag that reaches your own Twilio account: that adds the
-tunnel and the temporary webhook change, and `--no-webhook` leaves the number
-alone within it. [Calling your agent locally](https://docs.slng.ai/dev/local-telephony)
-has the transfer support table and what each plane proves.
+That opens a browser session with the same prompt, tools and models, and no
+phone involved. Use headphones, or the agent hears itself and interrupts itself.
 
 The package environment must contain `MANAGER_PHONE_NUMBER`, matching
 `agent.yaml` and the generated `.env.example`. `SUPERVISOR_PHONE_NUMBER` is not

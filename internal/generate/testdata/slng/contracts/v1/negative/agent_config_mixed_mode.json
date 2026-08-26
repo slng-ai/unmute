@@ -1,0 +1,35 @@
+{
+  "contract": "agent_config_v2",
+  "error_contains": "shared agents cannot contain legacy tools",
+  "payload": {
+    "schema_version": 2,
+    "name": "Broken",
+    "system_prompt": "Help",
+    "greeting": "Hello",
+    "language": "en",
+    "region": "eu-central",
+    "models": {
+      "stt": "soniox/speech-ai:rt-v4",
+      "llm": "google/gemini-2.5-flash",
+      "tts": "soniox/tts-rt:v1",
+      "tts_voice": "Maya"
+    },
+    "idle_nudges": {
+      "enabled": true,
+      "first_nudge_delay_seconds": 15,
+      "second_nudge_delay_seconds": 30,
+      "hangup_delay_seconds": 15,
+      "first_nudge_text": "Are you still there?",
+      "second_nudge_text": "I'm still here. If you need a moment, just let me know. Otherwise, I'll have to end the call soon.",
+      "final_hangup_text": "I'll end the call now. Feel free to call back when you're ready."
+    },
+    "tool_mode": "shared",
+    "tools": [
+      {
+        "type": "template",
+        "id": "11111111-1111-4111-8111-111111111111",
+        "template": "hangup"
+      }
+    ]
+  }
+}

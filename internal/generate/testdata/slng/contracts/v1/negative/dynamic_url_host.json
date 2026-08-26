@@ -1,0 +1,1 @@
+{"contract":"dynamic_webhook_url","error_contains":"string_pattern_mismatch","payload":{"type":"dynamic","host":{"type":"dns","value":"{{host}}"},"port":null,"path_segments":[],"query":[]}}

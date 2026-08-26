@@ -1,30 +1,4 @@
-{{if or .Telephony .SIP}}FROM python:3.12-slim
-
-WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir uv
-
-COPY pyproject.toml ./
-RUN uv pip install --system .
-
-# Bake NLTK's sentence tokenizer into the image. Pipecat's TTS splits text into
-# sentences with it, and without it here the container downloads it on first
-# use — a live-call SSL race that, when it fails, silently mutes the agent
-# (B15). Pin the data dir so build and runtime agree on the path, retry through
-# the intermittent SSL flake, and assert it is present so a failure fails the
-# build rather than shipping a mute image.
-ENV NLTK_DATA=/usr/local/share/nltk_data
-RUN mkdir -p "$NLTK_DATA" && \
-    for i in 1 2 3 4 5; do \
-      python -c "import nltk; nltk.download('punkt_tab', download_dir='$NLTK_DATA')" && \
-      python -c "import nltk.data; nltk.data.find('tokenizers/punkt_tab')" && break || sleep 4; \
-    done; \
-    python -c "import nltk.data; nltk.data.find('tokenizers/punkt_tab')"
-
-COPY . .
-
-CMD ["uvicorn", "telephony:app", "--host", "0.0.0.0", "--port", "7860"]
-{{else}}# Pipecat Cloud's own base image, not a plain Python one. The platform starts a
+# Pipecat Cloud's own base image, not a plain Python one. The platform starts a
 # session by POSTing /bot to this container. That route, the WebSocket and WebRTC
 # routes beside it, and the readiness probes the platform deploys behind all live
 # in the base image. A plain Python image serves none of them, so the deployment
@@ -136,4 +110,4 @@ RUN {{range .Knowledge.Credentials}}--mount=type=secret,id={{.}} {{end}}\
 {{end}}
 # No CMD: the base image imports bot.py and calls its bot() itself. A local
 # browser run overrides the command instead (see compose.dev.yaml).
-{{end}}
+

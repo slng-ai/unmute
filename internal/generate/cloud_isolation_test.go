@@ -22,12 +22,9 @@ import (
 // building from a plain Python base image.
 func TestPipecatReadmeTeachesCloudDeployExactlyWhenTheManifestIsEmitted(t *testing.T) {
 	for name, artifact := range map[string]Artifact{
-		"plain Pipecat Cloud":        plainPipecatArtifact(t),
-		"Daily with carrier":         dailyCarrierArtifact(t, "twilio", true),
-		"cloud-websocket":            cloudWebsocketArtifact(t, cloudWebsocketOptions{inbound: true}),
-		"carrier-websocket (twilio)": carrierWebsocketArtifact(t, "twilio"),
-		"carrier-websocket (telnyx)": carrierWebsocketArtifact(t, "telnyx"),
-		"carrier-websocket (plivo)":  carrierWebsocketArtifact(t, "plivo"),
+		"plain Pipecat Cloud": plainPipecatArtifact(t),
+		"Daily with carrier":  dailyCarrierArtifact(t, "twilio", true),
+		"cloud-websocket":     cloudWebsocketArtifact(t, cloudWebsocketOptions{inbound: true}),
 	} {
 		manifest := slices.Contains(artifactPaths(artifact), "pcc-deploy.toml")
 		readme := artifactFile(t, artifact, "README.md")
@@ -59,15 +56,6 @@ func TestPipecatReadmeTeachesCloudDeployExactlyWhenTheManifestIsEmitted(t *testi
 // Why every table reads SelectableTelephonyRoutes(): the two Exotel rows in
 // TelephonyRoutes() carry empty feature maps that ResolveTelephonyFeature
 // refuses, so they compile to nothing and there is no artifact to assert on.
-
-// planeEnvironmentPrefix is the reserved prefix for an environment name that
-// exists only for a local plane.
-//
-// A reserved prefix rather than a hand-maintained list of names, because gate C4
-// has to keep working as the planes grow. A list would need editing every time a
-// plane learns a new name, and the edit nobody makes is exactly how a plane-only
-// name reaches a deployment manifest. Every plane-only name starts with this.
-const planeEnvironmentPrefix = "UNMUTE_PLANE_"
 
 // telephonyRouteArtifact compiles a package on one route.
 //
@@ -144,18 +132,18 @@ func sortedRouteKeys(routes map[target.TelephonyKey]target.TelephonyRoute) []tar
 	return keys
 }
 
-// Gate C2. Two scoping decisions, both load-bearing.
+// Gate C2. Every telephony route deploys to a managed platform now, so this no
+// longer follows a per-route field: every Pipecat route emits the manifest, and
+// no LiveKit route does.
 //
-// Scoped to Pipecat because pcc-deploy.toml is a Pipecat artifact. CloudDeploys
-// is true on every LiveKit route, so an unscoped predicate would demand a
-// Pipecat manifest from LiveKit and fail on a working example. The LiveKit half
-// is asserted separately and in the opposite direction: no LiveKit route emits
-// that manifest at all.
-func TestCloudIsolationManifestFollowsCloudDeploys(t *testing.T) {
+// Still scoped by provider, and that is the load-bearing half. pcc-deploy.toml is
+// a Pipecat artifact: an unscoped "every route that deploys emits a manifest"
+// would demand a Pipecat manifest from LiveKit and fail on a working example. So
+// the LiveKit half is asserted in the opposite direction.
+func TestCloudIsolationManifestIsEmittedByEveryPipecatRouteAndNoLiveKitRoute(t *testing.T) {
 	routes := target.SelectableTelephonyRoutes()
 	pipecatSeen, livekitSeen := 0, 0
 	for _, key := range sortedRouteKeys(routes) {
-		route := routes[key]
 		artifact, err := telephonyRouteArtifact(t, key)
 		if err != nil {
 			t.Errorf("%v", err)
@@ -165,17 +153,17 @@ func TestCloudIsolationManifestFollowsCloudDeploys(t *testing.T) {
 		switch key.Provider {
 		case target.Pipecat:
 			pipecatSeen++
-			if emitted != route.CloudDeploys {
-				t.Errorf("route %+v emits pcc-deploy.toml = %v but CloudDeploys = %v: "+
-					"the deployment manifest must be emitted exactly when the route has "+
-					"a managed-platform deployment path", key, emitted, route.CloudDeploys)
+			if !emitted {
+				t.Errorf("Pipecat route %+v emits no pcc-deploy.toml. Every surviving "+
+					"telephony route deploys to a managed platform, so a Pipecat route "+
+					"without its deployment manifest cannot be deployed at all", key)
 			}
 		case target.LiveKit:
 			livekitSeen++
 			if emitted {
 				t.Errorf("LiveKit route %+v emits pcc-deploy.toml, which is a Pipecat "+
-					"artifact. CloudDeploys is true on every LiveKit route and still no "+
-					"LiveKit route emits this manifest", key)
+					"artifact. Every LiveKit route deploys, and still none emits this "+
+					"manifest", key)
 			}
 		}
 	}
@@ -188,7 +176,7 @@ func TestCloudIsolationManifestFollowsCloudDeploys(t *testing.T) {
 // Gate C3. Scoped to Pipecat for the same reason as C2: the managed platform's
 // base image is a Pipecat artifact. LiveKit emits its own container definition
 // and is held by C2's no-Pipecat-manifest half.
-func TestCloudIsolationBaseImageFollowsCloudDeploys(t *testing.T) {
+func TestCloudIsolationEveryPipecatRouteBuildsOnThePlatformBaseImage(t *testing.T) {
 	const platformBase = "dailyco/pipecat-base"
 	routes := target.SelectableTelephonyRoutes()
 	seen := 0
@@ -196,7 +184,6 @@ func TestCloudIsolationBaseImageFollowsCloudDeploys(t *testing.T) {
 		if key.Provider != target.Pipecat {
 			continue
 		}
-		route := routes[key]
 		artifact, err := telephonyRouteArtifact(t, key)
 		if err != nil {
 			t.Errorf("%v", err)
@@ -204,55 +191,16 @@ func TestCloudIsolationBaseImageFollowsCloudDeploys(t *testing.T) {
 		}
 		seen++
 		dockerfile := artifactFile(t, artifact, "Dockerfile")
-		usesPlatformBase := strings.Contains(dockerfile, platformBase)
-		if usesPlatformBase != route.CloudDeploys {
-			t.Errorf("route %+v uses %s = %v but CloudDeploys = %v: a route with a "+
-				"managed-platform deployment path builds on the platform's own base "+
-				"image, and a self-hosted route builds on a plain Python image",
-				key, platformBase, usesPlatformBase, route.CloudDeploys)
-		}
-		if !route.CloudDeploys && !strings.Contains(dockerfile, "FROM python:") {
-			t.Errorf("self-hosted route %+v does not build on a plain Python image:\n%s",
-				key, dockerfile)
+		// The self-hosted-on-plain-Python half of this gate went with the two
+		// routes that deployed nowhere. Every Pipecat route left builds for the
+		// platform, so the assertion is now one-directional.
+		if !strings.Contains(dockerfile, platformBase) {
+			t.Errorf("Pipecat route %+v does not build on %s. Every surviving Pipecat "+
+				"route deploys to Pipecat Cloud, which builds from the platform's own "+
+				"base image:\n%s", key, platformBase, dockerfile)
 		}
 	}
 	if seen == 0 {
 		t.Fatal("no Pipecat route inspected: the filter is inverted")
-	}
-}
-
-// Gate C4. A name that exists only so a local plane can run has no business in a
-// deployment manifest or in the environment file an author fills in for
-// production. Reads the reserved prefix rather than a list of names, so a plane
-// that grows a new name is covered without this test being edited.
-func TestCloudIsolationNoPlaneEnvironmentReachesManagedPlatformArtifacts(t *testing.T) {
-	routes := target.SelectableTelephonyRoutes()
-	seen := 0
-	for _, key := range sortedRouteKeys(routes) {
-		route := routes[key]
-		if key.Provider != target.Pipecat || !route.CloudDeploys {
-			continue
-		}
-		artifact, err := telephonyRouteArtifact(t, key)
-		if err != nil {
-			t.Errorf("%v", err)
-			continue
-		}
-		seen++
-		for _, path := range []string{"pcc-deploy.toml", ".env.example"} {
-			if !slices.Contains(artifactPaths(artifact), path) {
-				t.Errorf("route %+v emits no %s, so this gate is inspecting nothing", key, path)
-				continue
-			}
-			content := artifactFile(t, artifact, path)
-			if strings.Contains(content, planeEnvironmentPrefix) {
-				t.Errorf("route %+v: %s carries a plane-only environment name "+
-					"(prefix %s). A local plane's names must never reach a managed-"+
-					"platform artifact:\n%s", key, path, planeEnvironmentPrefix, content)
-			}
-		}
-	}
-	if seen == 0 {
-		t.Fatal("no Pipecat route with a managed-platform path inspected")
 	}
 }

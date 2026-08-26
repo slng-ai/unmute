@@ -1,6 +1,70 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 6.0.0 -> 7.0.0
+Bump rationale: MAJOR. Technology and Boundaries redefines what makes a target.
+A driver that owns its whole output makes a target, whether that output is a
+runnable project or a deployment body for a platform that runs the agent.
+
+Modified in 7.0.0:
+- "A provider is a target only when a driver emits a runnable project for it"
+  is replaced. It described the two drivers that existed when it was written and
+  excluded a third that produces real, complete output of a different shape.
+- The thing the old rule protected is kept word for word: a provider that
+  validates and then produces nothing is still forbidden. That was the actual
+  failure it was written against, and it survives the redefinition intact.
+- Principle V's first bullet gains one sentence. `dev` runs the generated
+  project locally, and a target that emits no project has none to run. The slng
+  target has no `dev`; an author talks to a SLNG agent through the platform's
+  own web session. The carrier bullet 6.0.0 added is untouched: a hosted target
+  is not a local stand-in for anything.
+
+Reason: the slng target compiles a package into an agent body and a runbook for
+a platform that hosts the agent. Nothing about it validates and produces
+nothing, which is what 5.0.0 was written to stop. Shipping it under the old text
+would have left the constitution stating something false about the shipped code,
+which Principle IV forbids more strongly than this amendment costs.
+
+What contributors do differently: a capability row now supplies three values,
+not two. A new target still arrives with its driver, and the driver still owns
+the whole output. What is no longer required is that the output be Python.
+
+Convention for the next amendment: put the new report at the top of this comment
+and push the one it replaces down under "Previous report". Trim the oldest when
+this comment reaches three reports.
+
+Previous report
+---------------
+Version change: 5.0.0 -> 6.0.0
+Bump rationale: MAJOR. Principle V is redefined. `dev` no longer promises a
+local stand-in for a carrier, and the bullet that governed such a stand-in
+("local input stands in for production input") is removed rather than reworded,
+because the thing it governed no longer exists.
+
+Modified in 6.0.0:
+- Principle V's `dev` bullet: `dev` is the browser loop and nothing else. The
+  Docker-unless-it-breaks-the-test rule stays; its second exception (a route
+  whose platform terminates the carrier's stream) goes with the local phone run.
+- Principle V gains a bullet saying where telephony is verified: on a deployed
+  agent, against a real carrier. Cold and warm transfer with it.
+- Principle V drops "local input stands in for production input instead of
+  creating another behavior path". It existed to bind the local telephony
+  planes, and every plane is deleted.
+
+Reason: the local telephony dev path created more complexity than it earned. A
+carrier reaches an agent over publicly routable signalling and media ingress,
+which a developer's machine does not have, so a local plane could confirm the
+wiring on that machine and nothing about going live. The two Pipecat route
+families that deployed nowhere are removed with it; every telephony route the
+compiler emits now deploys to LiveKit Cloud or Pipecat Cloud.
+
+Contributors do differently: do not add a local phone loop, a carrier stand-in,
+or a test level that imitates one. Verify telephony by deploying. `make rig` and
+the `rig` build tag are gone, so the test levels are L1 to L3 (required) and L4
+smoke (opt-in).
+
+Previous report
+---------------
 Version change: 4.0.1 -> 5.0.0
 Bump rationale: MAJOR. Technology and Boundaries no longer permits validation to
 cover more targets than generation. A provider with no driver is not a target.
@@ -21,63 +85,14 @@ describe two working drivers.
 
 What contributors do differently: a capability row now supplies two values, not
 four. A new target provider arrives with its driver, not ahead of it.
-
-Previous report
----------------
-Version change: 4.0.0 -> 4.0.1
-Bump rationale: PATCH. Clarifies one bullet under Principle V to match shipped
-behavior. The principle itself is unchanged: whatever compiles can still be
-spoken to, through the same four commands.
-
-Modified in 4.0.1:
-- Principle V's `dev` bullet said the generated project runs "in Docker". That
-  was already false in two shipped cases: the Pipecat browser loop runs the bot
-  as a host process so browser WebRTC can reach host-reachable ICE candidates
-  (see internal/generate/templates/pipecat_v1/compose.dev.yaml.tmpl), and the
-  cloud-websocket route runs it under `uv` because that route's platform
-  terminates the carrier's stream. The bullet now states the rule actually
-  followed: Docker unless containerizing would break the thing under test.
-- The same bullet now says a local stand-in for a carrier is not the generated
-  project. Local telephony planes stand in for a carrier, so they are governed
-  by "local input stands in for production input" rather than by this bullet.
-
-Reason: found by `/speckit-analyze` on specs/015-local-telephony-rigs, which
-correctly flagged the Docker bullet as a constitution conflict. The conflict
-predated that feature. Fixing the text rather than diluting the principle.
-
-Contributors do nothing differently. No gate changes.
-
-Convention for the next amendment: put the new report at the top of this comment
-and push the one it replaces down under "Previous report". The file used to hold
-only the current report, so history lived in git alone; keeping the previous one
-inline costs four lines and answers "when did this bullet change" without a
-blame walk. Trim the oldest when this comment reaches three reports.
-
-Previous report
----------------
-Version change: 3.0.0 -> 4.0.0
-Bump rationale: MAJOR. Principle IV no longer makes a hand-written schema
-document the highest authority. Feature specs become ignored local work and
-the public documentation site becomes the only user-doc tree.
-
-Modified in 4.0.0:
-- Principle III defines one owner for code facts, architecture, public usage,
-  contributor rules, and local planning.
-- Principle IV changes from "the document wins" to "the owner wins".
-- Workflow makes Spec Kit artifacts local and reduces the maintained emitted
-  behavior surfaces from five to four.
-
-Reason: the old hierarchy required every behavior change to update both
-`docs/` and `docs-site/`. Those copies drifted. The repository now derives
-machine contracts from Go, keeps one architecture document, and writes public
-guidance once.
 -->
 
 # Unmute Constitution
 
-Unmute is a Go compiler. It reads one voice-agent package and writes a native
-LiveKit or Pipecat project. These principles bind every change. Day-to-day
-commands and detailed gates live in `CLAUDE.md`.
+Unmute is a Go compiler. It reads one voice-agent package and writes what the
+chosen target needs: a native LiveKit or Pipecat project, or a deployment body
+for a platform that runs the agent. These principles bind every change.
+Day-to-day commands and detailed gates live in `CLAUDE.md`.
 
 ## Core Principles
 
@@ -156,15 +171,19 @@ Four commands take an author from nothing to a voice they can talk to:
 - `init` refuses to overwrite a non-empty directory.
 - `validate` loads, builds, and validates without writing an artifact.
 - `compile` validates before writing one artifact directory per target.
-- `dev` runs the generated project locally, in Docker wherever the topology
-  allows. It runs as a host process where Docker would break the thing under
-  test: Pipecat browser WebRTC, which needs host-reachable ICE candidates, and
-  a route whose platform terminates the carrier's stream. A local stand-in for
-  a carrier is not the generated project and is not bound by this bullet.
+- `dev` runs the generated project locally and serves one browser session to
+  talk to it. That is its whole surface. It runs the project in Docker wherever
+  the topology allows, and as a host process where Docker would break the thing
+  under test: Pipecat browser WebRTC, which needs host-reachable ICE candidates.
+  A target that emits no project has none to run, so it has no `dev`: an author
+  talks to a hosted agent through its own platform's session.
+- `dev` stands in for no carrier. A phone call reaches an agent that is
+  deployed, so telephony, cold transfer and warm transfer are verified after
+  deploy, against a real carrier. The compiler's job on that path is to emit
+  everything the deployed agent and its operator need, and to say so in the
+  runbook; it is not to imitate a carrier on the author's machine.
 - `skill` is outside this path. It installs the offline coding-agent bundle
   and MUST NOT read, write, or validate an agent package.
-- Local input stands in for production input instead of creating another
-  behavior path.
 - Local development restores borrowed external state on every exit path.
 
 ## Technology and Boundaries
@@ -180,9 +199,11 @@ Four commands take an author from nothing to a voice they can talk to:
 - Secret values appear in no package, generated file, or report.
 - Targets and model vendors are different concepts, and the distinction is
   load-bearing: a vendor name and a target name can be the same word.
-- A provider is a target only when a driver emits a runnable project for it.
-  Pipecat and LiveKit are the targets. A provider with no driver is not accepted
-  as a target value, so `validate` and `compile` agree about what exists.
+- A provider is a target when a driver owns its whole output end to end. Some
+  drivers emit a runnable project; some emit a deployment body for a platform
+  that runs the agent. What is forbidden is a provider that validates and then
+  produces nothing. A provider with no driver is not accepted as a target value,
+  so `validate` and `compile` agree about what exists.
 - Unmute does not buy phone numbers or provision carrier-side applications or
   SIP trunks.
 
@@ -220,4 +241,4 @@ topology change.
   knob needs a concrete reason. Without one, do less.
 - Rules added to `CLAUDE.md` need a failing gate or the label `(advisory)`.
 
-**Version**: 5.0.0 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-24
+**Version**: 6.0.0 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-25

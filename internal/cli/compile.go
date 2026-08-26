@@ -57,8 +57,12 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 		for _, warning := range artifact.Notes.Warnings {
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s: %s\n", resolved.Name, warning)
 		}
+		// Both kinds write the same way. They are still two cases, because the
+		// switch had no default arm: an artifact kind nobody handled produced a
+		// complete file list in memory, wrote none of it, and reported success.
+		// The default arm is the point of this switch, not the cases.
 		switch artifact.Kind {
-		case generate.CodeTarget:
+		case generate.CodeTarget, generate.BodyTarget:
 			outDir := filepath.Join(dir, "build", resolved.Name)
 			if err := writeArtifactFiles(cmd.ErrOrStderr(), outDir, artifact.Files); err != nil {
 				return fmt.Errorf("compile %s: %w", dir, err)
@@ -66,6 +70,9 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 			for _, file := range artifact.Files {
 				fmt.Fprintln(cmd.OutOrStdout(), "generated", filepath.Join(outDir, file.Path))
 			}
+		default:
+			return fmt.Errorf("compile %s: target %q produced artifact kind %q, which this command does not know how to write",
+				dir, resolved.Name, artifact.Kind)
 		}
 		printContract(cmd.OutOrStdout(), resolved.Name, resolved.Provider, artifact.Notes)
 		printTelephonyPlan(cmd.OutOrStdout(), resolved.Name, artifact.Telephony)

@@ -29,18 +29,19 @@ variables:
 |---|---|---|
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
 | `conversation` | the model, through the generated `update_variables` tool | during the call |
-| `session_id` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `sip` or `connector` |
-| `call_id` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `sip` or `connector` |
-| `stream_id` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `connector`; not LiveKit `sip` |
-| `direction` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `sip` or `connector` |
-| `from_number` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `sip` or `connector` |
-| `to_number` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `sip` or `connector` |
-| `carrier` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `sip` or `connector` |
-| `connection` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `sip` or `connector` |
+| `session_id` | the phone adapter | LiveKit `sip` or `connector` |
+| `call_id` | the phone adapter | LiveKit `sip` or `connector` |
+| `stream_id` | the phone adapter | LiveKit `connector` only, not LiveKit `sip` |
+| `direction` | the phone adapter | LiveKit `sip` or `connector` |
+| `from_number` | the phone adapter | LiveKit `sip` or `connector` |
+| `to_number` | the phone adapter | LiveKit `sip` or `connector` |
+| `carrier` | the phone adapter | LiveKit `sip` or `connector` |
+| `connection` | the phone adapter | LiveKit `sip` or `connector` |
 
 The last eight are system sources. You declare them and the selected phone route
-must prove it can supply them. Pipecat `daily-sip` and `cloud-websocket` routes
-do not bind system sources today, so using one there is a validation error.
+must prove it can supply them. **No Pipecat route binds a system source**, so
+declaring one on a Pipecat target is a validation error: neither `daily-sip` nor
+`cloud-websocket` emits an adapter that fills the table these read from.
 
 For an inbound LiveKit or Pipecat telephony channel, every `call_start` variable
 needs a default. There is no dispatch payload to supply an unsolicited incoming

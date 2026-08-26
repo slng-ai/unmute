@@ -24,8 +24,10 @@ examples/simple-prompt/build/livekit/
 └── compile-report.json   # what the compiler decided
 ```
 
-A telephony target on the SIP route also gets `compose.telephony.yaml`,
-`sip-inbound-trunk.json`, `sip-dispatch-rule.json`, and `telephony-setup.sh`.
+An inbound telephony target on the SIP route also gets `telephony-setup.sh` and
+the two records it feeds, `sip-inbound-trunk.json` and `sip-dispatch-rule.json`.
+Those create the inbound trunk and the dispatch rule that send calls on your
+number to this agent.
 
 ## agent.py
 

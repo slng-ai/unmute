@@ -34,9 +34,15 @@ Work down this list and stop at the first rung that can show the bug:
    becomes a permanent gate.
 2. **One provider request, replayed** — the artifact is right and the provider
    behaves unexpectedly. What the rest of this file is about.
-3. **The compiled project running locally** — the defect needs the framework's
+3. **The compiled project in the browser** — the defect needs the framework's
    own runtime, e.g. frame ordering or a settings update landing late.
-4. **A live call** — the defect needs real audio, real timing, or a real carrier.
+   `unmute dev <source-dir>` is this rung, and it is the only local one: it
+   exercises the prompt, the tools, the models and the turn-taking with no phone
+   involved.
+4. **A call to a deployed agent** — the defect needs real audio, real timing, or
+   a real carrier. Nothing local reaches this rung, because a carrier reaches an
+   agent over publicly routable signalling and media ingress. Deploy, finish the
+   carrier setup in the emitted README, and call the number.
 
 Going straight to rung 4 for a rung 2 problem is the mistake this document
 exists to prevent.

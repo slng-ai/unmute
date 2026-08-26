@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/slng-ai/unmute/internal/scaffold"
@@ -26,14 +27,13 @@ func TestCreateMenuLeadsWithTheScaffoldDefault(t *testing.T) {
 // with that one. Leading with the scaffold default here would offer to convert
 // the author's package every time they opened the menu.
 //
-// Both cases matter. Pipecat has historically sat at options[0], so a Pipecat
-// package looked right by accident; the LiveKit case is the one that was
-// actually broken.
+// Every case matters, so the cases are read from targetcap.Providers. Pipecat
+// has historically sat at options[0], so a Pipecat package looked right by
+// accident; LiveKit is the case that was actually broken once, and slng is the
+// case a two-literal list would have missed entirely.
 func TestMaintainMenuLeadsWithThePackagesOwnTarget(t *testing.T) {
-	for _, current := range []string{
-		string(targetcap.Pipecat),
-		string(targetcap.LiveKit),
-	} {
+	for _, provider := range targetcap.Providers {
+		current := string(provider)
 		t.Run(current, func(t *testing.T) {
 			options := maintainTargetOptions(current)
 			if len(options) == 0 {
@@ -47,13 +47,17 @@ func TestMaintainMenuLeadsWithThePackagesOwnTarget(t *testing.T) {
 	}
 }
 
-// Both menus must keep offering every shipped target. An ordering change that
-// quietly dropped one would satisfy the tests above.
+// Both menus must keep offering every shipped target, and name each one
+// correctly. An ordering change that quietly dropped one would satisfy the tests
+// above.
+//
+// The want set is read from targetcap.Providers, not written here. It used to be
+// two hardcoded literals, which made this the only check that could notice a
+// dropped target and unable to notice one: adding a third provider left it
+// green while both menus offered two, and while every screen labelled the third
+// one "Pipecat". A gate whose expectation is a copy of the thing it guards
+// cannot fail.
 func TestBothMenusStillOfferEveryShippedTarget(t *testing.T) {
-	want := map[string]bool{
-		string(targetcap.Pipecat): true,
-		string(targetcap.LiveKit): true,
-	}
 	for name, options := range map[string][]menuChoice{
 		"create":   createTargetOptions(),
 		"maintain": maintainTargetOptions(string(targetcap.LiveKit)),
@@ -62,10 +66,63 @@ func TestBothMenusStillOfferEveryShippedTarget(t *testing.T) {
 		for _, option := range options {
 			seen[option.value] = true
 		}
-		for value := range want {
-			if !seen[value] {
-				t.Errorf("the %s menu no longer offers %q", name, value)
+		for _, provider := range targetcap.Providers {
+			if !seen[string(provider)] {
+				t.Errorf("the %s menu no longer offers %q", name, provider)
 			}
 		}
+	}
+	// A label that reads as another target's name is worse than a missing menu
+	// row, because nothing about it looks wrong.
+	labels := map[string]string{}
+	for _, provider := range targetcap.Providers {
+		label := targetLabel(string(provider))
+		if label == "" {
+			t.Errorf("target %q has no label", provider)
+		}
+		if other, ok := labels[label]; ok {
+			t.Errorf("targets %q and %q both label as %q", other, provider, label)
+		}
+		labels[label] = string(provider)
+	}
+}
+
+// TestConsoleOffersNothingValidateRefuses covers the two remaining places the
+// console gated an option by naming a provider. Both were correct with two
+// targets and wrong with three, and both produced a package the author could
+// not compile: the console wrote a field, and `unmute validate` then refused it.
+//
+// The rule is one sentence. The console may hide an option the table refuses; it
+// may never offer one.
+func TestConsoleOffersNothingValidateRefuses(t *testing.T) {
+	table := targetcap.Default()
+	for _, provider := range targetcap.Providers {
+		t.Run(string(provider), func(t *testing.T) {
+			// Warm transfer, formerly `data.Target != pipecat`.
+			support := table.Control(targetcap.WarmTransfer, provider, "", "")
+			refused := support.Tag == targetcap.Gated || support.Tag == targetcap.Provisional
+			if offersWarmTransfer(string(provider)) == refused {
+				t.Errorf("the transfer-mode menu and the capability table disagree: menu offers warm=%v, table refuses it=%v",
+					offersWarmTransfer(string(provider)), refused)
+			}
+			// Advanced target settings, formerly offered to everyone. A target that
+			// emits no project is refused a version, an SDK language and pins by
+			// ir.validateDriverValues, so the form must not collect them.
+			var data scaffold.Data
+			data.Target = string(provider)
+			regions := ""
+			offered := advancedTargetFields(&data, &regions)
+			for _, field := range offered {
+				projectOnly := field.title == "Target version" ||
+					strings.HasPrefix(field.title, "SDK language") ||
+					strings.HasPrefix(field.title, "Pins")
+				if projectOnly && !targetcap.EmitsProject(provider) {
+					t.Errorf("advanced settings offers %q on %s, which emits no project and is refused it at validate", field.title, provider)
+				}
+			}
+			if len(offered) == 0 {
+				t.Error("advanced settings offers nothing at all; every target deploys somewhere")
+			}
+		})
 	}
 }

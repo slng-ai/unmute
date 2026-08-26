@@ -9,6 +9,60 @@ import (
 	"testing"
 )
 
+// fieldConstant matches one Field constant declaration. gofmt fixes the shape,
+// so a regexp reads it as reliably as a parser would and costs three lines
+// instead of thirty. It takes the block form and the standalone one, because a
+// constant declared outside a const block is still a constant: matching only the
+// block would fail this test on a plain refactor and blame a missing row for it.
+var fieldConstant = regexp.MustCompile(`(?m)^(?:\t|const )?(Field\w+)\s+Field = "(.+)"$`)
+
+// TestEveryFieldConstantHasARow is the complement of
+// TestDefaultTableIsCompleteAndTyped, and neither can stand in for the other:
+// that test ranges table.Fields, so it visits keys, and a Field constant that is
+// never a key is never visited.
+//
+// FieldReasonLocal spent its whole life in that blind spot. It was declared,
+// read by ir.Validate on every locally placed reason model, and claimed as
+// emitted by both drivers, while never being a key. Table.Capability handed back
+// a zero Capability, whose empty tag matches no case in applyCapabilityValue, so
+// an author who wrote `placement: local` on a think model got
+// `capability "models.placement.local" has no livekit tag` — an internal message
+// where a capability answer belonged — on both shipped targets.
+//
+// So this reads the constants out of the source rather than out of the map. It
+// reads the whole package, not just table.go: a scan that only knows one file
+// fails whenever a constant is declared next door, and reports it as a missing
+// row, which sends the reader to the wrong place. The count check closes the
+// other half: a row keyed by a bare string, with no constant behind it, is
+// nothing ir.Validate can ever ask for.
+func TestEveryFieldConstantHasARow(t *testing.T) {
+	fields := Default().Fields
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var declared [][]string
+	for _, source := range sources {
+		if strings.HasSuffix(source, "_test.go") {
+			continue
+		}
+		content, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		declared = append(declared, fieldConstant.FindAllStringSubmatch(string(content), -1)...)
+	}
+	// Also fails at zero, which is what a stale regexp looks like.
+	if len(declared) != len(fields) {
+		t.Errorf("this package declares %d Field constants but Default().Fields holds %d rows", len(declared), len(fields))
+	}
+	for _, match := range declared {
+		if _, ok := fields[Field(match[2])]; !ok {
+			t.Errorf("%s (%q) is declared but has no row in Default().Fields, so it resolves to an untagged capability", match[1], match[2])
+		}
+	}
+}
+
 func TestDefaultTableIsCompleteAndTyped(t *testing.T) {
 	table := Default()
 	for field, providers := range table.Fields {
@@ -71,6 +125,106 @@ func TestDefaultTableIsCompleteAndTyped(t *testing.T) {
 	}
 }
 
+// TestSlngEmitsNoProject pins the two questions the rest of the tree asks about
+// a target instead of asking "which provider is it". Both functions are explicit
+// two-value switches, so neither needed an edit for slng — which is exactly why
+// this test exists: nothing would have failed if one had silently started
+// returning true, and a target that claims to emit a project is asked for a
+// framework version, dependency pins and an SDK language it has none of.
+func TestSlngEmitsNoProject(t *testing.T) {
+	if IsCode(Slng) {
+		t.Error("IsCode(Slng) is true; the slng driver emits JSON and Markdown, not Python")
+	}
+	if EmitsProject(Slng) {
+		t.Error("EmitsProject(Slng) is true; the slng driver emits a deployment body, not a runnable project")
+	}
+	if _, ok := Window(Slng); ok {
+		t.Error("slng has a framework support window; SLNG owns its own runtime version")
+	}
+}
+
+// TestEveryProviderHasAFallbackSlot exists because FallbackSlots is the one
+// provider-keyed structure with no constructor to widen. ir.validateFallbacks
+// reads it unconditionally at the top of every target validation and errors with
+// "target has no fallback slot kind" when the key is missing, so a forgotten
+// entry breaks every package on that target with a message about the table
+// rather than about the package. Nothing else forces the key to exist.
+func TestEveryProviderHasAFallbackSlot(t *testing.T) {
+	slots := Default().FallbackSlots
+	for _, provider := range Providers {
+		if slots[provider] == "" {
+			t.Errorf("%s has no fallback slot kind, so every package fails on it", provider)
+		}
+	}
+}
+
+// TestSlngRowsAreDeliberate is the completeness check for the provider that
+// field() deliberately does not seed, and it holds three separate properties.
+//
+// The first is that field() really does leave slng out. That is the mechanism
+// every forced decision rests on: restore the seed and 35 gated rows silently
+// become Core, while TestDefaultTableIsCompleteAndTyped stays green because the
+// tag is no longer empty. So the mechanism is asserted directly, not inferred
+// from its effect.
+//
+// The second is that the structures with no constructor and no field-style
+// completeness loop — Roles and History — carry a value for every provider.
+//
+// The third is spec FR-007: a gated row says what SLNG cannot do *and* what to
+// do instead. table_test already checks a gated note is non-empty, which catches
+// silence and not uselessness. The shape checked here is the one every slng note
+// is written to: "slng target <what it cannot do>: <what to do instead>".
+func TestSlngRowsAreDeliberate(t *testing.T) {
+	if got := field()[Slng]; got.Tag != "" {
+		t.Fatalf("field() seeds slng with %q; every undecided row is now silently supported", got.Tag)
+	}
+	table := Default()
+	for role, byProvider := range table.Roles {
+		for _, provider := range Providers {
+			if byProvider[provider] == "" {
+				t.Errorf("role %s has no %s kind; the zero value reads as integrated", role, provider)
+			}
+		}
+	}
+	for history, byProvider := range table.History {
+		for _, provider := range Providers {
+			if byProvider[provider].Kind == "" {
+				t.Errorf("history %s has no %s kind; ir.validateContext reports it as an unknown value", history, provider)
+			}
+		}
+	}
+	// Every note slng speaks, from all three structures that carry one. A Warn is
+	// included because it reaches the author too, on stderr.
+	notes := map[string]string{}
+	for field, byProvider := range table.Fields {
+		if tag := byProvider[Slng].Tag; tag == Gated || tag == Warn {
+			notes[string(field)] = byProvider[Slng].Note
+		}
+	}
+	for control, byProvider := range table.Controls {
+		if tag := byProvider[Slng].Tag; tag == Gated || tag == Warn {
+			notes["control "+string(control)] = byProvider[Slng].Note
+		}
+	}
+	for history, byProvider := range table.History {
+		if byProvider[Slng].Kind == HistoryFail {
+			notes["history "+string(history)] = byProvider[Slng].Note
+		}
+	}
+	if len(notes) == 0 {
+		t.Fatal("no slng row says anything, which is what a broken collection loop looks like")
+	}
+	for name, note := range notes {
+		if !strings.HasPrefix(note, "slng target") {
+			t.Errorf("%s: slng note does not start with %q, so a reader cannot tell it from a message about the slng model vendor: %q", name, "slng target", note)
+		}
+		split := strings.LastIndex(note, ": ")
+		if split < 0 || strings.TrimSpace(note[split+2:]) == "" {
+			t.Errorf("%s: slng note names no alternative, so it says what cannot be done and not what to do: %q", name, note)
+		}
+	}
+}
+
 func TestBuiltinToolsPassOnCodeDriversOnly(t *testing.T) {
 	table := Default()
 	if table.Capability(FieldToolBuiltin, LiveKit).Tag != Core || table.Capability(FieldToolBuiltin, Pipecat).Tag != Core {
@@ -129,7 +283,7 @@ func TestTelephonyControlRequiresExactCarrierAndTransport(t *testing.T) {
 		},
 	}}
 	for _, route := range []struct{ transport, carrier string }{
-		{"carrier-websocket", "telnyx"},
+		{"cloud-websocket", "telnyx"},
 		{"sip", "twilio"},
 	} {
 		if got := table.Control(ColdTransfer, Pipecat, route.transport, route.carrier); got.Tag != Gated {
@@ -139,12 +293,14 @@ func TestTelephonyControlRequiresExactCarrierAndTransport(t *testing.T) {
 }
 
 func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
-	exact := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"}
+	exact := TelephonyKey{Provider: Pipecat, Transport: "cloud-websocket", Carrier: "twilio"}
 	if got := ResolveTelephonyFeature(exact, TelephonyInbound); got.Tag != Provisional || got.Docs == "" || got.Verified == "" || got.Smoke {
 		t.Fatalf("exact route evidence = %#v", got)
 	}
 	for _, key := range []TelephonyKey{
-		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"},
+		// A carrier the transport does not have, and a transport the provider does
+		// not have. Both must resolve gated rather than partially matching.
+		{Provider: Pipecat, Transport: "cloud-websocket", Carrier: "telnyx"},
 		{Provider: Pipecat, Transport: "sip", Carrier: "twilio"},
 	} {
 		if got := ResolveTelephonyFeature(key, TelephonyFeature(WarmTransfer)); got.Tag != Gated {
@@ -177,19 +333,20 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 	if !ok || len(optional) != 0 || strings.Join(required, ",") != "account_sid,auth_token,from_number" {
 		t.Fatalf("exact environment vocabulary = required %v optional %v ok %v", required, optional, ok)
 	}
+	// The opposite of the connector's runtime facts, and the defining property of
+	// this route: the platform terminates the carrier's stream, so the package
+	// hosts no process, no endpoint and no supplied environment name of its own.
+	// The block that used to sit here asserted a process, four endpoints and three
+	// supplied names, all facts of the carrier-websocket route that is now gone.
 	runtime := TelephonyRoutes()[exact]
-	if len(runtime.Processes) != 1 || len(runtime.PublicEndpoints) != 4 || len(runtime.ManualSteps) == 0 {
-		t.Fatalf("Pipecat route runtime facts = %#v", runtime)
+	if len(runtime.Processes) != 0 || len(runtime.PublicEndpoints) != 0 {
+		t.Fatalf("the platform-hosted route must host nothing: %#v", runtime)
 	}
-	// Every runtime name on this route is supplied rather than authored: the
-	// Compose graph starts the Redis, and `unmute dev` mints the public URL and
-	// the outbound token. The last two were missing from this list while the dev
-	// command already minted them, so .env.example asked the author to fill in
-	// blanks nobody fills in (FR-018c). ir.Build scopes the list to what a given
-	// package's route actually requires, so an inbound-only package drops the
-	// outbound token.
-	if strings.Join(runtime.LocallySuppliedEnvironment, ",") != "REDIS_URL,UNMUTE_OUTBOUND_TOKEN,UNMUTE_PUBLIC_URL" {
-		t.Fatalf("Pipecat locally supplied environment = %v", runtime.LocallySuppliedEnvironment)
+	if len(runtime.ManualSteps) == 0 {
+		t.Fatal("the carrier steps on this route are dictated, so the row must summarise them")
+	}
+	if len(runtime.LocallySuppliedEnvironment) != 0 {
+		t.Fatalf("nothing is supplied locally on this route: %v", runtime.LocallySuppliedEnvironment)
 	}
 	// The Daily carrier leg (SCHEMA N37): five provisional features, no call
 	// sources, and every granted feature carries its docs and its date.
@@ -211,16 +368,9 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 			t.Fatalf("daily carrier feature %s = %#v, want gated", feature, got)
 		}
 	}
-	telnyx := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"}
-	required, optional, ok = TelephonyEnvironment(telnyx)
-	if !ok || len(optional) != 0 || strings.Join(required, ",") != "api_key,public_key,connection_id,from_number" {
-		t.Fatalf("Telnyx environment vocabulary = required %v optional %v ok %v", required, optional, ok)
-	}
-	plivo := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "plivo"}
-	required, optional, ok = TelephonyEnvironment(plivo)
-	if !ok || len(optional) != 0 || strings.Join(required, ",") != "auth_id,auth_token,from_number" {
-		t.Fatalf("Plivo environment vocabulary = required %v optional %v ok %v", required, optional, ok)
-	}
+	// Telnyx and Plivo had their own REST vocabularies on carrier-websocket. That
+	// transport is gone and Pipecat's surviving phone routes are Twilio only, so
+	// the per-carrier vocabulary that remains is LiveKit's, asserted below.
 	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
 		livekitSIP := TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: carrier}
 		required, optional, ok = TelephonyEnvironment(livekitSIP)
@@ -231,7 +381,7 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 			t.Fatalf("LiveKit SIP %s warm transfer evidence = %#v", carrier, got)
 		}
 	}
-	exotel := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "exotel"}
+	exotel := TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: "exotel"}
 	if got := ResolveTelephonyFeature(exotel, TelephonyRouteSelected); got.Tag != Gated || !strings.Contains(got.Note, "does not support route") {
 		t.Fatalf("Exotel unauthenticated WebSocket route = %#v", got)
 	}
@@ -279,9 +429,6 @@ func TestV1_TransfersCompileOnlyOnNativeRoutes(t *testing.T) {
 	}
 	noPrimitive := []TelephonyKey{
 		{Provider: LiveKit, Transport: "connector", Carrier: "twilio"},
-		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"},
-		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"},
-		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "plivo"},
 	}
 	for _, key := range noPrimitive {
 		coldGot := ResolveTelephonyFeature(key, cold)
@@ -485,9 +632,23 @@ func TestToolAnnounceCapabilityRows(t *testing.T) {
 // emitter's side, so this row and the two lowerings cannot drift apart.
 func TestKnowledgeCapabilityRows(t *testing.T) {
 	table := Default()
-	for _, provider := range Providers {
+	// The two drivers that emit a runtime, named rather than ranged over: a third
+	// target that emits none must not quietly satisfy this by being added to
+	// Providers. slng is checked separately below, and refused.
+	for _, provider := range []Provider{LiveKit, Pipecat} {
 		if got := table.Capability(FieldToolKnowledge, provider); got.Tag != Core {
 			t.Errorf("%s on %s = %q, want %q", FieldToolKnowledge, provider, got.Tag, Core)
+		}
+	}
+	// slng emits a README and pushes a spec, so there is no image to carry the
+	// documents and no process to index them. Refused, with a reason, both scopes.
+	for _, f := range []Field{FieldToolKnowledge, FieldToolKnowledgeTask} {
+		got := table.Capability(f, Slng)
+		if got.Tag != Gated {
+			t.Errorf("%s on slng = %q, want %q: the target emits no runtime to search in", f, got.Tag, Gated)
+		}
+		if strings.TrimSpace(got.Note) == "" {
+			t.Errorf("%s is refused on slng with no note, so the author is told nothing", f)
 		}
 	}
 	if got := table.Capability(FieldToolKnowledgeTask, LiveKit); got.Tag != Core {

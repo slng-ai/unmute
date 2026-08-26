@@ -32,18 +32,18 @@
   },
   "markdown": {
     "instructions": [
-      "Unmute compiles to exactly two targets: Pipecat and LiveKit Agents. Those are the only values `provider` accepts in `targets.yaml`. Deepgram and ElevenLabs appear in these docs as model vendors, which is not the same thing as a target.",
+      "Unmute compiles to exactly three targets. Pipecat and LiveKit Agents are code targets: compile writes a Python project you run. SLNG is a hosted target: compile writes a deployment body and SLNG runs the agent, so it has no `unmute dev`. Those three are the only values `provider` accepts in `targets.yaml`. Deepgram and ElevenLabs appear in these docs as model vendors, which is not the same thing as a target, and `slng` is both.",
       "The Go structs in `internal/spec` and `internal/ir` are the schema truth. Check a field against them, or run `unmute validate`, rather than against what you remember."
     ]
   },
   "redirects": [
     {
       "source": "/dev/telephony",
-      "destination": "/dev/local-telephony"
+      "destination": "/telephony/overview"
     },
     {
       "source": "/dev/webhooks-and-tunnels",
-      "destination": "/dev/local-telephony"
+      "destination": "/telephony/overview"
     },
     {
       "source": "/telephony/first-phone-call",
@@ -71,7 +71,7 @@
     },
     {
       "source": "/telephony/webhooks-and-tunnels",
-      "destination": "/dev/local-telephony"
+      "destination": "/telephony/overview"
     },
     {
       "source": "/build/tools",
@@ -165,8 +165,7 @@
         "public": true,
         "icon": "terminal",
         "pages": [
-          "dev/overview",
-          "dev/local-telephony"
+          "dev/overview"
         ]
       },
       {
@@ -210,7 +209,8 @@
             "root": "targets/overview",
             "pages": [
               "targets/pipecat",
-              "targets/livekit"
+              "targets/livekit",
+              "targets/slng"
             ]
           },
           {

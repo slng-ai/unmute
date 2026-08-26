@@ -62,9 +62,11 @@ func TestKnowledgeContractIsTheSameOnBothTargets(t *testing.T) {
 // the vapi and deepgram retirement was about.
 func TestKnowledgeGateIsOpenOnBothTargets(t *testing.T) {
 	table := target.Default()
-	for _, provider := range target.Providers {
+	// Only the targets that emit a runtime. A target with no runtime cannot search
+	// anything, and internal/target/table_test.go holds its refusal.
+	for _, provider := range []target.Provider{target.LiveKit, target.Pipecat} {
 		if got := table.Capability(target.FieldToolKnowledge, provider); got.Tag != target.Core {
-			t.Errorf("%s is %q on %s but both drivers emit a lowering", target.FieldToolKnowledge, got.Tag, provider)
+			t.Errorf("%s is %q on %s but that driver emits a lowering", target.FieldToolKnowledge, got.Tag, provider)
 		}
 	}
 	if !livekitEmittedFields[target.FieldToolKnowledge] {

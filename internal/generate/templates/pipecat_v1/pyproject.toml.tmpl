@@ -11,7 +11,6 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http>=1.33,<2",
 {{end}}
 {{if .NeedsHTTPX}}    "httpx>=0.27",
-{{end}}{{if .Telephony}}    "redis>=5,<6",
 {{end}}]
 {{if .CloudWebsocket}}# The `websocket` extra is in the pipecat-ai extras above. It happens to arrive
 # with `runner` today (both pull fastapi), and it is declared anyway: this project

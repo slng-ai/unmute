@@ -458,30 +458,46 @@ func summary(result Result, review scaffold.PreflightReport) string {
 	return text.String()
 }
 
-// orderTargets lists the two shipped code targets with `first` at the head.
+// orderTargets lists every shipped target with `first` at the head.
 // selectOne preselects options[0] positionally and never reads the current
 // value, so head position *is* the preselect. One home for that ordering rule:
 // the create flow passes the scaffold default, the maintain flow passes the
 // package's own target, and neither restates the other's choice.
+//
+// It reads targetcap.Providers rather than naming the targets, because it used
+// to name them: an if/else returned [livekit, pipecat] for LiveKit and
+// [pipecat, livekit] for everything else, which was correct while "everything
+// else" meant Pipecat. The day a third target shipped, that else branch would
+// have dropped it from both menus *and* preselected Pipecat for a package that
+// had chosen it, so one Enter rewrote the author's target — the exact failure
+// the comment below this one warns about.
 func orderTargets(first string) []string {
-	if first == string(targetcap.LiveKit) {
-		return []string{string(targetcap.LiveKit), string(targetcap.Pipecat)}
+	ordered := make([]string, 0, len(targetcap.Providers))
+	known := false
+	for _, provider := range targetcap.Providers {
+		value := string(provider)
+		if value == first {
+			known = true
+			continue
+		}
+		ordered = append(ordered, value)
 	}
-	return []string{string(targetcap.Pipecat), string(targetcap.LiveKit)}
+	if !known {
+		// An unrecognised value preselects nothing rather than promoting itself
+		// into a menu of real targets.
+		return ordered
+	}
+	return append([]string{first}, ordered...)
 }
 
 // createTargetOptions is the new-package menu: a fresh package should start on
 // whatever the scaffold writes by default.
 func createTargetOptions() []menuChoice {
-	labels := map[string]string{
+	return targetMenu(orderTargets(scaffold.DefaultTarget), map[string]string{
 		string(targetcap.Pipecat): "Pipecat  ·  generated code project",
 		string(targetcap.LiveKit): "LiveKit  ·  generated code project",
-	}
-	options := make([]menuChoice, 0, 3)
-	for _, value := range orderTargets(scaffold.DefaultTarget) {
-		options = append(options, newChoice(labels[value], value))
-	}
-	return append(options, newChoice("← Back", actionBack))
+		string(targetcap.Slng):    "SLNG  ·  hosted, deployment body only",
+	})
 }
 
 // maintainTargetOptions is the existing-package menu. It leads with the
@@ -489,24 +505,51 @@ func createTargetOptions() []menuChoice {
 // and offering to switch them by default is how you silently rewrite a
 // Pipecat package into a LiveKit one.
 func maintainTargetOptions(current string) []menuChoice {
-	labels := map[string]string{
+	return targetMenu(orderTargets(current), map[string]string{
 		string(targetcap.Pipecat): "Pipecat",
 		string(targetcap.LiveKit): "LiveKit",
-	}
-	options := make([]menuChoice, 0, 3)
-	for _, value := range orderTargets(current) {
-		options = append(options, newChoice(labels[value], value))
+		string(targetcap.Slng):    "SLNG",
+	})
+}
+
+// targetMenu falls back to the short label when a menu forgets a target, so a
+// missing row reads as its own name rather than as another target's.
+func targetMenu(ordered []string, labels map[string]string) []menuChoice {
+	options := make([]menuChoice, 0, len(ordered)+1)
+	for _, value := range ordered {
+		options = append(options, newChoice(cmp.Or(labels[value], targetLabel(value)), value))
 	}
 	return append(options, newChoice("← Back", actionBack))
 }
 
+// targetLabel names a target on every screen: the header, the Identity row, the
+// completion summary and both tool-gating messages. It used to end in
+// `default: return "Pipecat"`, which meant a slng package was labelled Pipecat
+// everywhere at once, on a green test run. An unknown value now reads as itself,
+// because showing a raw provider string is a smaller lie than showing a
+// different target's name.
 func targetLabel(provider string) string {
 	switch targetcap.Provider(provider) {
 	case targetcap.LiveKit:
 		return "LiveKit"
-	default:
+	case targetcap.Pipecat:
 		return "Pipecat"
+	case targetcap.Slng:
+		return "SLNG"
 	}
+	return provider
+}
+
+// offersWarmTransfer asks the capability table the question the transfer-mode
+// menu needs answered. The table is the one owner of it, and the console reading
+// the table is what keeps the menu and `validate` from disagreeing.
+//
+// Transport and carrier are empty because the console has not chosen a
+// connection at this point. That costs nothing today: no warm row conditions on
+// a route, so every one of them answers before the condition is reached.
+func offersWarmTransfer(provider string) bool {
+	capability := targetcap.Default().Control(targetcap.WarmTransfer, targetcap.Provider(provider), "", "")
+	return capability.Tag != targetcap.Gated && capability.Tag != targetcap.Provisional
 }
 
 func modelsLabel(data scaffold.Data) string {
@@ -2408,8 +2451,12 @@ func editHumanTransferDetails(runner *fieldRunner, data *scaffold.Data, name str
 				return err
 			}
 		case "mode":
+			// Asks the table rather than naming a provider. `!= pipecat` meant
+			// "LiveKit" only while there were two targets; on a third it offered a
+			// warm transfer the same table refuses at validate, so the console
+			// wrote a package it already knew would fail.
 			options := []menuChoice{newChoice("Cold transfer", "cold")}
-			if data.Target != string(targetcap.Pipecat) {
+			if offersWarmTransfer(data.Target) {
 				options = append(options, newChoice("Warm transfer", "warm"))
 			}
 			options = append(options, newChoice("← Back", actionBack))
@@ -2755,6 +2802,36 @@ func editCapacity(runner *fieldRunner, data *scaffold.Data) error {
 	}
 }
 
+type advancedField struct {
+	title, help string
+	value       *string
+	validate    func(string) error
+	save        func(string)
+}
+
+// advancedTargetFields is the list the Advanced target settings form offers, and
+// it is a function rather than a literal inside the form so a test can read it.
+//
+// Three of the four describe a project: a framework version to pin, an SDK to
+// generate, and packages to hold still. A target that emits no project has none
+// of the three, and ir.validateDriverValues refuses all three by name, so
+// offering them is the console filling in a package it knows will fail. The
+// region stays, because every target deploys somewhere.
+func advancedTargetFields(data *scaffold.Data, regions *string) []advancedField {
+	region := advancedField{"Deployment region (optional)", "Where the platform deploys the agent; forwarded as declared. One region, or several separated by commas for one deployment per region (LiveKit only).", regions, validateBasic, func(value string) {
+		data.DeploymentRegions = parsePhrases(value)
+	}}
+	if !targetcap.EmitsProject(targetcap.Provider(data.Target)) {
+		return []advancedField{region}
+	}
+	return []advancedField{
+		{"Target version", "Driver/framework version pin.", &data.TargetVersion, validateBasic, nil},
+		{"SDK language (optional)", "For example python on LiveKit.", &data.SDKLanguage, validateBasic, nil},
+		region,
+		{"Pins (optional JSON object)", "Independently versioned target packages.", &data.Pins, validateParams, nil},
+	}
+}
+
 func editAdvancedTarget(runner *fieldRunner, data *scaffold.Data) error {
 	for {
 		// deployment_region holds one region or several (N32), so it is one
@@ -2762,19 +2839,7 @@ func editAdvancedTarget(runner *fieldRunner, data *scaffold.Data) error {
 		// save hook a multi-region package would lose every region but the
 		// first the moment someone opened this form to edit something else.
 		regions := strings.Join(data.DeploymentRegions, ", ")
-		fields := []struct {
-			title, help string
-			value       *string
-			validate    func(string) error
-			save        func(string)
-		}{
-			{"Target version", "Driver/framework version pin.", &data.TargetVersion, validateBasic, nil},
-			{"SDK language (optional)", "For example python on LiveKit.", &data.SDKLanguage, validateBasic, nil},
-			{"Deployment region (optional)", "Where the platform deploys the agent; forwarded as declared. One region, or several separated by commas for one deployment per region (LiveKit only).", &regions, validateBasic, func(value string) {
-				data.DeploymentRegions = parsePhrases(value)
-			}},
-			{"Pins (optional JSON object)", "Independently versioned target packages.", &data.Pins, validateParams, nil},
-		}
+		fields := advancedTargetFields(data, &regions)
 		options := make([]menuChoice, 0, len(fields)+1)
 		for i, field := range fields {
 			options = append(options, newChoice(field.title+"  ·  "+cmp.Or(*field.value, "not set"), strconv.Itoa(i)))

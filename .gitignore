@@ -6,8 +6,6 @@ my-test-agent/
 
 # Compiled target projects (reproducible via `unmute compile`; goldens are the tracked form)
 examples/*/build/
-# The rig fixtures' compiled output: `make rig` writes it, compile regenerates it.
-internal/cli/testdata/*/build/
 
 # Release artifacts: GoReleaser writes every build, archive, checksum and SBOM here
 dist/
