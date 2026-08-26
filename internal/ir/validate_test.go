@@ -177,6 +177,49 @@ func TestValidateTurnModelRejectsSpeakAndThinkFields(t *testing.T) { // V22
 
 // N16: a language set on a vendor whose integration has no language slot must
 // fail at VALIDATE, not just generate (C6: gate before any artifact). gemini
+// warm_standby_enabled is real on livekit and inert on pipecat: pipecat-slng
+// 0.5.0 deferred it, so the kwarg is absorbed by **kwargs and discarded with no
+// error. A params: block is forwarded verbatim by design, so nothing else in the
+// compiler can notice that the package is promising a held-open socket and
+// getting none. A warning rather than a refusal, because a package that ships to
+// both targets authors one speak binding for both.
+func TestValidateWarmStandbyIsPipecatInert(t *testing.T) {
+	withStandby := func(t *testing.T, provider Provider) []string {
+		t.Helper()
+		agent := safeAgent(t)
+		target := targetFor(agent, provider)
+		b := target.Models.Speak["front_desk"]
+		b.Params = map[string]any{"warm_standby_enabled": true}
+		target.Models.Speak["front_desk"] = b
+		report, err := Validate(agent, []Target{target}, targetcap.Default())
+		if err != nil {
+			t.Fatalf("an inert param must warn, never fail: %v %#v", err, report.PerTarget[0].Errors)
+		}
+		return report.PerTarget[0].Warnings
+	}
+
+	warnings := strings.Join(withStandby(t, ProviderPipecat), "\n")
+	if !strings.Contains(warnings, "warm_standby_enabled") {
+		t.Errorf("pipecat did not warn that the param reaches nothing:\n%s", warnings)
+	}
+	// The warning has to say what to do instead, or it is just noise.
+	if !strings.Contains(warnings, "livekit") {
+		t.Errorf("the warning does not name the target where the param works:\n%s", warnings)
+	}
+
+	// On livekit the plugin implements it, so there is nothing to say.
+	if got := strings.Join(withStandby(t, ProviderLiveKit), "\n"); strings.Contains(got, "warm_standby_enabled") {
+		t.Errorf("warned about a param that works on this target:\n%s", got)
+	}
+
+	// And an unset param is silent everywhere.
+	quiet := safeAgent(t)
+	report, _ := Validate(quiet, []Target{targetFor(quiet, ProviderPipecat)}, targetcap.Default())
+	if got := strings.Join(report.PerTarget[0].Warnings, "\n"); strings.Contains(got, "warm_standby_enabled") {
+		t.Errorf("warned with no param authored:\n%s", got)
+	}
+}
+
 // TTS is NoLanguage on livekit.
 func TestValidateLanguageSlotGate(t *testing.T) {
 	agent := safeAgent(t)

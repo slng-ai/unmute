@@ -15,7 +15,7 @@ models:
   listen:
     transcriber:
       provider: slng
-      model: "slng/deepgram/nova:3-en"
+      model: "deepgram/nova:3"
 ```
 
 A scaffolded package binds SLNG here by design, so one `SLNG_API_KEY` covers
@@ -33,12 +33,37 @@ To keep transcription compute in a world part or exact region, see
 
 | Where | `model:` |
 |---|---|
-| every shipped example, and `unmute init` | `slng/deepgram/nova:3-en` |
+| `unmute init`, and every example except `slng-support` | `deepgram/nova:3` |
+| `slng-support`, which compiles to the `slng` target | `slng/deepgram/nova:3-en` |
 
 Those are the only exact ids the docs name, because they are the ones the examples
 run. The full SLNG catalog, with languages, regions, and hosting, is at
 [docs.slng.ai/models](https://docs.slng.ai/models); any id from there goes in
 `model:` as written.
+
+### Why two shapes, and which one to pick
+
+The `slng/` prefix selects a model SLNG hosts itself. An id without it, like
+`deepgram/nova:3`, is the same vendor model reached through SLNG as a proxy. Both
+are one binding and one `SLNG_API_KEY`; the difference is who runs the model and
+how it is billed, which
+[docs.slng.ai](https://docs.slng.ai/execution-layer/byok) covers.
+
+For **listening**, the two are not equally fast, and the gap is larger than most
+settings on the optimization pages. Measured against the live bridge in August
+2026, time from end of speech to the final transcript:
+
+| route | median | samples |
+|---|---|---|
+| `deepgram/nova:3` | 280ms | 13 |
+| `slng/deepgram/nova:3-en` | 605ms | 16 |
+
+The caller waits through that on every turn, which is why the scaffold and the
+examples take the proxied route. Two caveats before you read too much into it:
+those sample counts are small, and a hosted id is not offered in every world
+part, so a region you need may decide this for you. Measure your own route rather
+than trusting the table, as
+[Optimizing your agent](/optimization/overview) says of every number on it.
 
 ## Pipecat
 

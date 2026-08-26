@@ -80,7 +80,7 @@ models:
   speak:
     voice:
       provider: slng
-      model: "slng/deepgram/aura:2-en"
+      model: "deepgram/aura:2"
       voice: "aura-2-thalia-en"
       params:
         # A broad area: na, eu or ap.
@@ -111,6 +111,12 @@ For independent, like-for-like comparisons across providers, we recommend
 on your own audio, because accents, phone codecs and the length of a typical
 utterance all move the result.
 
+The same model reached two ways is also two different waits. `deepgram/nova:3`
+and `slng/deepgram/nova:3-en` are the same vendor model, one proxied through SLNG
+and one hosted by it, and we measured 280ms against 605ms to the final
+transcript. That is why the scaffold and the examples take the proxied route.
+[Speech to text](/models/stt) has the numbers and the caveats.
+
 <Tip>
   Test the route before you ship it. Not every model on a provider is available on
   every transport or in every region, and some combinations only fail once a call
@@ -118,6 +124,13 @@ utterance all move the result.
 </Tip>
 
 ### Hold the TTS connection open
+
+<Warning>
+  **LiveKit only.** The SLNG plugin for Pipecat does not implement this as of
+  `pipecat-slng` 0.5.0, and a params block is forwarded to the plugin as written,
+  so the setting is accepted and then discarded with no error. `unmute validate`
+  warns when a package sets it on the Pipecat target.
+</Warning>
 
 Off by default. It takes the provider's session setup off the front of every
 segment, which shows up most on the first segment of a call and on the fastest
@@ -133,7 +146,8 @@ models:
       language: en
       params:
         # Hold a socket open so the provider's setup is done before the text
-        # arrives. Off by default.
+        # arrives. Off by default, and livekit only: on pipecat it is accepted
+        # and discarded, and unmute validate warns about it.
         warm_standby_enabled: true
         # Data residency. Pick the region nearest your callers.
         world_part_override: eu
@@ -218,7 +232,8 @@ models:
       language: en
       params:
         # Hold a socket open so the provider's setup is done before the text
-        # arrives. Off by default.
+        # arrives. Off by default, and livekit only: on pipecat it is accepted
+        # and discarded, and unmute validate warns about it.
         warm_standby_enabled: true
         # Run the model near your callers. A world part, or a specific region
         # with region_override, which wins when both are set.

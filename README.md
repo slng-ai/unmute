@@ -35,12 +35,12 @@ models:
   speak:
     voice:
       provider: slng
-      model: "slng/deepgram/aura:2-en"
+      model: "deepgram/aura:2"
       voice: "aura-2-thalia-en"
   listen:
     ears:
       provider: slng
-      model: "slng/deepgram/nova:3-en"
+      model: "deepgram/nova:3"
   turn:
     detector:
       provider: local

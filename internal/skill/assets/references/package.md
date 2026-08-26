@@ -46,12 +46,12 @@ models:
   speak:
     voice:
       provider: slng
-      model: "slng/deepgram/aura:2-en"
+      model: "deepgram/aura:2"
       voice: "aura-2-thalia-en"
   listen:
     transcriber:
       provider: slng
-      model: "slng/deepgram/nova:3-en"
+      model: "deepgram/nova:3"
   turn:
     detector:
       provider: local
@@ -396,7 +396,7 @@ so there is nothing to run locally and `unmute dev` does not apply to it. See
 
 `vapi` and `deepgram` used to be accepted as validation-only targets and were
 retired on 2026-08-24. Naming either as a target is refused. Note that
-`deepgram` is still a **model vendor** — `slng/deepgram/nova:3-en` and similar
+`deepgram` is still a **model vendor** — `deepgram/nova:3` and similar
 are unaffected. A target and a model vendor are different things that can share
 a word.
 
