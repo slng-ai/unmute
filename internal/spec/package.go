@@ -297,11 +297,26 @@ type Tool struct {
 	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
 }
 
-// ToolWebhook is the `webhook:` block: an HTTP endpoint named by env var, with
-// optional authentication.
+// ToolWebhook is the `webhook:` block: an HTTP endpoint named by env var or by
+// a literal base URL, with optional authentication.
 type ToolWebhook struct {
-	URLEnv string `json:"url_env" yaml:"url_env"`
-	// Path is appended to the env base URL; it may carry {{variable}} tokens,
+	// URLEnv names an environment variable holding the whole base URL. The code
+	// drivers read it at run time, which is how a webhook host stays out of the
+	// package.
+	URLEnv string `json:"url_env,omitempty" yaml:"url_env,omitempty"`
+	// BaseURL is the literal base, for a target whose platform stores the URL
+	// rather than reading it from the agent's environment. SLNG's URL validator
+	// requires a literal hostname and rejects a template token in the scheme or
+	// the authority, so a name is not a shape it can take.
+	//
+	// It belongs on the tool rather than on the target because two webhook tools
+	// in one package can point at two different hosts.
+	//
+	// A tool needs at least one of the two, and which one is required is a
+	// question about the target: the code drivers read url_env and ignore this,
+	// and the slng target does the reverse.
+	BaseURL string `json:"base_url,omitempty" yaml:"base_url,omitempty"`
+	// Path is appended to the base URL; it may carry {{variable}} tokens,
 	// whose rendered values are URL-encoded (variable_secrets_specs.md I.authoring.tool).
 	Path string    `json:"path,omitempty" yaml:"path,omitempty"`
 	Auth *ToolAuth `json:"auth,omitempty" yaml:"auth,omitempty"`
@@ -310,6 +325,15 @@ type ToolWebhook struct {
 // ToolLocal is the `local:` block: a Python handler in the package.
 type ToolLocal struct {
 	Handler string `json:"handler,omitempty" yaml:"handler,omitempty"`
+	// Dependencies are exact `name==version` pins the handler imports, for a
+	// target that installs a per-tool environment. Each is an exact pin because a
+	// range is not reproducible: the platform stores a canonical, sorted list and
+	// a body that does not match it is not the body that exists.
+	//
+	// The code drivers build their project's dependency list from the provider
+	// catalogue and read nothing per tool, so this field is refused there rather
+	// than dropped. FieldToolDependencies is the row that says so.
+	Dependencies []string `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
 }
 
 // ToolMCP is the `mcp:` block: one remote MCP server used as a tool source

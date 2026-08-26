@@ -83,16 +83,6 @@ func TestGeneratePipecatEmitsProject(t *testing.T) { // driver-pipecat T2, V17
 	}
 }
 
-func TestApplyPlanIsOrdered(t *testing.T) {
-	plan := ApplyPlan{Steps: []ApplyStep{
-		{Method: "POST", Endpoint: "/assistants", CaptureID: "assistant"},
-		{Method: "POST", Endpoint: "/squads"},
-	}}
-	if plan.Steps[0].CaptureID != "assistant" || plan.Steps[1].Endpoint != "/squads" {
-		t.Fatalf("plan = %#v", plan)
-	}
-}
-
 func TestTelephonyRuntimePlanAndCompileReportUseResolvedFacts(t *testing.T) { // telephony V7, V19
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {

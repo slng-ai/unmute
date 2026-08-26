@@ -1,0 +1,12 @@
+{
+  "contract": "backend_proxy",
+  "error_contains": "names are never sanitized",
+  "payload": {
+    "type": "backend_proxy",
+    "id": "11111111-1111-4111-8111-111111111111",
+    "name": "Search Web",
+    "description": "Must fail instead of being renamed",
+    "parameters": {"type": "object", "properties": {}},
+    "target_kind": "mcp"
+  }
+}

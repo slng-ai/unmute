@@ -2,9 +2,45 @@ package ir
 
 import (
 	"encoding/json"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
+
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
+
+// TestProviderEnumMatchesTargetSet closes the one surface in this repository
+// where a stale provider list produced a wrong artifact rather than wrong prose.
+//
+// enumOptions hand-writes the Provider enum for the debug schema, and until this
+// test existed nothing compared it to target.Providers. Forgetting to add a
+// provider here produced a derived schema that rejected the target the compiler
+// had just accepted, on a green CI run, because no other check reads this list.
+// Principle III asks for an agreement test wherever a fact has a second owner.
+func TestProviderEnumMatchesTargetSet(t *testing.T) {
+	schema := enumOptions().TypeSchemas[reflect.TypeFor[Provider]()]
+	if schema == nil {
+		t.Fatal("the Provider type has no enum schema, so the debug schema takes any string")
+	}
+	var got []string
+	for _, value := range schema.Enum {
+		name, ok := value.(Provider)
+		if !ok {
+			t.Fatalf("enum entry %#v is not an ir.Provider", value)
+		}
+		got = append(got, string(name))
+	}
+	var want []string
+	for _, provider := range targetcap.Providers {
+		want = append(want, string(provider))
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("debug schema provider enum = %v, target.Providers = %v", got, want)
+	}
+}
 
 func TestSchemaDerivesUnionEnumsAndNameReferences(t *testing.T) { // V2
 	schema, err := Schema()

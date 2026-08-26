@@ -125,6 +125,106 @@ func TestDefaultTableIsCompleteAndTyped(t *testing.T) {
 	}
 }
 
+// TestSlngEmitsNoProject pins the two questions the rest of the tree asks about
+// a target instead of asking "which provider is it". Both functions are explicit
+// two-value switches, so neither needed an edit for slng — which is exactly why
+// this test exists: nothing would have failed if one had silently started
+// returning true, and a target that claims to emit a project is asked for a
+// framework version, dependency pins and an SDK language it has none of.
+func TestSlngEmitsNoProject(t *testing.T) {
+	if IsCode(Slng) {
+		t.Error("IsCode(Slng) is true; the slng driver emits JSON and Markdown, not Python")
+	}
+	if EmitsProject(Slng) {
+		t.Error("EmitsProject(Slng) is true; the slng driver emits a deployment body, not a runnable project")
+	}
+	if _, ok := Window(Slng); ok {
+		t.Error("slng has a framework support window; SLNG owns its own runtime version")
+	}
+}
+
+// TestEveryProviderHasAFallbackSlot exists because FallbackSlots is the one
+// provider-keyed structure with no constructor to widen. ir.validateFallbacks
+// reads it unconditionally at the top of every target validation and errors with
+// "target has no fallback slot kind" when the key is missing, so a forgotten
+// entry breaks every package on that target with a message about the table
+// rather than about the package. Nothing else forces the key to exist.
+func TestEveryProviderHasAFallbackSlot(t *testing.T) {
+	slots := Default().FallbackSlots
+	for _, provider := range Providers {
+		if slots[provider] == "" {
+			t.Errorf("%s has no fallback slot kind, so every package fails on it", provider)
+		}
+	}
+}
+
+// TestSlngRowsAreDeliberate is the completeness check for the provider that
+// field() deliberately does not seed, and it holds three separate properties.
+//
+// The first is that field() really does leave slng out. That is the mechanism
+// every forced decision rests on: restore the seed and 35 gated rows silently
+// become Core, while TestDefaultTableIsCompleteAndTyped stays green because the
+// tag is no longer empty. So the mechanism is asserted directly, not inferred
+// from its effect.
+//
+// The second is that the structures with no constructor and no field-style
+// completeness loop — Roles and History — carry a value for every provider.
+//
+// The third is spec FR-007: a gated row says what SLNG cannot do *and* what to
+// do instead. table_test already checks a gated note is non-empty, which catches
+// silence and not uselessness. The shape checked here is the one every slng note
+// is written to: "slng target <what it cannot do>: <what to do instead>".
+func TestSlngRowsAreDeliberate(t *testing.T) {
+	if got := field()[Slng]; got.Tag != "" {
+		t.Fatalf("field() seeds slng with %q; every undecided row is now silently supported", got.Tag)
+	}
+	table := Default()
+	for role, byProvider := range table.Roles {
+		for _, provider := range Providers {
+			if byProvider[provider] == "" {
+				t.Errorf("role %s has no %s kind; the zero value reads as integrated", role, provider)
+			}
+		}
+	}
+	for history, byProvider := range table.History {
+		for _, provider := range Providers {
+			if byProvider[provider].Kind == "" {
+				t.Errorf("history %s has no %s kind; ir.validateContext reports it as an unknown value", history, provider)
+			}
+		}
+	}
+	// Every note slng speaks, from all three structures that carry one. A Warn is
+	// included because it reaches the author too, on stderr.
+	notes := map[string]string{}
+	for field, byProvider := range table.Fields {
+		if tag := byProvider[Slng].Tag; tag == Gated || tag == Warn {
+			notes[string(field)] = byProvider[Slng].Note
+		}
+	}
+	for control, byProvider := range table.Controls {
+		if tag := byProvider[Slng].Tag; tag == Gated || tag == Warn {
+			notes["control "+string(control)] = byProvider[Slng].Note
+		}
+	}
+	for history, byProvider := range table.History {
+		if byProvider[Slng].Kind == HistoryFail {
+			notes["history "+string(history)] = byProvider[Slng].Note
+		}
+	}
+	if len(notes) == 0 {
+		t.Fatal("no slng row says anything, which is what a broken collection loop looks like")
+	}
+	for name, note := range notes {
+		if !strings.HasPrefix(note, "slng target") {
+			t.Errorf("%s: slng note does not start with %q, so a reader cannot tell it from a message about the slng model vendor: %q", name, "slng target", note)
+		}
+		split := strings.LastIndex(note, ": ")
+		if split < 0 || strings.TrimSpace(note[split+2:]) == "" {
+			t.Errorf("%s: slng note names no alternative, so it says what cannot be done and not what to do: %q", name, note)
+		}
+	}
+}
+
 func TestBuiltinToolsPassOnCodeDriversOnly(t *testing.T) {
 	table := Default()
 	if table.Capability(FieldToolBuiltin, LiveKit).Tag != Core || table.Capability(FieldToolBuiltin, Pipecat).Tag != Core {

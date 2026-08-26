@@ -1,0 +1,233 @@
+---
+title: "The SLNG deployment body"
+description: "What unmute compile writes for a slng target, what SLNG runs for you, and what the package may not ask for."
+sidebarTitle: "SLNG"
+---
+
+SLNG hosts the agent. There is no project to run and nothing to keep alive, so
+`unmute compile` writes a deployment body and a runbook instead of Python.
+
+```sh
+unmute compile examples/slng-support --target slng
+```
+
+```text
+examples/slng-support/build/slng/
+├── agent.json          # the agent create body
+├── tools/              # one tool body per tool that needs one
+│   └── check_order.json
+└── README.md           # the runbook: what to create, what to run, what to watch
+```
+
+A package whose tools are all builtins gets no `tools/` directory at all.
+
+Unmute opens no connection to SLNG, at validate time or compile time. It writes
+files and stops. The `voiceai` CLI pushes them.
+
+## targets.yaml
+
+```yaml targets.yaml
+targets:
+  slng:
+    provider: slng
+    deployment_region: eu-central
+```
+
+That is the whole target. `version`, `pins`, `sdk_language` and `connection` are
+all refused by name: each describes a generated project, and there is none.
+
+`deployment_region` takes exactly one of `any`, `us-east`, `eu-central` or
+`ap-south`. `any` lets SLNG route each call itself. This is the only target
+whose region values are checked, because it is the only one whose platform
+publishes a closed set.
+
+## Model names
+
+SLNG names a model with the vendor and the model joined by a slash. A package
+writes them as two fields, and the slng driver joins them when it writes the
+body:
+
+```yaml agent.yaml
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-terra
+```
+
+That reaches SLNG as one string. A model name that already carries a slash is
+passed through whole rather than joined twice, which is how a SLNG Context
+Router model such as `slng/deepgram/nova:3-en` reaches the body unchanged.
+
+Nothing else about a model is checked here. SLNG owns its own model list, so the
+compile report says which values were forwarded and validates none of them.
+
+That makes a model string the field most likely to fail your push, and it fails
+loudly: `AGENT_MODEL_UNAVAILABLE`, naming `models.stt`, `models.llm` or
+`models.tts` and the string it rejected. Three different things cause it: the
+model is not enabled for agents in your organisation, it is one of your own and
+SLNG's router is off, or it is not served in the region and language this agent
+asked for.
+
+That last one is the surprising one. Not every model exists in every region, and
+pinning `deployment_region` to a region a model does not serve fails at push.
+`any` avoids it by letting SLNG route each call.
+
+Unmute writes no `llm_router_enabled`, so SLNG applies its own default. That is
+deliberate: a model your organisation brought its own key for has no entry in
+SLNG's shared catalogue, and SLNG accepts one only when the router is on.
+Writing the field off would refuse a whole class of your own models, and nothing
+in a package asks for that.
+
+## Push it
+
+The runbook in `build/slng/README.md` is the authority for your package. In
+outline:
+
+```sh
+export VOICEAI_API_KEY=...
+voiceai agents create --file build/slng/agent.json --json
+```
+
+Or run `voiceai login` and let the CLI store the key. An agent id comes back,
+and you need it to open a session.
+
+`VOICEAI_API_KEY` is the push tool's key. It is **not** `SLNG_API_KEY`, which is
+the Context Router's key that a generated agent uses at run time to reach SLNG
+models. Using one where the other belongs returns an authentication error that
+looks like a wrong body.
+
+### Names, not identifiers
+
+`agent.json` writes each tool and MCP reference as a name, because no compiler
+can invent an identifier a server assigns. SLNG's `tool_refs` entries require
+`attachment_id`, `tool_id` and `version`, so a name has to become an id before
+the body is accepted.
+
+This includes a curated capability. A builtin such as `end_call` needs nothing
+*created*, and it still has a `tool_id` that has to be filled in. Only an agent
+with no tools at all posts unchanged.
+
+A package with a `local:` or `webhook:` tool needs more: each tool body created
+first, then its new id filled in.
+
+The `voiceai` CLI has no `tools` command yet, so nothing does this for you
+today.
+
+An MCP reference is incomplete in a way name resolution alone cannot fix. SLNG
+requires a hash computed over the tool's schemas **as the live server reports
+them**, so the push step has to connect to the MCP server. It is not a lookup.
+
+The runbook says which case your package is in.
+
+### Do not push a dashboard export back
+
+An agent document exported from SLNG is not always a body the API accepts. The
+export carries `orchestrator`, which the create body forbids: an export from an
+agent running on LiveKit omits the field at its default and posts cleanly, and
+the same export from a Pipecat agent is rejected. Several other fields differ,
+and `llm_router_enabled` defaults the opposite way on the two shapes.
+
+Compile from the package instead.
+
+## Code tool dependencies
+
+A `local:` tool may pin the packages its handler imports:
+
+```yaml tools/check_order.yaml
+local:
+  handler: tools/check_order.py
+  dependencies:
+    - orjson==3.11.4
+```
+
+Each entry is an exact `name==version` pin. A range, a URL, an extra or a
+wildcard is refused at validate, because SLNG builds a locked, hash-verified
+environment per tool and none of those can be locked. The emitted body carries
+the list lowercase, dash-separated and sorted, which is how SLNG stores it.
+
+The sandbox runs Python 3.14 with `pydantic` already installed, so a handler
+using only the standard library and pydantic needs no `dependencies:` at all.
+
+This field is slng-only. The code drivers build one dependency list for the
+whole generated project out of the provider catalogue and read nothing per tool,
+so a package that pins here is refused on `livekit` and `pipecat` rather than
+having the pins silently dropped.
+
+## The Vault
+
+SLNG reads secrets from its own store. Unmute knows which names a package needs
+and can create none of them, so the runbook lists them, grouped by where each
+one came from, above the push command. No secret value reaches any emitted file
+or any command in the runbook.
+
+Two kinds appear there:
+
+- a **secret** is a credential a tool authenticates with, named in the package
+  as an environment variable and stored in the Vault under the same name;
+- a **variable** is a `{{$NAME}}` token that SLNG substitutes into text at run
+  time.
+
+A `{{$NAME}}` token passes validation on a slng target and reaches the body
+unchanged. On a LiveKit or Pipecat target it is refused, and the message says
+what the token is rather than telling you to declare a variable that must not
+exist.
+
+A package that needs no Vault entries is told so, rather than shown an empty
+list.
+
+## What a slng package may not ask for
+
+Every one of these is refused at validate, by name, with what to do instead.
+None is dropped quietly.
+
+| Package feature | Why SLNG cannot take it |
+|---|---|
+| tasks, task groups, agent transfers | the create body carries one prompt and one greeting |
+| a `turn:` section, `semantic_endpointing`, `endpointing_delay` | SLNG owns its own turn taking |
+| `placement: local` on any model | SLNG runs the pipeline; there is no machine of yours |
+| `conversation.inactivity` | SLNG's idle nudges need three spoken texts a package does not carry |
+| `conversation.max_duration`, `thinking_audio` | no field on the create body holds them |
+| `interruption.minimum_words`, `interruption.ignore_phrases` | interruptions are on or off |
+| a missing greeting, or a model-written one | SLNG requires a greeting and speaks the string it is given |
+| `tracing:` | unmute instruments no process here, so it can install no exporter |
+| a second `deployment_region` | SLNG takes exactly one |
+| `variables` with `source: conversation` | nothing on the create body captures a value mid-call |
+| outbound calling, `on_voicemail` | unmute creates no carrier state on SLNG |
+| a warm human transfer | SLNG's curated transfer places a single blind transfer |
+
+An MCP tool works, and carries one caveat rather than a refusal: the push step
+must reach the server.
+
+## If the agent answers with silence
+
+A model can pass every check at create time and still fail on the call. Create
+validates what your organisation is allowed to use; whether the provider behind
+it answers is a different question.
+
+```sh
+voiceai agents calls list <agent_id> --json
+```
+
+`call_end_reason` on the latest call names the layer:
+`terminal failure: component=llm reason=hard_fail` is the LLM, and `stt` and
+`tts` appear the same way. That is a model or provider problem rather than a
+problem with the compiled body, and swapping that one binding is the fix.
+
+## There is no `unmute dev`
+
+`dev` runs the generated project locally, and this target generates no project.
+To talk to a pushed agent, open a web session:
+
+```sh
+voiceai agents web-sessions create <agent_id> --file session.json
+```
+
+The agent id is the one `agents create` returned; `voiceai agents list` finds it
+again. The command returns LiveKit connection details, and a
+`livekit_dispatch_id` meaning a worker joined the room.
+
+The `--file` is required even though every field in it is optional, because the
+endpoint declares a request body and the CLI sends none without it. A minimal
+`session.json` is `{"arguments": {}}`; `arguments` is where the package's
+declared variables get their value for one session.

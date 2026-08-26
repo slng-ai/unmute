@@ -1,0 +1,28 @@
+description: Start a refund for the caller's order.
+
+input:
+  type: object
+  properties:
+    reason:
+      type: string
+      description: Why the caller wants a refund
+
+webhook:
+  # url_env is what the code targets read at run time. base_url is what SLNG
+  # stores in the tool body, because its URL validator requires a literal host.
+  # Both are written, and each target reads the one it needs.
+  url_env: REFUND_URL
+  base_url: https://api.acme.example
+  # The path carries a package variable, so the whole URL cannot live in the
+  # tool's own config: a tool-level URL may template Vault variables only. It
+  # goes on the attachment as a config override instead.
+  path: /refunds/{{customer_id}}
+  auth:
+    type: bearer
+    token_env: REFUND_API_TOKEN
+
+inject:
+  channel: voice
+
+interruption: provider_default
+effect: returns_data

@@ -182,6 +182,21 @@ func assignedVariables(agent *Agent) []string {
 func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site, value string, sessionStart bool, alsoAllowed ...string) error {
 	for _, ref := range TemplateRefs(value) {
 		where := pkg.Location(file, firstNonBlank(token, "{{"))
+		// A {{$NAME}} token is a SLNG Vault variable, not a package variable, and
+		// it is not declared anywhere in the package by design: SLNG holds the
+		// value and substitutes it at run time.
+		//
+		// It passes here on every target, because Build runs once for the whole
+		// package and does not know which targets are named. Which targets can
+		// resolve one is a per-target question, answered by validateVaultTokens.
+		// Refusing it here would refuse a legal slng package for having also named
+		// a livekit target.
+		if name, vault := VaultToken(ref); vault {
+			if !ValidVaultName(name) {
+				return fmt.Errorf("%s: %s references the SLNG Vault variable {{$%s}}, and %q is not a name SLNG's secret store accepts: a Vault name is uppercase, starts with a letter, and is at most 64 characters, like ACME_API_KEY", where, site, name, name)
+			}
+			continue
+		}
 		variable, ok := agent.Variables[ref]
 		if !ok {
 			if slices.Contains(agent.Secrets, ref) || envNamePattern.MatchString(ref) {

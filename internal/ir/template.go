@@ -1,6 +1,9 @@
 package ir
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // templatePattern matches one {{ token }}. The token is captured raw (not
 // name-shaped) so validation can name what was actually written — a typo, or a
@@ -58,4 +61,30 @@ func TemplateVar(value string) string {
 		return segments[0].Var
 	}
 	return ""
+}
+
+// VaultToken reports whether a template reference is a SLNG Vault variable
+// rather than a package variable, and returns its name without the marker.
+//
+// The two share the {{ }} spelling and mean entirely different things: a package
+// variable is declared in the package and rendered by unmute or by the target,
+// while a Vault variable names a value in SLNG's own secret store that only a
+// SLNG agent can resolve. The `$` is the whole difference, and telling an author
+// their Vault token "is not a declared variable" sends them to the wrong file.
+func VaultToken(ref string) (string, bool) {
+	name, found := strings.CutPrefix(ref, "$")
+	if !found || name == "" {
+		return "", false
+	}
+	return name, true
+}
+
+// VaultNamePattern is the shape SLNG requires of a name in its secret store. The
+// same pattern is written seven times across the SLNG backend and agrees
+// everywhere, read 2026-08-25.
+var VaultNamePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+
+// ValidVaultName reports whether a name is one SLNG will accept.
+func ValidVaultName(name string) bool {
+	return len(name) <= 64 && VaultNamePattern.MatchString(name)
 }

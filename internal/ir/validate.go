@@ -4,6 +4,9 @@ import (
 	"cmp"
 	"fmt"
 	"maps"
+	// net/url parses; it opens nothing. A webhook base URL has to be shape-checked
+	// before it reaches a platform that would reject it with a 422.
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -423,15 +426,27 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			if tool.Handler == "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler is required for local execution", name))
 			}
+			// The pin shape is checked wherever it is declared, not per target: a
+			// range or a URL is not a dependency on any platform. Which targets can
+			// install one is a separate question, answered by FieldToolDependencies.
+			if _, err := targetcap.CanonicalSlngPins(tool.Dependencies); err != nil {
+				errors = add(errors, fmt.Sprintf("tool %q dependency: %v", name, err))
+			}
 			if tool.URLEnv != "" {
 				errors = add(errors, fmt.Sprintf("tool %q url_env is legal for webhook execution only", name))
 			}
 		case ToolWebhook:
-			if tool.URLEnv == "" {
-				errors = add(errors, fmt.Sprintf("tool %q url_env is required for webhook execution", name))
-			} else if !envNamePattern.MatchString(tool.URLEnv) {
+			// A webhook needs a base from somewhere, and there are two shapes it
+			// can take. Which one a target needs is a per-target question, asked in
+			// validateTarget; this is the shared floor: at least one, and each one
+			// well formed if written.
+			if tool.URLEnv == "" && tool.BaseURL == "" {
+				errors = add(errors, fmt.Sprintf("tool %q needs url_env or base_url for webhook execution", name))
+			}
+			if tool.URLEnv != "" && !envNamePattern.MatchString(tool.URLEnv) {
 				errors = add(errors, fmt.Sprintf("tool %q url_env must be an UPPER_SNAKE environment variable name", name))
 			}
+			errors = append(errors, validateWebhookBaseURL(name, tool.BaseURL)...)
 			if tool.Handler != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler is legal for local execution only", name))
 			}
@@ -588,6 +603,28 @@ func validateDriverValues(resolved Target, provider targetcap.Provider, row *Tar
 			row.Errors = add(row.Errors, err.Error())
 		}
 	}
+	// The three checks above all return early for a provider with no support
+	// window, no pin floor and no SDK, which is every provider whose driver emits
+	// no project. So a bodiless target accepted version, pins and sdk_language in
+	// silence, and connection was never asked about at all (research R5). Say no
+	// by name instead: the point of validate is that the answer arrives before
+	// anything is written.
+	if !targetcap.EmitsProject(provider) {
+		refuseProjectOnlyValues(resolved, provider, row)
+	}
+}
+
+// refuseProjectOnlyValues names the four target settings that describe a
+// generated project, on a target that generates none.
+func refuseProjectOnlyValues(resolved Target, provider targetcap.Provider, row *TargetValidation) {
+	if provider == targetcap.Slng {
+		refuseSlngProjectValues(resolved, row)
+		return
+	}
+	// No other bodiless target exists yet. When one does, it says no in its own
+	// words rather than inheriting SLNG's, which is what "a gated error uses that
+	// target's vocabulary" means.
+	row.Errors = add(row.Errors, fmt.Sprintf("%s emits no project, and this repository has no wording for refusing version, pins, sdk_language and connection on it", provider))
 }
 
 // livekitVADSilenceFloor is the shortest VAD silence window livekit-agents will
@@ -622,6 +659,10 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		row.Errors = add(row.Errors, fmt.Sprintf("%s code target requires version", resolved.Provider))
 	}
 	validateDriverValues(resolved, provider, row)
+	validateVaultTokens(agent, provider, row)
+	if provider == targetcap.Slng {
+		validateSlngTarget(agent, resolved, row)
+	}
 	if agent.Tracing != nil {
 		applyCapability(caps, tracingCapability(agent.Tracing.Provider), provider, row)
 	}
@@ -1660,7 +1701,8 @@ func checkTransferBlock(control *HumanTransfer) []string {
 }
 
 func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
-	for _, tool := range agent.Tools {
+	for _, name := range slices.Sorted(maps.Keys(agent.Tools)) {
+		tool := agent.Tools[name]
 		if tool.Output != nil {
 			applyCapability(caps, targetcap.FieldToolOutput, provider, row)
 		}
@@ -1685,8 +1727,18 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 		if tool.Path != "" {
 			applyCapability(caps, targetcap.FieldWebhookPath, provider, row)
 		}
+		// A code driver emits `os.environ[...]` for the base URL, so it needs the
+		// env var form and reads base_url not at all. The slng target asks the
+		// mirror question in validateSlngTool. A package targeting both carries
+		// both fields, and neither target is worse off for the other one existing.
+		if tool.Execution == ToolWebhook && targetcap.EmitsProject(provider) && tool.URLEnv == "" {
+			row.Errors = add(row.Errors, fmt.Sprintf("%s target reads a webhook base URL from the environment: tool %q needs url_env, keeping base_url for a hosted target", provider, name))
+		}
 		if tool.Interruption != ToolProviderDefault {
 			applyCapability(caps, targetcap.FieldToolInterruption, provider, row)
+		}
+		if len(tool.Dependencies) > 0 {
+			applyCapability(caps, targetcap.FieldToolDependencies, provider, row)
 		}
 		if tool.Announce != "" {
 			applyCapability(caps, targetcap.FieldToolAnnounce, provider, row)
@@ -2270,6 +2322,34 @@ func applyResolvedCapability(capability targetcap.Capability, control targetcap.
 // validateRegions rejects the two authoring mistakes a region list can hold. A
 // duplicate is never deduplicated silently: two first deploys against one config
 // file name is a confusing thing to debug.
+// validateWebhookBaseURL checks the shape every target agrees on, whether or not
+// it reads the field. A literal base URL exists because SLNG's URL validator
+// requires a literal hostname; writing one that is not https, has no host, or
+// carries a template token would be a 422 at push, so it is refused here.
+func validateWebhookBaseURL(name, base string) []string {
+	if base == "" {
+		return nil
+	}
+	var errors []string
+	if HasTemplate(base) {
+		errors = add(errors, fmt.Sprintf("tool %q base_url carries a template token: the scheme and host must be literal, so put the token in path instead", name))
+	}
+	parsed, err := url.Parse(base)
+	switch {
+	case err != nil:
+		errors = add(errors, fmt.Sprintf("tool %q base_url is not a URL: %v", name, err))
+	case parsed.Scheme != "https":
+		errors = add(errors, fmt.Sprintf("tool %q base_url must be https, not %q", name, parsed.Scheme))
+	case parsed.Host == "":
+		errors = add(errors, fmt.Sprintf("tool %q base_url has no host", name))
+	case parsed.User != nil:
+		errors = add(errors, fmt.Sprintf("tool %q base_url carries userinfo: send credentials through auth: instead, which reaches the platform's own secret store", name))
+	case parsed.Fragment != "":
+		errors = add(errors, fmt.Sprintf("tool %q base_url carries a fragment, which never reaches a server: remove it", name))
+	}
+	return errors
+}
+
 func validateRegions(regions []string) []string {
 	var errors []string
 	seen := make(map[string]bool, len(regions))

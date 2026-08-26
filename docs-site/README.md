@@ -28,11 +28,14 @@ mint a11y                                               # contrast and media alt
    `internal/target/catalog_*.go` is the provider truth.
 2. **Every YAML snippet was run through `./bin/unmute validate`** in a scratch
    package, and every example the site names validates and compiles.
-3. **There are two targets**: Pipecat and LiveKit Agents. Those are the only
-   values `provider` accepts. Vapi and Deepgram were retired as targets on
-   2026-08-24; do not reintroduce them. Deepgram and ElevenLabs still appear as
-   *model vendors* where the catalog lists them, which is a different thing from
-   a target and must not be written as one.
+3. **There are three targets**: Pipecat and LiveKit Agents, which generate a
+   Python project you run, and SLNG, which is hosted and generates a deployment
+   body instead. Those are the only values `provider` accepts. Vapi and Deepgram
+   were retired as targets on 2026-08-24; do not reintroduce them. Deepgram and
+   ElevenLabs still appear as *model vendors* where the catalog lists them, which
+   is a different thing from a target and must not be written as one. `slng` is
+   both a target and a model vendor, which is exactly why that distinction
+   matters.
 4. **Plain language, short sentences, no em or en dashes as punctuation.**
 5. **Pages state what the product does and what the CLI prints.** Notes about
    how an author checked the documentation belong in the pull request, not the

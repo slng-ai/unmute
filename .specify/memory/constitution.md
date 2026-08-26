@@ -1,6 +1,40 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 6.0.0 -> 7.0.0
+Bump rationale: MAJOR. Technology and Boundaries redefines what makes a target.
+A driver that owns its whole output makes a target, whether that output is a
+runnable project or a deployment body for a platform that runs the agent.
+
+Modified in 7.0.0:
+- "A provider is a target only when a driver emits a runnable project for it"
+  is replaced. It described the two drivers that existed when it was written and
+  excluded a third that produces real, complete output of a different shape.
+- The thing the old rule protected is kept word for word: a provider that
+  validates and then produces nothing is still forbidden. That was the actual
+  failure it was written against, and it survives the redefinition intact.
+- Principle V's first bullet gains one sentence. `dev` runs the generated
+  project locally, and a target that emits no project has none to run. The slng
+  target has no `dev`; an author talks to a SLNG agent through the platform's
+  own web session. The carrier bullet 6.0.0 added is untouched: a hosted target
+  is not a local stand-in for anything.
+
+Reason: the slng target compiles a package into an agent body and a runbook for
+a platform that hosts the agent. Nothing about it validates and produces
+nothing, which is what 5.0.0 was written to stop. Shipping it under the old text
+would have left the constitution stating something false about the shipped code,
+which Principle IV forbids more strongly than this amendment costs.
+
+What contributors do differently: a capability row now supplies three values,
+not two. A new target still arrives with its driver, and the driver still owns
+the whole output. What is no longer required is that the output be Python.
+
+Convention for the next amendment: put the new report at the top of this comment
+and push the one it replaces down under "Previous report". Trim the oldest when
+this comment reaches three reports.
+
+Previous report
+---------------
 Version change: 5.0.0 -> 6.0.0
 Bump rationale: MAJOR. Principle V is redefined. `dev` no longer promises a
 local stand-in for a carrier, and the bullet that governed such a stand-in
@@ -29,10 +63,6 @@ or a test level that imitates one. Verify telephony by deploying. `make rig` and
 the `rig` build tag are gone, so the test levels are L1 to L3 (required) and L4
 smoke (opt-in).
 
-Convention for the next amendment: put the new report at the top of this comment
-and push the one it replaces down under "Previous report". Trim the oldest when
-this comment reaches three reports.
-
 Previous report
 ---------------
 Version change: 4.0.1 -> 5.0.0
@@ -59,9 +89,10 @@ four. A new target provider arrives with its driver, not ahead of it.
 
 # Unmute Constitution
 
-Unmute is a Go compiler. It reads one voice-agent package and writes a native
-LiveKit or Pipecat project. These principles bind every change. Day-to-day
-commands and detailed gates live in `CLAUDE.md`.
+Unmute is a Go compiler. It reads one voice-agent package and writes what the
+chosen target needs: a native LiveKit or Pipecat project, or a deployment body
+for a platform that runs the agent. These principles bind every change.
+Day-to-day commands and detailed gates live in `CLAUDE.md`.
 
 ## Core Principles
 
@@ -144,6 +175,8 @@ Four commands take an author from nothing to a voice they can talk to:
   talk to it. That is its whole surface. It runs the project in Docker wherever
   the topology allows, and as a host process where Docker would break the thing
   under test: Pipecat browser WebRTC, which needs host-reachable ICE candidates.
+  A target that emits no project has none to run, so it has no `dev`: an author
+  talks to a hosted agent through its own platform's session.
 - `dev` stands in for no carrier. A phone call reaches an agent that is
   deployed, so telephony, cold transfer and warm transfer are verified after
   deploy, against a real carrier. The compiler's job on that path is to emit
@@ -166,9 +199,11 @@ Four commands take an author from nothing to a voice they can talk to:
 - Secret values appear in no package, generated file, or report.
 - Targets and model vendors are different concepts, and the distinction is
   load-bearing: a vendor name and a target name can be the same word.
-- A provider is a target only when a driver emits a runnable project for it.
-  Pipecat and LiveKit are the targets. A provider with no driver is not accepted
-  as a target value, so `validate` and `compile` agree about what exists.
+- A provider is a target when a driver owns its whole output end to end. Some
+  drivers emit a runnable project; some emit a deployment body for a platform
+  that runs the agent. What is forbidden is a provider that validates and then
+  produces nothing. A provider with no driver is not accepted as a target value,
+  so `validate` and `compile` agree about what exists.
 - Unmute does not buy phone numbers or provision carrier-side applications or
   SIP trunks.
 

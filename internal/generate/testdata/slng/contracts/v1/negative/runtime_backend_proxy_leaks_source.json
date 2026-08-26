@@ -1,0 +1,16 @@
+{
+  "contract": "backend_proxy",
+  "error_contains": "Extra inputs are not permitted",
+  "payload": {
+    "type": "backend_proxy",
+    "id": "11111111-1111-4111-8111-111111111111",
+    "name": "unsafe_proxy",
+    "description": "Must reject source material",
+    "parameters": {"type": "object", "properties": {}},
+    "target_kind": "code",
+    "code_src": "SENTINEL_CODE_SOURCE",
+    "dependencies": ["SENTINEL_DEPENDENCY"],
+    "mcp_url": "https://SENTINEL_MCP_URL.example",
+    "auth": "SENTINEL_AUTH_SECRET"
+  }
+}

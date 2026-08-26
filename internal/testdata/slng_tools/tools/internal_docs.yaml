@@ -1,0 +1,8 @@
+mcp:
+  url_env: INTERNAL_DOCS_MCP_URL
+  transport: streamable_http
+  # Listed explicitly, because SLNG attaches one reference per tool and unmute
+  # cannot ask the server what it offers.
+  tools:
+    - search_docs
+    - read_doc

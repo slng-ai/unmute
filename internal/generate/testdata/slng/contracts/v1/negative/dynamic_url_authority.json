@@ -1,0 +1,1 @@
+{"contract":"dynamic_webhook_url","error_contains":"string_pattern_mismatch","payload":{"type":"dynamic","host":{"type":"dns","value":"user@api.example.com"},"port":443,"path_segments":[],"query":[]}}

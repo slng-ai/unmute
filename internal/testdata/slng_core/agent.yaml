@@ -1,0 +1,63 @@
+# The smallest package that runs on the slng target, and the fixture every slng
+# refusal test starts from: it passes, so a test that breaks one thing knows the
+# error it reads came from the thing it broke.
+#
+# What it deliberately leaves out, and why:
+#   - a `turn:` section: SLNG owns its own turn taking, so a bound turn model
+#     reaches nothing and FieldTurnPlacement refuses it
+#   - tasks, task groups and transfers: the create body carries one prompt
+#   - inactivity, max_duration, thinking_audio, interruption thresholds: no slot
+#   - tracing and capacity: unmute instruments and sizes no process here
+
+version: 1
+entry_agent: support
+
+models:
+  think:
+    reasoning:
+      description: answers the caller
+      # Two fields, as everywhere else. SLNG names a model with vendor and model
+      # in one string, and the slng driver folds these two into it. A model that
+      # already carries a slash is passed through whole.
+      provider: openai
+      model: gpt-5.6-luna
+      temperature: 0.4
+  speak:
+    front_desk:
+      description: warm, concise
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      description: default STT
+      provider: deepgram
+      model: slng/deepgram/nova:3-en
+      language: en
+
+variables:
+  customer_name:
+    type: string
+    default: there
+
+agents:
+  support:
+    instructions: instructions.md
+    model: reasoning
+    voice: front_desk
+    tools:
+      - end_call
+
+tools:
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi {{customer_name}}, you have reached Acme Support. How can I help?"
+  interruption:
+    enabled: true
+
+channels:
+  web:
+    kind: realtime_audio

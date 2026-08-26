@@ -1,0 +1,31 @@
+description: Look up an order by its id and return its status and delivery date.
+
+input:
+  type: object
+  properties:
+    order_id:
+      type: string
+      description: The order id the caller read out
+  required:
+    - order_id
+
+output:
+  type: object
+  properties:
+    status:
+      type: string
+    delivers_on:
+      type: string
+
+local:
+  handler: tools/check_order.py
+  # Written out of canonical order and with an uncanonical name on purpose: the
+  # emitted body must carry what SLNG stores, which is lowercase, dash-separated
+  # and sorted.
+  dependencies:
+    - Pydantic_Core==2.41.5
+    - orjson==3.11.4
+
+announce: One moment while I look that up.
+interruption: provider_default
+effect: returns_data

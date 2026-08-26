@@ -267,7 +267,9 @@ yet. `peak_sessions` and `max_sessions` must also be positive,
 be a positive Go duration such as `5m`.
 
 `provider` takes one of two values, `langfuse` or `coval`. Tracing works on the
-`pipecat` and `livekit` targets, which are the only two.
+`pipecat` and `livekit` targets only. The `slng` target refuses it: unmute
+instruments no process there, so it can install no exporter. Read those traces
+in SLNG's own dashboard.
 
 | provider | secrets it needs | use it for |
 |---|---|---|
@@ -343,12 +345,12 @@ provider with different settings, for example `pipecat_twilio` and
 
 | Field | What it is |
 |---|---|
-| `provider` | `livekit` or `pipecat` |
-| `version` | required exact `x.y.z` framework version for code targets |
-| `pins` | LiveKit-only known package pins, name to semantic version |
-| `sdk_language` | `python` when written |
-| `connection` | required for LiveKit or Pipecat telephony; illegal with no phone use |
-| `deployment_region` | one non-empty region, or a duplicate-free list; multiple regions are LiveKit-only |
+| `provider` | `livekit`, `pipecat`, or `slng` |
+| `version` | required exact `x.y.z` framework version for code targets; refused on `slng` |
+| `pins` | LiveKit-only known package pins, name to semantic version; refused on `slng` |
+| `sdk_language` | `python` when written; refused on `slng` |
+| `connection` | required for LiveKit or Pipecat telephony; illegal with no phone use; refused on `slng` |
+| `deployment_region` | one non-empty region, or a duplicate-free list; multiple regions are LiveKit-only; on `slng` exactly one of `any`, `us-east`, `eu-central`, `ap-south` |
 | `models` | per target overrides of named `models` entries |
 
 That is the whole list. A `models` override is keyed by the entry name from
@@ -382,9 +384,15 @@ the entry instead of merging it, so repeat every field that entry needs.
 |---|---|---|
 | `pipecat` | yes | yes |
 | `livekit` | yes | yes |
+| `slng` | yes | no |
 
-Those are the only two. A provider earns a place here by having a driver that
-emits a runnable project, so validate and compile agree about what exists.
+Those are the only three. A provider earns a place here by having a driver that
+owns its whole output, so validate and compile agree about what exists.
+
+`pipecat` and `livekit` generate a runnable Python project you host and run.
+`slng` generates a deployment body for a platform that runs the agent for you,
+so there is nothing to run locally and `unmute dev` does not apply to it. See
+"The slng target" below.
 
 `vapi` and `deepgram` used to be accepted as validation-only targets and were
 retired on 2026-08-24. Naming either as a target is refused. Note that
@@ -396,3 +404,123 @@ LiveKit and Pipecat versions are exact three-part versions in this release's
 supported window. Unmute never widens the pin. `pins` accepts only packages the
 LiveKit driver knows; other providers do not consume it. A target's `models`
 map is keyed by an existing model entry name and takes the same model fields.
+
+## The slng target
+
+SLNG hosts the agent. `unmute compile --target slng` writes a deployment body
+and a runbook instead of a project:
+
+```text
+build/slng/
+├── agent.json          the agent create body
+├── tools/<name>.json   one tool body per local: or webhook: tool
+└── README.md           the runbook
+```
+
+A package whose tools are all builtins gets no `tools/` directory. Unmute opens
+no connection to SLNG at any point; the `voiceai` CLI pushes what it wrote:
+
+```bash
+export VOICEAI_API_KEY=...
+voiceai agents create --file build/slng/agent.json --json
+voiceai agents web-sessions create <agent_id> --file session.json
+```
+
+`VOICEAI_API_KEY` is the push tool's key, not `SLNG_API_KEY`, which is the
+Context Router's. The web-session command takes the agent id the create step
+returned, and a `--file` holding at least `{"arguments": {}}`: every field in
+that body is optional but the body itself is required. `arguments` is where the
+package's declared variables get their value for one session.
+
+Unmute writes no `llm_router_enabled` on this target: SLNG applies its own
+default. Do not add one. A model your organisation brought its own key for is
+accepted only when the router is on, so forcing it off refuses those models.
+
+A model string that SLNG does not have enabled for agents is rejected at push
+with `AGENT_MODEL_UNAVAILABLE` naming the field. Unmute cannot check this: the
+list is per-organisation.
+
+**The emitted body is not postable as written when the agent references any
+tool.** SLNG's `tool_refs` entries require `attachment_id`, `tool_id` and
+`version`; unmute writes a name where the `tool_id` goes, because no compiler can
+invent an id a server assigns. That is true of a curated builtin too. Only an
+agent with no tools posts unchanged. The `voiceai` CLI has no `tools` command
+yet, so those ids are filled in by hand from the SLNG dashboard today.
+
+```yaml targets.yaml
+targets:
+  slng:
+    provider: slng
+    deployment_region: eu-central
+```
+
+That is the whole target. `deployment_region` takes exactly one of `any`,
+`us-east`, `eu-central` or `ap-south`, where `any` lets SLNG route each call
+itself. `version`, `pins`, `sdk_language` and `connection` are all refused by
+name: each describes a generated project and there is none.
+
+Write models as two fields here, the same as everywhere else. SLNG names a
+model with the vendor and the model joined by a slash, and the driver joins
+them when it writes the body; a model name that already carries a slash is
+passed through whole. SLNG owns its model list, so no vendor or model name is
+checked on this target.
+
+**Do not write a package for slng that uses any of these.** Each is refused at
+validate, by name, with what to do instead:
+
+| Feature | Why |
+|---|---|
+| tasks, task groups, agent transfers | the create body carries one prompt and one greeting |
+| a `turn:` section, `semantic_endpointing`, `endpointing_delay` | SLNG owns its own turn taking |
+| `placement: local` on any model | SLNG runs the pipeline |
+| `conversation.inactivity` | SLNG's idle nudges need three spoken texts a package does not carry |
+| `conversation.max_duration`, `thinking_audio` | no field holds them |
+| `interruption.minimum_words`, `interruption.ignore_phrases` | interruptions are on or off |
+| a missing greeting, or `speaks_first: user` | SLNG requires a greeting and speaks the string it is given |
+| `tracing:` | unmute instruments no process here |
+| more than one `deployment_region` | SLNG takes exactly one |
+| `variables` with `source: conversation` | nothing captures a value mid-call |
+| outbound calling, `on_voicemail`, a warm human transfer | unmute creates no carrier state on SLNG |
+
+A tool named `end_call`, `detected_answering_machine`, `get_current_datetime`,
+`get_user_phone_number` or `set_runtime_variables` is refused: SLNG keeps those
+five names for its own curated capabilities. Writing `builtin: end_call` as the
+tool `end_call` is the correct way to reach one and is not a collision.
+
+A `local:` tool on slng may pin what its handler imports:
+
+```yaml tools/check_order.yaml
+local:
+  handler: tools/check_order.py
+  dependencies:
+    - orjson==3.11.4
+```
+
+Exact `name==version` pins only. A range, a URL, an extra or a wildcard is
+refused. The sandbox runs Python 3.14 with `pydantic` present, so a stdlib-only
+handler pins nothing. `dependencies:` is slng-only and is refused on `livekit`
+and `pipecat`, whose drivers read no per-tool pins.
+
+A `local:` handler on slng may not import `requests`, `httpx` or `urllib`:
+custom code there has no internet access. Use a `webhook:` tool. Its entry point
+must be a plain `def`, not `async def`, because SLNG calls a handler
+synchronously.
+
+A `webhook:` tool needs `base_url` on slng, a literal `https` address with no
+template token, because SLNG stores the URL in the tool body rather than reading
+it from an environment. Keep `url_env` beside it for the code targets; each
+target reads the field it needs and ignores the other.
+
+An `mcp:` tool must list its tools under `mcp.tools`: SLNG attaches one
+reference per tool, and unmute cannot ask the server what it offers.
+
+### Vault names and Vault tokens
+
+SLNG reads secrets from its own store. The emitted runbook lists every name the
+package needs, grouped by where it came from, above the push command. Unmute
+lists names and never values.
+
+A `{{$NAME}}` token in a prompt, a greeting or a tool field is a **SLNG Vault
+variable**, not a package variable: SLNG substitutes the value at run time and
+nothing declares it in the package. It passes on a slng target and is refused on
+a livekit or pipecat one, which cannot resolve it.

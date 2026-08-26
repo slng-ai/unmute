@@ -1,0 +1,137 @@
+{
+  "metadata_version": 4,
+  "model_runtime_required": false,
+  "system_prompt": "You are helpful.",
+  "system_prompt_template": null,
+  "llm_template_variables": null,
+  "models": {
+    "stt": "soniox/speech-ai:rt-v4",
+    "llm": "google/gemini-2.5-flash",
+    "tts": "soniox/tts-rt:v1",
+    "tts_voice": "Maya",
+    "stt_kwargs": {},
+    "llm_kwargs": {},
+    "tts_kwargs": {},
+    "fallbacks": {"stt": [], "llm": [], "tts": []},
+    "stt_final_timeout_s": null,
+    "llm_first_token_timeout_s": null,
+    "tts_first_audio_timeout_s": null,
+    "failure_audio_enabled": true
+  },
+  "model_runtime": null,
+  "idle_nudges": null,
+  "phone_number": null,
+  "sip_trunk_id": null,
+  "region": "eu",
+  "slng_api_key": "runtime-key-placeholder",
+  "slng_base_url": "api.slng.ai",
+  "gateway_region_preferences": [],
+  "slng_backend_base_url": "https://backend.example.com",
+  "slng_agents_base_url": "https://agents.example.com",
+  "name": "Support agent",
+  "language": "en",
+  "greeting": "Hello",
+  "enable_interruptions": true,
+  "tools": [
+    {
+      "type": "backend_proxy",
+      "id": "11111111-1111-4111-8111-111111111111",
+      "name": "search_web",
+      "description": "Search the web",
+      "source": "contextual",
+      "parameters": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"]
+      },
+      "execution_policy": null,
+      "locked_arguments": {
+        "query": {
+          "expression": "{{search_query}}",
+          "source_kind": "memory",
+          "resolve_at": "invoke",
+          "expected_type": "string",
+          "source_label": "runtime memory search_query"
+        }
+      },
+      "target_kind": "mcp"
+    },
+    {
+      "type": "webhook",
+      "id": "66666666-6666-4666-8666-666666666666",
+      "name": "lookup_order",
+      "description": "Look up an order",
+      "llm_result_instructions": "Summarize the status.",
+  "url": {
+    "type": "dynamic",
+    "scheme": "https",
+        "host": {"type": "dns", "value": "api.example.com"},
+        "port": null,
+        "path_segments": [
+          {"segments": [{"type": "literal", "value": "orders"}]},
+          {
+            "segments": [
+              {
+                "type": "expression",
+                "expression": "{{order_id}}",
+                "source_kind": "memory",
+                "resolve_at": "invoke",
+                "source_label": "runtime memory order_id"
+              }
+            ]
+          }
+        ],
+    "has_query": false,
+    "query": []
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {"order_id": {"type": "string"}},
+        "required": ["order_id"]
+      },
+      "auth": {"type": "none", "token": null, "secret": null},
+      "http_method": "GET",
+      "webhook_format": "raw",
+      "timeout_seconds": 10.0,
+      "wait_for_response": true,
+      "show_results_to_llm": true,
+      "source": "contextual",
+      "system": null,
+      "execution_policy": null,
+      "extra_headers": {"X-Static": "voice"},
+      "locked_arguments": {}
+    },
+    {
+      "type": "backend_proxy",
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "normalize_timestamp",
+      "description": "Normalize a timestamp at call start",
+      "source": "system",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "execution_policy": null,
+      "locked_arguments": {},
+      "target_kind": "code",
+      "system": {
+        "triggers": [{"event": "call_start", "source_attachment_id": null}],
+        "arguments": []
+      }
+    }
+  ],
+  "resolved_locked_values": {},
+  "personalization": {},
+  "optional_input_variables": [],
+  "runtime_variables": [],
+  "channel": "console",
+  "agent_id": null,
+  "agent_config_version_id": null,
+  "agent_config_hash": null,
+  "runtime_dispatch_snapshot_id": null,
+  "agent_call_token": null,
+  "max_session_seconds": null
+}
