@@ -24,12 +24,12 @@ models:
   speak:
     voice:
       provider: slng
-      model: "slng/deepgram/aura:2-en"
+      model: "deepgram/aura:2"
       voice: "aura-2-thalia-en"
   listen:
     transcriber:
       provider: slng
-      model: "slng/deepgram/nova:3-en"
+      model: "deepgram/nova:3"
   turn:
     detector:
       provider: local
@@ -300,7 +300,7 @@ models:
   speak:
     voice:
       provider: slng
-      model: "slng/deepgram/aura:2-en"
+      model: "deepgram/aura:2"
       voice: "aura-2-thalia-en"
       params:
         world_part_override: eu
@@ -431,7 +431,7 @@ models:
   speak:
     voice:
       provider: slng
-      model: "slng/deepgram/aura:2-en"
+      model: "deepgram/aura:2"
       voice: "aura-2-thalia-en"
     backup_voice:
       provider: elevenlabs

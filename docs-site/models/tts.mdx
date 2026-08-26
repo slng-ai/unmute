@@ -15,7 +15,7 @@ models:
   speak:
     voice:
       provider: slng
-      model: "slng/deepgram/aura:2-en"
+      model: "deepgram/aura:2"
       voice: "aura-2-thalia-en"
 ```
 
@@ -34,7 +34,15 @@ To keep synthesis compute in a world part or exact region, see
 
 | Where | `model:` | `voice:` |
 |---|---|---|
-| every shipped example, and `unmute init` | `slng/deepgram/aura:2-en` | `aura-2-thalia-en` |
+| `unmute init`, and every example except `slng-support` | `deepgram/aura:2` | `aura-2-thalia-en` |
+| `slng-support`, which compiles to the `slng` target | `slng/deepgram/aura:2-en` | `aura-2-thalia-en` |
+
+The `slng/` prefix picks a model SLNG hosts itself, and an id without it reaches
+the same vendor model through SLNG as a proxy. For **listening** the two differ
+in speed by enough to matter, and [Speech to text](/models/stt) has the numbers.
+For speaking nobody has measured them against each other; the scaffold takes the
+proxied route here to match the transcriber, not because it is known to be
+faster.
 
 Those are the only exact ids the docs name, because they are the ones the examples
 run. The full SLNG catalog is at

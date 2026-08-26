@@ -1173,6 +1173,7 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 		checkVendor(targetcap.Speak, &binding)
 		checkLanguageSlot(targetcap.Speak, "speak."+name, &binding)
 		checkSpeakRequiredFields(catalog, provider, name, binding, row)
+		checkWarmStandby(provider, name, binding, row)
 	}
 	for _, name := range slices.Sorted(maps.Keys(models)) {
 		binding, ok := resolved.Models.Reason[name]
@@ -1529,6 +1530,32 @@ func checkSpeakRequiredFields(catalog targetcap.Catalog, provider targetcap.Prov
 	if entry.ModelRequired() && binding.Model == "" {
 		row.Errors = add(row.Errors, fmt.Sprintf("%s speak.%s binding provider %q is missing a model", provider, profile, binding.Provider))
 	}
+}
+
+// checkWarmStandby warns that warm_standby_enabled reaches nothing on Pipecat.
+//
+// It is a real setting on the LiveKit side, where the SLNG plugin pre-opens the
+// synthesis socket and reports standby_used per segment. pipecat-slng has no
+// such kwarg through 0.5.0, which deferred it: the value lands in **kwargs,
+// travels up to FrameProcessor and is discarded with no error. Nothing else in
+// the compiler would catch that, because a params: block is forwarded verbatim
+// by design, so a package can promise a held-open socket and get none.
+//
+// A warning rather than a refusal on purpose. Packages that ship to both targets
+// author one speak binding for both, and salon-concierge is one of them, so
+// refusing here would break a working package to report a param that is merely
+// inert.
+func checkWarmStandby(provider targetcap.Provider, profile string, binding Binding, row *TargetValidation) {
+	if provider != targetcap.Pipecat {
+		return
+	}
+	if _, set := binding.Params["warm_standby_enabled"]; !set {
+		return
+	}
+	row.Warnings = add(row.Warnings, fmt.Sprintf(
+		"pipecat speak.%s sets params.warm_standby_enabled, which pipecat-slng 0.5.0 does not implement: the kwarg is absorbed and no socket is held open. It works on livekit, so move it to a livekit target override if that is where you meant it",
+		profile,
+	))
 }
 
 func validateRoleBinding(role string, kind targetcap.RoleKind, binding *Binding, row *TargetValidation) {

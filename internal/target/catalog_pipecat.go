@@ -113,7 +113,7 @@ var pipecatCatalog = []Entry{
 		Framework: Pipecat, Role: Listen, Vendor: "slng",
 		Distributes: []string{"deepgram"},
 		Verified:    "2026-07-15", Docs: pipecatServicesDocs,
-		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.4.0"},
+		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.5.0"},
 		Import:  "from pipecat_slng import SlngSTTService",
 		Call: &CallSpec{
 			Class: "SlngSTTService", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",
@@ -267,7 +267,7 @@ var pipecatCatalog = []Entry{
 		Framework: Pipecat, Role: Speak, Vendor: "slng",
 		Distributes: []string{"cartesia", "deepgram"},
 		Verified:    "2026-07-15", Docs: pipecatServicesDocs,
-		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.4.0"},
+		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.5.0"},
 		Import:  "from pipecat_slng import SlngTTSService",
 		Call: &CallSpec{
 			Class: "SlngTTSService", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",

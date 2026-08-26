@@ -62,6 +62,12 @@ models:
       language: en
 ```
 
+**Use the proxied id, not the `slng/` hosted one, for listening.** They are the
+same vendor model reached two ways, and we measured 280ms against 605ms to the
+final transcript. A hosted id is also not offered in every world part, so a
+region requirement can decide it for you. Both sample sets were small, so treat
+it as a default rather than a law.
+
 ### 2. Pick the transcriber on its *final* latency, not its accuracy score
 
 The turn detector reads the transcript to decide whether the caller finished, so
@@ -78,6 +84,11 @@ transport or region, and some combinations only fail once a call is live. There
 is no models listing endpoint, so a route has to be tried.
 
 ### 3. Hold the TTS socket open
+
+**LiveKit only.** `pipecat-slng` 0.5.0 does not implement it, and a `params:`
+block reaches the plugin verbatim, so on Pipecat the setting is accepted and
+discarded with no error. `unmute validate` warns. Do not author it on a package
+that only ships to Pipecat.
 
 Off by default. It removes the provider's session setup from the front of every
 segment, which shows up most on the first segment of a call and on the fastest
@@ -119,6 +130,24 @@ next, and the agent asked twice. Come down from the default in steps and listen
 for interruptions. **The defaults differ per target** — LiveKit uses Silero's
 window, Pipecat uses `stop_secs`, and they are not the same — so set it
 explicitly if the package runs on both.
+
+**On Pipecat this window is one of three stages, not the whole wait.** Silero
+decides you stopped making sound, then Pipecat's Smart Turn v3 classifier decides
+whether you finished a thought (a small ONNX model inside the framework, running
+in every compiled package whether or not it was asked for), and then the turn
+waits for the transcriber to mark the transcript final. `endpointing_delay` sets
+the first stage only.
+
+That third stage was the largest until recently. A transcriber that never marks a
+transcript final leaves Pipecat waiting out a safety-net timer, one second by
+default, however fast the transcript arrived. Every Unmute package hit that until
+`pipecat-slng` 0.5.0, which the Pipecat catalog rows now require. If you are
+reading old advice that says `stop_secs` is the real window on Pipecat, that was
+true of the setting and not of the wait.
+
+Setting `interruption.min_words` swaps the default stop strategy for a plain
+timeout, which drops the Smart Turn classifier. Worth knowing before blaming turn
+taking on something else.
 
 ### 5. Cut LLM round trips before tuning anything else
 

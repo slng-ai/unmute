@@ -384,7 +384,15 @@ func (d *Data) SetTarget(provider string) {
 		d.SDKLanguage = "python"
 	}
 	// Pipecat and LiveKit share the safe SLNG/OpenAI starter.
-	d.Listen = Binding{Provider: "slng", Model: "slng/deepgram/nova:3-en"}
+	//
+	// The proxied route, not the slng/ hosted one, and the reason is measured
+	// rather than stylistic. Time from end of speech to the final transcript,
+	// taken against the live bridge at stop_secs=0.2 while fixing the turn-stop
+	// bug in pipecat-slng 0.5.0: 280ms median on deepgram/nova:3 (n=13) against
+	// 605ms on slng/deepgram/nova:3-en (n=16). A new package pays that on every
+	// turn, so the faster route is the one to hand out. It is also the only one
+	// salon-concierge could use, because the hosted id has no eu world part.
+	d.Listen = Binding{Provider: "slng", Model: "deepgram/nova:3"}
 	// One generation parameter, and it is not a preference: a fresh package has
 	// tools, and OpenAI rejects function tools on /v1/chat/completions for a
 	// reasoning model unless the request says `reasoning_effort: "none"`. Sending
@@ -402,7 +410,10 @@ func (d *Data) SetTarget(provider string) {
 	// family accepts it, and an unverified parameter fails on a live call
 	// (research D10).
 	d.Reason = Binding{Provider: "openai", Model: DefaultReasonModel, Params: `reasoning_effort: "none"`}
-	d.Speak = Binding{Provider: "slng", Model: "slng/deepgram/aura:2-en", Voice: "aura-2-thalia-en"}
+	// Proxied to match the transcriber above. The measurement behind that choice
+	// is a transcription one and does not carry over to synthesis, so this half
+	// is consistency with the examples rather than a measured win.
+	d.Speak = Binding{Provider: "slng", Model: "deepgram/aura:2", Voice: "aura-2-thalia-en"}
 }
 
 func (d Data) withDefaults() Data {
