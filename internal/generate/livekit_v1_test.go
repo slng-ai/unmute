@@ -1976,7 +1976,6 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	for _, want := range []string{
 		"## Telephony setup", "SIP trunking console", "twilio provider guide", "REDIS_URL", "not an audio hop",
 		"no LiveKit outbound trunk is registered",
-		"LIVEKIT_SIP_HOST_PORT", "LIVEKIT_RTP_HOST_PORT_RANGE", "LIVEKIT_HOST_PORT",
 	} {
 		if !strings.Contains(readme, want) {
 			t.Errorf("README.md missing %q", want)
@@ -1990,36 +1989,14 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 			t.Errorf("README.md still tells the reader to create the outbound trunk: %q", forbidden)
 		}
 	}
-	compose := artifactFile(t, artifact, "compose.telephony.yaml")
-	assertValidYAML(t, compose)
-	assertComposeLocalEnvironment(t, compose, TelephonyRuntimePlanFor(resolved))
-	assertGoldenFile(t, filepath.Join("testdata", "golden", "livekit_v1_telephony_compose.yaml"), compose, *updateLiveKitV1)
-	for _, want := range []string{
-		"image: valkey/valkey:9.1.1-alpine", "image: livekit/livekit-server:v1.13.4", "image: livekit/sip:v1.7.0",
-		"LIVEKIT_API_SECRET=secret", "address: redis:6379",
-		`stop_grace_period: "1200s"`, `"${UNMUTE_CONTROL_BIND_IP:-127.0.0.1}:${LIVEKIT_HOST_PORT:-7880}:7880"`,
-		`"${UNMUTE_PLANE_ADVERTISE_IP:-127.0.0.1}:${LIVEKIT_SIP_HOST_PORT:-5060}:5060/udp"`,
-		`rtp_port: ${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}`,
-		`"${UNMUTE_PLANE_ADVERTISE_IP:-127.0.0.1}:${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}:${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}/udp"`,
-		"condition: service_healthy", "redis_data:/data",
-	} {
-		if !strings.Contains(compose, want) {
-			t.Errorf("compose.telephony.yaml missing %q:\n%s", want, compose)
+	// No local Compose topology: this route is verified on a deployed agent, so
+	// nothing here starts LiveKit Server, LiveKit SIP or a Redis for you.
+	for _, path := range []string{"compose.telephony.yaml", "endpoint.Dockerfile", "baresip.conf"} {
+		for _, file := range artifact.Files {
+			if file.Path == path {
+				t.Errorf("SIP route still emits the local plane file %q", path)
+			}
 		}
-	}
-	for _, forbidden := range []string{"image: livekit/livekit-server:latest", "image: livekit/sip:latest", "secret-value", "TWILIO_SIP_PASSWORD=", "REDIS_URL=redis"} {
-		if strings.Contains(compose, forbidden) {
-			t.Errorf("compose.telephony.yaml contains %q", forbidden)
-		}
-	}
-	// V10/B2: the local stack must use the documented `livekit-server --dev`
-	// pair. A secret the dev server will not accept 401s worker registration
-	// and every SIP Twirp admin call.
-	if strings.Contains(compose, "devsecret-local-only") {
-		t.Error("compose.telephony.yaml uses a secret livekit-server --dev does not accept")
-	}
-	if !strings.Contains(compose, "LIVEKIT_API_SECRET=secret") || !strings.Contains(compose, "api_secret: secret") {
-		t.Errorf("compose.telephony.yaml must sign the app and SIP with the --dev secret:\n%s", compose)
 	}
 
 	runtime := TelephonyRuntimePlanFor(resolved)
@@ -2241,16 +2218,15 @@ func TestLiveKitConnectorGeneratesBridgeWithoutCloudOrSIP(t *testing.T) {
 		}
 	}
 
-	compose := artifactFile(t, artifact, "compose.telephony.yaml")
-	for _, want := range []string{"livekit_server:", "LIVEKIT_API_SECRET=secret", "python telephony_bridge.py"} {
-		if !strings.Contains(compose, want) {
-			t.Errorf("connector compose missing %q:\n%s", want, compose)
+	// The bridge is the deployed webhook server. Its local Compose file is gone
+	// with every other local phone topology.
+	for _, file := range artifact.Files {
+		if file.Path == "compose.telephony.yaml" {
+			t.Error("connector still emits a local telephony Compose file")
 		}
 	}
-	for _, forbidden := range []string{"redis", "livekit_sip", "livekit/sip:", "devsecret-local-only"} {
-		if strings.Contains(compose, forbidden) {
-			t.Errorf("connector compose contains %q", forbidden)
-		}
+	if !strings.Contains(artifactFile(t, artifact, "telephony_bridge.py"), "aiohttp") {
+		t.Error("connector must still emit its bridge")
 	}
 
 	env := artifactFile(t, artifact, ".env.example")

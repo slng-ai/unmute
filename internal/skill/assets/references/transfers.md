@@ -136,32 +136,20 @@ Check this table **before** promising a shape.
 | LiveKit `sip` | yes | **yes, the only one** | SIP REFER on the caller's existing leg, and LiveKit's warm transfer task for the held and briefed shape |
 | Pipecat `daily-sip` + Twilio | yes, on a phone call | not built yet | Daily transfers the existing SIP phone leg |
 | Pipecat `cloud-websocket` | yes, differently | no, by trade | one request replaces the live call's markup at the carrier |
-| Pipecat `sip` | yes | not built yet | the platform's own SIP participant transfer, on a room the agent is already in |
-| Pipecat `carrier-websocket` | no | no | the transport carries media only, with no transfer control |
-| LiveKit `connector` | no | no | same |
+| LiveKit `connector` | no | no | no platform transfer primitive on this route |
 
 Two of those cells mean different things:
 
 - **no** means the platform does not ship the primitive.
 - **not built yet** means the platform ships it and Unmute has not emitted it.
 
-## Testing a transfer without a carrier
+## Verifying a transfer
 
-`unmute dev --telephony` runs transfers locally, with no carrier account. What it
-can show differs by route, and the difference is worth stating before an author
-goes looking for a bug that is a route limit:
-
-| Route | Locally |
-|---|---|
-| LiveKit `sip` | warm end to end, including the briefing and the merge. Cold up to the REFER being accepted |
-| Pipecat `cloud-websocket` | cold up to the handoff: the caller's leg leaves the agent, the destination leg is recorded, the final hangup is honoured |
-| Pipecat `sip` | cold up to the REFER: same plane and same primitive as its LiveKit sibling, but the run prints only the request and any failure, so a completed handoff shows as the caller's leg leaving the room |
-| Pipecat `daily-sip` | nothing: this route has no local plane and the command refuses it |
-| Pipecat `carrier-websocket`, LiveKit `connector` | nothing to test: neither emits a transfer |
-
-**No local run proves that a person answered.** Every one of them stops at the
-handoff and prints that it did. If an author asks whether the transfer "worked",
-that distinction is the answer.
+There is no local stand-in for a carrier, so a transfer is verified the same way
+as any other phone behaviour: compile, deploy, and place a real call. `unmute
+dev` never runs a transfer, cold or warm, on any route; it stops at the browser
+session. Say that plainly, so an author does not assume a working `unmute dev`
+session proves a transfer works.
 
 One more thing worth saying out loud, because it wastes real time: **a model will
 announce a transfer the package never declared.** If an agent says it is putting

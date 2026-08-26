@@ -123,11 +123,10 @@ livekit: telephony route provider=livekit transport=sip carrier=twilio coordinat
 livekit: telephony evidence warm_transfer=provisional docs=https://docs.livekit.io/telephony/start/providers/twilio/ verified=2026-08-12 smoke=false
 ```
 
-Locally, `unmute dev --telephony --target livekit --to +1...` places an
-outbound call through the trunk, which is the practical way to reach a transfer
-without waiting for someone to call you. Inbound on this route is tested
-against a deployment: SIP needs the carrier to reach signalling and media at a
-routable address, which a laptop behind a home router usually cannot offer.
+Inbound on this route is tested against a deployment: SIP needs the carrier to
+reach signalling and media at a routable address, which a laptop behind a home
+router cannot offer. Deploy the generated project, finish the trunk setup
+above, and call your number to reach a transfer.
 
 Cold transfer needs an existing SIP caller leg, so it cannot be tested from a
 browser session or the LiveKit Agent Console. Warm transfer can start there,

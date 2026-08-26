@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	packagespec "github.com/slng-ai/unmute/internal/spec"
-	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 func TestBuildBuiltinToolResolvesRegistryDefaults(t *testing.T) {
@@ -133,7 +132,7 @@ func TestBuildRejectsInvalidAgentTransferAnnounce(t *testing.T) {
 func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
-	routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
+	routeTarget(pkg, "pipecat", "primary_phone", "cloud-websocket", "twilio")
 
 	agent, err := Build(pkg)
 	if err != nil {
@@ -143,31 +142,37 @@ func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
 	if plan == nil {
 		t.Fatal("telephony plan was not resolved")
 	}
-	if plan.Key.Transport != "carrier-websocket" || plan.Key.Carrier != "twilio" || plan.Connection != "primary_phone" {
+	if plan.Key.Transport != "cloud-websocket" || plan.Key.Carrier != "twilio" || plan.Connection != "primary_phone" {
 		t.Fatalf("route = %#v", plan)
 	}
 	if plan.Coordination != "shared" || plan.AdmissionOwner != "generated_runtime" || len(plan.Evidence) == 0 {
 		t.Fatalf("incomplete plan = %#v", plan)
 	}
-	if got := strings.Join(plan.Services, ","); got != "application,redis" {
+	// The platform terminates the carrier's stream on this route, so the package
+	// hosts no process and no endpoint of its own and needs no coordination store.
+	// This used to be asserted against carrier-websocket, which hosted all three
+	// and no longer exists.
+	if got := strings.Join(plan.Services, ","); got != "application" {
 		t.Fatalf("services = %s", got)
 	}
-	if len(plan.Processes) != 1 || len(plan.PublicEndpoints) != 3 || len(plan.ManualSteps) == 0 {
+	if len(plan.Processes) != 0 || len(plan.PublicEndpoints) != 0 || len(plan.ManualSteps) == 0 {
 		t.Fatalf("runtime facts = %#v", plan)
 	}
-	// Inbound only, so the outbound token is not required and the plan drops it
-	// from the supplied set even though the route declares it. Every other
-	// runtime name on this route is supplied rather than authored.
-	if got := strings.Join(plan.LocalEnvironment, ","); got != "REDIS_URL,UNMUTE_PUBLIC_URL" {
+	// Nothing is supplied locally: every name this route needs is a carrier
+	// credential the author declares.
+	if got := strings.Join(plan.LocalEnvironment, ","); got != "" {
 		t.Fatalf("locally supplied environment = %s", got)
 	}
-	if got := strings.Join(plan.RequiredEnvironment, ","); got != "REDIS_URL,TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER,UNMUTE_PUBLIC_URL" {
+	if got := strings.Join(plan.RequiredEnvironment, ","); got != "TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER" {
 		t.Fatalf("required environment = %s", got)
 	}
-	if got := coordinationReasonNames(plan.CoordinationReasons); got != "admission,call_correlation,callback_idempotency" {
+	if got := coordinationReasonNames(plan.CoordinationReasons); got != "admission" {
 		t.Fatalf("coordination reasons = %s", got)
 	}
-	if plan.AutoWebhookEndpoint != "inbound" {
+	// No auto webhook on this route: in production the number points at a TwiML
+	// Bin, which is a console object rather than a URL, so there is nothing for
+	// the CLI to write.
+	if plan.AutoWebhookEndpoint != "" {
 		t.Fatalf("auto webhook = %q", plan.AutoWebhookEndpoint)
 	}
 }
@@ -180,7 +185,7 @@ func TestBuildClearsAutoWebhookWithoutInboundEndpoint(t *testing.T) {
 	pkg.Agent.Channels["phone"] = packagespec.Channel{
 		Kind: "telephony", Inbound: &inbound, Outbound: &outbound, OnVoicemail: "hangup",
 	}
-	routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
+	routeTarget(pkg, "pipecat", "primary_phone", "cloud-websocket", "twilio")
 
 	agent, err := Build(pkg)
 	if err != nil {
@@ -241,20 +246,22 @@ func TestBuildSupportsMultipleCarrierTargets(t *testing.T) {
 	enableTelephony(pkg)
 	pipecat, livekit := pkg.Targets["pipecat"], pkg.Targets["livekit"]
 	pkg.Targets = map[string]packagespec.Target{
-		"pipecat_twilio": withTelephonyRoute(pipecat, "twilio_api"),
-		"pipecat_telnyx": withTelephonyRoute(pipecat, "telnyx_api"),
+		"pipecat_twilio": withTelephonyRoute(pipecat, "twilio_voice"),
 		"livekit_twilio": withTelephonyRoute(livekit, "twilio_sip"),
+		"livekit_telnyx": withTelephonyRoute(livekit, "telnyx_sip"),
 		"livekit_plivo":  withTelephonyRoute(livekit, "plivo_sip"),
 	}
-	// Four connections, four routes. Two targets each name two of them, which is
-	// what "multiple carrier targets" means now: the carrier travels with the
-	// transport in the connection file, not on the target.
+	// Four connections, four routes. Three of them are the same transport with
+	// three different carriers, which is the point: the carrier travels with the
+	// transport in the connection file, not on the target. It used to be shown on
+	// Pipecat carrier-websocket, which had three carriers and now does not exist;
+	// LiveKit sip still has three and makes the same case.
 	pkg.Connections = map[string]packagespec.Connection{
-		"twilio_api": {Transport: "carrier-websocket", Carrier: "twilio", Environment: map[string]string{
+		"twilio_voice": {Transport: "cloud-websocket", Carrier: "twilio", Environment: map[string]string{
 			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN", "from_number": "TWILIO_PHONE_NUMBER",
 		}},
-		"telnyx_api": {Transport: "carrier-websocket", Carrier: "telnyx", Environment: map[string]string{
-			"api_key": "TELNYX_API_KEY", "public_key": "TELNYX_PUBLIC_KEY", "connection_id": "TELNYX_CONNECTION_ID", "from_number": "TELNYX_PHONE_NUMBER",
+		"telnyx_sip": {Transport: "sip", Carrier: "telnyx", Environment: map[string]string{
+			"sip_address": "TELNYX_SIP_ADDRESS", "sip_username": "TELNYX_SIP_USERNAME", "sip_password": "TELNYX_SIP_PASSWORD", "from_number": "TELNYX_PHONE_NUMBER",
 		}},
 		"twilio_sip": {Transport: "sip", Carrier: "twilio", Environment: map[string]string{
 			"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME", "sip_password": "TWILIO_SIP_PASSWORD", "from_number": "TWILIO_PHONE_NUMBER",
@@ -269,9 +276,9 @@ func TestBuildSupportsMultipleCarrierTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, want := range map[string]string{
-		"pipecat_twilio": "pipecat/carrier-websocket/twilio/twilio_api",
-		"pipecat_telnyx": "pipecat/carrier-websocket/telnyx/telnyx_api",
+		"pipecat_twilio": "pipecat/cloud-websocket/twilio/twilio_voice",
 		"livekit_twilio": "livekit/sip/twilio/twilio_sip",
+		"livekit_telnyx": "livekit/sip/telnyx/telnyx_sip",
 		"livekit_plivo":  "livekit/sip/plivo/plivo_sip",
 	} {
 		plan := agent.Targets[name].Telephony
@@ -481,7 +488,7 @@ func TestBuildRejectsUnknownOrInvalidConnection(t *testing.T) { // telephony V1-
 				connection := pkg.Connections["primary_phone"]
 				delete(connection.Environment, "auth_token")
 				pkg.Connections["primary_phone"] = connection
-				routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
+				routeTarget(pkg, "pipecat", "primary_phone", "cloud-websocket", "twilio")
 			},
 			want: `requires environment key "auth_token"`,
 		},
@@ -492,7 +499,7 @@ func TestBuildRejectsUnknownOrInvalidConnection(t *testing.T) { // telephony V1-
 				connection := pkg.Connections["primary_phone"]
 				connection.Environment["api_key"] = "TWILIO_API_KEY"
 				pkg.Connections["primary_phone"] = connection
-				routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
+				routeTarget(pkg, "pipecat", "primary_phone", "cloud-websocket", "twilio")
 			},
 			want: `environment key "api_key" is not accepted`,
 		},
@@ -1234,8 +1241,11 @@ func TestTargetOverrideKeepsEndpointingDelay(t *testing.T) {
 // record the emitted carrier adapter keeps in Redis, and this route emits no
 // carrier adapter: what it needs the store for is the server and the SIP service
 // finding each other.
-func TestBuildGivesBothSIPPlaneRoutesThePlanesGraph(t *testing.T) {
-	for _, provider := range []string{"pipecat", "livekit"} {
+// Was "both SIP plane routes". The Pipecat one deployed to no managed platform
+// and is gone, so one route runs on this plane now. The loop is kept at one
+// entry rather than flattened because the whole test goes when the plane does.
+func TestBuildGivesTheSIPPlaneRouteThePlanesGraph(t *testing.T) {
+	for _, provider := range []string{"livekit"} {
 		t.Run(provider, func(t *testing.T) {
 			pkg := loadSafeCore(t)
 			enableTelephony(pkg)
@@ -1255,11 +1265,8 @@ func TestBuildGivesBothSIPPlaneRoutesThePlanesGraph(t *testing.T) {
 			if plan == nil {
 				t.Fatal("telephony plan was not resolved")
 			}
-			if plan.LocalPlane != string(targetcap.LocalPlaneSIP) {
-				t.Fatalf("this test is about the SIP plane and the route's plane is %q", plan.LocalPlane)
-			}
-			// The plane's own four, plus whatever endpoint services the package's
-			// declared transfer destinations add.
+			// The LiveKit SIP route's four: the agent, the LiveKit Server and SIP
+			// service it needs, and the store those two find each other through.
 			for _, want := range []string{"application", "livekit_server", "livekit_sip", "redis"} {
 				if !slices.Contains(plan.Services, want) {
 					t.Errorf("the plan does not name %s, so the two-phase startup will not bring it up: %v",

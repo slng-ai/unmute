@@ -20,9 +20,8 @@ import (
 // backend disagree. A vendored copy with no refresh check cannot notice
 // anything, and fetching during `make test` would break the offline rule that
 // `go test -race ./...` depends on. So this follows the shape the repository
-// already runs twice: `make smoke` needs Python, `make rig` needs a container
-// runtime, and `make contracts` needs the network. All three are opt-in and none
-// is in the PR gate.
+// already uses once: `make smoke` needs Python, `make contracts` needs the
+// network. Both are opt-in and neither is in the PR gate.
 //
 // It needs no credentials. The conformance fixtures are published, and
 // contracts/shared_tools/v1/README.md says they must stay byte-identical across

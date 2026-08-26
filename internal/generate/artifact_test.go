@@ -1,9 +1,7 @@
 package generate
 
 import (
-	"maps"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -12,30 +10,6 @@ import (
 	"github.com/slng-ai/unmute/internal/spec"
 	"github.com/slng-ai/unmute/internal/target"
 )
-
-var composeInjectedEnvironment = regexp.MustCompile(`(?m)^      - ([A-Z][A-Z0-9_]*)=.*$`)
-
-func assertComposeLocalEnvironment(t *testing.T, compose string, plan *TelephonyRuntimePlan) {
-	t.Helper()
-	seen := make(map[string]bool)
-	for _, match := range composeInjectedEnvironment.FindAllStringSubmatch(compose, -1) {
-		seen[match[1]] = true
-	}
-	if strings.Contains(compose, "redis:6379") {
-		seen["REDIS_URL"] = true
-	}
-	got := slices.Sorted(maps.Keys(seen))
-	// Every name the Compose graph injects must be one the route says is
-	// supplied rather than authored, or the generated file is quietly setting
-	// something .env.example told the reader to set. The reverse is not required:
-	// `unmute dev` mints the public URL and the outbound token itself, so they
-	// are supplied without appearing here.
-	for _, name := range got {
-		if !slices.Contains(plan.LocalEnvironment, name) {
-			t.Fatalf("Compose injects %q, which the telephony plan does not list as supplied: %v", name, plan.LocalEnvironment)
-		}
-	}
-}
 
 // TestGenerateValidatesBeforeProviderDispatch pins the ordering: a package is
 // validated before anything looks at which driver to run. An author with two
@@ -117,23 +91,27 @@ func TestTelephonyRuntimePlanAndCompileReportUseResolvedFacts(t *testing.T) { //
 	enablePackageTelephony(pkg)
 	configured := pkg.Targets["pipecat"]
 	configured.Connection = "primary_phone"
-	setConnectionRoute(pkg, "primary_phone", "carrier-websocket", "twilio")
+	setConnectionRoute(pkg, "primary_phone", "cloud-websocket", "twilio")
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	agent, err := ir.Build(pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The platform-terminated route hosts nothing, so the plan it resolves is the
+	// empty one. This used to be asserted against carrier-websocket, which ran a
+	// uvicorn process behind three endpoints and no longer exists; what the
+	// compile report has to prove is that the plan comes from the resolved facts,
+	// and an empty plan proves that just as well as a full one.
 	plan := TelephonyRuntimePlanFor(agent.Targets["pipecat"])
-	if plan == nil || len(plan.Processes) != 1 || len(plan.PublicEndpoints) != 3 {
+	if plan == nil || len(plan.Processes) != 0 || len(plan.PublicEndpoints) != 0 {
 		t.Fatalf("runtime plan = %#v", plan)
 	}
-	if strings.Join(plan.RequiredEnv, ",") != "REDIS_URL,TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER,UNMUTE_PUBLIC_URL" {
+	if strings.Join(plan.RequiredEnv, ",") != "TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER" {
 		t.Fatalf("required env = %v", plan.RequiredEnv)
 	}
-	if got := strings.Join(plan.Processes[0].Command, " "); got != "uv run uvicorn telephony:app --host 0.0.0.0 --port 7860" {
-		t.Fatalf("process command = %q", got)
-	}
-	if got := strings.Join(plan.Services, ","); got != "application,redis" || len(plan.Reasons) == 0 {
+	// One service and no coordination store: this route keeps no shared control
+	// record, which is the other half of hosting nothing.
+	if got := strings.Join(plan.Services, ","); got != "application" || len(plan.Reasons) == 0 {
 		t.Fatalf("coordination graph = %#v", plan)
 	}
 	files, err := withTelephonyReport([]File{{Path: "compile-report.json", Content: []byte(`{"target":"pipecat","required_env":["OPENAI_API_KEY"]}`)}}, plan)

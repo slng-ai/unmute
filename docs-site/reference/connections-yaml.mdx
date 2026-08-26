@@ -22,7 +22,7 @@ environment:
 
 | Key | Type | Required | Default | Allowed values | Meaning |
 |---|---|---|---|---|---|
-| `transport` | string | yes | — | `sip`, `connector`, `carrier-websocket`, `cloud-websocket`, `daily-sip`, as allowed by the target provider | mechanism that carries the call |
+| `transport` | string | yes | — | `sip`, `connector`, `cloud-websocket`, `daily-sip`, as allowed by the target provider | mechanism that carries the call |
 | `carrier` | string | yes | — | `twilio`, `telnyx`, or `plivo`, as allowed by the route | carrier account behind the route |
 | `environment` | map of strings | when the route needs account values | — | route keys listed below to UPPER_SNAKE env names | names holding the route's account values |
 
@@ -92,15 +92,15 @@ connections/twilio_voice.yaml: connection "twilio_voice" requires environment ke
 | Target | `transport` | `carrier` | `environment` keys |
 |---|---|---|---|
 | Pipecat | `cloud-websocket` | `twilio` | `account_sid`, `auth_token`, `from_number`, and only when the package places or redirects a call |
-| Pipecat | `carrier-websocket` | `twilio` | `account_sid`, `auth_token`, `from_number` |
-| Pipecat | `carrier-websocket` | `telnyx` | `api_key`, `public_key`, `connection_id`, `from_number` |
-| Pipecat | `carrier-websocket` | `plivo` | `auth_id`, `auth_token`, `from_number` |
 | Pipecat | `daily-sip` | `twilio` | `account_sid`, `auth_token`, `sip_address`, `from_number` |
 | LiveKit Agents | `sip` | `twilio`, `telnyx`, `plivo` | `sip_address`, `sip_username`, `sip_password`, `from_number` |
 | LiveKit Agents | `connector` | `twilio` | `account_sid`, `auth_token`, `from_number` |
 
 The SIP route uses standard SIP names rather than one vendor's, because the same
 generated code dials through any SIP carrier with them.
+
+Telnyx and Plivo reach a package through LiveKit's `sip` route, with those same
+SIP names. No route takes a carrier's own API key.
 
 A key from another route is refused, and the refusal carries the accepted set so
 you do not have to go looking for it:
@@ -115,7 +115,7 @@ connections/twilio_sip.yaml:4: connection "twilio_sip" environment key "account_
 
 A target names at most one connection, and a connection declares one transport.
 So two targets on different transports need two files, even when there is one
-carrier account behind both. `examples/salon-concierge` is that case:
+carrier account behind both:
 
 ```yaml targets.yaml
 targets:
@@ -132,7 +132,7 @@ targets:
 ```
 
 ```yaml connections/twilio_websocket.yaml
-transport: carrier-websocket
+transport: cloud-websocket
 carrier: twilio
 environment:
   account_sid: TWILIO_ACCOUNT_SID
@@ -171,8 +171,7 @@ does have:
 
 ```text
 connections/twilio_sip.yaml:21: transport "sip" with carrier "twilio" is not a route for
-  provider pipecat. pipecat supports: carrier-websocket with plivo, telnyx, twilio;
-  cloud-websocket with twilio; daily-sip with twilio.
+  provider pipecat. pipecat supports: cloud-websocket with twilio; daily-sip with twilio.
 ```
 
 **A value that is not an UPPER_SNAKE shell identifier**, because a deployment

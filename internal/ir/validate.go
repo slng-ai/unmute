@@ -2123,54 +2123,6 @@ func validateChannels(agent *Agent, resolved Target, provider targetcap.Provider
 	}
 }
 
-// managedPlatformOnlySettings are target settings that only a managed platform
-// can honour, and that therefore reach no artifact on a route with no managed
-// platform at all (FR-024).
-//
-// **Deliberately empty**, and it must stay empty until somebody has confirmed a
-// candidate setting reaches no artifact on the routes being refused (FR-024a).
-// The deployment region looked like the obvious first entry and is not one: on
-// LiveKit routes it selects the region the deploy command targets and is
-// load-bearing whether the deploy goes to the managed platform or to a server the
-// author runs. Enrolling it would reject examples/salon-concierge's livekit
-// target, which ships in this repository and works.
-//
-// The predicate is the point of having this now: it reads the route record's own
-// CloudDeploys, never the provider. One provider's routes each deploy to exactly
-// one kind of place; the other's deploy either way on the same route.
-// Each entry carries its own predicate, so enrolling a setting does not mean
-// adding a field to the plan for it: whatever already says the setting was
-// declared is what the predicate reads.
-type managedPlatformSetting struct {
-	Name     string
-	Reason   string
-	Declared func(*TelephonyPlan) bool
-}
-
-var managedPlatformOnlySettings []managedPlatformSetting
-
-// validateManagedPlatformSettings refuses a setting only a managed platform can
-// honour, on a route that has none (FR-024).
-func validateManagedPlatformSettings(plan *TelephonyPlan, row *TargetValidation) {
-	if plan.CloudDeploys {
-		// This route can deploy to a managed platform, so such a setting is
-		// meaningful here and must not be refused. Read from the route record,
-		// never inferred from the provider: inferring it would reject
-		// examples/salon-concierge, which declares a deployment region on a SIP
-		// route and works.
-		return
-	}
-	for _, setting := range managedPlatformOnlySettings {
-		if !setting.Declared(plan) {
-			continue
-		}
-		row.Errors = add(row.Errors, fmt.Sprintf(
-			"telephony route (%s, %s, %s) has no managed-platform deployment path, so %s "+
-				"reaches no emitted artifact: %s. Remove it, or use a route that deploys to one",
-			plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier, setting.Name, setting.Reason))
-	}
-}
-
 func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 	if plan == nil {
 		return
@@ -2190,7 +2142,6 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 	if len(plan.PublicEndpoints) > 0 && hostsNothing {
 		row.Errors = add(row.Errors, "the Pipecat Cloud websocket route hosts no endpoint of yours; an endpoint here contradicts the route")
 	}
-	validateManagedPlatformSettings(plan, row)
 	seenProcesses := make(map[string]bool, len(plan.Processes))
 	for _, process := range plan.Processes {
 		if process.Name == "" || len(process.Command) == 0 || seenProcesses[process.Name] {
@@ -2228,14 +2179,12 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 		row.Errors = add(row.Errors, "telephony plan has no route setup instructions")
 	}
 	services := make(map[string]bool, len(plan.Services))
-	// Each route has an exact service set: the SIP plane's routes and the Pipecat
-	// carrier routes coordinate through Redis; the LiveKit connector runs the app
-	// plus a local LiveKit Server only (no Redis, no SIP bridge).
-	//
-	// The SIP graph is read off the *plane*, not the provider. Both drivers that
-	// run on that plane run the same four containers, and reading the provider
-	// here made this refuse the graph `(pipecat, sip)` actually needs.
-	onSIPPlane := plan.LocalPlane == string(targetcap.LocalPlaneSIP)
+	// Each route has an exact service set. A LiveKit SIP route runs a LiveKit
+	// Server and a SIP service beside the agent, coordinating through a store; the
+	// LiveKit connector runs the app plus a LiveKit Server only (no store, no SIP
+	// bridge); a Pipecat route runs the agent, with a store only where it keeps a
+	// record that outlives a call.
+	isLiveKitSIP := plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip"
 	isLiveKitConnector := plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "connector"
 	// The Pipecat Daily carrier route runs the operator's helper and nothing
 	// else: no Redis, because it keeps no shared control record (SCHEMA N37).
@@ -2248,7 +2197,7 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 		// application is the deployed agent: the platform hosts it, and dev runs the
 		// same one locally, which is why an empty process list and one application
 		// service are the same route rather than a contradiction.
-	case onSIPPlane:
+	case isLiveKitSIP:
 		allowedServices["redis"] = true
 		allowedServices["livekit_server"] = true
 		allowedServices["livekit_sip"] = true
@@ -2259,44 +2208,6 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 	default:
 		allowedServices["redis"] = true
 		requiredServices = append(requiredServices, "redis")
-	}
-	// The SIP plane's own endpoint services. Allowed exactly when the plan
-	// derived endpoints, which happens only on a route whose plane is SIP, and
-	// required in the same breath: a plane service can then neither turn up on a
-	// route with no plane nor go missing from one that has it.
-	for _, endpoint := range plan.LocalEndpoints {
-		if endpoint.Role != TelephonyRoleDestination {
-			continue
-		}
-		allowedServices[endpoint.Service] = true
-		if !slices.Contains(requiredServices, endpoint.Service) {
-			requiredServices = append(requiredServices, endpoint.Service)
-		}
-	}
-	// A destination the plane has no endpoint for is a defect, not a call that
-	// times out. Refusing here means the author reads the destination's name at
-	// compile time instead of watching a transfer fail silently on the phone.
-	endpointNames := map[string]int{}
-	for _, endpoint := range plan.LocalEndpoints {
-		endpointNames[endpoint.Name]++
-	}
-	if len(plan.LocalEndpoints) > 0 {
-		for _, name := range sortedKeys(plan.Destinations) {
-			if endpointNames[name] == 0 {
-				row.Errors = add(row.Errors, fmt.Sprintf(
-					"transfer destination %q has no endpoint on the %s plane; the plane runs endpoints for: %s",
-					name, plan.LocalPlane, strings.Join(sortedKeys(endpointNames), ", ")))
-			}
-			if endpointNames[name] > 1 {
-				// The plane addresses an endpoint by name, so two endpoints
-				// answering to one name is an ambiguous transfer and one
-				// recording overwriting another. The reachable case is a
-				// destination declared with the caller endpoint's own name.
-				row.Errors = add(row.Errors, fmt.Sprintf(
-					"transfer destination %q collides with another endpoint of the same name on the %s plane; rename it",
-					name, plan.LocalPlane))
-			}
-		}
 	}
 	for _, service := range plan.Services {
 		if service == "" || services[service] {
@@ -2337,14 +2248,12 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 				row.Errors = add(row.Errors, fmt.Sprintf("telephony coordination reason %q has undeclared consumer %q", reason.Name, consumer))
 			}
 		}
-		// Not on the SIP plane: there the store is the server and the SIP service
-		// finding each other, so the application is not a consumer of it at all.
-		if plan.Key.Provider == ProviderPipecat && !onSIPPlane &&
+		if plan.Key.Provider == ProviderPipecat &&
 			(len(reason.Consumers) != 1 || reason.Consumers[0] != "application") {
 			row.Errors = add(row.Errors, fmt.Sprintf("Pipecat coordination reason %q must be consumed by application", reason.Name))
 		}
 	}
-	if plan.Key.Provider == ProviderPipecat && !onSIPPlane {
+	if plan.Key.Provider == ProviderPipecat {
 		// The two correlation reasons describe Redis-backed records, so they are
 		// required exactly where Redis is: the carrier-websocket routes. The Daily
 		// carrier leg keeps no such record and admits calls through the room
@@ -2366,12 +2275,11 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 			row.Errors = add(row.Errors, "the Pipecat Cloud websocket route coordinates only admission")
 		}
 	}
-	// The plane again, not the provider: whichever agent runs on it, the one
-	// thing the coordination store is for is the server and the SIP service
-	// finding each other.
-	if onSIPPlane {
+	// The one thing the store is for on this route is the server and the SIP
+	// service finding each other.
+	if isLiveKitSIP {
 		if len(seenReasons) != 1 || !seenReasons["livekit_control_plane"] {
-			row.Errors = add(row.Errors, "the SIP plane's only coordination reason is livekit_control_plane")
+			row.Errors = add(row.Errors, "the LiveKit SIP route's only coordination reason is livekit_control_plane")
 		}
 		for _, reason := range plan.CoordinationReasons {
 			consumers := slices.Clone(reason.Consumers)

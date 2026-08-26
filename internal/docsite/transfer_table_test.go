@@ -10,7 +10,7 @@ import (
 	"github.com/slng-ai/unmute/internal/target"
 )
 
-// The transfer table on the local-telephony page, held against the route table.
+// The transfer table on the transfers overview page, held against the route table.
 //
 // That table is the first thing a reader looks at when a transfer does not
 // happen, and it is prose, so it can rot silently while the code moves. It rots
@@ -29,17 +29,16 @@ type transferRow struct {
 	Warm      string
 }
 
-// rowPattern reads `| LiveKit `sip` | compiles · ... | **refused at compile** |`.
+// rowPattern reads the leading three cells of `| LiveKit `sip` | yes | **refused** | ... |`,
+// and ignores any column after Warm.
 var rowPattern = regexp.MustCompile(
-	"^\\|\\s*(LiveKit|Pipecat)\\s+`([a-z-]+)`\\s*\\|([^|]*)\\|([^|]*)\\|\\s*$")
+	"^\\|\\s*(LiveKit|Pipecat)\\s+`([a-z-]+)`\\s*\\|([^|]*)\\|([^|]*)\\|")
 
 func TestTransferTableMatchesTheRouteTable(t *testing.T) {
-	page, err := os.ReadFile(filepath.Join(siteRoot, "dev", "local-telephony.mdx"))
+	page, err := os.ReadFile(filepath.Join(siteRoot, "transfers", "overview.mdx"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Only the transfer table, not the plane table further down, which has the
-	// same leading two columns and a different meaning.
 	section := transferSection(t, string(page))
 
 	var rows []transferRow
@@ -104,7 +103,7 @@ func TestTransferTableMatchesTheRouteTable(t *testing.T) {
 // transferSection is the table under the transfers heading and nothing else.
 func transferSection(t *testing.T, page string) string {
 	t.Helper()
-	const heading = "## Transfers"
+	const heading = "## The route decides what is possible"
 	start := strings.Index(page, heading)
 	if start < 0 {
 		t.Fatalf("the page has no %q section, so a reader looking for transfer support finds nothing", heading)

@@ -109,10 +109,7 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 	return runDevCompose(ctx, cmd, run)
 }
 
-var startPipecatWebAgent = func(ctx context.Context, dir, port string, env []string, sink io.Writer) (*localAgent, error) {
-	return startLocalPipecatAgent(ctx, dir, env, sink,
-		"-t", "webrtc", "--host", "0.0.0.0", "--port", port)
-}
+var startPipecatWebAgent = startLocalPipecatAgent
 
 var pipecatWebAgentReady = waitForLocalAgentReady
 var pipecatLookPath = exec.LookPath
@@ -551,4 +548,67 @@ func (rw *readyWatcher) Write(p []byte) (int, error) {
 	}
 	rw.mu.Unlock()
 	return rw.w.Write(p)
+}
+
+// localAgent is a compiled Pipecat agent running on this machine.
+type localAgent struct {
+	cmd  *exec.Cmd
+	done chan error
+}
+
+func startLocalPipecatAgent(ctx context.Context, dir, port string, env []string, sink io.Writer) (*localAgent, error) {
+	child := exec.CommandContext(ctx, "uv",
+		"run", "bot.py", "-t", "webrtc", "--host", "0.0.0.0", "--port", port)
+	child.Dir = dir
+	child.Env = env
+	child.Stdout, child.Stderr = sink, sink
+	ownProcessGroup(child) // own group, so uv's python is reaped too
+	if err := child.Start(); err != nil {
+		return nil, fmt.Errorf("start the local agent: %w", err)
+	}
+	agent := &localAgent{cmd: child, done: make(chan error, 1)}
+	go func() {
+		agent.done <- child.Wait()
+		close(agent.done)
+	}()
+	return agent, nil
+}
+
+// waitForLocalAgentReady prevents the browser or a carrier webhook from being
+// pointed at a process that has started but is not yet accepting sessions.
+func waitForLocalAgentReady(ctx context.Context, port string, done <-chan error) error {
+	readyCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	client := &http.Client{Timeout: time.Second}
+	endpoint := "http://" + net.JoinHostPort("127.0.0.1", port) + "/status"
+	for {
+		select {
+		case err := <-done:
+			if err == nil {
+				return errors.New("local agent exited before it was ready")
+			}
+			return fmt.Errorf("local agent exited before it was ready: %w", err)
+		case <-ticker.C:
+			request, err := http.NewRequestWithContext(readyCtx, http.MethodGet, endpoint, nil)
+			if err != nil {
+				return err
+			}
+			response, err := client.Do(request)
+			if err != nil {
+				continue
+			}
+			var status struct {
+				Status string `json:"status"`
+			}
+			decodeErr := json.NewDecoder(response.Body).Decode(&status)
+			_ = response.Body.Close()
+			if response.StatusCode == http.StatusOK && decodeErr == nil && status.Status == "ready" {
+				return nil
+			}
+		case <-readyCtx.Done():
+			return readyCtx.Err()
+		}
+	}
 }

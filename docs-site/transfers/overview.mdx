@@ -37,8 +37,8 @@ controls:
       on_unavailable: return_to_caller
 ```
 
-The control's name goes in the agent's tool list, like any other control — and
-that half is enforced, not merely conventional. See [the control has to be
+The control's name goes in the agent's tool list, like any other control. That
+half is enforced, not merely conventional. See [the control has to be
 attached](#the-control-has-to-be-attached) below.
 
 ## Destinations are symbolic
@@ -72,20 +72,30 @@ mechanisms, which is why the answer differs per route:
 | Route | Cold | Warm | Mechanism |
 |---|---|---|---|
 | LiveKit `sip` | yes | **yes, the only one** | SIP REFER on the caller's existing leg, and LiveKit's `WarmTransferTask` for the held and briefed shape |
-| Pipecat `sip` | yes | **refused** | SIP REFER on the caller's existing leg, through the SIP service the route runs |
-| Pipecat `daily-sip` + Twilio | yes, on a phone call | **refused** | Daily transfers the existing SIP phone leg |
-| Pipecat `cloud-websocket` | yes, differently | no, by trade | one request replaces the live call's markup at the carrier |
-| Pipecat `carrier-websocket` | no | no | the transport carries media only, with no transfer control |
-| LiveKit `connector` | no | no | same |
+| Pipecat `daily-sip` | yes, on a phone call | **refused** | Daily transfers the existing SIP phone leg |
+| Pipecat `cloud-websocket` | yes, differently | **refused** | one request replaces the live call's markup at the carrier |
+| LiveKit `connector` | **refused** | **refused** | the transport carries media only, with no transfer control |
 
 Warm transfer is not supported on any Pipecat target. It requires the LiveKit
 `sip` route.
 
-Two of those cells mean different things, and the difference matters:
+Pipecat `daily-sip` + Twilio is the Daily shape that transfers, and the carrier
+is why: your carrier owns the number and hands Daily the SIP leg, so there is a
+real phone leg to hand on. A cold transfer there needs a Twilio connection and an
+active `channels.phone` route; a browser session has no leg and gets a named
+failure before the agent announces anything.
 
-- **no** means the platform has no primitive for it.
-- **refused** means the platform has one and Unmute does not emit it, so the
-  compiler rejects the shape and names where it does work.
+**You hear a transfer on a deployed agent.** Both shapes hand a real phone leg to
+a real number, so there is no local rehearsal for either: deploy, finish the
+carrier setup, and place the call. The browser loop that `unmute dev` gives you
+covers the prompt, the tools and the models, and stops exactly where the phone
+leg starts.
+
+Read the two words in that table carefully, because they are different answers:
+
+- **yes** means the compiler emits it, and a deployed call performs it.
+- **refused** means the shape does not compile. The error names the connection,
+  the transport it declares, and a route where the shape does work.
 
 The route comes from the connection the target names, so that is what the refusal
 points at. A transfer a route cannot do is refused at validation, naming the
@@ -134,7 +144,7 @@ agent.yaml:47: control "send_to_billing" is declared but no agent reaches it; ad
 ```
 
 Before, it compiled at exit 0 and the control was simply absent from the
-generated project — while its destination's environment name still reached
+generated project, while its destination's environment name still reached
 `.env.example` and the generated startup check, so the agent refused to start
 over a secret nothing would ever read.
 
