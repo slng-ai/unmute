@@ -58,7 +58,7 @@ func TestPipecatManifestIsDeployable(t *testing.T) { // FR-012, FR-013, FR-027
 			t.Errorf("manifest still declares %q:\n%s", unwanted, manifest)
 		}
 	}
-	for _, want := range []string{`agent_name = "pipecat"`, `region = "eu-west"`, `secret_set = "pipecat-secrets"`} {
+	for _, want := range []string{`agent_name = "safe-core-fixture-pipecat"`, `region = "eu-west"`, `secret_set = "safe-core-fixture-pipecat-secrets"`} {
 		if !strings.Contains(manifest, want) {
 			t.Errorf("manifest missing %q:\n%s", want, manifest)
 		}
@@ -204,9 +204,9 @@ func TestPipecatReadmeDeploySection(t *testing.T) { // FR-003, FR-004, FR-014, F
 	withRegion := artifactFile(t, pipecatArtifact(t, []string{"eu-west"}), "README.md")
 	for _, want := range []string{
 		"## Deploy to Pipecat Cloud",
-		"pipecat cloud secrets set pipecat-secrets --file .env --region eu-west",
+		"pipecat cloud secrets set safe-core-fixture-pipecat-secrets --file .env --region eu-west",
 		"pipecat cloud deploy",
-		"pipecat cloud agent status pipecat",
+		"pipecat cloud agent status safe-core-fixture-pipecat",
 		"pipecat cloud regions list",
 		"updates the existing agent",
 		"--secrets <other-name>",

@@ -12,11 +12,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/slng-ai/unmute/internal/devmetrics"
+	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/target"
 	"github.com/slng-ai/unmute/internal/web"
 )
 
@@ -338,5 +341,41 @@ func TestDevSessionAnswersBeforeTheRuntimeExists(t *testing.T) {
 				t.Error("handed out a token before a worker could join the room")
 			}
 		})
+	}
+}
+
+// `unmute dev` mints a browser token whose dispatch entry names one agent, and
+// the emitted worker registers under another name entirely unless the two read
+// the same source.
+//
+// They did not. The token named the target instance and the worker registered
+// the package's deploy name, so the room opened, no worker joined it, and the
+// browser loop went silent with nothing logged as wrong. This holds the token's
+// name to the string the emitted agent.py actually registers.
+func TestDevDispatchNameMatchesTheEmittedWorker(t *testing.T) {
+	agent, targets, err := loadPackage(filepath.Join("..", "testdata", "safe_core"), []string{"livekit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := targets[0]
+	artifact, err := generate.Generate(agent, resolved, target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var botpy string
+	for _, file := range artifact.Files {
+		if file.Path == "agent.py" {
+			botpy = string(file.Content)
+		}
+	}
+	if botpy == "" {
+		t.Fatal("no agent.py emitted")
+	}
+	dispatched := devDispatchName(agent, resolved)
+	if !strings.Contains(botpy, `@server.rtc_session(agent_name="`+dispatched+`")`) {
+		t.Errorf("dev dispatches to %q, which the emitted worker does not register", dispatched)
+	}
+	if dispatched == resolved.Name {
+		t.Fatal("this test needs the dispatch name to differ from the target name")
 	}
 }

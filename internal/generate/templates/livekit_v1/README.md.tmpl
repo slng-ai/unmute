@@ -19,7 +19,7 @@ LiveKit stack, move all three together:
 
 ```sh
 LIVEKIT_HOST_PORT=7890 LIVEKIT_TCP_HOST_PORT=7891 LIVEKIT_UDP_HOST_PORT=7892 \
-  unmute dev <source-dir> --target {{.AgentName}}
+  unmute dev <source-dir> --target {{.Target}}
 ```
 
 ## Latency measurements
@@ -520,6 +520,34 @@ already exists. `deploy` ships a new version of an agent that already exists and
 takes no region. Running them the wrong way round either refuses or registers a
 second billable agent with dispatch split between versions.
 
+#### This worker's agent name
+
+The worker registers as **{{.AgentName}}**, which is `name:` in your
+`agent.yaml` joined to the `{{.Target}}` target it was compiled for.
+
+It comes from the package rather than the target because every package on this
+target calls its target `{{.Target}}`. Two packages in one LiveKit project that
+registered the same worker name split dispatch between them, and a call reached
+whichever answered first.
+{{if and .Telephony (eq .Telephony.Transport "sip") .Telephony.HasInbound}}
+A dispatch rule matches a worker by that exact string, and this project's
+`sip-dispatch-rule.json` already names it. Renaming the package leaves the rule
+you already created pointing at the old worker, so inbound calls ring and
+nothing answers.
+
+Re-running `telephony-setup.sh` does **not** fix that. It reuses any rule that
+already names your trunk rather than replacing it, which is what makes it safe
+to run twice. Delete the stale rule first, then run it:
+
+```sh
+lk sip dispatch list   # find the rule whose agent is the old name
+lk sip dispatch delete <SDR_...>
+bash telephony-setup.sh
+```
+{{else}}
+A LiveKit SIP dispatch rule matches a worker by that exact string, so renaming
+the package means recreating any rule that names the old one.
+{{end}}
 #### Secrets
 
 `--secrets-file .env` sends every name in `.env.example` to the platform, which
@@ -677,7 +705,7 @@ destination fired.
 
 Tracing is configured. Set `COVAL_API_KEY` in `.env`. Spans go to
 `https://api.coval.dev/v1/traces` under the service name
-`{{.EntryAgent}}-{{.Project}}`.
+`{{.EntryAgent}}-{{.AgentName}}`.
 
 Every trace belongs to one Coval simulation, and Coval puts that simulation ID on
 the call. The agent looks for it in three places:
@@ -840,7 +868,7 @@ are approved.
 
 Tracing is configured. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
 `LANGFUSE_BASE_URL` in `.env`; all three are required. The trace name is
-`{{.EntryAgent}}-{{.Project}}`; the LiveKit room name becomes the Langfuse
+`{{.EntryAgent}}-{{.AgentName}}`; the LiveKit room name becomes the Langfuse
 session ID.
 
 Starting the worker or exporting a synthetic span proves connectivity only.

@@ -13,6 +13,7 @@ Durations use Go duration syntax, for example `90s`, `15m`, or `1h30m`.
 
 ```yaml agent.yaml
 version: 1
+name: acme-greeter
 entry_agent: greeter
 
 models:
@@ -55,6 +56,7 @@ capacity:
 | Key | Type | Required | Default | Allowed values | Meaning |
 |---|---|---|---|---|---|
 | `version` | integer | yes | — | `1` | schema version |
+| `name` | string | yes | — | lowercase letters, digits, single hyphens; 3 to 64 characters | what the deployed agent is called |
 | `entry_agent` | string | yes | — | declared agent name | agent that answers |
 | `models` | map | yes | — | sections `think`, `speak`, `listen`, `turn` | model palette grouped by kind |
 | `listen` | string | with 2 or more listen chain heads | sole chain head | declared `models.listen` name | listen entry to use |
@@ -72,6 +74,73 @@ capacity:
 | `tracing` | object | no | — | `provider: langfuse` or `provider: coval` | tracing provider |
 | `channels` | map | yes | — | one or more channel definitions | how people reach the agent |
 | `capacity` | object | for telephony or code targets | — | positive values; constraints below | traffic estimate |
+
+## `name`
+
+What this agent is called. Required on every target.
+
+```yaml agent.yaml
+name: acme-support
+```
+
+The deployed name is this joined to the target it was compiled for, so
+`acme-support` on a target called `slng` deploys as `acme-support-slng`, and on
+a target called `livekit_eu` as `acme-support-livekit-eu`. The target half is
+there for one collision the package half cannot solve: a package with two
+targets of the same provider would otherwise deploy one name twice and overwrite
+itself.
+
+Where the deployed name lands:
+
+| Target | What carries it |
+|---|---|
+| `slng` | the pushed agent's `name`, which is how a push finds the agent to update |
+| `pipecat` | `agent_name` in `pcc-deploy.toml`, its secret set, and every `pipecat cloud agent ...` command |
+| `livekit` | the worker's `agent_name`, which is what a SIP dispatch rule matches |
+
+`name:` on its own, without the target, labels the generated project: the
+pyproject distribution name, the logger, the trace name, the README title.
+
+### Why unmute does not infer it
+
+Both candidates look like names and neither is an identity.
+
+- The **target** is called `slng`, `livekit` or `pipecat`, because that is what
+  the docs, the examples and the console all call it. Unmute used to deploy
+  under it, so two packages in one organisation claimed one live agent and the
+  second deploy replaced the first, prompt, models and attached tools included.
+- The **folder** is named by whoever cloned the repository. It changes on a
+  rename, a copy, or a CI checkout into another path, and it changes silently.
+
+### Shape
+
+Lowercase letters, digits and single hyphens, starting with a letter, 3 to 64
+characters. The name is written into a PEP 508 `name =` in `pyproject.toml`, a
+Pipecat Cloud agent, a LiveKit `agent_name` and an SLNG agent. SLNG is the
+loosest of the four and pyproject the strictest, so unmute holds one shape all
+four accept rather than rewriting yours per target.
+
+### Renaming an agent that is already deployed
+
+A rename does not move a deployment. It leaves the old one running and creates a
+second, so after changing `name:`:
+
+- **slng**: the old agent stays in your organisation. Delete it, or leave it and
+  point your sessions at the new id.
+- **pipecat**: `pipecat cloud deploy` creates a new agent, and the old one keeps
+  billing. Delete it with `pipecat cloud agent delete <old-name>`, and re-create
+  the secret set under the new name.
+- **livekit**: the agent itself is fine, because `lk agent deploy` targets the
+  id in the preserved `livekit.toml` and re-registers the worker under the new
+  name. The **SIP dispatch rule** is what breaks: it still names the old worker,
+  so inbound calls ring and nothing answers. Delete it
+  (`lk sip dispatch delete <id>`) and re-run `telephony-setup.sh`, which skips
+  the step while a rule for that trunk still exists.
+
+There is no way to keep the old bare name. An agent deployed as `livekit` was
+named after the target, and the new name always carries the package half, so the
+first compile after this change renames every existing deployment once. Do that
+rename deliberately, with the steps above, rather than discovering it on a call.
 
 ## `models`
 

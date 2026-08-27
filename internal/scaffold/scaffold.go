@@ -19,6 +19,7 @@ import (
 	"text/template"
 
 	"github.com/goccy/go-yaml"
+	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/spec"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
@@ -100,7 +101,15 @@ Everything you say is read out loud.
 
 // Data is the v1 agent configuration rendered by the scaffold templates.
 type Data struct {
-	Name       string
+	// Name is the package folder, used as a label. It is not the agent's name:
+	// a folder is named by whoever cloned the repository.
+	Name string
+	// AgentName is the `name:` in agent.yaml, which is what the agent is called
+	// where it is deployed under a name rather than an id. Carried verbatim and
+	// never inferred: maintain rewrites agent.yaml from this struct, so a name
+	// absent here is a name deleted from the author's file, and a name invented
+	// here is a live SLNG agent claimed on the author's behalf.
+	AgentName  string
 	Target     string
 	Channel    string
 	Channels   []Channel
@@ -423,7 +432,29 @@ func (d *Data) SetTarget(provider string) {
 	d.Speak = Binding{Provider: "slng", Model: "deepgram/aura:2", Voice: "aura-2-thalia-en"}
 }
 
+// AgentNameFrom turns a folder name into a legal package name, or returns ""
+// when it cannot.
+//
+// `unmute init my_agent` must not scaffold a package the compiler then refuses,
+// and a folder is the closest thing to a name the author has already typed. What
+// it must not do is guess: a folder that cannot be squeezed into the shape
+// returns nothing, the scaffold writes no `name:`, and ir.Build says what to
+// write. A deployed identity is worth reading before it is claimed.
+func AgentNameFrom(folder string) string {
+	fields := strings.FieldsFunc(strings.ToLower(folder), func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+	})
+	name := strings.Join(fields, "-")
+	if !ir.ValidPackageName(name) {
+		return ""
+	}
+	return name
+}
+
 func (d Data) withDefaults() Data {
+	if d.AgentName == "" {
+		d.AgentName = AgentNameFrom(d.Name)
+	}
 	if d.Target == "" {
 		d.SetTarget(DefaultTarget)
 	} else if d.Listen == (Binding{}) && d.Reason == (Binding{}) && d.Speak == (Binding{}) {

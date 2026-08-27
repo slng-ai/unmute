@@ -64,6 +64,11 @@ const (
 	// SlngRouterKeyEnv first. One command, and the guidance a refused push carries
 	// is relayed in unmute's own format.
 	SlngDeployCommand = "unmute deploy %s"
+	// SlngListCommand lists the organisation's agents. It is in the runbook for
+	// one reason: an agent's name is its identity here, names are unique per
+	// organisation, and a push under a name that already exists writes that agent
+	// rather than adding one. This is how an author checks a name is free.
+	SlngListCommand = "voiceai agents list"
 	// SlngWebSessionCommand opens a browser session against one agent.
 	//
 	// It takes two things that both look optional and are not. The agent id is

@@ -312,14 +312,14 @@ func printPushResult(out, errOut io.Writer, name, outDir, keySource string, resu
 		fmt.Fprintf(out, "%s: organisation %s\n", name, org)
 	}
 	// Pushing REPLACES: a reference or field the package no longer names is
-	// removed, not merged. The agent's name is the target instance name, so two
-	// packages that both call their slng target `slng` resolve to the *same* live
-	// agent and the second push overwrites the first. That is worth a line even
-	// when it is what the author meant.
+	// removed, not merged. Which agent gets replaced is decided by the name in
+	// the body, so the warning quotes that name and not this target's: they were
+	// the same string until a package started naming its own deployments, and
+	// printing the target here sent an author to rename the wrong thing.
 	if result.Agent.Action == "update" {
 		fmt.Fprintf(errOut, "warning: %s: an agent named %q already exists%s, so this push replaces it rather than adding one; "+
-			"the name comes from the target instance name, so rename the target or pass --agent-id to write a different agent\n",
-			name, name, parenthesised(result.Agent.ID))
+			"the name is `name:` in agent.yaml joined to this target, so change `name:` or pass --agent-id to write a different agent\n",
+			name, result.Agent.Name, parenthesised(result.Agent.ID))
 	}
 	switch {
 	case len(result.Blockers) > 0:

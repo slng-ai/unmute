@@ -52,7 +52,7 @@ func manifest(t *testing.T, dir string, created []string) []byte {
 // template was invisible to `go test ./...`.
 func TestWrite_golden(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "support-bot")
-	created, err := Write(dir, Data{Name: "support-bot", Tools: DefaultTools()})
+	created, err := Write(dir, Data{Name: "support-bot", AgentName: "support-bot", Tools: DefaultTools()})
 	if err != nil {
 		t.Fatal(err)
 	}

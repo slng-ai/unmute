@@ -34,7 +34,16 @@ func (p *Package) Location(file, token string) string {
 }
 
 type AgentFile struct {
-	Version    int           `json:"version" yaml:"version"`
+	Version int `json:"version" yaml:"version"`
+	// Name is what this agent is called wherever it is deployed under a name
+	// rather than an id. It lives here, in the package, because that is the only
+	// thing about it that is stable: a target instance is named for where the
+	// package goes (`slng:`, which every package following the docs writes), and
+	// the folder on disk is named by whoever cloned the repository. Neither is an
+	// identity, and on SLNG the name IS the identity: names are unique per
+	// organisation and a push resolves the agent to update by matching one, so a
+	// name that two packages share is one live agent that two packages overwrite.
+	Name       string        `json:"name,omitempty" yaml:"name,omitempty"`
 	EntryAgent string        `json:"entry_agent" yaml:"entry_agent"`
 	Models     ModelSections `json:"models" yaml:"models"`
 	// Listen/Turn select one entry of the matching models section by name.

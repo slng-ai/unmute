@@ -30,7 +30,7 @@ const (
   "dry_run": true,
   "organisation": { "id": "550fffde", "name": "[SLNG] Example Workspace" },
   "package": "/pkg/build/slng/agent.json",
-  "agent": { "name": "slng", "action": "create" },
+  "agent": { "name": "acme-support-slng", "action": "create" },
   "tools": [
     { "name": "check_order", "action": "create", "toolType": "code", "needsGreenRun": true, "hasSample": true, "willRun": true }
   ],
@@ -67,7 +67,7 @@ const (
   "tools": [
     { "name": "check_order", "created": true, "introspected": true, "ran": "succeeded", "published": 1 }
   ],
-  "agent": { "id": "01998a7c", "action": "update" },
+  "agent": { "id": "01998a7c", "name": "acme-support-slng", "action": "update" },
   "version": { "number": 4, "label": "slng 2026-08-27T10:00:00Z" }
 }`
 
@@ -94,8 +94,8 @@ func TestPushDocumentsDecode(t *testing.T) {
 	if !plan.OK || !plan.DryRun {
 		t.Errorf("plan: ok=%t dry_run=%t, want both true", plan.OK, plan.DryRun)
 	}
-	if plan.Agent.Name != "slng" || plan.Agent.Action != "create" {
-		t.Errorf("plan agent = %+v, want name slng action create", plan.Agent)
+	if plan.Agent.Name != "acme-support-slng" || plan.Agent.Action != "create" {
+		t.Errorf("plan agent = %+v, want name acme-support-slng action create", plan.Agent)
 	}
 	if len(plan.Tools) != 1 || !plan.Tools[0].WillRun || plan.Tools[0].ToolType != "code" {
 		t.Errorf("plan tools = %+v, want one code tool that will run its sample", plan.Tools)
@@ -196,19 +196,25 @@ func TestBlockerHintOnlyAddsWhatTheToolCannotKnow(t *testing.T) {
 }
 
 // TestPushResultWarnsThatAnUpdateReplaces. Pushing replaces rather than merges,
-// and the agent's name is the target instance name — so two packages that both
-// call their slng target `slng` write the same live agent. A silent replace is
-// the failure mode, so the warning is the gate.
+// and which agent it replaces is decided by the name in the body. A silent
+// replace is the failure mode, so the warning is the gate.
+//
+// It has to quote the *agent's* name, not this target's. The two were the same
+// string until a package started naming its own deployments, so the warning
+// read from the wrong one and told the author to rename the wrong thing.
 func TestPushResultWarnsThatAnUpdateReplaces(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if err := printPushResult(&out, &errOut, "slng", "build/slng", target.SlngRouterKeyEnv, decodePush(t, pushOutcomeJSON)); err != nil {
 		t.Fatalf("a successful outcome returned %v", err)
 	}
 	warned := errOut.String()
-	for _, want := range []string{"replaces", "01998a7c", "--agent-id"} {
+	for _, want := range []string{"replaces", "01998a7c", "--agent-id", `"acme-support-slng"`, "`name:` in agent.yaml"} {
 		if !strings.Contains(warned, want) {
 			t.Errorf("the replace warning does not mention %q:\n%s", want, warned)
 		}
+	}
+	if strings.Contains(warned, "rename the target") {
+		t.Errorf("the warning sends the author to rename the target, which no longer decides the agent's name:\n%s", warned)
 	}
 	// The closing line has to be runnable, agent id included: the web-session
 	// command's id is not optional, which is what target.SlngWebSessionCommand

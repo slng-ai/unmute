@@ -6,6 +6,7 @@
 # that would recommend it over the route with nothing to host. Everything the
 # route's tests need is here.
 version: 1
+name: daily-carrier-fixture
 entry_agent: front_desk
 
 models:

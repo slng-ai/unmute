@@ -1,10 +1,10 @@
 {
   "dispatch_rule": {
-    "name": "livekit inbound",
+    "name": "safe-core-fixture inbound",
     "roomConfig": {
       "agents": [
         {
-          "agentName": "livekit",
+          "agentName": "safe-core-fixture-livekit",
           "metadata": "{\"direction\":\"inbound\"}"
         }
       ]

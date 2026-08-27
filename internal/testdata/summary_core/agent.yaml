@@ -12,6 +12,7 @@
 # two is not a shape a package can have.
 
 version: 1
+name: summary-core-fixture
 entry_agent: intake
 
 # Every model is defined once, here, in the central map grouped by kind (N15):

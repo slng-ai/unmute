@@ -51,6 +51,10 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | the console offers every shipped target, names each correctly, and offers no option validation refuses | `internal/tui/default_target_test.go` |
 | the slng target opens no socket to the SLNG agents API | `internal/ir/validate_slng_test.go` |
 | every surface naming a `voiceai` command names the same one, agent id included | `internal/target/slng_target_test.go` |
+| every deployed identity on all three targets is the package's `name:` joined to its target, never the target alone, while the emitted project's own labels stay the bare name | `internal/generate/deploy_name_test.go` |
+| a package with no `name:`, or one that cannot be deployed as written, is refused with the shape and an example | `internal/ir/package_name_test.go` |
+| the console preserves an authored name and never renames a package to its folder | `internal/tui/agent_name_roundtrip_test.go` |
+| the browser token `unmute dev` mints dispatches to the name the emitted worker registers | `internal/cli/dev_web_test.go` (`TestDevDispatchNameMatchesTheEmittedWorker`) |
 | example READMEs name every transport; every `examples/` link resolves | `internal/generate/examples_test.go` |
 | every emitted task prompt names its finish call and an escape, every finish takes the reserved `unserved_request`, and the owner is told to read it | `internal/generate/task_prompt_test.go`, `internal/ir/validate_test.go` |
 | the skill's tool kinds, vendors, providers and doc pointers match the code | `internal/skill/agreement_test.go` |

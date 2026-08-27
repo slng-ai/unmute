@@ -87,6 +87,36 @@ all refused by name: each describes a generated project, and there is none.
 whose region values are checked, because it is the only one whose platform
 publishes a closed set.
 
+## The pushed agent's name
+
+The agent is pushed under the package's [`name:`](/reference/agent-yaml#name)
+joined to the target it was compiled for. This target has no project to deploy
+into, so that name is the whole identity.
+
+```yaml agent.yaml
+version: 1
+name: acme-support
+entry_agent: support
+```
+
+With the target above, that pushes an agent called **acme-support-slng**.
+
+SLNG names are unique across an organisation and a push resolves which agent to
+write by matching the name in the body, so pushing under a name that already
+exists replaces that agent rather than adding one. Unmute used to write the
+target name here, and every package on this target calls its target `slng`: two
+packages in one organisation both pushed an agent called `slng`, and the second
+replaced the first one's prompt, models and tool attachments.
+
+Check a name is free before you claim it:
+
+```bash
+voiceai agents list
+```
+
+Renaming later does not move a deployed agent: it leaves the old one running and
+creates a second.
+
 ## Model names
 
 SLNG names a model with the vendor and the model joined by a slash. A package
@@ -208,9 +238,9 @@ Updating an agent replaces it with what the package declares. A tool reference
 the package no longer names is detached, and a field that differs is
 overwritten. `unmute deploy --dry-run` names both before anything happens.
 
-The agent's name is its target instance name, so a run that reports `update`
-when you expected `create` means an agent of that name already exists.
-`--agent-id` picks a different one.
+The agent's name is `name:` joined to the target, so a run that reports `update`
+when you expected `create` means an agent of that name already exists. Change
+`name:` in `agent.yaml`, or let `--agent-id` pick a different one.
 
 ### Do not push a dashboard export back
 

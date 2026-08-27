@@ -30,6 +30,7 @@ writing.
 
 ```yaml agent.yaml
 version: 1
+name: acme-appointments
 entry_agent: appointment_desk
 
 secrets:
@@ -87,6 +88,7 @@ That is `examples/simple-prompt`, and it runs in a browser.
 | Key | Required | What it is |
 |---|---|---|
 | `version` | yes | the schema version, `1` |
+| `name` | yes | what the deployed agent is called |
 | `entry_agent` | yes | which agent answers |
 | `models` | yes | the model palette, grouped by kind |
 | `listen` | when `models.listen` has two or more entries | which listen entry to use |
@@ -103,6 +105,36 @@ That is `examples/simple-prompt`, and it runs in a browser.
 | `tracing` | no | tracing provider |
 | `channels` | yes | how people reach the agent |
 | `capacity` | for telephony or code targets | your traffic estimate |
+
+## name
+
+Required on every target. Lowercase letters, digits and single hyphens, starting
+with a letter, 3 to 64 characters.
+
+```yaml agent.yaml
+name: acme-support
+```
+
+**The deployed name is `name:` joined to the target it was compiled for**, so
+`acme-support` on a target called `slng` deploys as `acme-support-slng` and on
+one called `livekit_eu` as `acme-support-livekit-eu`. The target half separates
+two targets of the same provider inside one package; without it such a package
+would deploy one name twice and overwrite itself.
+
+Where it lands: the pushed agent's `name` on slng, `agent_name` and the secret
+set on pipecat, the worker's `agent_name` that a SIP dispatch rule matches on
+livekit. `name:` on its own labels the generated project (pyproject name,
+logger, trace name, README title).
+
+**Never name a package after its target or its folder.** Unmute used to deploy
+under the target name, and every package calls its target `slng`, `livekit` or
+`pipecat`, so two packages in one organisation deployed over each other. A
+folder is named by whoever cloned the repository and changes on a rename or a CI
+checkout.
+
+Renaming a package that is already deployed does not move the deployment: it
+leaves the old one running and creates a second. On livekit, the existing SIP
+dispatch rule keeps naming the old worker, so inbound calls stop.
 
 ## models
 
@@ -514,6 +546,11 @@ live server — so attach MCP servers in the dashboard.
 A refused deploy has changed nothing, and reports every problem together with the
 dashboard page that fixes each: `vault missing`, `sample missing`,
 `tool unresolved`, `mcp unsupported`, `agent ambiguous`.
+
+The pushed agent is called **`<name>-<target>`**, so a package named
+`acme-support` on the target below pushes `acme-support-slng`. Check the name is
+free with `voiceai agents list` before the first push: an SLNG name is unique
+across an organisation and a push replaces the agent it matches.
 
 ```yaml targets.yaml
 targets:

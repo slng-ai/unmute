@@ -26,6 +26,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	if pkg == nil {
 		return nil, fmt.Errorf("build: nil package")
 	}
+	if err := checkPackageName(pkg); err != nil {
+		return nil, err
+	}
 	if err := checkNames(pkg); err != nil {
 		return nil, err
 	}
@@ -56,6 +59,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	}
 	out := &Agent{
 		Version:      pkg.Agent.Version,
+		Name:         strings.TrimSpace(pkg.Agent.Name),
 		EntryAgent:   pkg.Agent.EntryAgent,
 		Models:       models,
 		Listen:       listenName,

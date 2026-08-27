@@ -19,6 +19,14 @@
 # silently dropped.
 
 version: 1
+
+# What this agent is called where it is deployed. The deployed name is this
+# joined to the target it was compiled for, so this pushes an agent called
+# `acme-orders-slng`. Required on every target: the two names unmute could
+# infer instead are not identities, because every package calls its target
+# after the platform, and the folder is named by whoever cloned the
+# repository.
+name: acme-orders
 entry_agent: orders
 
 models:

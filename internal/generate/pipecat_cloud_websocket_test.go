@@ -158,11 +158,11 @@ func TestCloudWebsocketManifestDeclaresWebsocketAuth(t *testing.T) {
 func TestCloudWebsocketBinMarkupIsDictated(t *testing.T) {
 	section := telephonySection(t, cloudWebsocketArtifact(t, cloudWebsocketOptions{inbound: true}))
 	for _, want := range []string{
-		"<Say>Connecting you now.</Say>",                             // cold start is never dead air (SC-002)
-		`<Stream url="wss://api.pipecat.daily.co/ws/twilio">`,        // the platform's own endpoint
-		`<Parameter name="_pipecatCloudServiceHost" value="pipecat.`, // the agent name is compiled in
-		"YOUR_ORGANIZATION",                                          // the one substitution
-		"pipecat cloud organizations list",                           // where the one value comes from
+		"<Say>Connecting you now.</Say>",                                               // cold start is never dead air (SC-002)
+		`<Stream url="wss://api.pipecat.daily.co/ws/twilio">`,                          // the platform's own endpoint
+		`<Parameter name="_pipecatCloudServiceHost" value="safe-core-fixture-pipecat.`, // the deployed agent name is compiled in
+		"YOUR_ORGANIZATION",                // the one substitution
+		"pipecat cloud organizations list", // where the one value comes from
 		// Which value, because the command prints several columns whose headings
 		// differ between CLI versions, and the wrong one is the most common way this
 		// route fails (2026-08-13, from a live attempt: the display name was pasted

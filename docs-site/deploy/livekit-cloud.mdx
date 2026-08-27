@@ -130,6 +130,28 @@ rule names the agent. It needs `jq` as well as `lk`, and running it again is
 safe. See [create the LiveKit records](/telephony/inbound-calls#create-the-livekit-records)
 for the detail, and [the Twilio setup](/telephony/twilio) for the carrier half.
 
+### Renaming the agent breaks that rule
+
+The dispatch rule names the worker by the exact string in
+[`name:`](/reference/agent-yaml#name) joined to the target, so changing either
+one leaves the rule pointing at a worker nobody registers. Calls to the number
+ring and nothing answers, and `lk agent status` still reads ready, because the
+agent is healthy and simply never dispatched.
+
+Re-running the script does not repair it. "Running it again is safe" means it
+reuses any rule that already names your trunk rather than creating a second one,
+and that is exactly why it skips the step you need. Delete the stale rule first:
+
+```sh
+lk sip dispatch list                  # find the rule whose agent is the old name
+lk sip dispatch delete <SDR_...>
+bash telephony-setup.sh
+```
+
+The agent itself needs nothing. `lk agent deploy` targets the id in
+`livekit.toml`, which `unmute compile` preserves across rebuilds, so the same
+agent re-registers under the new name.
+
 ## Verifying a phone route
 
 `lk agent status` reporting ready is not the finish line: see [a phone call is

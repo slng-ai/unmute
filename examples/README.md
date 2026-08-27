@@ -28,6 +28,13 @@ provider request and a human conversation, not only the automated checks.
 [telephony overview](../docs-site/telephony/overview.mdx) explains the routes
 each platform offers and which one to pick.
 
+Every package here states a `name:`, which is required, and every deployment is
+named after it: `simple-prompt` on a target called `livekit` registers a worker
+called `simple-prompt-livekit`. Copy a package and you are copying its name, so
+rename it before you deploy, or your deploy lands on top of the one already
+there. [The `name` reference](../docs-site/reference/agent-yaml.mdx) has the
+whole rule.
+
 ## Compile an example
 
 Build the CLI, then validate and compile both code targets for a package.

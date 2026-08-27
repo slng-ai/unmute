@@ -1,5 +1,13 @@
 # One agent delegates three ordered appointment tasks with shared context.
 version: 1
+
+# What this agent is called where it is deployed. The deployed name is this
+# joined to the target it was compiled for, so one package with two targets
+# of the same provider does not deploy one name twice. Required on every
+# target: the two names unmute could infer instead are not identities,
+# because every package calls its target after the platform, and the folder
+# is named by whoever cloned the repository.
+name: task-groups
 entry_agent: appointment_desk
 
 secrets:

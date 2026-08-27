@@ -31,10 +31,11 @@ this page exists.
 tools and everything interesting happens to them.
 
 <Note>
-Both examples name their target instance `slng`, and today an agent's name on
-SLNG **is** its target instance name. So deploying both writes the same agent:
-the second replaces the first. Deploy one, or rename one target instance, or pass
-`--agent-id` to write a specific agent.
+Both examples name their target instance `slng`, and both deploy happily side by
+side: an agent's name is the package's [`name:`](/reference/agent-yaml#name)
+joined to the target, so they push `acme-support-slng` and `acme-orders-slng`.
+Copy a package without changing its `name:` and you get the old behaviour back:
+one live agent, written by whichever you deployed last.
 </Note>
 
 ## Why the package is shorter here
@@ -339,7 +340,7 @@ agent is **overwritten**.
 `--dry-run` names both before anything happens:
 
 ```text
-slng: agent slng — update
+slng: agent acme-orders-slng — update
 slng: reference end_call (existing attachment)
 slng: would detach refund, which this package no longer names
 slng: would overwrite system_prompt, which differs from what the agent has now
@@ -347,8 +348,9 @@ slng: dry run, nothing was created or changed
 ```
 
 A run that reports `update` when you expected `create` means an agent of that
-name already exists. `unmute deploy` warns when that happens, and `--agent-id`
-picks a different one.
+name already exists. `unmute deploy` warns when that happens, naming the agent
+it is about to replace; change `name:` in `agent.yaml`, or pass `--agent-id` to
+write a specific one.
 
 A push that changes nothing writes no version and does not relabel the previous
 one, so re-running a deploy is safe and cheap.

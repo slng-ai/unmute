@@ -185,10 +185,15 @@ func buildSlng(agent *ir.Agent, tgt ir.Target) (slngArtifacts, error) {
 	entry := agent.Agents[agent.EntryAgent]
 	built := slngArtifacts{Body: slngBody{
 		SchemaVersion: slngSchemaVersion,
-		Name:          tgt.Name,
-		SystemPrompt:  entry.Instructions,
-		Region:        slngTargetRegion(tgt),
-		ToolMode:      slngToolMode,
+		// The package's name joined to the target instance, never the target
+		// instance alone. Every package that follows the docs calls its slng target
+		// `slng`, and an SLNG name is unique per organisation, so naming the agent
+		// after the target made every package in an organisation claim one live
+		// agent. ir.Build refuses a package with no name, so this is never bare.
+		Name:         agent.DeployName(tgt),
+		SystemPrompt: entry.Instructions,
+		Region:       slngTargetRegion(tgt),
+		ToolMode:     slngToolMode,
 		// Not omitempty and not nil: SLNG's create default for runtime_variables
 		// differs from the document's, and nothing in a package maps to it, so an
 		// explicit empty list says "none" rather than "unspecified".

@@ -172,3 +172,51 @@ func TestConsoleActionUsesCommandPaths(t *testing.T) {
 		t.Fatalf("unknown action error = %v", err)
 	}
 }
+
+// `unmute init` writes no `name:` it had to guess at, so a folder that cannot be
+// one is refused before anything is written, and refused with a message about
+// the argument the author typed rather than about a field they never wrote.
+func TestInitRefusesAFolderThatCannotBeAnAgentName(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "it")
+	cmd := newRootCmd()
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetArgs([]string{"init", dir})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("init wrote a package whose name it could not derive")
+	}
+	for _, want := range []string{`"it" cannot be an agent name`, "3 to 64 characters", "add a `name:`"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal does not contain %q: %v", want, err)
+		}
+	}
+	if _, statErr := os.Stat(dir); statErr == nil {
+		t.Error("init refused and still created the directory")
+	}
+}
+
+// The usual case: a folder becomes a legal name, and the package it writes is
+// one the compiler accepts.
+func TestInitWritesAPackageThatValidates(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "Acme_Support")
+	cmd := newRootCmd()
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetArgs([]string{"init", dir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(filepath.Join(dir, "agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(written), "name: acme-support\n") {
+		t.Errorf("agent.yaml does not carry the name derived from the folder:\n%s", written)
+	}
+	if _, _, err := loadPackage(dir, nil); err != nil {
+		t.Errorf("the scaffolded package does not build: %v", err)
+	}
+}

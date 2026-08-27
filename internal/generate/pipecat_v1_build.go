@@ -37,8 +37,10 @@ func regionList(region string) []string {
 // selects the Pipecat service class and api-key env (C11).
 func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	data := pipecatData{
-		Project: target.Name,
-		Version: target.Version,
+		Project:   agent.Name,
+		Target:    target.Name,
+		AgentName: agent.DeployName(target),
+		Version:   target.Version,
 		// At most one region reaches this driver: a list of several is a gated
 		// validation error (FieldDeploymentMultiRegion), which runs before any
 		// artifact exists.
@@ -252,7 +254,10 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	// healthy and fails on its first call. A package needing no environment at
 	// all gets no set and deploys without one.
 	if len(data.RequiredEnv) > 0 {
-		data.SecretSet = data.Project + "-secrets"
+		// Named after the deployed agent, not the project label: a secret set is
+		// per-organisation on Pipecat Cloud in the same way an agent name is, so
+		// two packages sharing a label would share one set of credentials.
+		data.SecretSet = data.AgentName + "-secrets"
 	}
 	return data, nil
 }
