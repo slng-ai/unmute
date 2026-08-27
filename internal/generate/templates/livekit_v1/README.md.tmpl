@@ -377,6 +377,48 @@ form:
 base64 < service-account.json | tr -d '\n'
 ```
 {{end}}
+
+### Params and the prompt directive
+
+{{if .Slng.BodyParams}}Params on a router think binding travel **in the request body**, on both targets, and the router forwards keys it does not recognise to
+the upstream. This project sends:
+
+```
+{{range .Slng.BodyParams}}{{.}}
+{{end}}```
+
+`world_part_override` never reaches the upstream: this compiler consumes it into
+the router's regional base URL, and the line above says so. Everything else is
+passthrough, and the compiler does not know what any of it means, so it cannot
+tell you what the upstream will do with a value. If a value is wrong, the upstream says so and the
+router relays the message intact, with its status code.
+
+Constructor kwargs used to be where these went on LiveKit, and that is worth
+knowing if you are reading an older project: a key the plugin's constructor had
+never heard of was a `TypeError` at startup rather than a compile-time refusal.
+The body takes any key.
+
+{{else}}This project's router bindings send no forwardable params. Params on a router
+think binding would travel in the request body, on both targets, and the router
+forwards keys it does not recognise to the upstream.
+
+{{end}}{{if .Slng.PromptSuffix}}An authored `prompt_suffix` is appended to **every
+system prompt this binding sends**, separated by a blank line. This project
+appends:
+
+```
+{{range .Slng.PromptSuffix}}{{.}}
+{{end}}```
+
+It reaches every agent's prompt, every task's prompt on that binding's profile, and
+{{if .NeedsSummarize}}the summarizer's prompt{{else}}the summarizer's prompt where
+one is emitted{{end}}. You can read it in the `*_PROMPT` constants in the module
+beside this file, which is the point of putting it there: a directive you cannot
+see is a directive you cannot check.
+
+It is literal text and the compiler attaches no meaning to it. It exists because
+some models take instructions no parameter carries.
+{{end}}
 ### Reading the response
 
 **Every think request logs one line saying where its answer came from**, at info
@@ -418,7 +460,8 @@ off the stream.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| every tool turn returns 400, `Function tools with reasoning_effort are not supported` | the reasoning models in the GPT-5 family reject function tools on chat completions without it | set `params.reasoning_effort: "none"` on the think binding |
+| every tool turn returns 400, `Function tools with reasoning_effort are not supported` | the reasoning models in the GPT-5 family reject function tools on chat completions without it | set `params.reasoning_effort: "none"` on the think binding. **Only that family**: on an OpenAI-compatible upstream the same param can itself be what the host answers with a 400 |
+| a 4xx naming providers, models or a param you authored | the upstream refused a passthrough param, and the router relayed its message | read the message: it comes from the upstream and names what it accepts. The compiler does not validate a passthrough param, so this is where a wrong one surfaces |
 | every think request returns 400, `cannot be resolved: no org config found` | the request reached the router without its inline configuration | this agent always sends it, so the body was stripped or malformed in transit |
 | 400 starting `invalid slng_config:` | a malformed inline configuration | the message names the failing field; credentials are never echoed back |
 | 400 `inline slng_config is not enabled` | inline configuration is off for the organisation | ask your SLNG contact to enable it |

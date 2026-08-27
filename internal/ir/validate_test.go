@@ -2556,6 +2556,29 @@ func TestValidateSlngRouterWarnsOnToolsWithoutReasoningEffort(t *testing.T) {
 	if got := strings.Join(report.PerTarget[0].Warnings, "\n"); strings.Contains(got, "reasoning_effort") {
 		t.Errorf("warned about a param that is set:\n%s", got)
 	}
+	// And nothing to say on an upstream that does not serve OpenAI's models,
+	// where the advice is not merely unnecessary but wrong: qwen/qwen3-32b on
+	// Nebius answers reasoning_effort with a 400 (measured 2026-08-27). Firing
+	// here would tell every OpenRouter author, on every compile, to set the one
+	// param that breaks their agent.
+	compat := routerAgent(t, func(def *packagespec.ModelDef) {
+		def.Params = map[string]any{"world_part_override": "eu"}
+		def.Upstream = &packagespec.Upstream{
+			Provider: "openai-compat",
+			URL:      "https://openrouter.ai/api/v1",
+			KeyEnv:   "OPENROUTER_API_KEY",
+		}
+	})
+	// The upstream credential has to be declared or a different gate refuses the
+	// package before this one gets a word in.
+	compat.Secrets = append(compat.Secrets, "OPENROUTER_API_KEY")
+	report, err = Validate(compat, []Target{targetFor(compat, ProviderPipecat)}, targetcap.Default())
+	if err != nil {
+		t.Fatalf("an openai-compat upstream must validate: %v %#v", err, report.PerTarget[0].Errors)
+	}
+	if got := strings.Join(report.PerTarget[0].Warnings, "\n"); strings.Contains(got, "reasoning_effort") {
+		t.Errorf("advised reasoning_effort on an upstream whose host answers it with a 400:\n%s", got)
+	}
 }
 
 // The one target-shaped limit this feature adds, gated because a rule with no
@@ -3084,5 +3107,115 @@ func TestValidateKnowledgeMinScore(t *testing.T) {
 				t.Errorf("min_score %g: warning must contain %q, got:\n%s", score, want, joined)
 			}
 		}
+	}
+}
+
+// Every refusal prompt_suffix carries, each asserting on the reason and not only
+// on the failure. A refusal that does not say what to do instead is a dead end,
+// and the constitution asks for the reason by name.
+func TestValidatePromptSuffixRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		kind   ModelKind
+		value  string
+		reason string
+	}{
+		{
+			name: "a speak binding has no system prompt to append to",
+			kind: KindSpeak, value: "/no_think",
+			reason: "only a think model sends",
+		},
+		{
+			name: "a listen binding has none either",
+			kind: KindListen, value: "/no_think",
+			reason: "only a think model sends",
+		},
+		{
+			name: "empty is a typo, and absent is how you mean off",
+			kind: KindThink, value: "   ",
+			reason: "leave the key out to mean off",
+		},
+		{
+			name: "past the bound it stops being a suffix",
+			kind: KindThink, value: strings.Repeat("x", PromptSuffixMaxLen+1),
+			reason: "not a second prompt",
+		},
+		{
+			name: "a placeholder would be sent with no value",
+			kind: KindThink, value: "Answer as {{caller_alias}}.",
+			reason: "422",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := strings.Join(promptSuffixErrors("probe", ModelDef{Kind: tc.kind, PromptSuffix: tc.value}), "\n")
+			if got == "" {
+				t.Fatalf("accepted prompt_suffix %q on a %s model", tc.value, tc.kind)
+			}
+			if !strings.Contains(got, tc.reason) {
+				t.Errorf("the refusal does not say %q:\n%s", tc.reason, got)
+			}
+		})
+	}
+	// And the shape that is fine, so the rules above are not simply refusing
+	// everything.
+	if got := promptSuffixErrors("probe", ModelDef{Kind: KindThink, PromptSuffix: "/no_think"}); got != nil {
+		t.Errorf("refused a legal directive: %v", got)
+	}
+	if got := promptSuffixErrors("probe", ModelDef{Kind: KindSpeak}); got != nil {
+		t.Errorf("refused a binding that authors no directive: %v", got)
+	}
+}
+
+// Off the router it works, so it warns rather than refusing. It is only prompt
+// text, and an author may well have meant it; but the reason the field exists is
+// a router-served model whose thinking no parameter reaches, so it is worth
+// saying out loud.
+func TestValidatePromptSuffixWarnsOffTheRouter(t *testing.T) {
+	agent := routerAgent(t, func(def *packagespec.ModelDef) {
+		def.Provider = "openai"
+		def.Model = "gpt-4o"
+		def.AgentID = ""
+		def.Upstream = nil
+		def.Params = nil
+		def.PromptSuffix = "/no_think"
+	})
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	if err != nil {
+		t.Fatalf("an off-router directive must warn, never fail: %v %#v", err, report.PerTarget[0].Errors)
+	}
+	warnings := strings.Join(report.PerTarget[0].Warnings, "\n")
+	if !strings.Contains(warnings, "prompt_suffix") || !strings.Contains(warnings, "Check you meant this binding") {
+		t.Errorf("the warning does not name the field or say what to check:\n%s", warnings)
+	}
+}
+
+// A per-target override cannot name a different directive, because the prompts it
+// would apply to are markdown files every target shares. Refused with the reason,
+// rather than resolved to whichever target was walked last.
+func TestValidatePromptSuffixCannotDifferPerTarget(t *testing.T) {
+	agent := routerAgent(t, func(def *packagespec.ModelDef) {
+		def.PromptSuffix = "/no_think"
+	})
+	// The override arrives already resolved, so this is the shape Build would have
+	// produced from a targets.yaml naming a second value.
+	resolved := targetFor(agent, ProviderPipecat)
+	binding := resolved.Models.Reason["fast_reasoning"]
+	binding.PromptSuffix = "/think"
+	resolved.Models.Reason["fast_reasoning"] = binding
+
+	report, _ := Validate(agent, []Target{resolved}, targetcap.Default())
+	errors := strings.Join(report.PerTarget[0].Errors, "\n")
+	if !strings.Contains(errors, "cannot differ per target") {
+		t.Errorf("a divergent override was not refused with its reason:\n%s", errors)
+	}
+	// An override that leaves the field alone is carried forward by Build, so the
+	// agreeing case must stay silent. A fresh build, because the mutation above
+	// wrote into a map the target shares with the one it came from.
+	agreeing := routerAgent(t, func(def *packagespec.ModelDef) {
+		def.PromptSuffix = "/no_think"
+	})
+	report, _ = Validate(agreeing, []Target{targetFor(agreeing, ProviderPipecat)}, targetcap.Default())
+	if got := strings.Join(report.PerTarget[0].Errors, "\n"); strings.Contains(got, "prompt_suffix") {
+		t.Errorf("refused an override that agrees with the package:\n%s", got)
 	}
 }

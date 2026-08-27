@@ -1495,7 +1495,7 @@ func pipecatRuntimeBody(agent *ir.Agent, tgt ir.Target, profile string) string {
 		Names:      names,
 		ConfigFunc: slngConfigFunc(profile),
 	}
-	return pyLiteral(slngRequestBody(site, slngPureProxy(tgt.Models.Reason[profile])))
+	return pyLiteral(slngRequestBody(site, tgt.Models.Reason[profile]))
 }
 
 // pipecatRuntimeStateExpr is the call state inside an agent method, where the

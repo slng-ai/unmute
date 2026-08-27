@@ -1226,7 +1226,25 @@ func validateSlngRouter(agent *Agent, resolved Target, row *TargetValidation) {
 	var routers []string
 	for _, name := range slices.Sorted(maps.Keys(resolved.Models.Reason)) {
 		binding := resolved.Models.Reason[name]
+		// An instructions file is package-level, so the directive appended to it is
+		// too: Build applies the base binding's suffix once, to prompts every target
+		// shares. A target override naming a different one is asking for two
+		// different prompts out of one markdown file, which nothing downstream can
+		// deliver, so it is refused rather than resolved to whichever won.
+		if base := agent.Models[name].PromptSuffix; binding.PromptSuffix != base {
+			row.Errors = add(row.Errors, fmt.Sprintf(
+				"think.%s overrides prompt_suffix with %q where the package authors %q: the directive is appended to instructions files every target shares, so it cannot differ per target. Put one value on the base binding, or split the package",
+				name, binding.PromptSuffix, base))
+		}
 		if !binding.Router() {
+			// It works here — it is only prompt text — but the reason the field
+			// exists is a router-served model whose thinking no parameter turns
+			// off, so an author who set it elsewhere may have meant something else.
+			if binding.PromptSuffix != "" {
+				row.Warnings = add(row.Warnings, fmt.Sprintf(
+					"think.%s sets prompt_suffix on a provider %q binding: it will be appended to every prompt as written, which works, but the field exists for a model whose own prompt directive is the only way to reach it. Check you meant this binding",
+					name, binding.Provider))
+			}
 			// Both fields are the router's. A field with no slot is refused
 			// rather than dropped, the same as every other slotless field.
 			if binding.AgentID != "" {
@@ -1475,11 +1493,26 @@ func slngUpstreamErrors(agent *Agent, profile string, binding Binding) []string 
 // slngReasoningEffortWarning holds FR-037: a warning, never a refusal, because
 // the compiler cannot know the upstream model family for certain. Warnings go to
 // stderr and keep exit 0, so it never hides a downgrade.
+//
+// Scoped to upstreams that serve OpenAI's own models, because the advice is only
+// true there. On an openai-compat upstream it fired on every compile telling the
+// author to set a parameter the host answers with a 400 (qwen/qwen3-32b on
+// Nebius, measured 2026-08-27), and a warning nobody can act on is how the ones
+// they should act on come to be scrolled past.
 func slngReasoningEffortWarning(agent *Agent, profile string, binding Binding) string {
 	if _, set := binding.Params["reasoning_effort"]; set {
 		return ""
 	}
 	if !slngProfileHasTools(agent, profile) {
+		return ""
+	}
+	// An absent upstream block is the openai default, which is the row this
+	// advice was measured on, so an unnamed provider still warns.
+	provider := "openai"
+	if binding.Upstream != nil && binding.Upstream.Provider != "" {
+		provider = binding.Upstream.Provider
+	}
+	if upstream, ok := targetcap.SlngUpstreamByName(provider); ok && !upstream.OpenAIModels {
 		return ""
 	}
 	return fmt.Sprintf(
@@ -2659,6 +2692,47 @@ func validateDuration(name string, value Duration) []string {
 	return nil
 }
 
+// PromptSuffixMaxLen bounds the authored directive. It is a suffix, not a second
+// prompt: a value this long is not something anyone meant to type, and past it
+// the field stops being legible as the one line it is.
+const PromptSuffixMaxLen = 512
+
+// promptSuffixErrors holds the field's own rules. Each one exists because of a
+// specific way the field goes wrong, and every refusal names what to do instead.
+func promptSuffixErrors(name string, model ModelDef) []string {
+	if model.PromptSuffix == "" {
+		return nil
+	}
+	var errors []string
+	// It appends to a system prompt. A listen, speak or turn binding has none, so
+	// an authored value there does nothing at all, and a field that silently does
+	// nothing is what Principle II exists to prevent.
+	if model.Kind != KindThink {
+		return add(errors, fmt.Sprintf(
+			"model %q is a %s model; prompt_suffix appends to a system prompt, which only a think model sends. Move it to the think binding those prompts run on",
+			name, model.Kind))
+	}
+	if strings.TrimSpace(model.PromptSuffix) == "" {
+		errors = add(errors, fmt.Sprintf(
+			"model %q prompt_suffix is empty or whitespace: leave the key out to mean off, so a typo cannot read as a deliberate blank",
+			name))
+	}
+	if len(model.PromptSuffix) > PromptSuffixMaxLen {
+		errors = add(errors, fmt.Sprintf(
+			"model %q prompt_suffix is %d characters and the bound is %d: it is a directive appended to every prompt this binding sends, not a second prompt. Put the wording in the instructions file",
+			name, len(model.PromptSuffix), PromptSuffixMaxLen))
+	}
+	// The router substitutes placeholders from a variable snapshot it is handed.
+	// One arriving from a suffix rather than from an authored prompt would be sent
+	// with no value, and the router answers that with a 422 that ends the call.
+	if templatePattern.MatchString(model.PromptSuffix) {
+		errors = add(errors, fmt.Sprintf(
+			"model %q prompt_suffix contains a {{...}} placeholder: the router is given a snapshot of the names the prompts reference, this name would not be in it, and the request comes back 422 mid-call. Use literal text",
+			name))
+	}
+	return errors
+}
+
 // validateModelKind field-checks a model against its section kind (V22).
 func validateModelKind(name string, model ModelDef) []string {
 	var errors []string
@@ -2687,6 +2761,7 @@ func validateModelKind(name string, model ModelDef) []string {
 			errors = append(errors, validateDuration(fmt.Sprintf("model %q endpointing_delay", name), model.EndpointingDelay)...)
 		}
 	}
+	errors = append(errors, promptSuffixErrors(name, model)...)
 	if model.SemanticEndpointing != "" {
 		if model.Kind != KindTurn {
 			errors = add(errors, fmt.Sprintf("model %q semantic_endpointing is a turn-model field", name))

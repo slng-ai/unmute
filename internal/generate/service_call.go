@@ -3,7 +3,6 @@ package generate
 import (
 	"cmp"
 	"fmt"
-	"maps"
 
 	"github.com/slng-ai/unmute/internal/ir"
 	targetcap "github.com/slng-ai/unmute/internal/target"
@@ -46,12 +45,18 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 
 	// A router think binding consumes params.world_part_override into the base
 	// URL, so it must not also reach the client as a kwarg the SDK never heard
-	// of. binding is a value, so this is local to the call being built (D2).
+	// of (D2).
+	//
+	// The filtered map is a local rather than a write back onto binding.Params,
+	// because slngRequestBody reads the pure-proxy switch and the forwardable
+	// params off the binding itself. Handing it a binding whose params had
+	// already been consumed here is how the switch would silently stop being
+	// sent.
 	router := role == targetcap.Reason && binding.Router()
 	region := slngRegion(binding)
-	pureProxy := slngPureProxy(binding)
+	params := binding.Params
 	if router {
-		binding.Params = slngConsumedParams(binding.Params)
+		params = slngConsumedParams(params)
 	}
 
 	vendor := binding.Provider
@@ -149,7 +154,7 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 		}
 		// A target-specific param is an explicit integration override; avoid
 		// emitting the same Python kwarg twice.
-		if _, overridden := binding.Params[spec.Language.Arg]; !overridden {
+		if _, overridden := params[spec.Language.Arg]; !overridden {
 			nested(pyKV{Key: spec.Language.Arg, Value: pyQuote(binding.Language)})
 		}
 	}
@@ -158,25 +163,30 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 	}
 	switch spec.Params {
 	case targetcap.ParamsExtraKwargs:
-		if len(binding.Params) > 0 {
-			flat(pyKV{Key: "extra_kwargs", Value: pyLiteral(binding.Params)})
+		if len(params) > 0 {
+			flat(pyKV{Key: "extra_kwargs", Value: pyLiteral(params)})
 		}
 	default: // kwargs and settings: one kwarg per param, sorted
-		fields, overflow := splitParams(binding.Params, spec.SettingsOverflow)
+		// A router binding's forwardable params ride the request body
+		// (target.SlngRequestBodyArg), so on the router they split out of the
+		// construction whether or not this entry has a Settings overflow field of
+		// its own. slngRequestBody is what picks them up, which is why the split
+		// half is dropped here rather than sent a second time.
+		overflowArg := spec.SettingsOverflow
+		if router {
+			overflowArg = targetcap.SlngRequestBodyArg
+		}
+		fields, overflow := splitParams(params, overflowArg)
 		if router {
 			// Pipecat merges Settings.extra into the request params, so the two
 			// dicts ride there; LiveKit takes them as constructor kwargs. Either
 			// way they reach the same place in the request.
-			extras := slngRequestExtras(site, pureProxy)
-			if spec.SettingsOverflow != "" {
-				if overflow == nil {
-					overflow = make(map[string]any, len(extras))
-				}
-				maps.Copy(overflow, extras)
-			} else {
-				for _, kv := range forwardParams(extras) {
+			overflow = slngRequestExtras(site, binding)
+			if spec.SettingsOverflow == "" {
+				for _, kv := range forwardParams(overflow) {
 					flat(kv)
 				}
+				overflow = nil
 			}
 		}
 		for _, kv := range forwardParams(fields) {

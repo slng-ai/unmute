@@ -393,7 +393,7 @@ async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
             },
             # Rebuilt for every request, which is the point: a value this call
             # learns partway through reaches the model from the next turn on.
-            "extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(session.userdata, ("caller_alias", "customer_id"))},
+            "extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(session.userdata, ("caller_alias", "customer_id"))},
         },
     ) as stream:
         async for chunk in stream:
@@ -814,7 +814,7 @@ async def entrypoint(ctx: JobContext) -> None:
     session = AgentSession[Userdata](
         userdata=slng_state,
         stt=deepgram.STT(api_key=os.environ["DEEPGRAM_API_KEY"], model="nova-3"),
-        llm=openai.LLM(client=slng_state.slng_client, model="gpt-5.6-luna", reasoning_effort="none"),
+        llm=openai.LLM(client=slng_state.slng_client, model="gpt-5.6-luna"),
         tts=elevenlabs.TTS(api_key=os.environ["ELEVEN_API_KEY"], voice_id="cgSgspJ2msm6clMCkdW9"),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(version="v1-mini"),

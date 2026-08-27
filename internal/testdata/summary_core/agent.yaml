@@ -1,0 +1,131 @@
+# The history: summary fixture, and the only package in the tree that authors it.
+#
+# It exists for one reason: a handoff that summarizes is the one prompt site
+# ir.Build cannot reach. Every agent and task prompt comes from a markdown file
+# the author wrote, so Build appends a think binding's prompt_suffix to it
+# directly. The summarizer's prompt is a literal in the LiveKit driver's own
+# template, so it takes the value carried through to the template instead, and a
+# rule with no gate is a wish.
+#
+# One router think profile, both agents on it. Not two, because ir.Validate holds
+# every router think profile in a LiveKit package to being the entry agent's, so
+# two is not a shape a package can have.
+
+version: 1
+entry_agent: intake
+
+# Every model is defined once, here, in the central map grouped by kind (N15):
+# think (LLM), speak (TTS), listen (STT), turn (VAD). Agents reference think
+# and speak by name; listen/turn select themselves when their section has one
+# entry. targets.yaml only overrides an entry a target cannot run as-is.
+secrets:
+  - OPENROUTER_API_KEY
+  - SLNG_API_KEY
+
+models:
+  think:
+    reasoning:
+      description: answers the caller, and summarizes on a handoff
+      provider: slng
+      model: qwen/qwen3-32b
+      agent_id: summary-core-v1
+      # The whole point of this fixture. It has to reach three prompts: both
+      # agents' instructions files, and the summarizer literal in the driver's
+      # own template.
+      prompt_suffix: "/no_think"
+      upstream:
+        provider: openai-compat
+        url: https://openrouter.ai/api/v1
+        key_env: OPENROUTER_API_KEY
+      params:
+        world_part_override: eu
+  speak:
+    front_desk:
+      description: "warm, concise"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+    specialist:
+      description: "slower, more deliberate"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-orion-en"
+  listen:
+    transcriber:
+      description: default STT; targets that cannot run it override the entry
+      provider: deepgram
+      model: nova-3
+  turn:
+    vad:
+      description: end-of-turn preference; integrated targets warn and ignore it
+      provider: local
+      model: silero
+      semantic_endpointing: preferred
+
+variables:
+  customer_id:
+    type: string
+  verified:
+    type: boolean
+    default: false
+
+agents:
+  intake:
+    instructions: instructions.md
+    model: reasoning
+    voice: front_desk
+    tools:
+      - lookup_customer
+      - to_billing
+
+  billing:
+    instructions: agents/billing.md
+    model: reasoning
+    voice: specialist
+    tools:
+      - get_invoice
+
+controls:
+  to_billing:
+    kind: agent_transfer
+    to: billing
+    when: Caller asks about billing, an invoice, or a refund.
+    context:
+      # The reason this package exists: one summarizer turn replaces the running
+      # transcript, and that turn's prompt is the site Build cannot reach.
+      history: summary
+      summarizer: reasoning
+      variables: all
+
+tools:
+  - lookup_customer
+  - get_invoice
+
+conversation:
+  greeting:
+    speaks_first: agent
+    # Fixed opening: same words every call, works on all four targets.
+    # Leave `text` out to let the model write the opening from the prompt;
+    # that warns on Deepgram (SCHEMA.md 4.8).
+    text: "Hi, you have reached Acme Support. How can I help you today?"
+  interruption:
+    enabled: true
+    minimum_words: 2
+    ignore_phrases:   # warns on Deepgram (dropped)
+      - okay
+      - right
+      - uh-huh
+  inactivity:
+    nudge_after: 15s
+    end_after: 45s
+  max_duration: 20m
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 40
+  max_sessions: 60
+  peak_starts_per_second: 4
+  avg_session_duration: 6m

@@ -414,16 +414,21 @@ type livekitData struct {
 	// and so does a router package with none: the per-call session id lives on
 	// it, because the header set now travels per request and every agent and
 	// task class has to be able to reach the value from a method body.
-	HasUserdata      bool
-	NeedsLastN       bool // the _last_n history helper
-	NeedsSummarize   bool // the _summarize history helper
-	NeedsAsyncio     bool // inactivity end / max_duration timers
-	NeedsInspect     bool // local tool wrappers (isawaitable)
-	NeedsMCP         bool // mcp import (MCPServerHTTP)
-	NeedsEndCallTool bool // beta.tools EndCallTool import (prebuilt end_call)
-	HasColdTransfer  bool // get_job_context import
-	HasWarmTransfer  bool // WarmTransferTask import + trunk env + room_options (B14)
-	HasTaskTransfers bool // _TaskTransfer sentinel + task delegate catch paths
+	HasUserdata    bool
+	NeedsLastN     bool // the _last_n history helper
+	NeedsSummarize bool // the _summarize history helper
+	// SummaryPromptSuffix is the authored directive the summarizer's own think
+	// binding appends. The summarizer prompt is one literal shared by every
+	// summarizer site, so this is one value; slngSummaryPromptSuffix refuses a
+	// package whose summarizer profiles disagree rather than picking one.
+	SummaryPromptSuffix string
+	NeedsAsyncio        bool // inactivity end / max_duration timers
+	NeedsInspect        bool // local tool wrappers (isawaitable)
+	NeedsMCP            bool // mcp import (MCPServerHTTP)
+	NeedsEndCallTool    bool // beta.tools EndCallTool import (prebuilt end_call)
+	HasColdTransfer     bool // get_job_context import
+	HasWarmTransfer     bool // WarmTransferTask import + trunk env + room_options (B14)
+	HasTaskTransfers    bool // _TaskTransfer sentinel + task delegate catch paths
 	// HasToolAnnouncements gates the README section only: the emitted speech is
 	// per-tool and needs no import, so nothing in agent.py reads this.
 	HasToolAnnouncements bool

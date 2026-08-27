@@ -383,7 +383,7 @@ def build_billing_llm(state=None, *, slng_session_id):
         settings=OpenAILLMService.Settings(
             model="gpt-5.6-luna",
             system_instruction=BILLING_PROMPT,
-            extra={"extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(state, ("caller_alias", "customer_id"))}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:billing", "X-Slng-Session-Id": slng_session_id}, "reasoning_effort": "none"},
+            extra={"extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(state, ("caller_alias", "customer_id"))}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:billing", "X-Slng-Session-Id": slng_session_id}},
         ),
     )
 
@@ -429,7 +429,7 @@ class BillingAgent(LLMWorker):
             # placeholders, so the value has to reach it before the next turn
             # asks. Body only, so the speaking site's cache scope stays put.
             await self.queue_frame(LLMUpdateSettingsFrame(
-                delta=LLMSettings(extra={"extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(self.state, ("caller_alias", "customer_id"))}}),
+                delta=LLMSettings(extra={"extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(self.state, ("caller_alias", "customer_id"))}}),
             ))
         await params.result_callback({"saved": saved})
 
@@ -459,7 +459,7 @@ def build_intake_llm(state=None, *, slng_session_id):
         settings=OpenAILLMService.Settings(
             model="gpt-5.6-luna",
             system_instruction=INTAKE_PROMPT,
-            extra={"extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(state, ("caller_alias", "customer_id"))}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": slng_session_id}, "reasoning_effort": "none"},
+            extra={"extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(state, ("caller_alias", "customer_id"))}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": slng_session_id}},
         ),
     )
 
@@ -522,7 +522,7 @@ class IntakeAgent(LLMWorker):
             # placeholders, so the value has to reach it before the next turn
             # asks. Body only, so the speaking site's cache scope stays put.
             await self.queue_frame(LLMUpdateSettingsFrame(
-                delta=LLMSettings(extra={"extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(self.state, ("caller_alias", "customer_id"))}}),
+                delta=LLMSettings(extra={"extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(self.state, ("caller_alias", "customer_id"))}}),
             ))
         await params.result_callback({"saved": saved})
 

@@ -259,6 +259,14 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		}
 	}
 
+	if data.NeedsSummarize {
+		suffix, err := summaryPromptSuffix(agent)
+		if err != nil {
+			return livekitData{}, err
+		}
+		data.SummaryPromptSuffix = suffix
+	}
+
 	// F3: a lone agent that is never a handoff target needs no chat_ctx plumbing
 	// (the canonical single-agent shape is Agent(instructions=...)). Drop the
 	// ctor param plus the NOT_GIVEN/NotGivenOr imports that only feed it. The llm
@@ -417,7 +425,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	if profile, router := slngRouterBinding(agent, tgt, agent.Agents[agent.EntryAgent].Model); router {
 		binding := tgt.Models.Reason[profile]
 		site := livekitSlngSite(agent, tgt, profile)
-		data.Slng.RequestBody = pyLiteral(slngRequestBody(site, slngPureProxy(binding)))
+		data.Slng.RequestBody = pyLiteral(slngRequestBody(site, binding))
 		// This target builds its own client, because attaching a response hook is
 		// the only way to see the router's provenance headers and the plugin gives
 		// no other seam. So the two values it would have passed to the client it

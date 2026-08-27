@@ -171,6 +171,20 @@ authored on the **target override** if the package has one, because a target's
 `params:` block replaces the base block rather than merging into it. A param
 authored in the wrong place is discarded with no warning.
 
+**Check that the model honours a parameter at all before relying on one.** Not
+every model's thinking can be turned off that way, and a parameter that is
+accepted and ignored looks identical to one that worked. `qwen/qwen3-32b` ignored
+three spellings across three hosts (2026-08-27, nine requests) and answers only to
+its own `/no_think` directive in the prompt. For a model like that, use
+`prompt_suffix` on the think entry, which the compiler appends to every system
+prompt that binding sends. It is prompt text, so it works wherever the model reads
+its instructions, and you can read what it did in the emitted `*_PROMPT`
+constants.
+
+Read the number, not the setting. `usage.completion_tokens_details.reasoning_tokens`
+on a live response is what says whether thinking is actually off: 0 or 1 means it
+is, and a figure in the hundreds means whatever you set was ignored.
+
 ### 6. Speak before a tool runs
 
 The tool is usually not the wait — a local handler returns in milliseconds. The

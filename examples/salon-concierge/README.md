@@ -30,6 +30,41 @@ trips a turn needs, not by cutting what the agent can do:
   each cost their own round trip to finish, and the mutation tools already
   refuse a write that is not confirmed, so the split bought no extra safety.
 
+### The reasoning model, and why it is this one
+
+Thinking runs on `gpt-5.6-luna` through the Context Router, on OpenAI's own
+endpoint. `params.reasoning_effort: "none"` is not optional here: the GPT-5 family
+rejects function tools on chat completions without it, and nearly every agent in
+this package has tools.
+
+**A cheaper, faster model was tried and reverted on 2026-08-27.** The trial is
+worth recording, because the reason it failed is not the reason anyone expects.
+
+`qwen/qwen3-32b` on OpenRouter is a fraction of the price and its thinking can be
+turned off, which looked like a straight latency win. On a live call it produced
+first tokens in about a second and then told a caller *"your appointment is all
+set"* when no booking tool had run at all. The booking task never executed: given a
+booking request, the model asked for the phone number itself instead of delegating
+to the verification step, improvised the rest of the flow, and reported success.
+
+Measured on this package's own prompt and its five concierge tool schemas, twelve
+repetitions each, scoring whether a multi-turn booking request reaches the
+verification delegate:
+
+| Model | Routing | p50 | p90 |
+|---|---|---|---|
+| **gpt-5.6-luna** | **12/12** | **1.08 s** | **1.15 s** |
+| qwen/qwen3.8-27b | 10/12 | 4.72 s | 5.66 s |
+| z-ai/glm-5.3-flash | 9/12 | 7.34 s | 8.55 s |
+| qwen/qwen3-32b | 4-8/12 | 1.30 s | 2.65 s |
+| deepseek/deepseek-v4-flash-0731 @ inceptron/fp4 | 2/12 | 0.95 s | 1.10 s |
+
+The last row is the whole lesson. It is the fastest thing on the list and the worst
+at the job. **If you are here to change the model, screen it on multi-turn tool
+routing before you look at latency**: neither time-to-first-token nor a single-turn
+tool call predicts whether an agent will follow a multi-step flow, and a model that
+improvises one will invent confirmations rather than refuse.
+
 ### One router cache scope per prompt
 
 Thinking goes through the SLNG Context Router, which can answer a repeated turn
@@ -273,8 +308,8 @@ Common values:
 
 | Name | Purpose |
 |---|---|
-| `OPENAI_API_KEY` | reasoning model, and the knowledge bases' embeddings at startup |
-| `SLNG_API_KEY` | speech and transcription models |
+| `OPENAI_API_KEY` | the reasoning model's upstream, and the knowledge bases' embeddings at startup |
+| `SLNG_API_KEY` | the Context Router, plus the speech and transcription models. One key, all three roles |
 | `COVAL_API_KEY` | Coval trace ingest |
 
 `MANAGER_PHONE_NUMBER` is the cold-transfer destination in E.164 form. It is

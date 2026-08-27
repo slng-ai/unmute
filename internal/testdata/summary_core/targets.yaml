@@ -1,0 +1,30 @@
+# LiveKit only, and not an omission: the Pipecat driver refuses history:
+# summary outright, and the summarizer prompt this fixture exists to check is
+# a literal in the LiveKit template, so there is nothing for a second target
+# here to hold.
+#
+# One instance per target.
+# Each instance carries provider/version plus
+# a `models:` override map, keyed by model name, for the
+# entries this target cannot run as defined in agent.yaml (N15). An override
+# replaces the whole entry; overrides are forwarded to the provider as-is and
+# never validated (SCHEMA.md, D10); secrets and URLs are env var names only.
+# Instances are named after the provider: what you test is what you deploy.
+
+targets:
+  livekit:
+    provider: livekit
+    version: "1.6.10"
+    sdk_language: python
+    models:
+      # override the vad entry: LiveKit runs its own turn model, not Silero
+      vad:
+        provider: livekit
+        model: turn-detector-mini
+        semantic_endpointing: preferred
+      front_desk:
+        provider: elevenlabs
+        voice: cgSgspJ2msm6clMCkdW9
+      specialist:
+        provider: elevenlabs
+        voice: EXAVITQu4vr4xnSDxMaL

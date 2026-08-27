@@ -253,7 +253,7 @@ async def _summarize(source: llm.ChatContext, summarizer: llm.LLM) -> llm.ChatCo
     prompt = llm.ChatContext()
     prompt.add_message(
         role="system",
-        content="Summarize this conversation for the agent taking over. Keep names, facts, and open commitments. Reply with the summary only.",
+        content="Summarize this conversation for the agent taking over. Keep names, facts, and open commitments. Reply with the summary only.{{if .SummaryPromptSuffix}}\n\n{{.SummaryPromptSuffix}}{{end}}",
     )
     prompt.add_message(role="user", content=transcript)
     parts: list[str] = []

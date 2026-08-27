@@ -170,12 +170,98 @@ Four things are required and none has a default:
   key, a different accepted set per role. The compiler consumes this into the
   base URL and names the substitution in the compile report.
 
-`params.reasoning_effort: "none"` is not optional once the agent has tools, for
-the same reason as a direct OpenAI binding above. The compiler warns rather than
-refusing, because it cannot know the upstream model family for certain.
+`params.reasoning_effort: "none"` is not optional once the agent has tools **when
+the upstream serves OpenAI's own models**, for the same reason as a direct OpenAI
+binding above. The compiler warns rather than refusing, and only on the `openai`
+and `azure` upstreams. Do not add it on an `openai-compat` upstream, and do not add
+it defensively: there it ranges from useless to fatal depending on the host. Measured
+on `qwen/qwen3-32b`, 2026-08-27: Nebius answers a request carrying it with a 400,
+Groq accepts it with a 200 and ignores it. Same model, same param, one loud failure
+and one silent one.
 
 `endpoint_env` has no slot on a router binding: the region owns the router URL and
 `upstream` owns the upstream one.
+
+### Everything else under `params:` rides the request body
+
+The compiler consumes two names — `world_part_override` becomes the router's base
+URL, `slng_pure_proxy` is the router's shadow-trial switch — and forwards the rest
+in the request body, on both targets. The router passes a key it does not
+recognise to the upstream.
+
+So `params:` is how a package reaches a provider-specific option Unmute has never
+heard of, and nothing checks it: a wrong value comes back as the upstream's own
+error. Nested values are fine, because the body is JSON:
+
+```yaml
+      params:
+        world_part_override: eu
+        provider:                     # forwarded to the router, and on to OpenRouter
+          only: ["groq"]
+```
+
+Two things to tell a user about a host pin like that one, because both bite:
+
+- **It pins one provider and gives up fall-back.** With `only` set, an unavailable
+  host is a 404 with the message intact rather than a quiet landing somewhere that
+  behaves differently. That is usually what you want on a phone call, and it is a
+  trade to name out loud.
+- **The context ceiling becomes the pinned host's**, not the figure the model card
+  advertises for the model as a whole. Same model, `qwen/qwen3-32b`: 131,072 on
+  Groq, 40,960 on Nebius.
+
+**Tell the user to measure the host, and to measure latency and tool-correctness
+separately.** Neither predicts the other, and a provider's published figures are
+aggregated over short prompts with no tools, so they will not match a voice agent.
+On `qwen/qwen3-32b`, measured 2026-08-27 with a real 1.8 KB prompt and four tool
+schemas: p50 spanned 564 ms to 1261 ms, p90 spanned 739 ms to 7.3 s, one host
+skipped the tool entirely and another spoke a fragment of its own tool-call
+template into the reply on every single turn. One sample per host is not enough to
+choose — it is how a usable host gets excluded and a broken one gets shipped.
+
+### `prompt_suffix`, when no parameter reaches the model
+
+Some models take instructions that only work as prompt text. `prompt_suffix` on a
+**think** entry is literal text the compiler appends to every system prompt that
+binding sends: each agent's, each task's on that binding's profile, and the
+summarizer's where one is emitted.
+
+```yaml
+  think:
+    reasoning:
+      provider: slng
+      model: qwen/qwen3-32b
+      agent_id: salon-concierge-v1
+      prompt_suffix: "/no_think"
+      upstream:
+        provider: openai-compat
+        url: https://openrouter.ai/api/v1
+        key_env: OPENROUTER_API_KEY
+```
+
+**Do not reach for a `reasoning` parameter to turn a model's thinking off before
+checking that model actually honours one.** On 2026-08-27 three spellings were
+sent to three hosts of `qwen/qwen3-32b`, nine requests: `reasoning: {enabled:
+false}`, `reasoning: {effort: "none"}`, `reasoning_effort: "none"`, and
+`chat_template_kwargs: {enable_thinking: false}`. Every one was accepted, and every
+one was ignored — hundreds of reasoning tokens each time. A parameter that is
+accepted and ignored looks exactly like one that worked, which is the trap. Qwen3's
+own `/no_think` directive in the prompt was the only thing that worked.
+
+Rules for the field:
+
+- **Think entries only.** It appends to a system prompt, so a `speak`, `listen` or
+  `turn` entry is refused.
+- **Literal text, no placeholders.** A `{{...}}` in it is refused: the router
+  substitutes placeholders from a snapshot of the names the *prompts* reference, so
+  one from a suffix would be sent with no value and come back 422 mid-call.
+- **512 characters.** It is a directive, not a second prompt.
+- **One value per package.** A per-target override cannot name a different one,
+  because it is appended to instructions files every target shares.
+- **It moves no cache scope.** Scopes come from names, never prompt content.
+  Retiring a cache is still only ever the version suffix on `agent_id`.
+- **The compiler attaches no meaning to it.** `/no_think` is just a string. Write
+  whatever directive the user's model documents.
 
 ### The upstream block
 

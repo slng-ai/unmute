@@ -226,8 +226,15 @@ type ModelDef struct {
 	// carried verbatim: the id scopes the router's cache and the block says
 	// which upstream serves the model. Neither folds into Params, because params
 	// reach the SDK verbatim and these two are consumed by the compiler.
-	AgentID     string         `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
-	Upstream    *Upstream      `json:"upstream,omitempty" yaml:"upstream,omitempty"`
+	AgentID  string    `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
+	Upstream *Upstream `json:"upstream,omitempty" yaml:"upstream,omitempty"`
+	// PromptSuffix is the authored directive this binding appends to every system
+	// prompt it sends. Carried verbatim like the two above, and for the same
+	// reason: it is consumed by the compiler, not forwarded to the SDK. Build
+	// applies it where instructions resolve, so by the time a driver reads an
+	// agent's Instructions the suffix is already part of them.
+	PromptSuffix string `json:"prompt_suffix,omitempty" yaml:"prompt_suffix,omitempty"`
+
 	Params      map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
 	Fallback    []string       `json:"fallback,omitempty" yaml:"fallback,omitempty"`
 	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
@@ -781,9 +788,13 @@ type Binding struct {
 	// floor on every turn's wait. Turn models only; LiveKit floors it at 250ms.
 	EndpointingDelay Duration `json:"endpointing_delay,omitempty" yaml:"endpointing_delay,omitempty"`
 	// AgentID and Upstream are set only on a SLNG Context Router think binding.
-	AgentID  string         `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
-	Upstream *Upstream      `json:"upstream,omitempty" yaml:"upstream,omitempty"`
-	Params   map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
+	AgentID  string    `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
+	Upstream *Upstream `json:"upstream,omitempty" yaml:"upstream,omitempty"`
+	// PromptSuffix is the directive Build has already appended to every prompt
+	// this binding serves. It is carried here so a report and a gate can name it;
+	// no driver needs to apply it, because the prompts arrive with it in them.
+	PromptSuffix string         `json:"prompt_suffix,omitempty" yaml:"prompt_suffix,omitempty"`
+	Params       map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
 }
 
 // Router reports whether this binding selects the SLNG Context Router, which is

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -120,7 +121,7 @@ func printContract(out io.Writer, name string, provider ir.Provider, notes gener
 				case "reasoning_effort":
 					suffix = " (lowered to reasoning.effort)"
 				}
-				fmt.Fprintf(out, "%s:   param %s=%v%s\n", name, p.Name, p.Value, suffix)
+				fmt.Fprintf(out, "%s:   param %s=%s%s\n", name, p.Name, paramValue(p.Value), suffix)
 			}
 			continue
 		}
@@ -138,15 +139,21 @@ func printContract(out io.Writer, name string, provider ir.Provider, notes gener
 					if p.Name == "world_part_override" {
 						suffix = " (consumed as the router base URL)"
 					}
-					fmt.Fprintf(out, "%s:   param %s=%v%s\n", name, p.Name, p.Value, suffix)
+					fmt.Fprintf(out, "%s:   param %s=%s%s\n", name, p.Name, paramValue(p.Value), suffix)
 				}
 				fmt.Fprintf(out, "%s:   upstream %s (sent inline in the request body)\n", name, upstreamSummary(fb.Binding))
+				if fb.Binding.PromptSuffix != "" {
+					fmt.Fprintf(out, "%s:   prompt_suffix %q (appended to every system prompt this binding sends)\n", name, fb.Binding.PromptSuffix)
+				}
 				continue
 			}
 		}
 		fmt.Fprintf(out, "%s: binding %s %s (forwarded as-is, not validated)\n", name, role, bindingSummary(fb.Binding))
+		if fb.Binding.PromptSuffix != "" {
+			fmt.Fprintf(out, "%s:   prompt_suffix %q (appended to every system prompt this binding sends)\n", name, fb.Binding.PromptSuffix)
+		}
 		for _, p := range fb.Params {
-			fmt.Fprintf(out, "%s:   param %s=%v\n", name, p.Name, p.Value)
+			fmt.Fprintf(out, "%s:   param %s=%s\n", name, p.Name, paramValue(p.Value))
 		}
 	}
 	for _, s := range notes.Sizing {
@@ -191,6 +198,23 @@ func upstreamSummary(b ir.Binding) string {
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// paramValue renders a forwarded param the way it leaves, which for anything
+// nested means JSON, because JSON is what the request body carries.
+//
+// %v prints a nested value as Go: a host pin reads `provider=map[only:[nebius]]`,
+// which matches neither what the author wrote nor what is sent, and this line is
+// their only compile-time view of it. Scalars are untouched, so the ordinary
+// param line reads exactly as it did.
+func paramValue(value any) string {
+	switch value.(type) {
+	case map[string]any, []any:
+		if encoded, err := json.Marshal(value); err == nil {
+			return string(encoded)
+		}
+	}
+	return fmt.Sprintf("%v", value)
 }
 
 // bindingSummary renders the forwarded identity fields of a binding for stdout.

@@ -14,6 +14,7 @@ variables:
       share it, and the turn stops caching with no error to notice.
 
 secrets:
+  # The reasoning model and the knowledge bases' embeddings both read this.
   - OPENAI_API_KEY
   - SLNG_API_KEY
   - COVAL_API_KEY
@@ -54,11 +55,18 @@ models:
     reasoning:
       provider: slng
       model: gpt-5.6-luna
+      # Back at -v8 on purpose. The instruction files never changed, so this
+      # package's prompts are byte-identical to what -v8's cache was written
+      # against, and it comes back warm. Do not reuse -v9: it holds
+      # qwen/qwen3-32b's answers from a trial that was reverted, and one of them
+      # was a booking confirmation for a booking that never happened.
       agent_id: optimized-salon-concierge-v8
       upstream:
         provider: openai
       params:
         world_part_override: eu
+        # Not optional once the agent has tools: the GPT-5 family rejects
+        # function tools on chat completions without it.
         reasoning_effort: "none"
   speak:
     voice:

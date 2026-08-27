@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -141,6 +142,18 @@ type slngHelpers struct {
 	AgentIDHeader   string
 	SessionIDHeader string
 	SessionIDField  string
+	// BodyParams is every forwardable param this package's router bindings send,
+	// as "profile: key=json" lines. The runbook names them rather than describing
+	// the rule, because a reader checking why a request went where it went wants to
+	// see the value they authored, in the form it leaves in.
+	//
+	// The compiler knows nothing about what any of them mean. That is the point of
+	// a passthrough param, and it is why the runbook can only say a param reached
+	// the upstream, never what the upstream will do about it.
+	BodyParams []string
+	// PromptSuffix is the authored directive appended to every system prompt, per
+	// profile, as "profile: value" lines. Empty on a package that authors none.
+	PromptSuffix []string
 	// Scopes is every cache scope this package sends, in agent order then task
 	// order. The emitted runbook prints the list rather than describing the rule,
 	// because a reader checking a log line wants to recognise the value they are
@@ -199,6 +212,19 @@ func slngHelpersFor(agent *ir.Agent, tgt ir.Target) (slngHelpers, error) {
 		}
 		if binding.Upstream != nil && binding.Upstream.Provider == "vertex" {
 			helpers.Vertex = true
+		}
+		_, params := splitParams(slngConsumedParams(binding.Params), targetcap.SlngRequestBodyArg)
+		for _, key := range slices.Sorted(maps.Keys(params)) {
+			encoded, err := json.Marshal(params[key])
+			if err != nil {
+				return slngHelpers{}, fmt.Errorf("think.%s param %s: %w", profile, key, err)
+			}
+			helpers.BodyParams = append(helpers.BodyParams,
+				fmt.Sprintf("%s: %s=%s", profile, key, encoded))
+		}
+		if binding.PromptSuffix != "" {
+			helpers.PromptSuffix = append(helpers.PromptSuffix,
+				fmt.Sprintf("%s: %s", profile, binding.PromptSuffix))
 		}
 	}
 	helpers.Scopes = slngPackageScopes(agent, tgt)
@@ -367,8 +393,8 @@ func slngClientArgs(args []pyKV, expr string) []pyKV {
 }
 
 // slngRequestBody is the body extension one router think request carries beyond
-// the prompt: the inline model configuration, the variable snapshot, and the
-// author's pure-proxy switch when it is on.
+// the prompt: the inline model configuration, the variable snapshot, the author's
+// pure-proxy switch when it is on, and the author's forwardable params.
 //
 // One owner, two readers, the same arrangement as the header dict below it. A
 // target that fixes the body at construction reads it through
@@ -376,15 +402,29 @@ func slngClientArgs(args []pyKV, expr string) []pyKV {
 // slngHelpers.RequestBody and writes it into its own request path. A second
 // spelling of this dict is how one of the two would come to send a stale
 // snapshot.
-func slngRequestBody(site slngSite, pureProxy bool) map[string]any {
+//
+// The params join what this dict owns rather than getting an assembly path of
+// their own, because target.SlngRequestBodyArg says the body is where a router
+// binding's params go on every target. It reads them off the binding instead of
+// taking them as an argument for the same reason it reads the pure-proxy switch
+// off it: a caller that had to remember to pass them is a caller that can forget.
+func slngRequestBody(site slngSite, binding ir.Binding) map[string]any {
 	body := map[string]any{"slng_config": pyExpr(site.ConfigFunc + "()")}
-	if pureProxy {
+	if slngPureProxy(binding) {
 		body[slngPureProxyParam] = true
 	}
 	if len(site.Names) > 0 {
 		body["template_variables"] = pyExpr(fmt.Sprintf("_slng_template_variables(%s, (%s))",
 			slngStateExpr(site.StateExpr), pyTuple(site.Names)))
 	}
+	// The folded fields stay out: they are unmute's own typed model fields, they
+	// name a real slot on every entry that has them, and moving them would change
+	// where a temperature travels on every router package for no reason. What
+	// lands here is what splitParams calls overflow, which is the author's
+	// provider-specific passthrough and the only kind the upstream, not the
+	// compiler, is meant to read.
+	_, params := splitParams(slngConsumedParams(binding.Params), targetcap.SlngRequestBodyArg)
+	maps.Copy(body, params)
 	return body
 }
 
@@ -398,15 +438,63 @@ func slngRequestBody(site slngSite, pureProxy bool) map[string]any {
 // silently win while the emitted per-request source still looked right. A
 // LiveKit router construction therefore carries no router extras at all, which
 // is what the gate in livekit_v1_test.go holds.
-func slngRequestExtras(site slngSite, pureProxy bool) map[string]any {
+func slngRequestExtras(site slngSite, binding ir.Binding) map[string]any {
 	extras := map[string]any{}
 	if !site.BodyPerRequest {
-		extras["extra_body"] = slngRequestBody(site, pureProxy)
+		extras[targetcap.SlngRequestBodyArg] = slngRequestBody(site, binding)
 	}
 	if !site.HeadersPerRequest {
-		extras["extra_headers"] = slngRequestHeaders(site)
+		extras[targetcap.SlngRequestHeadersArg] = slngRequestHeaders(site)
 	}
 	return extras
+}
+
+// summaryPromptSuffix is the directive the emitted summarizer prompt carries: the
+// authored prompt_suffix on whichever think binding does the summarizing.
+//
+// The summarizer's prompt is a literal in the driver's own template rather than
+// an authored file, so ir.Build cannot reach it the way it reaches every agent and
+// task prompt. This is the one site that needs the value carried through instead.
+//
+// One value, because the emitted helper holds one prompt. A package whose
+// summarizer profiles authored different suffixes has asked for something that
+// shape cannot express, so it is refused with the reason named rather than served
+// whichever one happened to be walked last. No package in the repository can
+// reach it: a target is held to a single router think profile, and it takes two
+// summarizer profiles with two different directives to get here.
+func summaryPromptSuffix(agent *ir.Agent) (string, error) {
+	found := map[string]string{} // suffix -> the profile that authored it
+	consider := func(context ir.TaskContext) {
+		if context.History != ir.HistorySummary || context.Summarizer == "" {
+			return
+		}
+		if suffix := agent.Models[context.Summarizer].PromptSuffix; suffix != "" {
+			found[suffix] = context.Summarizer
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(agent.Controls)) {
+		if transfer, ok := agent.Controls[name].(*ir.AgentTransfer); ok {
+			consider(transfer.Context.TaskContext)
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(agent.Tasks)) {
+		consider(agent.Tasks[name].Context)
+	}
+	switch len(found) {
+	case 0:
+		return "", nil
+	case 1:
+		for suffix := range found {
+			return suffix, nil
+		}
+	}
+	profiles := make([]string, 0, len(found))
+	for suffix, profile := range found {
+		profiles = append(profiles, fmt.Sprintf("%s authors %q", profile, suffix))
+	}
+	slices.Sort(profiles)
+	return "", fmt.Errorf("two summarizer think profiles author different prompt_suffix values (%s): the emitted summarizer prompt is one literal shared by every summarizer site, so it can carry one directive. Give them the same value, or summarize both with one profile",
+		strings.Join(profiles, "; "))
 }
 
 // slngStateExpr is the state object the snapshot reads. A package with names to
