@@ -343,7 +343,7 @@ from datetime import date, timedelta
 from importlib.metadata import version
 from types import SimpleNamespace
 
-assert version("pipecat-ai") == "1.7.0"
+assert version("pipecat-ai") == "1.8.0"
 
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")

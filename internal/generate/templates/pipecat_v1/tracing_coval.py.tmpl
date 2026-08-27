@@ -349,7 +349,7 @@ def activate_simulation(runner_args) -> str | None:
 
 
 def enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:
-    # ponytail: Pipecat 1.7.0 LLMWorker exposes no tracing kwargs. Share the main
+    # ponytail: Pipecat 1.8.0 LLMWorker exposes no tracing kwargs. Share the main
     # worker's context until its public constructor accepts them.
     for agent in agents:
         agent._enable_tracing = True
@@ -381,7 +381,7 @@ def flush_tracing(provider: TracerProvider, session_id: str = "") -> None:
     _router.activate(conversation_id, CONVERSATION_EXPORT_HEADER)
 
 
-{{if or .NeedsFunctionCalls .NeedsMCP}}# ponytail: Pipecat 1.7.0 has no standard-tool tracing hook. Remove this
+{{if or .NeedsFunctionCalls .NeedsMCP}}# ponytail: Pipecat 1.8.0 has no standard-tool tracing hook. Remove this
 # subclass when ordinary LLMWorker tools gain native spans.
 class TracedLLMWorker(LLMWorker):
     """Add the `llm_tool_call` spans missing from Pipecat's standard tracing."""

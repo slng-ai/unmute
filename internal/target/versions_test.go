@@ -59,16 +59,16 @@ func TestCheckVersionAgainstWindow(t *testing.T) {
 		wantErr  string // "" means accepted
 	}{
 		{name: "livekit exact", provider: LiveKit, version: "1.6.10"},
-		{name: "pipecat exact", provider: Pipecat, version: "1.7.0"},
+		{name: "pipecat exact", provider: Pipecat, version: "1.8.0"},
 
 		// The bump this feature ships is exactly the case a string compare gets
 		// wrong: "1.6.10" sorts below "1.6.4" lexically.
 		{name: "patch above ceiling", provider: LiveKit, version: "1.6.11", wantErr: "newer than this unmute supports"},
 		{name: "minor above ceiling", provider: LiveKit, version: "1.7.0", wantErr: "newer than this unmute supports"},
 		{name: "major above ceiling", provider: Pipecat, version: "2.0.0", wantErr: "newer than this unmute supports"},
-		{name: "above ceiling names the fix", provider: Pipecat, version: "1.8.0", wantErr: "a newer unmute may support it"},
+		{name: "above ceiling names the fix", provider: Pipecat, version: "1.9.0", wantErr: "a newer unmute may support it"},
 
-		{name: "below pipecat floor", provider: Pipecat, version: "1.6.9", wantErr: "outside the supported range (exactly 1.7.0)"},
+		{name: "below pipecat floor", provider: Pipecat, version: "1.6.9", wantErr: "outside the supported range (exactly 1.8.0)"},
 		{name: "below livekit floor", provider: LiveKit, version: "1.6.9", wantErr: "outside the supported range (exactly 1.6.10)"},
 		{name: "far below floor", provider: LiveKit, version: "0.0.108", wantErr: "outside the supported range"},
 

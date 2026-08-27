@@ -452,7 +452,7 @@ func TestWebhookBaseURLRulesArePerTarget(t *testing.T) {
 		t.Errorf("a literal base_url was refused on slng: %#v", row.Errors)
 	}
 	target := targetFor(agent, ProviderSlng)
-	target.Provider, target.Name, target.Version = ProviderPipecat, "pipecat", "1.7.0"
+	target.Provider, target.Name, target.Version = ProviderPipecat, "pipecat", "1.8.0"
 	report, err := Validate(agent, []Target{target}, targetcap.Default())
 	if err == nil {
 		t.Fatal("a webhook with no url_env passed on pipecat, which reads the base from the environment")

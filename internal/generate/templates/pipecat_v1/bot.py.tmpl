@@ -331,8 +331,12 @@ async def _register_mcp_tools(clients, llm, reserved_names{{if .Tracing}}, trace
     for client, tools in discovered:
         await client.register_tools_schema(tools, llm)
 {{if .Tracing}}        for schema in tools.standard_tools:
-            # ponytail: Pipecat 1.7.0 exposes no public MCP handler hook.
-            # Remove this private seam when MCPClient adds one.
+            # ponytail: Pipecat 1.8.0 added MCPClient.tools(), which attaches
+            # handlers to the schemas and registers them when LLMContext
+            # advertises its tools. That is the public hook this seam was
+            # waiting for, but taking it moves MCP registration out of this
+            # function and into context construction, so it is its own change.
+            # Until then, reach for the private wrapper.
             llm.register_function(
                 schema.name,
                 trace_handler(client._tool_wrapper),
@@ -1358,7 +1362,7 @@ async def _flow_tool_{{.Name}}(args, flow_manager{{if .NeedsState}}, state=None{
     # DataFrame, so it is queued and speech starts while the handler body runs.
     # A flows handler holds a FlowManager rather than FunctionCallParams, and
     # FlowManager.worker is the documented seam for queueing a frame from inside
-    # a handler (pipecat.flows.manager, pipecat-ai 1.7.0). Queued after the
+    # a handler (pipecat.flows.manager, pipecat-ai 1.8.0). Queued after the
     # refusal check, so a refused call stays silent.
     await flow_manager.worker.queue_frame(TTSSpeakFrame({{pyq .Announce}}))
 {{end}}{{if .KnowledgeBase}}    return await knowledge.look_up({{pyq .KnowledgeBase}}, dict(args)["query"])

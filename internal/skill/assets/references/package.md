@@ -132,6 +132,12 @@ Each section allows these fields:
 | `endpointing_delay` | `turn`: a positive duration, the window of silence before the caller counts as finished. The floor on every turn, and only the floor. LiveKit refuses under `250ms` |
 | `fallback` | `think`, `listen` |
 
+The `turn:` section is the only thing that ends a turn. Some transcribers
+(AssemblyAI, Cartesia, Soniox, Speechmatics) detect turns themselves, but on
+Pipecat 1.8.0 they only propose an ending and the `turn:` entry still decides.
+So never drop `turn:` or set `semantic_endpointing: off` on the theory that the
+transcriber covers it.
+
 Unmute keeps no list of valid model ids. `model:` and `voice:` are forwarded to
 the provider exactly as written, so a typo is a provider error at run time, not
 a compile error. The compile report says so out loud. Which `provider:` values
@@ -327,7 +333,7 @@ data until its access and retention rules are approved.
 targets:
   pipecat:
     provider: pipecat
-    version: "1.7.0"
+    version: "1.8.0"
 
   livekit:
     provider: livekit

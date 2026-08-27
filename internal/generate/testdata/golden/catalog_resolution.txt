@@ -297,7 +297,7 @@ binding:  provider=slng model=slng/deepgram/nova:3
 class:    SlngSTTService
 args:     api_key=os.environ["SLNG_API_KEY"], model="slng/deepgram/nova:3", language="es-MX", sample_rate=24000
 import:   from pipecat_slng import SlngSTTService
-install:  pipecat-slng>=0.5.0
+install:  pipecat-slng>=0.5.1
 env:      SLNG_API_KEY
 
 === pipecat listen soniox ===
@@ -494,7 +494,7 @@ binding:  provider=slng model=slng/deepgram/aura:2-en voice=voice-1
 class:    SlngTTSService
 args:     api_key=os.environ["SLNG_API_KEY"], voice="voice-1", model="slng/deepgram/aura:2-en", language="es-MX", sample_rate=24000
 import:   from pipecat_slng import SlngTTSService
-install:  pipecat-slng>=0.5.0
+install:  pipecat-slng>=0.5.1
 env:      SLNG_API_KEY
 
 === pipecat speak soniox ===

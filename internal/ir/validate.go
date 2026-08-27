@@ -1647,7 +1647,7 @@ func checkWarmStandby(provider targetcap.Provider, profile string, binding Bindi
 		return
 	}
 	row.Warnings = add(row.Warnings, fmt.Sprintf(
-		"pipecat speak.%s sets params.warm_standby_enabled, which pipecat-slng 0.5.0 does not implement: the kwarg is absorbed and no socket is held open. It works on livekit, so move it to a livekit target override if that is where you meant it",
+		"pipecat speak.%s sets params.warm_standby_enabled, which pipecat-slng does not implement as of 0.5.1: the kwarg is absorbed and no socket is held open. It works on livekit, so move it to a livekit target override if that is where you meant it",
 		profile,
 	))
 }

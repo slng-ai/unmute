@@ -85,9 +85,9 @@ is no models listing endpoint, so a route has to be tried.
 
 ### 3. Hold the TTS socket open
 
-**LiveKit only.** `pipecat-slng` 0.5.0 does not implement it, and a `params:`
-block reaches the plugin verbatim, so on Pipecat the setting is accepted and
-discarded with no error. `unmute validate` warns. Do not author it on a package
+**LiveKit only.** The SLNG plugin does not implement it as of `pipecat-slng`
+0.5.1, and a `params:` block reaches the plugin verbatim, so on Pipecat the
+setting is accepted and discarded with no error. `unmute validate` warns. Do not author it on a package
 that only ships to Pipecat.
 
 Off by default. It removes the provider's session setup from the front of every
@@ -169,7 +169,7 @@ with LiveKit's column; the inconsistency is the finding.
 That third stage was the largest until recently. A transcriber that never marks a
 transcript final leaves Pipecat waiting out a safety-net timer, one second by
 default, however fast the transcript arrived. Every Unmute package hit that until
-`pipecat-slng` 0.5.0, which the Pipecat catalog rows now require. If you are
+`pipecat-slng` 0.5.0; the Pipecat catalog rows now require 0.5.1 or newer. If you are
 reading old advice that says `stop_secs` is the real window on Pipecat, that was
 true of the setting and not of the wait.
 

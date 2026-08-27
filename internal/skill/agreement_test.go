@@ -245,7 +245,6 @@ func TestPipecatTracingProviderOwnershipStaysExplicit(t *testing.T) {
 func TestPipecatMCPTracingDocsStayAligned(t *testing.T) {
 	const tracingRule = "With Langfuse tracing enabled, Pipecat MCP calls emit finite `tool:<name>` spans with tool arguments and, when completed, the result."
 	const collisionRule = "Pipecat refuses to start when an agent tool, task function, or MCP source on the same agent exposes the same name."
-	const cleanupRule = "Pipecat 1.7 has one cleanup limit: cancellation during `MCPClient.start()` may leave a partial transport open until async-generator or process cleanup; cancellation after `start()` returns is cleaned up normally."
 	for name, content := range map[string]string{
 		"references/tools.md":                                   bundleFile(t, "references/tools.md"),
 		"docs-site/build/tools/mcp.mdx":                         trackedFile(t, "docs-site/build/tools/mcp.mdx"),
@@ -257,9 +256,10 @@ func TestPipecatMCPTracingDocsStayAligned(t *testing.T) {
 		if !strings.Contains(content, collisionRule) {
 			t.Errorf("%s does not state the Pipecat MCP collision contract", name)
 		}
-		if !strings.Contains(content, cleanupRule) {
-			t.Errorf("%s does not state the Pipecat MCP cleanup limit", name)
-		}
+		// The third rule these three surfaces used to share was a cleanup limit
+		// on cancelling MCPClient.start(). Pipecat 1.8.0 cancels the stranded
+		// session task itself (services/mcp_service.py, start()), so the limit
+		// is gone and so is the sentence.
 	}
 }
 
