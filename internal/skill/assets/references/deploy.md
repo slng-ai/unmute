@@ -100,7 +100,7 @@ agent. Present them as a starting point and tell the user to measure.
 ## Route report
 
 ```
-livekit: telephony evidence inbound=provisional docs=https://docs.livekit.io/telephony/start/providers/twilio/ verified=2026-08-12 smoke=false
+livekit: telephony evidence inbound=provisional docs=https://docs.livekit.io/telephony/start/providers/twilio/ smoke=false
 ```
 
 The compile report marks the route and prints the vendor document, last-checked

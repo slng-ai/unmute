@@ -93,9 +93,16 @@ func printTelephonyPlan(out io.Writer, name string, plan *generate.TelephonyRunt
 	for _, env := range plan.RequiredEnv {
 		fmt.Fprintf(out, "%s: telephony required env %s\n", name, env)
 	}
+	// No verified= here. The date is when a maintainer last read the vendor's
+	// docs, which is our provenance and not the reader's business: it tells
+	// someone compiling a package nothing they can act on, and reads like a
+	// claim about their route. The tag already says how firm the support is and
+	// docs= is where to check. The field stays on the evidence, because
+	// ir.Validate requires one before a feature may claim support, and it still
+	// rides compile-report.json for tools that want it.
 	for _, evidence := range plan.Evidence {
-		fmt.Fprintf(out, "%s: telephony evidence %s=%s docs=%s verified=%s smoke=%t\n",
-			name, evidence.Feature, evidence.Tag, evidence.Docs, evidence.Verified, evidence.Smoke)
+		fmt.Fprintf(out, "%s: telephony evidence %s=%s docs=%s smoke=%t\n",
+			name, evidence.Feature, evidence.Tag, evidence.Docs, evidence.Smoke)
 	}
 }
 
