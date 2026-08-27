@@ -184,7 +184,7 @@ None is dropped quietly.
 | Package feature | Why SLNG cannot take it |
 |---|---|
 | tasks, task groups, agent transfers | the create body carries one prompt and one greeting |
-| a `turn:` section, `semantic_endpointing`, `endpointing_delay` | SLNG owns its own turn taking |
+| a `turn:` section, `semantic_endpointing`, `endpointing_delay`, `pace` | SLNG owns its own turn taking |
 | `placement: local` on any model | SLNG runs the pipeline; there is no machine of yours |
 | `conversation.inactivity` | SLNG's idle nudges need three spoken texts a package does not carry |
 | `conversation.max_duration`, `thinking_audio` | no field on the create body holds them |

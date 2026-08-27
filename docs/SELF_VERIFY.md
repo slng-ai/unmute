@@ -121,6 +121,64 @@ Python from python.org ships no CA bundle, so `urllib` raises
 
 ---
 
+## Measuring turn taking
+
+Turn taking is the one measurement here where reporting the improvement alone
+misleads, so it gets its own rule: **report two numbers or report nothing.**
+
+Endpointing fails two ways. Dead air after the caller finishes, and answering the
+caller mid-sentence. Shrinking the window trades one for the other, and only the
+first appears in a latency figure. A run that reports the wait getting shorter and
+says nothing about cutoffs has measured half the change and called that a result.
+
+### The two numbers
+
+1. **The endpointing wait.** Median and worst, over the run. Both emitted
+   projects report it as its own key, `user_turn` in
+   `build/<target>/dev_metrics.py`, from LiveKit's `end_of_turn_delay` and
+   Pipecat's `LatencyBreakdown.user_turn_secs`. Same key on both targets,
+   deliberately.
+2. **The premature-commit rate.** How many turns the agent answered while the
+   caller was still speaking, over the same run.
+
+### Two fixtures, replayed rather than spoken
+
+- **Plain finished sentences** for the wait.
+- **A ten-digit phone number read in groups, with pauses** for the
+  premature-commit rate. This is the case that breaks first, and it is why
+  `pace: patient` exists.
+
+Replayed, not spoken: identical builds here have swung more than a second of mean
+silence, and a person cannot hold an A/B still across two runs. Three runs per
+arm, per the rule above.
+
+### Do not add `user_turn` to `e2e`
+
+`e2e_latency` already contains the endpointing wait. Adding `user_turn` to it
+double-counts the exact span a turn-taking change moves, which makes a real
+improvement read as a regression.
+
+### Read the resolved numbers before the run, not after
+
+`unmute compile` prints them, so there is no need to infer what the build was
+doing:
+
+```
+livekit: turn pace balanced (silence 0.4s authored, closes at 1.6s)
+```
+
+The floor is `endpointing_delay` and the ceiling is `pace`. **Lowering the floor
+alone does not shorten a turn**; a turn that runs long is sitting at the ceiling.
+Each emitted `README.md` says which is which, and on Pipecat which of the two
+identically named `stop_secs` fields is which.
+
+One Pipecat trap worth knowing before you tune: widening its VAD window can make
+turns *slower*. Above the transcript's arrival time the frame goes out unfinalized
+and Pipecat waits out a flat 1.0s safety net. Observed transcripts arrive from
+0.27s, which is why that floor stays at 0.2s for every pace.
+
+---
+
 ## Having Coval judge the result
 
 Coval evaluates conversations you **push** to it. Nothing has to dial in, so

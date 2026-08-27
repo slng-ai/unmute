@@ -108,6 +108,38 @@ already has been.
 A repeated refusal with nothing in the log is not this guard. Look for a model
 that is not calling the control at all.
 {{- end}}
+## Turn taking
+
+Two numbers decide how long a caller waits, and they are not the same number.
+
+**The floor is {{.Pace.Floor}}s.** The prewarmed Silero VAD waits that much
+silence before it reports end of speech.{{if .Pace.FloorAuthored}} It comes from the package's
+`endpointing_delay`.{{else}} It comes from `pace: {{.Pace.Name}}`; set
+`endpointing_delay` to pin it yourself.{{end}}
+
+Nothing downstream can start earlier, because the transcriber is only asked to
+finalise once the VAD says the caller stopped. The runtime refuses anything under
+0.25s, so `unmute compile` rejects it rather than letting the worker raise on its
+first call.
+
+**The ceiling is {{.Pace.Ceiling}}s.** That is `turn_handling`'s endpointing
+`max_delay`, the longest the turn can run before closing regardless. It comes
+from `pace: {{.Pace.Name}}`.
+
+Mode is `{{.Pace.Mode}}`{{if eq .Pace.Mode "dynamic"}}, so the wait adapts between {{.Pace.MinDelay}}s and
+{{.Pace.Ceiling}}s from the pauses this caller actually leaves{{else}}, so the wait does not adapt: it is the
+same window on every turn{{end}}.
+
+**Lowering the floor alone does not shorten a turn.** The floor is when the
+runtime may start deciding; the ceiling is when it stops waiting. A turn that
+runs long is sitting at the ceiling, and only the pace moves that. This is worth
+saying because getting it wrong here cost a whole round of measurement: a live
+call spent 2.5s per turn in endpointing while the authored window was 0.4s.
+
+Faster is not free. `pace: snappy` will occasionally answer a caller who was
+pausing to think, and `patient` is the escape hatch for callers reading out
+numbers, addresses or spellings.
+
 {{- if .NeedsTasks}}
 
 ## Handoffs and the opening turn
@@ -116,24 +148,6 @@ A receiving agent's automatic opening reply names the tools it may use, which is
 every tool it has except its own handoffs: two agents that both want to route
 would otherwise bounce the call before the caller hears anything. Every later
 turn has the full list back.
-{{- if .EndpointingDelay}}
-
-## Turn taking
-
-The prewarmed Silero VAD waits {{.EndpointingDelay}}s of silence before it reports
-end of speech, from the package's `endpointing_delay`. That window is the floor on
-every turn: nothing downstream can start earlier, because the transcriber is only
-asked to finalise once the VAD says the caller stopped.
-
-Lower it to answer sooner, at the cost of cutting off a caller who pauses
-mid-sentence. Raise it to give them more room. The runtime refuses anything under
-0.25s, so `unmute compile` rejects it rather than letting the worker raise on its
-first call.
-
-This does not set `turn_handling`'s endpointing `min_delay`, and that is
-deliberate: `min_delay` cannot fire before the VAD reports end of speech, so any
-value below this window would be unreachable there.
-{{- end}}
 
 ## Tasks and task groups
 

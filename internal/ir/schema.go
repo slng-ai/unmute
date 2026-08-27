@@ -84,6 +84,7 @@ func enumOptions() *jsonschema.ForOptions {
 		reflect.TypeFor[Placement]():           enum(PlacementAPI, PlacementLocal),
 		reflect.TypeFor[ModelKind]():           enum(KindThink, KindSpeak, KindListen, KindTurn),
 		reflect.TypeFor[SemanticEndpointing](): enum(SemanticEndpointingRequired, SemanticEndpointingPreferred, SemanticEndpointingOff),
+		reflect.TypeFor[Pace]():                enum(PaceSnappy, PaceBalanced, PacePatient),
 		reflect.TypeFor[PrimitiveType]():       enum(PrimitiveString, PrimitiveNumber, PrimitiveBoolean, PrimitiveInteger),
 		reflect.TypeFor[VariableSource](): enum(
 			VariableSourceCallStart, VariableSourceSessionID, VariableSourceCarrier,

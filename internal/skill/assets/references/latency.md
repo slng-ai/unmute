@@ -116,12 +116,29 @@ models:
     detector:
       provider: local
       model: silero
+      pace: balanced
       endpointing_delay: 400ms
 ```
 
-This is the floor charged on **every** turn, and on LiveKit it also gates the
-transcript: the transcriber is only asked to finalise once the VAD says the
-caller stopped, so shortening the window shortens short replies twice over.
+**Two numbers, and they are not the same number.** Confusing them is the mistake
+this section exists to prevent.
+
+`endpointing_delay` is the **floor**: how long silence has to last before the
+caller counts as finished. It is charged on every turn, and on LiveKit it also
+gates the transcript, because the transcriber is only asked to finalise once the
+VAD says the caller stopped.
+
+`pace` is the **ceiling**: the longest a turn may run before closing regardless.
+`snappy`, `balanced` or `patient`, defaulting to `balanced`. Nothing in a package
+could reach this before it existed, so it sat at the framework defaults of 2.5s
+on LiveKit and 3.0s on Pipecat no matter how small the authored window was.
+
+**Lowering the floor alone does not shorten a turn.** A turn that runs long is
+sitting at the ceiling, and only `pace` moves that. Reach for `pace` first.
+
+`patient` reproduces the framework defaults exactly, so it is the escape hatch
+for a caller reading out digits. `pace` takes no per-target override:
+`endpointing_delay` is the field for a value that really is per-target.
 
 **Do not go to the floor.** LiveKit refuses below 250ms and `unmute compile`
 rejects it, but even a legal-but-short value splits utterances: a caller who
@@ -136,7 +153,18 @@ decides you stopped making sound, then Pipecat's Smart Turn v3 classifier decide
 whether you finished a thought (a small ONNX model inside the framework, running
 in every compiled package whether or not it was asked for), and then the turn
 waits for the transcriber to mark the transcript final. `endpointing_delay` sets
-the first stage only.
+the first stage and `pace` sets the second.
+
+Both stages are spelled `stop_secs` in the emitted `bot.py` and they are
+different fields: `VADParams(stop_secs=...)` is the silence window,
+`SmartTurnParams(stop_secs=...)` is the classifier's ceiling.
+
+**On Pipecat the silence window does not move with the pace**, and that is
+measured. A window wider than the transcript's arrival time makes Pipecat pay the
+flat safety-net second described below, and observed transcripts arrive from
+0.27s. So the floor stays at Pipecat's own 0.2s for every pace and the pace
+reaches this target through the ceiling alone. Do not "fix" the inconsistency
+with LiveKit's column; the inconsistency is the finding.
 
 That third stage was the largest until recently. A transcriber that never marks a
 transcript final leaves Pipecat waiting out a safety-net timer, one second by
@@ -145,9 +173,10 @@ default, however fast the transcript arrived. Every Unmute package hit that unti
 reading old advice that says `stop_secs` is the real window on Pipecat, that was
 true of the setting and not of the wait.
 
-Setting `interruption.min_words` swaps the default stop strategy for a plain
-timeout, which drops the Smart Turn classifier. Worth knowing before blaming turn
-taking on something else.
+`interruption.minimum_words` used to swap the default stop strategy for a plain
+timeout, which dropped the Smart Turn classifier and made turn taking worse. It
+no longer does: the classifier survives and carries the `pace` ceiling. The word
+count now narrows turn *start* only, which is what it was for.
 
 ### 5. Cut LLM round trips before tuning anything else
 

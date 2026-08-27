@@ -145,6 +145,42 @@ the model receives one corrective result naming the allowed fields. If a
 handler fails before returning, the full exception stays in the log and the
 model receives one safe failure result. It must not claim success from either.
 
+## Turn taking
+
+Two numbers decide how long a caller waits. **Both are spelled `stop_secs` in
+`bot.py` and they are different fields**, so grep finds two and only this tells
+you which is which.
+
+**The floor is 0.2s**, in `VADParams(stop_secs=0.2)`. The VAD waits that
+much silence before speech counts as stopped. It is Pipecat's own default.
+
+**The ceiling is 1.6s**, in `SmartTurnParams(stop_secs=1.6)` on the
+end-of-turn analyzer. That is the longest the turn can run before closing
+regardless, and it comes from `pace: balanced`.
+
+The wait does not adapt to the caller on this target. Unlike the LiveKit driver,
+which has a `dynamic` endpointing mode, this is the same fixed window on every
+turn.
+
+**Lowering the floor alone does not shorten a turn**, and on this target
+widening it makes some turns *slower*. pipecat-slng asks the bridge to finalise
+when the VAD reports the caller stopped; a final that has already arrived by then
+finds no request outstanding, so the frame goes out unfinalized and Pipecat waits
+out a flat 1.0s safety net instead. Measured over eight turns at 0.4s: every turn
+whose transcript beat the window paid a flat 1.000s, and observed transcripts
+arrive from 0.27s. That is why the floor here stays at 0.2s for every pace while
+LiveKit's moves, and why the inconsistency is deliberate.
+
+The end-of-turn analyzer (`LocalSmartTurnAnalyzerV3`) runs on every call. It is
+constructed explicitly only so the ceiling is reachable; left implicit it sits at
+its own 3s.
+
+A minimum interruption word count is set, and it replaces the default turn-*start*
+pair on purpose: gating turn start on words is the point, and leaving VAD start in
+place would open the turn before the words arrive. It no longer costs you the
+end-of-turn analyzer, which it used to.
+
+
 `uv` installs the pinned dependencies on first run. The Pipecat dev runner
 serves a WebRTC test client you can open in the browser.
 
@@ -275,7 +311,10 @@ import httpx
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.bus import BusBridgeProcessor
 from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -290,7 +329,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
-from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
 from pipecat.workers.runner import WorkerRunner
@@ -625,10 +664,37 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(),
+            # The FLOOR: how long silence has to last before speech counts as
+            # stopped. Pipecat's own default, and it does not move with the pace.
+            #
+            # Widening this window makes some turns SLOWER, not more patient.
+            # pipecat-slng asks the bridge to finalise when VAD reports the caller
+            # stopped, and a final that already arrived finds no request
+            # outstanding, so the frame goes out unfinalized and Pipecat waits out
+            # a flat 1.0s safety net. Observed transcripts arrive from 0.27s.
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+            # The CEILING, on the end-of-turn analyzer. pace: balanced.
+            #
+            # Note the two fields both spelled stop_secs. The one above is the
+            # VAD's silence window; this one is how long the turn may run before
+            # closing regardless. They are different fields and different numbers.
+            #
+            # The analyzer is Pipecat's own default stop strategy. It is
+            # constructed explicitly here only so the ceiling is reachable: left
+            # implicit it runs at SmartTurnParams' own 3s.
             user_turn_strategies=UserTurnStrategies(
+                # A minimum word count replaces the default start pair on purpose:
+                # gating turn start on words is the whole point, and leaving VAD
+                # start in place would open the turn before the words arrive.
                 start=[MinWordsUserTurnStartStrategy(min_words=2)],
-                stop=[SpeechTimeoutUserTurnStopStrategy()],
+                stop=[
+                    TurnAnalyzerUserTurnStopStrategy(
+                        turn_analyzer=LocalSmartTurnAnalyzerV3(
+                            params=SmartTurnParams(stop_secs=1.6)
+                        )
+                    )
+                ],
+
             ),
             user_idle_timeout=15,
         ),
@@ -905,7 +971,8 @@ if __name__ == "__main__":
     "listen: deepgram via DeepgramSTTService (pipecat-ai[deepgram], verified 2026-07-15)",
     "reason: openai via OpenAILLMService (pipecat-ai[openai], verified 2026-07-15)",
     "speak: slng via SlngTTSService (pipecat-slng\u003e=0.5.0, verified 2026-07-15)",
-    "turn role lowers to on-device VAD (Silero); its binding is advisory"
+    "turn role lowers to on-device VAD (Silero); its binding is advisory",
+    "turn pace balanced (silence 0.2s from the pace, closes at 1.6s)"
   ]
 }
 === compose.dev.yaml ===

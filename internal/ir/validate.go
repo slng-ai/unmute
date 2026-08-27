@@ -273,6 +273,10 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			errors = add(errors, fmt.Sprintf("model %q placement must be api or local", name))
 		}
 		errors = append(errors, validateModelKind(name, model)...)
+		errors = append(errors, paceErrors(name, model)...)
+		for _, warning := range turnDeadFieldWarnings(name, model) {
+			warnings = add(warnings, warning)
+		}
 	}
 	for name, variable := range agent.Variables {
 		if !validPrimitive(variable.Type) {
@@ -614,7 +618,12 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			}
 		}
 	}
-	return errors, schemas.notes
+	// schemas.notes and warnings are both structural warnings. Notes come first
+	// because they came first historically and the report's order is golden-stable.
+	// Before 2026-08-27 the named `warnings` return was dead: everything added to it
+	// was collected and then discarded here, so a warning could look wired up and
+	// reach nobody.
+	return errors, append(schemas.notes, warnings...)
 }
 
 // validateDriverValues asks the value questions a driver used to ask alone.
@@ -743,6 +752,30 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		applyCapability(caps, targetcap.FieldTurnPlacement, provider, row)
 		if b.SemanticEndpointing != "" {
 			applyCapability(caps, targetcap.FieldSemanticEndpointing, provider, row)
+		}
+		// No warning for a binding that sets both pace and endpointing_delay:
+		// both together is the recommended configuration, and the compile report
+		// names which value won which half on every compile. Two versions of
+		// that warning were written and both were wrong; the test named
+		// TestValidatePaceWithDelayCompilesAndRefusesNothing records why.
+		if b.Pace != "" {
+			applyCapability(caps, targetcap.FieldPace, provider, row)
+			// A per-target pace is refused rather than resolved to whichever won.
+			// One word working on both targets is the whole reason the field
+			// exists; a value that differed per target would be a duration in
+			// disguise, and endpointing_delay already is one.
+			//
+			// agent.Turn is non-empty whenever this binding exists: resolveBindings
+			// only builds bindings.Turn from a named turn model.
+			if base := agent.Models[agent.Turn].Pace; b.Pace != base {
+				authored := fmt.Sprintf("the package authors %q", base)
+				if base == "" {
+					authored = "the package authors none"
+				}
+				row.Errors = add(row.Errors, fmt.Sprintf(
+					"turn binding overrides pace with %q where %s: pace takes no per-target override. Put one value on the models.turn binding, or use endpointing_delay for a window that really is per-target",
+					b.Pace, authored))
+			}
 		}
 		if b.EndpointingDelay != "" {
 			applyCapability(caps, targetcap.FieldEndpointingDelay, provider, row)
@@ -2731,6 +2764,65 @@ func promptSuffixErrors(name string, model ModelDef) []string {
 			name))
 	}
 	return errors
+}
+
+// turnDeadFieldWarnings names a field authored on a turn binding that no target
+// reads. Three of them were accepted in silence until 2026-08-27: an author could
+// write `params: {alpha: 0.5}` on a turn binding, compile clean, and get an agent
+// that ignored it — with nothing in the report to say so.
+//
+// The neighbours already had this covered: `prompt_suffix` is refused on a turn
+// binding and `endpoint_env` warns. These three just missed it.
+//
+// A warning rather than a refusal, deliberately. A package carrying one of these
+// today is not broken, it is carrying a value that was never doing anything, and
+// refusing would fail a compile that used to pass over a field that changed no
+// behaviour either way. Each message names what to use instead, because "this
+// does nothing" tells an author they are wrong and not what to write.
+//
+// If turn params ever do get forwarded, the `params` line here is what to delete.
+func turnDeadFieldWarnings(name string, model ModelDef) []string {
+	if model.Kind != KindTurn {
+		return nil
+	}
+	var warnings []string
+	if len(model.Params) > 0 {
+		warnings = add(warnings, fmt.Sprintf(
+			"model %q is a turn model and sets params (%s), which no target reads: turn params are not forwarded to either framework. Use pace for the turn window and endpointing_delay for the silence window; there is no way to reach an individual framework parameter from a package today",
+			name, strings.Join(sortedKeys(model.Params), ", ")))
+	}
+	if model.AgentID != "" {
+		warnings = add(warnings, fmt.Sprintf(
+			"model %q is a turn model and sets agent_id, which no target reads: agent_id scopes the SLNG Context Router's cache and belongs on the think binding that names the router",
+			name))
+	}
+	if len(model.Fallback) > 0 {
+		warnings = add(warnings, fmt.Sprintf(
+			"model %q is a turn model and sets fallback, which no target reads: fallback is a think and listen field. A turn detector has no fallback chain on either code target",
+			name))
+	}
+	return warnings
+}
+
+// paceErrors refuses a pace that no target can map and a pace on a role that has
+// no turn to time. The legal values come from internal/target, which owns the
+// table that gives each one its numbers, so a value added there reaches this
+// message without a second list to keep in step.
+func paceErrors(name string, model ModelDef) []string {
+	if model.Pace == "" {
+		return nil
+	}
+	if model.Kind != KindTurn {
+		return []string{fmt.Sprintf(
+			"model %q pace is a turn-model field: pace belongs on a turn binding, not a %s binding",
+			name, model.Kind)}
+	}
+	if !slices.Contains(targetcap.PaceValues(), string(model.Pace)) {
+		return []string{fmt.Sprintf(
+			"model %q pace: %q is not a pace; use %s",
+			name, model.Pace, strings.Join(targetcap.PaceValues(), ", "))}
+	}
+	return nil
 }
 
 // validateModelKind field-checks a model against its section kind (V22).

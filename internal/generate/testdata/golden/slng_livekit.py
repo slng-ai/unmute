@@ -783,7 +783,16 @@ class Confirm(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict])
 
 # --- session ---------------------------------------------------------------
 def prewarm(proc: JobProcess) -> None:
-    proc.userdata["vad"] = silero.VAD.load()
+    # The FLOOR: how long silence has to last before the runtime treats the
+    # caller as finished. From pace: balanced.
+    #
+    # Always explicit. Leaving it off inherited Silero's own 0.55s, which is
+    # slower than the turn detector wants and was never anybody's choice. Hard
+    # floor is 0.25s; the turn detector raises at session start below it.
+    #
+    # Lowering this alone does not shorten a turn. The ceiling is in the session's
+    # turn_handling endpointing below, and that is where a 2.5s turn came from.
+    proc.userdata["vad"] = silero.VAD.load(min_silence_duration=0.3)
 server = AgentServer()
 server.setup_fnc = prewarm
 
@@ -818,6 +827,10 @@ async def entrypoint(ctx: JobContext) -> None:
         tts=elevenlabs.TTS(api_key=os.environ["ELEVEN_API_KEY"], voice_id="cgSgspJ2msm6clMCkdW9"),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(version="v1-mini"),
+            # The CEILING, and the shortest wait the runtime will consider.
+            # pace: balanced. Without this the streaming defaults apply and
+            # max_delay is 2.5s, which no package could reach.
+            endpointing={"mode": "dynamic", "min_delay": 0.3, "max_delay": 1.6},
             interruption={"enabled": True, "min_words": 2},
             preemptive_generation={"enabled": True},
         ),

@@ -50,7 +50,8 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		EntryAgent:        agent.EntryAgent,
 		EntryClass:        pyName(agent.EntryAgent),
 		TurnVersion:       turnVersion,
-		EndpointingDelay:  livekitEndpointingDelay(tgt.Models.Turn),
+		Pace:              resolvePaceView(targetcap.LiveKit, tgt.Models.Turn),
+		SemanticOff:       semanticEndpointingOff(tgt.Models.Turn),
 		Pins:              tgt.Pins,
 		Tracing:           agent.Tracing != nil,
 		TracingProvider:   tracingProviderOf(agent),
@@ -401,6 +402,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	}
 	if tgt.Models.Turn != nil {
 		data.Notes = append(data.Notes, "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory")
+		data.Notes = append(data.Notes, data.Pace.note())
 	}
 
 	for _, svc := range livekitServices(data) {
@@ -1175,24 +1177,6 @@ func livekitChainService(binding ir.Binding, env *envSet, site slngSite) (liveki
 	}
 	svc.Call.Args = slngClientArgs(svc.Call.Args, site.ClientExpr)
 	return svc, nil
-}
-
-// livekitEndpointingDelay renders the turn binding's silence window as seconds
-// for EndpointingOptions.min_delay. A transcriber slower than LiveKit's 0.5s
-// default sends its final text after the turn is committed, and the agent
-// answers half a sentence (B: fragmented STT, 2026-08-20).
-// livekitEndpointingDelay formats the authored VAD silence window for the
-// prewarmed silero.VAD.load call. It reads the target's turn binding, of which
-// there is exactly one per target, which is what makes it safe to carry into
-// prewarm: prewarm runs once per worker process, before any job, so it cannot
-// see per-session values.
-func livekitEndpointingDelay(binding *ir.Binding) string {
-	if binding == nil || binding.EndpointingDelay == "" {
-		return ""
-	}
-	// ir.Validate already refused anything unparseable, non-positive, or under
-	// the 250ms floor the turn detector raises below.
-	return durationSeconds(binding.EndpointingDelay)
 }
 
 // livekitTurnVersion maps the target's turn: binding to the

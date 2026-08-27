@@ -30,6 +30,38 @@ trips a turn needs, not by cutting what the agent can do:
   each cost their own round trip to finish, and the mutation tools already
   refuse a write that is not confirmed, so the split bought no extra safety.
 
+### How long the agent waits before answering
+
+Two numbers, and they are not the same number. Confusing them cost a whole round
+of measurement here, so both are set explicitly.
+
+**The floor** is `endpointing_delay`: how long silence has to last before the
+caller counts as finished. It is tuned per target, 400ms on the base binding and
+200ms on the Pipecat one, and `targets.yaml` carries the measurement behind that
+split. On Pipecat a *wider* window makes some turns a second slower, which is the
+opposite of what the name suggests.
+
+**The ceiling** is `pace: balanced`: the longest a turn may run before closing
+regardless. This is the number that was actually costing the caller time. Nothing
+in a package could reach it before, so it sat at the framework defaults of 2.5s
+on LiveKit and 3.0s on Pipecat, and a live LiveKit call spent 2.5s per turn there
+while the authored window was 400ms. `balanced` brings both to 1.6s.
+
+**Lowering the floor alone does not shorten a turn.** The floor is when the
+runtime may start deciding; the ceiling is when it stops waiting.
+
+`balanced` rather than `snappy` because callers here read out dates, times and
+the occasional phone number, and `snappy` would answer some of them mid-sentence.
+`patient` is the escape hatch if that still happens: it reproduces the framework
+defaults exactly. Faster turn taking is a trade, not a free win, and the failure
+it buys never shows up in a latency figure.
+
+**If you set `conversation.interruption.minimum_words`, that used to cost you the
+end-of-turn model.** The emitted bot replaced Pipecat's smart-turn analyzer with
+a plain silence timer, so turn taking got worse rather than better. It no longer
+does, and this is the behaviour change in this release an author is most likely
+to notice.
+
 ### The reasoning model, and why it is this one
 
 Thinking runs on `gpt-5.6-luna` through the Context Router, on OpenAI's own

@@ -468,7 +468,8 @@ func TestModelFieldAndPassthroughGuidanceStaysExact(t *testing.T) {
 		"| `language` | `speak`, `listen` |",
 		"| `temperature`, `top_p`, `top_k` | `think` |",
 		"| `semantic_endpointing` | `turn`: `required`, `preferred`, or `off` |",
-		"| `endpointing_delay` | `turn`: a positive duration, the window of silence before the caller counts as finished. The floor on every turn. LiveKit refuses under `250ms`; defaults differ per target (LiveKit `550ms`, Pipecat `200ms`) |",
+		"| `pace` | `turn`: `snappy`, `balanced`, or `patient`. How quickly the agent decides the caller has finished. Sets the ceiling on a turn, and the floor when `endpointing_delay` is absent. Defaults to `balanced`. No per-target override |",
+		"| `endpointing_delay` | `turn`: a positive duration, the window of silence before the caller counts as finished. The floor on every turn, and only the floor. LiveKit refuses under `250ms` |",
 	}
 	for name, content := range map[string]string{
 		"references/package.md":              bundleFile(t, "references/package.md"),

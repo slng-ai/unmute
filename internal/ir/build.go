@@ -443,6 +443,7 @@ func convertModelDef(raw packagespec.ModelDef, kind ModelKind, fallback []string
 		Speed: raw.Speed, Language: raw.Language, Temperature: raw.Temperature,
 		TopP: raw.TopP, TopK: raw.TopK, EndpointEnv: raw.EndpointEnv,
 		Placement: derivePlacement(raw), SemanticEndpointing: SemanticEndpointing(raw.SemanticEndpointing),
+		Pace:             Pace(raw.Pace),
 		EndpointingDelay: Duration(raw.EndpointingDelay),
 		AgentID:          raw.AgentID, Upstream: convertUpstream(raw.Upstream),
 		PromptSuffix: raw.PromptSuffix,
@@ -1347,6 +1348,20 @@ func resolveBindings(agent *Agent, used map[string]bool, overrides map[string]pa
 			if replaced.PromptSuffix == "" {
 				replaced.PromptSuffix = def.PromptSuffix
 			}
+			// Neither is part of the vendor selection either, and
+			// examples/salon-concierge overrides its turn binding on both
+			// targets, so without these a base `semantic_endpointing` or `pace`
+			// reaches neither of them.
+			//
+			// pace is carried even though it takes no per-target override: an
+			// override that names one has to stay visible in the resolved binding
+			// for Validate to refuse it rather than Build dropping it in silence.
+			if replaced.SemanticEndpointing == "" {
+				replaced.SemanticEndpointing = def.SemanticEndpointing
+			}
+			if replaced.Pace == "" {
+				replaced.Pace = def.Pace
+			}
 			def = replaced
 		}
 		return def
@@ -1382,8 +1397,9 @@ func toBinding(def ModelDef) Binding {
 	return Binding{
 		Provider: def.Provider, Model: def.Model, Voice: def.Voice, Language: def.Language,
 		EndpointEnv: def.EndpointEnv, Placement: def.Placement,
-		SemanticEndpointing: def.SemanticEndpointing, EndpointingDelay: def.EndpointingDelay,
-		AgentID: def.AgentID, Upstream: def.Upstream, PromptSuffix: def.PromptSuffix,
+		SemanticEndpointing: def.SemanticEndpointing, Pace: def.Pace,
+		EndpointingDelay: def.EndpointingDelay,
+		AgentID:          def.AgentID, Upstream: def.Upstream, PromptSuffix: def.PromptSuffix,
 		Params: foldParams(def),
 	}
 }

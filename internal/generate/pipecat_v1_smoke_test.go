@@ -219,7 +219,12 @@ class Runner:
 
 async def main():
     bot.LLMContextAggregatorPair = capture_pair
-    bot.SileroVADAnalyzer = lambda: None
+    # Every emitted package now passes params= to the VAD and constructs the
+    # end-of-turn analyzer explicitly, so the stubs take kwargs. The real
+    # LocalSmartTurnAnalyzerV3 loads an ONNX model, which this check has no
+    # business doing.
+    bot.SileroVADAnalyzer = lambda **kwargs: None
+    bot.LocalSmartTurnAnalyzerV3 = lambda **kwargs: None
     bot.build_stt = FrameProcessor
     bot.build_appointment_desk_llm = FrameProcessor
     bot.build_appointment_desk_tts = FrameProcessor

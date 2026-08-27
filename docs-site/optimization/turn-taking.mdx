@@ -1,0 +1,244 @@
+---
+title: "Setting how long the agent waits"
+description: "pace and endpointing_delay: the two settings that decide how long a caller waits before the agent answers, what each legal value does, and how to choose between them."
+sidebarTitle: "Turn taking"
+---
+
+Two settings decide how long a caller waits before the agent starts answering.
+They are not the same setting, and confusing them is the most common way to spend
+a day tuning the wrong number.
+
+```yaml agent.yaml
+models:
+  turn:
+    detector:
+      provider: local
+      model: silero
+      pace: balanced            # the ceiling
+      endpointing_delay: 400ms  # the floor
+```
+
+**`pace` is the ceiling**: the longest the agent will keep waiting before it
+answers regardless. Reach for this first.
+
+**`endpointing_delay` is the floor**: how long silence has to last before the
+agent believes you finished. Nothing downstream can start earlier.
+
+<Warning>
+  **Lowering the floor alone does not shorten a long turn.** A turn that runs long
+  is sitting at the ceiling, and only `pace` moves that.
+
+  Before `pace` existed nothing in a package could reach the ceiling, so it stayed
+  at the framework default — **2.5s** on LiveKit and **3.0s** on Pipecat — no
+  matter how small you made the window. If replies feel slow and your
+  `endpointing_delay` is already short, this is why.
+</Warning>
+
+## `pace`
+
+Legal on a `turn` binding. Three values. Defaults to `balanced` when you leave it
+out, so a package that says nothing still gets the faster behaviour.
+
+| Value | The agent | Choose it when |
+|---|---|---|
+| `snappy` | answers quickly, and will occasionally answer someone who was pausing to think | short exchanges, confirmations, menu navigation |
+| `balanced` | the default | most agents |
+| `patient` | waits, and someone who has finished waits with it. Reproduces the framework defaults exactly | callers reading out numbers, addresses, spellings |
+
+`patient` is the escape hatch. Selecting it changes nothing for a package that
+already has today's behaviour, so it is always safe to fall back to.
+
+### The two targets are not equally capable
+
+`unmute compile` prints the resolved floor and ceiling for each target, so you
+never have to look either up. Two differences are worth knowing before you read
+them:
+
+- **The Pipecat floor never moves.** It is the same 0.2s at every pace,
+  deliberately. See [the cliff](#the-pipecat-floor-is-a-cliff-not-a-dial) below.
+- **Only LiveKit adapts.** It shortens its wait based on the pauses a caller
+  actually leaves, between a lower bound and the ceiling. Pipecat has no
+  equivalent, so its wait is the same fixed window every turn.
+
+`pace` takes **no per-target override**. One word is meant to work on both
+targets, and a value that differed per target would be a duration in disguise —
+which is what `endpointing_delay` is for. Writing a `pace` inside a
+`targets.yaml` override is refused, naming what to do instead.
+
+## `endpointing_delay`
+
+Legal on a `turn` binding, as a positive duration. Optional: leave it out and the
+pace sets the floor too.
+
+Set it when you have measured a value for your transcriber. Lowering it makes
+short replies finalise sooner as well, because the transcriber is only asked to
+finalise once the silence window elapses — so it pays twice on a "yes, that's
+right".
+
+**Do not take it to the minimum.** LiveKit refuses anything under 250ms and
+`unmute compile` rejects it rather than letting the worker raise on its first
+call. But even a legal short value splits utterances: we had "tomorrow" committed
+as one turn and "afternoon" as the next, and the agent asked twice.
+
+Unlike `pace`, this one **does** take a per-target override, because a silence
+window is tied to one target's mechanism. `examples/salon-concierge` authors
+400ms on the base binding and 200ms on its Pipecat target, and the next section
+is why.
+
+### The Pipecat floor is a cliff, not a dial
+
+Widening the Pipecat window can make turns **slower**. This is the one
+counter-intuitive thing on this page.
+
+`pipecat-slng` asks the bridge to finalise when voice activity detection reports
+the caller stopped. A final transcript that has already arrived by then finds no
+request outstanding, so the frame goes out unfinalized and Pipecat waits out a
+flat **1.0s** safety net instead.
+
+So the relationship between the window and the wait is not monotonic. Below the
+transcript's arrival time the turn ends promptly. Above it, the turn costs a flat
+extra second — and transcripts can arrive in under 300ms, so "above it" starts
+sooner than you would guess.
+
+That is why the Pipecat column in the pace table stays at 0.2s for every pace, and
+why a patient Pipecat agent gets its patience from the ceiling instead. If you
+raise this window on Pipecat, check the wait afterwards rather than assuming it
+went up by what you added.
+
+## Reading what you set
+
+`unmute compile` prints the resolved values, so you never have to infer them from
+the generated code:
+
+```
+livekit: turn pace balanced (silence 0.4s authored, closes at 1.6s)
+pipecat: turn pace balanced (silence 0.2s authored, closes at 1.6s)
+```
+
+`authored` means the floor came from your `endpointing_delay`; `from the pace`
+means it came from `pace`.
+
+Each target's emitted `build/<target>/README.md` says the same thing at more
+length, including — on Pipecat — which of the two identically named `stop_secs`
+fields in `bot.py` is the floor and which is the ceiling.
+
+## How to tune it
+
+The order below matters. Each step tells you whether the next one is worth doing,
+and the first two need no audio at all.
+
+### 1. Read what you already have
+
+```bash
+unmute compile <your-agent>
+```
+
+The report names the resolved floor and ceiling per target. Most of the time this
+is the whole answer: a package that never set a pace was sitting at the framework
+ceiling, and simply compiling on a current build moves it.
+
+### 2. Decide from the caller, not from the clock
+
+Pick the pace from what your callers actually say, before measuring anything:
+
+- Do they answer in a few words — confirmations, a menu choice, a yes? Start at
+  `snappy`.
+- Do they read things out — phone numbers, dates, postcodes, an email address,
+  a name being spelled? Start at `balanced`, and be ready to go to `patient`.
+- Do they think aloud, with pauses inside a sentence? `patient`.
+
+A single agent often has both kinds of turn. Choose for the ones where being
+wrong is expensive: answering over someone reading their phone number costs more
+than half a second of extra silence on a "yes".
+
+### 3. Listen before you measure
+
+```bash
+unmute dev <your-agent> --target <target>
+```
+
+Have the conversation your callers will have. Two specific things to do, and the
+second is the one people skip:
+
+1. **Finish sentences cleanly and stop.** This is the case a shorter ceiling
+   improves, so it is where you will feel the change.
+2. **Read a phone number aloud in groups, with a pause between each group.** Then
+   pause mid-sentence and carry on. If the agent answers your first group, or
+   answers half your sentence, the pace is too fast for these callers. Go up one.
+
+### 4. Then read the numbers
+
+`unmute dev` reports the wait as its own number, `user_turn`, separately from
+everything else in the turn. That separation is the point: it tells you whether
+turn taking is your problem before you change anything.
+
+Compare each turn's `user_turn` against the floor and ceiling from step 1:
+
+| What you see | What it means | What to do |
+|---|---|---|
+| `user_turn` at your floor, repeatedly | The floor is the only thing being waited on. Turn taking is working. | Nothing. Look at the model instead. |
+| `user_turn` at your ceiling | The turn ran out of patience rather than deciding. These are the turns a shorter ceiling saves. | Go down one pace, then repeat step 3. |
+| `user_turn` above your ceiling | Something else is holding the turn open. Check the transcription number on the same turn: the ceiling cannot fire before the transcript arrives. | Look at the transcriber, not the pace. |
+| `user_turn` fine, replies still slow | Turn taking is not your problem. | See below. |
+
+### 5. When turn taking is not the answer
+
+This is the common outcome once the ceiling is set sensibly, and it is worth
+naming so you do not keep tuning a setting that is already right.
+
+Look at how many model round trips the slow turns took. A turn that calls a tool
+pays time-to-first-token **twice** — once to decide the tool, once to answer with
+its result — so tool turns cost roughly double, and two tools in one turn cost
+more again. That is usually a bigger number than anything on this page, and no
+pace will touch it.
+
+The fixes are structural: collapse two tools into one, ask for one piece of
+information instead of three, or answer from context rather than looking something
+up. See [Optimizing your agent](/optimization/overview) for that side.
+
+<Warning>
+  **A latency figure only shows you half of turn taking.** It fails two ways —
+  dead air after the caller finishes, and answering the caller mid-sentence — and
+  shrinking the window trades one for the other. Only the first appears in a
+  number.
+
+  So a run that reports the wait getting shorter and says nothing about cutoffs
+  has measured half the change. Do step 3 every time you change the pace, not
+  just the first time.
+</Warning>
+
+<Note>
+  **One call is not evidence.** Identical builds have swung more than a second of
+  mean silence between runs here, and a person cannot hold two conversations still
+  enough to compare them. If you are going to quote a number, take three runs per
+  setting and say how many agreed.
+</Note>
+
+## Where the rest of turn taking lives
+
+Everything on this page is on the `turn` binding under `models`. Two related
+things are not, and it is worth knowing why:
+
+- **`conversation.interruption`** decides who holds the floor while the *agent* is
+  speaking — whether a caller can barge in, how many words it takes, and which
+  stretches of the call are protected. It is a conversation policy rather than a
+  property of the turn detector, so it sits under `conversation`. Its fields are
+  in the [agent.yaml reference](/reference/agent-yaml).
+- **The turn model itself** is per-target vendor selection, so a LiveKit package
+  names `turn-detector-mini` in its `targets.yaml` override. See
+  [Turn detection](/models/turn-detection) for what actually runs on each target.
+
+Individual framework parameters — LiveKit's `alpha` and `unlikely_threshold`,
+Pipecat's `pre_speech_ms` and VAD confidence — are **not** reachable from a
+package today. `pace` and `endpointing_delay` are the whole surface.
+
+A `params:` block on a turn binding is not the escape hatch either. It is accepted
+for shape but reaches neither framework, so `unmute compile` warns rather than
+letting you believe it worked:
+
+```
+warning: model "detector" is a turn model and sets params (alpha), which no
+target reads: turn params are not forwarded to either framework.
+```
+
+The same goes for `agent_id` and `fallback` on a turn binding.

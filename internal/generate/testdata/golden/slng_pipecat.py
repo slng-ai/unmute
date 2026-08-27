@@ -29,7 +29,10 @@ from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.bus import BusBridgeProcessor
 from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, FlowsFunctionSchema, NodeConfig
 from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMUpdateSettingsFrame, TTSSpeakFrame
@@ -46,7 +49,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.settings import LLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
-from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
 from pipecat.workers.runner import WorkerRunner
@@ -784,10 +787,37 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(),
+            # The FLOOR: how long silence has to last before speech counts as
+            # stopped. Pipecat's own default, and it does not move with the pace.
+            #
+            # Widening this window makes some turns SLOWER, not more patient.
+            # pipecat-slng asks the bridge to finalise when VAD reports the caller
+            # stopped, and a final that already arrived finds no request
+            # outstanding, so the frame goes out unfinalized and Pipecat waits out
+            # a flat 1.0s safety net. Observed transcripts arrive from 0.27s.
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+            # The CEILING, on the end-of-turn analyzer. pace: balanced.
+            #
+            # Note the two fields both spelled stop_secs. The one above is the
+            # VAD's silence window; this one is how long the turn may run before
+            # closing regardless. They are different fields and different numbers.
+            #
+            # The analyzer is Pipecat's own default stop strategy. It is
+            # constructed explicitly here only so the ceiling is reachable: left
+            # implicit it runs at SmartTurnParams' own 3s.
             user_turn_strategies=UserTurnStrategies(
+                # A minimum word count replaces the default start pair on purpose:
+                # gating turn start on words is the whole point, and leaving VAD
+                # start in place would open the turn before the words arrive.
                 start=[MinWordsUserTurnStartStrategy(min_words=2)],
-                stop=[SpeechTimeoutUserTurnStopStrategy()],
+                stop=[
+                    TurnAnalyzerUserTurnStopStrategy(
+                        turn_analyzer=LocalSmartTurnAnalyzerV3(
+                            params=SmartTurnParams(stop_secs=1.6)
+                        )
+                    )
+                ],
+
             ),
             user_idle_timeout=15,
         ),

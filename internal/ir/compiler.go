@@ -218,9 +218,15 @@ type ModelDef struct {
 	EndpointEnv         string              `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
 	Placement           Placement           `json:"placement" yaml:"placement"`
 	SemanticEndpointing SemanticEndpointing `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
+	// Pace is the authored timing intent. Turn models only. Empty resolves to
+	// PaceBalanced in target.ResolvePace, never to "leave the runtime alone".
+	Pace Pace `json:"pace,omitempty" yaml:"pace,omitempty"`
 	// EndpointingDelay is the turn model's silence window: how long the caller
 	// has to stay quiet before the runtime treats them as finished. It is the
 	// floor on every turn's wait. Turn models only; LiveKit floors it at 250ms.
+	//
+	// It sets the floor only. The ceiling comes from Pace, so a package that
+	// tuned this value keeps it and still gets a shorter ceiling.
 	EndpointingDelay Duration `json:"endpointing_delay,omitempty" yaml:"endpointing_delay,omitempty"`
 	// AgentID and Upstream are the SLNG Context Router's two authored fields,
 	// carried verbatim: the id scopes the router's cache and the block says
@@ -296,6 +302,24 @@ const (
 	SemanticEndpointingRequired  SemanticEndpointing = "required"
 	SemanticEndpointingPreferred SemanticEndpointing = "preferred"
 	SemanticEndpointingOff       SemanticEndpointing = "off"
+)
+
+// Pace is the authored intent behind a turn's timing. It resolves to concrete
+// per-target numbers in internal/target, which owns the mapping because a floor
+// and a ceiling are target facts.
+//
+// The zero value is not a fourth pace. An unset pace resolves to PaceBalanced,
+// so a package that authored nothing gets the balanced row rather than whatever
+// the framework happened to default to.
+type Pace string
+
+// Defined from internal/target's constants rather than retyped, so the three
+// words have one spelling in the tree and the enum below cannot drift from the
+// table that gives each pace its numbers.
+const (
+	PaceSnappy   Pace = targetcap.PaceSnappy
+	PaceBalanced Pace = targetcap.PaceBalanced
+	PacePatient  Pace = targetcap.PacePatient
 )
 
 type Variable struct {
@@ -783,6 +807,9 @@ type Binding struct {
 	EndpointEnv         string              `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
 	Placement           Placement           `json:"placement,omitempty" yaml:"placement,omitempty"`
 	SemanticEndpointing SemanticEndpointing `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
+	// Pace is the authored timing intent, resolved to per-target numbers by the
+	// driver through target.ResolvePace. Turn bindings only.
+	Pace Pace `json:"pace,omitempty" yaml:"pace,omitempty"`
 	// EndpointingDelay is the turn model's silence window: how long the caller
 	// has to stay quiet before the runtime treats them as finished. It is the
 	// floor on every turn's wait. Turn models only; LiveKit floors it at 250ms.

@@ -139,21 +139,47 @@ holds `FunctionCallParams` and pushes the frame through `params.llm`; a task too
 is a flows handler and queues it through `flow_manager.worker`. Same frame, same
 contract, and nothing waits for playout in either.
 {{- end}}
-{{- if .HasFlows}}
 
-{{- if .EndpointingDelay}}
 ## Turn taking
 
-The VAD waits {{.EndpointingDelay}}s of silence before it ends the caller's turn,
-from the package's `endpointing_delay`. That window is the floor on every turn:
-lower it to answer sooner, at the cost of cutting off a caller who pauses
-mid-sentence.
+Two numbers decide how long a caller waits. **Both are spelled `stop_secs` in
+`bot.py` and they are different fields**, so grep finds two and only this tells
+you which is which.
 
-Note the defaults differ from the LiveKit driver, which matters if this package
-runs on both. Pipecat's `stop_secs` defaults to 0.2s and LiveKit's Silero VAD to
-0.55s, so an unset package answers noticeably faster here.
+**The floor is {{.Pace.Floor}}s**, in `VADParams(stop_secs={{.Pace.Floor}})`. The VAD waits that
+much silence before speech counts as stopped.{{if .Pace.FloorAuthored}} It comes from the
+package's `endpointing_delay`.{{else}} It is Pipecat's own default.{{end}}
 
-{{end}}## Task returns
+**The ceiling is {{.Pace.Ceiling}}s**, in `SmartTurnParams(stop_secs={{.Pace.Ceiling}})` on the
+end-of-turn analyzer. That is the longest the turn can run before closing
+regardless, and it comes from `pace: {{.Pace.Name}}`.
+
+The wait does not adapt to the caller on this target. Unlike the LiveKit driver,
+which has a `dynamic` endpointing mode, this is the same fixed window on every
+turn.
+
+**Lowering the floor alone does not shorten a turn**, and on this target
+widening it makes some turns *slower*. pipecat-slng asks the bridge to finalise
+when the VAD reports the caller stopped; a final that has already arrived by then
+finds no request outstanding, so the frame goes out unfinalized and Pipecat waits
+out a flat 1.0s safety net instead. Measured over eight turns at 0.4s: every turn
+whose transcript beat the window paid a flat 1.000s, and observed transcripts
+arrive from 0.27s. That is why the floor here stays at 0.2s for every pace while
+LiveKit's moves, and why the inconsistency is deliberate.
+
+The end-of-turn analyzer (`LocalSmartTurnAnalyzerV3`) runs on every call. It is
+constructed explicitly only so the ceiling is reachable; left implicit it sits at
+its own 3s.
+{{if .NeedsTurnStrategies}}
+A minimum interruption word count is set, and it replaces the default turn-*start*
+pair on purpose: gating turn start on words is the point, and leaving VAD start in
+place would open the turn before the words arrive. It no longer costs you the
+end-of-turn analyzer, which it used to.
+{{end}}
+
+{{- if .HasFlows}}
+
+## Task returns
 
 When a task returns, its internal turns stay out of the owner's conversation.
 The completed delegate call stays in that conversation with the typed result,

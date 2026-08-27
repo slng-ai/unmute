@@ -55,10 +55,10 @@ import httpx
 from loguru import logger
 {{if .NeedsMCP}}from mcp.client.session_group import {{join .MCPParamsImports ", "}}
 {{end}}
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-{{- if .EndpointingDelay}}
+{{if not .SemanticOff}}from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
+{{end}}from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-{{- end}}
 {{if not .Inline}}from pipecat.bus import BusBridgeProcessor
 {{end}}{{if .HasFlows}}from pipecat.flows import {{if .HasIsolated}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig{{if .HasTaskTransfers}}, NO_RESPONSE{{end}}
 {{end}}{{if .FrameImports}}from pipecat.frames.frames import {{join .FrameImports ", "}}
@@ -79,9 +79,9 @@ from pipecat.runner.utils import create_transport
 {{if .DailyParams}}{{.DailyParams.Import}}
 {{end}}{{if .CloudWebsocket}}from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 {{end}}{{if .NeedsTurnStrategies}}from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
-from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+{{end}}from pipecat.turns.user_stop import {{if .SemanticOff}}SpeechTimeoutUserTurnStopStrategy{{else}}TurnAnalyzerUserTurnStopStrategy{{end}}
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
-{{end}}{{if .UserMuteStrategies}}from pipecat.turns.user_mute import {{join .UserMuteStrategies ", "}}
+{{if .UserMuteStrategies}}from pipecat.turns.user_mute import {{join .UserMuteStrategies ", "}}
 {{end}}{{if not .Inline}}from pipecat.workers.llm import {{if not (and .Tracing (or .NeedsFunctionCalls .NeedsMCP))}}LLMWorker, {{end}}LLMWorkerActivationArgs{{if .NeedsFunctionCalls}}, tool{{end}}
 {{else if .NeedsFunctionCalls}}from pipecat.workers.llm import tool
 {{end}}from pipecat.workers.runner import WorkerRunner
@@ -1408,12 +1408,44 @@ def build_stt():
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer({{if .EndpointingDelay}}params=VADParams(stop_secs={{.EndpointingDelay}}){{end}}),
-{{if .Interrupt}}{{if gt .Interrupt.MinWords 0}}            user_turn_strategies=UserTurnStrategies(
+            # The FLOOR: how long silence has to last before speech counts as
+            # stopped. {{if .Pace.FloorAuthored}}Authored as endpointing_delay.{{else}}Pipecat's own default, and it does not move with the pace.{{end}}
+            #
+            # Widening this window makes some turns SLOWER, not more patient.
+            # pipecat-slng asks the bridge to finalise when VAD reports the caller
+            # stopped, and a final that already arrived finds no request
+            # outstanding, so the frame goes out unfinalized and Pipecat waits out
+            # a flat 1.0s safety net. Observed transcripts arrive from 0.27s.
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs={{.Pace.Floor}})),
+            # The CEILING, on the end-of-turn analyzer. pace: {{.Pace.Name}}.
+            #
+            # Note the two fields both spelled stop_secs. The one above is the
+            # VAD's silence window; this one is how long the turn may run before
+            # closing regardless. They are different fields and different numbers.
+            #
+            # The analyzer is Pipecat's own default stop strategy. It is
+            # constructed explicitly here only so the ceiling is reachable: left
+            # implicit it runs at SmartTurnParams' own 3s.
+            user_turn_strategies=UserTurnStrategies(
+{{if .Interrupt}}{{if gt .Interrupt.MinWords 0}}                # A minimum word count replaces the default start pair on purpose:
+                # gating turn start on words is the whole point, and leaving VAD
+                # start in place would open the turn before the words arrive.
                 start=[MinWordsUserTurnStartStrategy(min_words={{.Interrupt.MinWords}})],
+{{end}}{{end}}{{if .SemanticOff}}                # semantic_endpointing: off — the turn ends on a speech timeout with no
+                # analyzer judging whether a thought finished. The pace's ceiling
+                # goes with the analyzer on this target, because the ceiling IS the
+                # analyzer's own stop_secs.
                 stop=[SpeechTimeoutUserTurnStopStrategy()],
+{{else}}                stop=[
+                    TurnAnalyzerUserTurnStopStrategy(
+                        turn_analyzer=LocalSmartTurnAnalyzerV3(
+                            params=SmartTurnParams(stop_secs={{.Pace.Ceiling}})
+                        )
+                    )
+                ],
+{{end}}
             ),
-{{end}}{{end}}{{if .UserMuteStrategies}}            # The stretches of the call the caller cannot talk over, lowered from
+{{if .UserMuteStrategies}}            # The stretches of the call the caller cannot talk over, lowered from
             # conversation.interruption. On a phone route the greeting is
             # protected by default: a phone leg has no echo cancellation, so
             # without this the agent hears its own opening line and cuts itself
@@ -1532,12 +1564,44 @@ def build_stt():
 {{end}}    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer({{if .EndpointingDelay}}params=VADParams(stop_secs={{.EndpointingDelay}}){{end}}),
-{{if .Interrupt}}{{if gt .Interrupt.MinWords 0}}            user_turn_strategies=UserTurnStrategies(
+            # The FLOOR: how long silence has to last before speech counts as
+            # stopped. {{if .Pace.FloorAuthored}}Authored as endpointing_delay.{{else}}Pipecat's own default, and it does not move with the pace.{{end}}
+            #
+            # Widening this window makes some turns SLOWER, not more patient.
+            # pipecat-slng asks the bridge to finalise when VAD reports the caller
+            # stopped, and a final that already arrived finds no request
+            # outstanding, so the frame goes out unfinalized and Pipecat waits out
+            # a flat 1.0s safety net. Observed transcripts arrive from 0.27s.
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs={{.Pace.Floor}})),
+            # The CEILING, on the end-of-turn analyzer. pace: {{.Pace.Name}}.
+            #
+            # Note the two fields both spelled stop_secs. The one above is the
+            # VAD's silence window; this one is how long the turn may run before
+            # closing regardless. They are different fields and different numbers.
+            #
+            # The analyzer is Pipecat's own default stop strategy. It is
+            # constructed explicitly here only so the ceiling is reachable: left
+            # implicit it runs at SmartTurnParams' own 3s.
+            user_turn_strategies=UserTurnStrategies(
+{{if .Interrupt}}{{if gt .Interrupt.MinWords 0}}                # A minimum word count replaces the default start pair on purpose:
+                # gating turn start on words is the whole point, and leaving VAD
+                # start in place would open the turn before the words arrive.
                 start=[MinWordsUserTurnStartStrategy(min_words={{.Interrupt.MinWords}})],
+{{end}}{{end}}{{if .SemanticOff}}                # semantic_endpointing: off — the turn ends on a speech timeout with no
+                # analyzer judging whether a thought finished. The pace's ceiling
+                # goes with the analyzer on this target, because the ceiling IS the
+                # analyzer's own stop_secs.
                 stop=[SpeechTimeoutUserTurnStopStrategy()],
+{{else}}                stop=[
+                    TurnAnalyzerUserTurnStopStrategy(
+                        turn_analyzer=LocalSmartTurnAnalyzerV3(
+                            params=SmartTurnParams(stop_secs={{.Pace.Ceiling}})
+                        )
+                    )
+                ],
+{{end}}
             ),
-{{end}}{{end}}{{if .UserMuteStrategies}}            # The stretches of the call the caller cannot talk over, lowered from
+{{if .UserMuteStrategies}}            # The stretches of the call the caller cannot talk over, lowered from
             # conversation.interruption. On a phone route the greeting is
             # protected by default: a phone leg has no echo cancellation, so
             # without this the agent hears its own opening line and cuts itself

@@ -233,6 +233,7 @@
         "pages": [
           "optimization/overview",
           "optimization/latency",
+          "optimization/turn-taking",
           "optimization/execution-layer",
           "optimization/context-router",
           "optimization/regional-infrastructure"

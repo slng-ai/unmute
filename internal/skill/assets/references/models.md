@@ -76,6 +76,8 @@ say what you bound.
 | `language` | `speak`, `listen` |
 | `temperature`, `top_p`, `top_k` | `think` |
 | `semantic_endpointing` | `turn`: `required`, `preferred`, or `off` |
+| `pace` | `turn`: `snappy`, `balanced`, or `patient`. Defaults to `balanced`. No per-target override |
+| `endpointing_delay` | `turn`: a positive duration. The floor, and only the floor |
 | `fallback` | `think`, `listen` |
 
 A target and vendor may narrow this further. For example, validation rejects

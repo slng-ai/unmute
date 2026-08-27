@@ -65,6 +65,7 @@ const (
 	FieldTurnPlacement         Field = "pipeline.turn.placement"
 	FieldSemanticEndpointing   Field = "pipeline.turn.semantic_endpointing"
 	FieldEndpointingDelay      Field = "pipeline.turn.endpointing_delay"
+	FieldPace                  Field = "pipeline.turn.pace"
 	FieldFallback              Field = "models.fallback"
 	FieldListenFallback        Field = "models.listen.fallback"
 	FieldTask                  Field = "tasks"
@@ -271,9 +272,14 @@ func Default() Table {
 				warn(LiveKit, "LiveKit turn placement is a preference"),
 				deny(Slng, "slng target owns its own turn taking and its create body carries no turn section: remove the turn binding, or compile to livekit or pipecat which place the turn detector themselves"),
 			),
+			// Both code targets warned here until 2026-08-27, and the warning was
+			// honest about the wrong thing. It said the effect depended on the
+			// bound model. The real situation was that the value reached no
+			// emitted project at all: both drivers marked it advisory and no
+			// template read it. It is load-bearing now — `off` removes the turn
+			// model on LiveKit and the end-of-turn analyzer on Pipecat — so it is
+			// an ordinary supported field.
 			FieldSemanticEndpointing: field(
-				warn(LiveKit, "LiveKit semantic endpointing depends on the bound model"),
-				warn(Pipecat, "Pipecat semantic endpointing depends on the bound model"),
 				deny(Slng, "slng target owns its own turn taking, so a semantic endpointing choice reaches nothing: remove it, or compile to livekit or pipecat where the bound turn model decides"),
 			),
 			// One window, two places to set it: LiveKit's prewarmed Silero VAD
@@ -282,13 +288,27 @@ func Default() Table {
 			// interchangeable defaults, which matters when a package moves
 			// between the two: LiveKit's Silero defaults to 0.55s and Pipecat's
 			// stop_secs to 0.2s, so the same unset package hears a different
-			// agent. LiveKit's turn_handling endpointing min_delay is
-			// deliberately NOT the destination; it cannot fire before the VAD
-			// reports end of speech, so anything under the window is inert
-			// there. The hosted stacks own turn taking, so the value has
+			// agent. The hosted stacks own turn taking, so the value has
 			// nowhere to land.
+			//
+			// This field is the FLOOR only. It was the whole story until
+			// 2026-08-27, and the note that used to sit here said LiveKit's
+			// endpointing min_delay was deliberately not a destination. That is
+			// now false, and deliberately: `pace` reaches min_delay and max_delay,
+			// which is where a 2.5s turn actually came from. The reasoning was
+			// also only half right — min_delay cannot fire before the VAD reports
+			// end of speech, so a min_delay under the window is inert, but
+			// max_delay is a ceiling the VAD window has no say in at all.
 			FieldEndpointingDelay: field(
 				deny(Slng, "slng target owns its own turn taking, so an endpointing delay reaches nothing: remove it, or compile to livekit or pipecat, which set the silence window on the VAD"),
+			),
+			// The ceiling, and the floor when no duration was authored. One
+			// authored word per binding, mapped per target in pace.go, because a
+			// floor and a ceiling are target facts and the two frameworks spell
+			// neither the same way. No per-target override: a per-target pace is
+			// a duration in disguise and endpointing_delay already is one.
+			FieldPace: field(
+				deny(Slng, "slng target owns its own turn taking, so a pace reaches nothing: remove it, or compile to livekit or pipecat, which set the turn window themselves"),
 			),
 			// SLNG has a real fallback slot per component: fallbacks.stt and
 			// fallbacks.llm take model strings, fallbacks.tts takes model and voice

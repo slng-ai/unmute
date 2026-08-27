@@ -137,6 +137,18 @@ type ModelDef struct {
 	EndpointEnv         string   `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
 	Placement           string   `json:"placement,omitempty" yaml:"placement,omitempty"`
 	SemanticEndpointing string   `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
+	// Pace is how quickly the agent decides the caller has finished: snappy,
+	// balanced or patient. It is the portable form of a wait, and each target
+	// maps it onto its own floor and ceiling, because the two frameworks do not
+	// spell either the same way.
+	//
+	// Empty means balanced, which is deliberately not "leave the runtime alone".
+	// The runtime defaults are slower than the turn detector needs, so a package
+	// that says nothing still gets the faster behaviour.
+	//
+	// Turn bindings only, and it takes no per-target override: a per-target pace
+	// is a duration in disguise, and EndpointingDelay already exists for that.
+	Pace string `json:"pace,omitempty" yaml:"pace,omitempty"`
 	// EndpointingDelay is the window of silence that has to pass before the
 	// runtime treats the caller as finished. It is the floor on every turn, so
 	// shortening it shortens every answer and lengthening it gives a caller who
