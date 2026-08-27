@@ -3,11 +3,13 @@
 The full Sage and Stone Salon project. Use this example before a release when
 you want one package to exercise the main Unmute paths together:
 
-- a phone-only verification entry agent and a typed customer task;
+- a supervisor entry agent that identifies the caller, runs the booking step
+  itself, and answers open questions from the salon's own documents;
 - one booking task that handles create, modify, and cancel;
-- agent handoffs with shared customer context;
-- a complaint agent with cold manager transfer;
-- a chat agent that answers open questions and hands off, with no tool of its own;
+- a guarded step: `requires:` on a delegate, so the booking step will not start
+  before the caller is identified and the caller never hears the guard;
+- one agent handoff, with shared context and no prerequisite, to a complaint
+  agent that holds the refund policy and a cold manager transfer;
 - local Python tools backed by one in-memory store;
 - Coval tracing for release inspection;
 - browser audio and inbound phone calls on three targets, covering both local
@@ -34,26 +36,28 @@ Thinking goes through the SLNG Context Router, which can answer a repeated turn
 from cache instead of asking the model. It judges which turns are worth treating
 as repeatable, so a repeat served by the model is expected and not a fault.
 `agent_id` is what keeps one project's learned answers apart from another's, and
-this package writes one value: `optimized-salon-concierge-v3`.
+this package writes one value: `optimized-salon-concierge-v8`.
 
 The compiler adds the name of whoever is speaking, so this package sends six
 scopes:
 
 ```
-optimized-salon-concierge-v3:concierge
-optimized-salon-concierge-v3:booking_specialist
-optimized-salon-concierge-v3:complaint_specialist
-optimized-salon-concierge-v3:chat_with_me
-optimized-salon-concierge-v3:task.customer_verification
-optimized-salon-concierge-v3:task.booking
+optimized-salon-concierge-v8:concierge
+optimized-salon-concierge-v8:complaint_specialist
+optimized-salon-concierge-v8:task.customer_verification
+optimized-salon-concierge-v8:task.booking
 ```
 
-Six and not one, because the cache key is the last exchange and does not include
-the system prompt. Under one shared scope these agents were served each other's
-lines: on 2026-08-21 the booking specialist's opening turn after a handoff came
-back as the concierge's "what phone number should I use to look up your customer
-profile?", from cache, in 1.27 ms, with no model call. The caller heard the agent
-repeat itself.
+One per prompt site and not one for the package, because the cache key is the
+last exchange and does not include the system prompt. Under one shared scope
+these sites were served each other's lines: on 2026-08-21 a receiving agent's
+opening turn after a handoff came back as the concierge's "what phone number
+should I use to look up your customer profile?", from cache, in 1.27 ms, with no
+model call. The caller heard the agent repeat itself.
+
+It was six scopes then and is four now. Two of them belonged to agents that
+existed only to hold a guard the compiler could not put on a step, and each one
+was a separate prompt site paying for its own cache.
 
 This package used to carry `slng_pure_proxy: true` to stop that, which works by
 turning cache serving off entirely and giving up the speed the router is here for.
@@ -68,7 +72,7 @@ value for is a 422 that would end the call.
 
 ### Why the phone number is a placeholder, and why its format matters
 
-The booking specialist can tell the caller which number is on file, and that
+The concierge can tell the caller which number is on file, and that
 number is `{{customer_phone}}` in its prompt rather than text this package renders
 itself. The router refuses to store any answer containing a number, so an agent
 that reads one back aloud normally pays the model for every one of those turns.
@@ -89,16 +93,17 @@ hit rate is simply zero. That is why `customer_phone`'s description names the
 format, and why `tasks/verify-customer.md` says what shape to return the number
 in rather than leaving it to the model.
 
-### One placeholder, in one prompt
+### One identifier, and every agent that needs it can see it
 
-`customer_id` stays out of every prompt: it is never spoken, so a placeholder
-would buy no cache hit. The caller's name is not a variable at all, and neither
-of those is only tidiness.
+There is one caller identifier in this package and it is the phone number. A
+second, synthetic one used to sit beside it: never spoken, never shown, carried
+by every tool, and doing nothing the number could not. The caller's name is not a
+variable at all, and neither of those is only tidiness.
 
 The compiler sends **one set of names per think profile**, the union of every
-name any router-bound prompt on that profile references. All four agents and both
+name any router-bound prompt on that profile references. Both agents and both
 tasks share the `reasoning` profile here, so whatever this package declares and
-references is sent on all six requests, not only on the prompt that says it.
+references is sent on every request, not only on the prompt that says it.
 
 That matters because of a rule in the router's own guide: its sharing scan refuses
 any cached answer that still contains one of the values you sent for that call,
@@ -107,9 +112,28 @@ shared. A caller's first name is short enough to appear inside an unrelated word
 in some answer somewhere; a phone number in this shape is not. One long, specific
 value the agent actually says is the cheapest thing to send.
 
-The counterpart holds too: the complaint and chat specialists never say a number,
-so they carry no placeholder. That does not change what is sent, because the name
-set is a union, but a prompt should not hold a value it has no use for.
+**Both agents carry the `{{customer_phone}}` placeholder, and that is the point.**
+This page used to say the opposite: one placeholder in one prompt, on the
+reasoning that customer care never says the number so it should not hold a value
+it has no use for. That cost a live call. A caller identified during booking
+raised a complaint mid-flow, customer care picked up correctly with the whole
+history, and then asked for the phone number again, because `record_complaint`
+injects the number into the tool call and nothing put it in front of the model.
+The agent could not tell an already-verified caller from a new one.
+
+The reasoning was wrong on its own terms too. The name set is a union sent on
+every request, so `customer_phone` was already going out with every one of
+customer care's requests. Referencing it in a second prompt sends nothing new and
+narrows nothing further. The value was being paid for and thrown away.
+
+So the rule is not "one placeholder per package". It is: **an agent that holds a
+tool injecting a variable has to be able to see that variable.** Otherwise it
+cannot tell whether the value is already collected, and it asks the caller for
+something the package already has. `internal/generate/examples_test.go` holds
+that, for every agent and every injected variable, not just this pair.
+
+Seeing it is not saying it. Customer care still never reads a number aloud; the
+prompt says so on the same line that shows it the value.
 
 Every think request also logs one line saying where its answer came from, so
 whether any of this is working is a question you answer by reading the run:
@@ -131,25 +155,45 @@ its name.
 
 ## How the call moves
 
-The concierge verifies the caller once by phone number, saves `customer_id`,
-then routes the full conversation silently. Every specialist can route directly
-to any other specialist without announcing the internal handoff. The booking
-task can also leave immediately for a complaint or open chat without applying a
-booking change, since it holds those two handoffs itself. For any other request
-it cannot serve, the task finishes first with whatever the last mutation
-actually returned, and names the request in `unserved_request`. The booking
-specialist reads that off the returned result and routes the caller without
-being asked twice. Every route keeps the verified identity and full history.
+Two agents, and the concierge is the one the caller talks to for almost the whole
+call. It runs the booking step itself, as a guarded delegate: `manage_booking`
+declares `requires: [customer_phone]`, so the step will not start until the
+caller is identified, and the compiler refuses it to the model rather than to the
+caller. The model is told which control supplies the number, runs verification,
+and calls the step again on the same turn. Nobody hears any of that.
+
+That guard is why there is no booking agent. There used to be one, and it existed
+for a single reason: `requires:` was legal on a handoff and not on a step, so the
+only machine-checked way to gate booking was to put an agent in front of it. That
+agent had to be spoken through, which cost the caller a turn and taught a shape
+nobody needed. Open chat had a second such agent, for no reason at all.
+
+Customer care is a real agent, because it holds a permission and a document set
+the concierge must not have: the refund policy and the complaint record. Asking
+for a person is not gated on anything: the concierge holds the manager transfer
+directly, and the handoff to customer care carries no prerequisite, so a caller
+who opens with "I want to speak to a manager" is never asked for a number first.
+Customer care listens, quotes published policy, and identifies the caller only
+when it is about to write the complaint down.
+
+The booking step leaves for a complaint without applying a booking change, since
+it holds that handoff itself. For any other request it cannot serve, it finishes
+first with whatever the last mutation actually returned, and names the request in
+`unserved_request`. The concierge reads that off the returned result and acts on
+it without the caller being asked twice. Every route keeps the identity collected
+so far and full history.
 During verification, the task reads every phone digit back once and waits for a
 new clear yes before the customer lookup. After verification, no specialist
 asks for or repeats the number unless the caller says the saved identity is
 wrong. This readback checks what speech recognition captured; it is not strong
 authentication such as an OTP.
 
-On LiveKit, the target overrides the shared reasoning profile with OpenAI's
-Responses API and a held WebSocket in place of a fresh handshake on every model
-call, with reasoning still off. Pipecat keeps Chat Completions with reasoning
-disabled. Both targets still use the same model ID.
+Both targets run the same reasoning profile, through the SLNG Context Router,
+with reasoning off. Neither overrides it. `targets.yaml` says why in full: a
+target's `models:` block replaces a profile rather than merging into it, so an
+override there would drop the router binding, and the router speaks Chat
+Completions, which rules out the Responses API and the held websocket this target
+used before.
 
 The complaint specialist records the case with a local Python tool. It calls a
 cold transfer when the caller asks for a manager or uses clearly and strongly
@@ -160,9 +204,10 @@ explicit `hangup` policy ends the call because Pipecat `cloud-websocket` cannot
 return after carrier takeover.
 
 Every tool in the package is a local Python handler, so nothing has to be
-reachable before the greeting. `chat_with_me` has no business tool at all: it
-answers from what it knows, says plainly when it cannot check something, and
-hands off for booking or complaint work. For a remote tool over MCP, see
+reachable before the greeting. Anything that is neither a booking nor a complaint
+is answered by the concierge from the salon's own documents, and it says plainly
+when a question is outside them rather than claiming a lookup it cannot do. For a
+remote tool over MCP, see
 [MCP servers](../../docs-site/build/tools/mcp.mdx).
 
 ## Two knowledge bases
@@ -379,7 +424,10 @@ Repeat it on an inbound phone route only when that route is separately reachable
 | Modify | Book another appointment, then ask to move it to another future date. | The same booking is updated atomically after confirmation. |
 | Human transfer | On an inbound call say, “I want to speak to a manager.” | The active caller receives a cold transfer attempt. |
 | Frustration | On an inbound call repeat that the issue is unresolved and refuse to continue with the agent. | The complaint specialist starts the same manager transfer. |
-| No claimed lookup | Ask the chat specialist something it cannot know, such as another salon's prices today. | It says plainly that it cannot check, offers what it does know, and never claims to have searched. |
+| No claimed lookup | Ask the concierge something outside the salon's documents, such as another salon's prices today. | It says plainly that it cannot check, offers what it does know, and never claims to have searched. |
+| Guarded step, silently recovered | “I want to book a haircut,” with no number given yet. | Verification runs and the booking question follows. No booking action runs before identification, and the caller hears no refusal wording and no variable name. |
+| Guarded step, out loud | Ask to book, then refuse to give a number, five times. | By the fifth attempt the agent asks for the number in its own plain words. It does not go quiet and does not hang up. |
+| Escalation is never gated | Open the call with “I want to speak to a manager,” before saying anything else. | The escalation attempt starts on that turn, with no request for identifying information. |
 | Transfer failure truth | Try a manager transfer in a browser, then test an unavailable manager on a phone call. | Browser says an inbound phone leg is required. A carrier failure is not described as a browser limit, and the terminal policy may hang up. |
 
 ### Verification stress checks

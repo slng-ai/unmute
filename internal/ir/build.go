@@ -667,6 +667,14 @@ func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agen
 	}
 	task, group := stringValue(raw.Task), stringValue(raw.Group)
 	to := stringValue(raw.To)
+	// Both kinds that accept `requires:` name variables, and a name that does not
+	// resolve is a typo the author must see at compile rather than a guard that
+	// can never pass at runtime. One loop, so the two kinds cannot drift.
+	for _, name := range raw.Requires {
+		if _, ok := agent.Variables[name]; !ok {
+			return nil, missing(pkg, "agent.yaml", "requires", name)
+		}
+	}
 	switch kind {
 	case ControlDelegate:
 		if (task == "") == (group == "") {
@@ -687,7 +695,7 @@ func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agen
 		if err := checkAssignments(raw, agent); err != nil {
 			return nil, err
 		}
-		return &Delegate{Kind: ControlDelegate, When: raw.When, Task: task, Group: group, Assign: raw.Assign}, nil
+		return &Delegate{Kind: ControlDelegate, When: raw.When, Task: task, Group: group, Requires: raw.Requires, Assign: raw.Assign}, nil
 	case ControlAgentTransfer:
 		if _, ok := agent.Agents[to]; !ok {
 			return nil, missing(pkg, "agent.yaml", "to", to)
@@ -698,11 +706,6 @@ func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agen
 		}
 		if HasTemplate(announce) {
 			return nil, fmt.Errorf("announce does not support templates")
-		}
-		for _, name := range raw.Requires {
-			if _, ok := agent.Variables[name]; !ok {
-				return nil, missing(pkg, "agent.yaml", "requires", name)
-			}
 		}
 		context, err := buildTransferContext(pkg, raw.Context, agent)
 		if err != nil {
@@ -766,7 +769,7 @@ func unexpectedControlField(raw packagespec.Control, kind ControlKind) string {
 		"cold": raw.Cold != nil, "warm": raw.Warm != nil,
 	}
 	allowed := map[ControlKind]map[string]bool{
-		ControlDelegate:      {"task": true, "group": true, "assign": true},
+		ControlDelegate:      {"task": true, "group": true, "assign": true, "requires": true},
 		ControlAgentTransfer: {"to": true, "announce": true, "requires": true, "context": true},
 		ControlHumanTransfer: {"cold": true, "warm": true},
 	}[kind]

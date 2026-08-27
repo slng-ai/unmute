@@ -16,7 +16,11 @@ input:
 output:
   type: object
   properties:
-    customer_id:
+    # The confirmed number, normalised to digits, is the identifier. There is no
+    # second id: a synthetic one would be a value the caller never says, that
+    # every tool would have to carry, and that buys nothing the number does not
+    # already give.
+    customer_phone:
       type: string
     status:
       type: string
@@ -27,7 +31,7 @@ output:
     summary:
       type: string
   required:
-    - customer_id
+    - customer_phone
     - status
     - summary
 

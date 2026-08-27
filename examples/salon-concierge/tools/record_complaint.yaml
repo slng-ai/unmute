@@ -16,7 +16,7 @@ input:
     - requested_resolution
 
 inject:
-  customer_id: "{{customer_id}}"
+  customer_phone: "{{customer_phone}}"
 
 output:
   type: object

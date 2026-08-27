@@ -1,5 +1,5 @@
 description: >-
-  List the verified customer's active bookings. The customer ID comes from
+  List the verified customer's active bookings. The phone number comes from
   verification and is never supplied or guessed by the model.
 
 input:
@@ -7,7 +7,7 @@ input:
   properties: {}
 
 inject:
-  customer_id: "{{customer_id}}"
+  customer_phone: "{{customer_phone}}"
 
 output:
   type: object

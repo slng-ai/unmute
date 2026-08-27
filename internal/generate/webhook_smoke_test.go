@@ -55,7 +55,7 @@ os.environ["SALON_API_TOKEN"] = "test-token-abc123"
 # A customer id with a slash and a space: proof that a rendered path segment is
 # URL-encoded and cannot rewrite the route.
 os.environ["UNMUTE_CALL_START"] = json.dumps(
-    {"name": "Ada", "customer_id": "cus/10 42", "appointment_time": "tomorrow at 3 pm"}
+    {"name": "Ada", "customer_phone": "cus/10 42", "appointment_time": "tomorrow at 3 pm"}
 )
 `
 
@@ -87,7 +87,7 @@ assert captured["path"] == "/customers/cus%2F10%2042/appointments/confirm", capt
 assert captured["auth"] == "Bearer test-token-abc123", captured["auth"]
 assert captured["body"] == {
     "channel": "phone",
-    "customer_id": "cus/10 42",
+    "customer_phone": "cus/10 42",
     "dialed_number": "+15551230000",
 }, captured["body"]
 assert params.result["ok"] is True, params.result
@@ -107,7 +107,7 @@ asyncio.run(agent.reschedule_appointment(allowed))
 assert captured["count"] == 2, captured
 assert captured["path"] == "/customers/cus%2F10%2042/appointments", captured["path"]
 assert captured["body"] == {
-    "customer_id": "cus/10 42",
+    "customer_phone": "cus/10 42",
     "new_time": "Friday at 4",
 }, captured["body"]
 assert allowed.result["ok"] is True, allowed.result
@@ -139,7 +139,7 @@ assert captured["path"] == "/customers/cus%2F10%2042/appointments/confirm", capt
 assert captured["auth"] == "Bearer test-token-abc123", captured["auth"]
 assert captured["body"] == {
     "channel": "phone",
-    "customer_id": "cus/10 42",
+    "customer_phone": "cus/10 42",
     "dialed_number": "+15551230000",
 }, captured["body"]
 assert result["ok"] is True, result
@@ -157,7 +157,7 @@ assert userdata.reschedule_to == "Friday at 4", userdata.reschedule_to
 allowed = asyncio.run(desk.reschedule_appointment(ctx))
 assert captured["count"] == 2, captured
 assert captured["body"] == {
-    "customer_id": "cus/10 42",
+    "customer_phone": "cus/10 42",
     "new_time": "Friday at 4",
 }, captured["body"]
 assert allowed["ok"] is True, allowed

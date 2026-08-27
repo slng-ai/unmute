@@ -65,13 +65,13 @@ func useWebhookTools(agent *ir.Agent) {
 	addReminderVariables(agent)
 	agent.Tools["confirm_appointment"] = webhookTool(
 		"Confirm that the existing appointment stays as booked. Call it when the customer says the time works.",
-		"/customers/{{customer_id}}/appointments/confirm",
-		map[string]any{"customer_id": "{{customer_id}}", "dialed_number": "{{dialed_number}}", "channel": "phone"},
+		"/customers/{{customer_phone}}/appointments/confirm",
+		map[string]any{"customer_phone": "{{customer_phone}}", "dialed_number": "{{dialed_number}}", "channel": "phone"},
 	)
 	agent.Tools["reschedule_appointment"] = webhookTool(
 		"Move the appointment to the slot the customer asked for. Save the slot with update_variables first; this tool reads it on its own.",
-		"/customers/{{customer_id}}/appointments",
-		map[string]any{"customer_id": "{{customer_id}}", "new_time": "{{reschedule_to}}"},
+		"/customers/{{customer_phone}}/appointments",
+		map[string]any{"customer_phone": "{{customer_phone}}", "new_time": "{{reschedule_to}}"},
 	)
 	def := agent.Agents[agent.EntryAgent]
 	def.Tools = append(def.Tools, "confirm_appointment", "reschedule_appointment")
@@ -153,6 +153,28 @@ func TestSmokeFixturesGenerateAndKeepTheirPythonSurface(t *testing.T) {
 						t.Errorf("%s is missing %q, so the smoke script that names it cannot run", driver.file, symbol)
 					}
 				}
+				// Every `{{name}}` these fixtures template must be a variable the
+				// package actually declares.
+				//
+				// The fixtures mutate the resolved IR and call Generate directly,
+				// which skips ir.Validate, so an undeclared name is not refused
+				// here the way it would be in a real package: it compiles happily
+				// into `state.<name>` and dies at runtime with an AttributeError,
+				// deep inside a twenty-minute opt-in suite. That is exactly what
+				// happened when salon-concierge dropped its customer_id variable
+				// and these fixtures kept templating it.
+				for toolName, tool := range agent.Tools {
+					for _, site := range append([]string{tool.Path}, injectTemplates(tool)...) {
+						for _, name := range ir.TemplateRefs(site) {
+							if _, isVault := ir.VaultToken(name); isVault {
+								continue
+							}
+							if _, ok := agent.Variables[name]; !ok {
+								t.Errorf("fixture %s: tool %q templates {{%s}}, which the package does not declare; the smoke would compile fine and fail at runtime with an AttributeError", fixture.name, toolName, name)
+							}
+						}
+					}
+				}
 			})
 		}
 	}
@@ -212,5 +234,81 @@ func TestKnowledgeSmokeKeepsItsPythonSurface(t *testing.T) {
 				t.Errorf("artifact carries %d knowledge documents, want the example's 2", documents)
 			}
 		})
+	}
+}
+
+// injectTemplates lists every template site in a tool's inject block.
+func injectTemplates(tool ir.Tool) []string {
+	sites := make([]string, 0, len(tool.Inject))
+	for _, value := range tool.Inject {
+		if text, ok := value.(string); ok {
+			sites = append(sites, text)
+		}
+	}
+	return sites
+}
+
+// TestSalonJourneySmokeKeepsItsPythonSurface pins the emitted names the salon
+// journey smokes call by name.
+//
+// It exists because the shape change that added this test broke those smokes in
+// exactly the way nothing caught: the booking step moved from its own agent onto
+// the entry agent, so `bot.BookingSpecialistAgent` stopped existing, and the
+// only thing that noticed was an AttributeError thirty minutes into an opt-in
+// suite nobody runs before pushing. The same commit renamed the caller
+// identifier, and that surfaced the same way.
+//
+// Symbols, not behaviour. `make smoke` still owns whether the Python runs; this
+// owns whether the names it types are still there, in seconds, in the suite that
+// actually gates a PR.
+func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, driver := range []struct {
+		provider ir.Provider
+		file     string
+		symbols  []string
+	}{
+		{ir.ProviderLiveKit, "agent.py", []string{
+			"class Userdata:", "class Booking(", "class CustomerVerification(",
+			"class ComplaintSpecialist(", "class _TaskTransfer(",
+			"async def record_complaint(", "async def to_complaints(",
+		}},
+		{ir.ProviderPipecat, "bot.py", []string{
+			"class State:", "class ConciergeAgent(", "class ComplaintSpecialistAgent(",
+			"def _flow_tool_cancel_booking(", "def _flow_tool_check_availability(",
+			"def _flow_tool_create_booking(", "def _flow_tool_find_or_create_customer(",
+			"def _flow_tool_get_current_date(", "def _flow_tool_list_bookings(",
+			"_manage_booking_active_step", "_manage_booking_results",
+			"_manage_booking_snapshot", "_manage_booking_finish_booking",
+			"_manage_booking_transfer_booking_to_complaints",
+			"_verify_customer_results", "_verify_customer_snapshot",
+			"_verify_customer_finish_customer_verification",
+		}},
+	} {
+		t.Run(string(driver.provider), func(t *testing.T) {
+			artifact, err := Generate(agent, targetByProvider(t, agent, driver.provider), target.Default())
+			if err != nil {
+				t.Fatalf("the salon package no longer generates: %v", err)
+			}
+			emitted := artifactFile(t, artifact, driver.file)
+			for _, symbol := range driver.symbols {
+				if !strings.Contains(emitted, symbol) {
+					t.Errorf("%s is missing %q, so the salon journey smoke that names it cannot run", driver.file, symbol)
+				}
+			}
+		})
+	}
+
+	// The smokes construct Userdata and State with the caller identifier by
+	// keyword, so a rename has to fail here rather than at runtime.
+	if _, ok := agent.Variables["customer_phone"]; !ok {
+		t.Error("the salon package no longer declares customer_phone; the journey smokes pass it by keyword")
 	}
 }

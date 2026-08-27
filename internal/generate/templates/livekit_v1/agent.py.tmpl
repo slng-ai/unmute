@@ -4,6 +4,25 @@
         # its filter follows the context of everything this reply starts: a live call
         # offered one specialist nothing but its delegate for ten turns while the
         # caller asked for another one (B: salon handoffs, 2026-08-20).
+{{end}}{{define "prerequisite_guard"}}        _unmet = _unmet_prerequisites(ctx.userdata, [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
+        if _unmet:
+            # requires guard (machine-checked): the step does not start, and the
+            # refusal goes to the model rather than to the caller.
+            _tries = _prerequisite_refusals.get({{pyq .Method}}, 0) + 1
+            _prerequisite_refusals[{{pyq .Method}}] = _tries
+            _at_limit = _tries >= _PREREQUISITE_LIMIT
+            if _at_limit:
+                logger.info(
+                    "prerequisite guard: step %s refused, unmet %s, retry limit reached; asking the caller",
+                    {{pyq .Method}}, ", ".join(_unmet),
+                )
+            else:
+                logger.info(
+                    "prerequisite guard: step %s refused, unmet %s",
+                    {{pyq .Method}}, ", ".join(_unmet),
+                )
+            return {"refused": _prerequisite_refusal(_unmet, _at_limit)}
+        _prerequisite_refusals[{{pyq .Method}}] = 0
 {{end}}{{define "opening_tools"}}tools=[t.id for t in self.tools if t.id not in { {{- range $i, $t := .Transfers}}{{if $i}}, {{end}}{{pyq $t.Method}}{{end -}} }]{{end}}
 {{- /* svc renders any resolved ServiceCall inline (session/agent kwargs).
 Classes, kwargs, and model-route forms come from the provider catalogue
@@ -656,6 +675,14 @@ def _refusal(tool: str, userdata, needed: list[tuple[str, str]]) -> str:
     return f"cannot call {tool} yet: {names} not set. Ask the caller first. {hints}".strip()
 
 {{end}}
+{{- if .NeedsPrerequisiteGuard}}
+{{.PrerequisiteGuard}}
+# One counter per guarded control per session. Held on the module rather than the
+# agent because a handoff replaces the agent object and a caller who keeps
+# refusing across a handoff has not started over.
+_prerequisite_refusals: dict[str, int] = {}
+
+{{end}}
 {{- if .HasUserdata}}
 # --- shared state ------------------------------------------------------------
 # Typed session state (SCHEMA 4.4): tasks assign into it, transfers read it.
@@ -1034,10 +1061,16 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
     async def {{.Method}}(self, ctx: RunContext):
         {{triple .When}}
 {{- if .Requires}}
-        missing = [n for n, v in ({{range .Requires}}({{pyq .}}, ctx.userdata.{{.}}), {{end}}) if v in (None, "")]
-        if missing:
-            # requires guard (machine-checked): refuse and name the unmet variables.
-            return "Cannot transfer yet; missing required information: " + ", ".join(missing)
+        _unmet = _unmet_prerequisites(ctx.userdata, [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
+        if _unmet:
+            # requires guard (machine-checked): the same shared wording every
+            # other guard uses, so the two targets cannot describe the same
+            # refusal differently.
+            logger.info(
+                "prerequisite guard: handoff %s refused, unmet %s",
+                {{pyq .Method}}, ", ".join(_unmet),
+            )
+            return {"refused": _prerequisite_refusal(_unmet, False)}
 {{- end}}
 {{- if .Announce}}
         await ctx.session.say({{pyq .Announce}}, allow_interruptions=False)
@@ -1248,6 +1281,9 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
     @function_tool
     async def {{.Method}}(self, ctx: RunContext) -> dict{{if .CanTaskTransfer}} | Agent{{end}}:
         {{triple .When}}
+{{- if .Requires}}
+{{template "prerequisite_guard" .}}
+{{- end}}
         # N13: snapshot before the task, restore after. An awaited AgentTask
         # merges its own turns into this agent's context when it returns
         # (livekit/agents/voice/agent.py, merge on handoff-return), so without
@@ -1283,6 +1319,9 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
     @function_tool
     async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{if .CanTaskTransfer}} | Agent{{end}}{{end}}:
         {{triple .When}}
+{{- if .Requires}}
+{{template "prerequisite_guard" .}}
+{{- end}}
         # context_scope: isolated — each step is a standalone AgentTask starting
         # fresh (C3/C4); the grouped form always shares context, so it is not used.
         # Starting fresh says nothing about coming back: an AgentTask merges its
@@ -1317,6 +1356,9 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
     @function_tool
     async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{if .CanTaskTransfer}} | Agent{{end}}{{end}}:
         {{triple .When}}
+{{- if .Requires}}
+{{template "prerequisite_guard" .}}
+{{- end}}
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
             summarize_chat_ctx=False,
@@ -1592,10 +1634,14 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
         if not self._claim_terminal():
             return
 {{- if .Requires}}
-        missing = [n for n, v in ({{range .Requires}}({{pyq .}}, ctx.userdata.{{.}}), {{end}}) if v in (None, "")]
-        if missing:
+        _unmet = _unmet_prerequisites(ctx.userdata, [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
+        if _unmet:
             self._terminal_claimed = False
-            return "Cannot transfer yet; missing required information: " + ", ".join(missing)
+            logger.info(
+                "prerequisite guard: handoff %s refused, unmet %s",
+                {{pyq .Method}}, ", ".join(_unmet),
+            )
+            return {"refused": _prerequisite_refusal(_unmet, False)}
 {{- end}}
         try:
 {{- if .Announce}}

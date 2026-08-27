@@ -44,11 +44,49 @@ reports no total streaming time per service here, only time to first byte.
 
 An `agent_transfer` with `announce:` gives the exact sentence spoken once by
 the active agent. Pipecat waits for that speech to stop before it activates the
-receiving worker. The `requires:` guard runs first, so a refused handoff says no
-transfer is happening. Without `announce`, the handoff stays silent.
+receiving worker. The `requires:` guard runs first, so a refused handoff never
+speaks the announcement. Without `announce`, the handoff stays silent.
 
 The opening greeting belongs to call start only. A later handoff back to the
 entry agent continues from the shared context and never repeats it.
+{{- end}}
+{{- if .NeedsPrerequisiteGuard}}
+
+## Guarded steps and handoffs
+
+A control that declares `requires:` does not run until every named variable holds
+a value. The refusal goes to the model, never to the caller: it names the unmet
+variable and the control that supplies it, so the model fetches the value and
+calls the control again in the same turn. The caller hears the next natural
+question and never learns a guard fired.
+
+Each guarded control also carries its requirement in its own description, so the
+model usually collects the value during the earlier turns and the guard is never
+reached at all.
+
+**What you see in the log.** A refused control writes one line at normal level:
+
+```text
+prerequisite guard: step manage_booking refused, unmet customer_phone
+```
+
+and, on the attempt that reaches the retry limit:
+
+```text
+prerequisite guard: step manage_booking refused, unmet customer_phone, retry limit reached; asking the caller
+```
+
+Variable names and step names only. No caller speech and no variable value is
+ever written, which matters when the identifier is something like a phone number.
+
+After the limit the agent stops recovering quietly and asks the caller for the
+missing value out loud, in its own words. It does not fall silent and it does not
+end the call. That limit lives in this generated code, not in a prompt: a model
+can be argued out of an instruction, and the guard exists for the case where it
+already has been.
+
+A repeated refusal with nothing in the log is not this guard. Look for a model
+that is not calling the control at all.
 {{- end}}
 {{- if .NeedsFunctionCalls}}
 

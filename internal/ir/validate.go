@@ -792,6 +792,9 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 			if control.Task != "" {
 				applyCapability(caps, targetcap.FieldTask, provider, row)
 			}
+			if len(control.Requires) > 0 {
+				applyCapability(caps, targetcap.FieldDelegateRequires, provider, row)
+			}
 		case *AgentTransfer:
 			if control.Announce != "" {
 				applyCapability(caps, targetcap.FieldTransferAnnounce, provider, row)

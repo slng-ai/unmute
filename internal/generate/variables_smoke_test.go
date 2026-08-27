@@ -23,7 +23,7 @@ for name in json.load(open("compile-report.json"))["required_env"]:
 # The fixture's dispatch variables are what the render assertions read, so they
 # are supplied the way unmute dev --var does.
 os.environ["UNMUTE_CALL_START"] = json.dumps(
-    {"name": "Ada", "customer_id": "cus_1042", "appointment_time": "tomorrow at 3 pm"}
+    {"name": "Ada", "customer_phone": "cus_1042", "appointment_time": "tomorrow at 3 pm"}
 )
 
 import bot  # noqa: E402
@@ -43,10 +43,10 @@ rendered = bot._render("Hi {{name}}, see you {{appointment_time}}.", state)
 assert rendered == "Hi Ada, see you tomorrow at 3 pm.", rendered
 
 # A path renders with its values URL-encoded, separators untouched.
-state.customer_id = "cus/10 42"
-path = bot._render("/customers/{{customer_id}}/appointments", state, quote_values=True)
+state.customer_phone = "cus/10 42"
+path = bot._render("/customers/{{customer_phone}}/appointments", state, quote_values=True)
 assert path == "/customers/cus%2F10%2042/appointments", path
-state.customer_id = "cus_1042"
+state.customer_phone = "cus_1042"
 
 # An unset variable produces a refusal naming it, not a request.
 assert state.reschedule_to is None
@@ -72,7 +72,7 @@ assert state.reschedule_to == "Saturday at noon", state.reschedule_to
 assert saved == {"saved": ["reschedule_to"]}, saved
 
 # A second dispatch payload lands on a fresh state.
-os.environ["UNMUTE_CALL_START"] = json.dumps({"name": "Grace", "customer_id": "cus_7", "appointment_time": "Monday"})
+os.environ["UNMUTE_CALL_START"] = json.dumps({"name": "Grace", "customer_phone": "cus_7", "appointment_time": "Monday"})
 dispatched = bot.build_state()
 assert dispatched.name == "Grace", dispatched.name
 
@@ -97,12 +97,12 @@ import agent as generated  # noqa: E402
 
 userdata = generated.Userdata()
 userdata.name = "Ada"
-userdata.customer_id = "cus_1042"
+userdata.customer_phone = "cus_1042"
 
 rendered = generated._render("Hi {{name}}!", userdata)
 assert rendered == "Hi Ada!", rendered
 
-path = generated._render("/customers/{{customer_id}}/appointments", userdata, quote_values=True)
+path = generated._render("/customers/{{customer_phone}}/appointments", userdata, quote_values=True)
 assert path == "/customers/cus_1042/appointments", path
 
 refusal = generated._refusal("reschedule_appointment", userdata, [("reschedule_to", "the new slot")])
@@ -111,7 +111,7 @@ userdata.reschedule_to = "Friday at 4"
 assert generated._refusal("reschedule_appointment", userdata, [("reschedule_to", "the new slot")]) == ""
 
 # The dispatch stand-in is validated and applied.
-os.environ["UNMUTE_CALL_START"] = json.dumps({"name": "Grace", "customer_id": "cus_7", "appointment_time": "Monday"})
+os.environ["UNMUTE_CALL_START"] = json.dumps({"name": "Grace", "customer_phone": "cus_7", "appointment_time": "Monday"})
 values = generated._dispatched_call_start({})
 fresh = generated.Userdata()
 generated._hydrate_call_start(fresh, values)

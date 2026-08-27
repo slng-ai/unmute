@@ -619,7 +619,11 @@ async def main() -> None:
 
     reset_task_context()
     refused, next_node = await owner._run_verify_transfer_verify_to_billing({}, flow)
-    assert "still need" in refused["refused"]
+    # The wording is generated once by internal/generate/guard.go and rendered
+    # into both targets, so this asserts the shared sentence rather than a
+    # Pipecat-only one. It used to read "still need", which LiveKit never said.
+    assert "Not started. Missing: customer_id" in refused["refused"], refused
+    assert "Do not say any of this out loud" in refused["refused"], refused
     assert next_node is None, "recoverable refusal must keep the task LLM active"
     assert owner._run_verify_active_step == "verify"
 

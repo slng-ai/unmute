@@ -16,6 +16,22 @@ func TestSmokeSalonConciergePipecatJourneys(t *testing.T) {
 	runPipecatSmokeScript(t, "salon-concierge", nil, nil, salonPipecatJourneysSmokeScript)
 }
 
+// TestSmokeSalonConciergePipecatBound drives the prerequisite guard to its limit
+// in the real emitted Python.
+//
+// It exists because a live call could not reach this. On a browser call on
+// 2026-08-27 a caller refused to give a phone number four times and the guard
+// never fired once: the forward declaration on the tool description was enough
+// that the model never called the guarded step at all. That is the mechanism
+// working, and it is the outcome we want, but it means the bound underneath is
+// unreachable by talking to the agent.
+//
+// So it gets driven directly. The guard is the net for a model that ignores the
+// description, and a net nobody has ever tested is a net nobody should trust.
+func TestSmokeSalonConciergePipecatBound(t *testing.T) {
+	runPipecatSmokeScript(t, "salon-concierge", nil, nil, salonPipecatBoundSmokeScript)
+}
+
 // The tools/salon.py handler is copied once per tool (see its own module
 // docstring), so a module-level dict would give each copy a private store.
 // The product's fix is one state module parked in sys.modules that every
@@ -86,11 +102,23 @@ for tool_name in (
     setattr(module, tool_name, recorded)
 
 
+def digits(phone):
+    """The store's key for a number the tool hands back in spoken shape.
+
+    The caller identifier is the phone number, and it exists in two shapes on
+    purpose: the identification step returns spaced digit groups, because the
+    router only substitutes a placeholder back where the value matches character
+    for character, and the store keys on digits so any spoken form reaches one
+    record. A fixture that confuses the two passes for the wrong reason.
+    """
+    return "".join(character for character in str(phone) if character.isdigit())
+
+
 def booking_rows():
     return sorted(
         (
             booking_id,
-            booking["customer_id"],
+            booking["customer_phone"],
             booking["service"],
             booking["slot_id"],
             booking["status"],
@@ -102,7 +130,7 @@ def booking_rows():
 def complaint_rows():
     return [
         (
-            complaint["customer_id"],
+            complaint["customer_phone"],
             complaint["summary"],
             complaint["requested_resolution"],
         )
@@ -226,14 +254,13 @@ async def split_verification_then_intent_change():
     ctx = run_context(userdata, "verification-finish")
     verified = await verification.find_or_create_customer(ctx, phone="3035550199")
     finish_result = {
-        "customer_id": verified["customer_id"],
-        "customer_phone": "".join(fragments),
+        "customer_phone": verified["customer_phone"],
         "status": verified["status"],
         "summary": verified["summary"],
     }
     await verification.finish(ctx, **finish_result)
     assert verification.completions == [finish_result]
-    userdata.customer_id = verified["customer_id"]
+    userdata.customer_phone = verified["customer_phone"]
 
     complaint = "Actually, I need to complain about my last visit."
     chat_ctx.add_message(role="user", content=complaint)
@@ -244,7 +271,7 @@ async def split_verification_then_intent_change():
     assert isinstance(transfer, agent._TaskTransfer)
     assert isinstance(transfer.agent, agent.ComplaintSpecialist)
     transfer.agent._activity = quiet_activity()
-    assert userdata.customer_id == verified["customer_id"]
+    assert userdata.customer_phone == verified["customer_phone"]
     complaint_messages = [
         item.raw_text_content
         for item in transfer.agent.chat_ctx.items
@@ -268,7 +295,7 @@ async def main():
     )
     assert customer["status"] == "created"
     actions.clear()
-    userdata = agent.Userdata(customer_id=customer["customer_id"])
+    userdata = agent.Userdata(customer_phone=customer["customer_phone"])
     booking_id, slot_id = await create_then_cancel(userdata)
     booking_actions = [name for name, _, _ in actions]
     assert booking_actions == [
@@ -279,7 +306,7 @@ async def main():
         "cancel_booking",
     ]
     assert booking_rows() == [
-        (booking_id, customer["customer_id"], "haircut", slot_id, "cancelled")
+        (booking_id, digits(customer["customer_phone"]), "haircut", slot_id, "cancelled")
     ]
 
     verified = await split_verification_then_intent_change()
@@ -292,13 +319,13 @@ async def main():
     assert verified["status"] == "created"
     assert complaint_rows() == [
         (
-            verified["customer_id"],
+            digits(verified["customer_phone"]),
             "The last visit did not meet expectations.",
             "A manager callback",
         )
     ]
     assert booking_rows() == [
-        (booking_id, customer["customer_id"], "haircut", slot_id, "cancelled")
+        (booking_id, digits(customer["customer_phone"]), "haircut", slot_id, "cancelled")
     ]
 
 
@@ -447,19 +474,24 @@ async def split_verification_then_intent_change():
         {"phone": "3035550199"}, SimpleNamespace(worker=concierge)
     )
     finished, next_node = await concierge._verify_customer_finish_customer_verification(
-        {**verified, "customer_phone": "3035550199"}, None
+        verified, None
     )
     assert finished == {"status": "ok"} and next_node is None
-    assert state.customer_id == verified["customer_id"]
-    assert state.customer_phone == "3035550199", (
-        "the confirmed phone must reach the variable the package assigns it to, "
-        f"got {state.customer_phone!r}"
+    assert state.customer_phone == verified["customer_phone"]
+    # Spoken digit groups, not raw digits. The step returns the number in the
+    # shape tasks/verify-customer.md requires, and that shape is load-bearing:
+    # the router only substitutes a placeholder back where the stored value
+    # matches character for character, so a number reshaped on its way into the
+    # variable silently costs every later turn its cache with nothing failing.
+    assert state.customer_phone == "303 555 0199", (
+        "the confirmed phone must reach the variable in the shape the step "
+        f"returns it, got {state.customer_phone!r}"
     )
 
     complaint = "Actually, I need to complain about my last visit."
     snapshot = [dict(message) for message in context.get_messages()]
     context.add_message({"role": "user", "content": complaint})
-    specialist = bot.BookingSpecialistAgent(
+    specialist = bot.ConciergeAgent(
         state=state, context=context, call_context={}, slng_session_id="smoke-session"
     )
     await quiet(specialist)
@@ -479,7 +511,7 @@ async def split_verification_then_intent_change():
     assert len(activations) == 1
     assert activations[0][0] == "complaint_specialist"
     assert activations[0][2] is True
-    assert specialist.state is state and state.customer_id == verified["customer_id"]
+    assert specialist.state is state and state.customer_phone == verified["customer_phone"]
     complaint_messages = [
         message.get("content")
         for message in context.get_messages()
@@ -522,9 +554,9 @@ async def main():
     )
     assert customer["status"] == "created"
     actions.clear()
-    state = bot.State(customer_id=customer["customer_id"])
+    state = bot.State(customer_phone=customer["customer_phone"])
     context = LLMContext()
-    worker = bot.BookingSpecialistAgent(
+    worker = bot.ConciergeAgent(
         state=state, context=context, call_context={}, slng_session_id="smoke-session"
     )
     await quiet(worker)
@@ -542,7 +574,7 @@ async def main():
         "cancel_booking",
     ]
     assert booking_rows() == [
-        (booking_id, customer["customer_id"], "haircut", slot_id, "cancelled")
+        (booking_id, digits(customer["customer_phone"]), "haircut", slot_id, "cancelled")
     ]
 
     verified = await split_verification_then_intent_change()
@@ -555,16 +587,121 @@ async def main():
     assert verified["status"] == "created"
     assert complaint_rows() == [
         (
-            verified["customer_id"],
+            digits(verified["customer_phone"]),
             "The last visit did not meet expectations.",
             "A manager callback",
         )
     ]
     assert booking_rows() == [
-        (booking_id, customer["customer_id"], "haircut", slot_id, "cancelled")
+        (booking_id, digits(customer["customer_phone"]), "haircut", slot_id, "cancelled")
     ]
 
 
 asyncio.run(main())
 print("pipecat salon journeys smoke ok")
+`
+
+const salonPipecatBoundSmokeScript = `"""Smoke check: the prerequisite guard's bound, in emitted Python."""
+import asyncio
+import importlib
+import json
+import os
+import sys
+from types import SimpleNamespace
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import bot  # noqa: E402
+from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+from pipecat.services.llm_service import FunctionCallParams  # noqa: E402
+
+
+async def quiet(worker):
+    async def noop(*_args, **_kwargs):
+        return None
+
+    worker.queue_frame = noop
+    worker.queue_frames = noop
+    worker.flush_pipeline = noop
+    worker.push_frame = noop
+
+
+async def main():
+    context = LLMContext()
+    # customer_phone unset: exactly the state the guard exists for.
+    concierge = bot.ConciergeAgent(
+        state=bot.State(), context=context, call_context={},
+        slng_session_id="smoke-session",
+    )
+    await quiet(concierge)
+
+    results = []
+
+    async def result_callback(result, **kwargs):
+        results.append((result, kwargs))
+
+    def params(call_id):
+        return FunctionCallParams(
+            function_name="manage_booking",
+            tool_call_id=call_id,
+            arguments={},
+            llm=concierge.llm,
+            pipeline_worker=concierge,
+            context=context,
+            result_callback=result_callback,
+        )
+
+    limit = bot._PREREQUISITE_LIMIT
+    assert limit == 5, limit
+
+    for attempt in range(1, limit + 1):
+        await concierge.manage_booking(params(f"bound-{attempt}"))
+
+    assert len(results) == limit, results
+
+    # Every attempt is refused while the value is missing, and none of them ever
+    # starts the flow.
+    for result, kwargs in results:
+        assert "refused" in result, result
+        assert "customer_phone" in result["refused"], result
+        assert "verify_customer" in result["refused"], (
+            "the refusal must name the control that supplies the value, or the "
+            "model has nothing to act on"
+        )
+        assert "Do not say any of this out loud" in result["refused"], result
+        # THE line. A refused step starts no flow, so nothing else in the
+        # process will speak. Resolving with run_llm=False here leaves a live
+        # call silent with nothing in the trace.
+        properties = kwargs.get("properties")
+        assert properties is None or getattr(properties, "run_llm", None) is not False, (
+            "a refusal must give the model its turn back", kwargs
+        )
+
+    # Below the bound: recover silently on the same turn.
+    for result, _ in results[: limit - 1]:
+        assert "call this again in the same turn" in result["refused"], result
+        assert "ask the caller" not in result["refused"], result
+
+    # At the bound: stop recovering quietly and ask the caller out loud.
+    final = results[limit - 1][0]["refused"]
+    assert "ask the caller for it directly now" in final, final
+    assert "stay in the conversation" in final, final
+    assert "call this again in the same turn" not in final, final
+
+    # The counter is per control and resets when the step actually starts.
+    assert bot._prerequisite_refusals["manage_booking"] == limit
+    concierge.state.customer_phone = "555 010 1010"
+    await concierge.manage_booking(params("bound-recovered"))
+    assert bot._prerequisite_refusals["manage_booking"] == 0, (
+        "a step that starts must reset its counter, or one bad patch early in a "
+        "call makes every later refusal shout at the caller"
+    )
+    started = results[-1][0]
+    assert "refused" not in started, started
+
+    print("pipecat prerequisite bound smoke ok")
+
+
+asyncio.run(main())
 `
