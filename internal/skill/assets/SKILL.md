@@ -72,6 +72,8 @@ For every change:
 2. Run `unmute validate`; read the exact error and fix the package, not the refusal.
 3. Run `unmute compile` when validation is clean.
 4. Run `unmute dev` and talk to the agent.
+5. For a slng target only, `unmute deploy` pushes it. Run `unmute deploy --dry-run`
+   first: a push replaces the live agent rather than merging with it.
 
 Repeat validation until clean. If commands cannot run, give the exact package
 path and commands and ask for their output. If audio cannot be heard, run the

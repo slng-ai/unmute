@@ -79,6 +79,9 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | the docs-site transfer table matches the route table, both directions | `internal/docsite/transfer_table_test.go` |
 | the docs-site tool tables match the capability table on all three targets, and the page's own count of execution blocks is right | `internal/docsite/tool_table_test.go` |
 | an L4 smoke fixture still compiles the salon package, the emitted Python keeps the names its script calls, and every name a smoke script monkeypatches still exists and is still called the way the stub expects | `internal/generate/smoke_fixture_test.go` (`TestSmokeStubbedNamesExistInTheEmittedModule`) |
+| every emitted tool body tags its `config` with its own `tool_type`, because an update PATCH strips `tool_type` and an untagged body then deploys once and 422s forever after | `internal/generate/slng_v1_test.go` (`TestSlngV1ToolConfigCarriesItsUnionTag`) |
+| every `voiceai agents push --json` shape decodes into the fields deploy reads, blockers relay every item, detail and dashboard page, an update warns that a push replaces, and a run that printed a problem exits non-zero | `internal/cli/deploy_test.go` |
+| a tool sample written into `build/<target>/samples/` survives the next compile | `internal/cli/deploy_test.go` (`TestCompilePreservesToolSamples`) |
 | the docs-site states one version, in one snippet, and no page hardcodes a version literal that disagrees | `internal/docsite/version_test.go` |
 | the docs-site declares its Markdown surface, and the coding-agents page names all three endpoints | `internal/skill/markdown_surface_test.go` |
 | the changelog runs newest first, every entry carries a label, a version and its own release link, the newest matches the version snippet, and no entry keeps a heading, a dash or a commit hash | `internal/docsite/changelog_test.go` |

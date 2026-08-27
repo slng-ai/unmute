@@ -245,6 +245,7 @@
         "icon": "cloud-upload",
         "pages": [
           "deploy/going-live",
+          "deploy/slng",
           "deploy/livekit-cloud",
           "deploy/pipecat-cloud"
         ]
@@ -258,6 +259,7 @@
           "reference/cli/init",
           "reference/cli/validate",
           "reference/cli/compile",
+          "reference/cli/deploy",
           "reference/cli/dev",
           "reference/cli/skill"
         ]

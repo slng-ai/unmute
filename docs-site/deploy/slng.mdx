@@ -1,0 +1,414 @@
+---
+title: "Deploy to SLNG"
+description: "One command from a package to a live agent, why the definition is shorter here, and why your tools live in SLNG rather than in your repo."
+sidebarTitle: "SLNG"
+---
+
+Two commands, and the second one is the whole page.
+
+```sh
+export SLNG_API_KEY=...
+unmute deploy examples/slng-orders --run-samples
+```
+
+That validates the package, compiles it, creates its tool in your organisation,
+runs the tool once to prove it works, publishes it, attaches it to the agent, and
+returns an agent id you can talk to. Nothing is created unless every check
+passes, so a run that reports problems has changed nothing.
+
+## Start with the two examples
+
+Both ship in the repository. They differ in one way, and that way is the reason
+this page exists.
+
+| Example | What it references | What the push has to do |
+|---|---|---|
+| [`slng-support`](https://github.com/slng-ai/unmute/tree/main/examples/slng-support) | one builtin, `end_call` | nothing is created; SLNG already owns every capability it names |
+| [`slng-orders`](https://github.com/slng-ai/unmute/tree/main/examples/slng-orders) | a `local:` tool of its own, plus `end_call` | create the tool, derive its schema, run it, publish it, attach it |
+
+`slng-support` is the smallest agent that works. Read it to see the shape.
+`slng-orders` is the one to follow through this page, because a real agent has
+tools and everything interesting happens to them.
+
+<Note>
+Both examples name their target instance `slng`, and today an agent's name on
+SLNG **is** its target instance name. So deploying both writes the same agent:
+the second replaces the first. Deploy one, or rename one target instance, or pass
+`--agent-id` to write a specific agent.
+</Note>
+
+## Why the package is shorter here
+
+A slng package is smaller than the same agent written for pipecat or livekit, and
+it is worth being clear about what is missing: not capability, but the parts you
+would otherwise have to stand up yourself.
+
+| On a code target you author | On slng |
+|---|---|
+| a Python project, a `Dockerfile`, an image to build and host | nothing; SLNG runs the agent |
+| worker counts, concurrency, scaling | SLNG's, already provisioned |
+| a VAD, a turn model, endpointing windows | SLNG's turn taking |
+| the event loop that wires STT to LLM to TTS | SLNG's pipeline |
+| where each provider is called from | one region, chosen per call |
+
+So on slng you author **intent** — prompt, models, tools, greeting, variables —
+and the layer under it is already running. That layer is the trade: you give up
+owning the runtime, and you get a runtime that is already deployed in-region,
+already warm, with STT, LLM, TTS and the tool sandbox one network hop apart
+instead of one internet apart.
+
+That is also why four `targets.yaml` keys are **refused by name** on this target
+rather than ignored: `version`, `pins`, `sdk_language` and `connection` each
+describe a generated project, and there is none. Five `agent.yaml` sections go
+the same way, including `turn:` and `tracing:`. `unmute validate` names each one
+and says what owns it instead, so a setting never disappears quietly.
+
+<Card title="Regional infrastructure" icon="globe" href="/optimization/regional-infrastructure">
+  What "one region" buys, measured.
+</Card>
+
+## Why your tools live in SLNG, not in your package
+
+This is the part that works differently from every other target, so it is worth
+understanding before the walkthrough rather than during it.
+
+On pipecat or livekit, a `local:` tool is a Python function inside the project
+you host. It runs in your process. On slng there is no process of yours, so the
+handler is **uploaded** and lives in SLNG as an org-level object with a version
+number. Your package names it; SLNG owns it.
+
+Four reasons that is the right shape, and not merely the necessary one.
+
+**It runs next to the model that calls it.** A tool is on the critical path of a
+turn: the caller stops speaking, the model decides to call the tool, and nobody
+speaks until it returns. A handler inside SLNG's sandbox, in the region serving
+the call, answers in a hop. The same logic behind a webhook of your own is a
+round trip out of SLNG's network and back, added to every single call. That
+difference is audible.
+
+**Publishing is gated on the tool actually working.** A `code` or `api_request`
+tool cannot be attached to a live agent until one successful run proves it. SLNG
+uploads the source, derives the parameter and result schemas by introspecting it,
+runs it against a sample you supply, and only then publishes a version. A
+compiler cannot do that. Unmute can check that your schema is well formed and
+that your handler's type hints agree with it; only a real execution against your
+real dependencies can show that it returns what it claims.
+
+**Secrets stay where the value is.** A tool that authenticates names its
+credential; SLNG's vault holds the value. Unmute never sees one, so no secret
+appears in `build/`, in a compile report, in a command line, or in this page's
+output. That is why a missing vault entry is something the push *reports* and
+never something it creates.
+
+**A tool is shared, not copied.** `check_order` is one object in your
+organisation that many agents attach. That is why the push resolves a *name* to
+an id rather than creating something new every time, and why a name it cannot
+find is an error rather than a silent create: you almost certainly meant an
+existing tool and mistyped it.
+
+```text
+your repo                          SLNG
+─────────                          ────
+agent.yaml         ── deploy ──▶   agent (versioned)
+tools/check_order.py               tool  (versioned, published, locked env)
+                                     └── runs in the call's region
+build/slng/samples/                vault (you create; values never leave)
+  check_order.json  ── run once ──▶ the publish gate
+```
+
+Two consequences worth stating plainly:
+
+- **A tool on SLNG has no network access at all.** A handler that has to reach a
+  service is a `webhook:` tool instead, and unmute refuses the import at validate
+  rather than letting it fail in the sandbox.
+- **Dependencies are exact pins.** `name==version`, never a range: SLNG builds a
+  locked, hash-verified environment per tool. The sandbox runs Python 3.14 and
+  already has `pydantic`, so a handler needing only those pins nothing.
+
+## Before you start
+
+<Steps>
+  <Step title="Install the voiceai CLI">
+    SLNG hosts the agent, and `voiceai` is the tool that owns your account and
+    the push. `unmute deploy` runs it for you; it has to be on your PATH.
+
+    ```sh
+    brew install slng-ai/tap/voiceai
+    ```
+
+    Unmute's compiler opens no connection to SLNG at any point, at validate time
+    or compile time. It writes files and stops.
+  </Step>
+  <Step title="Get an API key">
+    One SLNG key serves every SLNG role, so this is the same key a generated
+    livekit or pipecat project reads at run time to reach SLNG models.
+
+    ```sh
+    export SLNG_API_KEY=...
+    ```
+
+    Get one at [app.slng.ai/api-keys](https://app.slng.ai/api-keys).
+
+    `unmute deploy` reads `SLNG_API_KEY`, then `VOICEAI_API_KEY`, then whatever
+    profile `voiceai login` stored. It also reads a package's `.env` and
+    `.env.local`, the same files `unmute dev` reads, so a key on a line there
+    needs no export.
+
+    <Warning>
+      An exported key and a stored `voiceai` profile can belong to **different
+      organisations**. `unmute deploy` prints the organisation it resolved on
+      every run; read that line before you read anything else.
+    </Warning>
+  </Step>
+</Steps>
+
+## The walkthrough
+
+Follow these against `examples/slng-orders` from a clone of the repository. Each
+step's output is what you should actually see.
+
+<Steps>
+  <Step title="Validate">
+    ```sh
+    unmute validate examples/slng-orders
+    ```
+
+    ```text
+    ✓ slng (slng)
+    ```
+
+    This is local and needs no key. It is where you find out that SLNG will not
+    run something the package asked for, and it is cheaper than finding out from
+    a rejected push.
+  </Step>
+
+  <Step title="Deploy without changing anything">
+    ```sh
+    unmute deploy examples/slng-orders --dry-run
+    ```
+
+    ```text
+    ✓ slng (slng)
+    slng: credential from SLNG_API_KEY
+    slng: compiled examples/slng-orders/build/slng (3 files)
+    slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
+
+    Cannot deploy slng. 1 problem:
+
+      sample missing (1)
+        check_order (code)
+        a code or api_request tool cannot publish until one successful run proves it. write samples/<tool>.json next to the tool bodies, then push with --run-samples.
+        samples for this target belong in examples/slng-orders/build/slng/samples, and `unmute deploy --run-samples` runs them.
+
+      nothing was created or changed.
+    ```
+
+    That refusal is the publish gate from the section above, met for the first
+    time. `check_order` is a `code` tool, so it cannot go live until one run
+    proves it works, and a run needs arguments.
+  </Step>
+
+  <Step title="Write the sample">
+    One JSON object, one set of arguments, named after the tool:
+
+    ```sh
+    mkdir -p examples/slng-orders/build/slng/samples
+    cat > examples/slng-orders/build/slng/samples/check_order.json <<'JSON'
+    {"order_number": "A-1001"}
+    JSON
+    ```
+
+    <Note>
+      A sample lives in `build/<target>/samples/` and not in the package, and that
+      is deliberate. It is **operator input**, like `.env`: what counts as a safe
+      set of arguments depends on your environment and your real dependencies, not
+      on the agent definition, and two organisations deploying the same package
+      would want different ones. Both are the two things a recompile preserves
+      inside a build directory. Everything else in there is regenerated.
+    </Note>
+  </Step>
+
+  <Step title="Deploy">
+    ```sh
+    unmute deploy examples/slng-orders --run-samples
+    ```
+
+    ```text
+    ✓ slng (slng)
+    slng: credential from SLNG_API_KEY
+    slng: compiled examples/slng-orders/build/slng (3 files)
+    slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
+    slng: tool check_order created, sample succeeded, published v1
+    slng: agent created 428006b1-19cf-499f-be00-e12b8dbfad14
+    slng: version 1 labelled "slng-orders @ 2026-08-27T15:08:39.184Z"
+    slng: deployed. Talk to it: voiceai agents web-sessions create 428006b1-19cf-499f-be00-e12b8dbfad14 --file session.json
+    ```
+
+    Read the tool line: **created**, then **sample succeeded**, then **published
+    v1**. All three had to happen in that order, and the push stops at the first
+    one that does not.
+
+    `--run-samples` executes your sample against your real dependencies. That is
+    why it is a flag and not the default.
+
+    Keep the agent id. `voiceai agents list` finds it again: unmute stores no id,
+    writes no lockfile, and keeps no local state about your account.
+  </Step>
+
+  <Step title="Talk to it">
+    There is no `unmute dev` for this target. `dev` runs a generated project
+    locally and this target generates none, so a browser session against the live
+    agent is how you hear it.
+
+    ```sh
+    cat > session.json <<'JSON'
+    {"arguments": {"customer_name": "Nicola"}, "participant_name": "you"}
+    JSON
+    voiceai agents web-sessions create <agent_id> --file session.json
+    ```
+
+    ```json
+    {
+      "call_id": "3ee08739-a329-49ee-a3a0-542b8ee9f8de",
+      "room_name": "agent-3ee08739-a329-49ee-a3a0-542b8ee9f8de",
+      "livekit_dispatch_id": "AD_6bSrcp7fowVe",
+      "livekit_url": "wss://slng-atlas-6sw2n5o2.livekit.cloud",
+      "livekit_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9…",
+      "max_session_seconds": 300
+    }
+    ```
+
+    A `livekit_dispatch_id` in the response means a worker joined the room. That
+    is the line that tells you the agent is running, as opposed to merely
+    created.
+
+    Both arguments look optional and neither is. The agent id is positional, and
+    leaving it off is an error rather than a shorter spelling. `--file` is
+    required even though every field inside it is optional, because the endpoint
+    declares a request body and the CLI sends none without it.
+
+    `arguments` is where this package's declared variables get their value for one
+    session — strings only, at most 32. Leave one out and its declared default is
+    used, which is how `Hi there` becomes `Hi Nicola`.
+
+    Say "I have order A-1001". The agent should say the words in `announce`, call
+    `check_order`, and come back with a status and a delivery date.
+  </Step>
+</Steps>
+
+## When your tool needs a secret
+
+`check_order` needs none, which is what makes the walkthrough above runnable with
+nothing set up in a dashboard. A tool that authenticates against a real service
+adds exactly one step, and it happens before the push.
+
+Name the credential in the package. For a `webhook:` tool that is its auth block;
+for a `local:` tool it is the environment name the handler reads. Then create an
+entry of that name in [the vault](https://app.slng.ai/vault/secrets) and deploy.
+
+Until it exists you get this, and nothing has been created:
+
+```text
+Cannot deploy slng. 1 problem:
+
+  vault missing (1)
+    REFUND_API_TOKEN
+    create them, then push again. a name that exists as a variable does not count — the platform's publish gate counts secrets only.
+    https://app.slng.ai/vault/secrets
+
+  nothing was created or changed.
+```
+
+Two details that cost people time:
+
+- **A variable of that name does not count.** The vault holds two kinds of entry,
+  and the publish gate counts secrets only.
+- **`{{$NAME}}` in a prompt or a greeting is the other kind.** That is a vault
+  *variable*, substituted by SLNG at run time. Nothing in the package declares
+  it, which is why only a slng target resolves one.
+
+The emitted runbook at `build/slng/README.md` lists every vault name your package
+needs, grouped by kind, with the line of the package that asked for each.
+
+## A push replaces
+
+Updating an agent replaces it with what the package declares. A tool reference
+the package no longer names is **detached**. A field that differs from the live
+agent is **overwritten**.
+
+`--dry-run` names both before anything happens:
+
+```text
+slng: agent slng — update
+slng: reference end_call (existing attachment)
+slng: would detach refund, which this package no longer names
+slng: would overwrite system_prompt, which differs from what the agent has now
+slng: dry run, nothing was created or changed
+```
+
+A run that reports `update` when you expected `create` means an agent of that
+name already exists. `unmute deploy` warns when that happens, and `--agent-id`
+picks a different one.
+
+A push that changes nothing writes no version and does not relabel the previous
+one, so re-running a deploy is safe and cheap.
+
+## When it refuses
+
+Every problem is reported together, each with what to do and the page that fixes
+it. Nothing is created until all of them clear.
+
+| It says | What to do |
+|---|---|
+| `vault missing` | create each name in [the vault](https://app.slng.ai/vault/secrets). A name that exists as a *variable* does not count. |
+| `sample missing` | write `build/<target>/samples/<tool>.json`, then deploy with `--run-samples`. |
+| `samples not enabled` | the sample is there; `--run-samples` is how you consent to running it. |
+| `tool unresolved` | the package names a tool your organisation cannot see. Rename the reference, or create the tool. |
+| `tool type immutable` | a tool's type cannot change after it is created. Rename it in the package, or delete the existing one. |
+| `singleton exists` | SLNG allows one tool of this type per organisation. Drop the body and reference the existing tool by name. |
+| `mcp unsupported` | attach MCP servers in the dashboard. Completing the reference needs a live connection to the server, which the push cannot make. |
+| `agent ambiguous` | two agents share the package's name. Pass `--agent-id`. |
+
+## When the agent answers with silence
+
+A model can pass every check at create time and still fail on the call. The
+create body is validated against what your organisation is *allowed* to use;
+whether the provider behind it answers is a different question, and nothing in
+`build/` can tell you.
+
+The call record is where it shows up:
+
+```sh
+voiceai agents calls list <agent_id> --json
+```
+
+`status` is `in_progress` while the agent is up and waiting. Once a call ends,
+read `call_end_reason`. A line like
+
+```text
+terminal failure: component=llm reason=hard_fail
+```
+
+names the layer that failed — `llm`, `stt` or `tts`. That is a model or provider
+problem, not a problem with the body unmute wrote, and swapping that one binding
+is the fix. A short `call_duration_ms` with the agent never speaking is the same
+story.
+
+A model SLNG does not have enabled for your organisation is rejected at push
+with `AGENT_MODEL_UNAVAILABLE`, naming the field. Unmute cannot check this: the
+list is per-organisation, and model strings are forwarded exactly as written.
+Three things cause it — the model is not enabled for agents, it is your own model
+and SLNG's router is off, or it is not served in the region and language this
+agent asked for. `deployment_region: any` avoids the third by letting SLNG route
+each call, which is worth trying before you pin one.
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="unmute deploy" icon="cloud-upload" href="/reference/cli/deploy">
+    Every flag, and what each output line means.
+  </Card>
+  <Card title="The SLNG target" icon="boxes" href="/targets/slng">
+    What the compiler writes, and what SLNG refuses.
+  </Card>
+</CardGroup>

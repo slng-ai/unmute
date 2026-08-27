@@ -38,15 +38,32 @@ var SlngRegions = []string{"any", "us-east", "eu-central", "ap-south"}
 // is wrong on one of them is wrong in the only place a reader looks.
 // SlngPushCommandsAgree in slng_target_test.go is the gate.
 const (
-	// SlngPushCredentialEnv is the environment variable the push tool reads. It
-	// is not SLNG_API_KEY, which is the Context Router's key (SlngRouterKeyEnv);
-	// giving the runbook the wrong one costs an afternoon.
+	// SlngPushCredentialEnv is the environment variable the push tool reads.
+	//
+	// It is a different *name* from SlngRouterKeyEnv, not a different key: one SLNG
+	// key serves every SLNG role, and the same token authenticates the Context
+	// Router and the agents API. Measured 2026-08-27 by pushing with the value out
+	// of an example's SLNG_API_KEY. What still costs an afternoon is exporting one
+	// name and expecting the other tool to see it, which is why `unmute deploy`
+	// reads both and passes on whichever it found.
 	SlngPushCredentialEnv = "VOICEAI_API_KEY"
 	// SlngLoginCommand is the alternative to exporting the key by hand. The CLI
 	// also takes `voiceai config set apiKey <token>`.
 	SlngLoginCommand = "voiceai login"
-	// SlngCreateCommand posts a create body. `--file -` reads stdin.
-	SlngCreateCommand = "voiceai agents create --file %s --json"
+	// SlngPushPackageCommand pushes a compiled package. It takes the package root
+	// or its build/slng directory, and it is the command that turns each name in
+	// `tool_refs` into the identifier the API wants.
+	//
+	// `voiceai agents create --file build/slng/agent.json` is the wrong path and
+	// deliberately not named here: it posts the body verbatim, names included, and
+	// the API refuses it. That was the known gap when this target shipped; push
+	// closed it.
+	SlngPushPackageCommand = "voiceai agents push %s"
+	// SlngDeployCommand is what unmute offers over the line above: it validates
+	// the package, compiles it, and pushes it, reading the key from
+	// SlngRouterKeyEnv first. One command, and the guidance a refused push carries
+	// is relayed in unmute's own format.
+	SlngDeployCommand = "unmute deploy %s"
 	// SlngWebSessionCommand opens a browser session against one agent.
 	//
 	// It takes two things that both look optional and are not. The agent id is

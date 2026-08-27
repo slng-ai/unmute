@@ -3,6 +3,7 @@ package generate
 import (
 	"encoding/json"
 	"flag"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -343,13 +344,19 @@ func TestSlngV1RunbookNamesTheTrapsAndTheCredential(t *testing.T) {
 	// that searches raw text is really testing where the line breaks fall.
 	runbook := strings.Join(strings.Fields(files["README.md"]), " ")
 	for _, want := range []string{
-		// FR-026: the credential, and which one it is not.
-		"VOICEAI_API_KEY", "not** `SLNG_API_KEY`",
-		// FR-024: a body with named references is not postable as written, and
-		// what resolves them.
-		"not postable exactly as written", "voiceai agents create",
-		// R12: an MCP reference needs a connection, not a lookup.
-		"connect to the MCP server",
+		// FR-026: both names the credential answers to, and that either works.
+		// One SLNG key serves every SLNG role, so this is a choice of variable
+		// name and not a choice of key; a runbook that called one of them the
+		// wrong key sent readers looking for a second token nobody issues.
+		"VOICEAI_API_KEY", "SLNG_API_KEY", "either works",
+		// FR-024: a body with named references carries a name where the API wants
+		// an id, and the push step is what resolves it. `voiceai agents create` is
+		// named as the thing not to reach for, because it posts the body verbatim.
+		"carries a name where the API wants an id",
+		"The push step resolves those names", "voiceai agents create",
+		// R12: an MCP reference needs a connection, not a lookup, so it is the one
+		// thing the push cannot finish.
+		"connecting to the MCP server",
 		// FR-025: an export is not always postable back.
 		"not** always a body the API will accept", "orchestrator",
 	} {
@@ -365,7 +372,7 @@ func TestSlngV1RunbookNamesTheTrapsAndTheCredential(t *testing.T) {
 	// schema bug.
 	_, plain := compileSlng(t, "slng_core")
 	builtinsOnly := strings.Join(strings.Fields(plain["README.md"]), " ")
-	if !strings.Contains(builtinsOnly, "not postable exactly as written") {
+	if !strings.Contains(builtinsOnly, "What the push resolves for you") {
 		t.Error("a builtins-only package is told nothing needs resolving; a curated reference still needs its tool_id")
 	}
 	if !strings.Contains(builtinsOnly, "A curated capability is no exception") {
@@ -402,5 +409,53 @@ func TestSlngV1CodeSourceKeepsTheAuthorsFileUnchanged(t *testing.T) {
 	}
 	if tool["tool_type"] != "code" {
 		t.Errorf("tool_type = %v, want code", tool["tool_type"])
+	}
+}
+
+// TestSlngV1ToolConfigCarriesItsUnionTag. `config` is a tagged union on the wire
+// and the tag is the tool's own type. A create body gets away without it, because
+// `tool_type` sits beside `config` and the API infers the tag; an update does not,
+// because the push step strips `tool_type` before it PATCHes (a tool's type cannot
+// change after creation).
+//
+// So an untagged body deploys once and fails on every deploy after it. That is the
+// worst shape a bug can have: it passes the first time you try it.
+//
+// Measured against api.agents.slng.ai on 2026-08-27 — the same PATCH is 422
+// without the tag and 200 with it, and SLNG stores the tag on read-back. The
+// union's members, from the API's own 422: code, api_request, end_call,
+// voicemail_detection, transfer_call, send_sms, current_datetime,
+// user_phone_number. The two below are the ones this driver emits.
+func TestSlngV1ToolConfigCarriesItsUnionTag(t *testing.T) {
+	_, files := compileSlng(t, "slng_tools")
+	found := map[string]string{}
+	for path, content := range files {
+		if !strings.HasPrefix(path, "tools/") {
+			continue
+		}
+		var body struct {
+			Name     string `json:"name"`
+			ToolType string `json:"tool_type"`
+			Config   struct {
+				Type string `json:"type"`
+			} `json:"config"`
+		}
+		if err := json.Unmarshal([]byte(content), &body); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if body.ToolType == "" {
+			t.Errorf("%s carries no tool_type", path)
+			continue
+		}
+		if body.Config.Type != body.ToolType {
+			t.Errorf("%s has tool_type %q and config.type %q; the union tag is the tool's own type, and an update PATCH has nothing else to infer it from",
+				path, body.ToolType, body.Config.Type)
+		}
+		found[body.Name] = body.ToolType
+	}
+	// Both shapes this driver emits have to be in the sample, or the assertion
+	// above could pass by covering only one of them.
+	if want := map[string]string{"check_order": "code", "refund": "api_request"}; !maps.Equal(found, want) {
+		t.Errorf("emitted tool bodies = %v, want %v", found, want)
 	}
 }

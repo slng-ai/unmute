@@ -1,8 +1,13 @@
 # Going live
 
-`unmute compile` hands over a Python project. Deploying it is deploying a normal
-container. Unmute is not involved at run time and is not a dependency of the
-thing that ships.
+This page is about the **code targets**, livekit and pipecat. `unmute compile`
+hands over a Python project, and deploying it is deploying a normal container.
+Unmute is not involved at run time and is not a dependency of the thing that
+ships.
+
+A **slng** target is the other shape: SLNG hosts the agent, so there is no
+container and no platform step. `unmute deploy <dir>` validates, compiles and
+pushes it in one command. See `references/package.md`, "The slng target".
 
 ## What the compiler emits, what the operator provides
 

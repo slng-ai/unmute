@@ -179,10 +179,14 @@ func selectDevTarget(cmd *cobra.Command, root, requested string) (string, error)
 	return selected, nil
 }
 
-// devChildEnv builds the bot subprocess environment from the ambient env, the
+// packageEnv builds a child process's environment from the ambient env, the
 // current directory's .env and .env.local, then the package-root pair. Later
 // files win, so a package can override shared repository credentials.
-func devChildEnv(root string, warn io.Writer) []string {
+//
+// `dev` and `deploy` both use it, and that is the point: an author who put
+// SLNG_API_KEY in an example's .env and ran `unmute dev` would be baffled to
+// find `unmute deploy` cannot see the same line.
+func packageEnv(root string, warn io.Writer) []string {
 	env := os.Environ()
 	files := make([]string, 0, 4)
 	if cwd, err := os.Getwd(); err == nil {

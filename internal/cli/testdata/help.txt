@@ -8,6 +8,7 @@ Usage:
 Available Commands:
   compile     Compile a v1 agent package to its resolved target artifacts.
   completion  Generate the autocompletion script for the specified shell
+  deploy      Compile a package and push it to SLNG.
   dev         Compile, run the agent locally, and talk to it in the browser.
   help        Help about any command
   init        Scaffold a new v1 agent package.
@@ -52,6 +53,26 @@ Usage:
 Flags:
   -h, --help             help for compile
       --target strings   target instance name (repeatable; default: all)
+
+$ unmute deploy --help
+Compile a package and push it to SLNG.
+
+Validates the package, compiles each slng target, then pushes it with `voiceai agents push`. Nothing on SLNG is created until every check passes, so a run that reports problems has changed nothing.
+
+The credential is read from SLNG_API_KEY, falling back to VOICEAI_API_KEY and then to whatever profile `voiceai login` stored. The organisation a push resolved is always printed, because an environment key and a stored profile can belong to different ones.
+
+With no package-dir, the package is the current directory, so you can cd into an agent and run this with no arguments.
+
+Usage:
+  unmute deploy [package-dir] [flags]
+
+Flags:
+      --agent-id string   update this agent, when more than one has the package's name
+      --dry-run           check everything and report, changing nothing
+  -h, --help              help for deploy
+      --label string      version label (default: the package name and a timestamp)
+      --run-samples       run each tool's sample against your real dependencies
+      --target strings    slng target instance name (repeatable; default: every slng target)
 
 $ unmute dev --help
 Compile, run the agent locally, and talk to it in the browser.

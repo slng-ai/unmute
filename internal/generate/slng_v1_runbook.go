@@ -153,11 +153,20 @@ func slngVaultNames(agent *ir.Agent, built slngArtifacts) (secrets, variables []
 	return secrets, variables
 }
 
-// PushCommand is the one command the runbook tells an author to run.
+// DeployCommand is the one command the runbook tells an author to run. It
+// validates, compiles and pushes, so a reader standing in the package needs
+// nothing else.
 //
 // It carries no credential at all, not even an expansion of one. The key is
 // exported in the line above it in the runbook, so the command that ends up in a
 // shell history, a CI log or a screenshot has nothing in it worth reading.
+func (r slngRunbook) DeployCommand() string {
+	return fmt.Sprintf(targetcap.SlngDeployCommand, ".")
+}
+
+// PushCommand is what DeployCommand runs underneath, named so an author who
+// would rather drive the push tool directly can. It takes the compiled directory
+// this file sits in.
 func (r slngRunbook) PushCommand() string {
-	return fmt.Sprintf(targetcap.SlngCreateCommand, "build/"+r.Target+"/agent.json")
+	return fmt.Sprintf(targetcap.SlngPushPackageCommand, "build/"+r.Target)
 }

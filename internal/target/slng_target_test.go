@@ -37,7 +37,7 @@ func TestSlngPushCommandsAgree(t *testing.T) {
 		// so it is checked for the field names instead of the rendered text. The
 		// rendered text itself is held by the goldens in internal/generate.
 		if strings.HasSuffix(path, ".tmpl") {
-			for _, field := range []string{"{{.CredentialEnv}}", "{{.WebSessionCommand}}", "{{.PushCommand}}", "{{.LoginCommand}}"} {
+			for _, field := range []string{"{{.CredentialEnv}}", "{{.WebSessionCommand}}", "{{.PushCommand}}", "{{.DeployCommand}}", "{{.LoginCommand}}"} {
 				if !strings.Contains(content, field) {
 					t.Errorf("%s does not render %s, so it states a command instead of reading the one owner", name, field)
 				}

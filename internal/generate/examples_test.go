@@ -924,12 +924,16 @@ func TestPublicExamplePackages(t *testing.T) {
 			directories = append(directories, entry.Name())
 		}
 	}
-	// Six packages: four structural, salon-concierge as the composite release
-	// fixture that also carries the only shipped telephony route, and
-	// slng-support as the only one that emits no runnable project. The focused
-	// telephony, outbound, transfer, MCP and regional examples were removed
-	// 2026-08-21; route guards remain against internal test fixtures.
-	want := []string{"multi-task", "salon-concierge", "simple-prompt", "slng-support", "subagents", "task-groups"}
+	// Seven packages: four structural, salon-concierge as the composite release
+	// fixture that also carries the only shipped telephony route, and two that
+	// emit no runnable project. The slng pair is deliberately a pair: support
+	// references only builtins so its push creates nothing, and orders ships a
+	// `local:` tool so the push has to create, run, publish and attach one. The
+	// deploy walkthrough needs both, because the difference between them is the
+	// thing it explains. The focused telephony, outbound, transfer, MCP and
+	// regional examples were removed 2026-08-21; route guards remain against
+	// internal test fixtures.
+	want := []string{"multi-task", "salon-concierge", "simple-prompt", "slng-orders", "slng-support", "subagents", "task-groups"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}

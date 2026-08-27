@@ -102,6 +102,14 @@ func renderSlngRunbook(data slngRunbook) ([]byte, error) {
 
 // --- tool bodies -----------------------------------------------------------
 
+// The two tool types this driver emits. Each name is now written twice per body
+// — as `tool_type` and as the `config` union tag — so it gets a constant rather
+// than two literals that agree by hand.
+const (
+	slngToolTypeCode = "code"
+	slngToolTypeAPI  = "api_request"
+)
+
 type slngToolFile struct {
 	Name string
 	Body any
@@ -120,7 +128,26 @@ type slngCodeTool struct {
 	Dependencies []string `json:"dependencies"`
 }
 
+// slngCodeConfig and slngAPIConfig both open with the discriminator, because
+// `config` is a tagged union on the wire and the tag is the tool's own type.
+//
+// A create body gets away without it: `tool_type` sits beside `config` and the
+// API infers the tag from it. An *update* does not. The push step PATCHes a tool
+// that already exists and strips `tool_type` first, because a tool's type cannot
+// change after it is created — at which point an untagged `config` has nothing
+// left to infer from and the request fails:
+//
+//	422 config: Input tag '...' found using 'type' does not match any of the
+//	expected tags: 'code', 'api_request', 'end_call', 'voicemail_detection',
+//	'transfer_call', 'send_sms', 'current_datetime', 'user_phone_number'
+//
+// Measured against api.agents.slng.ai on 2026-08-27: the same PATCH is 422
+// without the tag and 200 with it, and SLNG stores the tag on read-back. So an
+// untagged body is not the body that exists once it lands, which is reason
+// enough on its own. The first deploy of a package succeeded and every deploy
+// after it failed, which is the worst shape a bug like this can have.
 type slngCodeConfig struct {
+	Type         string         `json:"type"`
 	ImportProbes []string       `json:"import_probes"`
 	Egress       map[string]any `json:"egress"`
 }
@@ -133,6 +160,7 @@ type slngAPITool struct {
 }
 
 type slngAPIConfig struct {
+	Type       string         `json:"type"`
 	URL        string         `json:"url"`
 	HTTPMethod string         `json:"http_method"`
 	Auth       slngAPIAuth    `json:"auth"`
@@ -174,8 +202,9 @@ func slngToolBody(name string, tool ir.Tool) (*slngToolFile, map[string]any, err
 		return &slngToolFile{Name: name, Body: slngCodeTool{
 			Name:        name,
 			Description: tool.Description,
-			ToolType:    "code",
+			ToolType:    slngToolTypeCode,
 			Config: slngCodeConfig{
+				Type:         slngToolTypeCode,
 				ImportProbes: []string{},
 				// egress is documented as historical compatibility only and validates
 				// nothing: custom code has no internet access at all. Writing an empty
@@ -191,7 +220,7 @@ func slngToolBody(name string, tool ir.Tool) (*slngToolFile, map[string]any, err
 		return &slngToolFile{Name: name, Body: slngAPITool{
 			Name:        name,
 			Description: tool.Description,
-			ToolType:    "api_request",
+			ToolType:    slngToolTypeAPI,
 			Config:      config,
 		}}, override, nil
 	default:
@@ -221,6 +250,7 @@ func slngToolSecrets(tool ir.Tool) []string {
 // backwards is a 422 with a confusing message.
 func slngAPIConfigFor(tool ir.Tool) (slngAPIConfig, map[string]any) {
 	config := slngAPIConfig{
+		Type:       slngToolTypeAPI,
 		URL:        slngWebhookURL(tool, false),
 		HTTPMethod: "POST",
 		Auth:       slngAuthFor(tool),

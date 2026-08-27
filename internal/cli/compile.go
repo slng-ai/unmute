@@ -257,6 +257,10 @@ func loadPackage(dir string, names []string) (*ir.Agent, []ir.Target, error) {
 // both written there by somebody other than the compiler:
 //
 //   - `.env` holds the operator's real values. Long-standing behaviour.
+//   - `samples/*.json` are the tool samples `unmute deploy --run-samples` needs.
+//     The push tool reads them from `<compiled>/samples/`, which is inside this
+//     directory, so without this row writing one and re-running deploy would
+//     delete it and report the same `sample_missing` blocker forever.
 //   - `livekit*.toml` is written by LiveKit Cloud on the first deploy and names
 //     the project subdomain and the assigned agent ID. Losing it breaks
 //     `lk agent deploy` and sends people back to `lk agent create`, which
@@ -264,7 +268,7 @@ func loadPackage(dir string, names []string) (*ir.Agent, []ir.Target, error) {
 //     versions. The glob covers the platform's per-region naming
 //     (`livekit.us-east.toml`) and is safe precisely because the emitter never
 //     produces a file matching it.
-var preservedPatterns = []string{".env", "livekit*.toml"}
+var preservedPatterns = []string{".env", "livekit*.toml", filepath.Join("samples", "*.json")}
 
 type preservedFile struct {
 	path    string
@@ -364,6 +368,12 @@ func restorePreserved(outDir string, preserved []preservedFile) error {
 	}
 	var errs []error
 	for _, file := range preserved {
+		// A preserved file can sit in a subdirectory (samples/), and RemoveAll took
+		// that directory with it.
+		if err := os.MkdirAll(filepath.Dir(file.path), 0o755); err != nil {
+			errs = append(errs, fmt.Errorf("restore %s: %w", filepath.Dir(file.path), err))
+			continue
+		}
 		if err := os.WriteFile(file.path, file.content, file.mode); err != nil {
 			errs = append(errs, fmt.Errorf("restore %s: %w", file.path, err))
 			continue
