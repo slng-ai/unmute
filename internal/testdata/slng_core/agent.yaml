@@ -10,6 +10,7 @@
 #   - tracing and capacity: unmute instruments and sizes no process here
 
 version: 1
+name: slng-core-fixture
 entry_agent: support
 
 models:

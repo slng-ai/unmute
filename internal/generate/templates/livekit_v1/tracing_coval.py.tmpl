@@ -49,7 +49,7 @@ from opentelemetry.util.types import AttributeValue
 
 logger = logging.getLogger("coval_tracing")
 
-TRACE_NAME = {{pyq .EntryAgent}} + "-" + {{pyq .Project}}
+TRACE_NAME = {{pyq .EntryAgent}} + "-" + {{pyq .AgentName}}
 
 
 COVAL_TRACES_ENDPOINT = "https://api.coval.dev/v1/traces"

@@ -97,6 +97,26 @@ Every later version is `lk agent deploy`.
 
 The other path is a worker you host yourself, from the same `Dockerfile`.
 
+### The worker's agent name
+
+The worker registers under the package's
+[`name:`](/reference/agent-yaml#name) joined to the target it was compiled for,
+so `name: acme-support` on a target called `livekit` registers
+`acme-support-livekit`. A SIP dispatch rule matches a worker by that string, and
+the emitted `sip-dispatch-rule.json` and `telephony-setup.sh` both name the same
+one.
+
+It has to come from the package. Unmute used to register the target name, and
+every package on this target calls its target `livekit`: two packages in one
+LiveKit project registered the same worker name, and inbound calls reached
+whichever answered first.
+
+Renaming it leaves the existing dispatch rule naming the old worker, so inbound
+calls ring and nothing answers. Re-running the emitted `telephony-setup.sh` does
+not fix that: it reuses any rule already naming your trunk, which is what makes
+it safe to run twice. Delete the stale rule with `lk sip dispatch delete <id>`
+first, then run the script.
+
 <Warning>
   Do not edit files in `build/`. Change the source package and compile again.
 </Warning>

@@ -40,7 +40,7 @@ logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())
 
 # The agent name is compiled in, not configured: it is the same name the deploy
 # manifest carries, so a helper can never be pointed at the wrong agent.
-AGENT_NAME = {{pyq .Project}}
+AGENT_NAME = {{pyq .AgentName}}
 START_URL = f"https://api.pipecat.daily.co/v1/public/{AGENT_NAME}/start"
 
 PIPECAT_CLOUD_API_KEY_ENV = "PIPECAT_CLOUD_API_KEY"

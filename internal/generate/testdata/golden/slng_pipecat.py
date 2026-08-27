@@ -1,4 +1,4 @@
-"""Generated Pipecat agent for pipecat.
+"""Generated Pipecat agent for safe-core-fixture.
 
 Compiled by `unmute`; do not edit by hand. Prompts, model routes, and the agent
 graph are baked in from the spec. Secret values are read from the environment

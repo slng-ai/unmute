@@ -542,7 +542,7 @@ deploy cannot start without it:
 cp .env.example .env            # then fill in the values
 pipecat cloud secrets set {{.SecretSet}} --file .env{{if .DeploymentRegion}} --region {{.DeploymentRegion}}{{end}}
 pipecat cloud deploy
-pipecat cloud agent status {{.Project}}
+pipecat cloud agent status {{.AgentName}}
 ```
 
 Run the same `secrets set` command again to change a value. If that set name is
@@ -562,7 +562,7 @@ This package declares no secrets, so there is no secret set to create:
 
 ```sh
 pipecat cloud deploy
-pipecat cloud agent status {{.Project}}
+pipecat cloud agent status {{.AgentName}}
 ```
 {{- end}}
 
@@ -570,6 +570,20 @@ Deploying the same agent name again updates the existing agent rather than makin
 a second one. Sessions already running finish on the old image, and a deploy that
 fails leaves the previous ready version serving traffic. `status` reporting
 `ready` is the deploy actually being usable.
+
+### This agent's name
+
+**{{.AgentName}}** is `name:` in your `agent.yaml` joined to the `{{.Target}}`
+target it was compiled for, and it is `agent_name` in `pcc-deploy.toml`. Agent
+names are unique across your organisation and the deploy above updates whichever
+agent matches, so this name says which package this is rather than which
+platform it runs on.{{if .SecretSet}} The secret set follows the same name,
+because a secret set is per-organisation in the same way.{{end}}
+
+Renaming it in the source package does not move this deployment. The next deploy
+creates a second agent and the old one keeps running and keeps billing, so
+delete it with `pipecat cloud agent delete {{.AgentName}}`{{if .SecretSet}} and
+create the secret set again under the new name{{end}}.
 
 {{if .WarmInstances}}The manifest holds **{{.WarmInstances}}** instance{{if gt .WarmInstances 1}}s{{end}} ready, from `warm_instances` on
 this target in `targets.yaml`. That is a standing cost and it is what removes the
@@ -584,8 +598,8 @@ and recompile to keep one ready, which is a standing cost and removes that wait.
 ### Reading this agent's log
 
 ```sh
-pipecat cloud agent logs {{.Project}} -n 250
-pipecat cloud agent logs {{.Project}} -s <session-id>
+pipecat cloud agent logs {{.AgentName}} -n 250
+pipecat cloud agent logs {{.AgentName}} -s <session-id>
 ```
 
 **Do not pass `-l DEBUG`.** It filters to *only* that level rather than setting a
@@ -596,10 +610,10 @@ The CLI wraps output at 80 columns, which corrupts its JSON output. For machine
 reading, widen it first:
 
 ```sh
-COLUMNS=100000 pipecat cloud --output json agent logs {{.Project}} -n 2000 -s <session-id>
+COLUMNS=100000 pipecat cloud --output json agent logs {{.AgentName}} -n 2000 -s <session-id>
 ```
 
-`pipecat cloud agent sessions {{.Project}}` lists the sessions themselves, which is
+`pipecat cloud agent sessions {{.AgentName}}` lists the sessions themselves, which is
 how you tell a session that never started from one that failed inside. A session
 marked `Complete` with a blank `Bot Start Seconds` never reached `bot()` at all.
 
@@ -613,9 +627,9 @@ A second region is a second agent, because agent names are globally unique
 across regions:
 
 ```sh
-{{if .SecretSet}}pipecat cloud secrets set {{.Project}}-<region>-secrets --file .env --region <region>
-pipecat cloud deploy {{.Project}}-<region> --region <region> --secrets {{.Project}}-<region>-secrets
-{{else}}pipecat cloud deploy {{.Project}}-<region> --region <region>
+{{if .SecretSet}}pipecat cloud secrets set {{.AgentName}}-<region>-secrets --file .env --region <region>
+pipecat cloud deploy {{.AgentName}}-<region> --region <region> --secrets {{.AgentName}}-<region>-secrets
+{{else}}pipecat cloud deploy {{.AgentName}}-<region> --region <region>
 {{end}}```
 
 `pipecat cloud regions list` prints the regions available to you.
@@ -780,7 +794,7 @@ only there to answer incoming calls. One command, and it needs nothing the deplo
 did not already need.
 
 ```sh
-curl -X POST https://api.pipecat.daily.co/v1/public/{{.Project}}/start \
+curl -X POST https://api.pipecat.daily.co/v1/public/{{.AgentName}}/start \
   -H "Authorization: Bearer $PIPECAT_CLOUD_API_KEY" \
   -H 'Content-Type: application/json' \
   -d "{\"createDailyRoom\": true,
@@ -828,14 +842,14 @@ unmute compile <source-dir>
 ```
 
 `validate` exits 0 and names any account prerequisite; `compile` rewrites
-`<source-dir>/build/{{.Project}}/`, which is this directory. Skipping this after a
+`<source-dir>/build/{{.Target}}/`, which is this directory. Skipping this after a
 source edit deploys the previous version, which is the single easiest way to spend
 an afternoon.
 
 **2. Move into the build directory.** Every command below runs here:
 
 ```sh
-cd <source-dir>/build/{{.Project}}
+cd <source-dir>/build/{{.Target}}
 ```
 
 **3. Fill the environment, once.** `.env` is not regenerated over, so this
@@ -860,7 +874,7 @@ see the note in **Deploy to Pipecat Cloud** above.
 {{end}}
 ```sh
 pipecat cloud deploy
-pipecat cloud agent status {{.Project}}
+pipecat cloud agent status {{.AgentName}}
 ```
 
 Do not place a call until `status` reports `ready`. Deploying again updates the
@@ -897,7 +911,7 @@ or not answering**: expected is that you are still connected and the agent says 
 That second run is the one worth doing, because it is the path a caller actually
 meets on a bad day.
 {{end}}
-Logs for any of it: `pipecat cloud agent logs {{.Project}}` for the agent, and the
+Logs for any of it: `pipecat cloud agent logs {{.AgentName}}` for the agent, and the
 helper's own terminal for everything before the call reached it.
 
 ### One number serves one target at a time
@@ -1015,7 +1029,7 @@ Do these in the [Twilio Console](https://console.twilio.com), in this order.
      <Say>Connecting you now.</Say>
      <Connect>
        <Stream url="{{.CloudWebsocket.StreamURL}}">
-         <Parameter name="_pipecatCloudServiceHost" value="{{.Project}}.YOUR_ORGANIZATION"/>
+         <Parameter name="_pipecatCloudServiceHost" value="{{.AgentName}}.YOUR_ORGANIZATION"/>
        </Stream>
      </Connect>
    </Response>
@@ -1070,7 +1084,7 @@ prints what is available to you.
 
 Two things bite when you move an agent that already exists:
 
-- **Agent names are globally unique across regions**, so `{{.Project}}` cannot exist
+- **Agent names are globally unique across regions**, so `{{.AgentName}}` cannot exist
   in two regions at once. Either delete the old deployment first, or deploy the new
   region under another name and change the agent half of the service host in your
   Bin to match it.
@@ -1118,7 +1132,7 @@ curl -X POST "https://api.twilio.com/2010-04-01/Accounts/$TWILIO_ACCOUNT_SID/Cal
   -u "$TWILIO_ACCOUNT_SID:$TWILIO_AUTH_TOKEN" \
   --data-urlencode "To=+15551230000" \
   --data-urlencode "From=${{.CloudWebsocket.FromNumberEnv}}" \
-  --data-urlencode 'Twiml=<Response><Connect><Stream url="{{.CloudWebsocket.StreamURL}}"><Parameter name="_pipecatCloudServiceHost" value="{{.Project}}.'"$PIPECAT_CLOUD_ORGANIZATION"'"/><Parameter name="direction" value="outbound"/></Stream></Connect></Response>'
+  --data-urlencode 'Twiml=<Response><Connect><Stream url="{{.CloudWebsocket.StreamURL}}"><Parameter name="_pipecatCloudServiceHost" value="{{.AgentName}}.'"$PIPECAT_CLOUD_ORGANIZATION"'"/><Parameter name="direction" value="outbound"/></Stream></Connect></Response>'
 ```
 
 Change `To`; everything else is read from your environment. Expected: the phone
@@ -1175,7 +1189,7 @@ site.
 
 This route's deploy manifest sets `websocket_auth = "none"`, because a static
 piece of markup in a carrier console cannot fetch a token first. What limits who
-can start a session, then, is knowing the `{{.Project}}.<your organization>`
+can start a session, then, is knowing the `{{.AgentName}}.<your organization>`
 string your markup carries. Treat that string like a capability: it is not a
 secret in the cryptographic sense, but anyone holding it can open sessions you
 pay for. This is the platform's documented model for carriers that connect
@@ -1196,7 +1210,7 @@ unmute compile <source-dir>
 **2. Move into the build directory.**
 
 ```sh
-cd <source-dir>/build/{{.Project}}
+cd <source-dir>/build/{{.Target}}
 ```
 {{if .SecretSet}}
 **3. Fill the environment and push it.** `.env` is not regenerated over, so this
@@ -1213,7 +1227,7 @@ pipecat cloud secrets set {{.SecretSet}} --file .env{{if .DeploymentRegion}} --r
 {{end}}
 ```sh
 pipecat cloud deploy
-pipecat cloud agent status {{.Project}}
+pipecat cloud agent status {{.AgentName}}
 ```
 
 Do not place or expect a call until `status` reports `ready`.
@@ -1235,7 +1249,7 @@ the destination **declining or not answering**: expected is the original call
 ending after the dial finishes. Those last two runs cover the ordinary and
 failure paths.
 {{end}}
-One log, and only one: `pipecat cloud agent logs {{.Project}}`. There is no
+One log, and only one: `pipecat cloud agent logs {{.AgentName}}`. There is no
 second place to look on this route, because there is no second thing running.
 
 ### If the call feels slow
@@ -1280,8 +1294,8 @@ indistinguishable by ear.
 | What happens | Where to look |
 |---|---|
 | A working agent answers, but not this one | The number is still on a SIP trunk or an old webhook, so your markup was never consulted. Read the number's configuration with the command above. |
-| The call connects, the spoken line plays, then silence and a drop | Either the service host in your markup is wrong or this agent is not `ready`. **The tell is that this agent's log is empty**: a connection the platform refuses never reaches it. Check `pipecat cloud agent status {{.Project}}` first. Then re-read the service host: the agent name is `{{.Project}}`, and the organization is the **slug** from `pipecat cloud organizations list`, the one shaped like `three-random-words-12345`, never your display name (carrier action 2). Twilio's own call log names the stream error outright, under Monitor, Logs, Calls. |
-| The spoken line plays, a long silence, then the agent | A **cold start**, and it is the single biggest thing you can fix. With no warm instance the platform has to start a container after the call arrives: schedule it, import pipecat, load the voice-activity and end-of-turn models. That is the silence, and it happens on the first call after every idle period, not just after a deploy. {{if .WarmInstances}}This deployment already holds {{.WarmInstances}} instance{{if gt .WarmInstances 1}}s{{end}} ready, so if you are reading this row the pool is not the cause: check `pipecat cloud agent status {{.Project}}` for a deploy that has not gone ready.{{else}}Declare `warm_instances: 1` on this target in `targets.yaml` and recompile, and it goes away: the number lands in this manifest as `[scaling] min_agents`, so it survives every later deploy. `pipecat cloud deploy --min-agents 1` fixes one deploy only, and a `[scaling]` block hand-added to the manifest does not survive the next `unmute compile`, which rewrites the file.{{end}} Your agent's own log tells you which half you are looking at: `[pcc-observability] First bot speech | latency=...` measures only the part inside the process, so if that says two seconds and the caller waited twelve, the other ten were the container starting. |
+| The call connects, the spoken line plays, then silence and a drop | Either the service host in your markup is wrong or this agent is not `ready`. **The tell is that this agent's log is empty**: a connection the platform refuses never reaches it. Check `pipecat cloud agent status {{.AgentName}}` first. Then re-read the service host: the agent name is `{{.AgentName}}`, and the organization is the **slug** from `pipecat cloud organizations list`, the one shaped like `three-random-words-12345`, never your display name (carrier action 2). Twilio's own call log names the stream error outright, under Monitor, Logs, Calls. |
+| The spoken line plays, a long silence, then the agent | A **cold start**, and it is the single biggest thing you can fix. With no warm instance the platform has to start a container after the call arrives: schedule it, import pipecat, load the voice-activity and end-of-turn models. That is the silence, and it happens on the first call after every idle period, not just after a deploy. {{if .WarmInstances}}This deployment already holds {{.WarmInstances}} instance{{if gt .WarmInstances 1}}s{{end}} ready, so if you are reading this row the pool is not the cause: check `pipecat cloud agent status {{.AgentName}}` for a deploy that has not gone ready.{{else}}Declare `warm_instances: 1` on this target in `targets.yaml` and recompile, and it goes away: the number lands in this manifest as `[scaling] min_agents`, so it survives every later deploy. `pipecat cloud deploy --min-agents 1` fixes one deploy only, and a `[scaling]` block hand-added to the manifest does not survive the next `unmute compile`, which rewrites the file.{{end}} Your agent's own log tells you which half you are looking at: `[pcc-observability] First bot speech | latency=...` measures only the part inside the process, so if that says two seconds and the caller waited twelve, the other ten were the container starting. |
 | The spoken line plays and the agent never arrives at all | The same cold start, past the point where the session gives up. A session that expires before the container is listening leaves an **empty session**: `pipecat cloud agent sessions <name>` shows it as `Complete` with a blank `Bot Start Seconds`, and the agent log has no `pipecat.workers.runner` line for it, because `bot()` was never called. Measured 2026-08-26: a session created at T+0 ended at T+10 while the server bound at T+12. So a warm instance is not only a latency nicety here, it is what makes the call answerable.{{if not .WarmInstances}} This target declares no `warm_instances`, so that is the first thing to change.{{end}} {{if .Knowledge.Knowledge}}This project has a knowledge base, which makes it much easier to hit: the corpus is embedded at import, before the server binds, so read the "Baking the index" section above{{if not .WarmInstances}} and declare `warm_instances: 1`{{end}}.{{end}} |
 | Silence or degraded audio, everything else correct | Your markup names a different region than this deployment. The address in this file is the right one; re-paste it. |
 | Nothing in the agent log at all | The call never reached the platform. That is the first row, or the number is not the one you think. |
@@ -1309,7 +1323,7 @@ the call is what fails if the account cannot do it yet.
 
 Tracing is configured. Set `COVAL_API_KEY` in `.env`. Spans go to
 `https://api.coval.dev/v1/traces` under the service name
-`{{.EntryAgent}}-{{.Project}}`.
+`{{.EntryAgent}}-{{.AgentName}}`.
 
 Every trace belongs to one Coval simulation, and Coval puts that simulation ID
 on the call itself. The bot looks for it in four places, in this order:
@@ -1373,7 +1387,7 @@ are approved.
 
 Tracing is configured. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
 `LANGFUSE_BASE_URL` in `.env`; all three are required. The trace name is
-`{{.EntryAgent}}-{{.Project}}`; one trace contains the full conversation. The
+`{{.EntryAgent}}-{{.AgentName}}`; one trace contains the full conversation. The
 Pipecat runner session ID is also the Pipecat conversation ID and Langfuse
 session ID.
 Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.

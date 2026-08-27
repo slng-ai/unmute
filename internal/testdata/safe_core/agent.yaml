@@ -10,6 +10,7 @@
 #   - outbound calls: omitted; Deepgram's carrier-conditional lowering warns
 
 version: 1
+name: safe-core-fixture
 entry_agent: intake
 
 # Every model is defined once, here, in the central map grouped by kind (N15):

@@ -1,6 +1,6 @@
 {
   "trunk": {
-    "name": "livekit twilio inbound",
+    "name": "safe-core-fixture twilio inbound",
     "numbers": [
       "${TWILIO_PHONE_NUMBER}"
     ]

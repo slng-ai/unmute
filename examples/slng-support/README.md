@@ -40,6 +40,34 @@ examples/slng-support/build/slng/
 
 No `tools/` directory, because every tool here is a builtin.
 
+## The agent's name
+
+`agent.yaml` here says `name: acme-support`, and the target in `targets.yaml` is
+called `slng`, so this pushes an agent called **acme-support-slng**.
+
+SLNG has no project to deploy into. The agent's name *is* its identity: names
+are unique across an organisation, and a push resolves which agent to write by
+matching one. So the name has to say which agent this package is, and neither
+name unmute could have inferred does. The target is called `slng`, which is what
+every package on this target calls it, so it names the platform. The folder is
+called `slng-support` here and something else in your checkout, because a folder
+is named by whoever cloned the repository.
+
+Unmute wrote the target name into the body until it was fixed. Two packages in
+one organisation both compiled to an agent called `slng`, and pushing the second
+one replaced the first: same live agent, new prompt, new models, tool
+attachments detached.
+
+Pick a name no other package in your organisation uses, and check before the
+first push:
+
+```bash
+voiceai agents list
+```
+
+Renaming later does not move a deployed agent. It leaves the old one running and
+creates a second, so rename early or clean up after.
+
 ## Why every tool is a builtin
 
 `end_call` names a capability SLNG already owns, so nothing has to be *created*

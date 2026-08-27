@@ -41,6 +41,19 @@ const (
 // browser path still runs through Compose.
 const devWebMissingDockerHint = "docker compose is required to run `unmute dev`; " + composeInstallHint
 
+// devDispatchName is the agent name `unmute dev` mints into the browser's
+// LiveKit token, and it exists as its own function because the same string has
+// to be two things at once: what the token dispatches to, and what the emitted
+// worker registers itself as.
+//
+// It used to be the target instance name in one of those places and the
+// package's deploy name in the other. A room opened, no worker joined it, and
+// the browser loop was silent with nothing logged as wrong.
+// TestDevDispatchNameMatchesTheEmittedWorker holds the two together.
+func devDispatchName(agent *ir.Agent, resolved ir.Target) string {
+	return agent.DeployName(resolved)
+}
+
 // runDevWeb is the default `unmute dev` runner (SPEC V1): generate the
 // deployable project, start the target's local runtime, then serve one
 // standardized WebRTC web UI. Pipecat runs on the host because a browser cannot
@@ -86,7 +99,7 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 	run := devWebRun{
 		root:        root,
 		provider:    resolved.Provider,
-		agentName:   resolved.Name,
+		agentName:   devDispatchName(agent, resolved),
 		composeFile: composeFile,
 		project:     composeProjectName(root, resolved.Name),
 		env:         childEnv,

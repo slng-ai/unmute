@@ -35,7 +35,7 @@ from livekit.plugins import deepgram, elevenlabs, openai, silero
 from dev_metrics import install_dev_metrics
 
 
-logger = logging.getLogger("livekit")
+logger = logging.getLogger("safe-core-fixture")
 logger.setLevel(logging.INFO)
 
 load_dotenv()
@@ -797,7 +797,7 @@ server = AgentServer()
 server.setup_fnc = prewarm
 
 
-@server.rtc_session(agent_name="livekit")
+@server.rtc_session(agent_name="safe-core-fixture-livekit")
 async def entrypoint(ctx: JobContext) -> None:
     require_env()
     # The call state is a local here as well as the session's user data, so the

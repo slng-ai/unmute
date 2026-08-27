@@ -1819,7 +1819,7 @@ async def entrypoint(ctx: JobContext) -> None:
         session,
         metadata={
             "session.id": ctx.room.name,
-            "agent.name": {{pyq .EntryAgent}} + "-" + {{pyq .Project}},
+            "agent.name": {{pyq .EntryAgent}} + "-" + {{pyq .AgentName}},
         },
     )
 
@@ -1829,7 +1829,7 @@ async def entrypoint(ctx: JobContext) -> None:
         session,
         metadata={
             "langfuse.session.id": ctx.room.name,
-            "langfuse.trace.name": {{pyq .EntryAgent}} + "-" + {{pyq .Project}},
+            "langfuse.trace.name": {{pyq .EntryAgent}} + "-" + {{pyq .AgentName}},
         },
     )
 

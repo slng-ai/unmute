@@ -16,16 +16,21 @@ and runs it, and the `pipecat` CLI is how you drive it.
 
 ## The manifest the compiler wrote
 
+`agent_name` is your package's [`name:`](/reference/agent-yaml#name) joined to
+the target it was compiled for, and it is the agent's identity: names are unique
+across your organisation and a deploy updates whichever agent matches. The
+secret set follows the same name.
+
 ```toml pcc-deploy.toml
-agent_name = "pipecat"
+agent_name = "acme-support-pipecat"
 region = "eu-central"
-secret_set = "pipecat-secrets"
+secret_set = "acme-support-pipecat-secrets"
 
 [scaling]
 min_agents = 1
 ```
 
-Every line comes from your package: the target instance name, the
+Every line comes from your package: the agent name, the
 `deployment_region` you declared, the secret set the deploy will read, and the
 `warm_instances` you declared. The manifest names **no image**, deliberately:
 naming one switches cloud builds off. The `[scaling]` table appears only when the
@@ -51,9 +56,9 @@ exists. In order:
 cd my-agent/build/pipecat
 cp .env.example .env            # then fill in the values
 pipecat cloud auth login
-pipecat cloud secrets set pipecat-secrets --file .env --region eu-central
+pipecat cloud secrets set acme-support-pipecat-secrets --file .env --region eu-central
 pipecat cloud deploy
-pipecat cloud agent status pipecat
+pipecat cloud agent status acme-support-pipecat
 ```
 
 `--file .env` uploads every name in the file as one set. Run the same
@@ -114,8 +119,8 @@ A second region is a second agent, because agent names are globally unique acros
 regions:
 
 ```sh
-pipecat cloud secrets set pipecat-<region>-secrets --file .env --region <region>
-pipecat cloud deploy pipecat-<region> --region <region> --secrets pipecat-<region>-secrets
+pipecat cloud secrets set acme-support-pipecat-<region>-secrets --file .env --region <region>
+pipecat cloud deploy acme-support-pipecat-<region> --region <region> --secrets acme-support-pipecat-<region>-secrets
 ```
 
 This setting places the worker only. SLNG speech compute has its own regional

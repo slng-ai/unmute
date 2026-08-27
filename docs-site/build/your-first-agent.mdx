@@ -29,6 +29,7 @@ file when you want to see how they fit together. It is
 ```yaml
 # One agent owns every appointment workflow and tool.
 version: 1
+name: sage-and-stone-desk
 entry_agent: appointment_desk
 
 secrets:
@@ -102,6 +103,19 @@ capacity:
 </Accordion>
 
 Now each block.
+
+### `name`
+
+```yaml
+name: sage-and-stone-desk
+```
+
+What this agent is called. The deployed name is this joined to the target it was
+compiled for, so on a target called `livekit` it deploys as
+`sage-and-stone-desk-livekit`. Required, lowercase letters, digits and single
+hyphens, and it must not be a name another package in your organisation already
+uses: a deploy replaces the agent whose name it matches. The
+[`name` reference](/reference/agent-yaml#name) has the whole rule.
 
 ### `entry_agent`
 

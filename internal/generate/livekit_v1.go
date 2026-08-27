@@ -331,17 +331,30 @@ type livekitDeploy struct {
 }
 
 type livekitData struct {
-	Project           string
+	// Project is the package's own name, and it labels the generated project:
+	// the pyproject name, the logger, the trace name, the README title, the
+	// Twilio friendly names. It used to be the target instance name, which made
+	// a project call itself `livekit` and a trace read `assistant-livekit`.
+	Project string
+	// Target is the target instance name, and it is a label too, but a different
+	// one: it is what the author types after `--target`, so every emitted command
+	// naming a target reads this rather than Project or AgentName.
+	Target            string
 	Version           string
 	DeploymentRegions []string
 	Deploys           []livekitDeploy
-	AgentName         string
-	EntryAgent        string
-	EntryClass        string
-	STT               livekitChain
-	SessionLLM        livekitChain
-	SessionTTS        livekitService
-	TurnVersion       string
+	// AgentName is the deployed worker's identity: it reaches worker
+	// registration and the SIP dispatch rule, and a dispatch rule matches a
+	// worker by it. Package name joined to target instance, so two packages in
+	// one LiveKit project cannot both claim it and one package's two same-provider
+	// targets cannot claim it twice.
+	AgentName   string
+	EntryAgent  string
+	EntryClass  string
+	STT         livekitChain
+	SessionLLM  livekitChain
+	SessionTTS  livekitService
+	TurnVersion string
 	// Pace carries the resolved floor, ceiling and endpointing mode. It is never
 	// a zero value: an unset pace resolves to the balanced row, because the
 	// runtime's own defaults are slower than the turn detector needs.
@@ -817,7 +830,7 @@ func livekitReport(agent *ir.Agent, data livekitData, files []File, bindings []i
 		tasks = append(tasks, t.Name)
 	}
 	out, err := json.MarshalIndent(livekitReportJSON{
-		Target: data.Project, Provider: "livekit", Version: data.Version,
+		Target: data.Target, Provider: "livekit", Version: data.Version,
 		Supported: supportedRange(targetcap.LiveKit), EntryAgent: data.EntryClass,
 		Agents: agents, Tasks: tasks, Files: generated,
 		// Forwarded without checking, so it must be readable back (constitution).

@@ -101,16 +101,17 @@ live agent is **overwritten**.
 slng: credential from SLNG_API_KEY
 slng: compiled examples/slng-support/build/slng (2 files)
 slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
-slng: agent slng — update
+slng: agent acme-orders-slng — update
 slng: reference end_call (existing attachment)
 slng: would detach refund, which this package no longer names
 slng: would overwrite system_prompt, which differs from what the agent has now
 slng: dry run, nothing was created or changed
 ```
 
-An agent's name comes from its target instance name, so a run that resolves to
-`update` when you expected `create` means an agent of that name already exists.
-`unmute deploy` says so, and `--agent-id` picks a different one.
+An agent's name comes from `name:` in `agent.yaml` joined to the target, so a
+run that resolves to `update` when you expected `create` means an agent of that
+name already exists. `unmute deploy` warns and names it; change `name:`, or let
+`--agent-id` pick a different one.
 
 ## When it refuses
 

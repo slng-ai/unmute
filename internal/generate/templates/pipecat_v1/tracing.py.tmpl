@@ -18,7 +18,7 @@ from pipecat.pipeline.worker import PipelineWorker
 from pipecat.workers.llm import LLMWorker
 from pipecat.utils.tracing.setup import setup_tracing
 
-TRACE_NAME = {{pyq .EntryAgent}} + "-" + {{pyq .Project}}
+TRACE_NAME = {{pyq .EntryAgent}} + "-" + {{pyq .AgentName}}
 _TRACE_PROVIDER: TracerProvider | None = None
 
 

@@ -9,7 +9,12 @@ import (
 // Agent is the resolved v1 package. References remain names so the graph is
 // acyclic and schema derivation does not recurse through agent handoffs.
 type Agent struct {
-	Version    int    `json:"version" yaml:"version"`
+	Version int `json:"version" yaml:"version"`
+	// Name is the package's own name, carried through from agent.yaml and
+	// trimmed. Empty when the author wrote none, which only the slng target
+	// refuses: it is the one target that deploys under a name instead of into a
+	// project the author already named.
+	Name       string `json:"name,omitempty" yaml:"name,omitempty"`
 	EntryAgent string `json:"entry_agent" yaml:"entry_agent"`
 	// Models flattens the four authoring sections into one name-keyed map; each
 	// entry's Kind records its section (names are one namespace, N15).

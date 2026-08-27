@@ -156,6 +156,23 @@ unmute validate ./my-agent
 unmute compile ./my-agent
 ```
 
+### Except changing its name
+
+[`name:`](/reference/agent-yaml#name) is the one field where "deploy again" is
+not enough, because joined to the target it *is* the deployed thing's identity.
+A rename does not move a deployment. It leaves the old one where it was and
+addresses a new one.
+
+| Target | What the next deploy does | What you do |
+|---|---|---|
+| `slng` | pushes a second agent under the new name | delete the old agent, or point your sessions at the new id |
+| `pipecat` | creates a second agent; the old one keeps running and keeps billing | deploy, confirm `ready`, then `pipecat cloud agent delete <old-name>`; create the secret set under the new name first |
+| `livekit` | updates the same agent in place, under the new worker name | delete the SIP dispatch rule naming the old worker, then re-run `telephony-setup.sh`; see [renaming the agent breaks that rule](/deploy/livekit-cloud#renaming-the-agent-breaks-that-rule) |
+
+On `livekit` the agent survives because `lk agent deploy` targets the id in the
+preserved `livekit.toml`. On the other two the name is how the platform finds
+the resource, so a new name means a new resource.
+
 ## Where to go next
 
 <Columns cols={2}>

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/scaffold"
 	"github.com/slng-ai/unmute/internal/tui"
 	"github.com/spf13/cobra"
@@ -71,6 +72,15 @@ func consoleAction(action, path string, out io.Writer) error {
 }
 
 func writeScaffold(cmd *cobra.Command, dir string, data scaffold.Data) error {
+	// The scaffold seeds `name:` from the folder when it can, and writes none
+	// when it cannot rather than guessing at a deployed identity. Preflight would
+	// catch the result a moment later, but its message is about a field the
+	// author never wrote; this one is about the argument they did type.
+	if data.AgentName == "" && scaffold.AgentNameFrom(data.Name) == "" {
+		return fmt.Errorf("init %s: %q cannot be an agent name, and it is all unmute has to go on: "+
+			"a name is %s. Run `unmute init <name>` with one, or scaffold here and add a `name:` to agent.yaml yourself",
+			dir, data.Name, ir.PackageNameShape)
+	}
 	if _, err := scaffold.Preflight(data); err != nil {
 		return fmt.Errorf("init %s: preflight: %w", dir, err)
 	}

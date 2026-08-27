@@ -42,11 +42,12 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		return livekitData{}, err
 	}
 	data := livekitData{
-		Project:           tgt.Name,
+		Project:           agent.Name,
+		Target:            tgt.Name,
 		Version:           tgt.Version,
 		DeploymentRegions: tgt.DeploymentRegions,
 		Deploys:           livekitDeploys(tgt.DeploymentRegions),
-		AgentName:         tgt.Name,
+		AgentName:         agent.DeployName(tgt),
 		EntryAgent:        agent.EntryAgent,
 		EntryClass:        pyName(agent.EntryAgent),
 		TurnVersion:       turnVersion,

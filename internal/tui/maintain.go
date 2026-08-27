@@ -126,6 +126,7 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 	tgt := pkg.Targets[targetNames[0]]
 	data := scaffold.Data{
 		Name:              filepath.Base(pkg.Root),
+		AgentName:         pkg.Agent.Name,
 		Target:            tgt.Provider,
 		EntryAgent:        pkg.Agent.EntryAgent,
 		TargetVersion:     tgt.Version,

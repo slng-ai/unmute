@@ -56,6 +56,19 @@ Two flags are worth knowing before your first update:
 and a field that differs from the live agent is overwritten. `--dry-run` names
 both before anything happens.
 
+**Which agent it replaces is decided by the name.** This package pushes
+**slng-core-fixture-slng**: the `name:` in your `agent.yaml` joined to the `slng`
+target, never the target alone. SLNG names are unique in your organisation and a
+push writes whichever agent matches, so before the first push of a new package,
+check the name is free:
+
+```bash
+voiceai agents list
+```
+
+Rename in `agent.yaml` and compile again if it is taken. Renaming later does not
+move a deployed agent: it leaves the old one running and writes a second.
+
 Nothing on SLNG is created until every check passes, so a run that reports
 problems has changed nothing. Each problem comes back with what to do and the
 dashboard page that fixes it: a missing Vault entry, a tool name that resolves to
@@ -214,7 +227,7 @@ Compile from the package instead. That is the shape this file is.
 === agent.json ===
 {
   "schema_version": 2,
-  "name": "slng",
+  "name": "slng-core-fixture-slng",
   "system_prompt": "You are the front desk for Acme Support.\n\nAnswer in one or two short sentences. Use the caller's name once, near the\nstart, and not again.\n\nIf the caller says they are finished, or says goodbye, end the call.\n",
   "greeting": "Hi {{customer_name}}, you have reached Acme Support. How can I help?",
   "language": "en",

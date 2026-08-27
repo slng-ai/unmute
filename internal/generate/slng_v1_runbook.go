@@ -14,13 +14,21 @@ import (
 // reader needs is named here on purpose.
 type slngRunbook struct {
 	Target string
-	Region string
+	// AgentName is the name the body claims, taken from the package rather than
+	// the target instance. The runbook prints it because it is the one thing here
+	// that reaches outside this directory: SLNG names are unique per
+	// organisation, and a push under a name someone else's package already uses
+	// replaces their agent rather than adding one.
+	AgentName string
+	Region    string
 	// CredentialEnv is the push tool's key, and it is not the Context Router's
 	// key. Naming the wrong one costs an afternoon, so the runbook names this one
 	// and says which it is not.
 	CredentialEnv string
 	RouterKeyEnv  string
 	LoginCommand  string
+	// ListCommand is how an author checks a name is free before the first push.
+	ListCommand string
 	// WebSessionCommand takes the agent id the create step returned. Leaving it
 	// off is an error, not a shorter spelling, so the runbook prints the real one.
 	WebSessionCommand string
@@ -79,10 +87,12 @@ func (r slngRunbook) NeedsPushResolution() bool { return r.ToolCount+len(r.MCPRe
 func slngRunbookFor(agent *ir.Agent, tgt ir.Target, built slngArtifacts) slngRunbook {
 	runbook := slngRunbook{
 		Target:            tgt.Name,
+		AgentName:         built.Body.Name,
 		Region:            built.Body.Region,
 		CredentialEnv:     targetcap.SlngPushCredentialEnv,
 		RouterKeyEnv:      targetcap.SlngRouterKeyEnv,
 		LoginCommand:      targetcap.SlngLoginCommand,
+		ListCommand:       targetcap.SlngListCommand,
 		WebSessionCommand: targetcap.SlngWebSessionCommand,
 		NameShape:         targetcap.SlngVaultNamePattern,
 	}

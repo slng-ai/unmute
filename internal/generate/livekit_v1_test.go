@@ -143,13 +143,13 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 	bot := artifactFile(t, artifact, "agent.py")
 	tracing := artifactFile(t, artifact, "tracing.py")
 	readme := artifactFile(t, artifact, "README.md")
-	if !strings.Contains(readme, "`greeter-livekit`") {
+	if !strings.Contains(readme, "`greeter-remy-fixture-livekit`") {
 		t.Error("README trace name must match the emitted Langfuse trace name")
 	}
 	for _, want := range []string{
 		"from tracing import setup_langfuse",
 		`"langfuse.session.id": ctx.room.name`,
-		`"langfuse.trace.name": "greeter" + "-" + "livekit"`,
+		`"langfuse.trace.name": "greeter" + "-" + "remy-fixture-livekit"`,
 		"await session.start(agent=Greeter(initial=True), room=ctx.room)",
 	} {
 		if !strings.Contains(bot, want) {
@@ -178,7 +178,7 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 	}
 
 	pyproject := artifactFile(t, artifact, "pyproject.toml")
-	if !strings.Contains(pyproject, `name = "unmute-livekit"`) {
+	if !strings.Contains(pyproject, `name = "unmute-remy-fixture"`) {
 		t.Error("pyproject.toml distribution name shadows the livekit dependency")
 	}
 	for _, dep := range []string{`"langfuse>=3"`, `"opentelemetry-sdk>=1.33,<2"`} {
@@ -1926,7 +1926,7 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	}
 	for path, wants := range map[string][]string{
 		"sip-inbound-trunk.json": {`${TWILIO_PHONE_NUMBER}`, `twilio inbound`},
-		"sip-dispatch-rule.json": {`${UNMUTE_SIP_TRUNK_ID}`, `"agentName": "livekit"`, `\"direction\":\"inbound\"`},
+		"sip-dispatch-rule.json": {`${UNMUTE_SIP_TRUNK_ID}`, `"agentName": "safe-core-fixture-livekit"`, `\"direction\":\"inbound\"`},
 	} {
 		content := artifactFile(t, artifact, path)
 		for _, want := range wants {

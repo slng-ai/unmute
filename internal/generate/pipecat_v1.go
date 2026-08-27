@@ -366,7 +366,20 @@ type pipecatTransportParams struct {
 }
 
 type pipecatData struct {
-	Project          string
+	// Project is the package's own name, and it labels the generated project:
+	// the pyproject name, the logger, the trace name, the README title. It used
+	// to be the target instance name, which made a project call itself `pipecat`
+	// and a trace read `assistant-pipecat`.
+	Project string
+	// Target is the target instance name, and it is what the author types after
+	// `--target`, so every emitted command naming a target reads this.
+	Target string
+	// AgentName is the deployed agent's identity on Pipecat Cloud: `agent_name`
+	// in the manifest, and the argument every `pipecat cloud agent ...` command
+	// takes. Names are unique per organisation and a deploy updates the agent
+	// matching this one, so it is the package name joined to the target instance
+	// rather than either half alone.
+	AgentName        string
 	Version          string
 	DeploymentRegion string
 	// WarmInstances is `[scaling] min_agents` in the manifest: instances the
@@ -759,7 +772,7 @@ func pipecatReport(agent *ir.Agent, data pipecatData, files []File, bindings []i
 		agents = append(agents, a.Name)
 	}
 	out, err := json.MarshalIndent(pipecatReportJSON{
-		Target: data.Project, Provider: "pipecat", Version: data.Version,
+		Target: data.Target, Provider: "pipecat", Version: data.Version,
 		Supported: supportedRange(targetcap.Pipecat), EntryAgent: data.EntryAgent,
 		Agents: agents, Files: generated,
 		// Forwarded without checking, so it must be readable back (constitution).

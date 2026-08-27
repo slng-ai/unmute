@@ -84,14 +84,32 @@ shape of it:
 
 ```sh
 cp .env.example .env
-pipecat cloud secrets set pipecat-secrets --file .env
+pipecat cloud secrets set acme-support-pipecat-secrets --file .env
 pipecat cloud deploy
-pipecat cloud agent status pipecat
+pipecat cloud agent status acme-support-pipecat
 ```
 
 The secret set comes first, because the manifest already names it and a deploy
 cannot start without it. `pipecat cloud deploy` builds the image in the cloud
 from the generated `Dockerfile`.
+
+### The deployed agent's name
+
+`acme-support-pipecat` above is the package's
+[`name:`](/reference/agent-yaml#name) joined to the target it was compiled for,
+and it is `agent_name` in `pcc-deploy.toml`. Pipecat Cloud agent names are
+unique across an organisation and a deploy updates the agent matching the name,
+so it has to say which package this is. Unmute used to write the target name
+there, and every package on this target calls its target `pipecat`: two packages
+in one organisation deployed over each other.
+
+The secret set follows the same name, because a secret set is per-organisation
+in the same way.
+
+A rename creates a second agent rather than moving the first. The old one keeps
+running and keeps billing, so delete it with
+`pipecat cloud agent delete <old-name>` and create the secret set again under
+the new name.
 
 Every Pipecat route takes those same commands. Both telephony transports,
 `cloud-websocket` and `daily-sip`, emit a `pcc-deploy.toml` and build on the

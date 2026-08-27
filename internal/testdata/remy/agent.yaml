@@ -11,6 +11,7 @@
 # features (they fail on Vapi), and this is the LiveKit first-run example.
 
 version: 1
+name: remy-fixture
 entry_agent: greeter
 
 # Models are defined once, in the central map grouped by kind (N15). Agents

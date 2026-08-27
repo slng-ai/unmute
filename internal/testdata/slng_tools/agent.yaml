@@ -12,6 +12,7 @@
 # tool, so the runbook has both kinds of Vault name to group.
 
 version: 1
+name: slng-tools-fixture
 entry_agent: support
 
 secrets:

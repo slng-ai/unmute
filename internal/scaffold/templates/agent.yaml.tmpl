@@ -3,6 +3,14 @@
 # which runtime this compiles to lives in targets.yaml, so the same agent runs
 # on either one.
 version: 1
+[[- if .AgentName]]
+
+# What this agent is called where it is deployed under a name instead of an id.
+# The slng target writes it into the agent it pushes, and an SLNG name is unique
+# in your organisation: two packages sharing one name are two packages
+# overwriting one live agent. Rename it here, not by renaming this folder.
+name: [[yaml .AgentName]]
+[[- end]]
 entry_agent: [[.EntryAgent]]
 
 [[if .DeclaredSecrets]]# Every runtime value you supply, by environment variable name. A secret has no
