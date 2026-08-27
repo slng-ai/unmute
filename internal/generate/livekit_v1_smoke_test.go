@@ -570,14 +570,18 @@ from livekit.agents import (  # noqa: E402
 PREPARED = {"date": "2026-08-19", "party_size": 2, "time": "15:00"}
 RETRY_INSTRUCTIONS = (
     "The previous response was empty. Follow the current task instructions "
-    "and produce its next valid response now.",
+    "and produce its next valid response now. The caller's turns are already "
+    "in context: use what they have already told you, and never ask again "
+    "for something they have answered.",
     "The prior retry was also empty. This is the second retry. Follow the "
-    "current task instructions and produce its next non-empty valid response now.",
+    "current task instructions and produce its next non-empty valid response "
+    "now, using what the caller has already said rather than asking again.",
 )
 POST_TOOL_RETRY_INSTRUCTIONS = (
     "The response after the tool result was empty. Use the tool result already in "
     "context. Do not repeat that operation or call another operation. Produce the "
-    "task's next valid response now; call finish only if the task is complete.",
+    "task's next valid response now, using what the caller has already told you "
+    "rather than asking again; call finish only if the task is complete.",
     "The finish retry was also empty. This is the second retry. Use the existing "
     "tool result without repeating any operation. Produce the task's next valid "
     "response now; call finish only if the task is complete.",
@@ -1615,7 +1619,7 @@ func runLiveKitSmokeScript(t *testing.T, example string, mutate func(*ir.Target)
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, "smoke_check.py"), []byte(knowledgeSmokeStub+script), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "smoke_check.py"), []byte(withKnowledgeStub(script)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

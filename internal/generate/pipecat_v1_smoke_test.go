@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/slng-ai/unmute/internal/ir"
@@ -1155,7 +1156,10 @@ const pipecatStaticCheckScript = `"""Smoke check: the generated project passes R
 import subprocess
 
 subprocess.run(["ruff", "check", "."], check=True)
-subprocess.run(["ty", "check", "."], check=True)
+# smoke_check.py is this harness, not generated output, and the knowledge stub
+# spliced into it imports knowledge and llama_index, which a package with no
+# knowledge base does not install. Ruff still reads it; ty resolves imports.
+subprocess.run(["ty", "check", "--exclude", "smoke_check.py", "."], check=True)
 `
 
 // pipecatRequestTracingSmokeScript drives the generated worker/bus topology
@@ -2332,9 +2336,53 @@ except ImportError:
     pass  # no knowledge base in this package
 `
 
+// withKnowledgeStub splices the stub in below the script's own module docstring,
+// not above it. Ruff tolerates the try-guard anywhere, but a triple-quoted string
+// that is not the first statement is code to it, so a stub sitting above the
+// docstring makes every import below the docstring E402 and the scripts that run
+// `ruff check .` fail on their own harness. Scripts with no docstring keep the
+// plain prepend.
+func withKnowledgeStub(script string) string {
+	body := strings.TrimLeft(script, "\n")
+	if !strings.HasPrefix(body, `"""`) {
+		return knowledgeSmokeStub + script
+	}
+	end := strings.Index(body[3:], `"""`)
+	if end < 0 {
+		return knowledgeSmokeStub + script
+	}
+	cut := 3 + end + 3
+	return body[:cut] + knowledgeSmokeStub + body[cut:]
+}
+
+// The splice above is what keeps `ruff check .` green inside the smoke scripts, and
+// getting it wrong costs a 20-minute suite run to find out. This fails in
+// milliseconds instead.
+func TestWithKnowledgeStubKeepsTheDocstringFirst(t *testing.T) {
+	for name, script := range map[string]string{
+		"single line":                   "\"\"\"Doc.\"\"\"\nimport os\n",
+		"multi line":                    "\"\"\"Doc.\n\nMore.\n\"\"\"\nimport os\n",
+		"indented by a leading newline": "\n\"\"\"Doc.\"\"\"\nimport os\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := withKnowledgeStub(script)
+			if !strings.HasPrefix(got, `"""`) {
+				t.Fatalf("the docstring is no longer the first statement:\n%s", got)
+			}
+			after := 3 + strings.Index(got[3:], `"""`) + 3
+			if !strings.HasPrefix(got[after:], "\ntry:\n") {
+				t.Errorf("the stub is not spliced in right below the docstring:\n%s", got)
+			}
+		})
+	}
+	if !strings.HasPrefix(withKnowledgeStub("\nimport os\n"), "\ntry:\n") {
+		t.Error("a script with no docstring should keep the plain prepend")
+	}
+}
+
 func runGeneratedPipecatSmokeScript(t *testing.T, artifact Artifact, script string) {
 	t.Helper()
-	script = knowledgeSmokeStub + script
+	script = withKnowledgeStub(script)
 	dir := t.TempDir()
 	for _, file := range artifact.Files {
 		out := filepath.Join(dir, file.Path)
