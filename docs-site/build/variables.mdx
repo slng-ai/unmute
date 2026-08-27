@@ -41,7 +41,7 @@ the value comes from, and it changes what you can do with the variable.
 |---|---|---|
 | `call_start` | whatever starts the call | before the first word |
 | `conversation` | the model, during the call | whenever the caller says it |
-| system sources such as `from_number`, `direction`, `call_id` | the runtime | on a phone call |
+| system sources such as `from_number`, `direction`, `call_id` | the phone adapter | on a LiveKit phone call; no Pipecat route supplies one |
 
 ## Use one in the greeting
 

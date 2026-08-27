@@ -577,9 +577,9 @@ var pipecatDailyCarrierEmittedTelephonyFeatures = map[targetcap.TelephonyFeature
 // cloud-websocket, twilio) half of the emitter agreement. Hand-written like the
 // Daily carrier's, and holding the same five features the row grants: no
 // `source.*` entries, because the call-source table is filled by the
-// carrier-websocket adapter this route does not emit. The Bin's from_number and
-// to_number parameters reach the bot's call_data, which is a different surface
-// from a bound spec variable.
+// carrier-websocket adapter this route does not emit. The dictated Bin carries
+// no call-source parameters for the same reason: a `<Parameter>` nothing reads
+// is markup an operator pastes and then trusts (2026-08-27).
 var pipecatCloudWebsocketEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
 	targetcap.TelephonyRouteSelected:                   true,
 	targetcap.TelephonyInbound:                         true,

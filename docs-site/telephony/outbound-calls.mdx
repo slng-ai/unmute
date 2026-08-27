@@ -129,6 +129,11 @@ System sources include `to_number`, `from_number`, `direction`, `call_id`,
 `stream_id`, `session_id`, `carrier`, and `connection`. Seeding one with
 `--var` is refused, because the runtime owns it.
 
+**Only the LiveKit routes supply them.** The value is filled by an emitted
+carrier adapter, and no Pipecat route emits one, so naming a system source on a
+Pipecat target is a validation error rather than an empty string at call time.
+The [Variables reference](/reference/variables) has the per-source table.
+
 ## Where to go next
 
 <Columns cols={2}>

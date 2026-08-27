@@ -162,8 +162,6 @@ func TestCloudWebsocketBinMarkupIsDictated(t *testing.T) {
 		`<Stream url="wss://api.pipecat.daily.co/ws/twilio">`,        // the platform's own endpoint
 		`<Parameter name="_pipecatCloudServiceHost" value="pipecat.`, // the agent name is compiled in
 		"YOUR_ORGANIZATION",                                          // the one substitution
-		`<Parameter name="from_number" value="{{From}}"/>`,           // Twilio's own Bin templating
-		`<Parameter name="to_number" value="{{To}}"/>`,               //
 		"pipecat cloud organizations list",                           // where the one value comes from
 		// Which value, because the command prints several columns whose headings
 		// differ between CLI versions, and the wrong one is the most common way this
@@ -188,6 +186,33 @@ func TestCloudWebsocketBinMarkupIsDictated(t *testing.T) {
 	outbound := telephonySection(t, cloudWebsocketArtifact(t, cloudWebsocketOptions{outbound: true, connection: true}))
 	if strings.Contains(outbound, "Create a TwiML Bin") {
 		t.Error("an outbound-only package is told to create a Bin it never receives a call through")
+	}
+}
+
+// TestCloudWebsocketMarkupCarriesNoUnreadParameter: every <Parameter> the runbook
+// dictates has a reader in the emitted Python, or it is markup an operator pastes
+// and then trusts. `_pipecatCloudServiceHost` is the one exemption, because the
+// platform reads it before the connection ever reaches this agent.
+//
+// This is what from_number and to_number were: added in 815793a for a transfer
+// caller ID, left behind when that signature changed, and still telling readers
+// they were "how this agent learns who called" a year later (2026-08-27).
+func TestCloudWebsocketMarkupCarriesNoUnreadParameter(t *testing.T) {
+	artifact := cloudWebsocketArtifact(t, cloudWebsocketOptions{
+		inbound: true, outbound: true, transfer: true, connection: true,
+	})
+	bot := artifactFile(t, artifact, "bot.py")
+	names := regexp.MustCompile(`<Parameter name="([^"]+)"`).FindAllStringSubmatch(telephonySection(t, artifact), -1)
+	if len(names) == 0 {
+		t.Fatal("no markup parameter is dictated anywhere, so this is asserting nothing")
+	}
+	for _, match := range names {
+		if match[1] == "_pipecatCloudServiceHost" {
+			continue
+		}
+		if !strings.Contains(bot, match[1]) {
+			t.Errorf("the dictated markup carries %q and no emitted module reads it", match[1])
+		}
 	}
 }
 
