@@ -131,6 +131,7 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		TargetVersion:     tgt.Version,
 		SDKLanguage:       tgt.SDKLanguage,
 		DeploymentRegions: tgt.DeploymentRegion,
+		WarmInstances:     tgt.WarmInstances,
 		// The route is read from the connection the target names, because that
 		// is where a route is declared (spec FR-001).
 		Connection: tgt.Connection,

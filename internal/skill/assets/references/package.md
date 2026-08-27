@@ -351,6 +351,7 @@ provider with different settings, for example `pipecat_twilio` and
 | `sdk_language` | `python` when written; refused on `slng` |
 | `connection` | required for LiveKit or Pipecat telephony; illegal with no phone use; refused on `slng` |
 | `deployment_region` | one non-empty region, or a duplicate-free list; multiple regions are LiveKit-only; on `slng` exactly one of `any`, `us-east`, `eu-central`, `ap-south` |
+| `warm_instances` | instances the platform holds ready; zero or more; **Pipecat only**, refused on `livekit` and `slng` |
 | `models` | per target overrides of named `models` entries |
 
 That is the whole list. A `models` override is keyed by the entry name from
@@ -359,6 +360,28 @@ as defined, or runs its own better. Override the entry, never the agent.
 
 Transport, carrier, and destinations used to live here and no longer do. Writing
 any of them on a target is refused, and the refusal names the new home.
+
+## warm_instances, and when to write it
+
+`warm_instances` compiles to `[scaling] min_agents` in `pcc-deploy.toml`. With
+none declared the platform scales to zero when idle, so the first call after every
+quiet period waits for a container to start, and on a phone route that wait can
+outrun the session: it expires and nobody is answered at all. A knowledge base
+makes it much likelier, because the corpus is embedded at import before the server
+binds.
+
+**Write `warm_instances: 1` on a Pipecat target with a `telephony` channel**, and
+say out loud that it bills for that instance whether or not anybody calls. Leave
+it off a browser-only package, where a few seconds of cold start costs nothing.
+
+Do not tell an operator to remember `pipecat cloud deploy --min-agents 1` instead.
+That flag applies to one deploy, and `unmute compile` rewrites the manifest, so a
+hand-added `[scaling]` block does not survive either. The field is the durable
+answer.
+
+LiveKit refuses the field: `livekit.toml` carries only the project subdomain and
+the agent id, and a warm production replica on LiveKit Cloud is a property of the
+billing plan. SLNG refuses it too, because it exposes no pool of yours.
 
 ## Deployment regions and model regions
 

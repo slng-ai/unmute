@@ -13,6 +13,10 @@ targets:
 [[end]][[if .SDKLanguage]]    sdk_language: [[.SDKLanguage]]
 [[end]][[if .DeploymentRegions]]    deployment_region:[[if eq (len .DeploymentRegions) 1]] [[yaml (index .DeploymentRegions 0)]][[else]][[range .DeploymentRegions]]
       - [[yaml .]][[end]][[end]]
+[[end]][[if .WarmInstances]]    # Instances the platform holds ready, so a call is not waiting on a cold
+    # container. Compiles to `[scaling] min_agents` in pcc-deploy.toml, and bills
+    # whether or not anybody calls.
+    warm_instances: [[.WarmInstances]]
 [[end]][[if .Pins]]    pins:[[yamlBlock 6 .Pins]]
 [[end]][[if .Connection]]    # The whole route lives in connections/[[.Connection]].yaml: the transport,
     # the carrier, and the credentials it needs.

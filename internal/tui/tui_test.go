@@ -1835,6 +1835,45 @@ func TestMaintainKeepsEveryDeploymentRegion(t *testing.T) {
 	}
 }
 
+// warm_instances is a target field the console does not edit, and maintain
+// rewrites targets.yaml from scaffold.Data, so a field absent from that struct is
+// a field deleted from the author's file on any unrelated edit. Same reason as
+// TestMaintainKeepsEveryDeploymentRegion above, same shape of check.
+func TestMaintainKeepsWarmInstances(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "agent")
+	data := scaffold.Data{Name: "agent"}
+	data.SetTarget("pipecat")
+	data.WarmInstances = 2
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.data.WarmInstances != 2 {
+		t.Fatalf("warm_instances after load = %d, want 2", agent.data.WarmInstances)
+	}
+	agent.data.Instructions += "\n\nBe brief."
+	if err := saveMaintained(newRunner(strings.NewReader("1\n1\n1\n1\n"), &bytes.Buffer{}, true), &agent); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(root, "targets.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(manifest), "warm_instances: 2") {
+		t.Fatalf("warm_instances did not survive an unrelated edit:\n%s", manifest)
+	}
+	reloaded, err := loadMaintained(root)
+	if err != nil {
+		t.Fatalf("saved package no longer loads: %v", err)
+	}
+	if reloaded.data.WarmInstances != 2 {
+		t.Fatalf("warm_instances after save = %d, want 2", reloaded.data.WarmInstances)
+	}
+}
+
 // The advanced-target form edits the list as one comma-separated field, so the
 // split on save is what keeps a second region.
 func TestAdvancedTargetFormSplitsRegions(t *testing.T) { // N32

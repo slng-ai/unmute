@@ -206,8 +206,32 @@ fails leaves the previous ready version serving traffic. `status` reporting
 `ready` is the deploy actually being usable.
 
 No warm instance is kept: the manifest declares no replica count, because the
-source package declares none. Add `--min-agents <n>` on the deploy command if you
-want a pool held ready.
+source package declares none. So the first call after every idle period waits for
+a container to start. Declare `warm_instances: 1` on this target in `targets.yaml`
+and recompile to keep one ready, which is a standing cost and removes that wait.
+`--min-agents <n>` on the deploy command does the same for one deploy only.
+
+### Reading this agent's log
+
+```sh
+pipecat cloud agent logs pipecat -n 250
+pipecat cloud agent logs pipecat -s <session-id>
+```
+
+**Do not pass `-l DEBUG`.** It filters to *only* that level rather than setting a
+minimum, so it hides the `ERROR` line that says why a session died. Run with no
+`-l` at all.
+
+The CLI wraps output at 80 columns, which corrupts its JSON output. For machine
+reading, widen it first:
+
+```sh
+COLUMNS=100000 pipecat cloud --output json agent logs pipecat -n 2000 -s <session-id>
+```
+
+`pipecat cloud agent sessions pipecat` lists the sessions themselves, which is
+how you tell a session that never started from one that failed inside. A session
+marked `Complete` with a blank `Bot Start Seconds` never reached `bot()` at all.
 
 ### Region
 

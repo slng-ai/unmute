@@ -524,6 +524,7 @@ type Target struct {
 	SDKLanguage      string              `json:"sdk_language,omitempty" yaml:"sdk_language,omitempty"`
 	Connection       string              `json:"connection,omitempty" yaml:"connection,omitempty"`
 	DeploymentRegion Regions             `json:"deployment_region,omitempty" yaml:"deployment_region,omitempty"` // where the platform deploys the agent: one region or several (N18, widened by N32)
+	WarmInstances    int                 `json:"warm_instances,omitempty" yaml:"warm_instances,omitempty"`       // instances the platform holds ready, so a call is not waiting on a cold container
 	Models           map[string]ModelDef `json:"models,omitempty" yaml:"models,omitempty"`                       // per-target overrides (N15), keyed by model name / listen / turn
 
 	// Moved fields, kept on the decode struct so a package written the old way

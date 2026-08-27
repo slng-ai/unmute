@@ -187,6 +187,7 @@
           "telephony/outbound-calls",
           "telephony/inbound-calls",
           "telephony/twilio",
+          "telephony/pipecat-twilio",
           {
             "group": "Transfers",
             "icon": "phone-forwarded",

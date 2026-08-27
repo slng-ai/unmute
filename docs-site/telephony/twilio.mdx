@@ -81,7 +81,9 @@ This part differs by route, and it is the part to get right:
   console, which streams the call to Pipecat Cloud. There is no URL of yours
   to configure, because nothing of yours is hosted. Your build's generated README
   dictates the exact markup, including the regional stream address, because that
-  address comes from the region in your `targets.yaml`.
+  address comes from the region in your `targets.yaml`. [Pipecat over
+  Twilio](/telephony/pipecat-twilio) walks the whole route, including the
+  organisation slug that is the most common thing to get wrong.
 - **`connector`**: the number's voice webhook points at `POST /telephony/inbound`
   on the public URL of the service you deploy.
 

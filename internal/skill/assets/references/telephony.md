@@ -175,8 +175,11 @@ unmute compile examples/salon-concierge --target pipecat
 Deploy the emitted project, then follow the Telephony setup section of its
 `README.md` for the exact carrier steps that route and that carrier need. See
 `docs-site/telephony/overview.mdx` and `docs-site/transfers/overview.mdx` for
-the user-facing version of the routes and the transfer shapes, and `deploy.md`
-in this bundle for going live.
+the user-facing version of the routes and the transfer shapes,
+`docs-site/telephony/pipecat-twilio.mdx` for the Pipecat `cloud-websocket` route
+end to end, and `deploy.md` in this bundle for going live. Never invent carrier
+markup: the emitted runbook dictates it, and that page explains what each part
+of it is for.
 
 ## The boundary Unmute does not cross
 

@@ -43,6 +43,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		// validation error (FieldDeploymentMultiRegion), which runs before any
 		// artifact exists.
 		DeploymentRegion: firstRegion(target.DeploymentRegions),
+		WarmInstances:    target.WarmInstances,
 		MainName:         "main",
 		EntryAgent:       agent.EntryAgent,
 		EntryClass:       pyName(agent.EntryAgent),

@@ -20,6 +20,12 @@ targets:
     version: "1.7.0"
     connection: twilio_voice
     deployment_region: eu-central
+    # One instance held ready, because this is a phone route with two knowledge
+    # bases: the corpus is embedded at import, before the server binds, so a cold
+    # start can outlast the session and the call is never answered at all. This
+    # becomes `[scaling] min_agents` in pcc-deploy.toml. It bills whether or not
+    # anybody calls.
+    warm_instances: 1
     models:
       # 200ms here, 400ms on the base binding, and the split is not a
       # preference. Two reasons pull in the same direction.
