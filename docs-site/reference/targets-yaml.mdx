@@ -33,6 +33,7 @@ targets:
 | `targets.<name>.sdk_language` | string | no | — | `python` when written | SDK used by an emitted project |
 | `targets.<name>.connection` | string | for LiveKit or Pipecat telephony | — | connection file stem | this target's phone route; illegal when the package has no phone use |
 | `targets.<name>.deployment_region` | string or list of strings | no | — | non-empty platform region names, with no duplicates | deployment regions; more than one is LiveKit only |
+| `targets.<name>.warm_instances` | integer | no | — | zero or more; Pipecat only | instances the platform holds ready, so a call is not waiting on a cold container |
 | `targets.<name>.models` | map | no | — | existing model entry names to model definitions | per-target model overrides |
 
 The map key is the **target instance name**. It is what `--target` takes and
@@ -72,6 +73,29 @@ for complete worker, STT, and TTS examples plus LiveKit media guidance.
 
 An empty list entry or duplicate region is an error. Region names themselves use
 the platform's vocabulary and are otherwise passed through.
+
+## Instances held ready
+
+```yaml
+    warm_instances: 1
+```
+
+With none declared the platform scales to zero when idle, so the first call after
+every quiet period waits for a container to start. On a phone route that wait can
+outrun the call: the session expires and nobody is answered at all. One instance
+held ready removes it, and bills for that instance whether or not anyone calls.
+
+The number lands in `pcc-deploy.toml` as `[scaling] min_agents`, which is why it
+belongs here rather than on the deploy command. `pipecat cloud deploy
+--min-agents 1` does the same thing for one deploy, and the manifest is rewritten
+by every `unmute compile`, so a `[scaling]` block added to it by hand does not
+survive.
+
+**Pipecat only.** LiveKit refuses it: `livekit.toml` holds the project subdomain
+and the agent id and nothing else, and on LiveKit Cloud a warm production replica
+is a property of the billing plan rather than something the compiler can write.
+See [Pipecat over Twilio](/telephony/pipecat-twilio#deploy-with-a-warm-instance)
+for the measurement behind this.
 
 ## Package pins
 

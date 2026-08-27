@@ -90,10 +90,15 @@ unmute compile examples/salon-concierge
 ```
 
 For `pipecat`, follow [Pipecat Cloud](/deploy/pipecat-cloud): set the secret
-set, then `pipecat cloud deploy`. The generated `build/pipecat/README.md`
-prints the exact TwiML Bin markup, with your region and agent name already
-filled in; paste it into a TwiML Bin in the Twilio Console and point the
-number's voice configuration at it.
+set, then `pipecat cloud deploy`. Declare
+[`warm_instances: 1`](/reference/targets-yaml#instances-held-ready) on the target
+first, or the first call can arrive before the container is listening. The generated
+`build/pipecat/README.md` prints the exact TwiML Bin markup, with your region and
+agent name already filled in; paste it into a TwiML Bin in the Twilio Console and
+point the number's voice configuration at it. [Pipecat over
+Twilio](/telephony/pipecat-twilio) is that route end to end: what the markup
+carries, why the warm instance is what makes the call answerable, and the three
+ways it goes quiet.
 
 For `livekit`, follow [LiveKit Cloud](/deploy/livekit-cloud) to deploy with `lk
 agent create`, then do the [Twilio Console

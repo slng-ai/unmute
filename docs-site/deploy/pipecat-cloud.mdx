@@ -20,11 +20,17 @@ and runs it, and the `pipecat` CLI is how you drive it.
 agent_name = "pipecat"
 region = "eu-central"
 secret_set = "pipecat-secrets"
+
+[scaling]
+min_agents = 1
 ```
 
-Three lines that come from your package: the target instance name, the
-`deployment_region` you declared, and the secret set the deploy will read. The
-manifest names **no image**, deliberately: naming one switches cloud builds off.
+Every line comes from your package: the target instance name, the
+`deployment_region` you declared, the secret set the deploy will read, and the
+`warm_instances` you declared. The manifest names **no image**, deliberately:
+naming one switches cloud builds off. The `[scaling]` table appears only when the
+target declares `warm_instances`, and it comes last because in TOML any key after
+a table header belongs to that table.
 
 ## Install the CLI
 
@@ -70,12 +76,25 @@ ready version serving traffic.
 
 `status` reporting `ready` is the deploy actually being usable.
 
-No warm instance is kept unless you ask for one, because the source package declares
-no replica count:
+No warm instance is kept unless you ask for one. Ask in the package, on the
+target:
 
-```sh
-pipecat cloud deploy --min-agents 2
+```yaml targets.yaml
+targets:
+  pipecat:
+    provider: pipecat
+    warm_instances: 1
 ```
+
+That becomes `[scaling] min_agents` in the manifest, so it applies to this deploy
+and every later one. On a phone route it is not a latency nicety: a cold start can
+outrun the session window, and then the call is never answered at all rather than
+answered slowly. See [Pipecat over Twilio](/telephony/pipecat-twilio#deploy-with-a-warm-instance)
+for the measurement.
+
+`pipecat cloud deploy --min-agents 1` does the same for one deploy, which is worth
+knowing for a quick test. It is not the durable answer, and neither is editing the
+manifest: `unmute compile` rewrites that file.
 
 ## Verifying a phone route
 

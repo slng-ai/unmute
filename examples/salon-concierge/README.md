@@ -356,10 +356,12 @@ carry a garbled turn in its context for the rest of the conversation. A real
 call on 2026-08-26 produced a first user turn reading `hi you've reached`, which
 is the agent's own greeting, and every answer after that was built on it.
 
-Deploy with `--min-agents 1`. This package carries two knowledge bases, and an
-unbaked index is embedded at import before the server binds, which on a cold
-start can push the container past the point where the session gives up. The
-symptom is a session that never reaches the bot at all rather than a slow one.
+The `pipecat` target declares `warm_instances: 1`, which compiles to
+`[scaling] min_agents` in `pcc-deploy.toml` and keeps one instance ready on every
+deploy. Keep it. This package carries two knowledge bases, and an unbaked index is
+embedded at import before the server binds, which on a cold start can push the
+container past the point where the session gives up. The symptom is a session that
+never reaches the bot at all rather than a slow one.
 
 ## Release conversation script
 

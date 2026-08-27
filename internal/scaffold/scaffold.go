@@ -114,22 +114,26 @@ type Data struct {
 	TargetVersion     string
 	SDKLanguage       string
 	DeploymentRegions []string
-	Pins              string
-	Greeting          string
-	ModelGreeting     bool
-	SpeaksFirst       string
-	Interruption      *bool
-	MinimumWords      int
-	IgnorePhrases     []string
-	NudgeAfter        string
-	EndAfter          string
-	MaxDuration       string
-	ThinkingAudio     string
-	Instructions      string
-	Listen            Binding
-	Reason            Binding
-	Speak             Binding
-	Variables         []Variable
+	// WarmInstances is the target's warm_instances. The console does not edit it,
+	// and it has to be here anyway: maintain rewrites targets.yaml from this
+	// struct, so a field absent here is a field deleted from the author's file.
+	WarmInstances int
+	Pins          string
+	Greeting      string
+	ModelGreeting bool
+	SpeaksFirst   string
+	Interruption  *bool
+	MinimumWords  int
+	IgnorePhrases []string
+	NudgeAfter    string
+	EndAfter      string
+	MaxDuration   string
+	ThinkingAudio string
+	Instructions  string
+	Listen        Binding
+	Reason        Binding
+	Speak         Binding
+	Variables     []Variable
 	// Knowledge is the package's knowledge: section. The console does not edit
 	// it, but it has to carry it: maintain rewrites agent.yaml from this struct,
 	// so a field absent here is a field silently deleted from the author's file.
@@ -372,6 +376,9 @@ func (d *Data) SetTarget(provider string) {
 	d.TargetVersion = ""
 	d.SDKLanguage = ""
 	d.DeploymentRegions = nil
+	// Only Pipecat takes a warm pool, so switching target drops it rather than
+	// carrying a number the new target's validation refuses.
+	d.WarmInstances = 0
 	d.Pins = ""
 	switch provider {
 	case "pipecat":

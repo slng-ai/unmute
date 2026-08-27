@@ -1,0 +1,252 @@
+---
+title: "Pipecat over Twilio"
+description: "The cloud-websocket route end to end: the markup your number points at, the values that have to agree, and the three ways the call goes quiet."
+sidebarTitle: "Pipecat route"
+---
+
+This is the `cloud-websocket` transport with the `twilio` carrier. Your number
+points at a static piece of markup in the Twilio console, and that markup streams
+the call straight to Pipecat Cloud, which starts your agent.
+
+```text
+caller -> your Twilio number -> TwiML Bin -> wss:// stream -> Pipecat Cloud -> your agent
+```
+
+This route is **not SIP**. It shares nothing with the LiveKit Twilio route except
+the account the number lives in. There is no trunk, no webhook of yours, no
+tunnel, and no public URL.
+
+<Note>
+  Your own `build/pipecat/README.md` is the authority for your build, because it
+  was generated with your region and your agent name already filled in. This page
+  is the same route with the reasons attached, and it is the page to read before
+  the first call rather than after it.
+</Note>
+
+## Nothing of yours is hosted, and that decides the security model
+
+The generated `pcc-deploy.toml` sets `websocket_auth = "none"`. That is not a
+shortcut. A TwiML Bin is static markup in a console, so it cannot fetch a token
+before it opens the stream, which makes token authentication structurally
+impossible on this route.
+
+What limits who can start a session is knowing the `AGENT.ORGANISATION` string
+your markup carries. Treat that string like a capability. It is not a secret in
+the cryptographic sense, but anyone holding it can open sessions you pay for.
+
+## The values that have to agree
+
+The route fails when any of these disagree, and the failures look nothing like
+each other.
+
+### The stream address carries the region
+
+```text
+wss://eu-central.api.pipecat.daily.co/ws/twilio   # a region is declared
+wss://api.pipecat.daily.co/ws/twilio              # no region declared
+```
+
+A regional stream endpoint routes **only** to agents deployed in that region.
+Your build writes the right one, because it comes from `deployment_region` on the
+target:
+
+```yaml targets.yaml
+targets:
+  pipecat:
+    provider: pipecat
+    connection: twilio_voice
+    deployment_region: eu-central
+```
+
+One declaration, three places, and the platform needs all three to match:
+
+| What | Where it lands |
+|---|---|
+| where the agent runs | `region` in `pcc-deploy.toml` |
+| where its secrets live | `--region` on `pipecat cloud secrets set` |
+| where the carrier streams to | the `wss://` host in your markup |
+
+An agent can only read a secret set from its own region. To move region, change
+that one line, recompile, and paste the new address into the Bin.
+
+### The service host is your agent name and your organisation slug
+
+`_pipecatCloudServiceHost` is `AGENT_NAME.ORGANIZATION_NAME`. The agent name is
+filled in for you; the organisation is the one value the compiler cannot know:
+
+```sh
+pipecat cloud organizations list
+```
+
+<Warning>
+  You want the machine **slug**, not your display name. It looks like
+  `three-random-words-12345`: lowercase, hyphenated, ending in a number. Column
+  headings differ between CLI versions, so go by the shape of the value. It never
+  carries the `(active)` marker.
+</Warning>
+
+This is the most common way the route fails, and the least helpful failure you
+can get. A service host the platform refuses is rejected before it reaches your
+agent, so **your agent's log stays completely empty**. The caller hears the
+spoken line and then silence.
+
+### The caller and called numbers ride along as parameters
+
+```xml
+<Parameter name="from_number" value="{{From}}"/>
+<Parameter name="to_number" value="{{To}}"/>
+```
+
+`{{From}}` and `{{To}}` are Twilio's own Bin substitutions, replaced per call.
+They are not placeholders for you to fill in.
+
+Twilio forwards every custom parameter to the session, so these two put the
+caller and the called number in the session body alongside `direction`. Pipecat's
+own documented example carries only `_pipecatCloudServiceHost`, so if you compare
+the two, the extra lines are ours.
+
+### The number must not be on a SIP trunk
+
+A number attached to a trunk **ignores its voice configuration**, silently, so
+the Bin is never consulted. Read the state back rather than testing by ear:
+
+```sh
+twilio api core incoming-phone-numbers list --properties phoneNumber,trunkSid,voiceUrl
+```
+
+An empty `trunkSid` is what you want. One number serves one target at a time, so
+[buy a second number](/telephony/twilio#give-each-route-its-own-number) if you
+want both routes live.
+
+## The markup
+
+Paste this from your own `build/pipecat/README.md`, where the address and the
+agent name are already correct. `YOUR_ORGANIZATION` is the only value you fill
+in by hand.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say>Connecting you now.</Say>
+  <Connect>
+    <Stream url="wss://eu-central.api.pipecat.daily.co/ws/twilio">
+      <Parameter name="_pipecatCloudServiceHost" value="AGENT.YOUR_ORGANIZATION"/>
+      <Parameter name="from_number" value="{{From}}"/>
+      <Parameter name="to_number" value="{{To}}"/>
+    </Stream>
+  </Connect>
+</Response>
+```
+
+Console path: **TwiML**, **TwiML Bins**, then the plus button. Name it anything.
+Then point the number at it: **Phone Numbers**, **Manage**, **Active Numbers**,
+your number, **Voice Configuration**, "A call comes in", choose **TwiML Bin**.
+
+The `<Say>` line is a cold start cushion, not a requirement. It delays the stream
+by roughly two seconds, so drop it once you keep a warm instance.
+
+## Deploy with a warm instance
+
+```yaml targets.yaml
+targets:
+  pipecat:
+    provider: pipecat
+    connection: twilio_voice
+    deployment_region: eu-central
+    warm_instances: 1
+```
+
+On this route a warm instance is not a latency nicety, it is what makes the call
+answerable. Measured on 2026-08-26: a session created at T+0 ended at T+10 while
+the server bound at T+12, so the session expired before the container could
+answer and the call was never picked up at all. A knowledge base makes it much
+worse, because the corpus is embedded at import, before the server binds.
+
+`warm_instances` compiles to `[scaling] min_agents` in `pcc-deploy.toml`, so every
+deploy of this build keeps the pool. It bills for that instance whether or not
+anybody calls, which is why the compiler never adds it on its own.
+
+<Warning>
+  `pipecat cloud deploy --min-agents 1` is the same thing for one deploy only, and
+  a `[scaling]` block added to `pcc-deploy.toml` by hand does not survive the next
+  `unmute compile`. Declare it in `targets.yaml` and the manifest carries it.
+</Warning>
+
+## Three different ways nothing happens
+
+They look identical to the caller and they are easy to tell apart in the logs.
+
+| Symptom | Cause | How to confirm |
+|---|---|---|
+| the agent log is **completely empty**, no session at all | a wrong organisation slug, or the Bin's region does not match the deployment | `pipecat cloud agent sessions <name>` lists nothing new |
+| a session exists, marked `Complete`, with a blank `Bot Start Seconds` | the cold start outran the session window | no `pipecat.workers.runner` line for that session id, and the `Uvicorn running` timestamp is later than the session's end |
+| a session exists and the log has an `ERROR` line | your agent raised, usually a missing environment value | the error names it |
+
+Only the first one is a wiring problem. The second is
+[`warm_instances`](#deploy-with-a-warm-instance). The third is a secret that is
+declared but not in the set you deployed with.
+
+## Reading the agent's log
+
+```sh
+pipecat cloud agent logs <name> -n 250
+pipecat cloud agent logs <name> -s <session-id>
+```
+
+<Warning>
+  `-l DEBUG` filters to **only** DEBUG. It is not a minimum severity, so it hides
+  the `ERROR` line that says why the session died. Run with no `-l` at all.
+</Warning>
+
+The CLI wraps output at 80 columns, which corrupts JSON output. For machine
+reading:
+
+```sh
+COLUMNS=100000 pipecat cloud --output json agent logs <name> -n 2000 -s <session-id>
+```
+
+Two lines are worth knowing by name:
+
+- `parse_telephony_websocket ... Parsed - Type: twilio, Data: {...}` proves the
+  Bin delivered, and shows the service host and the parameters it carried.
+- `Generating chat from context [...]` dumps what the model actually saw. It is
+  the fastest way to spot echo, fragmentation, or a polluted context.
+
+## Speakerphone makes the agent interrupt itself
+
+A phone leg has no echo cancellation. A caller on speakerphone sends the agent's
+own greeting back into the microphone, it is transcribed as caller speech, and
+the agent cuts itself off and carries the garbled turn in its context for the
+rest of the call.
+
+A Pipecat phone route protects the greeting by default for exactly this reason.
+Everything after the opening line stays interruptible, so tell testers to use the
+handset. See [`interruption.protect`](/reference/agent-yaml) to change what is
+protected.
+
+## Where this page's facts come from
+
+The stream address, the manifest value, and the dictated markup are read from
+this repository's own emitter. The organisation slug shape, the regional endpoint
+rule, and the service host format were checked against Pipecat's
+[Twilio websocket guide](https://docs.pipecat.ai/pipecat-cloud/guides/telephony/twilio-websocket)
+and [regions guide](https://docs.pipecat.ai/pipecat-cloud/guides/regions) on
+2026-08-26. The cold start measurement, the empty session, the log filter
+behaviour, and the speakerphone echo all come from real calls on 2026-08-26.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Get your Twilio details" icon="key" href="/telephony/twilio">
+    Which console value fills which name.
+  </Card>
+  <Card title="Go live on Pipecat Cloud" icon="cloud" href="/deploy/pipecat-cloud">
+    Secret set, deploy, region.
+  </Card>
+  <Card title="Inbound calls" icon="phone-incoming" href="/telephony/inbound-calls">
+    The same trip on either target.
+  </Card>
+  <Card title="Transfers on this route" icon="phone-forwarded" href="/transfers/pipecat-twilio">
+    Hand the caller to a person.
+  </Card>
+</Columns>

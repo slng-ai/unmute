@@ -717,6 +717,15 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	if len(resolved.DeploymentRegions) > 1 {
 		applyCapability(caps, targetcap.FieldDeploymentMultiRegion, provider, row)
 	}
+	// Absent and zero are the same declaration: no instance held ready, which is
+	// every platform's default. So only a stated pool is gated, and a negative
+	// one is refused here rather than reaching a manifest the platform rejects.
+	if resolved.WarmInstances < 0 {
+		row.Errors = add(row.Errors, fmt.Sprintf("warm_instances is %d; it counts instances held ready, so it cannot be negative", resolved.WarmInstances))
+	}
+	if resolved.WarmInstances > 0 {
+		applyCapability(caps, targetcap.FieldWarmInstances, provider, row)
+	}
 	// Placement gates read the resolved per-target bindings (N15): a per-target
 	// override can change where a model runs, so the effective binding decides.
 	if b := resolved.Models.Listen; b != nil && b.Placement == PlacementLocal {

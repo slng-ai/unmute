@@ -15,4 +15,15 @@ agent_name = {{pyq .Project}}
 # capability: not a secret in the cryptographic sense, but anyone holding it can
 # open sessions you pay for. The README says the same thing in the same words.
 websocket_auth = "none"
+{{end}}{{if .WarmInstances}}
+# Instances held ready, from `warm_instances` on this target in targets.yaml.
+# It lives here rather than on the deploy command because `--min-agents` applies
+# to the deploy you pass it on, and this file is rewritten by every
+# `unmute compile`, so a hand-added block would not survive one.
+#
+# This table comes last on purpose: in TOML every key after a table header
+# belongs to that table, so a top-level key emitted below it would silently
+# become `scaling.<key>` and the platform would never read it.
+[scaling]
+min_agents = {{.WarmInstances}}
 {{end}}

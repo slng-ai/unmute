@@ -957,6 +957,7 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 		// declared: validate rejects a duplicate and each README states what
 		// the platform does with an empty list.
 		DeploymentRegions: raw.DeploymentRegion,
+		WarmInstances:     raw.WarmInstances,
 		Models:            resolveBindings(agent, used, raw.Models),
 		Destinations:      destinations,
 	}

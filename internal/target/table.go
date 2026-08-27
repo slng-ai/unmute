@@ -103,6 +103,7 @@ const (
 	FieldOutbound              Field = "channels.telephony.outbound"
 	FieldVoicemail             Field = "channels.telephony.on_voicemail"
 	FieldDeploymentMultiRegion Field = "deployment_region.multiple"
+	FieldWarmInstances         Field = "warm_instances"
 	FieldTracingLangfuse       Field = "tracing.provider.langfuse"
 	FieldTracingCoval          Field = "tracing.provider.coval"
 	FieldVariableConversation  Field = "variables.source.conversation"
@@ -518,6 +519,19 @@ func Default() Table {
 			FieldDeploymentMultiRegion: field(
 				deny(Pipecat, "Pipecat Cloud agent names are globally unique across regions, so a second region needs a differently named agent: declare one region here and deploy the second with `pipecat cloud deploy <name>-<region> --region <region>`"),
 				deny(Slng, "slng target takes exactly one deployment region: name one of any, us-east, eu-central or ap-south, where any lets SLNG route the call itself"),
+			),
+			// Instances held ready (warm_instances). Only Pipecat Cloud takes the
+			// number in a file this compiler writes: `[scaling] min_agents` in
+			// pcc-deploy.toml, so an authored value survives every recompile
+			// instead of living on a deploy flag somebody has to remember.
+			// LiveKit Cloud has no such key. livekit.toml carries the project
+			// subdomain and the agent id and nothing else, and whether production
+			// keeps a warm replica is a property of the billing plan
+			// (docs.livekit.io/deploy/agents/managing-deployments, checked
+			// 2026-08-27). SLNG runs the agent itself and exposes no pool.
+			FieldWarmInstances: field(
+				deny(LiveKit, "livekit.toml holds only the project subdomain and the agent id, so no warm pool size can be compiled into it: on LiveKit Cloud a paid plan keeps production warm and the free plan scales to zero, so drop warm_instances and choose the plan, or compile to pipecat which writes the number into pcc-deploy.toml"),
+				deny(Slng, "slng target deploys a hosted agent and exposes no instance pool of yours to keep warm: drop warm_instances, or compile to pipecat which writes the number into pcc-deploy.toml"),
 			),
 			// Variables and secrets (variable_secrets_specs.md V5). The code
 			// drivers own the session state and the request, so they can capture

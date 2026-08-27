@@ -83,7 +83,7 @@ usually causes it, and what you can change.
 | `llm` grows as the call goes on | the prompt and history the model re-reads every turn | [agent.yaml](/reference/agent-yaml) |
 | a tool row is large | the tool's own round trip, which is your code or your provider | [Tools](/build/tools/overview) |
 | every stage is slower than you expect | distance between the caller, the worker, and the models | [Regional infrastructure](/optimization/regional-infrastructure) |
-| only the first turn is slow | cold start, which a dev run pays and a warm deployment does not | |
+| only the first turn is slow | cold start, which a dev run pays and a warm deployment does not | on Pipecat, [`warm_instances`](/reference/targets-yaml#instances-held-ready) on the target |
 | `tts` is small but its total is large | the agent talked for a long time, which is not a wait | |
 
 Three of those are worth more than a row.

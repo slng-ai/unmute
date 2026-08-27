@@ -366,6 +366,12 @@ type pipecatData struct {
 	Project          string
 	Version          string
 	DeploymentRegion string
+	// WarmInstances is `[scaling] min_agents` in the manifest: instances the
+	// platform holds ready. Zero means the section is omitted and the platform's
+	// own default (scale to zero) applies. It is in the manifest rather than left
+	// to `--min-agents` on the deploy command because the flag applies to one
+	// deploy and this file is regenerated on every compile.
+	WarmInstances int
 	// SecretSet names the platform secret set the README tells the operator to
 	// create; empty when the package declares no secrets. The manifest names it
 	// so a deploy that skipped that step fails at deploy time rather than on a
@@ -552,6 +558,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolInject:           true, // hidden request values merged from State
 	targetcap.FieldWebhookPath:          true, // rendered, URL-encoded path on the base URL
 	targetcap.FieldTemplates:            true, // _render over prompts and the greeting at session start
+	targetcap.FieldWarmInstances:        true, // [scaling] min_agents in pcc-deploy.toml
 }
 
 // pipecatDailyCarrierEmittedTelephonyFeatures is the (pipecat, daily-sip,

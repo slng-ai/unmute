@@ -466,9 +466,37 @@ a second one. Sessions already running finish on the old image, and a deploy tha
 fails leaves the previous ready version serving traffic. `status` reporting
 `ready` is the deploy actually being usable.
 
-No warm instance is kept: the manifest declares no replica count, because the
-source package declares none. Add `--min-agents <n>` on the deploy command if you
-want a pool held ready.
+{{if .WarmInstances}}The manifest holds **{{.WarmInstances}}** instance{{if gt .WarmInstances 1}}s{{end}} ready, from `warm_instances` on
+this target in `targets.yaml`. That is a standing cost and it is what removes the
+cold start. Change the number in the source package and recompile: this file is
+rewritten on every compile, so the declaration belongs there and reaches every
+later deploy on its own.{{else}}No warm instance is kept: the manifest declares no replica count, because the
+source package declares none. So the first call after every idle period waits for
+a container to start. Declare `warm_instances: 1` on this target in `targets.yaml`
+and recompile to keep one ready, which is a standing cost and removes that wait.
+`--min-agents <n>` on the deploy command does the same for one deploy only.{{end}}
+
+### Reading this agent's log
+
+```sh
+pipecat cloud agent logs {{.Project}} -n 250
+pipecat cloud agent logs {{.Project}} -s <session-id>
+```
+
+**Do not pass `-l DEBUG`.** It filters to *only* that level rather than setting a
+minimum, so it hides the `ERROR` line that says why a session died. Run with no
+`-l` at all.
+
+The CLI wraps output at 80 columns, which corrupts its JSON output. For machine
+reading, widen it first:
+
+```sh
+COLUMNS=100000 pipecat cloud --output json agent logs {{.Project}} -n 2000 -s <session-id>
+```
+
+`pipecat cloud agent sessions {{.Project}}` lists the sessions themselves, which is
+how you tell a session that never started from one that failed inside. A session
+marked `Complete` with a blank `Bot Start Seconds` never reached `bot()` at all.
 
 ### Region
 {{if .DeploymentRegion}}
@@ -894,15 +922,18 @@ Do these in the [Twilio Console](https://console.twilio.com), in this order.
 
    - **The spoken line comes first.** Starting this agent takes a few seconds
      from cold, and a caller who hears nothing hangs up. Delete the `<Say>` line
-     once you keep a warm instance (`--min-agents 1` on the deploy).
+     once you keep a warm instance ({{if .WarmInstances}}this deployment holds {{.WarmInstances}} ready{{else}}`warm_instances: 1` on this target{{end}}).
    - **The address is already the right one**, including the region: this file
      was generated for this deployment, so paste it as it is rather than copying
      one from a guide.
    - **The agent name is already filled in.** `YOUR_ORGANIZATION` is the only
      substitution you make.
    - **`{{"{{From}}"}}` and `{{"{{To}}"}}` are Twilio's own Bin substitutions**, not
-     placeholders for you to fill. Twilio replaces them per call, and they are
-     how this agent learns who called.
+     placeholders for you to fill. Twilio replaces them per call, and the platform
+     forwards every custom parameter to the session, so the caller's number and
+     the number they rang arrive in the session body next to `direction`. The
+     platform's own example markup carries only the service host; these two lines
+     are this project's addition.
 
 4. **Point the number at that Bin.** Phone Numbers, Manage, Active Numbers,
    your number, Voice Configuration, "A call comes in", choose TwiML Bin, pick
@@ -1118,7 +1149,7 @@ anything. Two lines answer almost every latency question:
 
 - **First bot speech** counts from inside the process only. If it reads about two
   seconds and your caller waited much longer, the difference was the container
-  starting: see the cold-start row above and deploy with `--min-agents 1`.
+  starting: see the cold-start row above{{if not .WarmInstances}} and declare `warm_instances: 1`{{end}}.
 - **The breakdown** attributes each turn to a service by name. One service far
   above the others is that provider, not this project and not the platform: take
   it up with them, or bind a different provider for that role in the source
@@ -1149,8 +1180,8 @@ indistinguishable by ear.
 |---|---|
 | A working agent answers, but not this one | The number is still on a SIP trunk or an old webhook, so your markup was never consulted. Read the number's configuration with the command above. |
 | The call connects, the spoken line plays, then silence and a drop | Either the service host in your markup is wrong or this agent is not `ready`. **The tell is that this agent's log is empty**: a connection the platform refuses never reaches it. Check `pipecat cloud agent status {{.Project}}` first. Then re-read the service host: the agent name is `{{.Project}}`, and the organization is the **slug** from `pipecat cloud organizations list`, the one shaped like `three-random-words-12345`, never your display name (carrier action 2). Twilio's own call log names the stream error outright, under Monitor, Logs, Calls. |
-| The spoken line plays, a long silence, then the agent | A **cold start**, and it is the single biggest thing you can fix. With no warm instance the platform has to start a container after the call arrives: schedule it, import pipecat, load the voice-activity and end-of-turn models. That is the silence, and it happens on the first call after every idle period, not just after a deploy. Deploy with `pipecat cloud deploy --min-agents 1` and it goes away. That flag applies to the deploy you pass it on, so pass it every time: this manifest is regenerated by `unmute compile`, so a `[scaling]` block hand-added to it does not survive the next recompile. Your agent's own log tells you which half you are looking at: `[pcc-observability] First bot speech | latency=...` measures only the part inside the process, so if that says two seconds and the caller waited twelve, the other ten were the container starting. |
-| The spoken line plays and the agent never arrives at all | The same cold start, past the point where the session gives up. A session that expires before the container is listening leaves an **empty session**: `pipecat cloud agent sessions <name>` shows it as `Complete` with a blank `Bot Start Seconds`, and the agent log has no `pipecat.workers.runner` line for it, because `bot()` was never called. Measured 2026-08-26: a session created at T+0 ended at T+10 while the server bound at T+12. So `--min-agents 1` is not only a latency nicety here, it is what makes the call answerable. {{if .Knowledge.Knowledge}}This project has a knowledge base, which makes it much easier to hit: the corpus is embedded at import, before the server binds, so read the "Baking the index" section above and pass `--min-agents 1` on every deploy.{{end}} |
+| The spoken line plays, a long silence, then the agent | A **cold start**, and it is the single biggest thing you can fix. With no warm instance the platform has to start a container after the call arrives: schedule it, import pipecat, load the voice-activity and end-of-turn models. That is the silence, and it happens on the first call after every idle period, not just after a deploy. {{if .WarmInstances}}This deployment already holds {{.WarmInstances}} instance{{if gt .WarmInstances 1}}s{{end}} ready, so if you are reading this row the pool is not the cause: check `pipecat cloud agent status {{.Project}}` for a deploy that has not gone ready.{{else}}Declare `warm_instances: 1` on this target in `targets.yaml` and recompile, and it goes away: the number lands in this manifest as `[scaling] min_agents`, so it survives every later deploy. `pipecat cloud deploy --min-agents 1` fixes one deploy only, and a `[scaling]` block hand-added to the manifest does not survive the next `unmute compile`, which rewrites the file.{{end}} Your agent's own log tells you which half you are looking at: `[pcc-observability] First bot speech | latency=...` measures only the part inside the process, so if that says two seconds and the caller waited twelve, the other ten were the container starting. |
+| The spoken line plays and the agent never arrives at all | The same cold start, past the point where the session gives up. A session that expires before the container is listening leaves an **empty session**: `pipecat cloud agent sessions <name>` shows it as `Complete` with a blank `Bot Start Seconds`, and the agent log has no `pipecat.workers.runner` line for it, because `bot()` was never called. Measured 2026-08-26: a session created at T+0 ended at T+10 while the server bound at T+12. So a warm instance is not only a latency nicety here, it is what makes the call answerable.{{if not .WarmInstances}} This target declares no `warm_instances`, so that is the first thing to change.{{end}} {{if .Knowledge.Knowledge}}This project has a knowledge base, which makes it much easier to hit: the corpus is embedded at import, before the server binds, so read the "Baking the index" section above{{if not .WarmInstances}} and declare `warm_instances: 1`{{end}}.{{end}} |
 | Silence or degraded audio, everything else correct | Your markup names a different region than this deployment. The address in this file is the right one; re-paste it. |
 | Nothing in the agent log at all | The call never reached the platform. That is the first row, or the number is not the one you think. |
 {{- if .CloudWebsocket.HasOutbound}}
