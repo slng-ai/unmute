@@ -75,6 +75,7 @@ const (
 	FieldContextIsolated       Field = "task_groups.context_scope.isolated"
 	FieldTransferAnnounce      Field = "controls.agent_transfer.announce"
 	FieldTransferRequires      Field = "controls.agent_transfer.requires"
+	FieldDelegateRequires      Field = "controls.delegate.requires"
 	FieldContextNoToolCalls    Field = "context.include_tool_calls.false"
 	FieldContextVariableSubset Field = "context.variables.list"
 	FieldTransferBriefing      Field = "controls.human_transfer.warm.briefing"
@@ -323,6 +324,10 @@ func Default() Table {
 			FieldContextIsolated:  field(deny(Slng, slngNoTasks("an isolated task context"))),
 			FieldTransferAnnounce: field(deny(Slng, slngNoHandoff("a transfer announcement"))),
 			FieldTransferRequires: field(deny(Slng, slngNoHandoff("a transfer requirement"))),
+			// A step requirement is refused for the task reason, not the handoff
+			// one: the slng target has no separate step to hold back, so there is
+			// nothing for the guard to guard.
+			FieldDelegateRequires: field(deny(Slng, slngNoTasks("a step requirement"))),
 			FieldContextNoToolCalls: field(
 				deny(Pipecat, "the Pipecat driver does not shape transfer context (include_tool_calls) yet"),
 				deny(Slng, slngNoHandoff("include_tool_calls: false")),

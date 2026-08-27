@@ -44,12 +44,19 @@ tasks in a task group. The server owns its dynamic order.
 | the prompt keeps growing and starts contradicting itself | split it: [tasks](/build/orchestration/tasks) if the parts serve one caller goal, a [handoff](/build/orchestration/handoffs) if they are separate roles |
 | the model does things out of order | a [task group](/build/orchestration/task-groups): the order is declared, not requested |
 | the model calls a tool it should not have yet | move the tool. Lists are per agent and per task, so a tool the current step does not hold cannot be called at all |
+| a step runs before you have the value it needs | `requires:` on that delegate. The step is held back, and the model is told which control fills the gap |
 | you need a value out of a step and want to keep it | a task with `result:`, delegated with `assign:` |
 | two phases need different tools or different permissions | a [handoff](/build/orchestration/handoffs) |
 | the caller needs a person | none of these: that is a [human transfer](/transfers/overview), and what it can do depends on the phone route |
 
 A prompt that says "always identify the caller first" is a request. A task group is
-a guarantee. That is the difference you are buying.
+a guarantee, and so is `requires:` on the step that needs the identity. That is
+the difference you are buying.
+
+Reach for the task group when the *order* is what must hold, and for `requires:`
+when one *value* must be there before one step runs. The second is cheaper: no
+extra step, no extra prompt site, and nothing the caller has to be spoken
+through.
 
 ## What each shape costs
 
@@ -88,7 +95,8 @@ a guarantee. That is the difference you are buying.
 
     **Correction:** another handoff back.
 
-    **Cost:** nothing returns, so there is no result or automatic way back.
+    **Cost:** nothing returns, so there is no result or automatic way back. The
+    receiving agent speaks on arrival, so every handoff costs the caller a turn.
   </Card>
 </Columns>
 
@@ -97,8 +105,9 @@ another.
 
 For a combined release-readiness package, see
 [`examples/salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge).
-It uses tasks, a shared task group, direct handoffs, and human transfer in one
-inbound-only project.
+It uses a guarded delegate, a typed task, one handoff, and a human transfer in
+one inbound-only project. Two agents, because the second one holds a permission
+and a document set the first must not.
 
 ## The four shapes, as packages
 
@@ -126,12 +135,39 @@ controls:
     when: The caller wants to reschedule or cancel an existing appointment.
 ```
 
+### Guard the step, not the route to it
+
+Both kinds take `requires:`, and on a delegate it is usually the better place for
+it. Put the prerequisite on the work that needs the value:
+
+```yaml
+controls:
+  manage_booking:
+    kind: delegate
+    task: booking
+    when: The caller wants to make, change, or cancel a booking.
+    requires:
+      - customer_phone
+```
+
+The step will not start while `customer_phone` is empty. The refusal goes to the
+model, not to the caller: it names the missing variable and the control that
+supplies it, so the model runs that control and calls the step again on the same
+turn. See [Tasks](/build/orchestration/tasks#guarding-a-step) for what the caller
+hears, and what happens when the model cannot recover.
+
+Do not add an agent whose only job is to hold a guard in front of a step. That
+agent has to be spoken through, which costs the caller a turn and buys nothing a
+`requires:` on the step does not already give. And do not guard the route to a
+person: someone who asks for a manager should not be interviewed first.
+
 | | `delegate` | `agent_transfer` |
 |---|---|---|
 | returns | yes | no |
 | typed result | yes, `result:` | no |
 | targets | a task or a task group | another agent |
 | context control | `context:` on the task | `context:` on the control |
+| `requires:` | yes | yes |
 
 ## Where to go next
 

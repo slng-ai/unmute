@@ -2,9 +2,6 @@ version: 1
 entry_agent: concierge
 
 variables:
-  customer_id:
-    type: string
-    description: Verified customer ID. It is assigned by the verification task and never spoken.
   customer_phone:
     type: string
     description: >-
@@ -93,39 +90,19 @@ agents:
     tools:
       - verify_customer
       - look_up_salon_info
-      - to_booking
-      - to_complaints
-      - to_chat
-
-  booking_specialist:
-    instructions: agents/booking-specialist.md
-    model: reasoning
-    voice: voice
-    tools:
       - manage_booking
       - to_complaints
-      - to_chat
-      - to_concierge
+      - to_manager
 
   complaint_specialist:
     instructions: agents/complaint-specialist.md
     model: reasoning
     voice: voice
     tools:
+      - verify_customer
       - record_complaint
       - look_up_refund_policy
       - to_manager
-      - to_booking
-      - to_chat
-      - to_concierge
-
-  chat_with_me:
-    instructions: agents/chat-with-me.md
-    model: reasoning
-    voice: voice
-    tools:
-      - to_booking
-      - to_complaints
       - to_concierge
 
 tasks:
@@ -134,7 +111,6 @@ tasks:
     tools:
       - find_or_create_customer
     result:
-      customer_id: string
       customer_phone: string
       status:
         enum:
@@ -155,7 +131,6 @@ tasks:
       - modify_booking
       - cancel_booking
       - to_complaints
-      - to_chat
     result:
       action:
         enum:
@@ -177,40 +152,22 @@ controls:
       Confirm who the caller is before any specialist handoff. The task reads
       the phone number back and needs a yes before it looks anyone up.
     assign:
-      customer_id: result.customer_id
       customer_phone: result.customer_phone
 
   manage_booking:
     kind: delegate
     task: booking
-    when: The verified caller wants to create, modify, or cancel a booking.
-
-  to_booking:
-    kind: agent_transfer
-    to: booking_specialist
-    when: The verified caller wants to create, modify, cancel, or review a booking.
+    when: The caller wants to create, modify, or cancel a booking.
+    # The guard the shape used to need a whole extra agent for. The step is held
+    # back until the caller is identified, the model is told which control
+    # supplies the number, and the caller hears none of it.
     requires:
-      - customer_id
-    context:
-      history: full
-      variables: all
+      - customer_phone
 
   to_complaints:
     kind: agent_transfer
     to: complaint_specialist
     when: The verified caller has a complaint or service problem.
-    requires:
-      - customer_id
-    context:
-      history: full
-      variables: all
-
-  to_chat:
-    kind: agent_transfer
-    to: chat_with_me
-    when: The verified caller wants open-ended chat or current public information.
-    requires:
-      - customer_id
     context:
       history: full
       variables: all
@@ -219,8 +176,6 @@ controls:
     kind: agent_transfer
     to: concierge
     when: The caller changes to a request owned by another specialist.
-    requires:
-      - customer_id
     context:
       history: full
       variables: all

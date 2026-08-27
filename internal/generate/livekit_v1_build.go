@@ -313,6 +313,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		env.add(name)
 	}
 	data.NeedsRender = renderNeeds(agent)
+	data.PrerequisiteGuard, data.NeedsPrerequisiteGuard = PrerequisiteGuard(agent)
 	if data.Capture != nil {
 		data.NeedsFunctionTools = true // the generated capture tool is a @function_tool too
 	}
@@ -957,8 +958,11 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 		// hands back the typed result only (C4/N13). The finality guidance stops
 		// the owner LLM re-running the finished flow (B1/V1).
 		return livekitDelegate{
-			Method: ref, When: delegateWhen(c) + delegateReturnFinality, Task: single,
-			Then: "return", CanTaskTransfer: livekitTaskCanTransfer(agent, task),
+			Method: ref, When: delegateWhen(c) + delegateReturnFinality + delegateForwardDeclaration(agent, c),
+			Task:            single,
+			Then:            "return",
+			Requires:        c.Requires,
+			CanTaskTransfer: livekitTaskCanTransfer(agent, task),
 		}, nil
 	}
 	group, ok := agent.TaskGroups[c.Group]
@@ -968,8 +972,9 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 	// C3: TaskGroup always shares context, so `isolated` lowers to a generated
 	// sequence of standalone AgentTasks (each starts fresh, C4) instead.
 	delegate := livekitDelegate{
-		Method: ref, When: delegateWhen(c), Then: string(group.Then),
+		Method: ref, When: delegateWhen(c) + delegateForwardDeclaration(agent, c), Then: string(group.Then),
 		Isolated: group.ContextScope == ir.ContextIsolated,
+		Requires: c.Requires,
 	}
 	// N13/§4.7: return hands the owner the typed results; transfer and end do not
 	// return, so the tool description must say so (the model must not wait for a

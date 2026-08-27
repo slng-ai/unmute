@@ -163,7 +163,8 @@ Leave them out and the caller gets asked for their phone number twice. Choose on
 purpose, and tell the user what you chose.
 
 `requires:` is legal on an `agent_transfer` control when variables must exist
-before the call leaves this agent. It is not legal on a delegate.
+before the call leaves this agent. It is also legal on a delegate, which is
+usually the better place for it: see [Guarding a step](#guarding-a-step) below.
 
 ## Delegated task
 
@@ -213,6 +214,52 @@ schema by default.
 `assign:` copies fields out of the result into package variables, so the rest of
 the call uses them without asking again. Declare each of those variables at the
 top level.
+
+## Guarding a step
+
+A step that needs a value the conversation has not collected yet declares
+`requires:`. Put the guard on the step that needs the value, not on the handoff
+that reaches it:
+
+```yaml agent.yaml
+controls:
+  check_customer:
+    kind: delegate
+    task: customer_record
+    when: Identify the caller before handling an appointment request.
+    assign:
+      customer_phone: result.customer_phone
+
+  manage_appointment:
+    kind: delegate
+    task: appointment
+    when: The caller wants to make, change, or cancel an appointment.
+    requires:
+      - customer_phone
+```
+
+Every name in `requires:` must be a declared variable, or the package fails to
+compile. That is deliberate: a guard on a name nothing sets can never pass, and
+the symptom would be a step that silently never starts.
+
+**What the caller hears: nothing.** The refusal goes to the model, not to the
+caller. It names the missing variable and the control that supplies it, so the
+model runs `check_customer` and calls the step again on the same turn. The
+compiler also appends the requirement to the step's own description, so the model
+usually collects the value during the earlier turns and the guard is never
+reached. After five refusals of the same step the agent stops recovering quietly
+and asks the caller for the value out loud, in its own words. That bound lives in
+the emitted code, not in a prompt.
+
+**Do not put an agent in front of a step to hold a guard.** Before `requires:`
+worked on a delegate, the only machine-checked way to gate a step was to give the
+step to a second agent and guard the handoff to it. That agent then had to be
+spoken through, which cost the caller a turn and taught a shape nobody needed.
+One agent, one guarded step.
+
+**And do not gate reaching a person.** A `human_transfer` takes no `requires:`,
+and a handoff to the agent that hears complaints should not carry one either.
+Someone who asks for a manager should not be interviewed first.
 
 **While a task runs, the caller is talking to the task**: its prompt, and only
 the tools and controls in that task's own `tools:` list. The agent's list is not

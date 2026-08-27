@@ -691,6 +691,13 @@ def _refusal(tool: str, state, needed: list[tuple[str, str]]) -> str:
     names = ", ".join(name for name, _ in unset)
     hints = " ".join(f"{name}: {hint}" for name, hint in unset if hint)
     return f"cannot call {tool} yet: {names} not set. Ask the caller first. {hints}".strip()
+{{end}}{{if .NeedsPrerequisiteGuard}}
+
+{{.PrerequisiteGuard}}
+# One counter per guarded control per session. Held on the module rather than the
+# worker because activating another worker replaces the object and a caller who
+# keeps refusing across a handoff has not started over.
+_prerequisite_refusals: dict[str, int] = {}
 {{end}}{{if .NeedsEndAfter}}
 async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
     await asyncio.sleep(timeout_secs)
@@ -892,9 +899,14 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
     @_direct_tool(cancel_on_interruption=False)
     async def {{.MethodName}}(self, params: FunctionCallParams):
         """{{.When}}"""
-{{if .Requires}}        missing = [name for name in [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}] if getattr(self.state, name, None) in (None, "")]
-        if missing:
-            await params.result_callback({"refused": f"Cannot transfer yet; still need: {', '.join(missing)}"})
+{{if .Requires}}        _unmet = _unmet_prerequisites(self.state, [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
+        if _unmet:
+            logger.info(
+                "prerequisite guard: handoff {} refused, unmet {}".format(
+                    {{pyq .MethodName}}, ", ".join(_unmet)
+                )
+            )
+            await params.result_callback({"refused": _prerequisite_refusal(_unmet, False)})
             return
 {{end}}{{if .Announce}}        await self._announce_handoff({{pyq .Announce}})
 {{end}}        await self.activate_worker(
@@ -1079,7 +1091,33 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
     @_direct_tool
     async def {{$d.MethodName}}(self, params: FunctionCallParams):
         """{{$d.When}}"""
-        self._{{$d.MethodName}}_results = {}
+{{if $d.Requires}}        _unmet = _unmet_prerequisites(self.state, [{{range $i, $r := $d.Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
+        if _unmet:
+            # requires guard (machine-checked): no flow starts, so nothing else
+            # in this process is going to speak. The call is resolved WITHOUT
+            # run_llm=False on purpose. The success path below sets it because
+            # the flow's first node is the sole responder; copying that here
+            # would leave a live call silent with nothing in the trace, because
+            # there is no first node to respond.
+            _tries = _prerequisite_refusals.get({{pyq $d.MethodName}}, 0) + 1
+            _prerequisite_refusals[{{pyq $d.MethodName}}] = _tries
+            _at_limit = _tries >= _PREREQUISITE_LIMIT
+            if _at_limit:
+                logger.info(
+                    "prerequisite guard: step {} refused, unmet {}, retry limit reached; asking the caller".format(
+                        {{pyq $d.MethodName}}, ", ".join(_unmet)
+                    )
+                )
+            else:
+                logger.info(
+                    "prerequisite guard: step {} refused, unmet {}".format(
+                        {{pyq $d.MethodName}}, ", ".join(_unmet)
+                    )
+                )
+            await params.result_callback({"refused": _prerequisite_refusal(_unmet, _at_limit)})
+            return
+        _prerequisite_refusals[{{pyq $d.MethodName}}] = 0
+{{end}}        self._{{$d.MethodName}}_results = {}
 {{if $d.HasTransfers}}        self._{{$d.MethodName}}_active_step = {{pyq (index $d.StepTasks 0).Name}}
 {{end}}        flow = FlowManager(
             llm=self.llm,
@@ -1141,9 +1179,14 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{range $x := $t.Transfers}}    async def _{{$d.MethodName}}_transfer_{{$t.Name}}_{{$x.MethodName}}(self, args, flow_manager):
         if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
             return {"status": "already handled"}, NO_RESPONSE
-{{if $x.Requires}}        missing = [name for name in [{{range $i, $r := $x.Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}] if getattr(self.state, name, None) in (None, "")]
-        if missing:
-            return {"refused": f"Cannot transfer yet; still need: {', '.join(missing)}"}, None
+{{if $x.Requires}}        _unmet = _unmet_prerequisites(self.state, [{{range $i, $r := $x.Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
+        if _unmet:
+            logger.info(
+                "prerequisite guard: handoff {} refused, unmet {}".format(
+                    {{pyq $x.MethodName}}, ", ".join(_unmet)
+                )
+            )
+            return {"refused": _prerequisite_refusal(_unmet, False)}, None
 {{end}}        self._{{$d.MethodName}}_active_step = None
         flow_messages = None
         flow_tools = None

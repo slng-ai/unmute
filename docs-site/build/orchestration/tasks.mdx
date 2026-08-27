@@ -79,6 +79,49 @@ variables:
     type: string
 ```
 
+## Guarding a step
+
+A step that needs a value the conversation has not collected yet declares
+`requires:`:
+
+```yaml agent.yaml
+controls:
+  manage_appointment:
+    kind: delegate
+    task: appointment
+    when: The caller wants to make, change, or cancel an appointment.
+    requires:
+      - customer_phone
+```
+
+Every name must be a declared variable, or the package will not compile. A guard
+on a name nothing sets could never pass, and the symptom would be a step that
+silently never starts.
+
+**The caller hears nothing.** While `customer_phone` is empty the step does not
+run, and the refusal goes to the model rather than to the caller. It names the
+missing variable and the control that supplies it, so the model runs
+`check_customer` and calls the step again in the same turn. The caller just hears
+the next natural question.
+
+The compiler also appends the requirement to the step's own description, so the
+model usually collects the value during the earlier turns and never reaches the
+guard at all. The guard is the net; the description is the mechanism.
+
+**When the model cannot recover.** After five refusals of the same step the agent
+stops recovering quietly and asks the caller for the missing value out loud, in
+its own words. It does not fall silent and it does not end the call. That limit
+lives in the emitted code, not in a prompt: a model can be argued out of an
+instruction, and this exists for the case where it already has been.
+
+Both refusals are logged, with variable and step names only. No caller speech and
+no variable value is written, which matters when the identifier is a phone
+number.
+
+`requires:` works the same way on an [agent handoff](/build/orchestration/handoffs),
+but prefer the step. Guarding the route rather than the work means adding an agent
+whose only job is to hold the guard, and the caller has to be spoken through it.
+
 ## What the agent can do shrinks
 
 Look at the agent's tool list. It holds two controls and none of the five

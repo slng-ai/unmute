@@ -70,6 +70,12 @@ speak. It is spoken once and finishes before the new agent takes over; the
 model does not paraphrase it. Leave it out for a silent handoff. A failed
 `requires` guard is checked first and never makes a false announcement.
 
+`requires` is not handoff-only. It is legal on a delegate too, and that is
+usually the better place for it: guard the step that needs the value rather than
+the route to it. See [Guarding a step](/build/orchestration/tasks#guarding-a-step).
+Never guard the way to a person, though. A caller who asks for a manager should
+not be interviewed before anyone will route them.
+
 Prefer a silent handoff when agents are internal roles behind one service. The
 caller can keep talking to the same salon, clinic, or support desk without
 hearing implementation details such as “I’m connecting you to another agent.”

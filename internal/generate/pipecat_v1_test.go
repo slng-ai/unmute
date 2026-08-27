@@ -947,7 +947,7 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 		"handler=self._run_verify_transfer_verify_to_billing",
 		"async def _run_verify_transfer_verify_to_billing(self, args, flow_manager):",
 		`self._run_verify_active_step = "verify"`,
-		`missing = [name for name in ["customer_id"]`,
+		`_unmet = _unmet_prerequisites(self.state, ["customer_id"])`,
 		`if self._run_verify_active_step != "verify":`,
 		`return {"status": "already handled"}, NO_RESPONSE`,
 		`async def on_activated(self, args) -> None:`,
@@ -969,7 +969,7 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 		t.Fatalf("task transfer/finish chain missing: transfer=%d finish=%d next=%d", transferAt, finishAt, nextFinishAt)
 	}
 	transferBody := bot[transferAt:finishAt]
-	requiresAt := strings.Index(transferBody, "missing =")
+	requiresAt := strings.Index(transferBody, "_unmet = _unmet_prerequisites(")
 	stepClaimAt := strings.Index(transferBody, "self._run_verify_active_step = None")
 	tryAt := strings.Index(transferBody, "try:")
 	announceAt := strings.Index(transferBody, "await self._announce_handoff")
@@ -983,7 +983,7 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 	if requiresAt < 0 || stepClaimAt < requiresAt || tryAt < stepClaimAt || announceAt < tryAt || activateAt < announceAt || releaseAt < activateAt || restoreMessagesAt < 0 || restoreToolsAt < restoreMessagesAt {
 		t.Fatalf("task transfer must refuse, claim, attempt, then restore and release on failure: requires=%d step_claim=%d try=%d announce=%d activate=%d release=%d restore_messages=%d restore_tools=%d\n%s", requiresAt, stepClaimAt, tryAt, announceAt, activateAt, releaseAt, restoreMessagesAt, restoreToolsAt, transferBody)
 	}
-	if !strings.Contains(transferBody[:stepClaimAt], `return {"refused": f"Cannot transfer yet; still need: {', '.join(missing)}"}, None`) {
+	if !strings.Contains(transferBody[:stepClaimAt], `return {"refused": _prerequisite_refusal(_unmet, False)}, None`) {
 		t.Error("a recoverable requires refusal must stay on the task and let its LLM respond")
 	}
 	finishBody := bot[finishAt:nextFinishAt]
@@ -1386,7 +1386,7 @@ func TestV2PipecatV1AgentTransferAnnouncementWaitsForSourcePlayout(t *testing.T)
 	if end := strings.Index(body[1:], "\n    async def "); end >= 0 {
 		body = body[:end+1]
 	}
-	requiresAt := strings.Index(body, "missing =")
+	requiresAt := strings.Index(body, "_unmet = _unmet_prerequisites(")
 	announcementAt := strings.Index(body, `await self._announce_handoff("I’ll connect you with billing now.")`)
 	activateAt := strings.Index(body, "await self.activate_worker(")
 	if requiresAt < 0 || activateAt < 0 || announcementAt < 0 {
@@ -2866,4 +2866,125 @@ func pipecatDirectToolBody(t *testing.T, bot string) string {
 		body = body[:end+1]
 	}
 	return body
+}
+
+// TestPipecatV1RefusedDelegateGivesTheModelItsTurnBack exists for one line, and
+// nothing else.
+//
+// The success path resolves the delegate's tool call with run_llm=False on
+// purpose: the flow's first node is the sole responder, and a second completion
+// makes the caller hear the opening line twice. A refused delegate starts no
+// flow, so there is no first node and nothing else in the process is going to
+// speak. Copying run_llm=False onto the refusal leaves a live call in silence,
+// with no exception, no error, and nothing in the trace to find it by.
+//
+// That failure is invisible to every other test in this file, which is why this
+// one is separate from them and is not allowed to ride on a golden diff.
+func TestPipecatV1RefusedDelegateGivesTheModelItsTurnBack(t *testing.T) {
+	bot := emitFor(t, guardedFixture(t), ir.ProviderPipecat, "bot.py")
+
+	start := strings.Index(bot, "    async def manage_booking(self, params: FunctionCallParams):")
+	if start < 0 {
+		t.Fatal("bot.py has no manage_booking method")
+	}
+	method := bot[start:]
+	if end := strings.Index(method[1:], "\n    async def "); end >= 0 {
+		method = method[:end+1]
+	}
+
+	refusalAt := strings.Index(method, `{"refused": _prerequisite_refusal(`)
+	flowStartAt := strings.Index(method, `properties=FunctionCallResultProperties(run_llm=False)`)
+	if refusalAt < 0 || flowStartAt < 0 {
+		t.Fatalf("expected both a refusal path and a flow-start path:\n%s", method)
+	}
+	if refusalAt >= flowStartAt {
+		t.Fatalf("the refusal must come before the flow-start resolution:\n%s", method)
+	}
+
+	// Read the refusal branch itself: from `if _unmet:` to the `return` that
+	// leaves it. Comparing against the flow-start offset instead would sweep in
+	// the comment that explains run_llm=False, and the test would fail on prose.
+	branchAt := strings.Index(method, "        if _unmet:")
+	if branchAt < 0 {
+		t.Fatalf("no refusal branch:\n%s", method)
+	}
+	branch := method[branchAt:]
+	if end := strings.Index(branch, "\n            return\n"); end >= 0 {
+		branch = branch[:end]
+	} else {
+		t.Fatalf("the refusal branch must return:\n%s", branch)
+	}
+
+	// The refusal must resolve its call, or the model never gets its turn back.
+	if !strings.Contains(branch, "await params.result_callback(") {
+		t.Errorf("the refusal must resolve the tool call:\n%s", branch)
+	}
+
+	// And it must resolve it WITHOUT run_llm=False.
+	if strings.Contains(branch, "run_llm=False") && !strings.Contains(branch, "# ") {
+		t.Error("the refusal path resolves with run_llm=False. A refused delegate starts no flow, so nothing else will speak and the call goes silent with nothing in the trace")
+	}
+	for _, line := range strings.Split(branch, "\n") {
+		code := line
+		if hash := strings.Index(code, "#"); hash >= 0 {
+			code = code[:hash]
+		}
+		if strings.Contains(code, "run_llm=False") {
+			t.Errorf("the refusal path resolves with run_llm=False, which leaves a live call silent with nothing in the trace: %s", line)
+		}
+	}
+	_ = refusalAt
+
+	// The flow-start path must keep it, or the caller hears the opening line
+	// twice. Both halves of the asymmetry, held together.
+	if !strings.Contains(method[flowStartAt-400:flowStartAt], "run_llm=False: the flow's first node") {
+		t.Error("the flow-start path must keep run_llm=False and say why")
+	}
+}
+
+// TestPipecatV1DelegateRequiresGuard is the Pipecat side of the same list the
+// LiveKit test holds: guard before any work, counter, bound, reset, both log
+// lines with names only, and the forward declaration on the description.
+func TestPipecatV1DelegateRequiresGuard(t *testing.T) {
+	bot := emitFor(t, guardedFixture(t), ir.ProviderPipecat, "bot.py")
+
+	start := strings.Index(bot, "    async def manage_booking(self, params: FunctionCallParams):")
+	if start < 0 {
+		t.Fatal("bot.py has no manage_booking method")
+	}
+	method := bot[start:]
+	if end := strings.Index(method[1:], "\n    async def "); end >= 0 {
+		method = method[:end+1]
+	}
+
+	guardAt := strings.Index(method, `_unmet = _unmet_prerequisites(self.state, ["customer_id"])`)
+	resultsAt := strings.Index(method, "_results = {}")
+	flowAt := strings.Index(method, "flow = FlowManager(")
+	if guardAt < 0 || resultsAt < 0 || flowAt < 0 || guardAt >= resultsAt || resultsAt >= flowAt {
+		t.Fatalf("the guard must run before the results dict and before the flow is built:\n%s", method)
+	}
+
+	for _, want := range []string{
+		`_tries = _prerequisite_refusals.get("manage_booking", 0) + 1`,
+		"_at_limit = _tries >= _PREREQUISITE_LIMIT",
+		`_prerequisite_refusals["manage_booking"] = 0`,
+	} {
+		if !strings.Contains(method, want) {
+			t.Errorf("emitted guard missing %q:\n%s", want, method)
+		}
+	}
+
+	resetAt := strings.Index(method, `_prerequisite_refusals["manage_booking"] = 0`)
+	if resetAt < guardAt || resetAt > resultsAt {
+		t.Errorf("the counter must reset where the step starts, not in the refusal branch:\n%s", method)
+	}
+
+	doc := method[:guardAt]
+	for _, want := range []string{"customer_id", "verify_customer"} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("the function description must name %q so the model collects it earlier:\n%s", want, doc)
+		}
+	}
+
+	assertGuardLogsNamesOnly(t, method, "pipecat")
 }

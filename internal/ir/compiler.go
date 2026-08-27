@@ -408,11 +408,17 @@ type Control interface {
 }
 
 type Delegate struct {
-	Kind   ControlKind       `json:"kind" yaml:"kind"`
-	When   string            `json:"when,omitempty" yaml:"when,omitempty"`
-	Task   string            `json:"task,omitempty" yaml:"task,omitempty"`
-	Group  string            `json:"group,omitempty" yaml:"group,omitempty"`
-	Assign map[string]string `json:"assign,omitempty" yaml:"assign,omitempty"`
+	Kind  ControlKind `json:"kind" yaml:"kind"`
+	When  string      `json:"when,omitempty" yaml:"when,omitempty"`
+	Task  string      `json:"task,omitempty" yaml:"task,omitempty"`
+	Group string      `json:"group,omitempty" yaml:"group,omitempty"`
+	// Requires names the variables that must hold a value before the step may
+	// start. It applies whether the delegate targets a `task:` or a `group:`,
+	// because both are work that can need an input the conversation has not
+	// collected yet. The driver refuses the step to the model, never to the
+	// caller, and names the control that supplies each missing value.
+	Requires []string          `json:"requires,omitempty" yaml:"requires,omitempty"`
+	Assign   map[string]string `json:"assign,omitempty" yaml:"assign,omitempty"`
 }
 
 func (*Delegate) control() {}

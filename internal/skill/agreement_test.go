@@ -679,13 +679,24 @@ func TestOrchestrationGuidanceMatchesCodeOwnedFacts(t *testing.T) {
 	}
 
 	delegateRow := regexp.MustCompile("(?m)^\\| `delegate` \\| (.*) \\|$").FindStringSubmatch(agentReference)
-	if delegateRow == nil || delegateRow[1] != "`task` or `group`, `when`, `assign`" {
-		t.Errorf("docs-site/reference/agent-yaml.mdx delegate fields = %q, want task/group, when, assign", delegateRow)
+	if delegateRow == nil || delegateRow[1] != "`task` or `group`, `when`, `assign`, `requires`" {
+		t.Errorf("docs-site/reference/agent-yaml.mdx delegate fields = %q, want task/group, when, assign, requires", delegateRow)
 	}
+
+	// This assertion used to run the other way: it failed when the reference put
+	// `requires:` on a delegate, because the compiler allowed it on an
+	// agent_transfer only. The compiler now allows it on both, so the gate is
+	// inverted rather than deleted. A coding assistant that never sees the
+	// guarded shape will keep writing the agent-in-front-of-a-step workaround
+	// this feature exists to remove.
+	guarded := false
 	for _, match := range regexp.MustCompile("(?s)```yaml[^\\n]*\\n(.*?)```").FindAllStringSubmatch(orchestration, -1) {
 		if strings.Contains(match[1], "kind: delegate") && strings.Contains(match[1], "requires:") {
-			t.Error("references/orchestration.md puts requires on a delegate; code allows it on agent_transfer only")
+			guarded = true
 		}
+	}
+	if !guarded {
+		t.Error("references/orchestration.md shows no guarded delegate; code allows requires: on a delegate and the skill must teach it")
 	}
 
 	historyRow := regexp.MustCompile("(?m)^\\| `pipecat` \\| (.*) \\| (.*) \\|$").FindStringSubmatch(orchestration)

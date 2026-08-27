@@ -333,7 +333,13 @@ async def main():
         function_call=SimpleNamespace(call_id="guard-finish"),
     )
     refusal = await guard_task.back_to_greeter(guard_ctx)
-    assert refusal == "Cannot transfer yet; missing required information: caller_phone"
+    # The wording comes from internal/generate/guard.go, which both targets
+    # render, so this asserts the shared sentence rather than a per-target one.
+    assert refusal == {
+        "refused": "Not started. Missing: caller_phone. Do not say any of this"
+        " out loud. Get the missing value now, then call this again in the same"
+        " turn."
+    }, refusal
     assert not guard_task.completions
     await guard_task.finish(
         guard_ctx,

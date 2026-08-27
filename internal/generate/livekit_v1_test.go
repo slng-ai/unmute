@@ -851,8 +851,8 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 		"def _claim_terminal(self) -> bool:",
 		"async def back_to_greeter(self, ctx: RunContext):",
 		"if not self._claim_terminal():\n            return",
-		`missing = [n for n, v in (("caller_phone", ctx.userdata.caller_phone), ) if v in (None, "")]`,
-		"if missing:\n            self._terminal_claimed = False",
+		`_unmet = _unmet_prerequisites(ctx.userdata, ["caller_phone"])`,
+		"if _unmet:\n            self._terminal_claimed = False",
 		`await ctx.session.say("I will take you back to Remy.", allow_interruptions=False)`,
 		"self.complete(_TaskTransfer(Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))))",
 		"except BaseException:\n            self._terminal_claimed = False\n            raise",
@@ -1427,7 +1427,7 @@ func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
 		t.Fatal("agent.py missing the end of to_reservations")
 	}
 	method := botpy[start : start+1+end]
-	guardAt := strings.Index(method, "        if missing:")
+	guardAt := strings.Index(method, "        if _unmet:")
 	announceAt := strings.Index(method, `        await ctx.session.say("I’ll connect you to reservations now.", allow_interruptions=False)`)
 	resetAt := strings.Index(method, "        ctx.userdata.visit_count = None")
 	returnAt := strings.Index(method, "        return Reservations(")
@@ -1847,8 +1847,8 @@ func TestLiveKitV1RequiresGuard(t *testing.T) {
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		`missing = [n for n, v in (("caller_phone", ctx.userdata.caller_phone), ) if v in (None, "")]`,
-		`return "Cannot transfer yet; missing required information: " + ", ".join(missing)`,
+		`_unmet = _unmet_prerequisites(ctx.userdata, ["caller_phone"])`,
+		`return {"refused": _prerequisite_refusal(_unmet, False)}`,
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -3138,5 +3138,93 @@ func TestLiveKitV1TaskDropsParentInFlightCall(t *testing.T) {
 	}
 	if strings.Contains(got, "running_placeholders") {
 		t.Error("a package with no tasks emits the in-flight strip anyway")
+	}
+}
+
+// TestLiveKitV1DelegateRequiresGuard covers the emitted guard on a returning
+// step: it runs before the step starts, refuses while a value is unset, resets
+// on a successful start, speaks at the bound, logs both paths, and declares its
+// requirement on the tool description so the model rarely reaches the guard.
+func TestLiveKitV1DelegateRequiresGuard(t *testing.T) {
+	agent := guardedFixture(t)
+	py := emitFor(t, agent, ir.ProviderLiveKit, "agent.py")
+
+	start := strings.Index(py, "    async def manage_booking(self, ctx: RunContext)")
+	if start < 0 {
+		t.Fatal("agent.py has no manage_booking method")
+	}
+	method := py[start:]
+	if end := strings.Index(method[1:], "\n    @function_tool"); end >= 0 {
+		method = method[:end+1]
+	}
+
+	guardAt := strings.Index(method, `_unmet = _unmet_prerequisites(ctx.userdata, ["customer_id"])`)
+	workAt := strings.Index(method, "owner_ctx = self.chat_ctx.copy()")
+	if guardAt < 0 || workAt < 0 || guardAt >= workAt {
+		t.Fatalf("the guard must run before the step does any work:\n%s", method)
+	}
+
+	for _, want := range []string{
+		`_tries = _prerequisite_refusals.get("manage_booking", 0) + 1`,
+		"_at_limit = _tries >= _PREREQUISITE_LIMIT",
+		`return {"refused": _prerequisite_refusal(_unmet, _at_limit)}`,
+		`_prerequisite_refusals["manage_booking"] = 0`,
+	} {
+		if !strings.Contains(method, want) {
+			t.Errorf("emitted guard missing %q:\n%s", want, method)
+		}
+	}
+
+	// The reset must be on the path that actually starts the step, not inside
+	// the refusal branch, or the counter never advances and the bound never
+	// fires.
+	resetAt := strings.Index(method, `_prerequisite_refusals["manage_booking"] = 0`)
+	if resetAt < guardAt || resetAt > workAt {
+		t.Errorf("the counter must reset where the step starts, not in the refusal branch:\n%s", method)
+	}
+
+	// FR-003b: the requirement is declared where the model sees it before it
+	// gets here.
+	docEnd := strings.Index(method, `_unmet = _unmet_prerequisites`)
+	doc := method[:docEnd]
+	for _, want := range []string{"customer_id", "verify_customer"} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("the tool description must name %q so the model collects it earlier:\n%s", want, doc)
+		}
+	}
+
+	assertGuardLogsNamesOnly(t, method, "livekit")
+}
+
+// assertGuardLogsNamesOnly holds FR-003f and SC-005d.
+//
+// The identifier in the release example is a caller's phone number. A log line
+// that formats a variable's value writes real phone numbers into an operator's
+// log, which is a privacy defect and not a formatting slip. Every argument to
+// the guard's log calls must be a name or a step, never a lookup of a value.
+func assertGuardLogsNamesOnly(t *testing.T, method, label string) {
+	t.Helper()
+	logged := 0
+	for _, line := range strings.Split(method, "\n") {
+		if !strings.Contains(line, "prerequisite guard:") {
+			continue
+		}
+		logged++
+		if !strings.Contains(line, "refused") {
+			t.Errorf("%s: a refusal log line must say the step was refused: %s", label, line)
+		}
+	}
+	if logged < 2 {
+		t.Errorf("%s: both the ordinary refusal and the one that reaches the bound must be logged, found %d", label, logged)
+	}
+
+	// The only values that may reach a log argument. ctx.userdata.<name> and
+	// self.state.<name> are the two ways a value could get there.
+	for _, forbidden := range []string{"ctx.userdata.", "self.state.", "getattr(ctx.userdata", "getattr(self.state"} {
+		for _, line := range strings.Split(method, "\n") {
+			if strings.Contains(line, "logger.") && strings.Contains(line, forbidden) {
+				t.Errorf("%s: a log line reads a variable's value (%q); the identifier is a phone number, so only names may be logged: %s", label, forbidden, line)
+			}
+		}
 	}
 }

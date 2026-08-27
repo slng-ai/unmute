@@ -181,6 +181,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	}
 	setImportNeeds(&data)
 	data.NeedsRender = renderNeeds(agent)
+	data.PrerequisiteGuard, data.NeedsPrerequisiteGuard = PrerequisiteGuard(agent)
 	for _, tool := range data.FlowTools {
 		// A task tool reading call state needs it bound onto its module-level
 		// flows handler; agent @tool methods already have self.state.
@@ -757,8 +758,9 @@ func installLabel(entry targetcap.Entry) string {
 }
 
 // sortedKeys is the stdlib one-liner. internal/ir already writes it this way;
-// this file used to disagree with it.
-func sortedKeys(set map[string]bool) []string { return slices.Sorted(maps.Keys(set)) }
+// this file used to disagree with it. Generic in the value, because the guard's
+// supplier index is a map[string]string and one sorted-keys helper is enough.
+func sortedKeys[V any](set map[string]V) []string { return slices.Sorted(maps.Keys(set)) }
 
 func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.AgentDef, env *envSet) (pipecatAgent, error) {
 	promptConst := promptConstName(name)
@@ -843,7 +845,11 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 // (C8): a single task is a one-node flow, a group a linear chain. Each step is
 // resolved here so the template emits its node inline.
 func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, env *envSet) (pipecatDelegate, error) {
-	delegate := pipecatDelegate{MethodName: ref, When: delegateReason(c)}
+	delegate := pipecatDelegate{
+		MethodName: ref,
+		When:       delegateReason(c) + delegateForwardDeclaration(agent, c),
+		Requires:   c.Requires,
+	}
 	steps := []string{c.Task}
 	if c.Task != "" {
 		delegate.Task = c.Task

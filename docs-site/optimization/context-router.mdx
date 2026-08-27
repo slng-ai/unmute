@@ -98,14 +98,15 @@ What the compiler does do is add the name of whoever is speaking. Each agent and
 each task sends the `agent_id`, a colon, then its own name:
 
 ```
-salon-concierge-v3:concierge
-salon-concierge-v3:booking_specialist
-salon-concierge-v3:task.booking
+optimized-salon-concierge-v8:concierge
+optimized-salon-concierge-v8:complaint_specialist
+optimized-salon-concierge-v8:task.customer_verification
+optimized-salon-concierge-v8:task.booking
 ```
 
 That is not decoration. The cache key is the last exchange, and it does not
 include the system prompt, so two agents sharing one scope can be served each
-other's answers. Measured on a live call: the booking specialist's opening line
+other's answers. Measured on a live call: a receiving agent's opening line
 after a handoff was the concierge's "what phone number should I use to look up
 your customer profile?", served from cache in 1.27 ms with no model call. The
 caller heard the agent repeat itself. One scope per prompt is what the router's
@@ -444,14 +445,16 @@ second turn or later, and is it the exact pair of previous reply and current
 message. If all four hold, stop looking. The router decides, and some turns never
 cache.
 
-## The two salon examples
+## The salon example
 
 [`examples/salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)
-and
-[`examples/optimized-salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/optimized-salon-concierge)
-are the same package, one with a direct think binding and one behind the router.
-Run the same conversation through both and the difference you measure is the
-router's.
+is the package to read for this. It binds every think site to the router, sends
+one scope per prompt site, and its own README records what was measured against
+the live EU router.
+
+To measure the router's own contribution, compile it once as it ships and once
+with the think profile bound directly to the upstream vendor, and run the same
+conversation through both.
 
 ## Where to go next
 

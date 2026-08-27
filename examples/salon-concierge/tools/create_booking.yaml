@@ -1,6 +1,6 @@
 description: >-
   Create one confirmed booking for the verified customer using an exact slot
-  returned by availability. Never invent a slot or customer ID.
+  returned by availability. Never invent a slot or a phone number.
 
 input:
   type: object
@@ -23,7 +23,7 @@ input:
     - confirmed
 
 inject:
-  customer_id: "{{customer_id}}"
+  customer_phone: "{{customer_phone}}"
 
 output:
   type: object

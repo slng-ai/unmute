@@ -45,8 +45,11 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 	}
 }
 
-func TestSalonConciergeFeatureContract(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+// loadExample resolves one shipped package, so a test can assert on the same IR
+// the compiler works from rather than on the YAML text.
+func loadExample(t *testing.T, name string) *ir.Agent {
+	t.Helper()
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,6 +57,11 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return resolved
+}
+
+func TestSalonConciergeFeatureContract(t *testing.T) {
+	resolved := loadExample(t, "salon-concierge")
 	// The turn-latency contract on both targets: thinking goes through the SLNG
 	// Context Router, the model does not think before its first token, and the
 	// caller never hears another agent's line.
@@ -146,14 +154,48 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		t.Fatalf("manager transfer = %#v, want cold transfer with hangup fallback", resolved.Controls["to_manager"])
 	}
 
+	// Every internal handoff stays silent and carries the whole conversation, so
+	// the receiving agent never reintroduces itself and never re-asks a question
+	// already answered.
+	//
+	// What is deliberately NOT asserted here is a prerequisite on every handoff.
+	// This package used to gate all four on an identifier, which meant a caller
+	// who opened with "I want to speak to a manager" was interviewed before
+	// anyone would route them. A prerequisite belongs on the step that needs the
+	// value, not on the act of changing who is speaking. T012 below holds the
+	// escalation path specifically.
 	for name, control := range resolved.Controls {
 		transfer, ok := control.(*ir.AgentTransfer)
 		if !ok {
 			continue
 		}
 		if transfer.Announce != "" || transfer.Context.History != ir.HistoryFull ||
-			!transfer.Context.Variables.All || !slices.Equal(transfer.Requires, []string{"customer_id"}) {
-			t.Errorf("internal handoff %q must stay silent and carry verified context: %#v", name, transfer)
+			!transfer.Context.Variables.All {
+			t.Errorf("internal handoff %q must stay silent and carry full history and every variable: %#v", name, transfer)
+		}
+	}
+
+	// FR-008 to FR-010: nothing on the path from the entry agent to a person
+	// carries a prerequisite. The entry agent holds the escalation control
+	// directly, and the handoff to customer care is ungated, so the two ways a
+	// caller reaches a human both work on the first utterance.
+	entry := resolved.Agents[resolved.EntryAgent]
+	reachesAPerson := false
+	for _, name := range entry.Tools {
+		if _, ok := resolved.Controls[name].(*ir.HumanTransfer); ok {
+			reachesAPerson = true
+		}
+	}
+	if !reachesAPerson {
+		t.Errorf("entry agent %q holds no human transfer: %v; a caller asking for a person must not have to pass through another agent to get one", resolved.EntryAgent, entry.Tools)
+	}
+	for _, name := range []string{"to_complaints", "to_concierge"} {
+		transfer, ok := resolved.Controls[name].(*ir.AgentTransfer)
+		if !ok {
+			t.Fatalf("control %q is not an agent transfer: %#v", name, resolved.Controls[name])
+		}
+		if len(transfer.Requires) != 0 {
+			t.Errorf("handoff %q carries prerequisites %v; hearing a complaint and returning to the entry agent must not be gated on identifying the caller", name, transfer.Requires)
 		}
 	}
 
@@ -308,7 +350,7 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// caller up front: on a live Pipecat WebRTC call on 2026-08-24 that came out
 	// as a bare "Hi", because a blank value drops the name and leaves the
 	// greeting behind.
-	for _, name := range []string{"booking_specialist", "complaint_specialist", "chat_with_me"} {
+	for _, name := range []string{"complaint_specialist"} {
 		body := resolved.Agents[name].Instructions
 		requireText(name, body,
 			"You join a conversation that is already running",
@@ -327,8 +369,8 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// Heard on a live call on 2026-08-24: "haircut at 15" in the confirmation
 	// question and again in the outcome. Both halves are held, because either
 	// one drifting alone brings the repetition back.
-	requireText("booking_specialist", resolved.Agents["booking_specialist"].Instructions,
-		"Do not\n   list the service, day, and time again")
+	requireText("concierge", resolved.Agents["concierge"].Instructions,
+		"confirm it in one short sentence without repeating the service, the day and the time")
 	requireText("booking task", resolved.Tasks["booking"].Instructions,
 		"Say the whole thing back in one sentence and ask one yes-or-no question",
 		"does not repeat the details")
@@ -342,12 +384,67 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// only where a prompt says it. A phone number in this shape is long and
 	// specific enough not to. The blank rule is here because the value is absent
 	// until verification returns, which is most of the call.
-	requireText("booking_specialist", resolved.Agents["booking_specialist"].Instructions,
-		"{{customer_phone}}", "It can be blank")
-	for _, name := range []string{"complaint_specialist", "chat_with_me", "concierge"} {
-		if strings.Contains(resolved.Agents[name].Instructions, "{{") {
-			t.Errorf("%s carries a placeholder but never says the value: a prompt should not hold one it has no use for", name)
+	requireText("concierge", resolved.Agents["concierge"].Instructions,
+		"{{customer_phone}}", "empty until they have been identified")
+
+	// FR-007c: an agent that holds a tool injecting a variable must be able to
+	// SEE that variable, or it cannot tell whether the value is already there.
+	//
+	// This replaces an assertion that said the opposite. That one required the
+	// placeholder to live in exactly one prompt, on the reasoning that a prompt
+	// should not hold a value it never says. It cost a live call on 2026-08-27:
+	// a caller who had already been identified during booking raised a complaint,
+	// and customer care asked for their phone number again, because the number was
+	// injected into its own record_complaint tool and invisible to its prompt.
+	//
+	// The old rule's stated reason does not hold either. The compiler sends the
+	// union of names any router-bound prompt on the profile references, as one
+	// tuple shared by every agent, so customer_phone was already being sent on
+	// every request from every agent including this one. A second prompt
+	// referencing it sends nothing new and costs nothing. The value was being
+	// paid for and thrown away.
+	injectedBy := map[string][]string{}
+	for toolName, tool := range resolved.Tools {
+		for _, value := range tool.Inject {
+			text, ok := value.(string)
+			if !ok {
+				continue
+			}
+			injectedBy[toolName] = append(injectedBy[toolName], ir.TemplateRefs(text)...)
 		}
+	}
+	// A step reached only through a guarded delegate is the one exemption, and it
+	// is not a loophole: the guard has already refused the step unless the value
+	// is set, so the prompt cannot be wrong about it. That is why the booking step
+	// needs no placeholder and customer care does. Nothing guards the route to
+	// customer care, deliberately, because a caller with a complaint must not be
+	// interrogated before anyone will listen.
+	guaranteed := map[string][]string{}
+	for _, control := range resolved.Controls {
+		delegate, ok := control.(*ir.Delegate)
+		if !ok || len(delegate.Requires) == 0 {
+			continue
+		}
+		if delegate.Task != "" {
+			guaranteed[delegate.Task] = append(guaranteed[delegate.Task], delegate.Requires...)
+		}
+	}
+	canSee := func(holder, kind, prompt string, tools []string, given []string) {
+		for _, toolName := range tools {
+			for _, variable := range injectedBy[toolName] {
+				if strings.Contains(prompt, "{{"+variable+"}}") || slices.Contains(given, variable) {
+					continue
+				}
+				t.Errorf("%s %q holds %q, which injects %s, but it can neither see {{%s}} nor is it reached through a guard that requires it: it has no way to tell whether the value is already collected, so it asks the caller for something it already has",
+					kind, holder, toolName, variable, variable)
+			}
+		}
+	}
+	for name, def := range resolved.Agents {
+		canSee(name, "agent", def.Instructions, def.Tools, nil)
+	}
+	for name, task := range resolved.Tasks {
+		canSee(name, "task", task.Instructions, task.Tools, guaranteed[name])
 	}
 
 	// Verification is one phone number, nothing else. Spelling a name over a
@@ -416,12 +513,133 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		"On a no, or on a second unclear answer, finish with action `none` and save nothing",
 		"call `get_current_date` first", "never guess today's date",
 		"Never say a booking is saved, moved, or cancelled unless the matching tool ran in this turn")
-	// The chat agent has no tool of its own, so the prompt's job is to stop it
-	// claiming a lookup it cannot perform.
-	requireText("chat", resolved.Agents["chat_with_me"].Instructions,
-		"You have no way to look anything up", "say plainly that you cannot check it")
-	requireText("complaints", resolved.Agents["complaint_specialist"].Instructions,
-		"no active phone leg", "reaches the carrier", "route may hang up")
+	// Open chat is the entry agent's job now, and it holds exactly one lookup:
+	// the salon's own documents. The prompt's job is the same as the deleted chat
+	// agent's was, to stop it claiming a lookup it cannot perform, but the true
+	// sentence changed with the tool list. Asserting the old wording here would
+	// have pinned a claim that is no longer true of the agent that inherited the
+	// work.
+	requireText("concierge", resolved.Agents["concierge"].Instructions,
+		"the only thing you can look anything up in",
+		"say plainly that you cannot check it",
+		"Never claim to have searched, browsed, or checked a live source")
+	// Every agent that HOLDS the human transfer has to describe what it can and
+	// cannot do, not just the one that held it first.
+	//
+	// This used to name complaint_specialist directly, and that is exactly how it
+	// missed: the entry agent gained to_manager so a caller asking for a person
+	// is not interrogated first, the truthfulness rules stayed behind on the
+	// other agent, and on a live browser call the entry agent invented "please
+	// call the salon directly" — advice that is merely useless in a browser and
+	// actively wrong on a phone leg, where the caller has already done it.
+	for name, def := range resolved.Agents {
+		holdsTransfer := false
+		for _, tool := range def.Tools {
+			if _, ok := resolved.Controls[tool].(*ir.HumanTransfer); ok {
+				holdsTransfer = true
+			}
+		}
+		if !holdsTransfer {
+			continue
+		}
+		requireText(name+" (holds the human transfer)", def.Instructions,
+			"phone leg", "carrier", "hang up")
+		if strings.Contains(def.Instructions, "call the salon directly") {
+			t.Errorf("agent %q tells the caller to phone the salon; on the phone leg where this transfer works, they already have", name)
+		}
+	}
+
+	// The shape, held as tightly as the old shape was held. Two agents, and the
+	// booking step is a guarded delegate on the entry agent rather than an agent
+	// of its own.
+	if len(resolved.Agents) != 2 {
+		t.Errorf("the example has %d agents, want 2: %v", len(resolved.Agents), slices.Sorted(maps.Keys(resolved.Agents)))
+	}
+	guardedStep, ok := resolved.Controls["manage_booking"].(*ir.Delegate)
+	if !ok {
+		t.Fatalf("manage_booking = %T, want a delegate", resolved.Controls["manage_booking"])
+	}
+	if !slices.Equal(guardedStep.Requires, []string{"customer_phone"}) {
+		t.Errorf("manage_booking requires = %v, want [customer_phone]: the guard is what lets the booking step live on the entry agent", guardedStep.Requires)
+	}
+	if !slices.Contains(resolved.Agents[resolved.EntryAgent].Tools, "manage_booking") {
+		t.Errorf("the entry agent does not hold manage_booking: %v", resolved.Agents[resolved.EntryAgent].Tools)
+	}
+}
+
+// FR-012 and FR-013: every agent in this example earns its place.
+//
+// An agent is worth its turn when it holds a capability no other agent does: a
+// tool, a knowledge base, or a permission. A control is not a capability. An
+// agent that holds only controls is a routing table the caller has to be spoken
+// through, and this package shipped two of them for months, purely because the
+// compiler could not put a prerequisite on a step.
+func TestSalonConciergeHasNoRoutingOnlyAgent(t *testing.T) {
+	resolved := loadExample(t, "salon-concierge")
+
+	capabilities := map[string][]string{}
+	for name, agent := range resolved.Agents {
+		for _, tool := range agent.Tools {
+			if _, isControl := resolved.Controls[tool]; isControl {
+				continue
+			}
+			capabilities[name] = append(capabilities[name], tool)
+		}
+	}
+
+	for name, own := range capabilities {
+		if len(own) == 0 {
+			t.Errorf("agent %q holds only controls: it is a routing table, and a caller has to be spoken through it to reach anything", name)
+		}
+	}
+	for name := range resolved.Agents {
+		if _, ok := capabilities[name]; !ok {
+			t.Errorf("agent %q holds nothing at all", name)
+			continue
+		}
+		unique := false
+		for _, tool := range capabilities[name] {
+			held := 0
+			for _, other := range capabilities {
+				if slices.Contains(other, tool) {
+					held++
+				}
+			}
+			if held == 1 {
+				unique = true
+			}
+		}
+		if !unique {
+			t.Errorf("agent %q holds no capability its peer does not: %v. Two agents that can do the same things are one agent and a turn of latency", name, capabilities[name])
+		}
+	}
+}
+
+// FR-007a and SC-005b: one caller identifier, and it is the phone number.
+//
+// The package used to carry two, a synthetic customer reference alongside the
+// number that produced it. The reference was never spoken, never shown, and
+// never did anything the number could not, so every tool carried it for nothing
+// and every prompt had to be told to keep it quiet.
+func TestSalonConciergeDeclaresOneIdentifier(t *testing.T) {
+	resolved := loadExample(t, "salon-concierge")
+
+	if _, ok := resolved.Variables["customer_id"]; ok {
+		t.Error("the package still declares a customer_id variable")
+	}
+	if _, ok := resolved.Variables["customer_phone"]; !ok {
+		t.Errorf("the package declares no customer_phone: %v", slices.Sorted(maps.Keys(resolved.Variables)))
+	}
+	for name, task := range resolved.Tasks {
+		if _, ok := task.Result["customer_id"]; ok {
+			t.Errorf("task %q still returns a customer_id field", name)
+		}
+	}
+	for name, tool := range resolved.Tools {
+		if _, ok := tool.Inject["customer_id"]; ok {
+			t.Errorf("tool %q still injects customer_id", name)
+		}
+	}
 }
 
 func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
@@ -1060,17 +1278,19 @@ func salonScopes() []string {
 	const id = "optimized-salon-concierge-v8"
 	return []string{
 		id + ":concierge",
-		id + ":booking_specialist",
 		id + ":complaint_specialist",
-		id + ":chat_with_me",
 		id + ":task.customer_verification",
 		id + ":task.booking",
 	}
 }
 
-// assertSalonScopes holds SC-008 on the package a reader opens: six distinct
-// scopes on each target, the same six on both, each carrying the authored prefix,
-// and the bare authored id sent by nobody.
+// assertSalonScopes holds SC-008 on the package a reader opens: four distinct
+// scopes on each target, the same four on both, each carrying the authored
+// prefix, and the bare authored id sent by nobody.
+//
+// It was six. Two of them belonged to agents that existed only to hold a guard
+// the compiler could not put on a step, and each one was a separate prompt site
+// paying for its own cache.
 func assertSalonScopes(t *testing.T, resolved *ir.Agent) {
 	t.Helper()
 	value := regexp.MustCompile(`"X-Slng-Agent-Id": "([^"]*)"|_slng_scope = "([^"]*)"`)
@@ -1095,7 +1315,7 @@ func assertSalonScopes(t *testing.T, resolved *ir.Agent) {
 			delete(found, want)
 		}
 		for leftover := range found {
-			t.Errorf("%s: the example sends unexpected scope %q; the six are %v", provider, leftover, salonScopes())
+			t.Errorf("%s: the example sends unexpected scope %q; the four are %v", provider, leftover, salonScopes())
 		}
 	}
 }

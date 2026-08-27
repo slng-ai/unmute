@@ -1279,3 +1279,78 @@ func TestBuildGivesTheSIPPlaneRouteThePlanesGraph(t *testing.T) {
 		})
 	}
 }
+
+// A delegate may declare `requires:`, and the same rules apply to it as to a
+// handoff: every name must resolve to a declared variable, and the field stays
+// illegal on a human transfer.
+//
+// The gap this closes is worth stating, because the shape of the release example
+// was built around it. Before this, a returning step could not say what it
+// needed, so an author who wanted a machine-checked prerequisite had to put an
+// agent in front of the step purely to hold the guard. That agent then had to be
+// spoken through, which cost a turn and taught readers a structure they did not
+// need.
+func TestBuildDelegateRequires(t *testing.T) {
+	load := func(t *testing.T) *packagespec.Package {
+		t.Helper()
+		pkg, err := packagespec.Load(filepath.Join("..", "testdata", "remy"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pkg
+	}
+
+	t.Run("declared variable builds", func(t *testing.T) {
+		pkg := load(t)
+		control := pkg.Agent.Controls["do_reserve"]
+		control.Requires = []string{"caller_phone"}
+		pkg.Agent.Controls["do_reserve"] = control
+
+		agent, err := Build(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		delegate, ok := agent.Controls["do_reserve"].(*Delegate)
+		if !ok {
+			t.Fatalf("control union = %T", agent.Controls["do_reserve"])
+		}
+		if !slices.Equal(delegate.Requires, []string{"caller_phone"}) {
+			t.Errorf("delegate requires = %v, want [caller_phone]", delegate.Requires)
+		}
+	})
+
+	t.Run("undeclared variable fails with a location", func(t *testing.T) {
+		pkg := load(t)
+		control := pkg.Agent.Controls["do_reserve"]
+		control.Requires = []string{"not_a_variable"}
+		pkg.Agent.Controls["do_reserve"] = control
+
+		_, err := Build(pkg)
+		if err == nil {
+			t.Fatal("a requires name that resolves to no variable must fail at compile")
+		}
+		// The author needs to find the line, not just learn that something is
+		// wrong: a guard on a name nothing sets can never pass at runtime, and
+		// the symptom there is a step that silently never starts.
+		if !strings.Contains(err.Error(), "not_a_variable") || !strings.Contains(err.Error(), "agent.yaml") {
+			t.Errorf("error must name the value and the file: %v", err)
+		}
+	})
+
+	// Widening the field to delegates must not widen it to everything. A human
+	// transfer hands the call to a person and has no result to withhold, so a
+	// prerequisite on one would describe a guard nothing implements.
+	t.Run("still illegal on a human transfer", func(t *testing.T) {
+		pkg := load(t)
+		control := pkg.Agent.Controls["do_reserve"]
+		control.Kind = "human_transfer"
+		control.Group = nil // so the refusal is about `requires:`, not the group
+		control.Requires = []string{"caller_phone"}
+		pkg.Agent.Controls["do_reserve"] = control
+
+		_, err := Build(pkg)
+		if err == nil || !strings.Contains(err.Error(), "requires") {
+			t.Fatalf("requires on a human transfer must stay illegal: %v", err)
+		}
+	})
+}
