@@ -127,7 +127,7 @@ func TestPipecatRunbookRecordsWhyItsFloorDoesNotMove(t *testing.T) {
 //
 // This was a coverage gap in the plan and it closed itself on the rebase: main's
 // dev_metrics work already emits `user_turn` on Pipecat from
-// LatencyBreakdown.user_turn_secs, which the pinned pipecat 1.7.0 documents as
+// LatencyBreakdown.user_turn_secs, which the pinned pipecat 1.8.0 documents as
 // running "from when the user actually stopped speaking to when the turn was
 // released", including VAD silence, STT finalisation and the turn analyzer wait
 // (observers/user_bot_latency_observer.py:97-102). LiveKit reports the same thing

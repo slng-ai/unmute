@@ -62,6 +62,14 @@ The two `stop_secs` are different fields with the same name: the first is the
 silence window, from `endpointing_delay`, and the second is the classifier's
 ceiling, from `pace`. See [Latency](/optimization/latency) for both.
 
+### Transcribers that detect turns themselves
+
+Some transcribers decide the caller has finished on their own. AssemblyAI,
+Cartesia, Soniox and Speechmatics all do. On Pipecat 1.8.0 those services only
+*propose* an ending; the pair above still decides. So picking one of them does
+not change what `endpointing_delay` and `pace` mean, and does not give you a
+second thing racing your settings.
+
 ## LiveKit Agents
 
 LiveKit does both jobs, with two different pieces. It always loads Silero for voice

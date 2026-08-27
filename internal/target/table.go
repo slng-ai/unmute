@@ -506,7 +506,7 @@ func Default() Table {
 			// function that holds FunctionCallParams, but a task tool as a flows
 			// handler, which holds a FlowManager instead. Both have a seam:
 			// FlowManager.worker is the documented way to queue a frame from
-			// inside a handler, verified on pipecat-ai 1.7.0, the pinned version,
+			// inside a handler, verified on pipecat-ai 1.8.0, the pinned version,
 			// where flows ships bundled as pipecat.flows rather than the
 			// standalone pipecat_flows package.
 			//

@@ -828,11 +828,11 @@ if __name__ == "__main__":
 {
   "target": "pipecat",
   "provider": "pipecat",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "supported": {
-    "floor": "1.7.0",
-    "ceiling": "1.7.0",
-    "verified": "2026-08-16"
+    "floor": "1.8.0",
+    "ceiling": "1.8.0",
+    "verified": "2026-08-27"
   },
   "entry_agent": "intake",
   "agents": [
@@ -970,7 +970,7 @@ if __name__ == "__main__":
     "interruption ignore_phrases emitted as IGNORE_PHRASES; short phrases are also suppressed by the min-words turn-start strategy",
     "listen: deepgram via DeepgramSTTService (pipecat-ai[deepgram], verified 2026-07-15)",
     "reason: openai via OpenAILLMService (pipecat-ai[openai], verified 2026-07-15)",
-    "speak: slng via SlngTTSService (pipecat-slng\u003e=0.5.0, verified 2026-07-15)",
+    "speak: slng via SlngTTSService (pipecat-slng\u003e=0.5.1, verified 2026-07-15)",
     "turn role lowers to on-device VAD (Silero); its binding is advisory",
     "turn pace balanced (silence 0.2s from the pace, closes at 1.6s)"
   ]
@@ -1156,8 +1156,8 @@ version = "0.1.0"
 description = "Generated Pipecat voice agent (compiled by unmute)."
 requires-python = ">=3.11"
 dependencies = [
-    "pipecat-ai[deepgram,openai,runner,silero,webrtc]==1.7.0",
-    "pipecat-slng>=0.5.0",
+    "pipecat-ai[deepgram,openai,runner,silero,webrtc]==1.8.0",
+    "pipecat-slng>=0.5.1",
     "python-dotenv>=1.0",
 
     "httpx>=0.27",

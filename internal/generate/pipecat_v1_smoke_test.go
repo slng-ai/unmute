@@ -15,7 +15,7 @@ import (
 )
 
 // pipecatInlineSmokeScript proves the inline single-agent emission (F3) against
-// real pinned pipecat-ai 1.7.0 + pipecat-slng. Besides construction, it invokes
+// real pinned pipecat-ai 1.8.0 + pipecat-slng. Besides construction, it invokes
 // the real DirectFunctionWrapper with the malformed argument shape seen in the
 // live call and forces a local handler failure before result_callback.
 const pipecatInlineSmokeScript = `"""Smoke check: the inline single-agent bot imports and constructs, no bus."""
@@ -146,7 +146,7 @@ asyncio.run(main())
 print("pipecat logging idempotence ok")
 `
 
-const pipecatIdleResumeSmokeScript = `"""Resumed speech cancels a pending idle hangup on Pipecat 1.7."""
+const pipecatIdleResumeSmokeScript = `"""Resumed speech cancels a pending idle hangup on Pipecat 1.8."""
 import asyncio
 import json
 import os
@@ -532,7 +532,7 @@ async def main() -> None:
 asyncio.run(main())
 `
 
-const pipecatTaskTransferSmokeScript = `"""Smoke check: task transfer obeys Pipecat 1.7 Flow termination."""
+const pipecatTaskTransferSmokeScript = `"""Smoke check: task transfer obeys Pipecat 1.8 Flow termination."""
 import asyncio
 import json
 import os
@@ -719,6 +719,12 @@ async def main() -> None:
 
     class BillingSubscriber:
         name = "billing"
+
+        # Pipecat 1.8.0's bus asks every subscriber this before delivering, so
+        # a stub without it is silently never called and the wait below times
+        # out instead of failing on the thing under test.
+        def accepts_bus_message(self, message):
+            return True
 
         async def on_bus_message(self, message):
             if isinstance(message, BusActivateWorkerMessage):
@@ -1378,7 +1384,11 @@ async def assert_worker_start_failure_stops_runner() -> None:
     class FailingWorker:
         name = "startup-failure-agent"
 
-        async def attach(self, *, registry, bus) -> None:
+        # **kwargs, not a spelled-out signature: this stub only has to raise,
+        # and WorkerRunner.add_workers grew a worker_runner= argument in
+        # Pipecat 1.8.0. Naming the arguments would make every future one a
+        # TypeError in a probe that never reads them.
+        async def attach(self, **kwargs) -> None:
             raise RuntimeError("specialist startup probe")
 
     @runner.event_handler("on_ready")
@@ -1532,8 +1542,25 @@ async def main() -> None:
         assert len(mcp_clients) == 1
         mcp_session = FakeMCPSession()
         mcp_exit_stack = FakeExitStack()
+        # Pipecat 1.8.0 owns an MCP connection in a session task: close() sets
+        # _closing and awaits that task, whose finally block clears the session
+        # and closes the exit stack. Setting only _active_session/_exit_stack
+        # was the whole connected state through 1.7.0; now close() returns at
+        # its first line and nothing is ever closed.
+        mcp_closing = asyncio.Event()
+
+        async def own_mcp_session():
+            try:
+                await mcp_closing.wait()
+            finally:
+                mcp_clients[0]._active_session = None
+                mcp_clients[0]._exit_stack = None
+                await mcp_exit_stack.aclose()
+
         mcp_clients[0]._active_session = mcp_session
         mcp_clients[0]._exit_stack = mcp_exit_stack
+        mcp_clients[0]._closing = mcp_closing
+        mcp_clients[0]._session_task = asyncio.create_task(own_mcp_session())
         tool_probe.update(
             name="firecrawl_search",
             call_id="mcp-call-smoke",
@@ -1649,7 +1676,7 @@ async def main() -> None:
     assert requests["tts"].attributes["voice_id"] == "probe-voice"
     assert requests["tts"].attributes["metrics.character_count"] == len("traced.")
     assert requests["stt"].attributes["metrics.ttfb"] >= 0
-    # Pipecat 1.7.0 emits TTS TTFB as a framework metric after its native TTS
+    # Pipecat 1.8.0 emits TTS TTFB as a framework metric after its native TTS
     # span has closed. Keep the native lifecycle instead of patching its queue.
     assert json.loads(requests["stt"].attributes["langfuse.observation.input"]) == "audio"
     assert json.loads(requests["stt"].attributes["langfuse.observation.output"]) == "trace this request"
@@ -1794,7 +1821,7 @@ func TestSmokePipecatRegionalInfrastructureInstantiates(t *testing.T) {
 }
 
 // TestSmokePipecatV1TaskGroupsInstantiate runs the generated FlowManager on
-// pinned Pipecat 1.7.0 and observes task-role replacement, owner-role restoration,
+// pinned Pipecat 1.8.0 and observes task-role replacement, owner-role restoration,
 // and transfer activation (V28).
 func TestSmokePipecatV1TaskGroupsInstantiate(t *testing.T) {
 	runPipecatSmokeScript(t, "task-groups", nil, func(agent *ir.Agent) {
@@ -1813,14 +1840,14 @@ func TestSmokePipecatV1TaskGroupsInstantiate(t *testing.T) {
 // the supported SDK's real NO_RESPONSE transition semantics.
 func TestSmokePipecatV1TaskTransferStopsFlow(t *testing.T) {
 	runPipecatSmokeScript(t, "safe_core", func(target *ir.Target) {
-		target.Version = "1.7.0"
+		target.Version = "1.8.0"
 	}, func(agent *ir.Agent) {
 		addPipecatTaskTransferFixture(agent)
 	}, pipecatTaskTransferSmokeScript)
 }
 
 // TestSmokePipecatV1SessionStateIsIsolated runs the emitted cloud-transfer
-// worker against Pipecat 1.7.0. One session replays its own result, while a
+// worker against Pipecat 1.8.0. One session replays its own result, while a
 // second session still transfers its own phone call.
 func TestSmokePipecatV1SessionStateIsIsolated(t *testing.T) {
 	if _, err := exec.LookPath("uv"); err != nil {
@@ -1930,7 +1957,7 @@ for client in clients:
 print("smoke ok:", len(clients), "mcp client(s)")
 `
 
-const pipecatMCPTransactionSmokeScript = `"""Exercise generated MCP collision and cleanup paths against Pipecat 1.7."""
+const pipecatMCPTransactionSmokeScript = `"""Exercise generated MCP collision and cleanup paths against Pipecat 1.8."""
 import asyncio
 import inspect
 import json
@@ -1982,6 +2009,32 @@ class FakeExitStack:
             raise self.error
 
 
+def fake_connect(client, session, stack):
+    """Put a client into the connected state Pipecat 1.8.0 defines.
+
+    1.8.0 moved connection ownership into a session task: close() sets
+    _closing and awaits that task, whose finally block clears the session and
+    closes the exit stack — so a close error surfaces out of close(), as it
+    did when close() called aclose() directly. Setting _active_session and
+    _exit_stack was the whole connected state through 1.7.0; on 1.8.0 close()
+    returns at its first line and the stack is never closed.
+    """
+    closing = asyncio.Event()
+
+    async def own_session():
+        try:
+            await closing.wait()
+        finally:
+            client._active_session = None
+            client._exit_stack = None
+            await stack.aclose()
+
+    client._active_session = session
+    client._exit_stack = stack
+    client._closing = closing
+    client._session_task = asyncio.create_task(own_session())
+
+
 worker_types = [
     value
     for value in vars(bot).values()
@@ -2001,8 +2054,7 @@ def new_worker(sessions, close_errors=None):
     stacks = []
     for client, session, close_error in zip(clients, sessions, close_errors, strict=True):
         stack = FakeExitStack(close_error)
-        client._active_session = session
-        client._exit_stack = stack
+        fake_connect(client, session, stack)
         stacks.append(stack)
     return worker, clients, stacks
 

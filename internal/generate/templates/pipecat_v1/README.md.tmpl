@@ -307,7 +307,6 @@ Two things to expect at run time:
   call without the tools it promised.
 
 Pipecat refuses to start when an agent tool, task function, or MCP source on the same agent exposes the same name.
-Pipecat 1.7 has one cleanup limit: cancellation during `MCPClient.start()` may leave a partial transport open until async-generator or process cleanup; cancellation after `start()` returns is cleaned up normally.
 {{- end}}
 
 {{- if .CallStartVars}}

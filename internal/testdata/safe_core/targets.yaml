@@ -26,6 +26,6 @@ targets:
 
   pipecat:
     provider: pipecat
-    version: "1.7.0"
+    version: "1.8.0"
     # no model overrides: the agent.yaml defaults (SLNG + OpenAI + deepgram STT
     # + local silero VAD) run as defined

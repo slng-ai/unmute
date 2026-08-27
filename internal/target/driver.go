@@ -55,7 +55,11 @@ type SupportWindow struct {
 // claiming a compatibility range the release matrix does not exercise.
 var supportWindows = map[Provider]SupportWindow{
 	LiveKit: {Floor: "1.6.10", Ceiling: "1.6.10", Verified: "2026-08-16"},
-	Pipecat: {Floor: "1.7.0", Ceiling: "1.7.0", Verified: "2026-08-16"},
+	// 1.8.0 verified by browser call on salon-concierge: 13 turns, 20
+	// interruptions, 3 handoffs, 12 function calls in progress and 12 results,
+	// no errors. The settled count is the number that mattered, because the
+	// async-call fixes in 1.8.0 are what stop a handoff hanging unsettled.
+	Pipecat: {Floor: "1.8.0", Ceiling: "1.8.0", Verified: "2026-08-27"},
 }
 
 // frameworkPackages is the distribution each driver installs, so an error
