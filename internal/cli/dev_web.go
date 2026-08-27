@@ -76,7 +76,7 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "compiled %s\n", outDir)
 
-	childEnv := devChildEnv(root, cmd.ErrOrStderr())
+	childEnv := packageEnv(root, cmd.ErrOrStderr())
 	// compose.dev.yaml publishes the bot on ${UNMUTE_DEV_PORT}; --bot-port sets it.
 	childEnv = setChildEnv(childEnv, "UNMUTE_DEV_PORT", botPort)
 

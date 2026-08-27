@@ -21,7 +21,8 @@ provider request and a human conversation, not only the automated checks.
 | [`task-groups`](task-groups/) | One agent and three ordered tasks | Shared context moves through customer identification, slot selection, and finalization. |
 | [`subagents`](subagents/) | Two agents with handoffs | One agent books new visits; the other reschedules and cancels. |
 | [`salon-concierge`](salon-concierge/) | Four agents, tasks, a task group, handoffs, local SQLite, tracing, and inbound phone routes | **Release-readiness example.** Verify once, manage stored bookings, answer or escalate complaints, cold-transfer to a manager, and inspect Coval traces. Every tool is local Python, so nothing remote has to be up before the greeting. Browser and inbound phone on three targets, one per local telephony plane, no outbound. |
-| [`slng-support`](slng-support/) | One agent, one builtin tool, hosted by SLNG | **The hosted target.** The only example that produces no runnable project: `compile` writes a deployment body and a runbook, and the `voiceai` CLI pushes them. Builtins only, so the emitted body is postable as written and there is no `unmute dev`. |
+| [`slng-support`](slng-support/) | One agent, one builtin tool, hosted by SLNG | **The hosted target, smallest form.** Produces no runnable project: `unmute deploy` compiles a deployment body and pushes it. Builtins only, so the push creates nothing — SLNG already owns every capability it names. No `unmute dev`. |
+| [`slng-orders`](slng-orders/) | One agent and one `local:` tool, hosted by SLNG | **The hosted target with a tool of its own.** The handler is uploaded and becomes a versioned object in SLNG, so the push creates it, runs it once to prove it works, publishes it, and attaches it. Needs `--run-samples`. |
 
 `salon-concierge` is the only package with a telephony route. The
 [telephony overview](../docs-site/telephony/overview.mdx) explains the routes

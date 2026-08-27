@@ -3,8 +3,27 @@
 A support agent hosted by SLNG. Nothing to run, nothing to keep alive.
 
 This is the only example that targets `slng`, and the only one that produces no
-runnable project. `unmute compile` writes a deployment body and a runbook, and
-the `voiceai` CLI pushes them. Unmute opens no connection to SLNG at any point.
+runnable project. One command validates it, compiles it, and pushes it:
+
+```bash
+export SLNG_API_KEY=...
+bin/unmute deploy examples/slng-support
+```
+
+`--dry-run` reports what would happen and changes nothing. `unmute deploy` reads
+`SLNG_API_KEY` first, then `VOICEAI_API_KEY`, then whatever profile
+`voiceai login` stored: one SLNG key serves every SLNG role, so either name
+works and both hold the same token.
+
+Unmute's compiler opens no connection to SLNG at any point. `unmute deploy`
+compiles the package and hands the artifacts to the `voiceai` CLI, which owns
+your account and the push, so `voiceai` has to be on your PATH:
+
+```bash
+brew install slng-ai/tap/voiceai
+```
+
+Compiling on its own still works, and writes the same files:
 
 ```bash
 bin/unmute validate examples/slng-support
@@ -26,26 +45,28 @@ No `tools/` directory, because every tool here is a builtin.
 `end_call` names a capability SLNG already owns, so nothing has to be *created*
 before this agent can exist. That is the smallest push there is.
 
-It is not a zero-step push. Read the emitted runbook before you run anything:
-SLNG's `tool_refs` entries require `attachment_id`, `tool_id` and `version`, and
-unmute writes a name where the `tool_id` goes, because no compiler can invent an
-id a server assigns. A curated capability has an id too. So even here, the name
-has to be resolved before the body is accepted.
+It is still not a body you can post by hand. SLNG's `tool_refs` entries require
+`attachment_id`, `tool_id` and `version`, and unmute writes a name where the
+`tool_id` goes, because no compiler can invent an id a server assigns. A curated
+capability has an id too.
+
+Resolving those names is what the push step does, which is why
+`voiceai agents create --file build/slng/agent.json` is the wrong command: it
+posts the body verbatim, names included, and the API refuses it. Use
+`unmute deploy`, or the command it runs underneath:
 
 ```bash
 export VOICEAI_API_KEY=...
-voiceai agents create --file examples/slng-support/build/slng/agent.json --json
+voiceai agents push examples/slng-support/build/slng
 ```
 
 `voiceai login` stores the key instead, if you prefer.
 
-The `voiceai` CLI has no `tools` command yet, so nothing resolves that name for
-you today: fill the id in from the SLNG dashboard, or create the agent with no
-tools and attach `end_call` there.
-
 A package with a `local:` or `webhook:` tool compiles too, and its bodies land
-under `tools/`. Those need each tool created first *and* its new id filled in,
-which is strictly more work than this example asks for.
+under `tools/`. Those get created, introspected and published by the push, and
+each needs a sample: one JSON object of arguments at
+`build/slng/samples/<tool>.json`, run with `unmute deploy --run-samples`. A tool
+of either kind cannot be published until one successful run proves it works.
 
 A `local:` tool may also pin what its handler imports, with exact
 `name==version` entries under `local.dependencies`. The sandbox runs Python 3.14
@@ -63,8 +84,8 @@ SLNG runs the agent. To talk to it, open a web session:
 voiceai agents web-sessions create <agent_id> --file session.json
 ```
 
-The id is the one `agents create` returned. It is required: the command creates
-a session for one named agent.
+The id is the one `unmute deploy` printed. It is required: the command creates a
+session for one named agent.
 
 The `--file` is required even though every field in it is optional, because the
 endpoint declares a request body and the CLI sends none without it. A minimal

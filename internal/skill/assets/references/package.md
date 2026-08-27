@@ -431,8 +431,9 @@ map is keyed by an existing model entry name and takes the same model fields.
 
 ## The slng target
 
-SLNG hosts the agent. `unmute compile --target slng` writes a deployment body
-and a runbook instead of a project:
+SLNG hosts the agent. `unmute deploy <dir>` validates the package, compiles it,
+and pushes it. The compiler writes a deployment body and a runbook instead of a
+project:
 
 ```text
 build/slng/
@@ -441,20 +442,35 @@ build/slng/
 └── README.md           the runbook
 ```
 
-A package whose tools are all builtins gets no `tools/` directory. Unmute opens
-no connection to SLNG at any point; the `voiceai` CLI pushes what it wrote:
+A package whose tools are all builtins gets no `tools/` directory. Unmute's
+compiler opens no connection to SLNG at any point: `unmute deploy` hands the
+files to the `voiceai` CLI, which must be on PATH
+(`brew install slng-ai/tap/voiceai`).
 
 ```bash
-export VOICEAI_API_KEY=...
-voiceai agents create --file build/slng/agent.json --json
+export SLNG_API_KEY=...
+unmute deploy .
+unmute deploy . --dry-run                  # check everything, change nothing
+unmute deploy . --run-samples              # also run each tool's sample
 voiceai agents web-sessions create <agent_id> --file session.json
 ```
 
-`VOICEAI_API_KEY` is the push tool's key, not `SLNG_API_KEY`, which is the
-Context Router's. The web-session command takes the agent id the create step
-returned, and a `--file` holding at least `{"arguments": {}}`: every field in
-that body is optional but the body itself is required. `arguments` is where the
-package's declared variables get their value for one session.
+The key is read from `SLNG_API_KEY`, then `VOICEAI_API_KEY`, then whatever
+profile `voiceai login` stored. Those are two names for one token: a single SLNG
+key serves every SLNG role, including the Context Router key a generated livekit
+or pipecat project reads at run time. `VOICEAI_API_KEY` is the name the push tool
+itself reads.
+
+**A push replaces.** A tool reference the package no longer names is detached and
+a differing field is overwritten, and the agent's name is its target instance
+name — so two packages that both call their slng target `slng` write the same
+live agent. `--dry-run` names what would go; `--agent-id` picks a different
+agent.
+
+The web-session command takes the agent id `unmute deploy` printed, and a
+`--file` holding at least `{"arguments": {}}`: every field in that body is
+optional but the body itself is required. `arguments` is where the package's
+declared variables get their value for one session.
 
 Unmute writes no `llm_router_enabled` on this target: SLNG applies its own
 default. Do not add one. A model your organisation brought its own key for is
@@ -464,12 +480,34 @@ A model string that SLNG does not have enabled for agents is rejected at push
 with `AGENT_MODEL_UNAVAILABLE` naming the field. Unmute cannot check this: the
 list is per-organisation.
 
-**The emitted body is not postable as written when the agent references any
-tool.** SLNG's `tool_refs` entries require `attachment_id`, `tool_id` and
-`version`; unmute writes a name where the `tool_id` goes, because no compiler can
-invent an id a server assigns. That is true of a curated builtin too. Only an
-agent with no tools posts unchanged. The `voiceai` CLI has no `tools` command
-yet, so those ids are filled in by hand from the SLNG dashboard today.
+**The emitted body carries a name where the API wants an id.** SLNG's `tool_refs`
+entries require `attachment_id`, `tool_id` and `version`; unmute writes a name
+where the `tool_id` goes, because no compiler can invent an id a server assigns.
+That is true of a curated builtin too.
+
+The push step resolves those names, which is why
+`voiceai agents create --file build/slng/agent.json` is the wrong command: it
+posts the body verbatim and the API refuses it. `unmute deploy` runs
+`voiceai agents push build/slng` instead, and that resolves names, mints
+attachment ids, and creates any tool the package ships a body for.
+
+A `local:` or `webhook:` tool also needs a **sample** before it can publish: one
+JSON object of arguments at `build/slng/samples/<tool>.json`, run with
+`unmute deploy --run-samples`. It goes in the build directory rather than the
+package because it is operator input, like `.env`: what counts as a safe set of
+arguments depends on the environment and the real dependencies, not on the agent
+definition. Those two are the only things a recompile preserves inside `build/`.
+
+A tool on slng has **no network access at all** — the handler runs in SLNG's
+sandbox, in the region serving the call, which is why it is fast and why a
+handler that must reach a service has to be a `webhook:` tool. `examples/slng-orders`
+is the worked example: one `local:` tool, no secret, deployable as shipped. An MCP reference is
+the one thing the push cannot finish — the schema hash SLNG wants is read off the
+live server — so attach MCP servers in the dashboard.
+
+A refused deploy has changed nothing, and reports every problem together with the
+dashboard page that fixes each: `vault missing`, `sample missing`,
+`tool unresolved`, `mcp unsupported`, `agent ambiguous`.
 
 ```yaml targets.yaml
 targets:

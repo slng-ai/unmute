@@ -1,9 +1,10 @@
 === README.md ===
 # Deploying `slng` to SLNG
 
-Unmute wrote the files in this directory and stopped. It opens no connection to
-SLNG at any point, so nothing here has been pushed, checked against your
-account, or reserved. The `voiceai` CLI does that part.
+Unmute's compiler wrote the files in this directory and stopped. It opens no
+connection to SLNG at any point, so nothing here has been pushed, checked
+against your account, or reserved. `unmute deploy .` does that part, by
+handing these files to the `voiceai` CLI.
 
 Everything in this directory is disposable. Edit the package and compile again.
 
@@ -39,99 +40,102 @@ holds the value, so only a slng target resolves one.
 | `ACME_BRAND` | conversation.greeting.text |
 
 
-## 2. Push the agent
+## 2. Deploy
 
-The push tool reads its credential from `VOICEAI_API_KEY`. Export it once, or
-run `voiceai login` and let the CLI store it:
-
-```bash
-export VOICEAI_API_KEY=...
-```
-
-That is **not** `SLNG_API_KEY`. `SLNG_API_KEY` is the Context Router's
-key, which a generated livekit or pipecat project reads at run time. This target
-generates no project and needs no such key. The two are different keys for
-different things, and using one where the other belongs returns an
-authentication error that looks like a wrong body.
-
-Then push:
+One command validates the package, compiles it again, and pushes it:
 
 ```bash
-voiceai agents create --file build/slng/agent.json --json
+unmute deploy .
 ```
 
-An agent id comes back, and you need it for step 3. Keep it, or find it again
-with `voiceai agents list`: unmute stores no id, writes no lockfile, and keeps
-no local state about your account.
+Run it from the package root, the directory above `build/`.
 
-### Read this before you run that command
+It reads the key from `SLNG_API_KEY`, falling back to `VOICEAI_API_KEY`
+and then to whatever profile `voiceai login` stored:
 
-**This body is not postable exactly as written, and the command above will fail
-on it.** `agent.json` carries a name in every place the API wants an identifier,
-because no compiler can invent an id a server assigns.
+```bash
+export SLNG_API_KEY=...
+```
 
-Concretely: each entry under `tool_refs` is written as `{"tool": "<name>", ...}`,
-and the API wants `attachment_id`, `tool_id` and `version`, all three required,
-with no `tool` field at all. `mcp_refs` is the same shape. So a name has to
-become an id before this file is accepted.
+One SLNG key serves every SLNG role, so this is the same key a generated livekit
+or pipecat project reads at run time. `VOICEAI_API_KEY` is the name the push
+tool itself reads, and either works.
 
-**A curated capability is no exception.** A builtin such as `end_call` is a tool
-your organisation already owns, so it has a `tool_id` and that id still has to be
-filled in. It needs nothing *created*, which is a smaller job, but it is not a
-skipped one.
+The organisation the push resolved is printed on every run. That matters because
+an exported key and a stored profile can belong to **different** organisations,
+and nothing else on screen would tell you which one you just wrote to.
+
+Two flags are worth knowing before your first update:
+
+- `--dry-run` checks everything, reports it, and changes nothing.
+- `--run-samples` executes each `code` or `api_request` tool's sample against
+  your real dependencies. A tool of either kind cannot be published without one
+  successful run, so a package that ships one needs this.
+
+**A push replaces.** A tool reference this package no longer names is detached,
+and a field that differs from the live agent is overwritten. `--dry-run` names
+both before anything happens.
+
+Nothing on SLNG is created until every check passes, so a run that reports
+problems has changed nothing. Each problem comes back with what to do and the
+dashboard page that fixes it: a missing Vault entry, a tool name that resolves to
+nothing, a tool that needs a verified run.
+
+An agent id comes back. Keep it for step 3, or find it again with
+`voiceai agents list`: unmute stores no id, writes no lockfile, and keeps no
+local state about your account.
+
+### Driving the push tool yourself
+
+`unmute deploy .` runs this underneath, and you can run it directly:
+
+```bash
+voiceai agents push build/slng
+```
+
+It takes the package root or this directory. Do **not** post `agent.json` with
+`voiceai agents create` instead: that sends the body verbatim, and the body
+carries a name in every place the API wants an identifier.
+
+### What the push resolves for you
+
+`agent.json` carries a name where the API wants an id, because no compiler can
+invent an id a server assigns. Each entry under `tool_refs` is written as
+`{"tool": "<name>", ...}`, and the API wants `attachment_id`, `tool_id` and
+`version`, all three required, with no `tool` field at all. `mcp_refs` is the
+same shape.
+
+The push step resolves those names against your organisation's tools, mints the
+attachment ids, and creates any tool this package ships a body for. Nothing here
+is yours to edit by hand.
+
+**A curated capability is no exception.** A builtin such as `end_call` needs
+nothing *created*, and its `tool_id` still has to be filled in, which the push
+does.
 
 This package's curated references: `end_call`.
 
-These tools need a body created first, then their new ids filled in:
+These tools get a body created, introspected and published, in that order:
 
 - `tools/check_order.json`
 - `tools/refund.json`
 
-Each MCP reference is incomplete in a way that id resolution alone cannot fix.
-SLNG requires a schema hash computed over the tool's input and output schemas
-**as the live server reports them**, so the push step has to **connect to the
-MCP server** before the reference can be completed. It is not a lookup.
+Each also needs a sample. Write one per tool as
+`samples/<tool>.json`, holding a single set of arguments, and deploy with
+`--run-samples`. A recompile keeps them: `samples/*.json` is preserved in this
+directory the way `.env` is.
+Each MCP reference is the one thing the push **cannot** finish. SLNG requires a
+schema hash computed over the tool's input and output schemas **as the live
+server reports them**, so completing the reference means connecting to the MCP
+server. Attach these in the SLNG dashboard instead:
 
 - internal_docs · search_docs
 - internal_docs · read_doc
 
-The `voiceai` CLI has no `tools` command yet, so there is nothing that does this
-for you today. Doing it by hand takes one edit per reference. Replace
-
-```json
-{ "tool": "check_order", "description": "...", "invocation": "model", "argument_overrides": {} }
-```
-
-with
-
-```json
-{
-  "attachment_id": "0ad3148c-a454-4759-90b4-7941668278ad",
-  "tool_id": "fd25f5c5-15e7-4662-b11b-62b82beba14c",
-  "version": 3,
-  "description": "...",
-  "invocation": "model",
-  "argument_overrides": {}
-}
-```
-
-Keep the `description`, `invocation`, `argument_overrides` and any
-`execution_policy` or `config_overrides` unmute wrote: those are the fields it
-derived from your package, and they are correct. Only the three ids are yours to
-supply.
-
-- `tool_id` and `version` come from the tool itself. The quickest way to read
-  them for a curated capability is `voiceai agents get <id> --json` on any agent
-  that already has it attached: its `tool_refs` carry both.
-- `attachment_id` is a fresh UUID that you mint. It identifies this attachment,
-  not the tool, so it must not be copied from another agent.
-
-Or post an agent with no tools at all, which needs none of this, and attach them
-in the dashboard afterwards.
 
 ## 3. Talk to it
 
-Use the agent id step 2 returned. It is not optional: the command creates a
+Use the agent id step 2 printed. It is not optional: the command creates a
 session for one named agent.
 
 The `--file` is not optional either, even though everything in it is. Write a
@@ -337,6 +341,7 @@ Compile from the package instead. That is the shape this file is.
   "description": "Look up an order by its id and return its status and delivery date.",
   "tool_type": "code",
   "config": {
+    "type": "code",
     "import_probes": [],
     "egress": {}
   },
@@ -353,6 +358,7 @@ Compile from the package instead. That is the shape this file is.
   "description": "Start a refund for the caller's order.",
   "tool_type": "api_request",
   "config": {
+    "type": "api_request",
     "url": "https://api.acme.example",
     "http_method": "POST",
     "auth": {

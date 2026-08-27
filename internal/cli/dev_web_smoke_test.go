@@ -92,7 +92,7 @@ func TestSmokeDevPipecatImageReceivesEnvAndImportsWebRTC(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(repo)
-	env := devChildEnv(outDir, io.Discard)
+	env := packageEnv(outDir, io.Discard)
 	project := composeProjectName(outDir, "pipecat")
 	run := func(args ...string) ([]byte, error) {
 		cmd := exec.Command(docker, composeArgs(composeFile, project, args...)...)

@@ -14,6 +14,7 @@ Usage:
 Available Commands:
   compile     Compile a v1 agent package to its resolved target artifacts.
   completion  Generate the autocompletion script for the specified shell
+  deploy      Compile a package and push it to SLNG.
   dev         Compile, run the agent locally, and talk to it in the browser.
   help        Help about any command
   init        Scaffold a new v1 agent package.
@@ -27,7 +28,7 @@ Flags:
 Use "unmute [command] --help" for more information about a command.
 ```
 
-## The four commands
+## The five commands
 
 | Command | What it does |
 |---|---|
@@ -35,8 +36,12 @@ Use "unmute [command] --help" for more information about a command.
 | [`validate`](/reference/cli/validate) | check a package against its targets |
 | [`compile`](/reference/cli/compile) | write the generated project for each target |
 | [`dev`](/reference/cli/dev) | compile, run locally, and talk to the agent |
+| [`deploy`](/reference/cli/deploy) | validate, compile and push a package to SLNG |
 
-Together they take you from nothing to a voice you can talk to.
+The first four take you from nothing to a voice you can talk to on your own
+machine. `deploy` is the one that puts an agent somewhere else, and it is SLNG
+only: a livekit or pipecat target compiles to a project that platform deploys
+with its own tool.
 
 ## One command off that path
 
@@ -59,8 +64,8 @@ no-argument behaviour, and it is a different thing.
 
 ## Running a command with no package
 
-`validate`, `compile`, and `dev` take the package directory as an **optional**
-argument. Leave it out and the package is the current directory, so you can `cd`
+`validate`, `compile`, `deploy` and `dev` take the package directory as an
+**optional** argument. Leave it out and the package is the current directory, so you can `cd`
 into an agent and work there:
 
 ```sh

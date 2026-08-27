@@ -52,7 +52,7 @@ func TestDevChildEnv_readsDotenvLocal(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".env.local"), []byte("SLNG_API_KEY=sk-secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env := devChildEnv(dir, &bytes.Buffer{})
+	env := packageEnv(dir, &bytes.Buffer{})
 	if !contains(env, "SLNG_API_KEY=sk-secret") {
 		t.Errorf(".env.local value not passed to the child env; env = %v", env)
 	}
@@ -83,7 +83,7 @@ func TestV14DevChildEnvReadsWorkingDirectoryThenPackageDotenv(t *testing.T) {
 	t.Setenv("UNMUTE_TEST_SHARED_ENV", "shell")
 	t.Chdir(repo)
 
-	env := devChildEnv(root, &bytes.Buffer{})
+	env := packageEnv(root, &bytes.Buffer{})
 	for _, want := range []string{
 		"UNMUTE_TEST_REPO_ENV=repo",
 		"UNMUTE_TEST_REPO_LOCAL_ENV=repo-local",
@@ -102,7 +102,7 @@ func TestV14DevChildEnvReadsWorkingDirectoryThenPackageDotenv(t *testing.T) {
 
 func TestDevChildEnv_missingFilesAreFine(t *testing.T) {
 	var warn bytes.Buffer
-	env := devChildEnv(t.TempDir(), &warn) // no .env or .env.local present
+	env := packageEnv(t.TempDir(), &warn) // no .env or .env.local present
 	if len(env) == 0 {
 		t.Fatal("expected the ambient environment when .env is absent")
 	}
@@ -122,7 +122,7 @@ func TestDevChildEnv_readsPackageRootFilesOnce(t *testing.T) {
 	t.Chdir(dir)
 
 	var warn bytes.Buffer
-	devChildEnv(dir, &warn)
+	packageEnv(dir, &warn)
 	for _, name := range []string{".env", ".env.local"} {
 		prefix := "warning: reading " + filepath.Join(dir, name) + ":"
 		if got := strings.Count(warn.String(), prefix); got != 1 {

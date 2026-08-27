@@ -10,15 +10,18 @@ Write, validate, read the error, fix, repeat. Then run it and listen.
 | `unmute validate [dir]` | load, build, and check against every declared target |
 | `unmute compile [dir]` | validate, then write `build/<target>/` for each code target |
 | `unmute dev [dir]` | compile, run locally, and let you talk to the agent |
+| `unmute deploy [dir]` | validate, compile, and push a slng target to SLNG |
 | `unmute skill install` | write this skill into a project |
 
-`[dir]` is optional on those three. With no directory they use the current one,
+`[dir]` is optional on those four. With no directory they use the current one,
 so you can `cd` into a package and run them with no argument. Passing a
 directory still works and still wins, and it is the right form when you are not
 inside the package.
 
-Four commands take an author from nothing to a voice. `skill` is off that path:
-it writes this bundle into a project and does nothing else.
+Four commands take an author from nothing to a voice. `deploy` is how a slng
+package leaves the machine, and it is SLNG only: a livekit or pipecat target
+compiles to a project that platform deploys with its own tool. `skill` is off
+both paths: it writes this bundle into a project and does nothing else.
 
 ```sh
 unmute skill install

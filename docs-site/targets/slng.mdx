@@ -5,24 +5,70 @@ sidebarTitle: "SLNG"
 ---
 
 SLNG hosts the agent. There is no project to run and nothing to keep alive, so
-`unmute compile` writes a deployment body and a runbook instead of Python.
+the compiler writes a deployment body and a runbook instead of Python, and one
+command sends them:
 
 ```sh
-unmute compile examples/slng-support --target slng
+export SLNG_API_KEY=...
+unmute deploy examples/slng-orders --run-samples
+```
+
+<Card title="Deploy to SLNG" icon="cloud-upload" href="/deploy/slng">
+  The walkthrough: two worked examples, every failure message, and why a tool
+  lives in SLNG rather than in your repository. Start there if you want a
+  running agent. This page is the reference behind it.
+</Card>
+
+## The trade
+
+A slng package is shorter than the same agent written for pipecat or livekit, and
+what is missing is not capability. It is the layer you would otherwise stand up
+yourself.
+
+| On a code target you author | On slng |
+|---|---|
+| a Python project, a `Dockerfile`, an image to host | nothing; SLNG runs the agent |
+| worker counts, concurrency, scaling | SLNG's, already provisioned |
+| a VAD, a turn model, endpointing windows | SLNG's turn taking |
+| the event loop wiring STT to LLM to TTS | SLNG's pipeline |
+| where each provider is called from | one region, chosen per call |
+
+So here you author intent — prompt, models, tools, greeting, variables — and the
+layer under it is already running, already in-region, already warm, with STT,
+LLM, TTS and the tool sandbox one network hop apart rather than one internet
+apart. You give up owning the runtime and you get one that is co-located and
+tuned.
+
+That is also why the refusals below are refusals rather than silent drops: a
+setting that describes a runtime you no longer own has nothing to act on, and
+being told is better than having it disappear.
+
+## What compiling writes
+
+To stop at the files:
+
+```sh
+unmute compile examples/slng-orders --target slng
 ```
 
 ```text
-examples/slng-support/build/slng/
-├── agent.json          # the agent create body
-├── tools/              # one tool body per tool that needs one
+examples/slng-orders/build/slng/
+├── agent.json                # the agent create body
+├── tools/                    # one tool body per tool that needs one
 │   └── check_order.json
-└── README.md           # the runbook: what to create, what to run, what to watch
+└── README.md                 # the runbook: what to create, what to run, what to watch
 ```
 
 A package whose tools are all builtins gets no `tools/` directory at all.
 
-Unmute opens no connection to SLNG, at validate time or compile time. It writes
-files and stops. The `voiceai` CLI pushes them.
+Unmute's compiler opens no connection to SLNG, at validate time or compile time.
+It writes files and stops. [`unmute deploy`](/reference/cli/deploy) hands them to
+the `voiceai` CLI, which owns your account and the push, so it has to be
+installed:
+
+```sh
+brew install slng-ai/tap/voiceai
+```
 
 ## targets.yaml
 
@@ -85,17 +131,48 @@ The runbook in `build/slng/README.md` is the authority for your package. In
 outline:
 
 ```sh
-export VOICEAI_API_KEY=...
-voiceai agents create --file build/slng/agent.json --json
+export SLNG_API_KEY=...
+unmute deploy examples/slng-support
 ```
 
-Or run `voiceai login` and let the CLI store the key. An agent id comes back,
-and you need it to open a session.
+An agent id comes back, and you need it to open a session. Read
+[the command's own page](/reference/cli/deploy) for the flags; the two that
+matter first are `--dry-run`, which changes nothing, and `--run-samples`, which
+a package shipping a `local:` or `webhook:` tool needs.
 
-`VOICEAI_API_KEY` is the push tool's key. It is **not** `SLNG_API_KEY`, which is
-the Context Router's key that a generated agent uses at run time to reach SLNG
-models. Using one where the other belongs returns an authentication error that
-looks like a wrong body.
+`unmute deploy` reads `SLNG_API_KEY`, then `VOICEAI_API_KEY`, then whatever
+profile `voiceai login` stored. Those are two names for one token: a single SLNG
+key serves every SLNG role, including the Context Router key a generated livekit
+or pipecat project reads at run time. `VOICEAI_API_KEY` is the name the push tool
+itself reads, so export whichever your shell already has.
+
+The organisation is printed on every run, because an exported key and a stored
+profile can belong to different ones.
+
+To drive the push tool directly:
+
+```sh
+voiceai agents push build/slng
+```
+
+### Your tools live in SLNG
+
+On pipecat or livekit a `local:` tool is a function in the project you host, and
+it runs in your process. Here there is no process of yours: the handler is
+uploaded and becomes an org-level object in SLNG with a version number. Your
+package names it; SLNG owns it.
+
+That is the fast shape as well as the necessary one. A tool sits on the critical
+path of a turn — nobody speaks until it returns — and a handler inside SLNG's
+sandbox, in the region serving the call, answers in a hop. The same logic behind
+a webhook of your own is a round trip out of SLNG's network and back, on every
+call. Two consequences: a tool on SLNG has **no network access at all**, so a
+handler that must reach a service is a `webhook:` tool instead; and its
+dependencies are exact `name==version` pins, because SLNG builds a locked,
+hash-verified environment per tool.
+
+[Deploy to SLNG](/deploy/slng) has the long version, with the publish gate and
+where secrets sit.
 
 ### Names, not identifiers
 
@@ -106,19 +183,34 @@ the body is accepted.
 
 This includes a curated capability. A `builtin:` tool needs nothing *created*,
 because SLNG already has it, and it still has a `tool_id` that has to be filled
-in. Only an agent with no tools at all posts unchanged.
+in.
 
-A package with a `local:` or `webhook:` tool needs more: each tool body created
-first, then its new id filled in.
+Resolving those names is the push step's job. It is also why
+`voiceai agents create --file build/slng/agent.json` is the wrong command: that
+posts the body verbatim, names included, and the API refuses it.
 
-The `voiceai` CLI has no `tools` command yet, so nothing does this for you
-today.
+A package with a `local:` or `webhook:` tool needs more: each body is created,
+introspected and published, and neither kind can be published until one
+successful run proves it works. So each needs a sample, one JSON object of
+arguments at `build/slng/samples/<tool>.json`, run with
+`unmute deploy --run-samples`. Samples survive a recompile.
 
-An MCP reference is incomplete in a way name resolution alone cannot fix. SLNG
-requires a hash computed over the tool's schemas **as the live server reports
-them**, so the push step has to connect to the MCP server. It is not a lookup.
+An MCP reference is the one thing the push cannot finish. SLNG requires a hash
+computed over the tool's schemas **as the live server reports them**, so
+completing the reference means connecting to the MCP server. Attach MCP servers
+in the dashboard instead.
 
 The runbook says which case your package is in.
+
+### A push replaces
+
+Updating an agent replaces it with what the package declares. A tool reference
+the package no longer names is detached, and a field that differs is
+overwritten. `unmute deploy --dry-run` names both before anything happens.
+
+The agent's name is its target instance name, so a run that reports `update`
+when you expected `create` means an agent of that name already exists.
+`--agent-id` picks a different one.
 
 ### Do not push a dashboard export back
 
@@ -223,7 +315,7 @@ To talk to a pushed agent, open a web session:
 voiceai agents web-sessions create <agent_id> --file session.json
 ```
 
-The agent id is the one `agents create` returned; `voiceai agents list` finds it
+The agent id is the one `unmute deploy` printed; `voiceai agents list` finds it
 again. The command returns LiveKit connection details, and a
 `livekit_dispatch_id` meaning a worker joined the room.
 

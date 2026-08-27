@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 
@@ -49,6 +50,19 @@ func runValidate(cmd *cobra.Command, dir string, names []string) error {
 	report, validateErr := ir.Validate(agent, targets, target.Default())
 	out := cmd.OutOrStdout()
 	printHeader(out, "validate "+displayDir(dir))
+	printValidationReport(out, cmd.ErrOrStderr(), report)
+	if validateErr != nil {
+		return fmt.Errorf("validate %s: %w", dir, validateErr)
+	}
+	return nil
+}
+
+// printValidationReport writes the per-target result rows to out and every
+// prerequisite, warning and error to errOut.
+//
+// `deploy` validates before it pushes and prints the same report, so the format
+// has one owner rather than two renderers that agree by hand until they do not.
+func printValidationReport(out, errOut io.Writer, report ir.ValidateReport) {
 	u := style.For(out)
 	for _, row := range report.PerTarget {
 		status := u.Ok("✓")
@@ -64,10 +78,10 @@ func runValidate(cmd *cobra.Command, dir string, names []string) error {
 	for _, row := range report.PerTarget {
 		for _, prerequisite := range row.Prerequisites {
 			if !wrotePrerequisites {
-				fmt.Fprintln(cmd.ErrOrStderr(), "\nSetup prerequisites:")
+				fmt.Fprintln(errOut, "\nSetup prerequisites:")
 				wrotePrerequisites = true
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "  %s: %s: %s\n    %s (verified %s)\n",
+			fmt.Fprintf(errOut, "  %s: %s: %s\n    %s (verified %s)\n",
 				row.Name, prerequisite.Name, prerequisite.Summary,
 				prerequisite.Docs, prerequisite.Verified)
 		}
@@ -76,26 +90,22 @@ func runValidate(cmd *cobra.Command, dir string, names []string) error {
 	for _, row := range report.PerTarget {
 		for _, warning := range row.Warnings {
 			if !wroteWarnings {
-				fmt.Fprintln(cmd.ErrOrStderr(), "\nWarnings:")
+				fmt.Fprintln(errOut, "\nWarnings:")
 				wroteWarnings = true
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "  %s: %s\n", row.Name, warning)
+			fmt.Fprintf(errOut, "  %s: %s\n", row.Name, warning)
 		}
 	}
 	wroteErrors := false
 	for _, row := range report.PerTarget {
 		for _, validationError := range row.Errors {
 			if !wroteErrors {
-				fmt.Fprintln(cmd.ErrOrStderr(), "\nErrors:")
+				fmt.Fprintln(errOut, "\nErrors:")
 				wroteErrors = true
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "  %s: %s\n", row.Name, validationError)
+			fmt.Fprintf(errOut, "  %s: %s\n", row.Name, validationError)
 		}
 	}
-	if validateErr != nil {
-		return fmt.Errorf("validate %s: %w", dir, validateErr)
-	}
-	return nil
 }
 
 func validationTargets(agent *ir.Agent, names []string) ([]ir.Target, error) {

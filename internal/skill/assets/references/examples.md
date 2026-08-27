@@ -26,12 +26,22 @@ read two side by side and see only the difference that matters.
 | a step with a definite typed answer | `examples/multi-task` | one agent, two tasks it delegates to, `result:` and `assign:` |
 | steps that must happen in a fixed order | `examples/task-groups` | three ordered tasks, `context_scope: shared`, and the LiveKit experimental warning |
 | two jobs with different rules and tools | `examples/subagents` | two agents that hand the caller over, with a control in each direction |
+| an agent SLNG hosts, in its smallest form | `examples/slng-support` | one builtin and nothing else, so the push creates nothing. Emits no runnable project, so there is no `unmute dev`: `unmute deploy` pushes it and a web session talks to it |
+| an agent SLNG hosts, with a tool of its own | `examples/slng-orders` | a `local:` handler that is **uploaded** and becomes a versioned object in SLNG. Needs a sample at `build/slng/samples/<tool>.json` and `unmute deploy --run-samples`, because a code tool cannot publish until one run proves it |
 
 ## How to use one, when you have them
 
 ```sh
 unmute validate examples/simple-prompt
 unmute dev examples/simple-prompt --target pipecat
+```
+
+The two slng packages are the exception to that second line: they emit no
+runnable project, so `dev` has nothing to run. Deploy them instead.
+
+```sh
+unmute validate examples/slng-orders
+unmute deploy examples/slng-orders --dry-run
 ```
 
 Then read `examples/<name>/agent.yaml` and its `README.md`. Every one of these
