@@ -188,15 +188,18 @@ func TestKnowledgeSmokeKeepsItsPythonSurface(t *testing.T) {
 			emitted := artifactFile(t, artifact, "knowledge.py")
 			for _, symbol := range []string{
 				"def build_indexes(", "async def look_up(", "def _merge(", "def _index(",
-				"_INDEXES", "SETTINGS", "_embed_refunds(", "_embed_services(",
-				"BM25Retriever.from_defaults(",
+				"def _nodes(", "_INDEXES", "SETTINGS", "_embed_refunds(",
+				"_embed_services(", "BM25Retriever.from_defaults(",
 			} {
 				if !strings.Contains(emitted, symbol) {
 					t.Errorf("knowledge.py is missing %q, so the smoke script that names it cannot run", symbol)
 				}
 			}
-			// The smoke reads collection.count() and collection.get(), so the
-			// collection has to still be the second half of the tuple.
+			// The smoke reads entry["vector"] and entry["keyword"] off each index
+			// map value, so the value has to still be a dict. It last was a
+			// (index, collection) tuple, and unpacking a dict yields its keys
+			// instead of raising, so the smoke failed inside Chroma's API rather
+			// than saying the shape had changed.
 			if !strings.Contains(emitted, "_INDEXES: dict[str, dict]") {
 				t.Error("the index map shape changed; the smoke reads entry[\"vector\"] and entry[\"keyword\"]")
 			}
