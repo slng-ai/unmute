@@ -94,24 +94,94 @@ A flat number is the tell. If `user_turn` repeats to three decimals across
 turns, you are looking at a fixed wait rather than variance, and no model change
 will touch it.
 
-Two things set it. The detector you bind, and `semantic_endpointing`. On LiveKit
-the choice of detector also decides *where* the work happens:
+Three things set it. The detector you bind, `semantic_endpointing`, and `pace`.
+On LiveKit the choice of detector also decides *where* the work happens:
 `turn-detector-mini` runs on your machine, and `turn-detector` runs in LiveKit
 Cloud, which puts a network round trip in front of every single turn.
 `semantic_endpointing` waits to judge whether you actually finished a thought,
 and both targets warn that its effect depends on the model you bound.
+
+#### The floor and the ceiling are different numbers
+
+<Note>
+  This is the short version. [Turn taking](/optimization/turn-taking) is the full
+  page: every legal value, what each becomes on each target, and how to measure
+  both failure modes.
+</Note>
+
+This is the part worth reading twice, because getting it wrong sent a whole round
+of measurement here after the wrong knob.
+
+`endpointing_delay` is the **floor**: how long silence has to last before the
+runtime treats you as finished. Nothing downstream can start earlier.
+
+`pace` is the **ceiling**: the longest a turn may run before closing regardless.
+It takes `snappy`, `balanced` or `patient` on a `turn` binding, and it defaults
+to `balanced`.
+
+```yaml
+models:
+  turn:
+    detector:
+      provider: local
+      model: silero
+      pace: balanced          # the ceiling, and the floor if the next line is absent
+      endpointing_delay: 400ms  # the floor, if you have measured one
+```
+
+**Lowering the floor alone does not shorten a turn.** A turn that runs long is
+sitting at the ceiling. Before `pace` existed nothing in a package could reach
+that ceiling, so it stayed at the framework defaults — 2.5s on LiveKit, 3.0s on
+Pipecat — and a live LiveKit call spent 2.5s per turn there while the authored
+window was 400ms.
+
+| `pace` | The agent | Choose it when |
+|---|---|---|
+| `snappy` | answers quickly, and will occasionally answer someone who was pausing to think | short exchanges, confirmations, menu navigation |
+| `balanced` | the default | most agents |
+| `patient` | waits, and someone who has finished waits with it. Reproduces the framework defaults exactly | callers reading out numbers, addresses, spellings |
+
+`pace` takes no per-target override, on purpose: one word is meant to work on
+both targets, and a value that differed per target would be a duration in
+disguise. `endpointing_delay` is the field for that, and it does take one.
+
+Each target's emitted `README.md` states the resolved floor and ceiling, and
+`unmute compile` prints them:
+
+```
+livekit: turn pace balanced (silence 0.4s authored, closes at 1.6s)
+```
+
+Faster turn taking is a trade rather than a free win. Endpointing fails two
+ways — dead air after you finish, and answering you mid-sentence — and shrinking
+the window trades one for the other. The second one never shows up in a latency
+figure, so check for it deliberately.
 
 On Pipecat the work is all on device, but it is two stages rather than one.
 Silero voice activity detection decides that you stopped making sound, and then
 Pipecat's own Smart Turn v3 classifier decides whether you had finished a
 thought. The classifier is a small ONNX model that ships inside the framework and
 loads with no extra install, so it is running in every package Unmute compiles
-whether or not you asked for it. `endpointing_delay` sets the first stage only.
+whether or not you asked for it. `endpointing_delay` sets the first stage and
+`pace` sets the second.
+
+Both stages are spelled `stop_secs` in the emitted `bot.py` and they are
+different fields: `VADParams(stop_secs=...)` is the silence window and
+`SmartTurnParams(stop_secs=...)` is the classifier's ceiling. The emitted
+`README.md` says which is which.
+
+On this target the silence window does not move with the pace, and that is
+measured rather than an oversight. A window wider than the transcript's arrival
+time makes Pipecat pay a flat extra second (see the third stage below), and
+observed transcripts arrive from 0.27s. So the floor stays at Pipecat's own 0.2s
+for every pace and the pace reaches this target through the ceiling alone.
 
 <Note>
-  Setting `interruption.min_words` currently replaces that pair with a plain
-  timeout, which means the Smart Turn classifier stops running. If you set it and
-  turn taking gets worse rather than better, that is why.
+  Setting `interruption.minimum_words` used to replace that pair with a plain
+  timeout, which stopped the Smart Turn classifier running and made turn taking
+  worse rather than better. It no longer does: the classifier survives, and it
+  carries the `pace` ceiling. If you set the field on an older build and turn
+  taking got worse, that was why.
 </Note>
 
 There is a third stage on Pipecat that is not a setting and is worth knowing

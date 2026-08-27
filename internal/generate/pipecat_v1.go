@@ -479,9 +479,15 @@ type pipecatData struct {
 	AuthKinds              authKindSet // webhook auth schemes in use: helpers + imports per scheme
 	NeedsFunctionCalls     bool        // any @tool/transfer/delegate (FunctionCallParams)
 	ResultsHint            string      // developer-message tail when a delegate hands its results back
-	// EndpointingDelay is the authored silence window in seconds, "" when the
-	// package leaves the VAD default alone.
-	EndpointingDelay         string
+	// Pace carries the resolved floor and ceiling. On this target the floor does
+	// not vary with the pace and the ceiling does; see internal/target/pace.go
+	// for the measurement behind that.
+	Pace paceView
+	// SemanticOff lowers `semantic_endpointing: off`: the turn ends on a speech
+	// timeout rather than on the smart-turn analyzer's verdict. Unlike LiveKit,
+	// this target loses its ceiling with the analyzer, because the ceiling IS the
+	// analyzer's own stop_secs. The runbook says so.
+	SemanticOff              bool
 	NeedsTurnStrategies      bool // interruption min-words strategy
 	NeedsEndFrame            bool
 	NeedsAppendFrame         bool
@@ -536,6 +542,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTurnPlacement:        true, // advisory (VAD/smart-turn supplied)
 	targetcap.FieldSemanticEndpointing:  true, // advisory
 	targetcap.FieldEndpointingDelay:     true, // VAD stop_secs
+	targetcap.FieldPace:                 true, // smart-turn analyzer stop_secs (the ceiling)
 	targetcap.FieldTask:                 true, // Flow node on the owning worker (C8)
 	targetcap.FieldTaskNestedResult:     true, // forwarded json_schema properties
 	targetcap.FieldTaskGroup:            true, // linear dynamic-flow chain

@@ -1,12 +1,14 @@
 package ir
 
 import (
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	packagespec "github.com/slng-ai/unmute/internal/spec"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 func TestBuildBuiltinToolResolvesRegistryDefaults(t *testing.T) {
@@ -1353,4 +1355,137 @@ func TestBuildDelegateRequires(t *testing.T) {
 			t.Fatalf("requires on a human transfer must stay illegal: %v", err)
 		}
 	})
+}
+
+// The prompt directive reaches every prompt site on its own think profile, and
+// no site on any other profile.
+//
+// safe_core is the fixture because it has two think profiles and one agent on
+// each, which is what makes "no other profile" a real claim rather than a
+// vacuous one. The two tasks are added here: one naming a profile, one naming
+// none, because a task that names none runs on the entry agent's profile and
+// that inheritance is the half a per-agent-only implementation would miss.
+func TestBuildPromptSuffixReachesItsProfileAndNoOther(t *testing.T) {
+	const directive = "/no_think"
+
+	build := func(t *testing.T, suffix string) *Agent {
+		t.Helper()
+		pkg := loadSafeCore(t)
+		think := pkg.Agent.Models.Think["fast_reasoning"]
+		think.PromptSuffix = suffix
+		pkg.Agent.Models.Think["fast_reasoning"] = think
+
+		pkg.Markdown["tasks/inherits.md"] = "Collect the caller's account details."
+		pkg.Markdown["tasks/names_other.md"] = "Read the invoice back to the caller."
+		// intake is the entry agent and runs on fast_reasoning, so a task naming no
+		// model of its own inherits that profile and must carry the directive too.
+		pkg.Agent.Tasks = map[string]packagespec.Task{
+			"inherits":    {Instructions: "tasks/inherits.md"},
+			"names_other": {Instructions: "tasks/names_other.md", Model: "careful_reasoning"},
+		}
+		// A declared task nothing reaches is refused, so both get a delegate and
+		// intake gets both delegates.
+		inherits, namesOther := "inherits", "names_other"
+		pkg.Agent.Controls["run_inherits"] = packagespec.Control{
+			Kind: "delegate", Task: &inherits, When: "Collect the caller's account details.",
+		}
+		pkg.Agent.Controls["run_names_other"] = packagespec.Control{
+			Kind: "delegate", Task: &namesOther, When: "Read the invoice back.",
+		}
+		intake := pkg.Agent.Agents["intake"]
+		intake.Tools = append(intake.Tools, "run_inherits", "run_names_other")
+		pkg.Agent.Agents["intake"] = intake
+		agent, err := Build(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return agent
+	}
+
+	agent := build(t, directive)
+
+	// intake is on fast_reasoning; billing is on careful_reasoning.
+	for name, want := range map[string]bool{"intake": true, "billing": false} {
+		got := strings.HasSuffix(agent.Agents[name].Instructions, "\n\n"+directive)
+		if got != want {
+			t.Errorf("agent %q carries the directive = %t, want %t", name, got, want)
+		}
+	}
+	for name, want := range map[string]bool{"inherits": true, "names_other": false} {
+		got := strings.HasSuffix(agent.Tasks[name].Instructions, "\n\n"+directive)
+		if got != want {
+			t.Errorf("task %q carries the directive = %t, want %t", name, got, want)
+		}
+	}
+	// One occurrence per site, not two: a second append would double it on a
+	// package where an agent and a task resolve through the same lookup.
+	for name, def := range agent.Agents {
+		if n := strings.Count(def.Instructions, directive); n > 1 {
+			t.Errorf("agent %q carries the directive %d times", name, n)
+		}
+	}
+
+	// Unset is byte-identical to before the field existed. This is what lets the
+	// change ship without touching any package that does not use it.
+	bare := build(t, "")
+	for name, def := range bare.Agents {
+		if strings.Contains(def.Instructions, directive) {
+			t.Errorf("agent %q carries a directive with none authored", name)
+		}
+		if def.Instructions != loadSafeCoreInstructions(t, name) {
+			t.Errorf("agent %q instructions changed with no directive authored", name)
+		}
+	}
+}
+
+// loadSafeCoreInstructions is what an agent's prompt is with the field absent,
+// read straight from the package rather than from a build, so the byte-identical
+// claim above is checked against the file and not against another build.
+func loadSafeCoreInstructions(t *testing.T, name string) string {
+	t.Helper()
+	pkg := loadSafeCore(t)
+	return pkg.Markdown[pkg.Agent.Agents[name].Instructions]
+}
+
+// The directive must move no cache scope. Scopes are derived from names, never
+// from prompt content, and that is deliberate: if wording moved a scope, every
+// edit would silently retire a cache the author meant to keep.
+//
+// So this is stated as a rule with a gate rather than left as a consequence of
+// how SlngScope happens to be written today.
+func TestBuildPromptSuffixMovesNoCacheScope(t *testing.T) {
+	scopes := func(t *testing.T, suffix string) []string {
+		t.Helper()
+		pkg := loadSafeCore(t)
+		pkg.Agent.Secrets = append(pkg.Agent.Secrets, "SLNG_API_KEY", "OPENROUTER_API_KEY")
+		pkg.Agent.Models.Think["fast_reasoning"] = packagespec.ModelDef{
+			Provider: "slng", Model: "qwen/qwen3-32b", AgentID: "scope-probe-v1",
+			PromptSuffix: suffix,
+			Upstream: &packagespec.Upstream{
+				Provider: "openai-compat", URL: "https://openrouter.ai/api/v1",
+				KeyEnv: "OPENROUTER_API_KEY",
+			},
+			Params: map[string]any{"world_part_override": "eu"},
+		}
+		billing := pkg.Agent.Agents["billing"]
+		billing.Model = "fast_reasoning"
+		pkg.Agent.Agents["billing"] = billing
+		agent, err := Build(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, name := range slices.Sorted(maps.Keys(agent.Agents)) {
+			out = append(out, targetcap.SlngScope(agent.Models[agent.Agents[name].Model].AgentID,
+				targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name}))
+		}
+		return out
+	}
+	with, without := scopes(t, "/no_think"), scopes(t, "")
+	if !slices.Equal(with, without) {
+		t.Errorf("the directive moved a cache scope:\n with: %v\nwithout: %v", with, without)
+	}
+	if len(with) == 0 {
+		t.Fatal("no scopes derived, so the comparison proved nothing")
+	}
 }

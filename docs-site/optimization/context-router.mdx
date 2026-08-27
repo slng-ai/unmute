@@ -206,12 +206,13 @@ models:
         api_version: 2024-12-01-preview
       params:
         world_part_override: eu
-        reasoning_effort: "none"
+        reasoning_effort: "none"   # an azure upstream serves OpenAI's models
 ```
 
 A key the router does not expect for that upstream is a compile error rather than
 a silent pass-through, because an unknown field comes back as a 400 on every think
-request.
+request. That check is on the `upstream` block only. Everything under `params:` is
+forwarded without checking, which is [what makes it useful](#params-ride-the-request-body).
 
 ### Where your credentials go
 
@@ -251,10 +252,87 @@ Verified on macOS 2026-08-19: `base64` writes one line there already, and
 whose `base64` wraps its output by default. Paste the result into your `.env` as
 one line, and keep the key file itself out of your repository.
 
-## `reasoning_effort` is not optional in practice
+## Params ride the request body
 
-If your agent has tools, set it. The reasoning models in the GPT-5 family reject
-function tools on chat completions without it, and every tool turn comes back as:
+Everything under `params:` on a router think binding is passthrough. The compiler
+reads two names and forwards the rest:
+
+| Key | What happens |
+|---|---|
+| `world_part_override` | consumed, and becomes the router's regional base URL |
+| `slng_pure_proxy` | consumed, and rides the body as the router's shadow-trial switch |
+| anything else | forwarded, in the request body, on both targets |
+
+The router passes a key it does not recognise to your upstream, so this is how you
+reach a provider-specific option Unmute has never heard of. It is also why the
+compiler cannot check one: it does not know what your upstream accepts, so a wrong
+value surfaces as the upstream's own error, relayed with its status code and its
+message intact.
+
+The body, on both targets, and that is worth one sentence of history. On LiveKit
+these used to be constructor arguments, so a key the plugin had never heard of was
+a `TypeError` when the agent booted rather than something a compile could catch.
+They travel in the body now, which takes any key.
+
+A nested value is fine, because the body is JSON:
+
+```yaml agent.yaml
+params:
+  world_part_override: eu
+  provider:                       # forwarded to the router, and on to OpenRouter
+    only: ["groq"]
+```
+
+## `prompt_suffix`, for what no parameter reaches
+
+Some models take instructions that only work as prompt text. `prompt_suffix` is
+literal text the compiler appends to **every system prompt that binding sends**:
+each agent's, each task's on that binding's profile, and the summarizer's where one
+is emitted.
+
+```yaml agent.yaml
+models:
+  think:
+    reasoning:
+      provider: slng
+      model: qwen/qwen3-32b
+      agent_id: salon-concierge-v1
+      prompt_suffix: "/no_think"
+      upstream:
+        provider: openai-compat
+        url: https://openrouter.ai/api/v1
+        key_env: OPENROUTER_API_KEY
+```
+
+The worked reason it exists: Qwen3 is a hybrid thinking model, and thinking costs
+your caller seconds of silence before the first word. On 2026-08-27 three
+spellings of the thinking-off parameter were sent to three of its hosts, nine
+requests in all, and every one was accepted and ignored. Qwen3's own `/no_think`
+directive in the prompt was the only thing that worked, and it works from the
+system prompt, mid-prompt, and on a tool turn.
+
+Four things to know:
+
+- **It goes on the model, not on an agent.** It is a fact about the model. An
+  agent that needs different wording has its own prompt file.
+- **It is literal.** No placeholders — the router substitutes placeholders from a
+  snapshot of the names your *prompts* reference, so one arriving from a suffix
+  would be sent with no value and come back 422 mid-call. The compiler refuses one.
+- **It moves no cache.** Scopes come from names, never from prompt content, so
+  adding or changing a suffix retires nothing. Bumping the version on your
+  `agent_id` is still the only way to do that deliberately.
+- **The compiler attaches no meaning to it.** `/no_think` is just a string here.
+  The next model's directive will be different and this field already works for it.
+
+You can read what it did in the emitted `*_PROMPT` constants, and `unmute compile`
+names it on its own line. A directive you cannot see is a directive you cannot
+check.
+
+## `reasoning_effort`, and when it is the problem
+
+If your upstream serves an OpenAI reasoning model and your agent has tools, set
+it. The GPT-5 family rejects function tools on chat completions without it, and
+every tool turn comes back as:
 
 ```
 400 Function tools with reasoning_effort are not supported ...
@@ -263,8 +341,18 @@ To use function tools, use /v1/responses or set reasoning_effort to 'none'.
 
 `"none"` works. This is the same trap a direct OpenAI think binding has, and
 [the reasoning model page](/models/llm) explains it there too. The compiler warns
-when your package has tools and the param is missing, rather than refusing,
-because it cannot know for certain which model family your upstream serves.
+when your package has tools and the param is missing.
+
+**On an `openai-compat` upstream, ignore all of that**, and do not set it
+defensively. The advice is for OpenAI's own model families, and elsewhere the param
+ranges from useless to fatal depending on the host. Measured on `qwen/qwen3-32b`,
+2026-08-27: **Nebius answers a request carrying it with a 400**, and **Groq accepts
+it with a 200 and ignores it**. Same model, same param, two different failures — one
+loud, one silent — and neither is a reason to set it.
+
+So the warning fires only for the `openai` and `azure` upstreams, which are the ones
+serving the models the advice is about. Nothing warns on the others, and nothing
+should.
 
 ## Personal prompts stay cacheable
 

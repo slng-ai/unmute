@@ -2556,6 +2556,29 @@ func TestValidateSlngRouterWarnsOnToolsWithoutReasoningEffort(t *testing.T) {
 	if got := strings.Join(report.PerTarget[0].Warnings, "\n"); strings.Contains(got, "reasoning_effort") {
 		t.Errorf("warned about a param that is set:\n%s", got)
 	}
+	// And nothing to say on an upstream that does not serve OpenAI's models,
+	// where the advice is not merely unnecessary but wrong: qwen/qwen3-32b on
+	// Nebius answers reasoning_effort with a 400 (measured 2026-08-27). Firing
+	// here would tell every OpenRouter author, on every compile, to set the one
+	// param that breaks their agent.
+	compat := routerAgent(t, func(def *packagespec.ModelDef) {
+		def.Params = map[string]any{"world_part_override": "eu"}
+		def.Upstream = &packagespec.Upstream{
+			Provider: "openai-compat",
+			URL:      "https://openrouter.ai/api/v1",
+			KeyEnv:   "OPENROUTER_API_KEY",
+		}
+	})
+	// The upstream credential has to be declared or a different gate refuses the
+	// package before this one gets a word in.
+	compat.Secrets = append(compat.Secrets, "OPENROUTER_API_KEY")
+	report, err = Validate(compat, []Target{targetFor(compat, ProviderPipecat)}, targetcap.Default())
+	if err != nil {
+		t.Fatalf("an openai-compat upstream must validate: %v %#v", err, report.PerTarget[0].Errors)
+	}
+	if got := strings.Join(report.PerTarget[0].Warnings, "\n"); strings.Contains(got, "reasoning_effort") {
+		t.Errorf("advised reasoning_effort on an upstream whose host answers it with a 400:\n%s", got)
+	}
 }
 
 // The one target-shaped limit this feature adds, gated because a rule with no
@@ -3084,5 +3107,299 @@ func TestValidateKnowledgeMinScore(t *testing.T) {
 				t.Errorf("min_score %g: warning must contain %q, got:\n%s", score, want, joined)
 			}
 		}
+	}
+}
+
+// Every refusal prompt_suffix carries, each asserting on the reason and not only
+// on the failure. A refusal that does not say what to do instead is a dead end,
+// and the constitution asks for the reason by name.
+func TestValidatePromptSuffixRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		kind   ModelKind
+		value  string
+		reason string
+	}{
+		{
+			name: "a speak binding has no system prompt to append to",
+			kind: KindSpeak, value: "/no_think",
+			reason: "only a think model sends",
+		},
+		{
+			name: "a listen binding has none either",
+			kind: KindListen, value: "/no_think",
+			reason: "only a think model sends",
+		},
+		{
+			name: "empty is a typo, and absent is how you mean off",
+			kind: KindThink, value: "   ",
+			reason: "leave the key out to mean off",
+		},
+		{
+			name: "past the bound it stops being a suffix",
+			kind: KindThink, value: strings.Repeat("x", PromptSuffixMaxLen+1),
+			reason: "not a second prompt",
+		},
+		{
+			name: "a placeholder would be sent with no value",
+			kind: KindThink, value: "Answer as {{caller_alias}}.",
+			reason: "422",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := strings.Join(promptSuffixErrors("probe", ModelDef{Kind: tc.kind, PromptSuffix: tc.value}), "\n")
+			if got == "" {
+				t.Fatalf("accepted prompt_suffix %q on a %s model", tc.value, tc.kind)
+			}
+			if !strings.Contains(got, tc.reason) {
+				t.Errorf("the refusal does not say %q:\n%s", tc.reason, got)
+			}
+		})
+	}
+	// And the shape that is fine, so the rules above are not simply refusing
+	// everything.
+	if got := promptSuffixErrors("probe", ModelDef{Kind: KindThink, PromptSuffix: "/no_think"}); got != nil {
+		t.Errorf("refused a legal directive: %v", got)
+	}
+	if got := promptSuffixErrors("probe", ModelDef{Kind: KindSpeak}); got != nil {
+		t.Errorf("refused a binding that authors no directive: %v", got)
+	}
+}
+
+// Off the router it works, so it warns rather than refusing. It is only prompt
+// text, and an author may well have meant it; but the reason the field exists is
+// a router-served model whose thinking no parameter reaches, so it is worth
+// saying out loud.
+func TestValidatePromptSuffixWarnsOffTheRouter(t *testing.T) {
+	agent := routerAgent(t, func(def *packagespec.ModelDef) {
+		def.Provider = "openai"
+		def.Model = "gpt-4o"
+		def.AgentID = ""
+		def.Upstream = nil
+		def.Params = nil
+		def.PromptSuffix = "/no_think"
+	})
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	if err != nil {
+		t.Fatalf("an off-router directive must warn, never fail: %v %#v", err, report.PerTarget[0].Errors)
+	}
+	warnings := strings.Join(report.PerTarget[0].Warnings, "\n")
+	if !strings.Contains(warnings, "prompt_suffix") || !strings.Contains(warnings, "Check you meant this binding") {
+		t.Errorf("the warning does not name the field or say what to check:\n%s", warnings)
+	}
+}
+
+// A per-target override cannot name a different directive, because the prompts it
+// would apply to are markdown files every target shares. Refused with the reason,
+// rather than resolved to whichever target was walked last.
+func TestValidatePromptSuffixCannotDifferPerTarget(t *testing.T) {
+	agent := routerAgent(t, func(def *packagespec.ModelDef) {
+		def.PromptSuffix = "/no_think"
+	})
+	// The override arrives already resolved, so this is the shape Build would have
+	// produced from a targets.yaml naming a second value.
+	resolved := targetFor(agent, ProviderPipecat)
+	binding := resolved.Models.Reason["fast_reasoning"]
+	binding.PromptSuffix = "/think"
+	resolved.Models.Reason["fast_reasoning"] = binding
+
+	report, _ := Validate(agent, []Target{resolved}, targetcap.Default())
+	errors := strings.Join(report.PerTarget[0].Errors, "\n")
+	if !strings.Contains(errors, "cannot differ per target") {
+		t.Errorf("a divergent override was not refused with its reason:\n%s", errors)
+	}
+	// An override that leaves the field alone is carried forward by Build, so the
+	// agreeing case must stay silent. A fresh build, because the mutation above
+	// wrote into a map the target shares with the one it came from.
+	agreeing := routerAgent(t, func(def *packagespec.ModelDef) {
+		def.PromptSuffix = "/no_think"
+	})
+	report, _ = Validate(agreeing, []Target{targetFor(agreeing, ProviderPipecat)}, targetcap.Default())
+	if got := strings.Join(report.PerTarget[0].Errors, "\n"); strings.Contains(got, "prompt_suffix") {
+		t.Errorf("refused an override that agrees with the package:\n%s", got)
+	}
+}
+
+// TestValidatePaceIsATurnFieldWithThreeValues holds both refusals. The legal
+// values come from internal/target rather than being retyped here, so a value
+// added to the table cannot pass this test while missing from the message.
+func TestValidatePaceIsATurnFieldWithThreeValues(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		kind  ModelKind
+		value Pace
+		want  string
+	}{
+		{name: "turn model takes snappy", kind: KindTurn, value: PaceSnappy},
+		{name: "turn model takes balanced", kind: KindTurn, value: PaceBalanced},
+		{name: "turn model takes patient", kind: KindTurn, value: PacePatient},
+		{name: "unset is legal and means balanced", kind: KindTurn, value: ""},
+		{name: "unknown value is refused", kind: KindTurn, value: "fast", want: `"fast" is not a pace`},
+		{name: "think model does not take it", kind: KindThink, value: PaceSnappy, want: "pace is a turn-model field"},
+		{name: "listen model does not take it", kind: KindListen, value: PaceSnappy, want: "pace is a turn-model field"},
+		{name: "speak model does not take it", kind: KindSpeak, value: PaceSnappy, want: "pace is a turn-model field"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := paceErrors("local_turn", ModelDef{Kind: tc.kind, Pace: tc.value})
+			text := strings.Join(got, "\n")
+			if tc.want == "" {
+				if text != "" {
+					t.Fatalf("unexpected errors: %s", text)
+				}
+				return
+			}
+			if !strings.Contains(text, tc.want) {
+				t.Fatalf("want %q, got %q", tc.want, text)
+			}
+		})
+	}
+}
+
+// The refusal has to name every legal value, because "not a pace" tells an
+// author they are wrong and not what to write instead (Principle II).
+func TestValidatePaceRefusalNamesEveryLegalValue(t *testing.T) {
+	text := strings.Join(paceErrors("local_turn", ModelDef{Kind: KindTurn, Pace: "fast"}), "\n")
+	for _, value := range targetcap.PaceValues() {
+		if !strings.Contains(text, value) {
+			t.Errorf("refusal does not name %q: %q", value, text)
+		}
+	}
+}
+
+// TestValidatePaceWithDelayCompilesAndRefusesNothing. Both fields together is
+// the recommended configuration, not a mistake: examples/salon-concierge sets
+// both because its floor is measured per target and no pace can express that.
+//
+// There is deliberately no warning. Two were written and both were wrong on that
+// example: "you set both" fired on the recommended configuration, and "your
+// duration equals the pace floor, delete it" advised deleting a measured
+// per-target floor, which drops that target back onto the flat-second cliff.
+// What the author needs
+// is which value won which half, and the compile report says exactly that on
+// every compile. internal/generate holds that gate, because it is the report's
+// text rather than a validation outcome.
+func TestValidatePaceWithDelayCompilesAndRefusesNothing(t *testing.T) {
+	agent := safeAgent(t)
+	tgt := targetFor(agent, ProviderLiveKit)
+	if tgt.Models.Turn == nil {
+		t.Fatal("fixture has no turn binding to configure")
+	}
+	turn := *tgt.Models.Turn
+	turn.Pace = PaceBalanced
+	turn.EndpointingDelay = "400ms"
+	tgt.Models.Turn = &turn
+	agent.Models[agent.Turn] = func() ModelDef {
+		m := agent.Models[agent.Turn]
+		m.Pace = PaceBalanced
+		return m
+	}()
+
+	report, err := Validate(agent, []Target{tgt}, targetcap.Default())
+	if err != nil {
+		t.Fatalf("both fields set must compile: %v", err)
+	}
+	for _, warning := range reportFor(report, ProviderLiveKit).Warnings {
+		if strings.Contains(warning, "pace") {
+			t.Errorf("a pace warning fired on the recommended configuration: %q", warning)
+		}
+	}
+}
+
+// TestValidatePaceRefusesAPerTargetOverride. The field's whole point is that one
+// word works on both targets. A value that differed per target would be a
+// duration in disguise, and endpointing_delay already is one — so a per-target
+// pace is refused rather than resolved to whichever won.
+func TestValidatePaceRefusesAPerTargetOverride(t *testing.T) {
+	agent := safeAgent(t)
+	base := agent.Models[agent.Turn]
+	base.Pace = PaceBalanced
+	agent.Models[agent.Turn] = base
+
+	tgt := targetFor(agent, ProviderLiveKit)
+	turn := *tgt.Models.Turn
+	turn.Pace = PaceSnappy // as if a target override had named a second value
+	tgt.Models.Turn = &turn
+
+	report, err := Validate(agent, []Target{tgt}, targetcap.Default())
+	if err == nil {
+		t.Fatal("a per-target pace must be refused, not resolved to whichever won")
+	}
+	text := strings.Join(reportFor(report, ProviderLiveKit).Errors, "\n")
+	for _, want := range []string{"snappy", "balanced", "no per-target override", "endpointing_delay"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the refusal does not name %q: %q", want, text)
+		}
+	}
+}
+
+// TestValidateWarnsOnTurnFieldsThatReachNothing. Three fields were accepted on a
+// turn binding in silence: an author could write `params: {alpha: 0.5}`, compile
+// clean, and get an agent that ignored it with nothing in the report to say so.
+//
+// A warning rather than a refusal, because a package carrying one today is not
+// broken — it is carrying a value that never did anything, and failing a compile
+// that used to pass would be a worse trade than saying so.
+func TestValidateWarnsOnTurnFieldsThatReachNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		model ModelDef
+		// want is a phrase the warning must carry, including what to do instead.
+		want []string
+	}{
+		{
+			name:  "params",
+			model: ModelDef{Kind: KindTurn, Params: map[string]any{"alpha": 0.5}},
+			want:  []string{"alpha", "no target reads", "pace", "endpointing_delay"},
+		},
+		{
+			name:  "agent_id",
+			model: ModelDef{Kind: KindTurn, AgentID: "turn-v1"},
+			want:  []string{"agent_id", "no target reads", "think binding"},
+		},
+		{
+			name:  "fallback",
+			model: ModelDef{Kind: KindTurn, Fallback: []string{"other"}},
+			want:  []string{"fallback", "no target reads", "think and listen"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := turnDeadFieldWarnings("detector", tc.model)
+			if len(got) != 1 {
+				t.Fatalf("want exactly one warning, got %d: %v", len(got), got)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(got[0], want) {
+					t.Errorf("warning does not name %q: %q", want, got[0])
+				}
+			}
+		})
+	}
+}
+
+// The same fields on any other role are somebody else's business, so this must
+// not fire there. params on a think binding is the whole passthrough mechanism.
+func TestValidateDoesNotWarnOnTurnFieldsElsewhere(t *testing.T) {
+	for _, kind := range []ModelKind{KindThink, KindSpeak, KindListen} {
+		model := ModelDef{
+			Kind:     kind,
+			Params:   map[string]any{"temperature": 0.5},
+			AgentID:  "agent-v1",
+			Fallback: []string{"other"},
+		}
+		if got := turnDeadFieldWarnings("m", model); len(got) > 0 {
+			t.Errorf("%s binding warned about turn-only dead fields: %v", kind, got)
+		}
+	}
+}
+
+// A turn binding carrying only fields that do reach something stays quiet.
+func TestValidateTurnBindingWithLiveFieldsIsSilent(t *testing.T) {
+	model := ModelDef{
+		Kind: KindTurn, Provider: "local", Model: "silero",
+		Pace: PaceBalanced, EndpointingDelay: "400ms",
+		SemanticEndpointing: SemanticEndpointingPreferred,
+	}
+	if got := turnDeadFieldWarnings("detector", model); len(got) > 0 {
+		t.Errorf("a turn binding using only live fields warned: %v", got)
 	}
 }

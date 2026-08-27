@@ -14,6 +14,7 @@ variables:
       share it, and the turn stops caching with no error to notice.
 
 secrets:
+  # The reasoning model and the knowledge bases' embeddings both read this.
   - OPENAI_API_KEY
   - SLNG_API_KEY
   - COVAL_API_KEY
@@ -54,11 +55,18 @@ models:
     reasoning:
       provider: slng
       model: gpt-5.6-luna
+      # Back at -v8 on purpose. The instruction files never changed, so this
+      # package's prompts are byte-identical to what -v8's cache was written
+      # against, and it comes back warm. Do not reuse -v9: it holds
+      # qwen/qwen3-32b's answers from a trial that was reverted, and one of them
+      # was a booking confirmation for a booking that never happened.
       agent_id: optimized-salon-concierge-v8
       upstream:
         provider: openai
       params:
         world_part_override: eu
+        # Not optional once the agent has tools: the GPT-5 family rejects
+        # function tools on chat completions without it.
         reasoning_effort: "none"
   speak:
     voice:
@@ -80,6 +88,17 @@ models:
     detector:
       provider: local
       model: silero
+      # How quickly the agent decides the caller has finished: snappy, balanced
+      # or patient. This is a salon booking line, so callers read out dates,
+      # times and the occasional phone number, and `snappy` would answer some of
+      # them mid-sentence. `balanced` closes the turn at 1.6s instead of the
+      # framework defaults of 2.5s on LiveKit and 3.0s on Pipecat, which is where
+      # a measured 2.5s turn came from.
+      pace: balanced
+      # The floor: how long silence has to last before the caller counts as
+      # finished. Separate from the pace on purpose. This value is tuned per
+      # target in targets.yaml, and the pace is not: a per-target pace would be a
+      # duration in disguise, and this field already is one.
       endpointing_delay: 400ms
 
 agents:

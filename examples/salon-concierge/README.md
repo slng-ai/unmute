@@ -30,6 +30,73 @@ trips a turn needs, not by cutting what the agent can do:
   each cost their own round trip to finish, and the mutation tools already
   refuse a write that is not confirmed, so the split bought no extra safety.
 
+### How long the agent waits before answering
+
+Two numbers, and they are not the same number. Confusing them cost a whole round
+of measurement here, so both are set explicitly.
+
+**The floor** is `endpointing_delay`: how long silence has to last before the
+caller counts as finished. It is tuned per target, 400ms on the base binding and
+200ms on the Pipecat one, and `targets.yaml` carries the measurement behind that
+split. On Pipecat a *wider* window makes some turns a second slower, which is the
+opposite of what the name suggests.
+
+**The ceiling** is `pace: balanced`: the longest a turn may run before closing
+regardless. This is the number that was actually costing the caller time. Nothing
+in a package could reach it before, so it sat at the framework defaults of 2.5s
+on LiveKit and 3.0s on Pipecat, and a live LiveKit call spent 2.5s per turn there
+while the authored window was 400ms. `balanced` brings both to 1.6s.
+
+**Lowering the floor alone does not shorten a turn.** The floor is when the
+runtime may start deciding; the ceiling is when it stops waiting.
+
+`balanced` rather than `snappy` because callers here read out dates, times and
+the occasional phone number, and `snappy` would answer some of them mid-sentence.
+`patient` is the escape hatch if that still happens: it reproduces the framework
+defaults exactly. Faster turn taking is a trade, not a free win, and the failure
+it buys never shows up in a latency figure.
+
+**If you set `conversation.interruption.minimum_words`, that used to cost you the
+end-of-turn model.** The emitted bot replaced Pipecat's smart-turn analyzer with
+a plain silence timer, so turn taking got worse rather than better. It no longer
+does, and this is the behaviour change in this release an author is most likely
+to notice.
+
+### The reasoning model, and why it is this one
+
+Thinking runs on `gpt-5.6-luna` through the Context Router, on OpenAI's own
+endpoint. `params.reasoning_effort: "none"` is not optional here: the GPT-5 family
+rejects function tools on chat completions without it, and nearly every agent in
+this package has tools.
+
+**A cheaper, faster model was tried and reverted on 2026-08-27.** The trial is
+worth recording, because the reason it failed is not the reason anyone expects.
+
+`qwen/qwen3-32b` on OpenRouter is a fraction of the price and its thinking can be
+turned off, which looked like a straight latency win. On a live call it produced
+first tokens in about a second and then told a caller *"your appointment is all
+set"* when no booking tool had run at all. The booking task never executed: given a
+booking request, the model asked for the phone number itself instead of delegating
+to the verification step, improvised the rest of the flow, and reported success.
+
+Measured on this package's own prompt and its five concierge tool schemas, twelve
+repetitions each, scoring whether a multi-turn booking request reaches the
+verification delegate:
+
+| Model | Routing | p50 | p90 |
+|---|---|---|---|
+| **gpt-5.6-luna** | **12/12** | **1.08 s** | **1.15 s** |
+| qwen/qwen3.8-27b | 10/12 | 4.72 s | 5.66 s |
+| z-ai/glm-5.3-flash | 9/12 | 7.34 s | 8.55 s |
+| qwen/qwen3-32b | 4-8/12 | 1.30 s | 2.65 s |
+| deepseek/deepseek-v4-flash-0731 @ inceptron/fp4 | 2/12 | 0.95 s | 1.10 s |
+
+The last row is the whole lesson. It is the fastest thing on the list and the worst
+at the job. **If you are here to change the model, screen it on multi-turn tool
+routing before you look at latency**: neither time-to-first-token nor a single-turn
+tool call predicts whether an agent will follow a multi-step flow, and a model that
+improvises one will invent confirmations rather than refuse.
+
 ### One router cache scope per prompt
 
 Thinking goes through the SLNG Context Router, which can answer a repeated turn
@@ -273,8 +340,8 @@ Common values:
 
 | Name | Purpose |
 |---|---|
-| `OPENAI_API_KEY` | reasoning model, and the knowledge bases' embeddings at startup |
-| `SLNG_API_KEY` | speech and transcription models |
+| `OPENAI_API_KEY` | the reasoning model's upstream, and the knowledge bases' embeddings at startup |
+| `SLNG_API_KEY` | the Context Router, plus the speech and transcription models. One key, all three roles |
 | `COVAL_API_KEY` | Coval trace ingest |
 
 `MANAGER_PHONE_NUMBER` is the cold-transfer destination in E.164 form. It is

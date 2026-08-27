@@ -23,6 +23,7 @@ One turn is four spans, and they are nothing like equal:
 | span | what it is |
 |---|---|
 | silence window | how long you have to stay quiet before the agent believes you finished |
+| turn ceiling | the longest the agent will keep waiting before answering regardless |
 | transcript | your last word to the final text |
 | LLM | one round trip — a tool turn costs two |
 | TTS | synthesis to the first audio |
@@ -32,6 +33,12 @@ In our experience the LLM is the largest and the silence window is the most
 predictable, and the rest are smaller than people expect. That is why the order
 below is not the order of size — it is the order of how reliably each one pays
 off.
+
+The turn ceiling is the exception, and it is worth checking early rather than
+last. Nothing in a package could reach it before `pace` existed, so it sat at the
+framework default — and on a measured LiveKit call two turns spent 2.5s there
+while the authored silence window was 400ms. If your waits look flat and long,
+that is where to look.
 
 Measure your own agent rather than trusting anyone's numbers, including ours.
 [Reading the latency numbers](/optimization/latency) shows what `unmute dev`
@@ -153,17 +160,19 @@ models:
         world_part_override: eu
 ```
 
-### Set the silence window on purpose
+### Set the pace, then the silence window
 
-It is the floor charged on **every** turn. Lowering it also makes short replies
-finalise sooner, because the transcriber is only asked to finalise once the
-silence window elapses — so it pays twice on a "yes, that's right".
+Two settings, and the order matters. **Reach for `pace` first.**
 
-Do not take it to the minimum. Too short and a caller who pauses mid-sentence gets
-cut in two: we had "tomorrow" committed as one turn and "afternoon" as the next,
-and the agent asked twice. Come down from the default in steps and listen for
-interruptions rather than chasing the number. See
-[Turn detection](/models/turn-detection) for the mechanism.
+`pace` is the ceiling: the longest the agent keeps waiting before answering
+regardless. `snappy`, `balanced` or `patient`, defaulting to `balanced`. A turn
+that feels flat and long is sitting at the ceiling, and only this moves it.
+
+`endpointing_delay` is the floor: how long you have to stay quiet before the
+agent believes you finished. Lowering it also makes short replies finalise
+sooner, because the transcriber is only asked to finalise once the silence window
+elapses — so it pays twice on a "yes, that's right". **But lowering the floor
+alone does not shorten a long turn.**
 
 ```yaml agent.yaml
 models:
@@ -171,8 +180,23 @@ models:
     detector:
       provider: local
       model: silero
-      endpointing_delay: 400ms
+      pace: balanced            # the ceiling
+      endpointing_delay: 400ms  # the floor
 ```
+
+Do not take the floor to the minimum. Too short and a caller who pauses
+mid-sentence gets cut in two: we had "tomorrow" committed as one turn and
+"afternoon" as the next, and the agent asked twice. Come down from the default in
+steps and listen for interruptions rather than chasing the number.
+
+The same trade applies to `pace`. `snappy` will occasionally answer someone who
+was pausing to think, and that failure never appears in a latency figure, so
+check for it deliberately. `patient` reproduces the framework defaults exactly
+and is the escape hatch for callers reading out digits.
+
+See [Turn taking](/optimization/turn-taking) for every legal value and what each
+becomes on each target, and [Turn detection](/models/turn-detection) for what
+actually runs.
 
 ### Cut LLM round trips before tuning connections
 

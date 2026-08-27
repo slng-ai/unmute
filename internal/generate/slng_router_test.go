@@ -901,6 +901,98 @@ func TestSlngRouterPureProxyRidesTheBody(t *testing.T) {
 	}
 }
 
+// A router binding's forwardable params ride the request body on both targets,
+// which is what target.SlngRequestBodyArg says and this holds.
+//
+// The kwarg half is the half that matters. Before this rule LiveKit emitted an
+// author's params as constructor kwargs on openai.LLM, so a key the plugin's
+// constructor had never heard of was a TypeError when the agent booted: a live
+// call that never answers, rather than a compile that refuses. Nothing in the
+// compiler could catch it, because the compiler does not know what the upstream
+// accepts. Sending them in the body instead means it does not have to.
+//
+// The nested value is deliberate. A host pin is an object, and an object is the
+// shape that has no constructor kwarg spelling at all.
+func TestSlngRouterForwardableParamsRideTheBody(t *testing.T) {
+	for _, tc := range routerTargets() {
+		t.Run(string(tc.provider), func(t *testing.T) {
+			agent := routerFixture(t)
+			for name, tgt := range agent.Targets {
+				for profile, binding := range tgt.Models.Reason {
+					if !binding.Router() {
+						continue
+					}
+					binding.Params = map[string]any{
+						"world_part_override": "eu",
+						"provider":            map[string]any{"only": []any{"nebius"}},
+						"reasoning_effort":    "none",
+					}
+					tgt.Models.Reason[profile] = binding
+				}
+				agent.Targets[name] = tgt
+			}
+			// The module and not every emitted file: "constructor kwarg" is a fact
+			// about Python, and the runbook beside it quotes the authored params in
+			// prose.
+			source, _ := emitAgentSource(t, agent, tc.provider, tc.module)
+
+			// Both params in the body, the nested one keeping its shape.
+			for _, want := range []string{
+				`"provider": {"only": ["nebius"]}`,
+				`"reasoning_effort": "none"`,
+			} {
+				if !strings.Contains(source, want) {
+					t.Errorf("emitted module does not carry %s in the request body", want)
+				}
+			}
+			// And neither as a constructor kwarg or Settings field. `provider=` is
+			// the one that would not even import; reasoning_effort is the one that
+			// used to be there and must not still be.
+			for _, unwanted := range []string{"provider={", `reasoning_effort="none"`} {
+				if strings.Contains(source, unwanted) {
+					t.Errorf("emitted module passes %s as a constructor kwarg", unwanted)
+				}
+			}
+		})
+	}
+}
+
+// A folded field is not a forwardable param, and the line between them is the
+// reason temperature did not move when the host pin arrived.
+//
+// foldedFields are unmute's own typed model fields. They name a real slot on
+// every entry that has one, so they stay in the construction: moving them would
+// change where a temperature travels on every router package in exchange for
+// nothing. The author's passthrough is the only kind the upstream, rather than
+// the compiler, is meant to read, and the only kind that rides the body.
+func TestSlngRouterFoldedFieldsStayInTheConstruction(t *testing.T) {
+	for _, tc := range routerTargets() {
+		t.Run(string(tc.provider), func(t *testing.T) {
+			agent := routerFixture(t)
+			for name, tgt := range agent.Targets {
+				for profile, binding := range tgt.Models.Reason {
+					if !binding.Router() {
+						continue
+					}
+					binding.Params = map[string]any{
+						"world_part_override": "eu",
+						"temperature":         0.3,
+					}
+					tgt.Models.Reason[profile] = binding
+				}
+				agent.Targets[name] = tgt
+			}
+			source, _ := emitAgentSource(t, agent, tc.provider, tc.module)
+			if !strings.Contains(source, "temperature=0.3") {
+				t.Error("emitted module does not carry temperature as a real field")
+			}
+			if strings.Contains(source, `"temperature": 0.3`) {
+				t.Error("emitted module moved temperature into the request body")
+			}
+		})
+	}
+}
+
 // slngProvenanceKeys is the line's field set and its order, from
 // contracts/provenance-log.md. One list, read by two gates, because the claim is
 // that both drivers write the same line.
@@ -998,5 +1090,34 @@ func TestSlngRouterLiveKitClosesTheClientItOwns(t *testing.T) {
 	}
 	if !strings.Contains(source, ".slng_client.close()") {
 		t.Error("nothing closes the router client; the plugin closes only a client it built itself")
+	}
+}
+
+// The summarizer prompt is the one prompt site ir.Build cannot reach: it is a
+// literal in the LiveKit driver's template rather than a file the author wrote.
+// So it takes the value carried through to the template, and this is its gate.
+//
+// internal/testdata/summary_core is the only package in the tree that authors
+// history: summary, and it exists for this.
+func TestSlngRouterSummarizerCarriesThePromptDirective(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "summary_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, "agent.py")
+	summarize := strings.Index(source, "async def _summarize(")
+	if summarize < 0 {
+		t.Fatal("no _summarize helper emitted, so the fixture no longer summarizes")
+	}
+	body := source[summarize:]
+	if end := strings.Index(body, "\n\n\n"); end > 0 {
+		body = body[:end]
+	}
+	if !strings.Contains(body, "/no_think") {
+		t.Errorf("the summarizer prompt does not carry the authored directive:\n%s", body)
 	}
 }

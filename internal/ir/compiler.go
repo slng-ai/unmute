@@ -218,16 +218,29 @@ type ModelDef struct {
 	EndpointEnv         string              `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
 	Placement           Placement           `json:"placement" yaml:"placement"`
 	SemanticEndpointing SemanticEndpointing `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
+	// Pace is the authored timing intent. Turn models only. Empty resolves to
+	// PaceBalanced in target.ResolvePace, never to "leave the runtime alone".
+	Pace Pace `json:"pace,omitempty" yaml:"pace,omitempty"`
 	// EndpointingDelay is the turn model's silence window: how long the caller
 	// has to stay quiet before the runtime treats them as finished. It is the
 	// floor on every turn's wait. Turn models only; LiveKit floors it at 250ms.
+	//
+	// It sets the floor only. The ceiling comes from Pace, so a package that
+	// tuned this value keeps it and still gets a shorter ceiling.
 	EndpointingDelay Duration `json:"endpointing_delay,omitempty" yaml:"endpointing_delay,omitempty"`
 	// AgentID and Upstream are the SLNG Context Router's two authored fields,
 	// carried verbatim: the id scopes the router's cache and the block says
 	// which upstream serves the model. Neither folds into Params, because params
 	// reach the SDK verbatim and these two are consumed by the compiler.
-	AgentID     string         `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
-	Upstream    *Upstream      `json:"upstream,omitempty" yaml:"upstream,omitempty"`
+	AgentID  string    `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
+	Upstream *Upstream `json:"upstream,omitempty" yaml:"upstream,omitempty"`
+	// PromptSuffix is the authored directive this binding appends to every system
+	// prompt it sends. Carried verbatim like the two above, and for the same
+	// reason: it is consumed by the compiler, not forwarded to the SDK. Build
+	// applies it where instructions resolve, so by the time a driver reads an
+	// agent's Instructions the suffix is already part of them.
+	PromptSuffix string `json:"prompt_suffix,omitempty" yaml:"prompt_suffix,omitempty"`
+
 	Params      map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
 	Fallback    []string       `json:"fallback,omitempty" yaml:"fallback,omitempty"`
 	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
@@ -289,6 +302,24 @@ const (
 	SemanticEndpointingRequired  SemanticEndpointing = "required"
 	SemanticEndpointingPreferred SemanticEndpointing = "preferred"
 	SemanticEndpointingOff       SemanticEndpointing = "off"
+)
+
+// Pace is the authored intent behind a turn's timing. It resolves to concrete
+// per-target numbers in internal/target, which owns the mapping because a floor
+// and a ceiling are target facts.
+//
+// The zero value is not a fourth pace. An unset pace resolves to PaceBalanced,
+// so a package that authored nothing gets the balanced row rather than whatever
+// the framework happened to default to.
+type Pace string
+
+// Defined from internal/target's constants rather than retyped, so the three
+// words have one spelling in the tree and the enum below cannot drift from the
+// table that gives each pace its numbers.
+const (
+	PaceSnappy   Pace = targetcap.PaceSnappy
+	PaceBalanced Pace = targetcap.PaceBalanced
+	PacePatient  Pace = targetcap.PacePatient
 )
 
 type Variable struct {
@@ -776,14 +807,21 @@ type Binding struct {
 	EndpointEnv         string              `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
 	Placement           Placement           `json:"placement,omitempty" yaml:"placement,omitempty"`
 	SemanticEndpointing SemanticEndpointing `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
+	// Pace is the authored timing intent, resolved to per-target numbers by the
+	// driver through target.ResolvePace. Turn bindings only.
+	Pace Pace `json:"pace,omitempty" yaml:"pace,omitempty"`
 	// EndpointingDelay is the turn model's silence window: how long the caller
 	// has to stay quiet before the runtime treats them as finished. It is the
 	// floor on every turn's wait. Turn models only; LiveKit floors it at 250ms.
 	EndpointingDelay Duration `json:"endpointing_delay,omitempty" yaml:"endpointing_delay,omitempty"`
 	// AgentID and Upstream are set only on a SLNG Context Router think binding.
-	AgentID  string         `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
-	Upstream *Upstream      `json:"upstream,omitempty" yaml:"upstream,omitempty"`
-	Params   map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
+	AgentID  string    `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
+	Upstream *Upstream `json:"upstream,omitempty" yaml:"upstream,omitempty"`
+	// PromptSuffix is the directive Build has already appended to every prompt
+	// this binding serves. It is carried here so a report and a gate can name it;
+	// no driver needs to apply it, because the prompts arrive with it in them.
+	PromptSuffix string         `json:"prompt_suffix,omitempty" yaml:"prompt_suffix,omitempty"`
+	Params       map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
 }
 
 // Router reports whether this binding selects the SLNG Context Router, which is

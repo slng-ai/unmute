@@ -315,3 +315,68 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 		t.Error("the salon package no longer declares customer_phone; the journey smokes pass it by keyword")
 	}
 }
+
+// TestSmokeStubbedNamesExistInTheEmittedModule closes the gap that let a
+// twenty-minute suite be the first thing to notice a broken change.
+//
+// The gates above pin the names a smoke script *constructs*. They do not pin the
+// names it *monkeypatches*, and a script patches a module attribute by name:
+//
+//	bot.SileroVADAnalyzer = lambda **kwargs: None
+//
+// A patch whose target no longer takes those arguments, or no longer exists,
+// fails at import inside `make smoke` — opt-in, needs Python, and in one observed
+// run the failure landed after the suite had already burned its whole budget.
+//
+// This holds the same contract in the default suite: every name the Pipecat smoke
+// scripts replace is present in the emitted module, and the call the emitted
+// module makes matches what the stub accepts.
+func TestSmokeStubbedNamesExistInTheEmittedModule(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	emitted := artifactFile(t, artifact, "bot.py")
+
+	// name -> whether the emitted module calls it with keyword arguments. A
+	// stub written `lambda: None` breaks the moment the generator starts passing
+	// any, which is exactly what happened when the VAD gained params=.
+	for name, needsKwargs := range map[string]bool{
+		"SileroVADAnalyzer":        true,
+		"LocalSmartTurnAnalyzerV3": true,
+		"LLMContextAggregatorPair": false,
+		"WorkerRunner":             false,
+	} {
+		if !strings.Contains(emitted, name) {
+			t.Errorf("bot.py no longer names %q, so the smoke script that patches bot.%s patches nothing", name, name)
+			continue
+		}
+		if !needsKwargs {
+			continue
+		}
+		// Find the call and confirm it passes something, so a stub taking no
+		// kwargs would fail. The smoke stubs are `lambda **kwargs: None`.
+		call := name + "("
+		idx := strings.Index(emitted, call)
+		if idx < 0 {
+			t.Errorf("bot.py names %q but never calls it", name)
+			continue
+		}
+		rest := emitted[idx+len(call):]
+		end := strings.IndexByte(rest, '\n')
+		if end < 0 {
+			end = len(rest)
+		}
+		if strings.HasPrefix(strings.TrimSpace(rest[:end]), ")") {
+			t.Errorf("bot.py calls %s() with no arguments; the smoke stub expects kwargs, so update one or the other deliberately", name)
+		}
+	}
+}

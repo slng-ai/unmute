@@ -41,6 +41,31 @@ const (
 	SlngSessionIDHeader = "X-Slng-Session-Id"
 )
 
+// The two per-request extensions a router think request carries, named the way
+// the OpenAI SDK names them, because that is the vocabulary both targets speak:
+// LiveKit passes them through extra_kwargs and Pipecat merges them out of
+// Settings.extra, and either way they reach the same request.
+//
+// SlngRequestBodyArg is also where a router binding's forwardable params go, and
+// that is a fact about the router rather than about a target. It lives here and
+// not as a field on the two catalogue reason rows, because those rows declare
+// how their *class* of entry carries params — LiveKit's as constructor kwargs,
+// Pipecat's through a Settings overflow field — and that stays true for the
+// non-router entries sharing each class. The router is the one exception, so it
+// gets one owner instead of two rows quietly agreeing with each other.
+//
+// The body and not a kwarg because of what the alternative costs. A param on a
+// router binding is passthrough: the compiler does not know what it means and
+// the upstream does. On LiveKit a constructor kwarg the plugin never heard of is
+// a TypeError when the agent boots, which is a live call that never answers
+// instead of a compile that refuses. The body takes any key, and the router
+// forwards keys it does not recognise to the upstream (measured 2026-08-27,
+// research R5).
+const (
+	SlngRequestBodyArg    = "extra_body"
+	SlngRequestHeadersArg = "extra_headers"
+)
+
 // SlngRouterRegions are the router's own regions, in the order the public docs
 // list them. SLNG *speech* world parts are na, eu and ap: the same
 // params.world_part_override key, a different accepted set. A refusal names
@@ -193,6 +218,17 @@ type SlngUpstream struct {
 	WireProvider string
 	// Fields is in endpoint-object order, after the provider key.
 	Fields []SlngUpstreamField
+	// OpenAIModels says this upstream serves OpenAI's own model families, which
+	// is what decides whether the reasoning_effort advice in ir.Validate
+	// applies. True for openai and azure; false for the three that serve
+	// somebody else's models, and false for openai-compat, which speaks the
+	// OpenAI wire format on behalf of whoever the author points it at.
+	//
+	// The distinction earns a column because the alternative is an unactionable
+	// warning. On an openai-compat upstream the advice was to set a parameter the
+	// pinned host answers with a 400, on every compile, and an unactionable
+	// warning is how the actionable ones come to be ignored.
+	OpenAIModels bool
 }
 
 // slngUpstreams is the provider table: which fields each upstream requires,
@@ -200,7 +236,7 @@ type SlngUpstream struct {
 // four provider kinds.
 var slngUpstreams = []SlngUpstream{
 	{
-		Provider: "openai",
+		Provider: "openai", OpenAIModels: true,
 		Fields: []SlngUpstreamField{
 			{Authored: "url", Wire: "url", Default: "https://api.openai.com/v1"},
 			{Authored: "key_env", Wire: "api_key", Credential: true, Default: "OPENAI_API_KEY"},
@@ -217,7 +253,7 @@ var slngUpstreams = []SlngUpstream{
 		},
 	},
 	{
-		Provider: "azure", WireProvider: "azure",
+		Provider: "azure", WireProvider: "azure", OpenAIModels: true,
 		Fields: []SlngUpstreamField{
 			{Authored: "url", Wire: "url", Required: true},
 			{Authored: "key_env", Wire: "api_key", Required: true, Credential: true},

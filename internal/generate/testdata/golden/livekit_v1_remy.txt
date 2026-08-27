@@ -123,6 +123,35 @@ The opening greeting belongs to call start only. A later handoff back to the
 entry agent continues from the carried context and never repeats it. Transfer
 tools become available after that entry turn, so carried history cannot send
 the call straight back before the caller speaks again.
+## Turn taking
+
+Two numbers decide how long a caller waits, and they are not the same number.
+
+**The floor is 0.3s.** The prewarmed Silero VAD waits that much
+silence before it reports end of speech. It comes from `pace: balanced`; set
+`endpointing_delay` to pin it yourself.
+
+Nothing downstream can start earlier, because the transcriber is only asked to
+finalise once the VAD says the caller stopped. The runtime refuses anything under
+0.25s, so `unmute compile` rejects it rather than letting the worker raise on its
+first call.
+
+**The ceiling is 1.6s.** That is `turn_handling`'s endpointing
+`max_delay`, the longest the turn can run before closing regardless. It comes
+from `pace: balanced`.
+
+Mode is `dynamic`, so the wait adapts between 0.3s and
+1.6s from the pauses this caller actually leaves.
+
+**Lowering the floor alone does not shorten a turn.** The floor is when the
+runtime may start deciding; the ceiling is when it stops waiting. A turn that
+runs long is sitting at the ceiling, and only the pace moves that. This is worth
+saying because getting it wrong here cost a whole round of measurement: a live
+call spent 2.5s per turn in endpointing while the authored window was 0.4s.
+
+Faster is not free. `pace: snappy` will occasionally answer a caller who was
+pausing to think, and `patient` is the escape hatch for callers reading out
+numbers, addresses or spellings.
 
 ## Handoffs and the opening turn
 
@@ -958,7 +987,16 @@ class QualifyEvent(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
 
 # --- session ---------------------------------------------------------------
 def prewarm(proc: JobProcess) -> None:
-    proc.userdata["vad"] = silero.VAD.load()
+    # The FLOOR: how long silence has to last before the runtime treats the
+    # caller as finished. From pace: balanced.
+    #
+    # Always explicit. Leaving it off inherited Silero's own 0.55s, which is
+    # slower than the turn detector wants and was never anybody's choice. Hard
+    # floor is 0.25s; the turn detector raises at session start below it.
+    #
+    # Lowering this alone does not shorten a turn. The ceiling is in the session's
+    # turn_handling endpointing below, and that is where a 2.5s turn came from.
+    proc.userdata["vad"] = silero.VAD.load(min_silence_duration=0.3)
 server = AgentServer()
 server.setup_fnc = prewarm
 
@@ -973,6 +1011,10 @@ async def entrypoint(ctx: JobContext) -> None:
         tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], voice="aura-2-thalia-en", model="slng/deepgram/aura:2-en"),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(version="v1-mini"),
+            # The CEILING, and the shortest wait the runtime will consider.
+            # pace: balanced. Without this the streaming defaults apply and
+            # max_delay is 2.5s, which no package could reach.
+            endpointing={"mode": "dynamic", "min_delay": 0.3, "max_delay": 1.6},
             interruption={"enabled": True},
             preemptive_generation={"enabled": True},
         ),
@@ -1171,7 +1213,8 @@ async def entrypoint(ctx: JobContext) -> None:
     "listen: slng via slng.STT (livekit-plugins-slng\u003e=1.6.1, verified 2026-07-15)",
     "reason: openai via openai.LLM (livekit-agents[openai], verified 2026-07-18)",
     "speak: slng via slng.TTS (livekit-plugins-slng\u003e=1.6.1, verified 2026-07-15)",
-    "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory"
+    "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory",
+    "turn pace balanced (silence 0.3s from the pace, closes at 1.6s)"
   ]
 }
 === compose.dev.yaml ===

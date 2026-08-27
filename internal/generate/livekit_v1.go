@@ -342,27 +342,29 @@ type livekitData struct {
 	SessionLLM        livekitChain
 	SessionTTS        livekitService
 	TurnVersion       string
-	// EndpointingDelay is the authored VAD silence window in seconds, "" when
-	// the package leaves the runtime default alone. It renders into the
-	// prewarmed Silero VAD, not into turn_handling's endpointing: min_delay
-	// cannot fire before the VAD reports end of speech, so a value below the
-	// window is unreachable there.
-	EndpointingDelay string
-	Agents           []livekitAgent
-	Tasks            []livekitTask
-	Vars             []livekitVar
-	CallStartVars    []livekitCallStartVar // dispatched input variables (I.dispatch)
-	Capture          *livekitCapture       // generated update_variables tool; nil without conversation variables
-	Secrets          []string              // declared secrets, for .env.example (V11)
-	ExtraEnv         []string              // env the route needs that the package never declared
-	RequiredSecrets  []string              // required secrets: a startup check refuses to run without them (V12)
-	CallRequiredEnv  []string              // cold-transfer destinations checked only for a real phone call
-	LocalTools       []livekitLocalTool    // copied handler files (tools/<name>.py)
-	MCPServers       []livekitMCPServer    // unique mounted sources, used by the shared constructor + startup preflight
-	Pins             map[string]string     // plugin pins (C6): raise dep floors
-	Prompts          []livekitPrompt
-	EntryPromptExpr  string   // templated entry prompt rendered from session.userdata after outbound SIP hydration
-	PluginModules    []string // merged `from livekit.plugins import ...` names
+	// Pace carries the resolved floor, ceiling and endpointing mode. It is never
+	// a zero value: an unset pace resolves to the balanced row, because the
+	// runtime's own defaults are slower than the turn detector needs.
+	Pace paceView
+	// SemanticOff lowers `semantic_endpointing: off`: the session decides end of
+	// turn from voice activity alone, with no turn model. The endpointing dict
+	// still applies, so this target keeps its ceiling either way.
+	SemanticOff     bool
+	Agents          []livekitAgent
+	Tasks           []livekitTask
+	Vars            []livekitVar
+	CallStartVars   []livekitCallStartVar // dispatched input variables (I.dispatch)
+	Capture         *livekitCapture       // generated update_variables tool; nil without conversation variables
+	Secrets         []string              // declared secrets, for .env.example (V11)
+	ExtraEnv        []string              // env the route needs that the package never declared
+	RequiredSecrets []string              // required secrets: a startup check refuses to run without them (V12)
+	CallRequiredEnv []string              // cold-transfer destinations checked only for a real phone call
+	LocalTools      []livekitLocalTool    // copied handler files (tools/<name>.py)
+	MCPServers      []livekitMCPServer    // unique mounted sources, used by the shared constructor + startup preflight
+	Pins            map[string]string     // plugin pins (C6): raise dep floors
+	Prompts         []livekitPrompt
+	EntryPromptExpr string   // templated entry prompt rendered from session.userdata after outbound SIP hydration
+	PluginModules   []string // merged `from livekit.plugins import ...` names
 	// Slng is the SLNG Context Router's module-level helpers. Empty on a package
 	// with no router think binding, and then none of it is emitted (FR-019).
 	Slng        slngHelpers
@@ -414,16 +416,21 @@ type livekitData struct {
 	// and so does a router package with none: the per-call session id lives on
 	// it, because the header set now travels per request and every agent and
 	// task class has to be able to reach the value from a method body.
-	HasUserdata      bool
-	NeedsLastN       bool // the _last_n history helper
-	NeedsSummarize   bool // the _summarize history helper
-	NeedsAsyncio     bool // inactivity end / max_duration timers
-	NeedsInspect     bool // local tool wrappers (isawaitable)
-	NeedsMCP         bool // mcp import (MCPServerHTTP)
-	NeedsEndCallTool bool // beta.tools EndCallTool import (prebuilt end_call)
-	HasColdTransfer  bool // get_job_context import
-	HasWarmTransfer  bool // WarmTransferTask import + trunk env + room_options (B14)
-	HasTaskTransfers bool // _TaskTransfer sentinel + task delegate catch paths
+	HasUserdata    bool
+	NeedsLastN     bool // the _last_n history helper
+	NeedsSummarize bool // the _summarize history helper
+	// SummaryPromptSuffix is the authored directive the summarizer's own think
+	// binding appends. The summarizer prompt is one literal shared by every
+	// summarizer site, so this is one value; slngSummaryPromptSuffix refuses a
+	// package whose summarizer profiles disagree rather than picking one.
+	SummaryPromptSuffix string
+	NeedsAsyncio        bool // inactivity end / max_duration timers
+	NeedsInspect        bool // local tool wrappers (isawaitable)
+	NeedsMCP            bool // mcp import (MCPServerHTTP)
+	NeedsEndCallTool    bool // beta.tools EndCallTool import (prebuilt end_call)
+	HasColdTransfer     bool // get_job_context import
+	HasWarmTransfer     bool // WarmTransferTask import + trunk env + room_options (B14)
+	HasTaskTransfers    bool // _TaskTransfer sentinel + task delegate catch paths
 	// HasToolAnnouncements gates the README section only: the emitted speech is
 	// per-tool and needs no import, so nothing in agent.py reads this.
 	HasToolAnnouncements bool
@@ -458,6 +465,7 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTurnPlacement:         true, // advisory (Inference turn detection supplied)
 	targetcap.FieldSemanticEndpointing:   true, // advisory
 	targetcap.FieldEndpointingDelay:      true, // prewarmed VAD min_silence_duration
+	targetcap.FieldPace:                  true, // endpointing dict + prewarmed VAD floor
 	targetcap.FieldFallback:              true, // llm.FallbackAdapter (V4)
 	targetcap.FieldListenFallback:        true, // stt.FallbackAdapter (T16)
 	targetcap.FieldTask:                  true, // AgentTask; single delegate awaits it (T12)

@@ -137,6 +137,18 @@ type ModelDef struct {
 	EndpointEnv         string   `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
 	Placement           string   `json:"placement,omitempty" yaml:"placement,omitempty"`
 	SemanticEndpointing string   `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
+	// Pace is how quickly the agent decides the caller has finished: snappy,
+	// balanced or patient. It is the portable form of a wait, and each target
+	// maps it onto its own floor and ceiling, because the two frameworks do not
+	// spell either the same way.
+	//
+	// Empty means balanced, which is deliberately not "leave the runtime alone".
+	// The runtime defaults are slower than the turn detector needs, so a package
+	// that says nothing still gets the faster behaviour.
+	//
+	// Turn bindings only, and it takes no per-target override: a per-target pace
+	// is a duration in disguise, and EndpointingDelay already exists for that.
+	Pace string `json:"pace,omitempty" yaml:"pace,omitempty"`
 	// EndpointingDelay is the window of silence that has to pass before the
 	// runtime treats the caller as finished. It is the floor on every turn, so
 	// shortening it shortens every answer and lengthening it gives a caller who
@@ -150,7 +162,26 @@ type ModelDef struct {
 	// Upstream says where the router actually calls the model and whose
 	// credentials pay for it. Required on a router think binding, because the
 	// configuration travels inline on every request.
-	Upstream    *Upstream      `json:"upstream,omitempty" yaml:"upstream,omitempty"`
+	Upstream *Upstream `json:"upstream,omitempty" yaml:"upstream,omitempty"`
+	// PromptSuffix is literal text the compiler appends to every system prompt
+	// this binding sends: each agent's, each task's, and the summarizer's where
+	// one is emitted.
+	//
+	// It exists because some models take instructions no parameter can carry.
+	// Qwen3 is a hybrid thinking model, and on 2026-08-27 three spellings of the
+	// thinking-off parameter were sent to three of its hosts, nine requests: all
+	// accepted, all ignored, hundreds of reasoning tokens each time. Its own
+	// `/no_think` directive in the prompt is the only thing that worked, and it
+	// worked from the system prompt, mid-prompt, with tools, and through the
+	// router.
+	//
+	// On the model rather than on an agent, because it is a fact about the model.
+	// An agent that needs different wording has its own prompt file. The compiler
+	// does not know `/no_think` from any other string and must not learn: the next
+	// model's directive will be different and this field should already work for
+	// it.
+	PromptSuffix string `json:"prompt_suffix,omitempty" yaml:"prompt_suffix,omitempty"`
+
 	Params      map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
 	Fallback    []string       `json:"fallback,omitempty" yaml:"fallback,omitempty"`
 	Description string         `json:"description,omitempty" yaml:"description,omitempty"`

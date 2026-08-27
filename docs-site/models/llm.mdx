@@ -122,6 +122,59 @@ you pick one.
 **On Pipecat**, an unlisted provider is legal for any role on one condition: a
 genuinely OpenAI-compatible endpoint, named with `endpoint_env`.
 
+### Behind the Context Router: `openai-compat`
+
+`endpoint_env` above is for a think binding that talks to your gateway directly.
+When the [Context Router](/optimization/context-router) is in front, the upstream
+travels inline in the request body instead, and an OpenAI-compatible host is the
+`openai-compat` kind. OpenRouter is the worked example:
+
+```yaml agent.yaml
+secrets:
+  - SLNG_API_KEY
+  - OPENROUTER_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: slng
+      model: qwen/qwen3-32b               # the slug the host publishes
+      agent_id: salon-concierge-v1
+      upstream:
+        provider: openai-compat
+        url: https://openrouter.ai/api/v1
+        key_env: OPENROUTER_API_KEY
+      params:
+        world_part_override: eu           # the router's region, not the host's
+        provider:                         # forwarded to OpenRouter
+          only: ["groq"]
+```
+
+`url` and `key_env` are both required here: there is no default to fall back on,
+and your key travels to the router on every think request, so a package has to say
+whose it is.
+
+Two things this shape buys, both worth knowing before you copy it:
+
+- **A host pin.** OpenRouter serves one model from several providers, and they do
+  not behave the same. `params.provider` is forwarded verbatim, so you can accept
+  one. With `only` set, an unavailable host is a 404 with the message intact rather
+  than a quiet fall-back to a provider that breaks your tools.
+- **The context ceiling is the host's, not the model's.** A model card advertises
+  the largest window any provider offers. On `qwen/qwen3-32b` that is 131,072 on
+  Groq and 40,960 on Nebius, for the same model. Check the one you pinned.
+
+**Measure the host you pin, and measure two things separately.** On
+`qwen/qwen3-32b` the four providers spanned 564 ms to 1261 ms at p50 and 739 ms to
+7.3 s at p90, and latency did not predict correctness: the second-fastest spoke a
+fragment of its own tool-call template into every reply. A provider's published
+figures are aggregated over everybody's traffic, mostly short prompts with no
+tools, so they will not match a voice agent's request. Send your own prompt and
+your own tool schemas, and count tool calls as well as milliseconds.
+
+A model whose behaviour no parameter reaches may still need
+[`prompt_suffix`](/optimization/context-router#prompt-suffix-for-what-no-parameter-reaches).
+
 ```yaml
 models:
   think:

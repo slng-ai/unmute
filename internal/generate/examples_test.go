@@ -66,6 +66,13 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// Context Router, the model does not think before its first token, and the
 	// caller never hears another agent's line.
 	//
+	// The middle one is now held by a prompt directive rather than by a parameter,
+	// and that is not a style choice. Three spellings of the thinking-off parameter
+	// were sent to three of this model's hosts on 2026-08-27, nine requests: every
+	// one accepted, every one ignored, hundreds of reasoning tokens each time. The
+	// model's own /no_think directive in the system prompt is the only thing that
+	// worked.
+	//
 	// The last of those was measured, not imagined. The router's cache key is the
 	// (assistant speech, user speech) pair and carries no system prompt, so two
 	// of this package's agents whose last exchange matched collided while they
@@ -82,8 +89,28 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		if !reason.Router() {
 			t.Errorf("%s reasoning is not a router binding: %#v", provider, reason)
 		}
+		// reasoning_effort is not optional once the agent has tools: the GPT-5
+		// family rejects function tools on chat completions without it, and every
+		// tool turn comes back 400.
 		if reason.Params["reasoning_effort"] != "none" {
 			t.Errorf("%s reasoning params = %#v, want reasoning off before the first token", provider, reason.Params)
+		}
+		// No host pin and no prompt directive: this binding is on OpenAI's own
+		// endpoint, which serves one implementation of the model.
+		//
+		// A qwen/qwen3-32b trial on OpenRouter was reverted on 2026-08-27. Measured
+		// on this package's own prompt and tools, 12 reps: luna routes a multi-turn
+		// booking request to the verification delegate 12/12 at p50 1.08s, qwen3-32b
+		// managed 4-8/12 and improvised the flow the rest of the time, and on a live
+		// call it told a caller their appointment was booked when no booking tool had
+		// run. Four other candidates were screened and none cleared the bar. If you
+		// are here to swap the model, screen it on multi-turn tool routing first:
+		// latency and single-turn tool calls predict neither.
+		if _, pinned := reason.Params["provider"]; pinned {
+			t.Errorf("%s reasoning pins a host: %#v. OpenAI's endpoint serves one implementation", provider, reason.Params)
+		}
+		if reason.PromptSuffix != "" {
+			t.Errorf("%s reasoning sets prompt_suffix = %q; this model takes reasoning_effort instead", provider, reason.PromptSuffix)
 		}
 		// This used to require slng_pure_proxy, which stops the router serving
 		// from cache at all. It was a guard against a cross-agent cache hit

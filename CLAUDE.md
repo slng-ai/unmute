@@ -57,7 +57,18 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | every command and flag the skill names exists | `internal/cli/skill_bundle_test.go` |
 | the docs-site CLI pages quote each command's `Usage:` line, not just its flags | `internal/cli/help_capture_test.go` |
 | a receiving agent's opening turn withholds its own handoffs, and no emitted tool carries the on-enter flag | `internal/generate/livekit_v1_test.go` |
-| an authored `endpointing_delay` reaches LiveKit's `min_delay` and Pipecat's `stop_secs`, and stays absent when unset | `internal/generate/endpointing_delay_test.go`, `internal/ir/validate_test.go` |
+| an authored `endpointing_delay` reaches the floor on both targets and never the ceiling, and a package that authors nothing still emits the balanced floor and ceiling rather than inheriting a framework default | `internal/generate/endpointing_delay_test.go`, `internal/ir/validate_test.go` |
+| a `pace` reaches the ceiling on both targets, every pace has a complete per-target row, no Pipecat row varies the floor, and `patient` reproduces the framework default | `internal/target/pace_test.go`, `internal/generate/endpointing_delay_test.go` |
+| `pace` is refused on a non-turn binding, on an unknown value naming all three, and in a per-target override | `internal/ir/validate_test.go` (`TestValidatePace*`) |
+| each emitted runbook names the floor and the ceiling separately, says whether the wait adapts, and on Pipecat distinguishes the two fields both spelled `stop_secs` | `internal/generate/turn_runbook_test.go` |
+| `semantic_endpointing: off` removes the turn model on LiveKit and the end-of-turn analyzer on Pipecat, every other value keeps it, and the analyzer imports follow the branch | `internal/generate/semantic_endpointing_test.go` |
+| a Pipecat package setting `interruption.minimum_words` keeps its end-of-turn analyzer and its ceiling, so the silent downgrade cannot come back | `internal/generate/semantic_endpointing_test.go` (`TestPipecatEmitsNoSpeechTimeoutUnlessAsked`) |
+| a turn field set on the base binding survives a per-target `models:` override, which replaces rather than merges | `internal/generate/semantic_endpointing_test.go` (`TestTurnFieldsSurviveAPerTargetOverride`, over `examples/salon-concierge`) |
+| a turn binding carrying `params`, `agent_id` or `fallback` warns that the field reaches nothing, and the same fields on any other role stay quiet | `internal/ir/validate_test.go` (`TestValidateWarnsOnTurnFieldsThatReachNothing`) |
+| a router binding's forwardable params ride the request body on both targets and reach no constructor kwarg, while a folded field stays in the construction | `internal/generate/slng_router_test.go` (`TestSlngRouterForwardableParamsRideTheBody`, `TestSlngRouterFoldedFieldsStayInTheConstruction`) |
+| an authored `prompt_suffix` reaches every agent and task prompt on its own think profile, no other profile's, and the LiveKit summarizer's; and it moves no cache scope | `internal/ir/build_test.go`, `internal/generate/slng_router_test.go` (`TestSlngRouterSummarizerCarriesThePromptDirective`, over `internal/testdata/summary_core`) |
+| every `prompt_suffix` refusal names what to do instead, an off-router think binding warns rather than refusing, and a per-target override cannot name a second value | `internal/ir/validate_test.go` (`TestValidatePromptSuffix*`) |
+| the `reasoning_effort` advice fires only on an upstream serving OpenAI's own models, because elsewhere the param is what the host refuses | `internal/ir/validate_test.go` (`TestValidateSlngRouterWarnsOnToolsWithoutReasoningEffort`) |
 | the console's target menus lead with the right target: create with `scaffold.DefaultTarget`, maintain with the package's own | `internal/tui/default_target_test.go` |
 | every telephony route deploys to a managed platform: every Pipecat route emits a deploy manifest on the platform base image, and no LiveKit route emits one | `internal/generate/cloud_isolation_test.go` |
 | an inbound LiveKit SIP route emits the trunk and dispatch-rule records a call needs, and the one command that creates them | `internal/generate/livekit_telephony_setup_test.go` |
@@ -67,7 +78,7 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | the emitted transfer document and the plane's reading of it stay in agreement | `internal/generate` (emitted shape) + `internal/cli` (the reading), one gate each |
 | the docs-site transfer table matches the route table, both directions | `internal/docsite/transfer_table_test.go` |
 | the docs-site tool tables match the capability table on all three targets, and the page's own count of execution blocks is right | `internal/docsite/tool_table_test.go` |
-| an L4 smoke fixture still compiles the salon package, and the emitted Python keeps the names its script calls | `internal/generate/smoke_fixture_test.go` |
+| an L4 smoke fixture still compiles the salon package, the emitted Python keeps the names its script calls, and every name a smoke script monkeypatches still exists and is still called the way the stub expects | `internal/generate/smoke_fixture_test.go` (`TestSmokeStubbedNamesExistInTheEmittedModule`) |
 | the docs-site states one version, in one snippet, and no page hardcodes a version literal that disagrees | `internal/docsite/version_test.go` |
 | the docs-site declares its Markdown surface, and the coding-agents page names all three endpoints | `internal/skill/markdown_surface_test.go` |
 | the changelog runs newest first, every entry carries a label, a version and its own release link, the newest matches the version snippet, and no entry keeps a heading, a dash or a commit hash | `internal/docsite/changelog_test.go` |

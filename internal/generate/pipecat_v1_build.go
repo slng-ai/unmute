@@ -52,10 +52,8 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		Tracing:         agent.Tracing != nil,
 		TracingProvider: tracingProviderOf(agent),
 		ResultsHint:     pipecatResultsHint,
-		// The VAD's stop_secs is this driver's silence window: the same knob
-		// LiveKit calls endpointing min_delay. A transcriber slower than the
-		// default answers half a sentence (B: fragmented STT, 2026-08-20).
-		EndpointingDelay: pipecatEndpointingDelay(target.Models.Turn),
+		Pace:            resolvePaceView(targetcap.Pipecat, target.Models.Turn),
+		SemanticOff:     semanticEndpointingOff(target.Models.Turn),
 	}
 	// Read through the same door validate uses, so the command and the emitted
 	// project cannot disagree about what the account has to be allowed to do.
@@ -178,6 +176,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	data.Notes = append(data.Notes, serviceNotes(data)...)
 	if target.Models.Turn != nil {
 		data.Notes = append(data.Notes, "turn role lowers to on-device VAD (Silero); its binding is advisory")
+		data.Notes = append(data.Notes, data.Pace.note())
 	}
 	setImportNeeds(&data)
 	data.NeedsRender = renderNeeds(agent)
@@ -1011,19 +1010,6 @@ func transferReason(c *ir.AgentTransfer) string {
 // straight from `when:`, which is optional, so every Pipecat delegate written
 // without one emitted `""""""` — a control present in the file and unreachable
 // at run time (Wave C, 2026-08-15).
-// pipecatEndpointingDelay renders the turn binding's silence window as seconds
-// for VADParams(stop_secs=...). Empty leaves SileroVADAnalyzer on its default.
-func pipecatEndpointingDelay(binding *ir.Binding) string {
-	if binding == nil || binding.EndpointingDelay == "" {
-		return ""
-	}
-	duration, err := time.ParseDuration(string(binding.EndpointingDelay))
-	if err != nil {
-		return "" // ir.Validate already rejected it; never emit a broken literal
-	}
-	return strconv.FormatFloat(duration.Seconds(), 'f', -1, 64)
-}
-
 func delegateReason(c *ir.Delegate) string {
 	return orDefault(c.When, "Run this flow. It returns its result to you when it finishes.")
 }
@@ -1495,7 +1481,7 @@ func pipecatRuntimeBody(agent *ir.Agent, tgt ir.Target, profile string) string {
 		Names:      names,
 		ConfigFunc: slngConfigFunc(profile),
 	}
-	return pyLiteral(slngRequestBody(site, slngPureProxy(tgt.Models.Reason[profile])))
+	return pyLiteral(slngRequestBody(site, tgt.Models.Reason[profile]))
 }
 
 // pipecatRuntimeStateExpr is the call state inside an agent method, where the

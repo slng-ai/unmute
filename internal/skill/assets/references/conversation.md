@@ -219,9 +219,20 @@ runs, so the field is a preference there:
 It is information, not a problem, and the command still exits 0. Do not go
 looking for a `placement:` line to remove; there usually is not one.
 
-`semantic_endpointing` warns on both code targets, because what it does depends
-on the model bound underneath it. Read the warning to the user rather than
-hiding it.
+`semantic_endpointing` no longer warns on the code targets. It used to, and the
+warning said its effect depended on the bound model; the real situation was that
+the value reached no emitted project at all. It is load-bearing now:
+
+- `off` removes the semantic end-of-turn model. LiveKit decides end of turn from
+  voice activity alone; Pipecat ends the turn on a speech timeout instead of the
+  smart-turn analyzer's verdict. On Pipecat this also gives up the `pace`
+  ceiling, because that ceiling is the analyzer's own setting.
+- `preferred`, `required` and leaving it out all keep the model. Both code
+  targets can always provide one, so there is nothing for `required` to assert
+  that is not already true.
+
+Reach for `off` only if the semantic model is judging turns wrong for your
+callers. It is a downgrade in exchange for predictability, not a speed win.
 
 ## What to check by ear
 
@@ -229,8 +240,10 @@ A package that validates can still sound wrong. When you hand an agent over,
 tell the user to listen for these four:
 
 1. **The greeting.** Does it sound like a person opening a call?
-2. **The pause before the first reply.** If it drags, the lever is turn
-   detection, then the model, in that order.
+2. **The pause before the first reply.** If it drags, the lever is `pace` on the
+   turn binding, then the model, in that order. `pace` sets the ceiling on a
+   turn; `endpointing_delay` sets only the floor, and lowering the floor alone
+   does not shorten a turn.
 3. **Interrupting mid sentence.** Does the agent stop, and does it stop for
    "mm hm" too?
 4. **A long silence.** Does the nudge come at a reasonable moment, or does it

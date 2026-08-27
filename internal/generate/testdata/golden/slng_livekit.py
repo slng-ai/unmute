@@ -393,7 +393,7 @@ async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
             },
             # Rebuilt for every request, which is the point: a value this call
             # learns partway through reaches the model from the next turn on.
-            "extra_body": {"slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(session.userdata, ("caller_alias", "customer_id"))},
+            "extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(session.userdata, ("caller_alias", "customer_id"))},
         },
     ) as stream:
         async for chunk in stream:
@@ -783,7 +783,16 @@ class Confirm(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict])
 
 # --- session ---------------------------------------------------------------
 def prewarm(proc: JobProcess) -> None:
-    proc.userdata["vad"] = silero.VAD.load()
+    # The FLOOR: how long silence has to last before the runtime treats the
+    # caller as finished. From pace: balanced.
+    #
+    # Always explicit. Leaving it off inherited Silero's own 0.55s, which is
+    # slower than the turn detector wants and was never anybody's choice. Hard
+    # floor is 0.25s; the turn detector raises at session start below it.
+    #
+    # Lowering this alone does not shorten a turn. The ceiling is in the session's
+    # turn_handling endpointing below, and that is where a 2.5s turn came from.
+    proc.userdata["vad"] = silero.VAD.load(min_silence_duration=0.3)
 server = AgentServer()
 server.setup_fnc = prewarm
 
@@ -814,10 +823,14 @@ async def entrypoint(ctx: JobContext) -> None:
     session = AgentSession[Userdata](
         userdata=slng_state,
         stt=deepgram.STT(api_key=os.environ["DEEPGRAM_API_KEY"], model="nova-3"),
-        llm=openai.LLM(client=slng_state.slng_client, model="gpt-5.6-luna", reasoning_effort="none"),
+        llm=openai.LLM(client=slng_state.slng_client, model="gpt-5.6-luna"),
         tts=elevenlabs.TTS(api_key=os.environ["ELEVEN_API_KEY"], voice_id="cgSgspJ2msm6clMCkdW9"),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(version="v1-mini"),
+            # The CEILING, and the shortest wait the runtime will consider.
+            # pace: balanced. Without this the streaming defaults apply and
+            # max_delay is 2.5s, which no package could reach.
+            endpointing={"mode": "dynamic", "min_delay": 0.3, "max_delay": 1.6},
             interruption={"enabled": True, "min_words": 2},
             preemptive_generation={"enabled": True},
         ),

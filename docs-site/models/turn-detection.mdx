@@ -29,21 +29,38 @@ models:
       model: silero
 ```
 
-That is what every shipped example writes, and on Pipecat it is the whole story.
-A package scaffolded by `unmute init` targets LiveKit, so it writes the LiveKit
-binding below in this spot instead.
+That is what every shipped example writes. A package scaffolded by `unmute init`
+targets LiveKit, so it writes the LiveKit binding below in this spot instead.
 
 ## Pipecat
 
-The generated bot runs Silero as the transport's voice activity analyzer,
-on-device, with no API call:
+Both targets do two jobs, not one. On Pipecat both run on device.
+
+Silero is the transport's voice activity analyzer: it decides you stopped making
+sound. Pipecat's own Smart Turn v3 classifier then decides whether you had
+finished a thought. The classifier is a small ONNX model shipped inside the
+framework, so it needs no extra install and no API call, and it runs in every
+package Unmute compiles whether or not you asked for it:
 
 ```python
-from pipecat.audio.vad.silero import SileroVADAnalyzer
+vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+user_turn_strategies=UserTurnStrategies(
+    stop=[
+        TurnAnalyzerUserTurnStopStrategy(
+            turn_analyzer=LocalSmartTurnAnalyzerV3(
+                params=SmartTurnParams(stop_secs=1.6)
+            )
+        )
+    ],
+),
 ```
 
-End of turn is that signal. There is no separate turn model on this target, so
-`provider: local` and `model: silero` say what happens.
+So `provider: local` and `model: silero` name the first stage. The second stage
+has no binding to name because it is the framework's own, and it is not optional.
+
+The two `stop_secs` are different fields with the same name: the first is the
+silence window, from `endpointing_delay`, and the second is the classifier's
+ceiling, from `pace`. See [Latency](/optimization/latency) for both.
 
 ## LiveKit Agents
 
@@ -53,11 +70,16 @@ activity, and it takes a turn model on top:
 ```python
 turn_handling=TurnHandlingOptions(
     turn_detection=inference.TurnDetector(version="v1-mini"),
+    endpointing={"mode": "dynamic", "min_delay": 0.3, "max_delay": 1.6},
     interruption={"enabled": True},
     preemptive_generation={"enabled": True},
 ),
 vad=ctx.proc.userdata["vad"],
 ```
+
+The `endpointing` dict comes from `pace`. Unlike Pipecat, LiveKit can adapt the
+wait to the pauses a caller actually leaves, which is what `mode: dynamic` asks
+for.
 
 The turn model comes from a per-target override, which is how every example that
 runs on LiveKit writes it:

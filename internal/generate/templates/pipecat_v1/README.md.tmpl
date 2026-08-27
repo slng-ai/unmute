@@ -139,21 +139,47 @@ holds `FunctionCallParams` and pushes the frame through `params.llm`; a task too
 is a flows handler and queues it through `flow_manager.worker`. Same frame, same
 contract, and nothing waits for playout in either.
 {{- end}}
-{{- if .HasFlows}}
 
-{{- if .EndpointingDelay}}
 ## Turn taking
 
-The VAD waits {{.EndpointingDelay}}s of silence before it ends the caller's turn,
-from the package's `endpointing_delay`. That window is the floor on every turn:
-lower it to answer sooner, at the cost of cutting off a caller who pauses
-mid-sentence.
+Two numbers decide how long a caller waits. **Both are spelled `stop_secs` in
+`bot.py` and they are different fields**, so grep finds two and only this tells
+you which is which.
 
-Note the defaults differ from the LiveKit driver, which matters if this package
-runs on both. Pipecat's `stop_secs` defaults to 0.2s and LiveKit's Silero VAD to
-0.55s, so an unset package answers noticeably faster here.
+**The floor is {{.Pace.Floor}}s**, in `VADParams(stop_secs={{.Pace.Floor}})`. The VAD waits that
+much silence before speech counts as stopped.{{if .Pace.FloorAuthored}} It comes from the
+package's `endpointing_delay`.{{else}} It is Pipecat's own default.{{end}}
 
-{{end}}## Task returns
+**The ceiling is {{.Pace.Ceiling}}s**, in `SmartTurnParams(stop_secs={{.Pace.Ceiling}})` on the
+end-of-turn analyzer. That is the longest the turn can run before closing
+regardless, and it comes from `pace: {{.Pace.Name}}`.
+
+The wait does not adapt to the caller on this target. Unlike the LiveKit driver,
+which has a `dynamic` endpointing mode, this is the same fixed window on every
+turn.
+
+**Lowering the floor alone does not shorten a turn**, and on this target
+widening it makes some turns *slower*. pipecat-slng asks the bridge to finalise
+when the VAD reports the caller stopped; a final that has already arrived by then
+finds no request outstanding, so the frame goes out unfinalized and Pipecat waits
+out a flat 1.0s safety net instead. Measured over eight turns at 0.4s: every turn
+whose transcript beat the window paid a flat 1.000s, and observed transcripts
+arrive from 0.27s. That is why the floor here stays at 0.2s for every pace while
+LiveKit's moves, and why the inconsistency is deliberate.
+
+The end-of-turn analyzer (`LocalSmartTurnAnalyzerV3`) runs on every call. It is
+constructed explicitly only so the ceiling is reachable; left implicit it sits at
+its own 3s.
+{{if .NeedsTurnStrategies}}
+A minimum interruption word count is set, and it replaces the default turn-*start*
+pair on purpose: gating turn start on words is the point, and leaving VAD start in
+place would open the turn before the words arrive. It no longer costs you the
+end-of-turn analyzer, which it used to.
+{{end}}
+
+{{- if .HasFlows}}
+
+## Task returns
 
 When a task returns, its internal turns stay out of the owner's conversation.
 The completed delegate call stays in that conversation with the typed result,
@@ -408,6 +434,47 @@ form:
 base64 < service-account.json | tr -d '\n'
 ```
 {{end}}
+
+### Params and the prompt directive
+
+{{if .Slng.BodyParams}}Params on a router think binding travel **in the request body**, on both targets, and the router forwards keys it does not recognise to
+the upstream. This project sends:
+
+```
+{{range .Slng.BodyParams}}{{.}}
+{{end}}```
+
+`world_part_override` never reaches the upstream: this compiler consumes it into
+the router's regional base URL, and the line above says so. Everything else is
+passthrough, and the compiler does not know what any of it means, so it cannot
+tell you what the upstream will do with a value. If a value is wrong, the upstream says so and the
+router relays the message intact, with its status code.
+
+Constructor kwargs used to be where these went on LiveKit, and that is worth
+knowing if you are reading an older project: a key the plugin's constructor had
+never heard of was a `TypeError` at startup rather than a compile-time refusal.
+The body takes any key.
+
+{{else}}This project's router bindings send no forwardable params. Params on a router
+think binding would travel in the request body, on both targets, and the router
+forwards keys it does not recognise to the upstream.
+
+{{end}}{{if .Slng.PromptSuffix}}An authored `prompt_suffix` is appended to **every
+system prompt this binding sends**, separated by a blank line. This project
+appends:
+
+```
+{{range .Slng.PromptSuffix}}{{.}}
+{{end}}```
+
+It reaches every agent's prompt, and every task's prompt on that binding's profile,
+which on this target travels through its owning agent's model service. You can read
+it in the `*_PROMPT` constants in the module beside this file, which is the point of
+putting it there: a directive you cannot see is a directive you cannot check.
+
+It is literal text and the compiler attaches no meaning to it. It exists because
+some models take instructions no parameter carries.
+{{end}}
 ### Reading the response
 
 **Every think request logs one line saying where its answer came from**, at info
@@ -449,7 +516,8 @@ off the stream.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| every tool turn returns 400, `Function tools with reasoning_effort are not supported` | the reasoning models in the GPT-5 family reject function tools on chat completions without it | set `params.reasoning_effort: "none"` on the think binding |
+| every tool turn returns 400, `Function tools with reasoning_effort are not supported` | the reasoning models in the GPT-5 family reject function tools on chat completions without it | set `params.reasoning_effort: "none"` on the think binding. **Only that family**: on an OpenAI-compatible upstream the same param can itself be what the host answers with a 400 |
+| a 4xx naming providers, models or a param you authored | the upstream refused a passthrough param, and the router relayed its message | read the message: it comes from the upstream and names what it accepts. The compiler does not validate a passthrough param, so this is where a wrong one surfaces |
 | every think request returns 400, `cannot be resolved: no org config found` | the request reached the router without its inline configuration | this agent always sends it, so the body was stripped or malformed in transit |
 | 400 starting `invalid slng_config:` | a malformed inline configuration | the message names the failing field; credentials are never echoed back |
 | 400 `inline slng_config is not enabled` | inline configuration is off for the organisation | ask your SLNG contact to enable it |
