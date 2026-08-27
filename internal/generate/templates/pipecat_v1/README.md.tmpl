@@ -911,8 +911,6 @@ Do these in the [Twilio Console](https://console.twilio.com), in this order.
      <Connect>
        <Stream url="{{.CloudWebsocket.StreamURL}}">
          <Parameter name="_pipecatCloudServiceHost" value="{{.Project}}.YOUR_ORGANIZATION"/>
-         <Parameter name="from_number" value="{{"{{From}}"}}"/>
-         <Parameter name="to_number" value="{{"{{To}}"}}"/>
        </Stream>
      </Connect>
    </Response>
@@ -928,12 +926,10 @@ Do these in the [Twilio Console](https://console.twilio.com), in this order.
      one from a guide.
    - **The agent name is already filled in.** `YOUR_ORGANIZATION` is the only
      substitution you make.
-   - **`{{"{{From}}"}}` and `{{"{{To}}"}}` are Twilio's own Bin substitutions**, not
-     placeholders for you to fill. Twilio replaces them per call, and the platform
-     forwards every custom parameter to the session, so the caller's number and
-     the number they rang arrive in the session body next to `direction`. The
-     platform's own example markup carries only the service host; these two lines
-     are this project's addition.
+   - **There is nothing else in it.** A `<Parameter>` reaches this agent only if
+     the emitted code reads one by that name, and on an inbound call that is the
+     service host alone. Adding the caller's number here is a common suggestion
+     and it does nothing: no module in this package reads it.
 
 4. **Point the number at that Bin.** Phone Numbers, Manage, Active Numbers,
    your number, Voice Configuration, "A call comes in", choose TwiML Bin, pick
