@@ -593,7 +593,7 @@ func TestV23PipecatSpeechObservationsAreRich(t *testing.T) {
 }
 
 func TestV24PipecatStaticCheckSurface(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	pkg, err := spec.Load(examplePackagePath("simple-prompt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,7 +665,7 @@ func TestV24PipecatStaticCheckSurface(t *testing.T) {
 }
 
 func TestV25PipecatTracesConfiguredSystemInstruction(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	pkg, err := spec.Load(examplePackagePath("simple-prompt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -728,7 +728,7 @@ func TestV22PipecatToolCallsAreTraced(t *testing.T) {
 }
 
 func TestV22PipecatMCPToolCallsAreTraced(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	pkg, err := spec.Load(examplePackagePath("simple-prompt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1448,7 +1448,7 @@ func TestV2PipecatV1AgentTransferAnnouncementWaitsForSourcePlayout(t *testing.T)
 // sits directly in the pipeline, tools are module-level direct functions in
 // LLMContext, and there is no bus / BusBridge / LLMWorker / activate_worker.
 func TestF3PipecatSingleAgentInline(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	pkg, err := spec.Load(examplePackagePath("simple-prompt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1497,7 +1497,7 @@ func TestF3PipecatSingleAgentInline(t *testing.T) {
 // lifecycle path prevents the inline optimization from growing a second MCP
 // transaction and collision implementation.
 func TestPipecatV1MCPUsesWorkerTopology(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	pkg, err := spec.Load(examplePackagePath("simple-prompt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2832,7 +2832,7 @@ func TestPipecatV1ToolAnnounceQueuesFrameWithoutWaiting(t *testing.T) {
 // single-agent package uses carries the same decorator, so both call sites are
 // held by a test rather than by one of them happening to be exercised.
 func TestPipecatV1ToolAnnounceOnInlinePath(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	pkg, err := spec.Load(examplePackagePath("simple-prompt"))
 	if err != nil {
 		t.Fatal(err)
 	}

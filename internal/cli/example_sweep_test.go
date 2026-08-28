@@ -62,12 +62,12 @@ const (
 var sweepIgnored = []string{".env", "livekit.toml", "livekit-sip.toml"}
 
 // sweepVars seeds input variables the sweep would otherwise leave to their
-// defaults, which would exercise the fallback instead of the dispatch path.
-// multi-task declares names too but neither is call_start and its greeting
-// interpolates nothing, so it needs none (research.md R5, closed).
-var sweepVars = map[string][]string{
-	"salon-concierge": {"customer_id=cus_0042"},
-}
+// defaults, which would exercise the fallback instead of the dispatch path
+// (research.md R5, closed). Empty since 2026-08-28: `--var` only accepts a
+// variable with `source: call_start`, and no shipped example declares one, so
+// every entry here would be refused by the flag rather than seeded. Add the row
+// back with the example that reintroduces one.
+var sweepVars = map[string][]string{}
 
 type sweepSession struct {
 	Example string  `json:"example"`
@@ -228,13 +228,13 @@ func discoverExamples(t *testing.T, root string) []sweepExample {
 func TestSweepDiscoveryUsesBrowserChannel(t *testing.T) {
 	root := repoRoot(t)
 	t.Chdir(root)
-	t.Setenv(sweepOnlyEnv, "salon-concierge,simple-prompt")
+	t.Setenv(sweepOnlyEnv, "salon-concierge")
 	got := map[string]bool{}
 	for _, example := range discoverExamples(t, root) {
 		got[example.Name] = example.Runnable
 	}
 	for name, want := range map[string]bool{
-		"simple-prompt": true, "salon-concierge": true,
+		"salon-concierge": true,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got[name] != want {

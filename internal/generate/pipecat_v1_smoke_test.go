@@ -267,14 +267,14 @@ from pipecat.pipeline.worker import PipelineWorker  # noqa: E402
 
 
 class Params:
-    function_name = "to_appointment_manager"
+    function_name = "to_reservations"
 
     async def result_callback(self, _result, **_kwargs):
         pass
 
 
 async def exercise_handoff():
-    source = bot.BookingDeskAgent()
+    source = bot.GreeterAgent()
     events = []
     original_queue = PipelineWorker.queue_frame
 
@@ -296,10 +296,10 @@ async def exercise_handoff():
         assert activation.messages == [
             {
                 "role": "developer",
-                "content": "The caller wants to reschedule or cancel an existing appointment.",
+                "content": "Caller wants to book a table for a normal dine-in visit.",
             }
         ]
-        assert name == "appointment_manager"
+        assert name == "reservations"
         source._active = False
         events.append(("activate", name))
 
@@ -311,16 +311,16 @@ async def exercise_handoff():
     source.activate_worker = capture_activate
     source.flush_pipeline = capture_flush
     try:
-        registered = source.llm._functions["to_appointment_manager"].handler
+        registered = source.llm._functions["to_reservations"].handler
         await asyncio.wait_for(registered.invoke({}, Params()), timeout=1.0)
     finally:
         PipelineWorker.queue_frame = original_queue
 
     assert events == [
-        ("speak", "I’m connecting you with our appointment manager now."),
+        ("speak", "I am connecting you with our reservations desk now."),
         ("started",),
         ("stopped",),
-        ("activate", "appointment_manager"),
+        ("activate", "reservations"),
     ], events
 
 
@@ -363,14 +363,15 @@ func TestSmokePipecatV1BuiltinEndCall(t *testing.T) {
 }
 
 func TestSmokeV2PipecatAgentTransferAnnouncementWaitsForSourcePlayout(t *testing.T) {
-	runPipecatSmokeScript(t, "subagents", nil, nil, pipecatHandoffAnnouncementSmokeScript)
-}
-
-func examplePackagePath(name string) string {
-	if name == "remy" || name == "safe_core" || name == "daily_carrier" {
-		return filepath.Join("..", "testdata", name)
-	}
-	return filepath.Join("..", "..", "examples", name)
+	// remy authors no announcement, so the test sets one. The behaviour under
+	// test is the playout ordering, not where the sentence came from.
+	runPipecatSmokeScript(t, "remy", nil, func(agent *ir.Agent) {
+		transfer, ok := agent.Controls["to_reservations"].(*ir.AgentTransfer)
+		if !ok {
+			t.Fatalf("to_reservations is %T, want an agent transfer", agent.Controls["to_reservations"])
+		}
+		transfer.Announce = "I am connecting you with our reservations desk now."
+	}, pipecatHandoffAnnouncementSmokeScript)
 }
 
 // smokeCheckScript imports the emitted bot and instantiates every service
@@ -1824,15 +1825,15 @@ func TestSmokePipecatRegionalInfrastructureInstantiates(t *testing.T) {
 // pinned Pipecat 1.8.0 and observes task-role replacement, owner-role restoration,
 // and transfer activation (V28).
 func TestSmokePipecatV1TaskGroupsInstantiate(t *testing.T) {
-	runPipecatSmokeScript(t, "task-groups", nil, func(agent *ir.Agent) {
-		aftercare := agent.Agents["appointment_desk"]
+	runPipecatSmokeScript(t, "remy", nil, func(agent *ir.Agent) {
+		aftercare := agent.Agents["reservations"]
 		aftercare.Instructions = "You are the aftercare agent."
 		aftercare.Tools = nil
 		agent.Agents["aftercare"] = aftercare
-		group := agent.TaskGroups["appointment_flow"]
+		group := agent.TaskGroups["reserve_group"]
 		group.Then = ir.GroupTransfer
 		group.ThenTarget = "aftercare"
-		agent.TaskGroups["appointment_flow"] = group
+		agent.TaskGroups["reserve_group"] = group
 	}, pipecatTaskRoleSmokeScript)
 }
 
@@ -2294,7 +2295,7 @@ func TestSmokeV24PipecatDailyTransferStaticCheck(t *testing.T) {
 // pinned ruff of its own.
 //
 // ty stays on simple-prompt (TestSmokeV24PipecatSimplePromptStaticCheck) rather
-// than widening here: run over multi-task and task-groups it reports real type
+// than widening here: run over a task-bearing package it reports real type
 // errors in emitted task code (self.context is `Unknown | None` at the snapshot
 // and aggregator call sites, self.state likewise where results are assigned).
 // Those are driver bugs to fix in their own change, not something to widen the
@@ -2303,7 +2304,7 @@ func TestSmokeV24PipecatExamplesStaticCheck(t *testing.T) {
 	if _, err := exec.LookPath("uv"); err != nil {
 		t.Skip("uv not available")
 	}
-	for _, example := range []string{"simple-prompt", "multi-task", "task-groups", "subagents"} {
+	for _, example := range []string{"simple-prompt", "salon-concierge", "remy"} {
 		t.Run(example, func(t *testing.T) {
 			pkg, err := spec.Load(examplePackagePath(example))
 			if err != nil {

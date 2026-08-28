@@ -164,7 +164,6 @@ func TestTaskTransferAndSharedResultDocsStayAligned(t *testing.T) {
 	for name, content := range map[string]string{
 		"references/orchestration.md":                      transferDocs["references/orchestration.md"],
 		"docs-site/build/orchestration/task-groups.mdx":    transferDocs["docs-site/build/orchestration/task-groups.mdx"],
-		"examples/task-groups/README.md":                   trackedFile(t, "examples/task-groups/README.md"),
 		"internal/generate/templates/livekit_v1/README.md": transferDocs["internal/generate/templates/livekit_v1/README.md"],
 		"internal/generate/templates/pipecat_v1/README.md": transferDocs["internal/generate/templates/pipecat_v1/README.md"],
 	} {
@@ -215,7 +214,7 @@ func TestTracingPrivacyWarningStaysExplicit(t *testing.T) {
 		"references/package.md":                                 bundleFile(t, "references/package.md"),
 		"docs-site/reference/agent-yaml.mdx":                    trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
 		"docs/HARNESS_TEST.md":                                  trackedFile(t, "docs/HARNESS_TEST.md"),
-		"examples/simple-prompt/README.md":                      trackedFile(t, "examples/simple-prompt/README.md"),
+		"docs-site/tracing/langfuse.mdx":                        trackedFile(t, "docs-site/tracing/langfuse.mdx"),
 		"internal/generate/templates/livekit_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/livekit_v1/README.md.tmpl"),
 		"internal/generate/templates/pipecat_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
 	} {
@@ -233,7 +232,7 @@ func TestPipecatTracingProviderOwnershipStaysExplicit(t *testing.T) {
 	for name, content := range map[string]string{
 		"references/package.md":                                 bundleFile(t, "references/package.md"),
 		"docs-site/reference/agent-yaml.mdx":                    trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
-		"examples/simple-prompt/README.md":                      trackedFile(t, "examples/simple-prompt/README.md"),
+		"docs-site/tracing/langfuse.mdx":                        trackedFile(t, "docs-site/tracing/langfuse.mdx"),
 		"internal/generate/templates/pipecat_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
 	} {
 		if !strings.Contains(content, rule) {

@@ -10,9 +10,10 @@ should never see.
 This page teaches the common workflow. For every type, source, and supported
 location, use the [Variables reference](/reference/variables).
 
-The `agent.yaml` and tool snippets below are a worked example you can paste.
-`examples/salon-concierge` is the shipped package with a `variables:` block, and
-it is what the runnable commands here use.
+Every snippet below is a worked example you can paste into a package of your
+own. No shipped example declares a `call_start` variable, so the commands here
+name `my-agent`: the package you get from
+[`unmute init`](/reference/cli/init), with the `variables:` block below added.
 
 ## Declare them
 
@@ -62,7 +63,14 @@ In production the values arrive with the call. On your machine, `--var` stands
 in for that:
 
 ```sh
-unmute dev examples/salon-concierge --target pipecat \
+unmute dev my-agent --var customer_id=cus_2002
+```
+
+It is repeatable, so several values seed one call:
+
+```sh
+unmute dev my-agent \
+  --var customer_name=Priya \
   --var customer_id=cus_2002
 ```
 
@@ -84,8 +92,8 @@ Declaring a variable with `source: conversation` creates a tool called
 `update_variables` in the generated project. You do not write it. The model
 calls it when the caller says something worth keeping.
 
-Say "I'd like a haircut" to the salon agent and `requested_service` is stored
-for the rest of the call.
+Say "I'd like a haircut" and `requested_service` is stored for the rest of the
+call.
 
 ## Hand a value to a tool
 
@@ -156,14 +164,13 @@ name and wrong for a token. See [secrets](/reference/secrets).
 ## Try it
 
 ```sh
-unmute dev examples/salon-concierge --target pipecat --var customer_id=cus_2002
+unmute dev my-agent --var customer_id=cus_2002
 ```
 
 Seeding `customer_id` is the same thing a production call does when it already
-knows who is calling. Ask to book straight away: the handoff to the booking
-specialist `requires: customer_id`, so with a value already set it goes through
-without the verification step. Leave the flag out and the concierge asks for a
-phone number first. That difference is the variable doing its job.
+knows who is calling. Put `requires: customer_id` on a delegate and the step
+goes straight through with a value already set, while without the flag the agent
+has to ask first. That difference is the variable doing its job.
 
 ## Where to go next
 

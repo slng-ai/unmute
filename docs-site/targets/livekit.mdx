@@ -5,16 +5,18 @@ sidebarTitle: "LiveKit"
 ---
 
 ```sh
-unmute compile examples/simple-prompt --target livekit
+unmute compile my-agent --target livekit
 ```
 
 ```text
-examples/simple-prompt/build/livekit/
+my-agent/build/livekit/
 ├── agent.py              # the agent worker
 ├── tools/                # your local handlers, copied
 │   ├── __init__.py
-│   └── book_appointment.py
+│   └── <name>.py         # one per local tool
+├── knowledge.py          # present when the package sets knowledge
 ├── tracing.py            # present when the package sets tracing
+├── dev_metrics.py        # per-turn latency for `unmute dev`, inert elsewhere
 ├── pyproject.toml        # pinned dependencies
 ├── Dockerfile
 ├── .dockerignore
@@ -23,6 +25,11 @@ examples/simple-prompt/build/livekit/
 ├── README.md             # the runbook for this build
 └── compile-report.json   # what the compiler decided
 ```
+
+A target with an inbound SIP route writes three more files:
+`sip-inbound-trunk.json`, `sip-dispatch-rule.json`, and the
+`telephony-setup.sh` that creates both. [Inbound calls](/telephony/inbound-calls)
+covers them.
 
 An inbound telephony target on the SIP route also gets `telephony-setup.sh` and
 the two records it feeds, `sip-inbound-trunk.json` and `sip-dispatch-rule.json`.

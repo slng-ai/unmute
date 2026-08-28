@@ -9,15 +9,15 @@ compiles the package, starts the target's local runtime, and serves a web page
 you can talk through.
 
 ```sh
-unmute dev examples/simple-prompt --target pipecat
+unmute dev examples/salon-concierge --target pipecat
 ```
 
 ```text
-compiled examples/simple-prompt/build/pipecat
+compiled examples/salon-concierge/build/pipecat
 starting the local Pipecat agent...
 
   ▸ http://localhost:8765/?agent=pipecat
-    ctrl-c to stop  ·  logs: examples/simple-prompt/build/pipecat/dev.log
+    ctrl-c to stop  ·  logs: examples/salon-concierge/build/pipecat/dev.log
 ```
 
 That names a package sitting somewhere else, which is why it carries a path.
@@ -73,14 +73,14 @@ A package with one target needs no flag. With more than one:
   choices:
 
 ```text
-unmute: dev examples/simple-prompt: multiple targets declared; pass --target <name>: livekit (livekit), pipecat (pipecat)
+unmute: dev examples/salon-concierge: multiple targets declared; pass --target <name>: livekit (livekit), pipecat (pipecat)
 ```
 
 `--target` takes exactly one name here, unlike `validate` and `compile`, which
 take a repeatable list. A name that is not declared is an error:
 
 ```text
-unmute: dev examples/simple-prompt: target instance "nope" is not declared
+unmute: dev examples/salon-concierge: target instance "nope" is not declared
 ```
 
 ## Ports
@@ -93,7 +93,7 @@ unmute: dev examples/simple-prompt: target instance "nope" is not declared
 Change both when a port is busy:
 
 ```sh
-unmute dev examples/simple-prompt --target pipecat --port 8790 --bot-port 7890
+unmute dev examples/salon-concierge --target pipecat --port 8790 --bot-port 7890
 ```
 
 The web page URL always carries the target name, for example
@@ -161,13 +161,13 @@ means "follow container/agent logs on stderr", and without it the log goes to th
 file only:
 
 ```sh
-unmute dev examples/simple-prompt --target pipecat --verbose
+unmute dev examples/salon-concierge --target pipecat --verbose
 ```
 
 ## Not opening the browser
 
 ```sh
-unmute dev examples/simple-prompt --target pipecat --no-open
+unmute dev examples/salon-concierge --target pipecat --no-open
 ```
 
 The URL is still printed. Useful over SSH, and in scripts.
@@ -193,13 +193,22 @@ it, and one package can override both. The generated
 with. It is repeatable, and it only accepts variables declared with
 `source: call_start`:
 
-```sh
-unmute dev examples/salon-concierge --target pipecat \
-  --var customer_id=cus_2002
+```yaml agent.yaml
+variables:
+  customer_id:
+    type: string
+    source: call_start
+    default: cus_1001
+    description: CRM id of the caller.
 ```
 
-See [variables](/build/variables) for what happens when you try to seed
-something else.
+```sh
+unmute dev my-agent --var customer_id=cus_2002
+```
+
+Leave the flag out and the `default` is used instead. See
+[variables](/build/variables) for what happens when you try to seed something
+else.
 
 ## One run per package at a time
 
@@ -211,7 +220,7 @@ overlap. Move signaling, TCP fallback, and UDP media as one set:
 
 ```sh
 LIVEKIT_HOST_PORT=7890 LIVEKIT_TCP_HOST_PORT=7891 LIVEKIT_UDP_HOST_PORT=7892 \
-  unmute dev examples/subagents --target livekit --port 8766
+  unmute dev my-other-agent --target livekit --port 8766
 ```
 
 ## Where to go next

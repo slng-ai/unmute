@@ -98,10 +98,10 @@ What the compiler does do is add the name of whoever is speaking. Each agent and
 each task sends the `agent_id`, a colon, then its own name:
 
 ```
-optimized-salon-concierge-v8:concierge
-optimized-salon-concierge-v8:complaint_specialist
-optimized-salon-concierge-v8:task.customer_verification
-optimized-salon-concierge-v8:task.booking
+optimized-salon-concierge-v10:concierge
+optimized-salon-concierge-v10:complaint_specialist
+optimized-salon-concierge-v10:task.customer_verification
+optimized-salon-concierge-v10:task.booking
 ```
 
 That is not decoration. The cache key is the last exchange, and it does not
@@ -448,7 +448,7 @@ correct answer every time. The only symptom is a hit rate of zero.
 
 So write the format into the variable's own `description`, and make whatever
 produces the value follow it. A task that returns a phone number should say what
-shape it returns it in, the way `examples/salon-concierge` does:
+shape it returns it in:
 
 ```yaml agent.yaml
 variables:
@@ -459,6 +459,11 @@ variables:
       digit groups separated by single spaces, with no plus sign, brackets or
       dashes.
 ```
+
+This only decides caching for a value the agent **says out loud**. A value it
+only passes to tools can take whatever single shape the rest of your package
+uses: `examples/salon-concierge` returns E.164, one format for every number it
+holds, and its prompts never read the number back to the caller.
 
 ### What the router will not cache, whatever you do
 

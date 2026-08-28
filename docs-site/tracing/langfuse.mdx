@@ -41,6 +41,13 @@ With Langfuse tracing enabled, Pipecat MCP calls emit finite `tool:<name>` spans
 
 Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
 
+## What a trace records
+
+<Warning>
+  Traces can contain caller speech, model input and output, and tool arguments and results.
+  Use only fake identities and fake customer data for release tests.
+</Warning>
+
 ## Checking it works
 
 Starting the worker or exporting a synthetic span proves connectivity only.

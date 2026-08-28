@@ -6,9 +6,6 @@ description: "Tools, tasks, task groups, or a second agent. Which split to reach
 You have four ways to organize an agent. Each one owns a different boundary.
 Choose from the brief before you write files.
 
-The repository ships the same salon workflow in all four shapes, so you can read
-them side by side.
-
 ## Choose the native shape
 
 | The brief needs | Native shape | Do not invent |
@@ -108,15 +105,6 @@ For a combined release-readiness package, see
 It uses a guarded delegate, a typed task, one handoff, and a human transfer in
 one inbound-only project. Two agents, because the second one holds a permission
 and a document set the first must not.
-
-## The four shapes, as packages
-
-| Package | Shape | Reach for it when |
-|---|---|---|
-| `examples/simple-prompt` | one agent, one prompt, every tool | the workflow fits in a prompt you can still read |
-| `examples/multi-task` | one agent, two tasks it delegates to | a step has a definite answer you want typed |
-| `examples/task-groups` | one agent, three ordered tasks, shared context | the steps must happen in a fixed order |
-| `examples/subagents` | two agents that hand the caller over | two jobs have different rules and different tools |
 
 ## Delegate or transfer
 

@@ -302,7 +302,7 @@ func TestDeployRefusesAPackageWithNoSlngTarget(t *testing.T) {
 	var out bytes.Buffer
 	root.SetOut(&out)
 	root.SetErr(&out)
-	root.SetArgs([]string{"deploy", filepath.Join("..", "..", "examples", "simple-prompt")})
+	root.SetArgs([]string{"deploy", filepath.Join("..", "..", "examples", "salon-concierge")})
 	err := root.Execute()
 	if err == nil {
 		t.Fatal("deploying a package with no slng target succeeded")

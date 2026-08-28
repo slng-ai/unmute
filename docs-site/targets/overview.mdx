@@ -122,12 +122,12 @@ every shipped example does.
 ## One package, two projects
 
 ```sh
-unmute compile examples/simple-prompt
+unmute compile examples/salon-concierge
 ```
 
 ```text
-generated examples/simple-prompt/build/livekit/agent.py
-generated examples/simple-prompt/build/pipecat/bot.py
+generated examples/salon-concierge/build/livekit/agent.py
+generated examples/salon-concierge/build/pipecat/bot.py
 ```
 
 Each directory is a complete project: source, pinned dependencies, Dockerfile,
@@ -136,7 +136,7 @@ Each directory is a complete project: source, pinned dependencies, Dockerfile,
 `--target` limits the work:
 
 ```sh
-unmute compile examples/simple-prompt --target pipecat
+unmute compile examples/salon-concierge --target pipecat
 ```
 
 ## Choosing between them

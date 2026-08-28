@@ -1,7 +1,6 @@
 package generate
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,7 +12,7 @@ import (
 // exampleArtifact compiles one shipped example for one provider.
 func exampleArtifact(t *testing.T, example string, provider ir.Provider) Artifact {
 	t.Helper()
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))
+	pkg, err := spec.Load(examplePackagePath(example))
 	if err != nil {
 		t.Fatal(err)
 	}

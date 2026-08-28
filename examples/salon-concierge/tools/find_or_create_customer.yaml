@@ -16,12 +16,14 @@ input:
 output:
   type: object
   properties:
-    # The confirmed number, normalised to digits, is the identifier. There is no
-    # second id: a synthetic one would be a value the caller never says, that
-    # every tool would have to carry, and that buys nothing the number does not
-    # already give.
+    # The confirmed number is the identifier. There is no second id: a synthetic
+    # one would be a value the caller never says, that every tool would have to
+    # carry, and that buys nothing the number does not already give.
     customer_phone:
       type: string
+      description: >-
+        The confirmed number in E.164: a plus sign then digits, no spaces or
+        punctuation. Return it exactly as it comes back, character for character.
     status:
       type: string
       enum:

@@ -1,4 +1,4 @@
-# One LiveKit instance, named after the provider. All models, including the
+# Two instances, each named after its provider. All models, including the
 # STT (models.listen) and turn detector (models.turn), are defined once in
 # agent.yaml; this file carries only the infrastructure. Any catalogued
 # provider binds instead with a one-line change in agent.yaml (driver-livekit
@@ -11,3 +11,10 @@ targets:
     provider: livekit
     version: "1.6.10"
     sdk_language: python
+
+  # Added 2026-08-28. This fixture is the only package left with a task group
+  # and two agents that hand the caller over, so the Pipecat smoke tests that
+  # used examples/task-groups and examples/subagents run here now.
+  pipecat:
+    provider: pipecat
+    version: "1.8.0"
