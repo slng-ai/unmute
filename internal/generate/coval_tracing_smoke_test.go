@@ -46,8 +46,15 @@ class _Sink(http.server.BaseHTTPRequestHandler):
                     "body": json.loads(body),
                 }
             )
+            # A distinct ID per call, so a trace filed under the wrong call's
+            # conversation is visible rather than indistinguishable.
             payload = json.dumps(
-                {"conversation": {"conversation_id": "conv-from-submit", "status": "IN_QUEUE"}}
+                {
+                    "conversation": {
+                        "conversation_id": f"conv-{len(SUBMITTED)}",
+                        "status": "IN_QUEUE",
+                    }
+                }
             ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -81,6 +88,13 @@ tracing.COVAL_CONVERSATIONS_ENDPOINT = _SUBMIT_ENDPOINT
 `
 
 const covalPipecatTracingSmokeScript = covalTracingSmokeSink + `
+# ── Session 1 ─────────────────────────────────────────────────────────────────
+#
+# Pipecat Cloud serves many calls from one warm container, so this script drives
+# three sessions through one imported module and never resets anything by hand.
+# Hand-resetting is exactly what hid the warm-container bug from this suite: the
+# module has to do it itself, on every call, or the second call is appended to
+# the first call's Coval conversation.
 provider = tracing.setup_coval_tracing()
 
 # Before any simulation ID exists, a span must be held rather than sent.
@@ -127,6 +141,11 @@ said.end()
 provider.force_flush()
 assert RECEIVED == [], f"exported with no correlation ID at all: {RECEIVED}"
 
+# A span that belongs to this call but has not ended yet. It is ended during
+# session two below, which is the span-level form of the same bug: a late span
+# must never ride out under the next call's Coval identity.
+straggler = provider.get_tracer("smoke").start_span("llm")
+
 tracing.flush_tracing(provider, "local-session-1")
 assert len(SUBMITTED) == 1, SUBMITTED
 submit = SUBMITTED[0]
@@ -139,30 +158,92 @@ assert submit["body"]["external_conversation_id"] == "local-session-1", submit["
 assert RECEIVED, "the conversation ID did not flush the held spans"
 conv_export = RECEIVED[0]
 # Exactly one correlation header, and it is the conversation one.
-assert conv_export.get("x-conversation-id") == "conv-from-submit", conv_export
+assert conv_export.get("x-conversation-id") == "conv-1", conv_export
 assert "x-simulation-id" not in conv_export, conv_export
 
 # A second flush must not register the same call twice.
 tracing.flush_tracing(provider, "local-session-1")
 assert len(SUBMITTED) == 1, SUBMITTED
 
+first_token = tracing._router.call_token
 RECEIVED.clear()
 
-# Activating flushes the span that existed before the ID did.
-tracing._router.simulation_id = None
-tracing._router._exporter = None
-assert tracing.activate_simulation(ws) == "sim-ws"
+# ── Session 2: the same warm process takes another call ───────────────────────
+#
+# Nothing is reset by hand. setup_coval_tracing has to hand back the process's
+# one provider and still begin a new call on it, because Pipecat installs one
+# provider per process and refuses a second.
+provider2 = tracing.setup_coval_tracing()
+assert provider2 is provider, "a warm process must reuse its one provider"
+assert tracing._router.call_token != first_token, "the second call reused the first call's token"
+assert tracing._router.simulation_id is None, "the second call inherited a correlation ID"
+assert not tracing._router.active, "the second call inherited the first call's exporter"
+assert tracing._router.held() == [], "the second call inherited held spans"
+
+# The straggler from session one ends now, while session two is live. It must be
+# discarded rather than filed under session two.
+straggler.end()
 provider.force_flush()
-assert RECEIVED, "activation did not flush the held span"
-first = RECEIVED[0]
-assert first.get("x-api-key") == "smoke-key-not-a-real-secret", first
-assert first.get("x-simulation-id") == "sim-ws", first
-# The simulation route must never carry the conversation header.
-assert "x-conversation-id" not in first, first
+live = tracing._router.call_token
+for span in tracing._router.held():
+    token = (span.attributes or {}).get("coval.internal.call_token")
+    assert token == live, f"a span from call {token} is held for call {live}"
+
+heard2 = provider.get_tracer("smoke").start_span("stt")
+heard2.set_attribute("transcript", "actually make it a colour too")
+heard2.end()
+said2 = provider.get_tracer("smoke").start_span("tts")
+said2.set_attribute("text", "Of course, colour and cut.")
+said2.end()
+provider.force_flush()
+assert RECEIVED == [], f"session two exported before it had an ID: {RECEIVED}"
+
+tracing.flush_tracing(provider, "local-session-2")
+assert len(SUBMITTED) == 2, f"the second call was not registered on its own: {SUBMITTED}"
+second = SUBMITTED[1]
+# Only session two's words. The first call's transcript must not come along.
+assert second["body"]["transcript"] == [
+    {"role": "user", "content": "actually make it a colour too"},
+    {"role": "assistant", "content": "Of course, colour and cut."},
+], second["body"]["transcript"]
+assert second["body"]["external_conversation_id"] == "local-session-2", second["body"]
+
+assert RECEIVED, "session two never exported"
+for export in RECEIVED:
+    # The whole defect in one assertion: not one span of the second call may go
+    # out under the first call's conversation.
+    assert export.get("x-conversation-id") == "conv-2", export
+    assert "x-simulation-id" not in export, export
+
+RECEIVED.clear()
+
+# ── Session 3: a simulation claims a call that is not the first ───────────────
+#
+# The per-call reset clears the simulation ID, and it runs inside
+# setup_coval_tracing just before activate_simulation. That ordering is
+# load-bearing: reverse it and every Coval simulation on a warm process loses
+# its ID and is filed as an unrelated conversation instead.
+provider3 = tracing.setup_coval_tracing()
+assert provider3 is provider
+assert tracing.activate_simulation(ws) == "sim-ws"
+claimed = provider.get_tracer("smoke").start_span("llm")
+claimed.end()
+provider.force_flush()
+assert RECEIVED, "the simulation did not export on a warm process"
+for export in RECEIVED:
+    assert export.get("x-api-key") == "smoke-key-not-a-real-secret", export
+    assert export.get("x-simulation-id") == "sim-ws", export
+    # The simulation route must never carry the conversation header.
+    assert "x-conversation-id" not in export, export
+
+# A call a simulation already claimed is not registered as a conversation too.
+tracing.flush_tracing(provider, "sim-session-3")
+assert len(SUBMITTED) == 2, f"a claimed call was also registered as a conversation: {SUBMITTED}"
 
 print(
-    f"coval pipecat tracing ok: {len(RECEIVED)} export(s) after activation, "
-    f"{len(SUBMITTED)} conversation(s) registered"
+    f"coval pipecat tracing ok: 3 sessions in one process, "
+    f"{len(SUBMITTED)} conversation(s) registered, "
+    f"{len(RECEIVED)} export(s) on the claimed call"
 )
 `
 
@@ -802,7 +883,7 @@ assert submitted["body"]["external_conversation_id"] == "call-local-dev", submit
 assert RECEIVED, "the conversation ID did not flush the held spans"
 local_export = RECEIVED[0]
 # Exactly one correlation header, and it is the conversation one.
-assert local_export.get("x-conversation-id") == "conv-from-submit", local_export
+assert local_export.get("x-conversation-id") == "conv-1", local_export
 assert "x-simulation-id" not in local_export, local_export
 
 # The call still produced Coval's tree, plus the span that records the route.
@@ -811,7 +892,7 @@ assert local_names == ["conversation", "llm", "stt", "transport", "turn"], local
 
 # The route is on the trace, so a reader can tell how it was correlated.
 marker = [s for s in LOCAL_EXPORTED if s.name == "transport"][-1]
-assert marker.attributes["coval.conversation_id"] == "conv-from-submit", marker.attributes
+assert marker.attributes["coval.conversation_id"] == "conv-1", marker.attributes
 assert marker.attributes["coval.correlation.method"] == "conversation_submit", marker.attributes
 
 print(

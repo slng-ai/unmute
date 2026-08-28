@@ -704,8 +704,23 @@ destination fired.
 ## Trace with Coval
 
 Tracing is configured. Set `COVAL_API_KEY` in `.env`. Spans go to
-`https://api.coval.dev/v1/traces` under the service name
-`{{.EntryAgent}}-{{.AgentName}}`.
+`https://api.coval.dev/v1/traces` under the name `{{.EntryAgent}}-{{.AgentName}}`.
+
+**Where the traces appear.** A call Coval placed itself attaches to that
+simulation's run. **Every other call**, deployed or local, appears under
+**Conversations** and in **Trace Search**, and never inside a run. Looking for a
+real phone call inside a run and not finding it is the most common way to
+conclude that tracing is broken when it is working.
+
+**Local against deployed.** `unmute dev` labels its runs
+`{{.EntryAgent}}-{{.AgentName}}-local`; the same build deployed uses
+`{{.EntryAgent}}-{{.AgentName}}` exactly. The label is decided when the agent
+starts, not when it is compiled, so one build serves both. It is on the trace's
+`agent.name`, on the conversation's `metadata.agent`, and on the conversation's
+tag, which is what Trace Search filters on.
+
+Each trace also records how the caller arrived in `coval.call.origin`: `phone`
+for a SIP caller, `browser` for WebRTC including `unmute dev`.
 
 Every trace belongs to one Coval simulation, and Coval puts that simulation ID on
 the call. The agent looks for it in three places:
@@ -763,6 +778,33 @@ dropped with a warning in the log. If `COVAL_API_KEY` is unset the agent logs a
 warning and runs without tracing; an evaluation credential never takes down a
 live call. A call where nobody said anything is not submitted either, because an
 empty conversation is not worth an entry.
+
+Registering the call is the last thing that happens, and LiveKit force-kills a
+job process ten seconds after shutdown begins, so that step gets a five-second
+budget of its own rather than the thirty seconds Coval's exporter asks for.
+Being cut short is logged, so a lost trace is never silent.
+
+### Getting traces from the deployed agent
+
+1. Put `COVAL_API_KEY` in `.env`.
+2. Push it to the platform:
+
+   ```bash
+   lk agent update-secrets --secrets-file .env
+   ```
+
+3. Deploy, place one call, and hang up. The trace is filed when the call ends,
+   so nothing appears until then. Open **Observability → Conversations** in
+   Coval and filter on `{{.EntryAgent}}-{{.AgentName}}`; the call is normally
+   there within a few seconds of hangup, and a minute is the outside case.
+4. If nothing appears, read `lk agent logs`. The agent says on startup whether
+   `COVAL_API_KEY` is present and where traces are going, and it writes one line
+   per call saying which conversation the call was filed as, or why it was not.
+
+A Coval simulation that dials this agent on a plain phone number cannot deliver
+its simulation ID, because the phone network strips the headers it travels in.
+That call still traces, as a conversation, detached from the run. Nothing is
+lost; it is just not where a run-based reader would look.
 
 The trace is built to Coval's own shape, one `conversation` holding one `turn`
 per exchange:

@@ -18,6 +18,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/slng-ai/unmute/internal/devmetrics"
+	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/style"
 	"github.com/slng-ai/unmute/internal/tui"
 	"github.com/spf13/cobra"
@@ -222,6 +223,11 @@ func packageEnv(root string, warn io.Writer) []string {
 	// the dotenv files so the dev loop wins over a stale value on disk. The name
 	// is owned by devmetrics because two Python producers read the same string.
 	env = setChildEnv(env, devmetrics.Env, "1")
+	// Same placement, same reason: telephony dev runs need it too, and the dev
+	// loop must win over a stale value on disk. This is what makes a local run
+	// show up in Coval as `<name>-local` while the same build deployed shows up
+	// as `<name>`.
+	env = setChildEnv(env, generate.LocalRunEnv, "1")
 	return env
 }
 

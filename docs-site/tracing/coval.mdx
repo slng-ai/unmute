@@ -94,7 +94,13 @@ Coval has two ways to correlate a trace, and the agent uses both:
 | The call | How it is correlated | Where it lands |
 | --- | --- | --- |
 | Coval placed it | the simulation ID Coval put on the call | the simulation's result, and Trace Search |
-| anything else | submitted as a Coval conversation when it ends | Trace Search |
+| anything else | submitted as a Coval conversation when it ends | Conversations, and Trace Search |
+
+Read the second row carefully, because it is the one that surprises people. A
+real phone call to a deployed agent is not in a run, and never will be. It is
+under **Observability → Conversations** and in **Trace Search**. Opening a run,
+not finding the call, and concluding that deployed tracing is broken is the most
+common false alarm here.
 
 For the second row the agent waits until the call is over, submits what was said
 to Coval as a conversation, and exports the same spans against the conversation
@@ -114,6 +120,64 @@ empty conversation is not worth an entry.
 Read `coval.correlation.method` to see which route a trace took:
 `conversation_submit` for the second row, and the name of the delivery route for
 the first.
+
+Each call handled by a deployed agent gets its own conversation, however many
+calls the platform routes through one warm container. Everything about which
+call is being traced resets at the start of every call, so a container that has
+already served ten calls files the eleventh as its own.
+
+## Telling local runs from deployed ones
+
+The same build behaves differently depending on where it runs, and the trace
+says which:
+
+| Where it ran | The name in Coval |
+| --- | --- |
+| `unmute dev` | `<entry-agent>-<agent-name>-local` |
+| deployed to either cloud | `<entry-agent>-<agent-name>` |
+
+The suffix is decided when the agent starts, not when it is compiled, so one
+build serves both and you never deploy a binary labelled `-local`. It is written
+in three places, because Trace Search has no `service.name` filter: the trace's
+`agent.name` attribute, the conversation's `metadata.agent`, and the
+conversation's tag. Filter on either name and you get only that side.
+
+Each trace also records how the caller arrived, in `coval.call.origin`:
+
+| Value | What it means |
+| --- | --- |
+| `phone` | a carrier call: LiveKit SIP, or a carrier websocket on Pipecat Cloud |
+| `websocket` | a plain websocket session that named no carrier |
+| `browser` | WebRTC, including `unmute dev` |
+
+A route the agent cannot identify records nothing rather than guessing.
+
+## Checking a deployed agent
+
+1. Put `COVAL_API_KEY` in the build directory's `.env` and push it with your
+   platform's secret command: `pipecat cloud secrets set <set> --file .env`, or
+   `lk agent update-secrets --secrets-file .env`.
+2. Deploy, place a call, and hang up. The trace is filed when the call ends, so
+   nothing appears while the call is running.
+3. Open **Observability → Conversations** and filter on the agent name. The call
+   is normally there within a few seconds of hangup; a minute is the outside
+   case.
+4. Do it three times before you conclude anything. One call cannot support a
+   claim about a deployed agent, and the three conversations should be distinct,
+   each holding exactly one `conversation` root span.
+
+If nothing appears, read the agent's log rather than guessing. It says on
+startup whether `COVAL_API_KEY` is present and where traces are going, and it
+writes one line per call naming the conversation the call was filed as, or the
+reason it was not: no transcript, a failed registration, or a registration that
+ran past its budget.
+
+<Note>
+A Coval simulation that dials a deployed agent on a plain phone number cannot
+deliver its simulation ID, because the phone network strips the headers it
+travels in. That call still traces, as a conversation, detached from the run.
+Nothing is lost; it is just not where a run-based reader would look.
+</Note>
 
 ## What the spans look like
 

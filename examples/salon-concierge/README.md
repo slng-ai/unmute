@@ -426,6 +426,19 @@ fake phone numbers, and fake customer data for release tests, in a separate
 Coval project. Do not send real customer data until its access and retention
 rules are approved. Keep `UNMUTE_LOG_LEVEL=INFO` for normal runs.
 
+### Where the traces land
+
+A call Coval placed attaches to that simulation's run. Every other call, local or
+deployed, arrives under **Observability → Conversations** and in **Trace
+Search**, never inside a run, and it is filed when the call ends rather than
+while it runs.
+
+`unmute dev` labels its runs `salon-concierge-<target>-local`; the same build
+deployed uses `salon-concierge-<target>`, so the two are separable by filter. The
+suffix is decided when the agent starts, not when it is compiled. Each trace also
+records how the caller arrived in `coval.call.origin`: `phone` for a Twilio call
+on either target, `browser` for a `unmute dev` session.
+
 ## Booking confirmation boundary
 
 Selection and confirmation happen inside the one booking task. Picking a time
