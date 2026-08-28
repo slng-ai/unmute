@@ -48,14 +48,45 @@ recompiling does not cost you the agent.
 
 ## Every later deploy is `deploy`
 
+Compile first. `lk agent deploy` reads `build/livekit/` and nothing else, so a
+redeploy is only as current as the last compile, and a stale build deploys
+without complaining.
+
 ```sh
-lk agent deploy
+unmute compile ./my-agent
 ```
+
+```sh
+cd build/livekit && lk agent deploy
+```
+
+<Warning>
+  `unmute compile ./my-agent --target livekit` compiles **only** this target. A
+  package that also deploys to pipecat or slng leaves those builds untouched,
+  however old they are, and the next deploy from one of them ships the previous
+  build's agent name and secret set. With no `--target`, every target is
+  compiled.
+</Warning>
 
 `create` is the first deploy and refuses to run when a config file of that name
 already exists. `deploy` ships a new version of an agent that already exists, and
 takes no region. Running them the wrong way round either refuses, or registers a
 second billable agent with dispatch split between two versions.
+
+Confirm the new version is the one serving:
+
+```sh
+lk agent list
+```
+
+An ordinary redeploy moves nothing else. Secrets stay on the agent, the region is
+fixed at create, and the carrier keeps pointing where it pointed. Three files in
+`build/livekit/` are yours rather than the compiler's and survive every recompile:
+`.env`, `livekit*.toml`, and any tool sample under `samples/`.
+
+Renaming the agent is the exception, and it is
+[the dispatch rule that breaks](#renaming-the-agent-breaks-that-rule) rather than
+the agent.
 
 ## Secrets
 
@@ -140,17 +171,59 @@ agent is healthy and simply never dispatched.
 
 Re-running the script does not repair it. "Running it again is safe" means it
 reuses any rule that already names your trunk rather than creating a second one,
-and that is exactly why it skips the step you need. Delete the stale rule first:
+and that is exactly why it skips the step you need. Delete the stale rule first.
 
-```sh
-lk sip dispatch list                  # find the rule whose agent is the old name
-lk sip dispatch delete <SDR_...>
-bash telephony-setup.sh
-```
-
-The agent itself needs nothing. `lk agent deploy` targets the id in
+The agent itself needs nothing: `lk agent deploy` targets the id in
 `livekit.toml`, which `unmute compile` preserves across rebuilds, so the same
-agent re-registers under the new name.
+agent re-registers under the new name. Only the rule has to be replaced.
+
+<Steps>
+  <Step title="Deploy, and read back the name it registered">
+    ```sh
+    unmute compile ./my-agent && cd build/livekit && lk agent deploy
+    ```
+
+    ```sh
+    lk agent list
+    ```
+
+    Do not continue until Dispatch Name reads the new value. Building the next
+    record from a stale listing is the easiest way to get this wrong twice.
+  </Step>
+  <Step title="Delete the rule naming the old worker">
+    ```sh
+    lk sip dispatch list
+    ```
+
+    ```sh
+    lk sip dispatch delete <SDR_...>
+    ```
+
+    The number is unrouted from here until the next step finishes.
+  </Step>
+  <Step title="Recreate it">
+    ```sh
+    bash telephony-setup.sh
+    ```
+
+    From `build/livekit/`. It reads `SIP_FROM_NUMBER` from `.env`, reuses the
+    inbound trunk that already claims that number, and creates one rule naming
+    the new worker. The trunk is untouched by a rename: it claims a number and
+    says nothing about which agent answers.
+  </Step>
+  <Step title="Check the two strings match">
+    ```sh
+    lk sip dispatch list
+    ```
+
+    The Agents column for your trunk must equal the Dispatch Name from step 1.
+    Then call the number.
+  </Step>
+</Steps>
+
+On the `connector` route there is no dispatch rule, and the same string is
+compiled into the bridge you host as `AGENT_NAME`. Redeploy the bridge from the
+new build.
 
 ## Verifying a phone route
 
