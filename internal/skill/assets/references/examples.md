@@ -1,6 +1,6 @@
 # Working examples
 
-Three packages ship with the Unmute repository. **They live in that repository,
+Two packages ship with the Unmute repository. **They live in that repository,
 not in the user's project.** Check before you reach for one:
 
 ```sh
@@ -18,8 +18,7 @@ table below to know what shape you are aiming at.
 | What the user wants | Package | What it shows |
 |---|---|---|
 | one full release-readiness project | `examples/salon-concierge` | a verification task, a booking task, a guarded delegate, two agents that hand the caller over, in-process tool state, Coval tracing, a cold manager transfer, browser audio, and an inbound phone route on each of its two targets; every tool is local, so it starts with no external tool server |
-| an agent SLNG hosts, in its smallest form | `examples/slng-support` | one builtin and nothing else, so the push creates nothing. Emits no runnable project, so there is no `unmute dev`: `unmute deploy` pushes it and a web session talks to it |
-| an agent SLNG hosts, with a tool of its own | `examples/slng-orders` | a `local:` handler that is **uploaded** and becomes a versioned object in SLNG. Needs a sample at `build/slng/samples/<tool>.json` and `unmute deploy --run-samples`, because a code tool cannot publish until one run proves it |
+| an agent SLNG hosts | `examples/slng-support` | one builtin and nothing else, so the push creates nothing. Emits no runnable project, so there is no `unmute dev`: `unmute deploy` pushes it and a web session talks to it. This is the only slng shape that publishes today: a package shipping a `local:` or `webhook:` body cannot be pushed yet, so send those to pipecat or livekit |
 
 The smallest thing that runs is not an example any more. `unmute init <name>`
 scaffolds it: one agent, browser audio, one builtin, no Twilio and no third-party
@@ -33,12 +32,12 @@ unmute validate examples/salon-concierge
 unmute dev examples/salon-concierge --target pipecat
 ```
 
-The two slng packages are the exception to that second line: they emit no
-runnable project, so `dev` has nothing to run. Deploy them instead.
+`slng-support` is the exception to that second line: it emits no runnable
+project, so `dev` has nothing to run. Deploy it instead.
 
 ```sh
-unmute validate examples/slng-orders
-unmute deploy examples/slng-orders --dry-run
+unmute validate examples/slng-support
+unmute deploy examples/slng-support --dry-run
 ```
 
 Then read `examples/<name>/agent.yaml` and its `README.md`. Every one of these

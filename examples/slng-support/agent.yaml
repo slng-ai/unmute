@@ -34,15 +34,7 @@ models:
   think:
     reasoning:
       description: answers the caller
-      # Two fields, as on every target. SLNG names a model with the vendor and
-      # the model joined by a slash, and the slng driver joins these two when it
-      # writes the body. A model whose name already carries a slash, like the
-      # speak entry below, is passed through whole instead of joined twice.
-      #
-      # SLNG owns its model list, so unmute validates no vendor and checks no
-      # model name here. The compile report says which values it forwarded.
-      provider: openai
-      model: gpt-5.6-luna
+      model: gemini/google/gemini-3.1-flash-lite:latest
   speak:
     front_desk:
       description: warm, concise
