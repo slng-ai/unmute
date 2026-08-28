@@ -82,7 +82,9 @@ name again updates the existing agent rather than making a second one. Sessions
 already running finish on the old image, and a deploy that fails leaves the previous
 ready version serving traffic.
 
-`status` reporting `ready` is the deploy actually being usable.
+`status` reporting `ready` means the agent is healthy. It does **not** mean the
+agent is running the code you just compiled. See [read the Build ID, not
+`ready`](#read-the-build-id-not-ready).
 
 No warm instance is kept unless you ask for one. Ask in the package, on the
 target:
@@ -106,35 +108,162 @@ manifest: `unmute compile` rewrites that file.
 
 ## Every later deploy
 
-Compile first. `pipecat cloud deploy` reads `build/pipecat/` and nothing else, so
-a redeploy is only as current as the last compile, and a stale build deploys
-without complaining.
+`pipecat cloud deploy` reads `build/pipecat/` and nothing else, so a redeploy is
+only as current as your last compile, and a stale build deploys without
+complaining. Five steps, in this order, every time.
+
+<Steps>
+  <Step title="Compile">
+    ```sh
+    unmute compile ./my-agent
+    ```
+
+    <Warning>
+      `unmute compile ./my-agent --target pipecat` compiles **only** this target.
+      A package that also deploys to livekit or slng leaves those builds
+      untouched, however old they are. With no `--target`, every target is
+      compiled.
+    </Warning>
+
+    Compile and deploy from the same checkout. A second checkout or a git
+    worktree has its own `build/pipecat/`, so compiling in one and deploying from
+    the other ships the older of the two without saying so.
+  </Step>
+
+  <Step title="Check the .env still covers the build">
+    ```sh
+    cd build/pipecat
+    cut -d= -f1 .env.example | grep -E '^[A-Z]' | sort -u > /tmp/required
+    cut -d= -f1 .env | grep -E '^[A-Z]' | sort -u > /tmp/present
+    comm -23 /tmp/required /tmp/present
+    ```
+
+    `.env` is yours and survives every recompile. `.env.example` is the
+    compiler's and is rewritten every time, so a renamed or added variable lands
+    in one and not the other. Anything the last line prints is missing from your
+    `.env`.
+
+    Fill it in before going on. A missing name deploys cleanly, reports ready,
+    and then refuses every session: see [your `.env` does not follow a
+    rename](#your-env-does-not-follow-a-rename).
+  </Step>
+
+  <Step title="Upload the secret set">
+    ```sh
+    pipecat cloud secrets set acme-support-pipecat-secrets --file .env --region eu-central
+    ```
+
+    Needed only when `.env` changed, and safe to run when it did not: it merges
+    rather than replaces, so names you do not pass keep their values. It restarts
+    the agent.
+  </Step>
+
+  <Step title="Deploy">
+    ```sh
+    pipecat cloud deploy
+    ```
+
+    From `build/pipecat`, where step 2 left you. Run it anywhere else and it stops
+    with `Agent name is required`, which is about your working directory and not
+    your manifest.
+  </Step>
+
+  <Step title="Confirm the Build ID changed">
+    ```sh
+    pipecat cloud agent status acme-support-pipecat
+    ```
+
+    A new `Build` value is the only proof your code shipped. `Ready`, `Updated
+    At` and `Active Deployment ID` all move without a new image: see [read the
+    Build ID, not `ready`](#read-the-build-id-not-ready).
+  </Step>
+</Steps>
+
+A redeploy moves nothing beyond those steps. The region and the carrier
+configuration stay as they are, and any tool sample under `samples/` survives the
+recompile alongside your `.env`.
+
+Changing a secret on its own needs no deploy at all, though it does restart the
+agent. Step 3 is the whole procedure.
+
+## When the deploy looks fine and the call does not
+
+A deploy can report success while a call reaches old code, or reaches nothing at
+all. Four causes, in the order they are worth checking. All four are silent: none
+of them fails a deploy.
+
+### Read the Build ID, not `ready`
+
+Three fields on `status` move on their own and say nothing about your code.
+`Updated At` changes on any deploy. `Active Deployment ID` changes whenever the
+agent is re-rolled, including onto the image it was already running. `Ready`
+describes the agent's health.
+
+**`Build` is the field to read.** It changes only when a new image was built, so it
+is the one thing that proves your compile shipped.
 
 ```sh
-unmute compile ./my-agent
+pipecat cloud agent status acme-support-pipecat
 ```
+
+`Ready: True` beside a Build ID from two hours ago means a two-hour-old agent is
+healthy.
+
+### Deploy from the directory that holds the manifest
+
+`pipecat cloud deploy` reads `pcc-deploy.toml` from the working directory and
+nothing else. Run it anywhere else and it stops with an error about your agent
+rather than your directory:
+
+```
+Agent name is required
+```
+
+The manifest is fine. Go back to [every later deploy](#every-later-deploy) and run
+the steps from `build/pipecat`.
+
+### The carrier may point at a different agent
+
+On the `cloud-websocket` route the agent name is half of
+`_pipecatCloudServiceHost` in your TwiML, and nothing keeps that value in step
+with your manifest. It names an agent, so a wrong name is not an error. It is a
+different agent.
+
+| What the parameter names | What a call does |
+|---|---|
+| the agent you just deployed | works |
+| another agent in your organisation | answers with **that** agent's prompt, models and tools |
+| an agent that no longer exists | connects, then drops in under a second |
+
+The middle row is the one that costs an afternoon, because the call is answered and
+sounds like your agent ignoring every change you make. Read the parameter against
+the deployed name before you suspect the build:
 
 ```sh
-cd build/pipecat && pipecat cloud deploy
+pipecat cloud agent list
 ```
 
-<Warning>
-  `unmute compile ./my-agent --target pipecat` compiles **only** this target. A
-  package that also deploys to livekit or slng leaves those builds untouched,
-  however old they are. With no `--target`, every target is compiled.
-</Warning>
+The value must be `<agent-name>.<organization>`, where the organization is the slug
+from `pipecat cloud organizations list`.
 
-An ordinary redeploy moves nothing else: the secret set, the region and the
-carrier configuration all stay as they are. Two files in `build/pipecat/` are
-yours rather than the compiler's and survive every recompile: `.env`, and any
-tool sample under `samples/`.
+### Your `.env` does not follow a rename
 
-Changing a secret needs no redeploy, though it does restart the agent. It merges
-by default, so names you do not pass keep their values:
+`.env` is yours, so `unmute compile` never rewrites it. `.env.example` is the
+compiler's, and it is rewritten every time. Rename a transfer destination, or add a
+provider, and the two drift apart: the new name is in `.env.example`, missing from
+`.env`, and therefore missing from the secret set. The container then starts,
+refuses the session and stops:
 
-```sh
-pipecat cloud secrets set <agent-name>-secrets --file .env --region <region>
 ```
+Exception running bot(): Missing environment for a phone call: MANAGER_PHONE_NUMBER
+```
+
+Compile does not warn about this, which is why comparing the two files is [step 2
+of a redeploy](#every-later-deploy). Add the missing name, upload the set, then
+deploy.
+
+Names left in `.env` that no longer appear in `.env.example` are harmless. Delete
+them anyway, so the next person does not read a renamed variable as a live one.
 
 ## Renaming the agent
 
@@ -195,6 +324,31 @@ still points at it.
 
 `status` reporting `ready` is not the finish line: see [a phone call is verified
 after you deploy](/telephony/overview#a-phone-call-is-verified-after-you-deploy).
+
+Two checks come before the call, and both are cheaper than dialling.
+
+`pipecat cloud agent start <agent-name>` opens a session against the deployed
+container with no phone leg, so it proves the image boots and `bot()` runs. If this
+fails, the carrier was never the problem. It needs a public API key, which is a
+separate thing from your CLI login:
+
+```sh
+pipecat cloud organizations keys create
+pipecat cloud organizations keys use
+```
+
+`pipecat cloud agent logs <agent-name>` is where a refused session says why.
+
+<Warning>
+  Do not pass `-l DEBUG` to `agent logs`. It filters to that level **only**, which
+  hides the `ERROR` line you are looking for.
+</Warning>
+
+Then call, and read the duration in the Twilio call log before anything else. A
+call Twilio records as `completed` after a second or two was answered by the
+platform and dropped, so the fault sits in front of your agent: the service host,
+or a container refusing the session. A call that lasts and stays silent is a
+different layer, and that is when the logs matter.
 
 ## Regions
 
