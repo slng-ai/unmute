@@ -245,7 +245,6 @@
         "icon": "cloud-upload",
         "pages": [
           "deploy/going-live",
-          "deploy/redeploying",
           "deploy/slng",
           "deploy/livekit-cloud",
           "deploy/pipecat-cloud"

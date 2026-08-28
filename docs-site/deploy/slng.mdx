@@ -355,6 +355,35 @@ write a specific one.
 A push that changes nothing writes no version and does not relabel the previous
 one, so re-running a deploy is safe and cheap.
 
+## Every later deploy
+
+`unmute deploy` validates, compiles and pushes in one command, so there is no
+stale build to worry about here as there is on the other two targets:
+
+```sh
+unmute deploy ./my-agent
+```
+
+An ordinary redeploy moves nothing else. Vault entries stay as they are, the
+region is fixed at create, and the agent id does not change, so a web session or
+a dashboard attachment holding that id keeps working.
+
+## Renaming the agent
+
+A push resolves the agent by name, so a new name pushes a **second** agent and
+leaves the first one exactly where it was. There is no carrier record to fix —
+SLNG owns the phone side — and what a rename strands instead is the **agent id**.
+Anything holding the old one still addresses the old agent: a saved web session,
+a dashboard attachment, an integration.
+
+Take the new id from the push output, or find it again:
+
+```sh
+voiceai agents list
+```
+
+Then delete the old agent, or leave it and point those places at the new id.
+
 ## When it refuses
 
 Every problem is reported together, each with what to do and the page that fixes

@@ -21,10 +21,8 @@ the target it was compiled for, and it is the agent's identity: names are unique
 across your organisation and a deploy updates whichever agent matches. The
 secret set follows the same name.
 
-Changing it creates a second agent rather than moving the first, and on a phone
-route it also strands the TwiML Bin, which carries the agent name in
-`_pipecatCloudServiceHost`. [Redeploying](/deploy/redeploying#pipecat-cloud-websocket)
-walks that sequence in order.
+Changing it creates a second agent rather than moving the first: see
+[renaming the agent](#renaming-the-agent).
 
 ```toml pcc-deploy.toml
 agent_name = "acme-support-pipecat"
@@ -105,6 +103,93 @@ for the measurement.
 `pipecat cloud deploy --min-agents 1` does the same for one deploy, which is worth
 knowing for a quick test. It is not the durable answer, and neither is editing the
 manifest: `unmute compile` rewrites that file.
+
+## Every later deploy
+
+Compile first. `pipecat cloud deploy` reads `build/pipecat/` and nothing else, so
+a redeploy is only as current as the last compile, and a stale build deploys
+without complaining.
+
+```sh
+unmute compile ./my-agent
+```
+
+```sh
+cd build/pipecat && pipecat cloud deploy
+```
+
+<Warning>
+  `unmute compile ./my-agent --target pipecat` compiles **only** this target. A
+  package that also deploys to livekit or slng leaves those builds untouched,
+  however old they are. With no `--target`, every target is compiled.
+</Warning>
+
+An ordinary redeploy moves nothing else: the secret set, the region and the
+carrier configuration all stay as they are. Two files in `build/pipecat/` are
+yours rather than the compiler's and survive every recompile: `.env`, and any
+tool sample under `samples/`.
+
+Changing a secret needs no redeploy, though it does restart the agent. It merges
+by default, so names you do not pass keep their values:
+
+```sh
+pipecat cloud secrets set <agent-name>-secrets --file .env --region <region>
+```
+
+## Renaming the agent
+
+A deploy resolves the agent by name, so a new name is a **new agent**. The old
+one keeps running, keeps billing, and keeps answering the phone number that
+still points at it.
+
+<Steps>
+  <Step title="Create the secret set under the new name">
+    ```sh
+    pipecat cloud secrets set <new-name>-secrets --file .env --region <region>
+    ```
+
+    Before the deploy, not after: the manifest references the set by name and a
+    deploy cannot start without it. A new agent has no secrets of its own.
+  </Step>
+  <Step title="Compile, deploy, wait for ready">
+    ```sh
+    unmute compile ./my-agent && cd build/pipecat && pipecat cloud deploy
+    ```
+
+    ```sh
+    pipecat cloud agent status <new-name>
+    ```
+  </Step>
+  <Step title="Repoint the carrier">
+    On the `cloud-websocket` route the agent name is half of the service host
+    your TwiML carries, and nothing updates it for you. Edit the Bin for this
+    number in the Twilio Console:
+
+    ```xml
+    <Parameter name="_pipecatCloudServiceHost" value="<new-name>.<your-organization>"/>
+    ```
+
+    The organization is the **slug** from `pipecat cloud organizations list`, the
+    one shaped like `three-random-words-12345`, never the display name. Until
+    this is saved, calls keep reaching the old agent.
+
+    On the `daily-sip` route the name is compiled into the helper you host, as
+    `AGENT_NAME`. Redeploy the helper from the new build instead; the Twilio
+    webhook points at your helper, so it does not change.
+  </Step>
+  <Step title="Call the number, then delete the old agent">
+    ```sh
+    pipecat cloud agent delete <old-name>
+    ```
+
+    ```sh
+    pipecat cloud secrets delete <old-name>-secrets
+    ```
+
+    Only once a real call to the new agent works. Until then the old one is your
+    way back.
+  </Step>
+</Steps>
 
 ## Verifying a phone route
 

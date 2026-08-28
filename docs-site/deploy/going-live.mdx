@@ -156,10 +156,17 @@ unmute validate ./my-agent
 unmute compile ./my-agent
 ```
 
-[Redeploying](/deploy/redeploying) is that loop in full: the order per platform,
-what carries over, and which carrier records a rename leaves pointing at the old
-agent. Compile with no `--target` before a deploy, or a package with two targets
-ships one of them from its previous build.
+Each platform page carries that loop in full, including what a rename leaves
+behind: [SLNG](/deploy/slng#every-later-deploy),
+[LiveKit Cloud](/deploy/livekit-cloud#every-later-deploy-is-deploy),
+[Pipecat Cloud](/deploy/pipecat-cloud#every-later-deploy).
+
+<Warning>
+  `--target` compiles one target. `unmute compile ./my-agent --target livekit`
+  leaves `build/pipecat/` untouched however old it is, and the next deploy from
+  there ships the previous build's agent name and secret set. With no `--target`,
+  every target is compiled.
+</Warning>
 
 ### Except changing its name
 
@@ -178,9 +185,18 @@ On `livekit` the agent survives because `lk agent deploy` targets the id in the
 preserved `livekit.toml`. On the other two the name is how the platform finds
 the resource, so a new name means a new resource.
 
-A rename also strands the record that routes calls to the agent, on every phone
-route. [Why telephony breaks on a rename](/deploy/redeploying#why-telephony-breaks-on-a-rename)
-names the record per route and walks the swap.
+A rename also strands the record that routes calls to the agent, and that record
+is different on every phone route. It is not part of the agent, so no deploy
+updates it: the number rings and nothing answers, while the agent reports healthy
+because it is — it was never dispatched.
+
+| Route | The record naming the agent | Walked in |
+|---|---|---|
+| LiveKit `sip` | the SIP dispatch rule | [LiveKit Cloud](/deploy/livekit-cloud#renaming-the-agent-breaks-that-rule) |
+| LiveKit `connector` | `AGENT_NAME` in the bridge you host | [LiveKit Cloud](/deploy/livekit-cloud#renaming-the-agent-breaks-that-rule) |
+| Pipecat `cloud-websocket` | `_pipecatCloudServiceHost` in the TwiML Bin | [Pipecat Cloud](/deploy/pipecat-cloud#renaming-the-agent) |
+| Pipecat `daily-sip` | `AGENT_NAME` in the helper you host | [Pipecat Cloud](/deploy/pipecat-cloud#renaming-the-agent) |
+| `slng` | none; the agent id is what goes stale | [SLNG](/deploy/slng#renaming-the-agent) |
 
 ## Where to go next
 

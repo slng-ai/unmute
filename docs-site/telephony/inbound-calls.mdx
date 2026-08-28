@@ -153,8 +153,9 @@ An ordinary redeploy leaves all of this alone: the trunk, the rule, and the
 number keep working. Renaming the agent does not, because the dispatch rule
 names the old worker as a string and no deploy updates it. The number then rings
 and nothing answers, while the agent reports healthy — it was never dispatched.
-[Redeploying](/deploy/redeploying#why-telephony-breaks-on-a-rename) walks the
-swap for every route.
+[Renaming the agent breaks that rule](/deploy/livekit-cloud#renaming-the-agent-breaks-that-rule)
+walks the swap; [changing the agent](/deploy/going-live#except-changing-its-name)
+lists the equivalent record on every other route.
 
 ## One number, one target at a time
 
