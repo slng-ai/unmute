@@ -21,6 +21,11 @@ the target it was compiled for, and it is the agent's identity: names are unique
 across your organisation and a deploy updates whichever agent matches. The
 secret set follows the same name.
 
+Changing it creates a second agent rather than moving the first, and on a phone
+route it also strands the TwiML Bin, which carries the agent name in
+`_pipecatCloudServiceHost`. [Redeploying](/deploy/redeploying#pipecat-cloud-websocket)
+walks that sequence in order.
+
 ```toml pcc-deploy.toml
 agent_name = "acme-support-pipecat"
 region = "eu-central"

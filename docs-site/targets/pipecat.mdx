@@ -109,7 +109,8 @@ in the same way.
 A rename creates a second agent rather than moving the first. The old one keeps
 running and keeps billing, so delete it with
 `pipecat cloud agent delete <old-name>` and create the secret set again under
-the new name.
+the new name. On a phone route the TwiML Bin has to be repointed too:
+[Redeploying](/deploy/redeploying#pipecat-cloud-websocket) is the ordered walk.
 
 Every Pipecat route takes those same commands. Both telephony transports,
 `cloud-websocket` and `daily-sip`, emit a `pcc-deploy.toml` and build on the

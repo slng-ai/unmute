@@ -156,6 +156,11 @@ unmute validate ./my-agent
 unmute compile ./my-agent
 ```
 
+[Redeploying](/deploy/redeploying) is that loop in full: the order per platform,
+what carries over, and which carrier records a rename leaves pointing at the old
+agent. Compile with no `--target` before a deploy, or a package with two targets
+ships one of them from its previous build.
+
 ### Except changing its name
 
 [`name:`](/reference/agent-yaml#name) is the one field where "deploy again" is
@@ -172,6 +177,10 @@ addresses a new one.
 On `livekit` the agent survives because `lk agent deploy` targets the id in the
 preserved `livekit.toml`. On the other two the name is how the platform finds
 the resource, so a new name means a new resource.
+
+A rename also strands the record that routes calls to the agent, on every phone
+route. [Why telephony breaks on a rename](/deploy/redeploying#why-telephony-breaks-on-a-rename)
+names the record per route and walks the swap.
 
 ## Where to go next
 
