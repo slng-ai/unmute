@@ -1452,9 +1452,8 @@ func TestSmokeV26LiveKitExamplesStaticCheck(t *testing.T) {
 		tracing  bool
 	}{
 		{name: "simple-prompt"},
-		{name: "multi-task"},
-		{name: "task-groups"},
-		{name: "subagents"},
+		{name: "salon-concierge"},
+		{name: "remy"},
 		{name: "simple-prompt-tool-free-unconfigured", toolFree: true},
 		{name: "simple-prompt-tool-free-tracing", toolFree: true, tracing: true},
 	}

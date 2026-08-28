@@ -103,13 +103,12 @@ for tool_name in (
 
 
 def digits(phone):
-    """The store's key for a number the tool hands back in spoken shape.
+    """The store's key for a number the tool hands back in E.164.
 
-    The caller identifier is the phone number, and it exists in two shapes on
-    purpose: the identification step returns spaced digit groups, because the
-    router only substitutes a placeholder back where the value matches character
-    for character, and the store keys on digits so any spoken form reaches one
-    record. A fixture that confuses the two passes for the wrong reason.
+    The caller identifier is the phone number. The tool returns it in E.164, one
+    shape for every number in the package, and keys its store on the digits alone
+    so a caller who says the number any other way reaches the one record. A
+    fixture that confuses the two passes for the wrong reason.
     """
     return "".join(character for character in str(phone) if character.isdigit())
 
@@ -478,12 +477,11 @@ async def split_verification_then_intent_change():
     )
     assert finished == {"status": "ok"} and next_node is None
     assert state.customer_phone == verified["customer_phone"]
-    # Spoken digit groups, not raw digits. The step returns the number in the
-    # shape tasks/verify-customer.md requires, and that shape is load-bearing:
-    # the router only substitutes a placeholder back where the stored value
-    # matches character for character, so a number reshaped on its way into the
-    # variable silently costs every later turn its cache with nothing failing.
-    assert state.customer_phone == "303 555 0199", (
+    # E.164, not raw digits and not spoken groups. The step returns the number in
+    # the one shape tasks/verify-customer.md requires and the customer_phone
+    # variable documents, and it has to reach the variable unchanged: a second
+    # shape here would put two phone formats back into a package with one.
+    assert state.customer_phone == "+3035550199", (
         "the confirmed phone must reach the variable in the shape the step "
         f"returns it, got {state.customer_phone!r}"
     )

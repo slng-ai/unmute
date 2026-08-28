@@ -5,16 +5,18 @@ sidebarTitle: "Pipecat"
 ---
 
 ```sh
-unmute compile examples/simple-prompt --target pipecat
+unmute compile my-agent --target pipecat
 ```
 
 ```text
-examples/simple-prompt/build/pipecat/
+my-agent/build/pipecat/
 ├── bot.py                # the agent
 ├── tools/                # your local handlers, copied
 │   ├── __init__.py
-│   └── book_appointment.py
+│   └── <name>.py         # one per local tool
+├── knowledge.py          # present when the package sets knowledge
 ├── tracing.py            # present when the package sets tracing
+├── dev_metrics.py        # per-turn latency for `unmute dev`, inert elsewhere
 ├── pyproject.toml        # pinned dependencies
 ├── Dockerfile
 ├── .dockerignore

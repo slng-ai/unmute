@@ -517,15 +517,16 @@ Both are controls. The difference is whether control comes back.
 | targets | a task or a task group | another agent |
 | context control | `context:` on the task | `context:` on the control |
 
-## The four shapes, as packages
+## The shapes, as packages
 
-These live in the unmute repository, not in the project you are working in.
-`examples.md` says how to reach them. Read the closest one before you write a
-new one.
+One package in the unmute repository shows these shapes working together:
+`examples/salon-concierge` has two agents that hand the caller over, two tasks
+one of them delegates to, and a guarded delegate. It is not in the project you
+are working in; `examples.md` says how to reach it.
 
-| Package | Shape |
-|---|---|
-| `examples/simple-prompt` | one agent, one prompt, every tool |
-| `examples/multi-task` | one agent, two tasks it delegates to |
-| `examples/task-groups` | one agent, three ordered tasks, shared context |
-| `examples/subagents` | two agents that hand the caller over |
+The one-agent, one-prompt shape has no package. `unmute init <name>` scaffolds
+it, and `package.md` in this bundle has the same shape inline.
+
+Task groups have no package either. The YAML above is the reference, and the
+LiveKit experimental warning in "Where a target refuses a shape" is the thing to
+repeat before a user ships one.

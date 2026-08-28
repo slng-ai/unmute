@@ -45,11 +45,23 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 	}
 }
 
+// examplePackagePath resolves a package by name. Most live under examples/; the
+// internal fixtures do not, and simple-prompt moved into internal/testdata when
+// it stopped being a shipped example (2026-08-28) while staying the minimal
+// single-agent shape the compiler tests need.
+func examplePackagePath(name string) string {
+	switch name {
+	case "remy", "safe_core", "daily_carrier", "simple-prompt":
+		return filepath.Join("..", "testdata", name)
+	}
+	return filepath.Join("..", "..", "examples", name)
+}
+
 // loadExample resolves one shipped package, so a test can assert on the same IR
 // the compiler works from rather than on the YAML text.
 func loadExample(t *testing.T, name string) *ir.Agent {
 	t.Helper()
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", name))
+	pkg, err := spec.Load(examplePackagePath(name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,20 +142,11 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// in it.
 	assertSalonScopes(t, resolved)
 
-	// The other half of the turn-latency contract, and the bigger half. LiveKit's
-	// turn detector reads the transcript to decide whether the caller has
-	// finished, so a transcriber that has not finalised yet leaves it unsure, and
-	// an unsure detector waits the full endpointing max_delay of 2.5s instead of
-	// the 0.58s floor. Measured on identical audio, 12 clips each, 2026-08-21:
-	// gradium/stt:default finalised in 0.999s mean and crossed the 0.55s line on
-	// 12 of 12; deepgram/nova:3 finalised in 0.159s mean, worst 0.323s, and
-	// crossed it on none, for the same words. Latency itself is not testable
-	// without the network, so this pins the model that measurement chose and
-	// fails loudly if someone swaps it back.
-	transcriber := resolved.Models["transcriber"]
-	if transcriber.Model != "deepgram/nova:3" {
-		t.Errorf("transcriber model = %q, want deepgram/nova:3: a slower final transcript costs 2s of endpointing per turn", transcriber.Model)
-	}
+	// No assertion on which transcriber this package binds. The measured
+	// finalisation numbers that make the choice matter are recorded in the
+	// package's own `listen:` comment, where an author changing the model reads
+	// them. A gate here would fail every time somebody tried another one, which
+	// is the opposite of what this example is for.
 
 	// A warm TTS socket means the gateway's session init is already done when
 	// the text arrives. Worth ~40ms of mean time to first audio and a much
@@ -478,11 +481,19 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// transcriber is the slowest and least reliable thing a caller can be asked
 	// to do, and the number alone identifies the record.
 	verification := resolved.Tasks["customer_verification"]
+	// The last three are what a real call broke on (2026-08-28, a Spanish
+	// number). The step judged the number short because it did not look like a
+	// NANP one and refused to move; it treated "that sounds about right"
+	// followed by the caller getting on with their booking as not a yes; and it
+	// re-asked in the same words, which the caller heard as the line breaking.
+	// Replayed against the router 8 times per variant, the step reached the
+	// lookup 1/8 before these lines and 8/8 after.
 	requireText("verification", verification.Instructions,
-		"A complete number is 10 to 15 digits",
+		"You never decide whether a number is long enough",
 		"Never invent a country code",
 		"Read every digit back once",
-		"On a clear yes, look the number up")
+		"Agreement is a yes, however it arrives",
+		"Never send the same sentence twice")
 	for _, banned := range []string{"first name", "surname", "one letter at a time", "spell"} {
 		if strings.Contains(strings.ToLower(verification.Instructions), banned) {
 			t.Errorf("verification still collects a name: prompt mentions %q", banned)
@@ -495,9 +506,22 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// so the shape it comes back in is part of the contract and not a style
 	// note. Asking for the number is already in the prompt above; this is only
 	// about how it is written down on the way out.
+	// One shape, E.164, which is what MANAGER_PHONE_NUMBER already holds. The
+	// plus goes in front of the digits the caller gave and no country code is
+	// split off or supplied, because telling one from the number after it needs a
+	// table of every country. Guessing it took the last ten digits for the local
+	// part, so +34 680 830 464 came back as "3 468 083 0464": a lone "3" standing
+	// in for a country code that is really 34, and a caller hearing their own
+	// number read as somebody else's.
 	requireText("verification", verification.Instructions,
-		"digit groups separated by single spaces",
-		"A country code is simply the first group")
+		"Return it in E.164 and in no other shape",
+		"a plus sign, then digits, with nothing between them",
+		"leaves their order alone")
+	// E.164 is not the shape to say out loud: a model asked to speak it regroups
+	// it, which is measured to cost the turn its cache. The readback speaks
+	// digits one at a time instead, and nothing else reads the number back.
+	requireText("verification", verification.Instructions,
+		"Never read this string back as one long number")
 	if _, returned := verification.Result["customer_phone"]; !returned {
 		t.Error("verification no longer returns customer_phone, so the specialists' {{customer_phone}} has no value and the router answers their first request with a 422")
 	}
@@ -669,97 +693,6 @@ func TestSalonConciergeDeclaresOneIdentifier(t *testing.T) {
 	}
 }
 
-func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
-	// Among these four structural comparison packages, tracing stays on only
-	// simple-prompt. It used to be on all four, which made
-	// the first package in the table impossible to run without a Langfuse
-	// account: three third-party values before a first-time reader hears a word
-	// (research D12). Which one keeps it is a table row in examples/README.md,
-	// and this is the test that holds the count at one.
-	cases := []struct {
-		name                  string
-		agents, tasks, groups int
-		tracing               bool
-	}{
-		{"simple-prompt", 1, 0, 0, true},
-		{"multi-task", 1, 2, 0, false},
-		{"task-groups", 1, 3, 1, false},
-		{"subagents", 2, 0, 0, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			pkg, err := spec.Load(filepath.Join("..", "..", "examples", tc.name))
-			if err != nil {
-				t.Fatal(err)
-			}
-			agent, err := ir.Build(pkg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(agent.Agents) != tc.agents || len(agent.Tasks) != tc.tasks || len(agent.TaskGroups) != tc.groups {
-				t.Fatalf("got agents/tasks/groups %d/%d/%d, want %d/%d/%d", len(agent.Agents), len(agent.Tasks), len(agent.TaskGroups), tc.agents, tc.tasks, tc.groups)
-			}
-			if tracing := agent.Tracing != nil && agent.Tracing.Provider == "langfuse"; tracing != tc.tracing {
-				t.Fatalf("tracing = %t, want %t: only simple-prompt in this comparison configures it", tracing, tc.tracing)
-			}
-			if len(agent.Tools) != 5 {
-				t.Fatalf("got %d tools, want 5", len(agent.Tools))
-			}
-			for name, def := range agent.Agents {
-				for _, required := range []string{"## Voice contract", "Never speak or emit", "immediately and silently", "Never ask the caller to wait"} {
-					if !strings.Contains(def.Instructions, required) {
-						t.Errorf("agent %q is missing prompt contract %q", name, required)
-					}
-				}
-			}
-			for name, task := range agent.Tasks {
-				for _, required := range []string{"## Voice contract", "Never speak or emit", "immediately and silently", "runtime-only"} {
-					if !strings.Contains(task.Instructions, required) {
-						t.Errorf("task %q is missing prompt contract %q", name, required)
-					}
-				}
-			}
-			toolContracts := map[string]string{
-				"lookup_customer":    "before any availability",
-				"create_customer":    "explicitly gave permission",
-				"check_availability": "This tool accepts only service and date",
-				"book_appointment":   "Never invent either ID",
-				"cancel_appointment": "explicit confirmation",
-			}
-			for name, tool := range agent.Tools {
-				if tool.Execution != ir.ToolLocal || tool.URLEnv != "" {
-					t.Errorf("tool %q execution/url = %q/%q, want local/empty", name, tool.Execution, tool.URLEnv)
-				}
-				if !strings.Contains(tool.Description, toolContracts[name]) {
-					t.Errorf("tool %q is missing workflow contract %q", name, toolContracts[name])
-				}
-			}
-			if tc.name == "multi-task" {
-				parent := agent.Agents["appointment_desk"].Instructions
-				if !strings.Contains(parent, "Don't ask for the caller's name or phone number first") ||
-					!strings.Contains(parent, "service, date, or appointment ID first") {
-					t.Error("multi-task parent can collect task-owned fields before delegation")
-				}
-				customer := agent.Tasks["customer_record"].Instructions
-				appointment := agent.Tasks["appointment_request"].Instructions
-				if !strings.Contains(customer, "Never guess an ID") ||
-					!strings.Contains(customer, "explicit permission") ||
-					!strings.Contains(appointment, "nonempty customer ID") ||
-					!strings.Contains(appointment, "Only after booking succeeds") {
-					t.Error("multi-task workflow does not enforce customer and appointment gates")
-				}
-			}
-			for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
-				t.Run(string(provider), func(t *testing.T) {
-					if _, err := Generate(agent, targetByProvider(t, agent, provider), target.Default()); err != nil {
-						t.Fatal(err)
-					}
-				})
-			}
-		})
-	}
-}
-
 // TestPublicExamplesValidateAndGenerate is the shipped-example gate (compiler.md V36):
 // every package under examples/ must load, build, validate its **declared**
 // targets with zero errors, and generate for each one. Generating without
@@ -924,16 +857,18 @@ func TestPublicExamplePackages(t *testing.T) {
 			directories = append(directories, entry.Name())
 		}
 	}
-	// Seven packages: four structural, salon-concierge as the composite release
-	// fixture that also carries the only shipped telephony route, and two that
-	// emit no runnable project. The slng pair is deliberately a pair: support
-	// references only builtins so its push creates nothing, and orders ships a
-	// `local:` tool so the push has to create, run, publish and attach one. The
-	// deploy walkthrough needs both, because the difference between them is the
-	// thing it explains. The focused telephony, outbound, transfer, MCP and
-	// regional examples were removed 2026-08-21; route guards remain against
-	// internal test fixtures.
-	want := []string{"multi-task", "salon-concierge", "simple-prompt", "slng-orders", "slng-support", "subagents", "task-groups"}
+	// Three packages: salon-concierge as the composite release fixture that also
+	// carries the only shipped telephony route, and two that emit no runnable
+	// project. The slng pair is deliberately a pair: support references only
+	// builtins so its push creates nothing, and orders ships a `local:` tool so
+	// the push has to create, run, publish and attach one. The deploy walkthrough
+	// needs both, because the difference between them is the thing it explains.
+	// The focused telephony, outbound, transfer, MCP and regional examples were
+	// removed 2026-08-21; the four structural comparison packages followed on
+	// 2026-08-28, and a reader who wants a package to run scaffolds one with
+	// `unmute init`. simple-prompt lives on as internal/testdata/simple-prompt,
+	// because it is the minimal single-agent shape a dozen tests compile.
+	want := []string{"salon-concierge", "slng-orders", "slng-support"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
@@ -967,67 +902,6 @@ func TestRepositoryKeepsSpecsPrivateAndDocsFocused(t *testing.T) {
 	}
 	if err := exec.Command("git", "-C", repo, "check-ignore", "-q", "--", "specs/.unmute-ignore-probe/spec.md").Run(); err != nil {
 		t.Errorf("specs/ is not ignored: %v", err)
-	}
-}
-
-func TestExampleToolExposure(t *testing.T) {
-	domainTools := []string{"lookup_customer", "create_customer", "check_availability", "book_appointment", "cancel_appointment"}
-	cases := []struct {
-		name       string
-		agentTools map[string][]string
-		taskTools  map[string][]string
-	}{
-		{
-			name:       "simple-prompt",
-			agentTools: map[string][]string{"appointment_desk": domainTools},
-		},
-		{
-			name:       "multi-task",
-			agentTools: map[string][]string{"appointment_desk": {"check_customer", "manage_appointment"}},
-			taskTools: map[string][]string{
-				"customer_record":     {"lookup_customer", "create_customer"},
-				"appointment_request": {"check_availability", "book_appointment", "cancel_appointment"},
-			},
-		},
-		{
-			name:       "task-groups",
-			agentTools: map[string][]string{"appointment_desk": {"manage_appointment"}},
-			taskTools: map[string][]string{
-				"identify_customer":    {"lookup_customer", "create_customer"},
-				"select_appointment":   {"check_availability"},
-				"finalize_appointment": {"book_appointment", "cancel_appointment"},
-			},
-		},
-		{
-			name: "subagents",
-			agentTools: map[string][]string{
-				"booking_desk":        {"lookup_customer", "create_customer", "check_availability", "book_appointment", "to_appointment_manager"},
-				"appointment_manager": {"lookup_customer", "create_customer", "check_availability", "book_appointment", "cancel_appointment", "to_booking_desk"},
-			},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			pkg, err := spec.Load(filepath.Join("..", "..", "examples", tc.name))
-			if err != nil {
-				t.Fatal(err)
-			}
-			agent, err := ir.Build(pkg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for name, want := range tc.agentTools {
-				if got := agent.Agents[name].Tools; !slices.Equal(got, want) {
-					t.Errorf("agent %q tools = %v, want %v", name, got, want)
-				}
-			}
-			for name, want := range tc.taskTools {
-				if got := agent.Tasks[name].Tools; !slices.Equal(got, want) {
-					t.Errorf("task %q tools = %v, want %v", name, got, want)
-				}
-			}
-		})
 	}
 }
 
@@ -1282,8 +1156,8 @@ func TestExampleReadmesNameTheirDeclaredTransports(t *testing.T) {
 			}
 			if len(routed) == 0 {
 				// Nothing declares a route, so there is no route claim to keep true.
-				// The four structural examples live in the index table in
-				// examples/README.md and need no page of their own.
+				// The slng pair lives in the index table in examples/README.md
+				// and needs no route section of its own.
 				return
 			}
 			readme, err := os.ReadFile(filepath.Join(root, entry.Name(), "README.md"))
@@ -1306,7 +1180,7 @@ func TestExampleReadmesNameTheirDeclaredTransports(t *testing.T) {
 // agent, one per task. Four agents and two tasks on one think profile is the
 // shape that collided, so it is the shape worth naming here in full.
 func salonScopes() []string {
-	const id = "optimized-salon-concierge-v8"
+	const id = "optimized-salon-concierge-v12"
 	return []string{
 		id + ":concierge",
 		id + ":complaint_specialist",
@@ -1486,22 +1360,44 @@ func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 	if !strings.Contains(all, "{{customer_phone}}") {
 		t.Error("no prompt in the example uses {{customer_phone}}, so every answer that says the number is still refused by the router's number rule and the example teaches nothing about caching one")
 	}
-	// The format rule is the feature, not decoration. Measured against the live
-	// EU router on 2026-08-24, three reads per arm on fresh throwaway scopes:
-	// values written "555 070 1222" came back echoed character for character and
-	// the third read was served from cache in 109ms; the same numbers written
-	// "+15550707444" were reformatted by the model, so the value never appeared
-	// in the answer, and none of the three reads was served. The router puts the
-	// placeholder back only where the answer holds the value exactly, so a
-	// description that does not pin the shape costs every number-bearing turn
-	// its cache, with no error anywhere to notice.
+	// The format rule is the feature, not decoration, and the package now pins
+	// E.164: one shape for every number it holds, MANAGER_PHONE_NUMBER included.
+	// That is a deliberate reversal, so the measurement behind the old shape is
+	// kept here rather than deleted. Measured against the live EU router on
+	// 2026-08-24, three reads per arm on fresh throwaway scopes: values written
+	// "555 070 1222" came back echoed character for character and the third read
+	// was served from cache in 109ms; the same numbers written "+15550707444"
+	// were reformatted by the model, so the value never appeared in the answer,
+	// and none of the three reads was served.
+	//
+	// So E.164 is not a shape to speak, and the description has to say both
+	// things: which shape the value takes, and that no prompt reads it aloud. A
+	// package that pins E.164 and then tells an agent to recite it pays the cache
+	// on every one of those turns with no error anywhere to notice.
 	phone, declared := resolved.Variables["customer_phone"]
 	if !declared {
 		t.Fatal("the package declares no customer_phone")
 	}
-	for _, want := range []string{"single spaces", "character for character"} {
+	for _, want := range []string{
+		"E.164",
+		"no spaces, brackets or dashes",
+		"character for character",
+		"never read this value back to the caller",
+	} {
 		if !strings.Contains(phone.Description, want) {
-			t.Errorf("customer_phone description omits %q: without the format rule the value is reformatted when spoken and the turn silently stops caching", want)
+			t.Errorf("customer_phone description omits %q: the shape has to be pinned, and an E.164 value the agent speaks silently stops caching the turn", want)
+		}
+	}
+	// And the prompts have to actually hold that line, because the description is
+	// only a comment to them.
+	for _, bodies := range []map[string]string{promptBodies(resolved.Agents), taskBodies(resolved.Tasks)} {
+		for name, body := range bodies {
+			if !strings.Contains(body, "{{customer_phone}}") {
+				continue
+			}
+			if !strings.Contains(body, "never say it back") && !strings.Contains(body, "do not repeat the caller's phone number") {
+				t.Errorf("prompt %q substitutes {{customer_phone}} without forbidding the agent to say it back; an E.164 number read aloud is regrouped and the turn stops caching", name)
+			}
 		}
 	}
 	if strings.Contains(all, "{{customer_id}}") {

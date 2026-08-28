@@ -20,8 +20,12 @@ Flags:
 ## Usage
 
 ```sh
-unmute validate examples/simple-prompt
+unmute validate my-agent
 ```
+
+One line per target: the target instance name, then its provider in
+parentheses. With no `--target`, every declared target is checked. A package
+that declares two prints two:
 
 ```text
 ✓ livekit (livekit)
@@ -31,16 +35,13 @@ Warnings:
   livekit: LiveKit turn placement is a preference
 ```
 
-One line per target: the target instance name, then its provider in
-parentheses. With no `--target`, every declared target is checked.
-
 ## Choosing targets
 
 `--target` is repeatable, and the results come back in the order you asked for
 them:
 
 ```sh
-unmute validate examples/simple-prompt --target pipecat --target livekit
+unmute validate my-agent --target pipecat --target livekit
 ```
 
 ```text

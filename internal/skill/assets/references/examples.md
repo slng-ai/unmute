@@ -1,8 +1,7 @@
 # Working examples
 
-Every shape in this bundle has a package that already does it. **Those packages
-live in the Unmute repository, not in the user's project.** Check before you
-reach for one:
+Three packages ship with the Unmute repository. **They live in that repository,
+not in the user's project.** Check before you reach for one:
 
 ```sh
 ls examples/
@@ -14,26 +13,24 @@ this skill, **do not go looking for it and do not stop**. Build from
 `package.md`, which carries a complete working `agent.yaml` inline, and use the
 table below to know what shape you are aiming at.
 
-All of them apply the same Sage and Stone Salon appointment workflow, so you can
-read two side by side and see only the difference that matters.
-
 ## From a need to a package
 
 | What the user wants | Package | What it shows |
 |---|---|---|
-| one full release-readiness project | `examples/salon-concierge` | verification task, booking task group, four-agent handoffs, in-process tool state, Coval tracing, cold manager transfer, browser audio, and an inbound phone route on each of its two targets; every tool is local, so it starts with no external tool server |
-| the smallest thing that runs, and one prompt with every tool | `examples/simple-prompt` | **Start here.** One agent, browser audio, local tools, no Twilio and no API to stand up. Also the baseline for both targets. |
-| a step with a definite typed answer | `examples/multi-task` | one agent, two tasks it delegates to, `result:` and `assign:` |
-| steps that must happen in a fixed order | `examples/task-groups` | three ordered tasks, `context_scope: shared`, and the LiveKit experimental warning |
-| two jobs with different rules and tools | `examples/subagents` | two agents that hand the caller over, with a control in each direction |
+| one full release-readiness project | `examples/salon-concierge` | a verification task, a booking task, a guarded delegate, two agents that hand the caller over, in-process tool state, Coval tracing, a cold manager transfer, browser audio, and an inbound phone route on each of its two targets; every tool is local, so it starts with no external tool server |
 | an agent SLNG hosts, in its smallest form | `examples/slng-support` | one builtin and nothing else, so the push creates nothing. Emits no runnable project, so there is no `unmute dev`: `unmute deploy` pushes it and a web session talks to it |
 | an agent SLNG hosts, with a tool of its own | `examples/slng-orders` | a `local:` handler that is **uploaded** and becomes a versioned object in SLNG. Needs a sample at `build/slng/samples/<tool>.json` and `unmute deploy --run-samples`, because a code tool cannot publish until one run proves it |
+
+The smallest thing that runs is not an example any more. `unmute init <name>`
+scaffolds it: one agent, browser audio, one builtin, no Twilio and no third-party
+account. Start a user there rather than at `salon-concierge`, which is a phone
+package with two agents and tracing.
 
 ## How to use one, when you have them
 
 ```sh
-unmute validate examples/simple-prompt
-unmute dev examples/simple-prompt --target pipecat
+unmute validate examples/salon-concierge
+unmute dev examples/salon-concierge --target pipecat
 ```
 
 The two slng packages are the exception to that second line: they emit no
@@ -48,6 +45,11 @@ Then read `examples/<name>/agent.yaml` and its `README.md`. Every one of these
 validates and compiles as it stands, so a package that will not validate can be
 diffed against the closest example rather than debugged from first principles.
 
+For prompts specifically, read `examples/salon-concierge/instructions.md` and its
+two task prompts. Every one of them carries the same `How you speak` and
+`How you sound` blocks that `prompting.md` describes, and its `README.md` records
+which lines came out of a real call going wrong.
+
 ## When you do not have them
 
 This is the ordinary case. You are in a user's project, they ran
@@ -60,14 +62,12 @@ This is the ordinary case. You are in a user's project, they ran
 Say nothing to the user about a missing examples directory. It is not missing;
 it was never theirs. Telling them to go and find it wastes their time.
 
-Telephony, transfers, outbound, MCP and regional routing have no example of
-their own any more: the focused packages were removed on 2026-08-21, and
-`salon-concierge` carries the only shipped phone route. Point the user at the
-docs page for those, not at a package, and never invent an example path.
+## Shapes with no example
 
-## The four shapes, side by side
-
-`simple-prompt`, `multi-task`, `task-groups`, and `subagents` are the same
-workflow in four structures, and the four structural packages share the same
-five local Python tools. Diff two of them to see exactly what a structure costs
-and buys. `orchestration.md` in this bundle has the rule for choosing.
+Telephony, transfers, outbound, MCP and regional routing lost their focused
+packages on 2026-08-21. Tasks, task groups and agent handoffs lost theirs on
+2026-08-28: `simple-prompt`, `multi-task`, `task-groups` and `subagents` are
+gone, and `salon-concierge` carries the only shipped phone route. Every one of
+those shapes is still supported and still documented. `orchestration.md` in this
+bundle has the rule for choosing between them and the YAML for writing each one.
+Point the user at the docs page, never at a package path you have not listed.

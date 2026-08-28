@@ -9,8 +9,9 @@ prompt, its own tools, and the call for good: nothing comes back.
 Reach for it when two jobs have genuinely different rules, not just different
 paragraphs. One prompt can only get so long before it starts contradicting itself.
 
-This page follows `examples/subagents`: `booking_desk` takes new appointments,
-`appointment_manager` reschedules and cancels.
+The YAML on this page is one worked pair of agents. For a shipped package that
+does it, read `examples/salon-concierge`: `concierge` handles bookings and
+`complaint_specialist` handles complaints, with a control in each direction.
 
 ## Two agents in one package
 
@@ -112,10 +113,11 @@ If you want a step that runs and hands control back with an answer, that is a
 
 ## The tool lists are the guardrail
 
-In `examples/subagents`, only `appointment_manager` has `cancel_appointment`.
-A caller cannot talk the booking agent into a cancellation, because the booking
-agent has no way to perform one. Splitting agents is as much about splitting
-capability as it is about splitting prose.
+In `examples/salon-concierge`, only `complaint_specialist` has `record_complaint`
+and the refund policy. A caller cannot talk the concierge into filing a complaint
+or quoting a refund rule, because the concierge has no way to do either.
+Splitting agents is as much about splitting capability as it is about splitting
+prose.
 
 ## The opening turn cannot hand off again
 
@@ -134,11 +136,11 @@ nothing but its delegate for ten turns while the caller asked for another one.
 ## Try it
 
 ```sh
-unmute validate examples/subagents
-unmute dev examples/subagents --target pipecat
+unmute validate examples/salon-concierge
+unmute dev examples/salon-concierge --target pipecat
 ```
 
-Say you want to change an appointment you already have. The voice keeps going,
+Say you have a complaint about a service you paid for. The voice keeps going,
 but the agent behind it changes.
 
 ## Where to go next

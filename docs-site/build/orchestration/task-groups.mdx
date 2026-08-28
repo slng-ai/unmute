@@ -6,8 +6,9 @@ description: "Run several tasks in a fixed order, sharing one context, and get o
 A task group is an ordered sequence of tasks. The order is a guarantee, not a
 request in a prompt.
 
-This page follows `examples/task-groups`: identify the customer, select the
-appointment, finalize it.
+The YAML on this page is one worked group: identify the customer, select the
+appointment, finalize it. No shipped example uses a task group, so copy the
+shape from here rather than looking for a package.
 
 ## Declare the group
 
@@ -120,9 +121,8 @@ member tasks share the group's running context. Each task still declares
 
 ## The LiveKit warning
 
-```sh
-unmute validate examples/task-groups
-```
+`unmute validate` on a package with a task group and both code targets prints a
+second warning:
 
 ```text
 ✓ livekit (livekit)
@@ -140,12 +140,9 @@ command still exits 0.
 
 ## Try it
 
-```sh
-unmute dev examples/task-groups --target pipecat
-```
-
-Ask to book an appointment. Watch the three steps run in order, and notice that
-nothing asks you the same question twice.
+Add the group above to a package of your own, then `unmute dev` it and ask to
+book an appointment. Watch the three steps run in order, and notice that nothing
+asks you the same question twice.
 
 ## Where to go next
 

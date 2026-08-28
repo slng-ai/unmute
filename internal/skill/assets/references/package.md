@@ -81,7 +81,7 @@ capacity:
   avg_session_duration: 5m
 ```
 
-That is `examples/simple-prompt`, and it runs in a browser.
+That is the shape `unmute init <name>` scaffolds, and it runs in a browser.
 
 ## Every top-level key
 

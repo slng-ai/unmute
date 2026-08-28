@@ -14,8 +14,8 @@ default output does not give you:
 
 1. **Short answers.** A paragraph becomes a monologue the caller forgets, and
    every extra token is latency they hear.
-2. **Speech-shaped text.** Markdown, bullet lists, raw URLs, and bare digits all
-   sound wrong when a speech model reads them.
+2. **Speech-shaped text.** Markdown, bullet lists, raw URLs, and a number
+   written for the eye all sound wrong when a speech model reads them.
 3. **Natural speech patterns.** Clean grammar sounds robotic. Real speech has
    filler words, restarts, and openers that change from turn to turn.
 
@@ -30,7 +30,8 @@ models find a rule faster when it has a heading over it.
 | Section | Purpose |
 |---|---|
 | Identity | who the agent is, its role, what it is accountable for |
-| Output rules | formatting that survives being spoken |
+| `How you speak` | formatting that survives being spoken |
+| `How you sound` | the personality, written as behaviour you can hear |
 | Conversational flow | how it moves through a call |
 | Tools | how it uses tools and reports what happened |
 | Goal | what success looks like |
@@ -52,23 +53,76 @@ own section.
 
 ### Output rules
 
-Load bearing. Copy this and add your domain's cases.
+Load bearing, and the section a chat prompt never has. Write it as two headings,
+because they answer two different questions and get edited at different times:
+`How you speak` is the contract with the speech model, and `How you sound` is the
+personality. Copy this and add your domain's cases.
 
 ```markdown
-# Output rules
+# How you speak
 
-You are speaking to the caller out loud, so write every reply the way a person
-would say it.
+A speech model reads out everything you write, exactly as you write it. So write
+speech, not text.
 
-- Plain sentences only. No markdown, no lists, no tables, no code, no emoji.
-- One to three sentences by default. Ask one question at a time.
-- Say numbers, phone numbers, and email addresses as words.
-- Read a web address without "https" and without slashes.
-- Avoid acronyms and anything you would have to spell out.
+- Whole sentences in ordinary capitalization, each one ending in a full stop, a
+  question mark or an exclamation mark.
+- No markdown, no asterisks, no bullet points, no headings, no emoji, and no
+  symbols like the euro sign or the hash. They get read out loud as written.
+- Never send a bare fragment or a lone word. A number or a code always sits
+  inside a sentence.
+- Words in capitals are read letter by letter, so use capitals only for
+  something you want spelled out that way, like ATM. Never for emphasis: it
+  changes how a word is read, not how loud it sounds.
+- Write money, dates, times and numbers in their plain written form and let the
+  voice say them: 3:00 PM, Friday the 12th, 28 euros, 20 percent.
+- Commas and full stops are your only pauses. Use them where you would breathe.
+- One or two short sentences a turn, and one question at a time.
+- Never say agent names, tool names, result keys, or raw results.
 ```
 
 Then add the entities your domain says out loud: prices, dates, order numbers,
-dosages, postcodes, confirmation codes. For each one, say how to pronounce it.
+dosages, postcodes, confirmation codes. For each one, say which of the two rules
+below it falls under.
+
+#### Do not spell numbers out yourself
+
+A speech model normalizes conventional written forms, and it does it better than
+a prompt can. `3:00 PM`, `$19.99`, `04/20/2025`, `12%`, `(415) 555-1212`,
+`user@example.com` and `123 Main St` all come out the way a person says them. A
+prompt that orders the model to write "three in the afternoon" or "nineteen
+dollars ninety-nine" is doing preprocessing the engine already does, and the
+hand-written version is the one that comes out wrong. Stripping punctuation or
+forcing casing to help also costs quality.
+
+**This page used to say the opposite.** It said to say numbers, phone numbers and
+email addresses as words. That rule was removed on 2026-08-28 after it was
+reversed on a shipped package: hand-spelling buys nothing and loses the engine's
+own normalization.
+
+Where a document the agent quotes already writes an amount out in words, tell it
+to quote the document as written rather than converting either way.
+
+#### A code read one character at a time
+
+The exception is a value the caller has to hear character by character: a
+confirmation code, a reference, an ID. Delimit the characters.
+
+| Want | Write |
+|---|---|
+| a natural pace | `A B C 1 2 3` |
+| slower | `A, B, C, 1, 2, 3` |
+| a long run, in groups | `3 6 8 9, 0 5 0 5, 2 5 8 2, 3 6 7 9` |
+
+Never put full stops between single characters. NATO words, Alpha and Bravo, help
+where a letter has to be unambiguous.
+
+**A phone number is not one of these.** It is a conventional format, so write it
+the way it is written on a phone and let normalization read it: `+34 680 830 464`,
+`(415) 555-1212`. Delimiting one instead is a live-call failure already paid for
+here. A verification prompt asked for `plus 3 4, 6 8 0, 8 3 0, 4 6 4`; the voice
+said "plus three four" and never spoke the rest of the number, and the caller
+confirmed digits they had not heard. Commas inside a run of digits are the thing
+that breaks it.
 
 ### Conversational flow
 
@@ -174,6 +228,11 @@ Examples:
 The point is to make filler available, not to sprinkle it everywhere. Too much
 sounds as fake as none.
 
+**A filler rides on a turn that also does its job.** A turn that is only "let me
+have a look" costs a whole round trip, tells the caller nothing, and is the same
+defect as narrating a tool call. Say so in the prompt, next to the filler
+examples, or you get the polite version of asking the caller to hold.
+
 ### Self-corrections
 
 ```markdown
@@ -235,6 +294,66 @@ Examples:
 ```
 
 Show four or five openers. Show one and the model anchors on it.
+
+### One example is a template, not an example
+
+This is worth its own heading because it does not look like a bug. A single
+example of a spoken line is not a hint, it is the line the model uses every
+call. A booking task whose prompt read `for example "A haircut, lovely. What day
+suits you?"` opened with that exact sentence on every single call, and it read as
+a script the moment anyone heard two calls in a row.
+
+So wherever you show a spoken line: three or four variants, or none at all and a
+description of what the line has to achieve.
+
+### Do not say the same thing twice
+
+The most common way a technically correct voice agent sounds wrong. Three
+versions, all found on real calls.
+
+**A turn after a tool acknowledges again.** A tool's `announce:` is spoken while
+the tool runs, so the caller has already been acknowledged by the time the model
+speaks. Nothing tells the model that, so the two stack up: "Okay, one sec." then
+"A haircut, lovely. What day suits you?". Keep the `announce:`, because it covers
+real model latency, and take the second acknowledgment out of the prompt.
+
+```markdown
+- A short line plays out loud while a tool runs, so a turn that comes straight
+  after a tool ran has already been acknowledged. Never add a second one there.
+  No "Okay", no "Right", no "Lovely" at the front of that turn: carry straight on
+  with the new information.
+```
+
+`tools.md` has the other half of this: if the instructions also tell the agent to
+say it is checking something, remove that when you add `announce:`.
+
+**One value named two ways.** "Tomorrow, Saturday the 29th, I've got 9:00 AM" is
+one day said three times, and it makes every sentence it appears in sound like a
+form being read back. Tell the agent to name a day once, the way the caller said
+it.
+
+**Two prompts confirming the same result.** When a task hands its result back to
+the agent that called it, exactly one of them says the detail out loud. Write
+which one into both prompts, or the caller hears the service, the day and the
+time twice in a row.
+
+### One written shape per value
+
+A value that prompts and tools pass around needs exactly one written shape, named
+in the variable's `description` and repeated in whatever produces it. A phone
+number is the usual offender: a tool that hands one back in E.164, a task prompt
+that returns it as spaced digit groups, and an agent that says it a third way are
+three formats for one customer, and only one of them is the key the store was
+written with.
+
+Pick the shape the rest of the system already uses. For a phone number that is
+E.164, a plus sign then the digits with nothing between them, because a transfer
+destination is already written that way. Keep the spoken shape separate and say so
+in the prompt: the value a step returns is data, and the line the caller hears is
+a sentence.
+
+If the agent also **says** the value out loud, `models.md` has the part where the
+written shape decides whether that turn is served from cache.
 
 ## What changes per prompt surface
 
@@ -383,7 +502,12 @@ These hold up:
 - Tool X is called with these parameters when the caller says Y.
 - An out of scope request is declined with the words the guardrails specify.
 - No literal `{{ }}` string is ever spoken.
-- Numbers, prices, and dates come out as spoken words.
+- Numbers, prices and dates come out the way a person says them, and a phone
+  number or a code is heard well enough to be checked.
+- No turn opens by acknowledging something an `announce:` line already
+  acknowledged.
+- Two calls in a row do not open the same way, and no spoken example from the
+  prompt comes back word for word.
 
 These do not, in an automated check:
 

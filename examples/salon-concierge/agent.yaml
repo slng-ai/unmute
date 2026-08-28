@@ -1,11 +1,5 @@
 version: 1
 
-# What this agent is called where it is deployed. The deployed name is this
-# joined to the target it was compiled for, so one package with two targets
-# of the same provider does not deploy one name twice. Required on every
-# target: the two names unmute could infer instead are not identities,
-# because every package calls its target after the platform, and the folder
-# is named by whoever cloned the repository.
 name: salon-concierge
 entry_agent: concierge
 
@@ -13,16 +7,19 @@ variables:
   customer_phone:
     type: string
     description: >-
-      The caller's confirmed phone number, as the verification task returns it:
-      digit groups separated by single spaces, with no plus sign, brackets or
-      dashes. That exact shape is load-bearing rather than cosmetic. The Context
-      Router only puts the placeholder back where the answer holds the value
-      character for character, so a number the agent reformats while speaking it
-      leaves real digits in the stored copy, the personal-data scan refuses to
-      share it, and the turn stops caching with no error to notice.
+      The caller's confirmed phone number in E.164, exactly as the verification
+      task returns it: a plus sign, then digits, with no spaces, brackets or
+      dashes. One shape for every phone number in this package, the
+      MANAGER_PHONE_NUMBER transfer destination included, so no prompt and no
+      tool has to guess which shape it is holding. The prompts never read this
+      value back to the caller, and that is deliberate: the Context Router only
+      puts the placeholder back where an answer holds the value character for
+      character, and a model asked to say an E.164 string aloud regroups it, so
+      such a turn would silently stop caching. The placeholder is here so an
+      agent can tell an identified caller from a new one, not so it can recite
+      the number.
 
 secrets:
-  # The reasoning model and the knowledge bases' embeddings both read this.
   - OPENAI_API_KEY
   - SLNG_API_KEY
   - COVAL_API_KEY
@@ -38,23 +35,11 @@ secrets:
 destinations:
   manager_line: MANAGER_PHONE_NUMBER
 
-# Two folders of documents the agents can search, so an answer about a price or a
-# refund comes from the salon's own paperwork instead of from what the model
-# happens to remember. Each folder is read, split and embedded once when the agent
-# starts, and held in memory, so content is fixed until the next compile.
-#
-# They are separate on purpose. An agent gets a knowledge base by being given its
-# tool, so the concierge can quote prices and cannot quote refund policy, and the
-# complaint specialist is the other way round.
 knowledge:
   refunds:
     documents: knowledge/refunds
   services:
     documents: knowledge/services
-    # A price list, not prose. At the default 90 tokens the list splits mid-run,
-    # so "how much is a cut and finish" ranked an opening-hours passage above the
-    # price: the price line ended up as the tail of a chunk about something else.
-    # A wider window keeps each service with its own price and duration.
     chunk_size: 220
     chunk_overlap: 40
 
@@ -63,24 +48,17 @@ models:
     reasoning:
       provider: slng
       model: gpt-5.6-luna
-      # Back at -v8 on purpose. The instruction files never changed, so this
-      # package's prompts are byte-identical to what -v8's cache was written
-      # against, and it comes back warm. Do not reuse -v9: it holds
-      # qwen/qwen3-32b's answers from a trial that was reverted, and one of them
-      # was a booking confirmation for a booking that never happened.
-      agent_id: optimized-salon-concierge-v8
+      agent_id: optimized-salon-concierge-v12
       upstream:
         provider: openai
       params:
         world_part_override: eu
-        # Not optional once the agent has tools: the GPT-5 family rejects
-        # function tools on chat completions without it.
         reasoning_effort: "none"
   speak:
     voice:
       provider: slng
-      model: "deepgram/aura:2"
-      voice: "aura-2-thalia-en"
+      model: "cartesia/sonic:3.5"
+      voice: "62ae83ad-4f6a-430b-af41-a9bede9286ca"
       language: en
       params:
         world_part_override: eu
@@ -88,7 +66,7 @@ models:
   listen:
     transcriber:
       provider: slng
-      model: "deepgram/nova:3"
+      model: "soniox/speech-ai:rt-v5"
       language: en
       params:
         world_part_override: eu
@@ -96,17 +74,7 @@ models:
     detector:
       provider: local
       model: silero
-      # How quickly the agent decides the caller has finished: snappy, balanced
-      # or patient. This is a salon booking line, so callers read out dates,
-      # times and the occasional phone number, and `snappy` would answer some of
-      # them mid-sentence. `balanced` closes the turn at 1.6s instead of the
-      # framework defaults of 2.5s on LiveKit and 3.0s on Pipecat, which is where
-      # a measured 2.5s turn came from.
       pace: balanced
-      # The floor: how long silence has to last before the caller counts as
-      # finished. Separate from the pace on purpose. This value is tuned per
-      # target in targets.yaml, and the pace is not: a per-target pace would be a
-      # duration in disguise, and this field already is one.
       endpointing_delay: 400ms
 
 agents:
@@ -185,9 +153,6 @@ controls:
     kind: delegate
     task: booking
     when: The caller wants to create, modify, or cancel a booking.
-    # The guard the shape used to need a whole extra agent for. The step is held
-    # back until the caller is identified, the model is told which control
-    # supplies the number, and the caller hears none of it.
     requires:
       - customer_phone
 
@@ -230,7 +195,7 @@ tools:
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, you’ve reached Sage and Stone Salon. How can I help today?"
+    text: "Hi, you've reached Sage and Stone. Robin speaking, what can I do for you?"
   interruption:
     enabled: true
   inactivity:

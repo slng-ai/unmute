@@ -1,26 +1,21 @@
 # Examples
 
-These packages apply the same Sage and Stone Salon appointment workflow
-to progressively stronger orchestration. Compare them to see when one large
-prompt stops being enough and independent tasks, task groups, or agent handoffs
-help.
+Three packages. `salon-concierge` is the full Sage and Stone Salon project and
+the one to read when you want to see every path working together. The two
+`slng-*` packages are the hosted target, which emits no runnable project.
 
-The four structural packages contain the same five deterministic local Python
-tools for customer lookup and creation, availability, booking, and cancellation.
-Those tools use no network or durable storage. `salon-concierge` is the full
-integration example: it combines the structures with handoffs, tracing, and
-inbound telephony. The other packages keep smaller tool sets on purpose.
+If you want a package of your own to start from rather than one to read, run
+`unmute init my-agent`. The scaffold writes the smallest package that does
+something: one agent, browser audio, one built-in tool, no phone number and no
+third-party account. [Your first
+agent](../docs-site/build/your-first-agent.mdx) walks through what it contains.
 
 Use the [end-to-end example harness](../docs/HARNESS_TEST.md) when a change needs a real
 provider request and a human conversation, not only the automated checks.
 
 | Package | Structure | Responsibility split |
 |---|---|---|
-| [`simple-prompt`](simple-prompt/) | One agent and one large prompt | **Start here.** One agent owns every workflow and tool. **Compact tracing example:** it sets `tracing.provider: langfuse` and needs the three `LANGFUSE_*` values. |
-| [`multi-task`](multi-task/) | One agent and two independent tasks | One task owns customer records; another owns appointments. |
-| [`task-groups`](task-groups/) | One agent and three ordered tasks | Shared context moves through customer identification, slot selection, and finalization. |
-| [`subagents`](subagents/) | Two agents with handoffs | One agent books new visits; the other reschedules and cancels. |
-| [`salon-concierge`](salon-concierge/) | Four agents, tasks, a task group, handoffs, local SQLite, tracing, and inbound phone routes | **Release-readiness example.** Verify once, manage stored bookings, answer or escalate complaints, cold-transfer to a manager, and inspect Coval traces. Every tool is local Python, so nothing remote has to be up before the greeting. Browser and inbound phone on three targets, one per local telephony plane, no outbound. |
+| [`salon-concierge`](salon-concierge/) | Two agents, two tasks, handoffs, a guarded delegate, a cold manager transfer, tracing, and inbound phone routes | **Release-readiness example.** Verify once, manage stored bookings, answer or escalate complaints, cold-transfer to a manager, and inspect Coval traces. Every tool is local Python, so nothing remote has to be up before the greeting. Browser and inbound phone on two targets, one per telephony plane, no outbound. |
 | [`slng-support`](slng-support/) | One agent, one builtin tool, hosted by SLNG | **The hosted target, smallest form.** Produces no runnable project: `unmute deploy` compiles a deployment body and pushes it. Builtins only, so the push creates nothing — SLNG already owns every capability it names. No `unmute dev`. |
 | [`slng-orders`](slng-orders/) | One agent and one `local:` tool, hosted by SLNG | **The hosted target with a tool of its own.** The handler is uploaded and becomes a versioned object in SLNG, so the push creates it, runs it once to prove it works, publishes it, and attaches it. Needs `--run-samples`. |
 
@@ -29,8 +24,8 @@ provider request and a human conversation, not only the automated checks.
 each platform offers and which one to pick.
 
 Every package here states a `name:`, which is required, and every deployment is
-named after it: `simple-prompt` on a target called `livekit` registers a worker
-called `simple-prompt-livekit`. Copy a package and you are copying its name, so
+named after it: `salon-concierge` on a target called `livekit` registers a worker
+called `salon-concierge-livekit`. Copy a package and you are copying its name, so
 rename it before you deploy, or your deploy lands on top of the one already
 there. [The `name` reference](../docs-site/reference/agent-yaml.mdx) has the
 whole rule.
@@ -41,12 +36,12 @@ Build the CLI, then validate and compile both code targets for a package.
 
 ```sh
 make build
-bin/unmute validate examples/simple-prompt
-bin/unmute compile examples/simple-prompt
+bin/unmute validate examples/salon-concierge
+bin/unmute compile examples/salon-concierge
 ```
 
-The generated projects are in `examples/simple-prompt/build/livekit/` and
-`examples/simple-prompt/build/pipecat/`.
+The generated projects are in `examples/salon-concierge/build/livekit/` and
+`examples/salon-concierge/build/pipecat/`.
 
 ## Review traces
 
@@ -54,15 +49,15 @@ Keep credentials in the ignored repository-root `.env`, then run one target
 from the repository root. A package-level `.env` can override shared values.
 
 ```sh
-bin/unmute dev examples/simple-prompt --target pipecat
+bin/unmute dev examples/salon-concierge --target pipecat
 ```
 
-`simple-prompt` sets `tracing.provider: langfuse` and needs
+`salon-concierge` sets `tracing.provider: coval` and needs `COVAL_API_KEY`. A
+package that wants Langfuse instead sets `tracing.provider: langfuse` and needs
 `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_BASE_URL` together.
-`salon-concierge` sets `tracing.provider: coval` and needs `COVAL_API_KEY`. The
-smaller starter examples set neither, so the first run still needs only
-model-provider keys. Add `tracing:` to any other package that wants traces; the
-block is two lines and the section below explains what you get.
+A scaffolded package sets neither, so the first run needs only model-provider
+keys. Add `tracing:` to any package that wants traces; the block is two lines
+and the section below explains what you get.
 
 LiveKit creates one trace for the room and uses the room name as the session ID.
 Pipecat creates one trace for the full conversation.

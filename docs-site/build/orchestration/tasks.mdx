@@ -9,7 +9,9 @@ to the agent that called it. Its internal turns stay out of the agent's context,
 while the completed delegate call stays there so the same request does not run
 twice.
 
-This page follows `examples/multi-task`: one agent, two tasks.
+The YAML on this page is one worked pair of tasks. For a shipped package that
+does it, read `examples/salon-concierge`: a verification task and a booking
+task, one of them behind a `requires:` guard.
 
 ## Declare the task
 
@@ -203,12 +205,13 @@ LiveKit agents and Pipecat output are unchanged.
 ## Try it
 
 ```sh
-unmute validate examples/multi-task
-unmute dev examples/multi-task --target pipecat
+unmute validate examples/salon-concierge
+unmute dev examples/salon-concierge --target pipecat
 ```
 
-Ask to book a haircut. The agent delegates to `customer_record` first, and only
-then to the appointment task.
+Ask to book a haircut. The agent delegates to `customer_verification` first, and
+only then to the booking task, which is held back until the caller is
+identified.
 
 ## Where to go next
 

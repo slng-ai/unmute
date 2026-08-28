@@ -541,6 +541,11 @@ something, remove that instruction when you add `announce:`. Otherwise the model
 speaks its own version and the tool speaks the fixed one, and the caller hears
 both. This is the most common way to get it wrong.
 
+The second most common way is quieter, because no instruction asks for it. The
+model opens its **next** turn with an acknowledgment of its own, so the caller
+hears "Okay, one sec." and then "A haircut, lovely. What day suits you?". The fix
+is in the prompt, not here: see `prompting.md`, "Do not say the same thing twice".
+
 Rules that will fail the compile if you break them:
 
 - Legal on `webhook:` and `local:` only. Every other kind has no body to speak
@@ -618,9 +623,9 @@ A file in `tools/` that the package level list does not name is not loaded at
 all, and nothing complains. When a tool is never offered, check that list first.
 
 Splitting tool lists is how you make a wrong action impossible rather than
-discouraged. In `examples/subagents`, only the appointment manager holds
-`cancel_appointment`, so no caller can talk the booking agent into a
-cancellation.
+discouraged. In `examples/salon-concierge`, only the booking task holds
+`cancel_booking`, so no caller can talk the entry agent into a cancellation
+without going through the step that checks who they are.
 
 ## Choosing a kind, from a plain English ask
 

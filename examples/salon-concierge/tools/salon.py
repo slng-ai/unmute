@@ -42,25 +42,34 @@ def _normalize_phone(phone):
     """Digits only, and the store's one key.
 
     Every function here normalises its own argument rather than trusting the
-    caller to. The phone number is now the customer identifier, and it arrives
-    from a prompt that returns it as spoken digit groups, so "1 555 070 7444"
-    and "+1 (555) 070-7444" have to reach the same record.
+    caller to. The phone number is the customer identifier, and a caller says it
+    in whatever shape they like, so "+1 555 070 7444" and "1 (555) 070-7444"
+    have to reach the same record.
     """
     digits = "".join(character for character in str(phone) if character.isdigit())
     return digits if 10 <= len(digits) <= 15 else ""
 
 
-def _spoken_phone(digits):
-    """The shape tasks/verify-customer.md requires the step to return.
+def _e164(digits):
+    """The one shape a phone number takes anywhere in this package.
 
-    The tool returns it already in that shape so the model copies it rather than
-    reformatting it. That is not cosmetic: the Context Router only substitutes a
-    placeholder back where the stored value matches character for character, so a
-    number reshaped on its way out silently costs every later turn its cache.
+    E.164: a plus sign, then digits, and nothing else. `MANAGER_PHONE_NUMBER`
+    already holds that shape, so this makes every number in the package one
+    format instead of two, and `tasks/verify-customer.md` says the same thing on
+    the prompt side. The tool returns it in that shape so the model copies it
+    rather than inventing a second one.
+
+    It never splits a country code off, and never supplies one. Guessing took the
+    last ten digits for the local number, so `+34 680 830 464` came back as
+    "3 468 083 0464": a lone "3" standing in for a country code that is really
+    34, and a caller hearing their own number read as somebody else's.
     """
-    country, local = digits[:-10], digits[-10:]
-    groups = [local[:3], local[3:6], local[6:]]
-    return " ".join(([country] if country else []) + groups)
+    # ponytail: the plus, and nothing else. Ceiling: a caller who gives a bare
+    # national number gets a plus in front of it, which is a consistent key but
+    # not a dialable E.164. Inventing the missing country code is worse, because
+    # a wrong guess merges two callers or splits one. Reach for `phonenumbers`
+    # with a default region if a caller ever needs the dialable form back.
+    return "+" + digits
 
 
 def _slot_parts(slot_id):
@@ -94,7 +103,7 @@ def find_or_create_customer(phone):
         known = normalized_phone in _state.customers
         _state.customers.add(normalized_phone)
     return {
-        "customer_phone": _spoken_phone(normalized_phone),
+        "customer_phone": _e164(normalized_phone),
         "status": "existing" if known else "created",
         "summary": (
             "The existing customer was verified."
@@ -279,12 +288,16 @@ def _demo():
     assert _normalize_phone("(555) 010-1010") == "5550101010"
     assert _normalize_phone("123456789012345") == "123456789012345"
 
-    # The returned shape is the one tasks/verify-customer.md requires, so the
-    # model copies it instead of reformatting it and the router cache keeps
-    # matching. Reshaping this silently costs every later turn its cache, with
-    # nothing failing to notice it by, so it is asserted rather than trusted.
-    assert _spoken_phone("15550707444") == "1 555 070 7444"
-    assert _spoken_phone("5550101010") == "555 010 1010"
+    # E.164, and the same E.164 whatever punctuation the number arrived in. This
+    # is the shape tasks/verify-customer.md tells the step to return, and the one
+    # the `customer_phone` variable documents, so it is asserted rather than
+    # trusted: a second shape here would put two formats back in the package.
+    assert _e164("15550707444") == "+15550707444"
+    assert _e164("5550101010") == "+5550101010"
+    # A number whose local part is not ten digits long, kept in the order the
+    # caller said it. Splitting a country code off the last ten read this back as
+    # "3 468 083 0464", the caller's digits regrouped into somebody else's number.
+    assert _e164("34680830464") == "+34680830464"
 
     created = find_or_create_customer("+1 555 010 1010")
     repeated = find_or_create_customer("15550101010")
@@ -292,7 +305,7 @@ def _demo():
     assert repeated["status"] == "existing"
     # One identifier, and it survives being written any of the ways a caller or
     # a prompt might write it.
-    assert repeated["customer_phone"] == created["customer_phone"] == "1 555 010 1010"
+    assert repeated["customer_phone"] == created["customer_phone"] == "+15550101010"
     customer = created["customer_phone"]
     # Punctuation is noise. A country code is not: the same local digits with
     # and without a leading 1 are two different numbers, and therefore two

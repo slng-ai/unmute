@@ -9,47 +9,55 @@ An Unmute package is a directory. The agent lives in `agent.yaml`, the prompt
 lives in a Markdown file next to it, and the runtime choice lives in
 `targets.yaml`.
 
-The example this page follows is `examples/simple-prompt` in the repository. It
-declares both targets and runs in the browser.
+Make one now, then read along in the file it writes:
+
+```sh
+unmute init my-agent
+```
+
+```text
+created my-agent/agent.yaml
+created my-agent/.env.example
+created my-agent/.gitignore
+created my-agent/instructions.md
+created my-agent/targets.yaml
+created my-agent/tools/end_call.yaml
+```
 
 <Tip>
-  **If you want to run something before reading, run this one.**
-  `examples/simple-prompt` is the smallest package that does something: web
-  audio, local tools, no phone number, no third-party account. It is also the
-  package this page teaches, so nothing here is a detour.
+  That package already validates and already runs. One agent, browser audio, one
+  built-in tool so it can hang up, no phone number and no third-party account.
+  Everything below is a tour of what is in it, so nothing here is a detour.
 </Tip>
 
 ## The agent file
 
 The small snippets below keep one block on screen at a time. Expand the full
-file when you want to see how they fit together. It is
-`examples/simple-prompt/agent.yaml` exactly as it appears in the repository.
+file when you want to see how they fit together. This is
+`my-agent/agent.yaml` as the scaffold wrote it, with its explanatory comments
+taken out so the shape is visible.
 
 <Accordion title="Complete agent.yaml">
 ```yaml
-# One agent owns every appointment workflow and tool.
 version: 1
-name: sage-and-stone-desk
-entry_agent: appointment_desk
+name: my-agent
+entry_agent: assistant
 
 secrets:
   - OPENAI_API_KEY
   - SLNG_API_KEY
-  - LANGFUSE_BASE_URL
-  - LANGFUSE_PUBLIC_KEY
-  - LANGFUSE_SECRET_KEY
 
 models:
   think:
-    reasoning:
+    assistant_model:
+      description: default reasoning model
       provider: openai
-      model: gpt-5.6-terra
+      model: "gpt-5.6-terra"
       params:
-        # A reasoning model answering with function tools on chat completions
-        # needs this exact value, or OpenAI returns 400 on every turn.
-        reasoning_effort: "none"
+        reasoning_effort: none
   speak:
-    voice:
+    assistant_voice:
+      description: default voice
       provider: slng
       model: "deepgram/aura:2"
       voice: "aura-2-thalia-en"
@@ -59,45 +67,32 @@ models:
       model: "deepgram/nova:3"
   turn:
     detector:
-      provider: local
-      model: silero
+      provider: livekit
+      model: turn-detector-mini
 
 agents:
-  appointment_desk:
+  assistant:
     instructions: instructions.md
-    model: reasoning
-    voice: voice
+    model: assistant_model
+    voice: assistant_voice
     tools:
-      - lookup_customer
-      - create_customer
-      - check_availability
-      - book_appointment
-      - cancel_appointment
+      - end_call
 
 tools:
-  - lookup_customer
-  - create_customer
-  - check_availability
-  - book_appointment
-  - cancel_appointment
+  - end_call
 
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
-  interruption:
-    enabled: true
-
-tracing:
-  provider: langfuse
+    text: "Hi there, I'm listening. What can I help you with?"
 
 channels:
   web:
     kind: realtime_audio
 
 capacity:
-  peak_sessions: 5
-  max_sessions: 10
+  peak_sessions: 10
+  max_sessions: 20
   avg_session_duration: 5m
 ```
 </Accordion>
@@ -107,12 +102,12 @@ Now each block.
 ### `name`
 
 ```yaml
-name: sage-and-stone-desk
+name: my-agent
 ```
 
 What this agent is called. The deployed name is this joined to the target it was
 compiled for, so on a target called `livekit` it deploys as
-`sage-and-stone-desk-livekit`. Required, lowercase letters, digits and single
+`my-agent-livekit`. Required, lowercase letters, digits and single
 hyphens, and it must not be a name another package in your organisation already
 uses: a deploy replaces the agent whose name it matches. The
 [`name` reference](/reference/agent-yaml#name) has the whole rule.
@@ -120,7 +115,7 @@ uses: a deploy replaces the agent whose name it matches. The
 ### `entry_agent`
 
 ```yaml
-entry_agent: appointment_desk
+entry_agent: assistant
 ```
 
 Which agent answers. A package can hold several agents; exactly one starts the
@@ -137,18 +132,18 @@ Four kinds of model, grouped by what they do:
 | `listen` | turns audio into text | STT |
 | `turn` | decides when the caller has finished speaking | turn detection or VAD |
 
-Each section holds named entries. The name is yours: `reasoning`, `voice`,
-`transcriber`, `detector` above. An agent then points at the entries it wants
-by name.
+Each section holds named entries. The name is yours: `assistant_model`,
+`assistant_voice`, `transcriber`, `detector` above. An agent then points at the
+entries it wants by name.
 
 ```yaml
 models:
   think:
-    reasoning:
+    assistant_model:
       provider: openai
-      model: gpt-5.6-terra
+      model: "gpt-5.6-terra"
       params:
-        reasoning_effort: "none"
+        reasoning_effort: none
 ```
 
 `provider` names the integration; `model` and `voice` are passed to that
@@ -157,14 +152,14 @@ ids, so a typo shows up as a provider error at run time, not at compile time.
 The compile report says so out loud:
 
 ```text
-pipecat: binding reason.reasoning provider=openai model=gpt-5.6-terra (forwarded as-is, not validated)
+livekit: binding reason.assistant_model provider=openai model=gpt-5.6-terra (forwarded as-is, not validated)
 ```
 
 `params:` is normally passthrough for anything else the provider takes. The one
 line here earns its place: `gpt-5.6-terra` is a reasoning model, and OpenAI
 refuses a chat request that carries function tools unless it sets
-`reasoning_effort`. This package has five tools, taken out of the listing above,
-so the line is doing real work. The LiveKit Responses compiler directive is the
+`reasoning_effort`. This package has a tool, `end_call`, so the line is doing
+real work from the first run. The LiveKit Responses compiler directive is the
 narrow exception; [Reasoning model](/models/llm) has both forms.
 
 <Note>
@@ -180,10 +175,10 @@ line naming the one to use.
 
 ```yaml
 agents:
-  appointment_desk:
+  assistant:
     instructions: instructions.md
-    model: reasoning
-    voice: voice
+    model: assistant_model
+    voice: assistant_voice
 ```
 
 An agent is a prompt plus the models it speaks and thinks with. `instructions`
@@ -214,13 +209,14 @@ failing on the first spoken word.
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
-  interruption:
-    enabled: true
+    text: "Hi there, I'm listening. What can I help you with?"
 ```
 
-Who speaks first and what they say, plus whether the caller can talk over the
-agent.
+Who speaks first and what they say. The greeting is spoken word for word without
+going through the model, so changing it changes nothing else. `conversation` also
+holds `interruption:`, `inactivity:` and `max_duration:`, which the scaffold
+leaves out; the
+[`conversation` reference](/reference/agent-yaml#conversation) has them.
 
 ### `channels` and `capacity`
 
@@ -230,8 +226,8 @@ channels:
     kind: realtime_audio
 
 capacity:
-  peak_sessions: 5
-  max_sessions: 10
+  peak_sessions: 10
+  max_sessions: 20
   avg_session_duration: 5m
 ```
 
@@ -248,41 +244,36 @@ your agent.
 
 ```yaml targets.yaml
 targets:
-  pipecat:
-    provider: pipecat
-    version: "1.8.0"
-
   livekit:
     provider: livekit
     version: "1.6.10"
     sdk_language: python
-    models:
-      detector:
-        provider: livekit
-        model: turn-detector-mini
 ```
 
-Two targets, both from the same agent. The LiveKit target overrides one model
-entry by name: LiveKit runs its own turn detector instead of local Silero.
-That is the shape of every per target difference. You override the entry, not
-the agent.
+One target. Nothing in `agent.yaml` names a runtime, so this file is the only
+place the choice lives, and one package can declare several. A second instance
+here compiles a second complete project from the same agent, and a target that
+cannot run a model entry as written overrides that entry by name rather than
+changing the agent. [Targets](/targets/overview) has both.
 
 ## Try it
 
 ```sh
-unmute validate examples/simple-prompt
+unmute validate my-agent
 ```
 
 ```text
 ✓ livekit (livekit)
-✓ pipecat (pipecat)
 
 Warnings:
   livekit: LiveKit turn placement is a preference
 ```
 
+A warning is a real difference worth reading, not a failure: the command still
+exits 0. Then talk to it in your browser:
+
 ```sh
-unmute dev examples/simple-prompt --target pipecat
+unmute dev my-agent
 ```
 
 ## Where to go next

@@ -20,24 +20,27 @@ Flags:
 ## Usage
 
 ```sh
-unmute compile examples/simple-prompt --target pipecat
+unmute compile my-agent
 ```
 
-Every file written is printed:
+Every file written is printed. This is a package scaffolded by
+[`unmute init`](/reference/cli/init), which declares one LiveKit target:
 
 ```text
-generated examples/simple-prompt/build/pipecat/.dockerignore
-generated examples/simple-prompt/build/pipecat/.env.example
-generated examples/simple-prompt/build/pipecat/Dockerfile
-generated examples/simple-prompt/build/pipecat/README.md
-generated examples/simple-prompt/build/pipecat/bot.py
-generated examples/simple-prompt/build/pipecat/compile-report.json
-generated examples/simple-prompt/build/pipecat/compose.dev.yaml
-generated examples/simple-prompt/build/pipecat/pcc-deploy.toml
-generated examples/simple-prompt/build/pipecat/pyproject.toml
-generated examples/simple-prompt/build/pipecat/tools/__init__.py
-...
+generated my-agent/build/livekit/.dockerignore
+generated my-agent/build/livekit/.env.example
+generated my-agent/build/livekit/Dockerfile
+generated my-agent/build/livekit/README.md
+generated my-agent/build/livekit/agent.py
+generated my-agent/build/livekit/compile-report.json
+generated my-agent/build/livekit/compose.dev.yaml
+generated my-agent/build/livekit/dev_metrics.py
+generated my-agent/build/livekit/pyproject.toml
 ```
+
+A package with tools, knowledge files, tracing, or a phone route writes more:
+`tools/<name>.py` per tool, `knowledge.py`, `tracing.py`, and on Pipecat
+`pcc-deploy.toml`.
 
 Output goes to `<package>/build/<target-instance-name>/`. With no `--target`,
 every declared target is compiled. `--target` is repeatable.

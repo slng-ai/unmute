@@ -12,8 +12,8 @@ you want one package to exercise the main Unmute paths together:
   agent that holds the refund policy and a cold manager transfer;
 - local Python tools backed by one in-memory store;
 - Coval tracing for release inspection;
-- browser audio and inbound phone calls on three targets, covering both local
-  telephony planes.
+- browser audio and inbound phone calls on two targets, one per telephony
+  plane.
 
 There is no outbound route. `channels.phone.outbound` is `false`.
 
@@ -103,16 +103,16 @@ Thinking goes through the SLNG Context Router, which can answer a repeated turn
 from cache instead of asking the model. It judges which turns are worth treating
 as repeatable, so a repeat served by the model is expected and not a fault.
 `agent_id` is what keeps one project's learned answers apart from another's, and
-this package writes one value: `optimized-salon-concierge-v8`.
+this package writes one value: `optimized-salon-concierge-v10`.
 
 The compiler adds the name of whoever is speaking, so this package sends six
 scopes:
 
 ```
-optimized-salon-concierge-v8:concierge
-optimized-salon-concierge-v8:complaint_specialist
-optimized-salon-concierge-v8:task.customer_verification
-optimized-salon-concierge-v8:task.booking
+optimized-salon-concierge-v10:concierge
+optimized-salon-concierge-v10:complaint_specialist
+optimized-salon-concierge-v10:task.customer_verification
+optimized-salon-concierge-v10:task.booking
 ```
 
 One per prompt site and not one for the package, because the cache key is the
@@ -137,28 +137,44 @@ rather than being whatever it was when the call started. A name with no value ye
 is still sent, as an empty string, because a placeholder the router was given no
 value for is a 422 that would end the call.
 
-### Why the phone number is a placeholder, and why its format matters
+### One phone number format: E.164
 
-The concierge can tell the caller which number is on file, and that
-number is `{{customer_phone}}` in its prompt rather than text this package renders
-itself. The router refuses to store any answer containing a number, so an agent
-that reads one back aloud normally pays the model for every one of those turns.
-Through a placeholder it does not: the stored copy holds no number at all.
+Every phone number in this package is E.164, a plus sign then digits with nothing
+between them. `MANAGER_PHONE_NUMBER` already was, and now
+`find_or_create_customer` returns the caller's number the same way,
+`tasks/verify-customer.md` tells the step to return exactly what it got back, and
+`customer_phone`'s own description names the shape. Nothing has to guess which of
+two formats it is holding.
 
-That only works while the router can find the value in the answer. It substitutes
-back where the answer holds the value **character for character**, so the shape
-the number arrives in decides whether anything caches at all. Measured 2026-08-24
-against the live EU router, three reads per arm on fresh scopes:
+The tool never invents or splits off a country code. It puts the plus in front of
+the digits the caller gave and leaves their order alone, because telling a country
+code from the number after it needs a table of every country, and a wrong guess
+merges two callers or splits one. A caller who gives a bare national number
+therefore gets a plus in front of it: a consistent key, not a dialable number.
+`tools/salon.py` names that ceiling and the upgrade path.
+
+**The price of one format, paid on purpose.** The router substitutes a
+placeholder back into a stored answer only where the answer holds the value
+**character for character**. Measured 2026-08-24 against the live EU router,
+three reads per arm on fresh scopes:
 
 | Value supplied | The model said it back | Served from cache |
 |---|---|---|
 | `555 070 1222` | unchanged | yes, 109ms on the third read |
 | `+15550707444` | regrouped, so the value never appeared | never, 0 of 3 |
 
-Nothing reports the failure. The caller hears a correct answer either way and the
-hit rate is simply zero. That is why `customer_phone`'s description names the
-format, and why `tasks/verify-customer.md` says what shape to return the number
-in rather than leaving it to the model.
+So a turn where the agent reads an E.164 number aloud will not cache, and nothing
+reports it: the caller hears a correct answer and the hit rate is simply zero.
+This package's answer is not to pick the spoken shape, it is to not read the
+number aloud. `{{customer_phone}}` is in both agent prompts so an agent can tell
+an identified caller from a new one, and both prompts forbid saying it back. The
+one place digits are spoken is the verification readback, which reads the
+caller's own digits one at a time, before any lookup has returned, on a turn that
+follows a tool result and was never cacheable anyway.
+
+If you copy this package for an agent that *does* read a number back to callers,
+put the spoken shape in the variable description instead and have the tool return
+that.
 
 ### One identifier, and every agent that needs it can see it
 
@@ -206,7 +222,7 @@ Every think request also logs one line saying where its answer came from, so
 whether any of this is working is a question you answer by reading the run:
 
 ```
-slng router: scope=optimized-salon-concierge-v8:concierge source=cache layer=l2_exact request_id=req_...
+slng router: scope=optimized-salon-concierge-v10:concierge source=cache layer=l2_exact request_id=req_...
 ```
 
 Say the same thing twice in a row and watch `source=` change from `llm` to
@@ -219,6 +235,51 @@ all, belongs in the prompt text. Two callers who chose different languages would
 otherwise share one cached answer and one of them would hear the wrong language.
 Nothing warns you: the compiler cannot tell a spoken value from a steering one by
 its name.
+
+## How the agent sounds
+
+Every prompt here carries the same two blocks, `How you speak` and `How you
+sound`, and they do different jobs.
+
+`How you speak` is the contract with the TTS voice, which is
+`cartesia/sonic:3.5`. Sonic reads what it is given, so the prompts hand it
+written speech: whole sentences, ordinary capitalization, a full stop at the end
+of each one, no markdown or symbols, and no bare fragments. Numbers, money, dates
+and times go in their plain written form, `3:00 PM` and `28 euros`, and Sonic's
+own text normalization speaks them. That reverses what this package used to say.
+It told the model to spell amounts and times into words itself, and hand-written
+normalization is exactly the preprocessing the engine does better.
+
+A phone number is the same rule, and it took a live call to get right. The
+readback first asked for delimited characters, `plus 3 4, 6 8 0, 8 3 0, 4 6 4`,
+and Sonic spoke "plus three four" and dropped the rest: the caller heard nothing
+to check and confirmed it anyway. Cartesia's own guidance is that a phone number
+is a conventional format the engine normalizes, and that punctuation inside a run
+of characters may be read aloud or break it. So the readback writes `+34 680 830
+464` and lets the voice read it as a phone number.
+
+`How you sound` is the part that makes it a person rather than a correct
+transcript. Contractions, a rotating opener so no two turns start the same way, a
+filler at the front of a turn, a mid-sentence self-correction with no apology,
+and a calm baseline that only moves for a moment that earns it. Every one of
+those is written as an example, because a model copies an example far more
+reliably than it follows an adjective.
+
+Two rules protect the latency work in the section above:
+
+- **A filler rides on a turn that also does its job.** A turn that is only
+  "let me have a look" costs a whole extra round trip and buys nothing, so the
+  prompts forbid it, alongside the older rule against asking the caller to hold.
+- **A turn that follows a tool does not acknowledge anything.** Each tool carries
+  an `announce` line that plays while it runs, so the caller has already been
+  acknowledged by the time the model speaks. Without this rule the two stack up:
+  a live call produced "Okay, one sec. A haircut, lovely. What day suits you?"
+  and "Booking that in. Lovely, your haircut is booked." The announce is worth
+  keeping, it covers about a second of real model latency, so the prompts drop
+  the second acknowledgement instead.
+- **The agent has one name for the whole call.** The greeting introduces Robin,
+  and customer care is still Robin: the handoff is silent, the voice is the same,
+  and a second introduction is how a caller finds out they were transferred.
 
 ## How the call moves
 

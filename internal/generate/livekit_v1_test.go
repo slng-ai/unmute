@@ -303,7 +303,7 @@ func TestLiveKitV1UnconfiguredGolden(t *testing.T) { // V24
 }
 
 func TestV26LiveKitStaticCheckSurface(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	pkg, err := spec.Load(examplePackagePath("simple-prompt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -668,7 +668,7 @@ func TestLiveKitV1EmptyTaskResponseContract(t *testing.T) {
 		t.Errorf("task-bearing README.md missing %q", runbookHeading)
 	}
 
-	minimalPkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	minimalPkg, err := spec.Load(examplePackagePath("simple-prompt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1169,7 +1169,7 @@ func TestV2LiveKitToolCarriesSchema(t *testing.T) {
 // chat_ctx ctor plumbing and no NOT_GIVEN/NotGivenOr/llm imports that only feed
 // it. Multi-agent output is unchanged.
 func TestF3LiveKitSingleAgentMinimalShape(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	pkg, err := spec.Load(examplePackagePath("simple-prompt"))
 	if err != nil {
 		t.Fatal(err)
 	}
