@@ -1,8 +1,9 @@
 # Examples
 
-Three packages. `salon-concierge` is the full Sage and Stone Salon project and
-the one to read when you want to see every path working together. The two
-`slng-*` packages are the hosted target, which emits no runnable project.
+Two packages. `salon-concierge` is the full Sage and Stone Salon project and the
+one to read when you want to see every path working together. `slng-support` is
+the hosted target, which emits no runnable project and today publishes only
+agents whose tools are already built.
 
 If you want a package of your own to start from rather than one to read, run
 `unmute init my-agent`. The scaffold writes the smallest package that does
@@ -17,7 +18,6 @@ provider request and a human conversation, not only the automated checks.
 |---|---|---|
 | [`salon-concierge`](salon-concierge/) | Two agents, two tasks, handoffs, a guarded delegate, a cold manager transfer, tracing, and inbound phone routes | **Release-readiness example.** Verify once, manage stored bookings, answer or escalate complaints, cold-transfer to a manager, and inspect Coval traces. Every tool is local Python, so nothing remote has to be up before the greeting. Browser and inbound phone on two targets, one per telephony plane, no outbound. |
 | [`slng-support`](slng-support/) | One agent, one builtin tool, hosted by SLNG | **The hosted target, smallest form.** Produces no runnable project: `unmute deploy` compiles a deployment body and pushes it. Builtins only, so the push creates nothing — SLNG already owns every capability it names. No `unmute dev`. |
-| [`slng-orders`](slng-orders/) | One agent and one `local:` tool, hosted by SLNG | **The hosted target with a tool of its own.** The handler is uploaded and becomes a versioned object in SLNG, so the push creates it, runs it once to prove it works, publishes it, and attaches it. Needs `--run-samples`. |
 
 `salon-concierge` is the only package with a telephony route. The
 [telephony overview](../docs-site/telephony/overview.mdx) explains the routes

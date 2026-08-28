@@ -10,13 +10,20 @@ command sends them:
 
 ```sh
 export SLNG_API_KEY=...
-unmute deploy examples/slng-orders --run-samples
+unmute deploy examples/slng-support
 ```
 
+<Warning>
+  Only agents whose tools are already built work on this target right now. A
+  package shipping a `local:` or `webhook:` body cannot be published yet, so
+  keep the package to builtins or compile it to pipecat or livekit. The rest of
+  this page describes the target in full, including the tool shapes.
+</Warning>
+
 <Card title="Deploy to SLNG" icon="cloud-upload" href="/deploy/slng">
-  The walkthrough: two worked examples, every failure message, and why a tool
-  lives in SLNG rather than in your repository. Start there if you want a
-  running agent. This page is the reference behind it.
+  The walkthrough: the worked example, what you need first, and every failure
+  message. Start there if you want a running agent. This page is the reference
+  behind it.
 </Card>
 
 ## The trade
@@ -48,18 +55,19 @@ being told is better than having it disappear.
 To stop at the files:
 
 ```sh
-unmute compile examples/slng-orders --target slng
+unmute compile examples/slng-support --target slng
 ```
 
 ```text
-examples/slng-orders/build/slng/
+examples/slng-support/build/slng/
 ├── agent.json                # the agent create body
-├── tools/                    # one tool body per tool that needs one
-│   └── check_order.json
 └── README.md                 # the runbook: what to create, what to run, what to watch
 ```
 
-A package whose tools are all builtins gets no `tools/` directory at all.
+A package that ships a tool body of its own also gets a `tools/` directory, one
+JSON file per tool that needs creating. A package whose tools are all builtins,
+which is the only shape this target publishes today, gets no `tools/` directory
+at all.
 
 Unmute's compiler opens no connection to SLNG, at validate time or compile time.
 It writes files and stops. [`unmute deploy`](/reference/cli/deploy) hands them to

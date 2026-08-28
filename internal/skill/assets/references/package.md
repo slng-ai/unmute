@@ -538,8 +538,10 @@ definition. Those two are the only things a recompile preserves inside `build/`.
 
 A tool on slng has **no network access at all** — the handler runs in SLNG's
 sandbox, in the region serving the call, which is why it is fast and why a
-handler that must reach a service has to be a `webhook:` tool. `examples/slng-orders`
-is the worked example: one `local:` tool, no secret, deployable as shipped. An MCP reference is
+handler that must reach a service has to be a `webhook:` tool. Today that whole
+path is unusable: the only slng packages that publish are the ones whose tools
+are all builtins, like `examples/slng-support`, so a package that needs a tool of
+its own belongs on pipecat or livekit. An MCP reference is
 the one thing the push cannot finish — the schema hash SLNG wants is read off the
 live server — so attach MCP servers in the dashboard.
 
