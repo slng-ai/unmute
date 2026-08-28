@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/scaffold"
 )
 
@@ -97,6 +98,27 @@ func TestV14DevChildEnvReadsWorkingDirectoryThenPackageDotenv(t *testing.T) {
 		if !contains(env, want) {
 			t.Errorf("dev child env missing %q", want)
 		}
+	}
+}
+
+// Every local run has to say it is local, or its Coval traces are labelled as
+// deployed ones and the two cannot be told apart. The marker goes on after the
+// dotenv files for the same reason `UNMUTE_DEV_METRICS` does: a stale `0` left
+// in a `.env` would otherwise silently turn it off for the whole run.
+func TestDevChildEnv_marksTheRunAsLocal(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".env"),
+		[]byte(generate.LocalRunEnv+"=0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+
+	env := packageEnv(root, &bytes.Buffer{})
+	if !contains(env, generate.LocalRunEnv+"=1") {
+		t.Errorf("a local dev run does not set %s, so its Coval traces would be labelled as deployed", generate.LocalRunEnv)
+	}
+	if contains(env, generate.LocalRunEnv+"=0") {
+		t.Errorf("a stale %s on disk beat the dev loop", generate.LocalRunEnv)
 	}
 }
 

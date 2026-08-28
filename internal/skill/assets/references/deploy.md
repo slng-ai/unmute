@@ -124,6 +124,20 @@ Suggest `coval` when they want simulated calls scored, since each Coval trace is
 attached to the simulation that produced it. See `prompting.md` on turning
 surprising sessions into test cases.
 
+Two things about `coval` that users get wrong, so say them before they ask:
+
+- **Only a call Coval placed lands inside a run.** Every other call, local or
+  deployed, is filed as a Coval **conversation** when it ends, and appears under
+  Observability → Conversations and in Trace Search. A real phone call is never
+  in a run. Getting the key onto the platform is the deploy step that matters:
+  `pipecat cloud secrets set <set> --file .env`, or `lk agent update-secrets
+  --secrets-file .env`.
+- **Local and deployed runs are labelled apart.** `unmute dev` traces under
+  `<entry-agent>-<agent-name>-local`; the same build deployed traces under
+  `<entry-agent>-<agent-name>`. Decided at start-up, not at compile time, so one
+  build serves both. Each trace also carries `coval.call.origin`, one of
+  `phone`, `websocket` or `browser`.
+
 ## Changing the agent
 
 Edit the package, compile again, deploy again. **Never edit `build/`**, because

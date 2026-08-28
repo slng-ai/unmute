@@ -101,8 +101,10 @@ func TestCovalTracingRegistersCallsNoSimulationClaimed(t *testing.T) {
 			// Submit first, then export against what it returned.
 			"def submit_conversation(",
 			"_router.activate(conversation_id, CONVERSATION_EXPORT_HEADER)",
-			// A missing key or an empty call must not invent a conversation.
-			"if not api_key or not transcript:",
+			// A missing key or an empty call must not invent a conversation,
+			// and neither may pass without saying so.
+			`logger.warning("COVAL_API_KEY is not set, so this call is not filed with Coval")`,
+			"if not transcript:",
 			// The call is over by now, so a failed submit is a warning.
 			"Could not register this call with Coval",
 		} {
@@ -178,13 +180,16 @@ func TestCovalTracingResolvesEveryDocumentedRoute(t *testing.T) {
 // targets. The name is built from the target, so the two never collide; build it
 // from the package instead and a LiveKit run and a Pipecat run of the same
 // package land in one undifferentiated pile.
+// The identity is AGENT_NAME rather than TRACE_NAME since the local suffix was
+// added: TRACE_NAME is now derived from it and reads identically on both
+// targets, so matching that would compare the derivation instead of the name.
 func TestCovalTracingNamesEachTargetsService(t *testing.T) {
 	seen := map[string]ir.Provider{}
 	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
 		tracing := artifactFile(t, covalArtifact(t, provider), "tracing.py")
-		found := regexp.MustCompile(`TRACE_NAME = (.+)`).FindStringSubmatch(tracing)
+		found := regexp.MustCompile(`AGENT_NAME = (.+)`).FindStringSubmatch(tracing)
 		if found == nil {
-			t.Fatalf("%s Coval tracing declares no TRACE_NAME", provider)
+			t.Fatalf("%s Coval tracing declares no AGENT_NAME", provider)
 		}
 		if other, clash := seen[found[1]]; clash {
 			t.Errorf("%s and %s both report service.name %s, so Trace Search cannot tell them apart", provider, other, found[1])
@@ -396,6 +401,219 @@ func TestCovalTracingRequiresOnlyItsOwnSecret(t *testing.T) {
 		}
 		if strings.Contains(env, "LANGFUSE_") {
 			t.Errorf("%s .env.example requires a Langfuse key under Coval tracing", provider)
+		}
+	}
+}
+
+// Pipecat Cloud serves many calls from one warm container. The emitted module
+// keeps one provider for the process, because Pipecat installs one and refuses a
+// second, but everything about *which* call is being traced has to reset on
+// every call. It did not, and the result was silent data corruption: the second
+// and later calls in a warm process were appended to the first call's Coval
+// conversation and registered nothing of their own.
+//
+// The smoke gate is what actually catches a regression here. This one keeps the
+// shape of the fix in place, and runs in the default suite where the smoke
+// suite does not.
+func TestCovalTracingResetsCorrelationPerCall(t *testing.T) {
+	tracing := artifactFile(t, covalArtifact(t, ir.ProviderPipecat), "tracing.py")
+	for _, want := range []string{
+		// The reset itself, and a token that says which call a span belongs to.
+		"def begin_call(self) -> int:",
+		"self.call_token += 1",
+		"self.simulation_id = None",
+		`_CALL_TOKEN_ATTR = "coval.internal.call_token"`,
+		"span.set_attribute(_CALL_TOKEN_ATTR, router.call_token)",
+		// The export is scoped by that token, so a span that ended after its own
+		// call cannot ride out under the next call's correlation ID.
+		"mine = [s for s in spans if (s.attributes or {}).get(_CALL_TOKEN_ATTR) == token]",
+		"return exporter.export(mine)",
+		"Discarded %d span(s) from a finished call",
+	} {
+		if !strings.Contains(tracing, want) {
+			t.Errorf("pipecat tracing.py missing per-call correlation: %q", want)
+		}
+	}
+	// The memoized path is the whole bug: returning the process's provider
+	// without resetting the call is what filed every later call under the first.
+	memoized := regexp.MustCompile(`(?s)if _provider is not None:.*?return _provider`).FindString(tracing)
+	if memoized == "" {
+		t.Fatal("pipecat tracing.py no longer memoizes its provider; re-read this gate before deleting it")
+	}
+	if !strings.Contains(memoized, "begin_call()") {
+		t.Error("pipecat setup_coval_tracing returns a warm provider without beginning a new call, so a second call in one process is filed under the first")
+	}
+	// A processor that has shut down drops every later span in silence, and the
+	// next call in a warm process still needs it.
+	if strings.Contains(tracing, "provider.shutdown()") {
+		t.Error("pipecat tracing.py shuts down the provider, which silently drops every span of the next call in a warm process")
+	}
+}
+
+// Two budgets, deliberately different. The exporter keeps the 30 seconds Coval's
+// docs require; registering the call runs inside the host's shutdown window, and
+// LiveKit force-kills a job process ten seconds after shutdown begins. Collapsing
+// them back into one literal is the regression this gate exists for.
+func TestCovalTracingSplitsTheSubmitBudgetFromTheExportTimeout(t *testing.T) {
+	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
+		tracing := artifactFile(t, covalArtifact(t, provider), "tracing.py")
+		export := regexp.MustCompile(`EXPORT_TIMEOUT_SECONDS = (\d+)`).FindStringSubmatch(tracing)
+		submit := regexp.MustCompile(`SUBMIT_TIMEOUT_SECONDS = (\d+)`).FindStringSubmatch(tracing)
+		if export == nil || submit == nil {
+			t.Fatalf("%s tracing.py must declare both timeout budgets", provider)
+		}
+		if export[1] != "30" {
+			t.Errorf("%s tracing.py must keep Coval's required 30s export timeout, got %s", provider, export[1])
+		}
+		if submit[1] == export[1] {
+			t.Errorf("%s tracing.py gives the shutdown-path submit the exporter's %ss budget, which does not fit LiveKit's 10s kill window", provider, submit[1])
+		}
+		if submit[1] != "5" {
+			t.Errorf("%s tracing.py submit budget is %ss; the contract pins 5s", provider, submit[1])
+		}
+		// The submit is the call that has to fit the window.
+		if !strings.Contains(tracing, "timeout=SUBMIT_TIMEOUT_SECONDS") {
+			t.Errorf("%s tracing.py does not spend the shutdown budget on the conversation submit", provider)
+		}
+		if !strings.Contains(tracing, "timeout=EXPORT_TIMEOUT_SECONDS") {
+			t.Errorf("%s tracing.py does not give the OTLP exporter Coval's required timeout", provider)
+		}
+		// Losing a trace to a slow Coval must be visible, not silent.
+		if !strings.Contains(tracing, "took longer than its %ss budget") {
+			t.Errorf("%s tracing.py does not log a submit cut short by its budget", provider)
+		}
+	}
+}
+
+// One build has to serve both a local `unmute dev` run and the same package
+// deployed, so the local mark is decided when the agent starts rather than when
+// it is compiled. The two targets of one package must still be told apart, which
+// is what the deployed identity underneath the suffix is for.
+func TestCovalTracingMarksLocalRuns(t *testing.T) {
+	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
+		tracing := artifactFile(t, covalArtifact(t, provider), "tracing.py")
+		if !strings.Contains(tracing, `TRACE_NAME = AGENT_NAME + "-local" if os.environ.get(LOCAL_RUN_ENV) else AGENT_NAME`) {
+			t.Errorf("%s tracing.py does not derive the local label from the marker at run time", provider)
+		}
+		// Baked in at compile time, one build could not serve both.
+		identity := regexp.MustCompile(`AGENT_NAME = (.+)`).FindStringSubmatch(tracing)
+		if identity == nil {
+			t.Fatalf("%s tracing.py declares no AGENT_NAME", provider)
+		}
+		if strings.Contains(identity[1], "-local") {
+			t.Errorf("%s tracing.py bakes the local mark into the deployed identity: %s", provider, identity[1])
+		}
+	}
+	// FR-004, restated against the new derivation because this is the expression
+	// TestCovalTracingNamesEachTargetsService used to read.
+	pipecat := artifactFile(t, covalArtifact(t, ir.ProviderPipecat), "tracing.py")
+	livekit := artifactFile(t, covalArtifact(t, ir.ProviderLiveKit), "tracing.py")
+	pipecatName := regexp.MustCompile(`AGENT_NAME = (.+)`).FindStringSubmatch(pipecat)[1]
+	livekitName := regexp.MustCompile(`AGENT_NAME = (.+)`).FindStringSubmatch(livekit)[1]
+	if pipecatName == livekitName {
+		t.Errorf("both targets now derive the same identity %s, so Coval cannot tell them apart", pipecatName)
+	}
+}
+
+// Three places name the local-run marker: the Go that sets it and the two
+// templates that read it. Without this gate that is three owners of one string,
+// and a rename in one of them makes every local run label itself as deployed.
+func TestCovalTracingOwnsTheLocalRunMarker(t *testing.T) {
+	if LocalRunEnv == "" {
+		t.Fatal("generate.LocalRunEnv is empty")
+	}
+	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
+		tracing := artifactFile(t, covalArtifact(t, provider), "tracing.py")
+		declared := regexp.MustCompile(`LOCAL_RUN_ENV = "([^"]+)"`).FindStringSubmatch(tracing)
+		if declared == nil {
+			t.Fatalf("%s tracing.py declares no LOCAL_RUN_ENV", provider)
+		}
+		if declared[1] != LocalRunEnv {
+			t.Errorf("%s tracing.py reads %q but generate.LocalRunEnv is %q, so a local run would label itself as deployed", provider, declared[1], LocalRunEnv)
+		}
+	}
+}
+
+// Coval's Trace Search filters on the agent attribute and on tags. It has no
+// service.name filter, so a label that reached only the service name would be
+// visible in a trace and unfilterable across them, which is the whole point of
+// marking local runs.
+func TestCovalTracingLabelsEveryPlaceCovalFilters(t *testing.T) {
+	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
+		tracing := artifactFile(t, covalArtifact(t, provider), "tracing.py")
+		want := []string{
+			`"agent": TRACE_NAME`,  // the conversation's own metadata
+			`"tags": [TRACE_NAME]`, // what Trace Search filters on
+			`"agent.name": TRACE_NAME`,
+		}
+		// The service name is set differently per target, by each framework.
+		if provider == ir.ProviderPipecat {
+			want = append(want, "setup_tracing(service_name=TRACE_NAME")
+		} else {
+			want = append(want, "SERVICE_NAME: TRACE_NAME")
+		}
+		for _, w := range want {
+			if !strings.Contains(tracing, w) {
+				t.Errorf("%s tracing.py does not label %s", provider, w)
+			}
+		}
+	}
+}
+
+// An operator looking at a call in Coval should be able to tell how it arrived
+// without decoding a session id. The values are fixed so the four documentation
+// surfaces and both targets can agree on them.
+func TestCovalTracingRecordsHowTheCallArrived(t *testing.T) {
+	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
+		tracing := artifactFile(t, covalArtifact(t, provider), "tracing.py")
+		for _, want := range []string{
+			`CALL_ORIGIN_ATTR = "coval.call.origin"`,
+			"def resolve_call_origin(",
+			`return "browser"`,
+			`"origin"`, // carried on the conversation metadata too
+		} {
+			if !strings.Contains(tracing, want) {
+				t.Errorf("%s tracing.py does not record the call origin: %q", provider, want)
+			}
+		}
+		if !strings.Contains(tracing, `"phone"`) {
+			t.Errorf("%s tracing.py never reports a carrier call as phone", provider)
+		}
+	}
+	// Only Pipecat can receive a non-carrier websocket session; a LiveKit job
+	// always arrives over the room, so it has no websocket origin to report.
+	if !strings.Contains(artifactFile(t, covalArtifact(t, ir.ProviderPipecat), "tracing.py"), `"websocket"`) {
+		t.Error("pipecat tracing.py never reports a plain websocket session")
+	}
+}
+
+// The line this replaces said `No Coval simulation ID on this call, so no trace
+// is exported` on every real call. It is false: the conversation route exports
+// the trace at the call's end. That one sentence is what confirmed the wrong
+// conclusion during the investigation that produced this feature, so it is
+// forbidden by shape rather than by string.
+func TestCovalTracingLogsWhatActuallyHappened(t *testing.T) {
+	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
+		tracing := artifactFile(t, covalArtifact(t, provider), "tracing.py")
+		if strings.Contains(tracing, "so no trace is exported") {
+			t.Errorf("%s tracing.py still claims no trace is exported on a call the conversation route files", provider)
+		}
+		for _, want := range []string{
+			// FR-005: one startup line, naming provider, destination and key.
+			`"Coval tracing on: agent %s, traces to %s, COVAL_API_KEY %s"`,
+			`"present" if api_key else "MISSING"`,
+			// FR-006: one line per terminal state of the call.
+			"No Coval simulation placed this",
+			"so its trace is filed as a ",
+			"Filed this call as Coval conversation %s with %d span(s)",
+			"so its spans are on their way",
+			"This call produced no transcript",
+			"Could not register this call with Coval",
+			"took longer than its %ss budget",
+		} {
+			if !strings.Contains(tracing, want) {
+				t.Errorf("%s tracing.py is missing the log line %q", provider, want)
+			}
 		}
 	}
 }

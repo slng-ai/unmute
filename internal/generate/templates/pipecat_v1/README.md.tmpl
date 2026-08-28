@@ -1322,8 +1322,24 @@ the call is what fails if the account cannot do it yet.
 ## Trace with Coval
 
 Tracing is configured. Set `COVAL_API_KEY` in `.env`. Spans go to
-`https://api.coval.dev/v1/traces` under the service name
-`{{.EntryAgent}}-{{.AgentName}}`.
+`https://api.coval.dev/v1/traces` under the name `{{.EntryAgent}}-{{.AgentName}}`.
+
+**Where the traces appear.** A call Coval placed itself attaches to that
+simulation's run. **Every other call**, deployed or local, appears under
+**Conversations** and in **Trace Search**, and never inside a run. Looking for a
+real phone call inside a run and not finding it is the most common way to
+conclude that tracing is broken when it is working.
+
+**Local against deployed.** `unmute dev` labels its runs
+`{{.EntryAgent}}-{{.AgentName}}-local`; the same build deployed uses
+`{{.EntryAgent}}-{{.AgentName}}` exactly. The label is decided when the agent
+starts, not when it is compiled, so one build serves both. It is on the trace's
+`agent.name`, on the conversation's `metadata.agent`, and on the conversation's
+tag, which is what Trace Search filters on.
+
+Each trace also records how the caller arrived in `coval.call.origin`:
+`phone` for a carrier call, `websocket` for a plain socket session, `browser`
+for WebRTC including `unmute dev`.
 
 Every trace belongs to one Coval simulation, and Coval puts that simulation ID
 on the call itself. The bot looks for it in four places, in this order:
@@ -1373,9 +1389,36 @@ traces included can also read each round's prompt and tool activity, so a
 judge can check what the agent said against what its tools returned.
 
 Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
+One provider serves the whole process, because Pipecat installs one and refuses
+a second. Everything about *which* call is being traced resets on every call, so
+a warm container that has already handled ten calls still files the eleventh as
+its own conversation.
 
 Starting the worker or exporting a synthetic span proves connectivity only.
 Complete at least one user turn before reviewing the trace.
+{{if .SecretSet}}
+### Getting traces from the deployed agent
+
+1. Put `COVAL_API_KEY` in `.env`.
+2. Push it with the rest of the secrets, before or after you deploy:
+
+   ```bash
+   pipecat cloud secrets set {{.SecretSet}} --file .env{{if .DeploymentRegion}} --region {{.DeploymentRegion}}{{end}}
+   ```
+
+3. Deploy, place one call, and hang up. The trace is filed when the call ends,
+   so nothing appears until then. Open **Observability → Conversations** in
+   Coval and filter on `{{.EntryAgent}}-{{.AgentName}}`; the call is normally
+   there within a few seconds of hangup, and a minute is the outside case.
+4. If nothing appears, read the agent log. It says on startup whether
+   `COVAL_API_KEY` is present and where traces are going, and it writes one line
+   per call saying which conversation the call was filed as, or why it was not.
+
+A Coval simulation that dials this agent on a plain phone number cannot deliver
+its simulation ID, because the phone network strips the headers it travels in.
+That call still traces, as a conversation, detached from the run. Nothing is
+lost; it is just not where a run-based reader would look.
+{{end}}
 
 Traces can contain caller speech, model input and output, and tool arguments and results.
 Use only fake identities and fake customer data for release tests, and do not

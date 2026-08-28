@@ -2,6 +2,16 @@ package generate
 
 import "github.com/slng-ai/unmute/internal/ir"
 
+// LocalRunEnv marks a run as a local `unmute dev` one, so the emitted tracing
+// module can label its traces apart from the same build running in the cloud.
+// No deploy path sets it.
+//
+// This constant is the single owner of the name. It lives here, next to the
+// templates that read it, because `unmute dev` sets it and both tracing
+// templates hardcode the same string; `TestCovalTracingOwnsTheLocalRunMarker`
+// fails if any of the three ever disagrees.
+const LocalRunEnv = "UNMUTE_LOCAL_RUN"
+
 // tracingTemplate names the per-provider tracing template. Both code drivers
 // emit the result as tracing.py, so bot.py and agent.py import from one module
 // name whichever provider the package named.
