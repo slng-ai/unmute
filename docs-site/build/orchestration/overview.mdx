@@ -6,9 +6,9 @@ description: "Three ways to split one agent into parts, and where each is taught
 One agent with a good prompt and a few tools handles more than you would expect.
 When it stops being enough, there are three shapes to reach for.
 
-New here? Read [The mental model](/build/orchestration/mental-model) first. It is
-one page, it answers "I want two agents, each with tasks, where do I start?", and
-everything below assumes it.
+New here? Read [How a package fits together](/build/how-a-package-fits-together)
+first. It is one page, it answers "I want two agents, each with tasks, where do I
+start?", and everything below assumes it.
 
 | Shape | What it is | Where it is taught |
 |---|---|---|
@@ -36,8 +36,8 @@ catalog of the same name:
 | `escalations:` | `escalations:` | the caller goes through to a person |
 
 Which block a thing is written in is its kind, so nothing carries a `kind:`
-field. [The mental model](/build/orchestration/mental-model) walks through a
-complete file.
+field. [How a package fits together](/build/how-a-package-fits-together) walks
+through a complete file.
 
 ## Read them in order, then choose
 
@@ -46,9 +46,6 @@ is the one to come back to when you are deciding: it pairs the symptom you have
 with the shape that fixes it, and states what each shape costs.
 
 <Columns cols={2}>
-  <Card title="The mental model" icon="map" href="/build/orchestration/mental-model">
-    One rule, four kinds, and where each key goes.
-  </Card>
   <Card title="Handoffs" icon="users" href="/build/orchestration/handoffs">
     Two agents, two sets of rules.
   </Card>

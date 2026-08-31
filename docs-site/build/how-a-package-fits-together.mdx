@@ -1,0 +1,236 @@
+---
+title: "How a package fits together"
+description: "One rule explains the whole file: every list on an agent has a matching block at the top level."
+---
+
+You have one agent working. This page is the rule that gets you to several.
+
+A package answers three questions. Who answers the call. What each agent is
+allowed to do. What each of those things actually is. `agent.yaml` holds all
+three, alongside the prompts, tool files and knowledge folders it points at.
+
+You only need one rule to read or write it:
+
+> **Every list on an agent has a matching top-level block with the same name.
+> The list holds names. The block holds the definitions.**
+
+That is the whole system. The rest of this page is that rule, applied.
+
+## The four things an agent can do
+
+An agent is a person on the phone. It can do four kinds of things, and each
+kind has its own list:
+
+| List on the agent | What it means | Does the agent get the caller back? |
+|---|---|---|
+| `tools:` | do real work: look something up, call an API | yes, a tool just returns data |
+| `delegates:` | run a focused side job (a task) and use its result | yes, the task finishes and reports back |
+| `handoffs:` | give the caller to another agent | no, the other agent takes over |
+| `escalations:` | give the caller to a human | no, the call leaves the system |
+
+If you remember one thing, remember the third column. Tools and delegates come
+back. Handoffs and escalations do not.
+
+There is no `kind:` field anywhere. The block a thing is written in is its kind.
+
+## Build one in five steps
+
+Say you want two agents, and each one can run a task.
+
+**Step 1. Say who answers.**
+
+```yaml agent.yaml
+entry_agent: front_desk
+```
+
+**Step 2. Write the agents.** Give each one lists of names. You have not
+defined those names yet. That is fine, you will in the next steps.
+
+```yaml agent.yaml
+agents:
+  front_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - look_up_prices
+    delegates:
+      - verify_customer
+      - manage_booking
+    handoffs:
+      - to_complaints
+    escalations:
+      - to_manager
+
+  complaint_specialist:
+    instructions: agents/complaints.md
+    model: reasoning
+    voice: voice
+    tools:
+      - record_complaint
+    delegates:
+      - verify_customer
+    handoffs:
+      - to_front_desk
+    escalations:
+      - to_manager
+```
+
+Read `front_desk` top to bottom. You already know everything it can do, and
+which kind of thing each one is. That glance is the point of the four lists.
+
+**Step 3. Define the delegates.** Each one points at a task, or at a task
+group, and says when to use it. The `when:` text is what the model reads to
+decide.
+
+```yaml agent.yaml
+delegates:
+  verify_customer:
+    task: customer_verification
+    when: Confirm who the caller is before anything personal.
+    assign:
+      customer_phone: result.customer_phone
+  manage_booking:
+    task: booking
+    when: The caller wants to create, change, or cancel a booking.
+    requires:
+      - customer_phone
+```
+
+**Step 4. Define the handoffs and escalations.**
+
+```yaml agent.yaml
+handoffs:
+  to_complaints:
+    to: complaint_specialist
+    when: The verified caller has a complaint.
+    context:
+      history: full
+      variables: all
+  to_front_desk:
+    to: front_desk
+    when: The caller is done complaining and wants something else.
+    context:
+      history: full
+      variables: all
+
+escalations:
+  to_manager:
+    when: The caller asks for a manager.
+    cold:
+      destination: manager_line
+      ring_timeout: 30s
+      on_unavailable: hangup
+```
+
+**Step 5. Define the tasks and tools.** A task is a small agent with a job and
+a typed `result:`, written under `tasks:` the same way as everything above.
+
+Tools are the one place the rule bends. A tool is its own file under
+`tools/<name>.yaml`, so the top-level `tools:` is a plain list of names rather
+than a block of definitions:
+
+```yaml agent.yaml
+tools:
+  - look_up_prices
+  - record_complaint
+```
+
+Done. Notice you never wrote anything twice. `verify_customer` is defined once
+and both agents list it. Sharing is just naming the same thing.
+
+## Three small words that move data
+
+Three keys touch your `variables:`. They look similar and do different jobs:
+
+| Key | Job | Plain words | Legal on |
+|---|---|---|---|
+| `requires:` | a guard | "do not run this until these variables are set" | delegates, handoffs |
+| `context:` | luggage | "when the caller moves, these values travel along" | handoffs, task definitions |
+| `assign:` | a write-back | "when the task finishes, save its result here" | delegates naming a task |
+
+A guard tests a variable. Luggage carries its value. A write-back fills it.
+In the example above, `verify_customer` fills `customer_phone` with `assign:`,
+and `manage_booking` waits for it with `requires:`. That is how "verify before
+booking" works, with no extra agent and nothing the caller can hear.
+
+Put the guard on the work that needs the value, not on the route to it. And
+never guard the way to a person: somebody asking for a manager should not be
+interviewed first.
+
+## Tasks attach handoffs, and nothing else
+
+A task has `tools:` and `handoffs:` and no other list. There is no
+`delegates:` and no `escalations:` key on a task, so a task cannot delegate
+further or reach a person. That is not a rule you have to remember. The key
+does not exist, so the file cannot be written.
+
+## What the compiler holds for you
+
+- Every name in an agent's list must exist in the matching top-level block.
+  A typo is a build error, not a silent gap.
+- A name listed under the wrong kind is refused, and the message names the
+  list it belongs on.
+- All four blocks share one namespace, because every name becomes a callable
+  function at runtime. Two things cannot share a name.
+- A defined thing that no agent lists is also a build error. There is no dead
+  config to forget about.
+- A task can list `tools:` and `handoffs:` only, enforced by the shape of the
+  file.
+
+Two of those errors, as you will actually see them:
+
+```text
+agent.yaml:31: "verify_customer" is a delegate, so move it out of the tools: list
+  and into the delegates: list
+```
+
+```text
+agent.yaml:47: escalation "to_manager" is declared but no agent reaches it; add it
+  to the escalations: of one of these agents: front_desk, complaint_specialist
+```
+
+## Order, and what it does not mean
+
+Nothing runs in list order. The model picks what to use from the `when:` text,
+and the only real sequence in a package is the `steps:` of a task group.
+
+Order is not free, though: the order of names in a list is the order the tools
+are declared to the model in the generated code, so reordering a list produces
+a different file. Treat it as presentation, not as control flow.
+
+## The order to write the file in
+
+```
+version, name, entry_agent
+agents
+delegates
+handoffs
+escalations
+tasks
+task_groups
+variables
+secrets, destinations, knowledge, models, tools
+conversation, tracing, channels, capacity
+```
+
+That order is a convention, not a schema rule, and it exists so a reader meets
+the agents first and the plumbing last. `unmute init` writes it, and every
+shipped example follows it.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
+    Delegates, typed results, and guards.
+  </Card>
+  <Card title="Handoffs" icon="users" href="/build/orchestration/handoffs">
+    When to split into two agents.
+  </Card>
+  <Card title="Task groups" icon="list-ordered" href="/build/orchestration/task-groups">
+    Tasks in a fixed order, sharing what they learn.
+  </Card>
+  <Card title="Human transfers" icon="phone-forwarded" href="/transfers/overview">
+    Cold and warm escalation to a person.
+  </Card>
+</Columns>
