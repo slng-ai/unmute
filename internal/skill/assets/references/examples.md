@@ -17,7 +17,7 @@ table below to know what shape you are aiming at.
 
 | What the user wants | Package | What it shows |
 |---|---|---|
-| one full release-readiness project | `examples/salon-concierge` | a verification task, a booking task, a guarded delegate, two agents that hand the caller over, in-process tool state, Coval tracing, a cold manager transfer, browser audio, and an inbound phone route on each of its two targets; every tool is local, so it starts with no external tool server |
+| one full release-readiness project | `examples/salon-concierge` | a verification task, a booking task, a guarded delegate, two agents that hand the caller over, in-process tool state, Langfuse tracing, a cold manager transfer, browser audio, and an inbound phone route on each of its two targets; every tool is local, so it starts with no external tool server |
 | an agent SLNG hosts | `examples/slng-support` | one builtin and nothing else, so the push creates nothing. Emits no runnable project, so there is no `unmute dev`: `unmute deploy` pushes it and a web session talks to it. This is the only slng shape that publishes today: a package shipping a `local:` or `webhook:` body cannot be pushed yet, so send those to pipecat or livekit |
 
 The smallest thing that runs is not an example any more. `unmute init <name>`

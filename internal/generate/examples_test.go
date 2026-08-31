@@ -165,19 +165,26 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		t.Errorf("voice params = %#v, want warm_standby_enabled: without it gateway synthesis never drops below ~221ms", voice.Params)
 	}
 
-	// This example is the release-readiness package, so it carries the provider
-	// that needs a real call to prove: Coval correlates a trace to the call that
-	// produced it, and only a live call exercises that.
-	if resolved.Tracing == nil || resolved.Tracing.Provider != "coval" {
-		t.Fatalf("tracing = %#v, want Coval", resolved.Tracing)
-	}
-	if !slices.Contains(resolved.Secrets, "COVAL_API_KEY") {
-		t.Errorf("secrets omit COVAL_API_KEY: %v", resolved.Secrets)
+	// This example traces to Langfuse. All three names are required together, so
+	// the package declares all three or a deployed run fails at startup with a
+	// credential it never names.
+	//
+	// The direction of this check was Coval's until this package moved. Nothing
+	// about the Coval work moved with it: TestSmokeCovalTracingPipecat and its
+	// LiveKit sibling still drive this same package through both targets, and
+	// they set the provider in memory through enableCoval rather than reading it
+	// from agent.yaml. So the per-call correlation proof that needs a real call
+	// is unaffected by which provider the checked-in file names.
+	if resolved.Tracing == nil || resolved.Tracing.Provider != "langfuse" {
+		t.Fatalf("tracing = %#v, want Langfuse", resolved.Tracing)
 	}
 	for _, name := range []string{"LANGFUSE_BASE_URL", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"} {
-		if slices.Contains(resolved.Secrets, name) {
-			t.Errorf("secrets still require %s after the move to Coval", name)
+		if !slices.Contains(resolved.Secrets, name) {
+			t.Errorf("secrets omit %s, which Langfuse requires: %v", name, resolved.Secrets)
 		}
+	}
+	if slices.Contains(resolved.Secrets, "COVAL_API_KEY") {
+		t.Errorf("secrets still require COVAL_API_KEY after the move to Langfuse, and nothing reads it: %v", resolved.Secrets)
 	}
 	manager, ok := resolved.Controls["to_manager"].(*ir.HumanTransfer)
 	if !ok || manager.Mode != ir.TransferCold || manager.OnUnavailable != ir.OnUnavailableHangup {

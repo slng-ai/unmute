@@ -11,7 +11,7 @@ you want one package to exercise the main Unmute paths together:
 - one agent handoff, with shared context and no prerequisite, to a complaint
   agent that holds the refund policy and a cold manager transfer;
 - local Python tools backed by one in-memory store;
-- Coval tracing for release inspection;
+- Langfuse tracing for release inspection;
 - browser audio and inbound phone calls on two targets, one per telephony
   plane.
 
@@ -403,7 +403,7 @@ Common values:
 |---|---|
 | `OPENAI_API_KEY` | the reasoning model's upstream, and the knowledge bases' embeddings at startup |
 | `SLNG_API_KEY` | the Context Router, plus the speech and transcription models. One key, all three roles |
-| `COVAL_API_KEY` | Coval trace ingest |
+| `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` | Langfuse trace ingest. All three are required together, and a missing one fails startup rather than quietly disabling tracing |
 
 `MANAGER_PHONE_NUMBER` is the cold-transfer destination in E.164 form. It is
 needed only for inbound phone manager transfers, may stay unset for browser
@@ -423,21 +423,27 @@ Secrets stay in `.env`. No credential or phone number belongs in this package.
 Traces and debug logs can include caller speech, model input and output, phone
 details, complaint text, and tool arguments or results. Use only fake identities,
 fake phone numbers, and fake customer data for release tests, in a separate
-Coval project. Do not send real customer data until its access and retention
+Langfuse project. Do not send real customer data until its access and retention
 rules are approved. Keep `UNMUTE_LOG_LEVEL=INFO` for normal runs.
 
 ### Where the traces land
 
-A call Coval placed attaches to that simulation's run. Every other call, local or
-deployed, arrives under **Observability → Conversations** and in **Trace
-Search**, never inside a run, and it is filed when the call ends rather than
-while it runs.
+The trace is named after the entry agent, the package and the target, so this
+one arrives as `concierge-salon-concierge-livekit` or
+`concierge-salon-concierge-pipecat`.
 
-`unmute dev` labels its runs `salon-concierge-<target>-local`; the same build
-deployed uses `salon-concierge-<target>`, so the two are separable by filter. The
-suffix is decided when the agent starts, not when it is compiled. Each trace also
-records how the caller arrived in `coval.call.origin`: `phone` for a Twilio call
-on either target, `browser` for a `unmute dev` session.
+Each target supplies its own session ID. On LiveKit the room name becomes the
+Langfuse session ID. On Pipecat the runner session ID is both the Pipecat
+conversation ID and the Langfuse session ID, and one trace holds the whole
+conversation.
+
+Starting the worker proves only that the credentials work. Complete at least one
+user turn before you go looking, because the generation observations are written
+per request.
+
+Unlike Coval, Langfuse gets no local marker, so a `unmute dev` session and a
+deployed call carry the same trace name. Point local runs at a different
+Langfuse project if you need to tell them apart.
 
 ## Booking confirmation boundary
 
