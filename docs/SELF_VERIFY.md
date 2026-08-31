@@ -179,6 +179,53 @@ and Pipecat waits out a flat 1.0s safety net. Observed transcripts arrive from
 
 ---
 
+## Reading the call somebody just made
+
+This is the local loop. You change something, a person runs `unmute dev` and
+talks to the agent for a minute, and then you read the call back yourself. No
+dial-in, no tunnel, and nobody has to describe what happened from memory.
+
+It needs the package to set `tracing.provider: langfuse`.
+`examples/salon-concierge` does.
+
+```sh
+python3 scripts/read_langfuse_trace.py --env examples/salon-concierge/.env
+```
+
+With no other argument that takes the newest trace in the last two hours,
+which is the call that just finished. It prints the transcript, the tool calls
+with their results, and per-span latency. `--sessions` lists what is there
+first, `--trace-id` pins one, and `--local-only` keeps just the `unmute dev`
+rooms.
+
+**Read the transcript from the speech spans, not the model spans.** `stt`
+output is what the caller said and `tts` input is what the agent said, so the
+two interleaved are the conversation. The `llm_request` spans carry the same
+words wrapped in system prompts and tool-call envelopes, which is the wrong
+shape to read a call in but the right place to see what the model was actually
+asked.
+
+Three API facts, each of which costs an hour to rediscover:
+
+- **`GET /api/public/traces/{id}` is v3 and refuses on Langfuse Cloud.** Spans
+  come from `GET /api/public/v2/observations` filtered by `traceId`. The error
+  says so, but only if you read the body.
+- **One page is 50 spans and a real call is hundreds.** Page the cursor or the
+  end of the call is silently missing.
+- **`metadata` is truncated at 200 characters** unless you name the keys you
+  want in `expandMetadata`.
+
+A session named `unmute-XXXX` is a local browser room, `call-_+<number>_XXXX`
+is a real SIP call, and a bare UUID is a Pipecat session. Langfuse has no
+local-run marker of its own, unlike Coval, so the session name is what tells
+local from deployed.
+
+One call is evidence, not proof. Latency in particular swings hard enough
+between identical builds that a single run cannot support a claim: measure
+three.
+
+---
+
 ## Having Coval judge the result
 
 Coval evaluates conversations you **push** to it. Nothing has to dial in, so
