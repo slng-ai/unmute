@@ -187,6 +187,13 @@ that makes self-verification possible at all.
 
 `COVAL_API_KEY` goes in the `X-API-Key` header. Base `https://api.coval.dev/v1`.
 
+That key is yours, not the package's. Judging happens over HTTP from your shell,
+so it does not matter what a package's `tracing.provider` names, and no package
+has to declare `COVAL_API_KEY` for any of this to work. `examples/salon-concierge`
+traces to Langfuse and is still judged here exactly the same way. Tracing decides
+where a **running agent** sends its spans; this section is about pushing a
+finished transcript to a judge, which is a different job.
+
 | Step | Call |
 |---|---|
 | create a metric | `POST /metrics` with `metric_name`, `description`, `metric_type`, `prompt` |
