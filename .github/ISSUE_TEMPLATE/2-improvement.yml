@@ -1,0 +1,116 @@
+name: Improvement
+description: Make something unmute already does better. Latency, turn taking, cost, or a rough edge.
+labels: ["enhancement"]
+title: "improve: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when the thing exists and works, but not well enough: the agent
+        is slow to answer, it talks over the caller, a call costs more than it
+        should, an error does not say what to do next, a runbook leaves out a
+        step.
+
+        If it produces a wrong result, file a bug. If it does not exist at all,
+        file a feature request.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of improvement
+      multiple: true
+      options:
+        - Latency (silence before the agent answers, time to first word)
+        - Turn taking, interruptions, or the agent talking over the caller
+        - Cost per call
+        - Audio quality, or how the voice sounds
+        - Prompt quality, or how the agent behaves on a call
+        - Reliability (it works, but not every time)
+        - Where things run (region, placement, cold starts)
+        - Developer experience (CLI output, errors, runbook, docs)
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: What is it like today
+      description: What you were doing, and where it fell short.
+      placeholder: |
+        On the pipecat cloud-websocket route the agent waits about a second
+        after I stop talking, even with `pace: snappy`. On the same package on
+        livekit it feels immediate.
+    validations:
+      required: true
+
+  - type: textarea
+    id: numbers
+    attributes:
+      label: Numbers, if this is about latency, cost, or reliability
+      description: >
+        For latency, measure across at least three calls. Two identical builds
+        here once swung more than a second of mean silence, so a single call
+        cannot support a claim. Say what you measured and where you read it
+        (`build/<target>/dev.log`, the platform logs, your tracing tool).
+      placeholder: |
+        3 calls, 6 turns each, silence after the caller stops:
+        mean 1.05s, 0.98s, 1.12s
+        read from the Coval trace, user_turn to first agent audio
+      render: text
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface
+      multiple: true
+      options:
+        - The running agent on a call
+        - CLI output, errors, or warnings
+        - The interactive console
+        - The authoring spec (agent.yaml, targets.yaml, connection files)
+        - The generated project in `build/<target>/`
+        - The generated runbook (`build/<target>/README.md`)
+        - "`unmute dev`"
+        - "`unmute deploy`"
+        - The docs site
+        - The coding-agent skill (`unmute skill`)
+        - The examples
+        - Install, release, or packaging
+    validations:
+      required: true
+
+  - type: dropdown
+    id: targets
+    attributes:
+      label: Which target does this affect
+      multiple: true
+      options:
+        - livekit
+        - pipecat
+        - slng
+        - Not target specific
+
+  - type: textarea
+    id: better
+    attributes:
+      label: What better would look like
+      description: >
+        The number you need, the wording you wish the error had, the line you
+        wish the runbook carried. A rough sketch is more useful than a general
+        principle.
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you tried, or how you work around it now
+      description: >
+        Fields you already turned (`pace`, `endpointing_delay`, a different
+        model or region), or hand edits you make after a compile. Leave blank if
+        you have not tried anything yet.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
