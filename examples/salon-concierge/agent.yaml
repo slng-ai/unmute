@@ -209,7 +209,7 @@ conversation:
   max_duration: 15m
 
 tracing:
-  provider: coval
+  provider: langfuse
 
 channels:
   web:
