@@ -47,10 +47,10 @@ func configuredLiveKitSIPWarmOnly(t *testing.T) (*ir.Agent, ir.Target) {
 		"sip_password": "SIP_AUTH_PASSWORD", "from_number": "SIP_FROM_NUMBER",
 	}
 	pkg.Connections["primary_phone"] = connection
-	human := pkg.Agent.Controls["to_human"]
+	human := pkg.Agent.Escalations["to_human"]
 	human.Cold = nil
 	human.Warm = &spec.WarmTransfer{Destination: "billing_line"}
-	pkg.Agent.Controls["to_human"] = human
+	pkg.Agent.Escalations["to_human"] = human
 
 	agent, err := ir.Build(pkg)
 	if err != nil {

@@ -2464,15 +2464,18 @@ func enablePackageTelephony(pkg *spec.Package) {
 }
 
 func addColdHumanTransfer(pkg *spec.Package) {
-	pkg.Agent.Controls["to_human"] = spec.Control{
-		Kind: "human_transfer", Cold: &spec.ColdTransfer{Destination: "billing_line"},
+	if pkg.Agent.Escalations == nil {
+		pkg.Agent.Escalations = map[string]spec.Escalation{}
+	}
+	pkg.Agent.Escalations["to_human"] = spec.Escalation{
+		Cold: &spec.ColdTransfer{Destination: "billing_line"},
 	}
 	if pkg.Agent.Destinations == nil {
 		pkg.Agent.Destinations = map[string]string{}
 	}
 	pkg.Agent.Destinations["billing_line"] = "BILLING_PHONE_NUMBER"
 	billing := pkg.Agent.Agents["billing"]
-	billing.Tools = append(billing.Tools, "to_human")
+	billing.Escalations = append(billing.Escalations, "to_human")
 	pkg.Agent.Agents["billing"] = billing
 }
 

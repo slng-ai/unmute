@@ -277,9 +277,13 @@ type Handoff struct {
 }
 
 type Task struct {
-	Name             string
-	Instructions     string
-	Tools            []string
+	Name         string
+	Instructions string
+	Tools        []string
+	// Handoffs is the one other kind a task may attach. It has no Delegates and
+	// no Escalations for the same reason spec.Task does not: the illegal thing
+	// has nowhere to be written.
+	Handoffs         []string
 	Model            string
 	Result           string // flat typed result as a JSON object
 	History          string
@@ -564,6 +568,9 @@ func (d Data) AllAgents() []Agent {
 	return agents
 }
 
+// The four agent-level lists, one accessor each. They were one accessor while
+// the four kinds shared one list; the template now writes them under four keys,
+// so the split is what makes each key's contents a question with one answer.
 func (d Data) AgentTools(name string) []string {
 	var names []string
 	seen := map[string]bool{}
@@ -579,12 +586,14 @@ func (d Data) AgentTools(name string) []string {
 			}
 		}
 	}
-	for _, handoff := range d.Handoffs {
-		if handoff.Source == name && !seen[handoff.Name] {
-			names = append(names, handoff.Name)
-			seen[handoff.Name] = true
-		}
-	}
+	return names
+}
+
+// AgentDelegates covers both shapes a delegate can take, a task and a task
+// group, because the block they are written in does not distinguish them.
+func (d Data) AgentDelegates(name string) []string {
+	var names []string
+	seen := map[string]bool{}
 	for _, task := range d.Tasks {
 		if task.Agent == name && !seen[task.RunName()] {
 			names = append(names, task.RunName())
@@ -597,6 +606,24 @@ func (d Data) AgentTools(name string) []string {
 			seen[group.RunName()] = true
 		}
 	}
+	return names
+}
+
+func (d Data) AgentHandoffs(name string) []string {
+	var names []string
+	seen := map[string]bool{}
+	for _, handoff := range d.Handoffs {
+		if handoff.Source == name && !seen[handoff.Name] {
+			names = append(names, handoff.Name)
+			seen[handoff.Name] = true
+		}
+	}
+	return names
+}
+
+func (d Data) AgentEscalations(name string) []string {
+	var names []string
+	seen := map[string]bool{}
 	for _, transfer := range d.HumanTransfers {
 		if transfer.Agent == name && !seen[transfer.Name] {
 			names = append(names, transfer.Name)
@@ -659,6 +686,18 @@ func (d Data) TaskTools(name string) []string {
 		}
 	}
 	return names
+}
+
+// TaskHandoffs is the task-level counterpart of AgentHandoffs. A task carries
+// its handoffs on its own definition, so unlike an agent's lists there is
+// nothing to search for: the answer is the field.
+func (d Data) TaskHandoffs(name string) []string {
+	for _, task := range d.Tasks {
+		if task.Name == name {
+			return task.Handoffs
+		}
+	}
+	return nil
 }
 
 // RequiredEnv returns the starter env names the author supplies. Values are

@@ -46,6 +46,12 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | every direct dependency is on the allowlist | `internal/cli/deps_test.go` |
 | no declaration is reachable only from its own definition | `internal/cli/reachability_test.go` (`deadcode -test ./...`) |
 | every declared capability `Field` constant has a row in the table | `internal/target/table_test.go` (`TestEveryFieldConstantHasARow`) |
+| every shipped package and the scaffold template is block style, ignoring `{{placeholders}}` and the template's own `[[ ]]` | `internal/generate/examples_test.go` (`TestAuthoredPackagesAreBlockStyle`) |
+| nothing authored still speaks the retired `controls:` / `kind:` shape, while a bare `kind:` stays legal on tools, channels and models | `internal/generate/examples_test.go` (`TestNothingAuthoredSpeaksTheRetiredShape`) |
+| no page, bundle reference, emitted runbook or package comment still teaches `agent_transfer` or `human_transfer` as a word an author writes; the changelog and generated-code comments are excluded with their reasons inline | `internal/skill/agreement_test.go` (`TestNoReaderFacingSurfaceTeachesARetiredKindName`) |
+| every documented YAML example attaches a name under the key its own catalog declares, so a reader copying a page gets something that compiles; checked per file, because one page splits the agents block and the catalog across two fences | `internal/skill/agreement_test.go` (`TestDocumentedExamplesAttachUnderTheRightKey`) |
+| a name listed under the wrong kind is refused, and the message names both what the name is and the list it belongs on | `internal/ir/build_test.go` (`TestBuildRefusesANameInTheWrongList`) |
+| a task's `handoffs:` survives a console round-trip, because a key `scaffold.Data` does not carry is a key `unmute maintain` deletes at exit 0 | `internal/tui/agent_name_roundtrip_test.go` (`TestMaintainKeepsATasksHandoffs`) |
 | every symbol a template names still exists in Go | `internal/scaffold/template_symbols_test.go` |
 | every capability row carries a deliberate value for a target `field()` does not seed, and every refusal names what to do instead | `internal/target/table_test.go` |
 | the console offers every shipped target, names each correctly, and offers no option validation refuses | `internal/tui/default_target_test.go` |

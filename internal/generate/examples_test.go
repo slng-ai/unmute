@@ -640,7 +640,7 @@ func TestSalonConciergeHasNoRoutingOnlyAgent(t *testing.T) {
 
 	for name, own := range capabilities {
 		if len(own) == 0 {
-			t.Errorf("agent %q holds only controls: it is a routing table, and a caller has to be spoken through it to reach anything", name)
+			t.Errorf("agent %q holds no tools of its own, only delegates, handoffs and escalations: it is a routing table, and a caller has to be spoken through it to reach anything", name)
 		}
 	}
 	for name := range resolved.Agents {
@@ -1429,4 +1429,84 @@ func mapValues(m map[string]string) []string {
 		out = append(out, v)
 	}
 	return out
+}
+
+// authoredPackageFiles is every agent.yaml this repository ships as authoring
+// material, plus the template `unmute init` writes. These are the files a reader
+// copies from, so their written style is the style people learn.
+//
+// The set comes from `git ls-files`, not from walking the directory. "Shipped"
+// means tracked, and this worktree has ten untracked folders under examples/
+// that the spec puts out of scope. Walking the filesystem would let a local
+// scratch package fail a gate that does not apply to it.
+func authoredPackageFiles(t *testing.T) map[string]string {
+	t.Helper()
+	root := filepath.Join("..", "..")
+	listed, err := exec.Command("git", "-C", root, "ls-files", "*agent.yaml").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	for _, name := range strings.Fields(string(listed)) {
+		source, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[name] = string(source)
+	}
+	const template = "internal/scaffold/templates/agent.yaml.tmpl"
+	source, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(template)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out[template] = string(source)
+	if len(out) < 5 {
+		t.Fatalf("found only %d authored packages; the walk is looking in the wrong place", len(out))
+	}
+	return out
+}
+
+// placeholders strips the things that look like flow style and are not.
+//
+// `{{customer_name}}` inside a greeting is prose, and the scaffold template's
+// `[[ ]]` are its own action delimiters. A literal test for `{` or `[` fails on
+// examples/slng-support today, which is why this stripping exists rather than a
+// list of exceptions.
+var placeholders = regexp.MustCompile(`\{\{[^}]*\}\}|\[\[[^\]]*\]\]`)
+
+// TestAuthoredPackagesAreBlockStyle (FR-028, FR-031). Every shipped package and
+// the scaffold template are written in block style, because block style is what
+// makes the four lists readable at a glance, and a reader copies what they see.
+//
+// The scope is deliberate and narrower than it could be: documentation and skill
+// fences are advisory (FR-028a), because they legitimately carry `only: ["groq"]`
+// and `properties: {}`, neither of which has anything to do with how a package
+// declares what an agent can do.
+func TestAuthoredPackagesAreBlockStyle(t *testing.T) {
+	for path, source := range authoredPackageFiles(t) {
+		for i, line := range strings.Split(placeholders.ReplaceAllString(source, ""), "\n") {
+			if strings.Contains(line, "#") {
+				line = line[:strings.Index(line, "#")]
+			}
+			if strings.ContainsAny(line, "{[") {
+				t.Errorf("%s:%d is flow style, and shipped packages are block style: %s", path, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+}
+
+// TestNothingAuthoredSpeaksTheRetiredShape (FR-033). `controls:` and `kind:` on
+// a control are gone, with no alias and no migration message, so the one way
+// they can come back is somebody copying an old file in.
+//
+// A bare `kind:` stays legal and is not flagged: tools, channels and model
+// sections all use it. Only the three retired control kinds are refused.
+func TestNothingAuthoredSpeaksTheRetiredShape(t *testing.T) {
+	retired := regexp.MustCompile(`(?m)^controls:|^\s*kind:\s*(delegate|agent_transfer|human_transfer)\s*$`)
+	for path, source := range authoredPackageFiles(t) {
+		if found := retired.FindString(source); found != "" {
+			t.Errorf("%s still speaks the retired shape (%q); an agent declares what it can do in tools:, delegates:, handoffs: and escalations:",
+				path, strings.TrimSpace(found))
+		}
+	}
 }

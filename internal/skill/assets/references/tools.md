@@ -467,7 +467,7 @@ a builtin id: an unknown one is refused by name.
 
 If what the user wants is not `end_call`, it is usually a webhook, a Python
 handler, or an MCP server. **One thing it is not is a tool at all:** handing the
-caller to a person is a `human_transfer` control at the top level of
+caller to a person is an entry under `escalations:` at the top level of
 `agent.yaml`, not a file in `tools/`. See `transfers.md`, and check there first,
 because on a browser-only package a transfer is not possible at all.
 

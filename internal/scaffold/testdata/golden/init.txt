@@ -31,6 +31,27 @@ version: 1
 name: support-bot
 entry_agent: assistant
 
+# Each agent is a prompt plus the models it thinks and speaks with. The
+# instructions file is sent to the model verbatim as its system prompt, so
+# everything in it is addressed to the agent and nothing in it is addressed to
+# you — put your own notes here, in a comment, where the model never sees them.
+#
+# The starter prompt is a real one, and it is meant to be replaced. Rewrite it
+# to say what your agent actually does; the greeting below is separate, and it
+# is spoken word for word without going through the model at all.
+#
+# What an agent can do is four lists, one per kind, and each one names entries
+# in the catalog of the same name further down: tools do work and come back,
+# delegates run a task and come back, handoffs make the conversation somebody
+# else's, and escalations put the caller through to a person.
+agents:
+  assistant:
+    instructions: instructions.md
+    model: assistant_model
+    voice: assistant_voice
+    tools:
+      - end_call
+
 # Every runtime value you supply, by environment variable name. A secret has no
 # other fields, and a value never appears in a package file: put the values in
 # `.env`, which is gitignored. `unmute validate` warns when this package
@@ -68,22 +89,6 @@ models:
     detector:
       provider: livekit
       model: turn-detector-mini
-
-# Each agent is a prompt plus the models it thinks and speaks with. The
-# instructions file is sent to the model verbatim as its system prompt, so
-# everything in it is addressed to the agent and nothing in it is addressed to
-# you — put your own notes here, in a comment, where the model never sees them.
-#
-# The starter prompt is a real one, and it is meant to be replaced. Rewrite it
-# to say what your agent actually does; the greeting below is separate, and it
-# is spoken word for word without going through the model at all.
-agents:
-  assistant:
-    instructions: instructions.md
-    model: assistant_model
-    voice: assistant_voice
-    tools:
-      - end_call
 
 tools:
   - end_call

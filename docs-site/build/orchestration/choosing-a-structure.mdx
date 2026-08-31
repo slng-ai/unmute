@@ -108,17 +108,18 @@ and a document set the first must not.
 
 ## Delegate or transfer
 
-Both are controls. The difference is whether control comes back.
+The difference is whether control comes back. That is why they are two blocks
+rather than one block with a kind field: which block a thing is written in is
+what it is.
 
 ```yaml
-controls:
-  check_customer:          # delegate: runs, returns a typed result, agent continues
-    kind: delegate
+delegates:
+  check_customer:          # runs, returns a typed result, the agent continues
     task: customer_record
     when: Identify the caller before handling an appointment request.
 
-  to_appointment_manager:  # agent_transfer: hands the call over, nothing returns
-    kind: agent_transfer
+handoffs:
+  to_appointment_manager:  # hands the call over, nothing returns
     to: appointment_manager
     when: The caller wants to reschedule or cancel an existing appointment.
 ```
@@ -129,9 +130,8 @@ Both kinds take `requires:`, and on a delegate it is usually the better place fo
 it. Put the prerequisite on the work that needs the value:
 
 ```yaml
-controls:
+delegates:
   manage_booking:
-    kind: delegate
     task: booking
     when: The caller wants to make, change, or cancel a booking.
     requires:
@@ -139,9 +139,9 @@ controls:
 ```
 
 The step will not start while `customer_phone` is empty. The refusal goes to the
-model, not to the caller: it names the missing variable and the control that
-supplies it, so the model runs that control and calls the step again on the same
-turn. See [Tasks](/build/orchestration/tasks#guarding-a-step) for what the caller
+model, not to the caller: it names the missing variable and the delegate that
+supplies it, so the model runs that delegate and calls the step again on the
+same turn. See [Tasks](/build/orchestration/tasks#guarding-a-step) for what the caller
 hears, and what happens when the model cannot recover.
 
 Do not add an agent whose only job is to hold a guard in front of a step. That
@@ -149,12 +149,12 @@ agent has to be spoken through, which costs the caller a turn and buys nothing a
 `requires:` on the step does not already give. And do not guard the route to a
 person: someone who asks for a manager should not be interviewed first.
 
-| | `delegate` | `agent_transfer` |
+| | `delegates:` | `handoffs:` |
 |---|---|---|
 | returns | yes | no |
 | typed result | yes, `result:` | no |
 | targets | a task or a task group | another agent |
-| context control | `context:` on the task | `context:` on the control |
+| where context is set | `context:` on the task | `context:` on the handoff entry |
 | `requires:` | yes | yes |
 
 ## Where to go next

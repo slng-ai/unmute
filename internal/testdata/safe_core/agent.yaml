@@ -10,8 +10,42 @@
 #   - outbound calls: omitted; Deepgram's carrier-conditional lowering warns
 
 version: 1
+
 name: safe-core-fixture
+
 entry_agent: intake
+
+agents:
+  intake:
+    instructions: instructions.md
+    model: fast_reasoning
+    voice: front_desk
+    tools:
+      - lookup_customer
+    handoffs:
+      - to_billing
+
+  billing:
+    instructions: agents/billing.md
+    model: careful_reasoning
+    voice: specialist
+    tools:
+      - get_invoice
+
+handoffs:
+  to_billing:
+    to: billing
+    when: Caller asks about billing, an invoice, or a refund.
+    context:
+      history: full       # the only history value that works on all four
+      variables: all      # the only variables value managed targets accept
+
+variables:
+  customer_id:
+    type: string
+  verified:
+    type: boolean
+    default: false
 
 # Every model is defined once, here, in the central map grouped by kind (N15):
 # think (LLM), speak (TTS), listen (STT), turn (VAD). Agents reference think
@@ -50,38 +84,6 @@ models:
       provider: local
       model: silero
       semantic_endpointing: preferred
-
-variables:
-  customer_id:
-    type: string
-  verified:
-    type: boolean
-    default: false
-
-agents:
-  intake:
-    instructions: instructions.md
-    model: fast_reasoning
-    voice: front_desk
-    tools:
-      - lookup_customer
-      - to_billing
-
-  billing:
-    instructions: agents/billing.md
-    model: careful_reasoning
-    voice: specialist
-    tools:
-      - get_invoice
-
-controls:
-  to_billing:
-    kind: agent_transfer
-    to: billing
-    when: Caller asks about billing, an invoice, or a refund.
-    context:
-      history: full       # the only history value that works on all four
-      variables: all      # the only variables value managed targets accept
 
 tools:
   - lookup_customer

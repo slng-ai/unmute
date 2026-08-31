@@ -139,9 +139,8 @@ cannot call book_appointment yet: requested_service not set. Ask the caller firs
 ## Assigning a task result to a variable
 
 ```yaml agent.yaml
-controls:
+delegates:
   check_customer:
-    kind: delegate
     task: customer_record
     assign:
       customer_id: result.customer_id

@@ -1,0 +1,206 @@
+---
+title: "The mental model"
+description: "I want two agents, each with tasks. Where do I start? Read this page and you can write the file."
+---
+
+Everything a package does with more than one agent follows one rule.
+
+> Every agent-level list has a same-named top-level catalog. Attach by name.
+
+You declare a thing once, at the top level, and every agent that may use it
+names it in the list of the same name. That is the whole shape. There is no
+`kind:` field, because the block a thing is written in **is** its kind.
+
+## Start with who answers
+
+`entry_agent` names the agent that picks up. Everything else in the package is
+reached from there, and anything the entry agent cannot reach, directly or
+through a handoff, is refused at compile.
+
+```yaml agent.yaml
+version: 1
+name: salon-concierge
+entry_agent: concierge
+```
+
+## Then say who talks
+
+An agent is a prompt plus the models it thinks and speaks with, plus four lists
+of what it can do.
+
+```yaml agent.yaml
+agents:
+  concierge:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - look_up_salon_info
+    delegates:
+      - verify_customer
+      - manage_booking
+    handoffs:
+      - to_complaints
+    escalations:
+      - to_manager
+```
+
+You can read that agent without scrolling anywhere. It can look something up, it
+can run two short jobs, it can hand the caller to the complaints specialist, and
+it can put them through to a manager.
+
+## The four kinds
+
+Each list holds names. Each name is defined in the catalog with the same name.
+
+| List | What it does | Does control come back? |
+|---|---|---|
+| `tools` | does one piece of work and returns a value | yes |
+| `delegates` | runs a task or a task group | yes |
+| `handoffs` | the conversation becomes another agent | no |
+| `escalations` | the caller goes through to a person | no |
+
+The difference that matters most is the last column. A tool and a delegate come
+back and the agent carries on. A handoff and an escalation do not.
+
+`tools:` is the odd one out in shape, not in meaning: the top-level `tools:` is a
+list of names, because each tool is its own file under `tools/<name>.yaml`. The
+other three are maps of definitions.
+
+## Then the three catalogs
+
+```yaml agent.yaml
+delegates:
+  verify_customer:
+    task: customer_verification
+    when: Confirm who the caller is before any specialist handoff.
+    assign:
+      customer_phone: result.customer_phone
+
+  manage_booking:
+    task: booking
+    when: The caller wants to create, modify, or cancel a booking.
+    requires:
+      - customer_phone
+
+handoffs:
+  to_complaints:
+    to: complaint_specialist
+    when: The verified caller has a complaint or service problem.
+    context:
+      history: full
+      variables: all
+
+escalations:
+  to_manager:
+    when: The caller explicitly asks for a manager, or is clearly very frustrated.
+    cold:
+      destination: manager_line
+      ring_timeout: 30s
+      on_unavailable: hangup
+```
+
+`when` is on every kind. Write it as the situation, not as an instruction to
+call something. It is what the model reads to decide.
+
+One name may be attached to as many agents as you like. Sharing is by reference,
+so `verify_customer` above can appear in both agents' `delegates:` lists and it
+is still one definition.
+
+## Guard, payload, write-back
+
+Three keys that get confused with each other. Each does one job.
+
+| Key | Job | Does it test anything? | Does it carry anything? | Legal on |
+|---|---|---|---|---|
+| `requires` | the guard, the bouncer | yes, and it can refuse the step | no | delegates, handoffs |
+| `context` | the payload, the luggage | no | history and variable values | handoffs, task definitions |
+| `assign` | the write-back | no | a task result into a variable | delegates naming a task |
+
+`requires` names declared variables, never tools and never other catalog
+entries. If the value is missing the step does not start, and the refusal goes
+to the model rather than to the caller.
+
+Put the guard on the work that needs the value, not on the route to it. And
+never guard the way to a person: somebody asking for a manager should not be
+interviewed first.
+
+## Tasks attach handoffs, and nothing else
+
+A task is a short step with a typed result. It has `tools:` and `handoffs:` and
+no other list.
+
+```yaml agent.yaml
+tasks:
+  booking:
+    instructions: tasks/booking.md
+    tools:
+      - check_availability
+      - create_booking
+    handoffs:
+      - to_complaints
+    result:
+      booking_id: string
+      summary: string
+    context:
+      history: full
+```
+
+There is no `delegates:` and no `escalations:` key on a task. That is not a rule
+you have to remember: the key does not exist, so the file cannot be written.
+
+## Two agents, each with tasks
+
+Putting it together, the order the file is written in:
+
+```
+version, name, entry_agent
+agents
+delegates
+handoffs
+escalations
+tasks
+task_groups
+variables
+secrets, destinations, knowledge, models, tools
+conversation, tracing, channels, capacity
+```
+
+That order is a convention, not a schema rule, and it exists so a reader meets
+the agents first and the plumbing last. `unmute init` writes it, and every
+shipped example follows it.
+
+## Names are one namespace
+
+All four kinds become callable function names at runtime, so a name belongs to
+exactly one of them. `verify_customer` cannot be both a tool and a delegate, and
+the compiler says so rather than picking one.
+
+Two mistakes the compiler names for you:
+
+```text
+agent.yaml:31: "verify_customer" is a delegate, so move it out of the tools: list
+  and into the delegates: list
+```
+
+```text
+agent.yaml:47: escalation "to_manager" is declared but no agent reaches it; add it
+  to the escalations: of one of these agents: concierge, complaint_specialist
+```
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Handoffs" icon="users" href="/build/orchestration/handoffs">
+    Two agents, two sets of rules.
+  </Card>
+  <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
+    Delegate a step, keep the answer.
+  </Card>
+  <Card title="Task groups" icon="list-ordered" href="/build/orchestration/task-groups">
+    A fixed order, and shared context.
+  </Card>
+  <Card title="Choosing a structure" icon="git-branch" href="/build/orchestration/choosing-a-structure">
+    Which split to reach for, and what it costs.
+  </Card>
+</Columns>

@@ -287,7 +287,7 @@ Two agents, and the concierge is the one the caller talks to for almost the whol
 call. It runs the booking step itself, as a guarded delegate: `manage_booking`
 declares `requires: [customer_phone]`, so the step will not start until the
 caller is identified, and the compiler refuses it to the model rather than to the
-caller. The model is told which control supplies the number, runs verification,
+caller. The model is told which delegate supplies the number, runs verification,
 and calls the step again on the same turn. Nobody hears any of that.
 
 That guard is why there is no booking agent. There used to be one, and it existed

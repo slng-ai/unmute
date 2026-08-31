@@ -28,7 +28,24 @@ version: 1
 # because every package calls its target after the platform, and the folder
 # is named by whoever cloned the repository.
 name: acme-support
+
 entry_agent: support
+
+agents:
+  support:
+    instructions: instructions.md
+    model: reasoning
+    voice: front_desk
+    tools:
+      - end_call
+
+variables:
+  # Declared with a default, so it appears in both of SLNG's variable maps: the
+  # declaration list and the defaults. A caller whose name is not supplied at
+  # dispatch is greeted with the default.
+  customer_name:
+    type: string
+    default: there
 
 models:
   think:
@@ -47,22 +64,6 @@ models:
       provider: deepgram
       model: slng/deepgram/nova:3-en
       language: en
-
-variables:
-  # Declared with a default, so it appears in both of SLNG's variable maps: the
-  # declaration list and the defaults. A caller whose name is not supplied at
-  # dispatch is greeted with the default.
-  customer_name:
-    type: string
-    default: there
-
-agents:
-  support:
-    instructions: instructions.md
-    model: reasoning
-    voice: front_desk
-    tools:
-      - end_call
 
 tools:
   - end_call

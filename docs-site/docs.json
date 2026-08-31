@@ -140,7 +140,8 @@
             "icon": "git-branch",
             "root": "build/orchestration/overview",
             "pages": [
-              "build/orchestration/handoffs",
+              "build/orchestration/mental-model",
+                "build/orchestration/handoffs",
               "build/orchestration/tasks",
               "build/orchestration/task-groups",
               "build/orchestration/choosing-a-structure"

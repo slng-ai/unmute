@@ -14,10 +14,11 @@ import (
 // has nothing to choose. The route itself uses existing connection fields.
 //
 // If you are here because this test failed, you are adding authoring surface.
-// That is allowed, but the constitution prices it: a numbered dated SCHEMA
-// amendment, the derived schemas, a capability row, the agreement tests, the
-// scaffold templates, the interactive console, the examples, and docs-site/, all
-// in one commit. Delete a line here only alongside that work.
+// That is allowed, but the constitution prices it: the Go structs (which are the
+// schema of record, and derive the schemas themselves), a capability row, the
+// agreement tests, the scaffold templates, the interactive console, the
+// examples, the skill bundle, and docs-site/, all in one commit. Delete a line
+// here only alongside that work.
 
 func TestAuthoringSchemaHasNoHostingModelField(t *testing.T) {
 	schema, err := Schema()
@@ -223,6 +224,36 @@ func TestAuthoringSchemaCarriesTheRouterFields(t *testing.T) {
 	} {
 		if found := searchSchema(decoded, name); found == nil {
 			t.Errorf("derived authoring schema is missing the upstream %q property", name)
+		}
+	}
+}
+
+// The three catalogs are on the derived schema, because the schema derives
+// itself from the structs and this is the check that the derivation actually
+// happened. A hand-authored schema file is what this replaces.
+func TestAuthoringSchemaCarriesTheThreeCatalogs(t *testing.T) {
+	schema, err := Schema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"delegates", "handoffs", "escalations"} {
+		if searchSchema(decoded, name) == nil {
+			t.Errorf("derived authoring schema has no %q property", name)
+		}
+	}
+	// And the retired spelling is gone from it, so a package written the old way
+	// fails against the published schema as well as against the compiler.
+	for _, name := range []string{"controls"} {
+		if found := searchSchema(decoded, name); found != nil {
+			t.Errorf("derived authoring schema still carries %q: %v", name, found)
 		}
 	}
 }

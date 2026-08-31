@@ -69,7 +69,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		Agents:       make(map[string]AgentDef, len(pkg.Agent.Agents)),
 		Tasks:        make(map[string]Task, len(pkg.Agent.Tasks)),
 		TaskGroups:   make(map[string]TaskGroup, len(pkg.Agent.TaskGroups)),
-		Controls:     make(map[string]Control, len(pkg.Agent.Controls)),
+		Controls:     make(map[string]Control, len(pkg.Agent.Delegates)+len(pkg.Agent.Handoffs)+len(pkg.Agent.Escalations)),
 		Tools:        make(map[string]Tool, len(pkg.Tools)),
 		Conversation: buildConversation(pkg.Agent.Conversation),
 		Channels:     make(map[string]Channel, len(pkg.Agent.Channels)),
@@ -146,15 +146,26 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	for _, name := range sortedKeys(pkg.Agent.Agents) {
 		raw := pkg.Agent.Agents[name]
 		// model/voice references and their kinds are resolved in resolveModelKinds.
-		if err := checkToolRefs(pkg, raw.Tools); err != nil {
-			return nil, err
+		for _, list := range []struct {
+			key   string
+			names []string
+		}{
+			{"tools", raw.Tools}, {"delegates", raw.Delegates},
+			{"handoffs", raw.Handoffs}, {"escalations", raw.Escalations},
+		} {
+			if err := checkAttachments(pkg, list.key, list.names); err != nil {
+				return nil, err
+			}
 		}
 		instructions, ok := pkg.Markdown[raw.Instructions]
 		if !ok {
 			return nil, missing(pkg, "agent.yaml", "instructions", raw.Instructions)
 		}
 		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg, raw.Model))
-		out.Agents[name] = AgentDef{Instructions: instructions, Model: raw.Model, Voice: raw.Voice, Tools: raw.Tools}
+		out.Agents[name] = AgentDef{
+			Instructions: instructions, Model: raw.Model, Voice: raw.Voice,
+			Tools: attached(raw.Tools, raw.Delegates, raw.Handoffs, raw.Escalations),
+		}
 	}
 
 	for _, name := range sortedKeys(pkg.Agent.Tasks) {
@@ -164,7 +175,10 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 				return nil, missing(pkg, "agent.yaml", "model", raw.Model)
 			}
 		}
-		if err := checkToolRefs(pkg, raw.Tools); err != nil {
+		if err := checkAttachments(pkg, "tools", raw.Tools); err != nil {
+			return nil, err
+		}
+		if err := checkAttachments(pkg, "handoffs", raw.Handoffs); err != nil {
 			return nil, err
 		}
 		if raw.Context.Summarizer != "" {
@@ -186,7 +200,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 			return nil, fmt.Errorf("%s: task %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
 		out.Tasks[name] = Task{
-			Instructions: instructions, Tools: raw.Tools, Model: raw.Model, Result: result,
+			Instructions: instructions, Tools: attached(raw.Tools, raw.Handoffs), Model: raw.Model, Result: result,
 			Context: buildTaskContext(raw.Context),
 		}
 	}
@@ -221,10 +235,27 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		}
 		out.Targets[name] = target
 	}
-	for _, name := range sortedKeys(pkg.Agent.Controls) {
-		control, err := buildControl(pkg, pkg.Agent.Controls[name], out)
+	// The three catalogs merge into one map keyed by name. Names are one
+	// namespace across all four kinds (checkNames refuses a collision), so the
+	// merge is order-free and the intermediate representation is unchanged.
+	for _, name := range sortedKeys(pkg.Agent.Delegates) {
+		control, err := buildDelegate(pkg, pkg.Agent.Delegates[name], out)
 		if err != nil {
-			return nil, fmt.Errorf("%s: control %q: %w", pkg.Location("agent.yaml", name), name, err)
+			return nil, fmt.Errorf("%s: delegate %q: %w", pkg.Location("agent.yaml", name), name, err)
+		}
+		out.Controls[name] = control
+	}
+	for _, name := range sortedKeys(pkg.Agent.Handoffs) {
+		control, err := buildHandoff(pkg, pkg.Agent.Handoffs[name], out)
+		if err != nil {
+			return nil, fmt.Errorf("%s: handoff %q: %w", pkg.Location("agent.yaml", name), name, err)
+		}
+		out.Controls[name] = control
+	}
+	for _, name := range sortedKeys(pkg.Agent.Escalations) {
+		control, err := buildEscalation(pkg.Agent.Escalations[name], out)
+		if err != nil {
+			return nil, fmt.Errorf("%s: escalation %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
 		out.Controls[name] = control
 	}
@@ -254,7 +285,8 @@ func checkNames(pkg *packagespec.Package) error {
 		{"model", modelNames},
 		{"variable", sortedKeys(pkg.Agent.Variables)}, {"agent", sortedKeys(pkg.Agent.Agents)},
 		{"task", sortedKeys(pkg.Agent.Tasks)}, {"task group", sortedKeys(pkg.Agent.TaskGroups)},
-		{"control", sortedKeys(pkg.Agent.Controls)}, {"tool", sortedKeys(pkg.Tools)},
+		{"delegate", sortedKeys(pkg.Agent.Delegates)}, {"handoff", sortedKeys(pkg.Agent.Handoffs)},
+		{"escalation", sortedKeys(pkg.Agent.Escalations)}, {"tool", sortedKeys(pkg.Tools)},
 	}
 	for _, set := range sets {
 		for _, name := range set.names {
@@ -263,18 +295,33 @@ func checkNames(pkg *packagespec.Package) error {
 			}
 		}
 	}
-	for name := range pkg.Agent.Controls {
-		if _, ok := pkg.Tools[name]; ok {
-			return fmt.Errorf("%s: tool and control name %q collide", pkg.Location("agent.yaml", name), name)
-		}
-	}
-	// The capture tool is generated whenever a conversation variable exists, so
-	// its name cannot also be a package tool or control (V7).
+	// All four kinds become callable function names at runtime, so they share one
+	// flat namespace: a name may sit in exactly one catalog, and never on a tool
+	// as well. The capture tool is generated whenever a conversation variable
+	// exists, so its name is reserved across all of them (V7).
 	if _, ok := pkg.Tools[CaptureToolName]; ok {
 		return fmt.Errorf("%s: tool name %q is reserved: unmute generates %s for source: conversation variables", pkg.Location("agent.yaml", CaptureToolName), CaptureToolName, CaptureToolName)
 	}
-	if _, ok := pkg.Agent.Controls[CaptureToolName]; ok {
-		return fmt.Errorf("%s: control name %q is reserved: unmute generates %s for source: conversation variables", pkg.Location("agent.yaml", CaptureToolName), CaptureToolName, CaptureToolName)
+	declared := map[string]string{}
+	for _, catalog := range []struct {
+		kind  string
+		names []string
+	}{
+		{"delegate", sortedKeys(pkg.Agent.Delegates)}, {"handoff", sortedKeys(pkg.Agent.Handoffs)},
+		{"escalation", sortedKeys(pkg.Agent.Escalations)},
+	} {
+		for _, name := range catalog.names {
+			if prior, ok := declared[name]; ok {
+				return fmt.Errorf("%s: %s and %s name %q collide: all four kinds share one namespace, so a name belongs to exactly one of them", pkg.Location("agent.yaml", name), prior, catalog.kind, name)
+			}
+			declared[name] = catalog.kind
+			if _, ok := pkg.Tools[name]; ok {
+				return fmt.Errorf("%s: tool and %s name %q collide", pkg.Location("agent.yaml", name), catalog.kind, name)
+			}
+			if name == CaptureToolName {
+				return fmt.Errorf("%s: %s name %q is reserved: unmute generates %s for source: conversation variables", pkg.Location("agent.yaml", name), catalog.kind, name, CaptureToolName)
+			}
+		}
 	}
 	for _, name := range sortedKeys(pkg.Connections) {
 		if !namePattern.MatchString(name) {
@@ -364,10 +411,12 @@ func checkModelReferences(pkg *packagespec.Package, models map[string]ModelDef) 
 			return err
 		}
 	}
-	for _, controlName := range sortedKeys(pkg.Agent.Controls) {
-		control := pkg.Agent.Controls[controlName]
-		if control.Context != nil {
-			if err := check(control.Context.Summarizer, KindThink, "summarizer"); err != nil {
+	// A handoff is the only kind carrying a `context:`, so it is the only one with
+	// a summarizer to resolve.
+	for _, name := range sortedKeys(pkg.Agent.Handoffs) {
+		handoff := pkg.Agent.Handoffs[name]
+		if handoff.Context != nil {
+			if err := check(handoff.Context.Summarizer, KindThink, "summarizer"); err != nil {
 				return err
 			}
 		}
@@ -427,9 +476,9 @@ func usedModelNames(pkg *packagespec.Package, models map[string]ModelDef) map[st
 		add(task.Model)
 		add(task.Context.Summarizer)
 	}
-	for _, control := range pkg.Agent.Controls {
-		if control.Context != nil {
-			add(control.Context.Summarizer)
+	for _, handoff := range pkg.Agent.Handoffs {
+		if handoff.Context != nil {
+			add(handoff.Context.Summarizer)
 		}
 	}
 	for name := range maps.Clone(used) {
@@ -698,79 +747,87 @@ func buildTaskContext(raw packagespec.TaskContext) TaskContext {
 	}
 }
 
-func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agent) (Control, error) {
-	kind := ControlKind(raw.Kind)
-	if field := unexpectedControlField(raw, kind); field != "" {
-		return nil, fmt.Errorf("field %q is illegal with control kind %q", field, raw.Kind)
+// checkRequires resolves a guard's names against the declared variables. Both
+// kinds that accept `requires:` share this, so the two cannot drift, and a name
+// that does not resolve is a typo the author must see at compile rather than a
+// guard that can never pass at runtime.
+func checkRequires(pkg *packagespec.Package, requires []string, agent *Agent) error {
+	for _, name := range requires {
+		if _, ok := agent.Variables[name]; !ok {
+			// Name what the field takes, because the common mistake is writing a
+			// tool or another catalog entry here and expecting an ordering rule.
+			return fmt.Errorf("%s: requires names variables, and %q is not declared under the variables: block",
+				pkg.Location("agent.yaml", name), name)
+		}
+	}
+	return nil
+}
+
+func buildDelegate(pkg *packagespec.Package, raw packagespec.Delegate, agent *Agent) (Control, error) {
+	if err := checkRequires(pkg, raw.Requires, agent); err != nil {
+		return nil, err
 	}
 	task, group := stringValue(raw.Task), stringValue(raw.Group)
-	to := stringValue(raw.To)
-	// Both kinds that accept `requires:` name variables, and a name that does not
-	// resolve is a typo the author must see at compile rather than a guard that
-	// can never pass at runtime. One loop, so the two kinds cannot drift.
-	for _, name := range raw.Requires {
-		if _, ok := agent.Variables[name]; !ok {
-			return nil, missing(pkg, "agent.yaml", "requires", name)
+	if (task == "") == (group == "") {
+		return nil, fmt.Errorf("delegate needs exactly one of task or group")
+	}
+	if task != "" {
+		if _, ok := agent.Tasks[task]; !ok {
+			return nil, missing(pkg, "agent.yaml", "task", task)
+		}
+	} else {
+		if _, ok := agent.TaskGroups[group]; !ok {
+			return nil, missing(pkg, "agent.yaml", "group", group)
+		}
+		if len(raw.Assign) > 0 {
+			return nil, fmt.Errorf("assign is legal on task delegates only")
 		}
 	}
-	switch kind {
-	case ControlDelegate:
-		if (task == "") == (group == "") {
-			return nil, fmt.Errorf("delegate needs exactly one of task or group")
-		}
-		if task != "" {
-			if _, ok := agent.Tasks[task]; !ok {
-				return nil, missing(pkg, "agent.yaml", "task", task)
-			}
-		} else {
-			if _, ok := agent.TaskGroups[group]; !ok {
-				return nil, missing(pkg, "agent.yaml", "group", group)
-			}
-			if len(raw.Assign) > 0 {
-				return nil, fmt.Errorf("assign is legal on task delegates only")
-			}
-		}
-		if err := checkAssignments(raw, agent); err != nil {
-			return nil, err
-		}
-		return &Delegate{Kind: ControlDelegate, When: raw.When, Task: task, Group: group, Requires: raw.Requires, Assign: raw.Assign}, nil
-	case ControlAgentTransfer:
-		if _, ok := agent.Agents[to]; !ok {
-			return nil, missing(pkg, "agent.yaml", "to", to)
-		}
-		announce := stringValue(raw.Announce)
-		if raw.Announce != nil && strings.TrimSpace(announce) == "" {
-			return nil, fmt.Errorf("announce must not be blank")
-		}
-		if HasTemplate(announce) {
-			return nil, fmt.Errorf("announce does not support templates")
-		}
-		context, err := buildTransferContext(pkg, raw.Context, agent)
-		if err != nil {
-			return nil, err
-		}
-		return &AgentTransfer{Kind: ControlAgentTransfer, When: raw.When, To: to, Announce: announce, Requires: raw.Requires, Context: context}, nil
-	case ControlHumanTransfer:
-		transfer, err := buildHumanTransfer(raw)
-		if err != nil {
-			return nil, err
-		}
-		for name, target := range agent.Targets {
-			if _, ok := target.Destinations[transfer.(*HumanTransfer).Destination]; !ok {
-				return nil, fmt.Errorf("destination %q is missing from target %q", transfer.(*HumanTransfer).Destination, name)
-			}
-		}
-		return transfer, nil
-	default:
-		return nil, fmt.Errorf("unknown control kind %q", raw.Kind)
+	if err := checkAssignments(task, raw.Assign, agent); err != nil {
+		return nil, err
 	}
+	return &Delegate{Kind: ControlDelegate, When: raw.When, Task: task, Group: group, Requires: raw.Requires, Assign: raw.Assign}, nil
+}
+
+func buildHandoff(pkg *packagespec.Package, raw packagespec.Handoff, agent *Agent) (Control, error) {
+	if err := checkRequires(pkg, raw.Requires, agent); err != nil {
+		return nil, err
+	}
+	if _, ok := agent.Agents[raw.To]; !ok {
+		return nil, missing(pkg, "agent.yaml", "to", raw.To)
+	}
+	announce := stringValue(raw.Announce)
+	if raw.Announce != nil && strings.TrimSpace(announce) == "" {
+		return nil, fmt.Errorf("announce must not be blank")
+	}
+	if HasTemplate(announce) {
+		return nil, fmt.Errorf("announce does not support templates")
+	}
+	context, err := buildTransferContext(pkg, raw.Context, agent)
+	if err != nil {
+		return nil, err
+	}
+	return &AgentTransfer{Kind: ControlAgentTransfer, When: raw.When, To: raw.To, Announce: announce, Requires: raw.Requires, Context: context}, nil
+}
+
+func buildEscalation(raw packagespec.Escalation, agent *Agent) (Control, error) {
+	transfer, err := buildHumanTransfer(raw)
+	if err != nil {
+		return nil, err
+	}
+	for name, target := range agent.Targets {
+		if _, ok := target.Destinations[transfer.(*HumanTransfer).Destination]; !ok {
+			return nil, fmt.Errorf("destination %q is missing from target %q", transfer.(*HumanTransfer).Destination, name)
+		}
+	}
+	return transfer, nil
 }
 
 // buildHumanTransfer resolves the `cold:`/`warm:` block into the IR control
 // (SCHEMA N25). The shape is the block name, so zero blocks and two blocks are
 // both errors here; `on_unavailable` resolves to its default so no driver reads
 // an empty value.
-func buildHumanTransfer(raw packagespec.Control) (Control, error) {
+func buildHumanTransfer(raw packagespec.Escalation) (Control, error) {
 	transfer := &HumanTransfer{Kind: ControlHumanTransfer, When: raw.When}
 	switch {
 	case raw.Cold != nil && raw.Warm != nil:
@@ -800,32 +857,18 @@ func buildHumanTransfer(raw packagespec.Control) (Control, error) {
 	return transfer, nil
 }
 
-func unexpectedControlField(raw packagespec.Control, kind ControlKind) string {
-	fields := map[string]bool{
-		"task": raw.Task != nil, "group": raw.Group != nil, "assign": raw.Assign != nil,
-		"to": raw.To != nil, "announce": raw.Announce != nil, "requires": raw.Requires != nil, "context": raw.Context != nil,
-		"cold": raw.Cold != nil, "warm": raw.Warm != nil,
-	}
-	allowed := map[ControlKind]map[string]bool{
-		ControlDelegate:      {"task": true, "group": true, "assign": true, "requires": true},
-		ControlAgentTransfer: {"to": true, "announce": true, "requires": true, "context": true},
-		ControlHumanTransfer: {"cold": true, "warm": true},
-	}[kind]
-	for _, field := range slices.Sorted(maps.Keys(fields)) {
-		if fields[field] && !allowed[field] {
-			return field
-		}
-	}
-	return ""
-}
+// unexpectedControlField is gone, and nothing replaced it. It was a nine-field
+// by three-kind allow-matrix that existed only because one superset struct held
+// every kind's fields. Three precise structs make every cell of it unwritable,
+// so strict decoding refuses the same inputs, and it names file, line and column
+// where the matrix named only the field.
 
-func checkAssignments(raw packagespec.Control, agent *Agent) error {
-	taskName := stringValue(raw.Task)
+func checkAssignments(taskName string, assign map[string]string, agent *Agent) error {
 	if taskName == "" {
 		return nil
 	}
 	task := agent.Tasks[taskName]
-	for variable, path := range raw.Assign {
+	for variable, path := range assign {
 		want, ok := agent.Variables[variable]
 		if !ok {
 			return fmt.Errorf("assign variable %q does not resolve", variable)
@@ -1021,22 +1064,18 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 // direction, or a human transfer, which dials its destination whatever the
 // channel says. Both need the carrier credentials; receiving a call does not.
 //
-// The controls are read from the raw package rather than the built agent because
-// controls are built *after* targets (they resolve destinations against a target),
-// so agent.Controls is still empty here. buildTelephonyPlan reads them the same
-// way, for the same reason.
+// The escalations are read from the raw package rather than the built agent
+// because controls are built *after* targets (they resolve destinations against
+// a target), so agent.Controls is still empty here. buildTelephonyPlan reads them
+// the same way, for the same reason.
 func packagePlacesCalls(pkg *packagespec.Package, agent *Agent) bool {
 	for _, channel := range agent.Channels {
 		if channel.Kind == ChannelTelephony && channel.Outbound != nil && *channel.Outbound {
 			return true
 		}
 	}
-	for _, control := range pkg.Agent.Controls {
-		if control.Kind == string(ControlHumanTransfer) {
-			return true
-		}
-	}
-	return false
+	// Every escalation dials a person, so one is enough.
+	return len(pkg.Agent.Escalations) > 0
 }
 
 // connectionFileFor names the file a moved route field belongs in. A target that
@@ -1170,13 +1209,10 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 			features[targetcap.TelephonyFeature(control)] = true
 		}
 	}
-	for _, control := range pkg.Agent.Controls {
-		if control.Kind != string(ControlHumanTransfer) {
-			continue
-		}
+	for _, escalation := range pkg.Agent.Escalations {
 		// The shape block is the feature: SCHEMA N25 removed the briefing mode
 		// enum, so free-text briefing rides the warm row and resolves nothing.
-		if shape := control.TransferShape(); shape != "" {
+		if shape := escalation.TransferShape(); shape != "" {
 			features[targetcap.TelephonyFeature(shape+"_transfer")] = true
 		}
 	}
@@ -1482,19 +1518,6 @@ func buildConversation(raw *packagespec.Conversation) *Conversation {
 	return conversation
 }
 
-func checkToolRefs(pkg *packagespec.Package, names []string) error {
-	for _, name := range names {
-		if _, tool := pkg.Tools[name]; tool {
-			continue
-		}
-		if _, control := pkg.Agent.Controls[name]; control {
-			continue
-		}
-		return missing(pkg, "agent.yaml", "tool or control", name)
-	}
-	return nil
-}
-
 // checkReachability walks the package forwards from the entry agent and refuses
 // anything declared the walk never arrives at.
 //
@@ -1518,18 +1541,39 @@ func checkReachability(pkg *packagespec.Package) error {
 	agents, controls, tools := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	tasks, groups, destinations := map[string]bool{}, map[string]bool{}, map[string]bool{}
 
-	var visitAgent, visitControl, visitTask, visitGroup func(string)
-	// An agent, a task, and a task group all attach the same way: by name, to a
-	// tool or a control. Anything the name does not resolve to is checkToolRefs'
-	// error to report, not this walk's.
-	attach := func(names []string) {
-		for _, name := range names {
-			if _, ok := pkg.Tools[name]; ok {
-				tools[name] = true
-				continue
-			}
-			if _, ok := pkg.Agent.Controls[name]; ok {
-				visitControl(name)
+	var visitAgent, visitTask, visitGroup func(string)
+	// An agent and a task attach the same way: by name, from typed lists. Which
+	// list a name came out of is no longer guessed, it is the catalog the name
+	// resolves in, and a name that resolves in none is checkAttachments' error to
+	// report, not this walk's.
+	attach := func(lists ...[]string) {
+		for _, names := range lists {
+			for _, name := range names {
+				switch catalogOf(pkg, name) {
+				case "tools":
+					tools[name] = true
+				case "delegates":
+					if controls[name] {
+						continue
+					}
+					controls[name] = true
+					raw := pkg.Agent.Delegates[name]
+					if task := stringValue(raw.Task); task != "" {
+						visitTask(task)
+					}
+					if group := stringValue(raw.Group); group != "" {
+						visitGroup(group)
+					}
+				case "handoffs":
+					if controls[name] {
+						continue
+					}
+					controls[name] = true
+					visitAgent(pkg.Agent.Handoffs[name].To)
+				case "escalations":
+					controls[name] = true
+					destinations[pkg.Agent.Escalations[name].TransferDestination()] = true
+				}
 			}
 		}
 	}
@@ -1538,34 +1582,16 @@ func checkReachability(pkg *packagespec.Package) error {
 			return
 		}
 		agents[name] = true
-		attach(pkg.Agent.Agents[name].Tools)
-	}
-	visitControl = func(name string) {
-		if controls[name] {
-			return
-		}
-		controls[name] = true
-		raw := pkg.Agent.Controls[name]
-		switch ControlKind(raw.Kind) {
-		case ControlDelegate:
-			if task := stringValue(raw.Task); task != "" {
-				visitTask(task)
-			}
-			if group := stringValue(raw.Group); group != "" {
-				visitGroup(group)
-			}
-		case ControlAgentTransfer:
-			visitAgent(stringValue(raw.To))
-		case ControlHumanTransfer:
-			destinations[raw.TransferDestination()] = true
-		}
+		def := pkg.Agent.Agents[name]
+		attach(def.Tools, def.Delegates, def.Handoffs, def.Escalations)
 	}
 	visitTask = func(name string) {
 		if tasks[name] {
 			return
 		}
 		tasks[name] = true
-		attach(pkg.Agent.Tasks[name].Tools)
+		def := pkg.Agent.Tasks[name]
+		attach(def.Tools, def.Handoffs)
 	}
 	visitGroup = func(name string) {
 		if groups[name] {
@@ -1584,7 +1610,7 @@ func checkReachability(pkg *packagespec.Package) error {
 
 	// The fix rides the message, and never suggests an impossible one: with no
 	// reachable agent to attach to, the hint is omitted rather than invented.
-	attachable := func() string {
+	attachable := func(list string) string {
 		var names []string
 		if agents[pkg.Agent.EntryAgent] {
 			names = append(names, pkg.Agent.EntryAgent)
@@ -1597,7 +1623,7 @@ func checkReachability(pkg *packagespec.Package) error {
 		if len(names) == 0 {
 			return ""
 		}
-		return "; add it to the tools: of one of these agents: " + strings.Join(names, ", ")
+		return fmt.Sprintf("; add it to the %s: of one of these agents: %s", list, strings.Join(names, ", "))
 	}
 
 	// Reported in graph order, nearest declaration first: an unattached delegate
@@ -1609,34 +1635,107 @@ func checkReachability(pkg *packagespec.Package) error {
 	// unreachable declarations takes three runs to clear. Collect them into one
 	// message when somebody hits that in practice; the graph order above is what
 	// makes the single error the useful one.
-	for _, name := range sortedKeys(pkg.Agent.Controls) {
-		if !controls[name] {
-			return fmt.Errorf("%s: control %q is declared but no agent reaches it%s", pkg.Location("agent.yaml", name), name, attachable())
+	for _, catalog := range []struct {
+		list  string
+		names []string
+	}{
+		{"delegates", sortedKeys(pkg.Agent.Delegates)}, {"handoffs", sortedKeys(pkg.Agent.Handoffs)},
+		{"escalations", sortedKeys(pkg.Agent.Escalations)},
+	} {
+		for _, name := range catalog.names {
+			if !controls[name] {
+				return fmt.Errorf("%s: %s %q is declared but no agent reaches it%s", pkg.Location("agent.yaml", name), singular(catalog.list), name, attachable(catalog.list))
+			}
 		}
 	}
 	for _, name := range sortedKeys(pkg.Agent.Destinations) {
 		if !destinations[name] {
-			return fmt.Errorf("%s: destination %q is declared but no control resolves to it", pkg.Location("agent.yaml", name), name)
+			return fmt.Errorf("%s: destination %q is declared but no escalation resolves to it", pkg.Location("agent.yaml", name), name)
 		}
 	}
 	for _, name := range sortedKeys(pkg.Tools) {
 		if !tools[name] {
-			return fmt.Errorf("%s: tool %q is declared but no agent reaches it%s", pkg.Location("agent.yaml", name), name, attachable())
+			return fmt.Errorf("%s: tool %q is declared but no agent reaches it%s", pkg.Location("agent.yaml", name), name, attachable("tools"))
 		}
 	}
 	for _, name := range sortedKeys(pkg.Agent.TaskGroups) {
 		if !groups[name] {
-			return fmt.Errorf("%s: task group %q is declared but nothing reaches it; add a delegate control with group: %s and attach it to an agent", pkg.Location("agent.yaml", name), name, name)
+			return fmt.Errorf("%s: task group %q is declared but nothing reaches it; add an entry under delegates: with group: %s and attach it to an agent", pkg.Location("agent.yaml", name), name, name)
 		}
 	}
 	for _, name := range sortedKeys(pkg.Agent.Tasks) {
 		if !tasks[name] {
-			return fmt.Errorf("%s: task %q is declared but nothing reaches it; add a delegate control with task: %s and attach it to an agent, or list it in the steps: of a task group that is reached", pkg.Location("agent.yaml", name), name, name)
+			return fmt.Errorf("%s: task %q is declared but nothing reaches it; add an entry under delegates: with task: %s and attach it to an agent, or list it in the steps: of a task group that is reached", pkg.Location("agent.yaml", name), name, name)
 		}
 	}
 	for _, name := range sortedKeys(pkg.Agent.Agents) {
 		if !agents[name] {
-			return fmt.Errorf("%s: agent %q is declared but the entry agent %q cannot reach it, directly or through an agent_transfer", pkg.Location("agent.yaml", name), name, pkg.Agent.EntryAgent)
+			return fmt.Errorf("%s: agent %q is declared but the entry agent %q cannot reach it, directly or through a handoff", pkg.Location("agent.yaml", name), name, pkg.Agent.EntryAgent)
+		}
+	}
+	return nil
+}
+
+// attached flattens the kind-named lists an agent or a task writes back into the
+// single ordered list the intermediate representation holds.
+//
+// The order is load-bearing and is the reading order: tools, delegates,
+// handoffs, escalations. Both drivers walk this list in order. LiveKit
+// re-partitions it into four buckets as it walks, so only within-bucket order
+// survives there and concatenating by kind preserves it exactly. Pipecat does
+// NOT fully partition: it appends a human transfer into its tool list beside
+// real tools, so on Pipecat the relative order of tools and escalations is
+// visible in the emitted project. No package in this repository interleaves them,
+// which is why every package still compiles byte for byte.
+func attached(lists ...[]string) []string {
+	var out []string
+	for _, list := range lists {
+		out = append(out, list...)
+	}
+	return out
+}
+
+// singular turns a catalog key into the noun an error message uses for one of
+// its entries.
+func singular(list string) string { return strings.TrimSuffix(list, "s") }
+
+// catalogOf reports which of the four lists declares name, or "" when nothing
+// does. All four kinds share one flat namespace, so at most one answers.
+func catalogOf(pkg *packagespec.Package, name string) string {
+	switch {
+	case has(pkg.Tools, name):
+		return "tools"
+	case has(pkg.Agent.Delegates, name):
+		return "delegates"
+	case has(pkg.Agent.Handoffs, name):
+		return "handoffs"
+	case has(pkg.Agent.Escalations, name):
+		return "escalations"
+	}
+	return ""
+}
+
+func has[V any](m map[string]V, name string) bool {
+	_, ok := m[name]
+	return ok
+}
+
+// checkAttachments resolves the names an agent or a task lists under one key
+// against the catalog of the same name.
+//
+// Kind-aware, which the single mixed list could not be. With four lists the
+// mistake worth naming is a name written in the wrong one, so when the name does
+// resolve, just not here, the message says where it IS declared and which list
+// it belongs on.
+func checkAttachments(pkg *packagespec.Package, list string, names []string) error {
+	for _, name := range names {
+		switch found := catalogOf(pkg, name); found {
+		case list:
+		case "":
+			return missing(pkg, "agent.yaml", singular(list), name)
+		default:
+			return fmt.Errorf("%s: %q is a %s, so move it out of the %s: list and into the %s: list",
+				pkg.Location("agent.yaml", name), name, singular(found), list, found)
 		}
 	}
 	return nil

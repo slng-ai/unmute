@@ -6,6 +6,10 @@ description: "Three ways to split one agent into parts, and where each is taught
 One agent with a good prompt and a few tools handles more than you would expect.
 When it stops being enough, there are three shapes to reach for.
 
+New here? Read [The mental model](/build/orchestration/mental-model) first. It is
+one page, it answers "I want two agents, each with tasks, where do I start?", and
+everything below assumes it.
+
 | Shape | What it is | Where it is taught |
 |---|---|---|
 | **Handoff** | one agent gives the caller to another, and does not get them back | [Handoffs](/build/orchestration/handoffs) |
@@ -15,9 +19,25 @@ When it stops being enough, there are three shapes to reach for.
 The difference that matters most is whether control comes back. A task returns. A
 handoff does not.
 
-None of these is how you reach a person: that is a
-[human transfer](/transfers/overview), and what it can do depends on the phone
-route.
+None of these is how you reach a person: that is an
+[escalation](/transfers/overview), and what it can do depends on the phone route.
+
+## Four lists, four catalogs
+
+Whichever shape you reach for, you write it the same way. An agent declares what
+it can do in four lists, one per kind, and three of those have a top-level
+catalog of the same name:
+
+| Agent list | Catalog | What it does |
+|---|---|---|
+| `tools:` | `tools:` | does work and returns a value |
+| `delegates:` | `delegates:` | runs a task or a task group, then control returns |
+| `handoffs:` | `handoffs:` | the conversation becomes another agent, and never returns |
+| `escalations:` | `escalations:` | the caller goes through to a person |
+
+Which block a thing is written in is its kind, so nothing carries a `kind:`
+field. [The mental model](/build/orchestration/mental-model) walks through a
+complete file.
 
 ## Read them in order, then choose
 
@@ -26,6 +46,9 @@ is the one to come back to when you are deciding: it pairs the symptom you have
 with the shape that fixes it, and states what each shape costs.
 
 <Columns cols={2}>
+  <Card title="The mental model" icon="map" href="/build/orchestration/mental-model">
+    One rule, four kinds, and where each key goes.
+  </Card>
   <Card title="Handoffs" icon="users" href="/build/orchestration/handoffs">
     Two agents, two sets of rules.
   </Card>

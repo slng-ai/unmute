@@ -858,8 +858,7 @@ func TestWriteHumanTransferPutsDestinationInTheBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	var decoded struct {
-		Controls map[string]struct {
-			Kind        string  `yaml:"kind"`
+		Escalations map[string]struct {
 			Destination *string `yaml:"destination"`
 			Cold        *struct {
 				Destination string `yaml:"destination"`
@@ -870,19 +869,19 @@ func TestWriteHumanTransferPutsDestinationInTheBlock(t *testing.T) {
 				RingTimeout   string `yaml:"ring_timeout"`
 				OnUnavailable string `yaml:"on_unavailable"`
 			} `yaml:"warm"`
-		} `yaml:"controls"`
+		} `yaml:"escalations"`
 	}
 	if err := yaml.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("scaffolded agent.yaml does not parse: %v\n%s", err, raw)
 	}
-	cold := decoded.Controls["to_human"]
+	cold := decoded.Escalations["to_human"]
 	if cold.Destination != nil {
 		t.Error("destination must live inside the shape block, not above it")
 	}
 	if cold.Cold == nil || cold.Cold.Destination != "support_line" {
 		t.Errorf("cold block = %+v", cold.Cold)
 	}
-	warm := decoded.Controls["to_manager"].Warm
+	warm := decoded.Escalations["to_manager"].Warm
 	if warm == nil || warm.Destination != "manager_line" || warm.Briefing != "Say who is calling." ||
 		warm.RingTimeout != "20s" || warm.OnUnavailable != "hangup" {
 		t.Errorf("warm block = %+v", warm)

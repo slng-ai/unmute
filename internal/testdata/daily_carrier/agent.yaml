@@ -6,8 +6,27 @@
 # that would recommend it over the route with nothing to host. Everything the
 # route's tests need is here.
 version: 1
+
 name: daily-carrier-fixture
+
 entry_agent: front_desk
+
+agents:
+  front_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    escalations:
+      - send_to_billing
+
+escalations:
+  send_to_billing:
+    when: The caller asks about an invoice or a refund.
+    cold:
+      destination: billing_line
+
+destinations:
+  billing_line: BILLING_PHONE_NUMBER
 
 models:
   think:
@@ -27,24 +46,6 @@ models:
     detector:
       provider: local
       model: silero
-
-agents:
-  front_desk:
-    instructions: instructions.md
-    model: reasoning
-    voice: voice
-    tools:
-      - send_to_billing
-
-controls:
-  send_to_billing:
-    kind: human_transfer
-    when: The caller asks about an invoice or a refund.
-    cold:
-      destination: billing_line
-
-destinations:
-  billing_line: BILLING_PHONE_NUMBER
 
 conversation:
   greeting:

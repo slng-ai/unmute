@@ -43,9 +43,8 @@ block at all.
 ## The transfer
 
 ```yaml agent.yaml
-controls:
+escalations:
   send_to_billing:
-    kind: human_transfer
     when: The caller asks about an invoice, a refund, or a charge they do not recognise.
     cold:
       destination: billing_line
