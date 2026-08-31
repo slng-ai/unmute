@@ -2,58 +2,26 @@
 # driver, showing the hybrid pattern: agent handoff for routing, plus task
 # groups for guided collection, all on the SLNG Execution Layer.
 #
-# A greeter (Remy) hands off to a reservations agent or an events agent
-# (agent_transfer). Each specialist delegates to a task group that qualifies the
-# request, then runs a shared confirm-booking step. Control returns to the
+# A greeter (Remy) hands off to a reservations agent or an events agent, through
+# an entry under `handoffs:`. Each specialist delegates to a task group that
+# qualifies the request, then runs a shared confirm-booking step. Control returns to the
 # specialist (then: return), which closes or hands back to the greeter.
 #
 # Targeted at LiveKit only: task groups and delegate-return are code-target
 # features (they fail on Vapi), and this is the LiveKit first-run example.
 
 version: 1
+
 name: remy-fixture
+
 entry_agent: greeter
-
-# Models are defined once, in the central map grouped by kind (N15). Agents
-# reference think and speak entries by name; the sole listen and turn entries
-# select themselves. targets.yaml carries infrastructure only.
-models:
-  think:
-    reasoning:
-      description: greeting, routing, and the booking tasks
-      provider: openai
-      model: gpt-4o-mini
-      temperature: 0.4
-  speak:
-    host:
-      description: "warm, upbeat greeter"
-      provider: slng
-      model: "slng/deepgram/aura:2-en"
-      voice: "aura-2-thalia-en"
-    desk:
-      description: "calm, precise booking voice"
-      provider: slng
-      model: "slng/deepgram/aura:2-en"
-      voice: "aura-2-orion-en"
-  listen:
-    transcriber:
-      provider: slng
-      model: "slng/deepgram/nova:3-en"
-  turn:
-    detector:
-      provider: livekit
-      model: turn-detector-mini
-
-variables:
-  caller_phone:
-    type: string
 
 agents:
   greeter:
     instructions: instructions.md
     model: reasoning
     voice: host
-    tools:
+    handoffs:
       - to_reservations
       - to_events
 
@@ -61,17 +29,50 @@ agents:
     instructions: agents/reservations.md
     model: reasoning
     voice: desk
-    tools:
+    delegates:
       - do_reserve
+    handoffs:
       - back_to_greeter
 
   events:
     instructions: agents/events.md
     model: reasoning
     voice: desk
-    tools:
+    delegates:
       - do_event
+    handoffs:
       - back_to_greeter
+
+delegates:
+  do_reserve:
+    group: reserve_group
+    when: The caller is ready to book a table; run the reservation flow.
+
+  do_event:
+    group: events_group
+    when: The caller is ready to plan their event; run the events flow.
+
+handoffs:
+  to_reservations:
+    to: reservations
+    when: Caller wants to book a table for a normal dine-in visit.
+    context:
+      history: full
+      variables: all
+
+  to_events:
+    to: events
+    when: Caller wants to plan a private event, party, or large group booking.
+    context:
+      history: full
+      variables: all
+
+  back_to_greeter:
+    to: greeter
+    when: Caller wants something else, or to start over.
+    context:
+      history: full
+      variables: all
 
 tasks:
   find_slot:
@@ -120,40 +121,39 @@ task_groups:
     then: return
     merge: results
 
-controls:
-  to_reservations:
-    kind: agent_transfer
-    to: reservations
-    when: Caller wants to book a table for a normal dine-in visit.
-    context:
-      history: full
-      variables: all
+variables:
+  caller_phone:
+    type: string
 
-  to_events:
-    kind: agent_transfer
-    to: events
-    when: Caller wants to plan a private event, party, or large group booking.
-    context:
-      history: full
-      variables: all
-
-  back_to_greeter:
-    kind: agent_transfer
-    to: greeter
-    when: Caller wants something else, or to start over.
-    context:
-      history: full
-      variables: all
-
-  do_reserve:
-    kind: delegate
-    group: reserve_group
-    when: The caller is ready to book a table; run the reservation flow.
-
-  do_event:
-    kind: delegate
-    group: events_group
-    when: The caller is ready to plan their event; run the events flow.
+# Models are defined once, in the central map grouped by kind (N15). Agents
+# reference think and speak entries by name; the sole listen and turn entries
+# select themselves. targets.yaml carries infrastructure only.
+models:
+  think:
+    reasoning:
+      description: greeting, routing, and the booking tasks
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.4
+  speak:
+    host:
+      description: "warm, upbeat greeter"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+    desk:
+      description: "calm, precise booking voice"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-orion-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: livekit
+      model: turn-detector-mini
 
 tools:
   - check_availability

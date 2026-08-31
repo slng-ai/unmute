@@ -79,9 +79,9 @@ func cloudWebsocketTarget(t *testing.T, opts cloudWebsocketOptions) (*ir.Agent, 
 		// The env-name destination form: a route that composes markup out of the
 		// destination is exactly where a literal would show up in emitted output.
 		addColdHumanTransfer(pkg)
-		control := pkg.Agent.Controls["to_human"]
+		control := pkg.Agent.Escalations["to_human"]
 		control.Cold.OnUnavailable = string(ir.OnUnavailableHangup)
-		pkg.Agent.Controls["to_human"] = control
+		pkg.Agent.Escalations["to_human"] = control
 	}
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	agent, err := ir.Build(pkg)

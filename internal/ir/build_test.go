@@ -2,7 +2,9 @@ package ir
 
 import (
 	"maps"
+	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -59,9 +61,9 @@ func TestBuildSafeCore(t *testing.T) {
 func TestBuildAgentTransferAnnounce(t *testing.T) {
 	pkg := loadSafeCore(t)
 	want := "I’ll connect you with billing."
-	control := pkg.Agent.Controls["to_billing"]
+	control := pkg.Agent.Handoffs["to_billing"]
 	control.Announce = &want
-	pkg.Agent.Controls["to_billing"] = control
+	pkg.Agent.Handoffs["to_billing"] = control
 
 	agent, err := Build(pkg)
 	if err != nil {
@@ -83,9 +85,9 @@ func TestBuildRejectsInvalidAgentTransferAnnounce(t *testing.T) {
 			name:  "blank",
 			value: " \t ",
 			mutate: func(pkg *packagespec.Package, value *string) {
-				control := pkg.Agent.Controls["to_billing"]
+				control := pkg.Agent.Handoffs["to_billing"]
 				control.Announce = value
-				pkg.Agent.Controls["to_billing"] = control
+				pkg.Agent.Handoffs["to_billing"] = control
 			},
 			want: "announce must not be blank",
 		},
@@ -93,32 +95,18 @@ func TestBuildRejectsInvalidAgentTransferAnnounce(t *testing.T) {
 			name:  "template",
 			value: "I’ll connect you with {{destination}}.",
 			mutate: func(pkg *packagespec.Package, value *string) {
-				control := pkg.Agent.Controls["to_billing"]
+				control := pkg.Agent.Handoffs["to_billing"]
 				control.Announce = value
-				pkg.Agent.Controls["to_billing"] = control
+				pkg.Agent.Handoffs["to_billing"] = control
 			},
 			want: "announce does not support templates",
 		},
-		{
-			name:  "delegate",
-			value: "Please hold.",
-			mutate: func(pkg *packagespec.Package, value *string) {
-				task := "collect"
-				pkg.Agent.Controls["bad"] = packagespec.Control{Kind: "delegate", Task: &task, Announce: value}
-			},
-			want: `field "announce" is illegal with control kind "delegate"`,
-		},
-		{
-			name:  "human transfer",
-			value: "Please hold.",
-			mutate: func(pkg *packagespec.Package, value *string) {
-				pkg.Agent.Controls["bad"] = packagespec.Control{
-					Kind: "human_transfer", Announce: value,
-					Cold: &packagespec.ColdTransfer{Destination: "billing_line"},
-				}
-			},
-			want: `field "announce" is illegal with control kind "human_transfer"`,
-		},
+		// `announce` on a delegate and `announce` on an escalation used to be
+		// caught here, by an allow-matrix keyed on `kind:`. Neither is a value a
+		// package can hold any more: `spec.Delegate` and `spec.Escalation` have no
+		// Announce field, so the two cases moved to
+		// TestBuildRefusesAFieldFromAnotherKind, which proves the *file* is
+		// refused, with a line and a column the matrix never had.
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			pkg := loadSafeCore(t)
@@ -592,8 +580,9 @@ func TestBuildRejectsBadAndCollidingNames(t *testing.T) { // V7
 		{
 			name: "tool control collision",
 			mutate: func(pkg *packagespec.Package) {
-				destination := "billing_line"
-				pkg.Agent.Controls["lookup_customer"] = packagespec.Control{Kind: "human_transfer", Cold: &packagespec.ColdTransfer{Destination: destination}}
+				pkg.Agent.Escalations = map[string]packagespec.Escalation{
+					"lookup_customer": {Cold: &packagespec.ColdTransfer{Destination: "billing_line"}},
+				}
 			},
 			want: "collide",
 		},
@@ -610,14 +599,111 @@ func TestBuildRejectsBadAndCollidingNames(t *testing.T) { // V7
 	}
 }
 
-func TestBuildRejectsFieldsFromAnotherControlKind(t *testing.T) { // V3
-	pkg := loadSafeCore(t)
-	control := pkg.Agent.Controls["to_billing"]
-	control.Task = new(string)
-	pkg.Agent.Controls["to_billing"] = control
-	_, err := Build(pkg)
-	if err == nil || !strings.Contains(err.Error(), `field "task" is illegal with control kind "agent_transfer"`) {
-		t.Fatalf("got %v", err)
+// patchSafeCore copies the safe_core fixture into a temp directory, replaces one
+// piece of its agent.yaml, and loads the result.
+//
+// These refusals happen at decode, so they need a real file with real line
+// numbers. Mutating a decoded struct cannot reach them, and that is the point:
+// the illegal thing is unwritable in Go, which is why the check moved.
+func patchSafeCore(t *testing.T, from, to string) error {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "pkg")
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "safe_core"))); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "agent.yaml")
+	source, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patched := strings.Replace(string(source), from, to, 1)
+	if patched == string(source) {
+		t.Fatalf("anchor %q is not in the fixture any more", from)
+	}
+	if err := os.WriteFile(path, []byte(patched), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = packagespec.Load(dir)
+	return err
+}
+
+// TestBuildRefusesAFieldFromAnotherKind (V3). The nine-field by three-kind
+// allow-matrix that used to catch these is gone, and three precise structs
+// replaced it. Every case below is refused at decode instead, which is strictly
+// louder: the matrix named the field, and decoding names the file, the line and
+// the column.
+func TestBuildRefusesAFieldFromAnotherKind(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		from string
+		to   string
+		want string
+	}{
+		{
+			name: "task on a handoff",
+			from: "  to_billing:\n    to: billing",
+			to:   "  to_billing:\n    task: collect\n    to: billing",
+			want: "task",
+		},
+		{
+			name: "announce on a delegate",
+			from: "\nhandoffs:\n  to_billing:",
+			to:   "\ndelegates:\n  run_it:\n    task: collect\n    announce: Please hold.\n\nhandoffs:\n  to_billing:",
+			want: "announce",
+		},
+		{
+			name: "assign on an escalation",
+			from: "\nhandoffs:\n  to_billing:",
+			to:   "\nescalations:\n  to_manager:\n    cold:\n      destination: manager_line\n    assign:\n      x: result.y\n\nhandoffs:\n  to_billing:",
+			want: "assign",
+		},
+		{
+			name: "cold on a handoff",
+			from: "  to_billing:\n    to: billing",
+			to:   "  to_billing:\n    cold:\n      destination: manager_line\n    to: billing",
+			want: "cold",
+		},
+		{
+			name: "kind on a catalog entry",
+			from: "  to_billing:\n    to: billing",
+			to:   "  to_billing:\n    kind: agent_transfer\n    to: billing",
+			want: "kind",
+		},
+		{
+			name: "a retired controls: block",
+			from: "\nhandoffs:\n  to_billing:",
+			to:   "\ncontrols:\n  to_manager:\n    kind: human_transfer\n\nhandoffs:\n  to_billing:",
+			want: "controls",
+		},
+		{
+			name: "delegates: inside a task definition",
+			from: "\nhandoffs:\n  to_billing:",
+			to:   "\ntasks:\n  collect:\n    instructions: instructions.md\n    delegates:\n      - run_it\n\nhandoffs:\n  to_billing:",
+			want: "delegates",
+		},
+		{
+			name: "escalations: inside a task definition",
+			from: "\nhandoffs:\n  to_billing:",
+			to:   "\ntasks:\n  collect:\n    instructions: instructions.md\n    escalations:\n      - to_manager\n\nhandoffs:\n  to_billing:",
+			want: "escalations",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := patchSafeCore(t, test.from, test.to)
+			if err == nil {
+				t.Fatal("the illegal field was accepted")
+			}
+			// The message names the offending key, and the position: an unknown
+			// field is reported with a line and a column, which is what replaced
+			// the allow-matrix and is the whole reason deleting it was an
+			// improvement rather than a loosening.
+			if !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("message does not name %q: %v", test.want, err)
+			}
+			if !regexp.MustCompile(`agent\.yaml: \[\d+:\d+\]`).MatchString(err.Error()) {
+				t.Fatalf("message carries no file:line:column: %v", err)
+			}
+		})
 	}
 }
 
@@ -849,43 +935,43 @@ func TestUnreachableControlIsRefused(t *testing.T) {
 	}{
 		{
 			name:   "unattached human_transfer, cold",
-			mutate: func(pkg *packagespec.Package) { detachTool(pkg, "billing", "to_human") },
-			want:   `control "to_human" is declared but no agent reaches it`,
+			mutate: func(pkg *packagespec.Package) { detach(pkg, "billing", "to_human") },
+			want:   `escalation "to_human" is declared but no agent reaches it`,
 		},
 		{
 			name: "unattached human_transfer, warm",
 			mutate: func(pkg *packagespec.Package) {
-				control := pkg.Agent.Controls["to_human"]
+				control := pkg.Agent.Escalations["to_human"]
 				control.Cold, control.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
-				pkg.Agent.Controls["to_human"] = control
-				detachTool(pkg, "billing", "to_human")
+				pkg.Agent.Escalations["to_human"] = control
+				detach(pkg, "billing", "to_human")
 			},
-			want: `control "to_human" is declared but no agent reaches it`,
+			want: `escalation "to_human" is declared but no agent reaches it`,
 		},
 		{
 			name:   "unattached agent_transfer",
-			mutate: func(pkg *packagespec.Package) { detachTool(pkg, "intake", "to_billing") },
-			want:   `control "to_billing" is declared but no agent reaches it`,
+			mutate: func(pkg *packagespec.Package) { detach(pkg, "intake", "to_billing") },
+			want:   `handoff "to_billing" is declared but no agent reaches it`,
 		},
 		{
 			name: "unattached delegate",
 			mutate: func(pkg *packagespec.Package) {
 				addTask(pkg, "check_balance")
 				task := "check_balance"
-				pkg.Agent.Controls["run_check"] = packagespec.Control{Kind: "delegate", Task: &task}
+				pkg.Agent.Delegates = map[string]packagespec.Delegate{"run_check": {Task: &task}}
 			},
-			want: `control "run_check" is declared but no agent reaches it`,
+			want: `delegate "run_check" is declared but no agent reaches it`,
 		},
 		{
 			name: "unreferenced destination",
 			mutate: func(pkg *packagespec.Package) {
 				pkg.Agent.Destinations["front_desk_line"] = "FRONT_DESK_PHONE_NUMBER"
 			},
-			want: `destination "front_desk_line" is declared but no control resolves to it`,
+			want: `destination "front_desk_line" is declared but no escalation resolves to it`,
 		},
 		{
 			name:   "unreferenced top-level tool",
-			mutate: func(pkg *packagespec.Package) { detachTool(pkg, "billing", "get_invoice") },
+			mutate: func(pkg *packagespec.Package) { detach(pkg, "billing", "get_invoice") },
 			want:   `tool "get_invoice" is declared but no agent reaches it`,
 		},
 		{
@@ -952,15 +1038,15 @@ func TestUnreachableControlIsRefused(t *testing.T) {
 
 func TestTaskScopedAgentTransferIsReachable(t *testing.T) {
 	pkg := loadSafeCore(t)
-	detachTool(pkg, "intake", "to_billing")
+	detach(pkg, "intake", "to_billing")
 	addTask(pkg, "route_billing")
 	task := pkg.Agent.Tasks["route_billing"]
-	task.Tools = []string{"to_billing"}
+	task.Handoffs = []string{"to_billing"}
 	pkg.Agent.Tasks["route_billing"] = task
 	taskName := "route_billing"
-	pkg.Agent.Controls["start_routing"] = packagespec.Control{Kind: "delegate", Task: &taskName}
+	pkg.Agent.Delegates = map[string]packagespec.Delegate{"start_routing": {Task: &taskName}}
 	intake := pkg.Agent.Agents["intake"]
-	intake.Tools = append(intake.Tools, "start_routing")
+	intake.Delegates = append(intake.Delegates, "start_routing")
 	pkg.Agent.Agents["intake"] = intake
 
 	if _, err := Build(pkg); err != nil {
@@ -969,23 +1055,32 @@ func TestTaskScopedAgentTransferIsReachable(t *testing.T) {
 }
 
 func addColdHumanTransfer(pkg *packagespec.Package) {
-	pkg.Agent.Controls["to_human"] = packagespec.Control{
-		Kind: "human_transfer", Cold: &packagespec.ColdTransfer{Destination: "billing_line"},
+	if pkg.Agent.Escalations == nil {
+		pkg.Agent.Escalations = map[string]packagespec.Escalation{}
+	}
+	pkg.Agent.Escalations["to_human"] = packagespec.Escalation{
+		Cold: &packagespec.ColdTransfer{Destination: "billing_line"},
 	}
 	if pkg.Agent.Destinations == nil {
 		pkg.Agent.Destinations = map[string]string{}
 	}
 	pkg.Agent.Destinations["billing_line"] = "BILLING_PHONE_NUMBER"
 	billing := pkg.Agent.Agents["billing"]
-	billing.Tools = append(billing.Tools, "to_human")
+	billing.Escalations = append(billing.Escalations, "to_human")
 	pkg.Agent.Agents["billing"] = billing
 }
 
-// detachTool removes one name from an agent's tools: list, leaving whatever it
-// named still declared. That is the whole shape of defect A.
-func detachTool(pkg *packagespec.Package, agent, tool string) {
+// detach removes one name from every list an agent attaches it through, leaving
+// whatever it named still declared. That is the whole shape of defect A. It
+// sweeps all four lists rather than taking the kind as an argument, because the
+// caller's point is always "nothing reaches this any more".
+func detach(pkg *packagespec.Package, agent, name string) {
+	drop := func(list []string) []string {
+		return slices.DeleteFunc(slices.Clone(list), func(entry string) bool { return entry == name })
+	}
 	def := pkg.Agent.Agents[agent]
-	def.Tools = slices.DeleteFunc(slices.Clone(def.Tools), func(name string) bool { return name == tool })
+	def.Tools, def.Delegates = drop(def.Tools), drop(def.Delegates)
+	def.Handoffs, def.Escalations = drop(def.Handoffs), drop(def.Escalations)
 	pkg.Agent.Agents[agent] = def
 }
 
@@ -1304,9 +1399,9 @@ func TestBuildDelegateRequires(t *testing.T) {
 
 	t.Run("declared variable builds", func(t *testing.T) {
 		pkg := load(t)
-		control := pkg.Agent.Controls["do_reserve"]
+		control := pkg.Agent.Delegates["do_reserve"]
 		control.Requires = []string{"caller_phone"}
-		pkg.Agent.Controls["do_reserve"] = control
+		pkg.Agent.Delegates["do_reserve"] = control
 
 		agent, err := Build(pkg)
 		if err != nil {
@@ -1323,9 +1418,9 @@ func TestBuildDelegateRequires(t *testing.T) {
 
 	t.Run("undeclared variable fails with a location", func(t *testing.T) {
 		pkg := load(t)
-		control := pkg.Agent.Controls["do_reserve"]
+		control := pkg.Agent.Delegates["do_reserve"]
 		control.Requires = []string{"not_a_variable"}
-		pkg.Agent.Controls["do_reserve"] = control
+		pkg.Agent.Delegates["do_reserve"] = control
 
 		_, err := Build(pkg)
 		if err == nil {
@@ -1339,20 +1434,17 @@ func TestBuildDelegateRequires(t *testing.T) {
 		}
 	})
 
-	// Widening the field to delegates must not widen it to everything. A human
-	// transfer hands the call to a person and has no result to withhold, so a
+	// Widening the field to delegates must not widen it to everything. An
+	// escalation hands the call to a person and has no result to withhold, so a
 	// prerequisite on one would describe a guard nothing implements.
-	t.Run("still illegal on a human transfer", func(t *testing.T) {
-		pkg := load(t)
-		control := pkg.Agent.Controls["do_reserve"]
-		control.Kind = "human_transfer"
-		control.Group = nil // so the refusal is about `requires:`, not the group
-		control.Requires = []string{"caller_phone"}
-		pkg.Agent.Controls["do_reserve"] = control
-
-		_, err := Build(pkg)
+	//
+	// It is now unwritable rather than rejected: spec.Escalation has no Requires
+	// field, so the refusal happens at decode and carries a line and a column.
+	t.Run("still illegal on an escalation", func(t *testing.T) {
+		err := patchSafeCore(t, "\nhandoffs:\n  to_billing:",
+			"\nescalations:\n  to_manager:\n    requires:\n      - customer_id\n    cold:\n      destination: manager_line\n\nhandoffs:\n  to_billing:")
 		if err == nil || !strings.Contains(err.Error(), "requires") {
-			t.Fatalf("requires on a human transfer must stay illegal: %v", err)
+			t.Fatalf("requires on an escalation must stay illegal: %v", err)
 		}
 	})
 }
@@ -1386,14 +1478,12 @@ func TestBuildPromptSuffixReachesItsProfileAndNoOther(t *testing.T) {
 		// A declared task nothing reaches is refused, so both get a delegate and
 		// intake gets both delegates.
 		inherits, namesOther := "inherits", "names_other"
-		pkg.Agent.Controls["run_inherits"] = packagespec.Control{
-			Kind: "delegate", Task: &inherits, When: "Collect the caller's account details.",
-		}
-		pkg.Agent.Controls["run_names_other"] = packagespec.Control{
-			Kind: "delegate", Task: &namesOther, When: "Read the invoice back.",
+		pkg.Agent.Delegates = map[string]packagespec.Delegate{
+			"run_inherits":    {Task: &inherits, When: "Collect the caller's account details."},
+			"run_names_other": {Task: &namesOther, When: "Read the invoice back."},
 		}
 		intake := pkg.Agent.Agents["intake"]
-		intake.Tools = append(intake.Tools, "run_inherits", "run_names_other")
+		intake.Delegates = append(intake.Delegates, "run_inherits", "run_names_other")
 		pkg.Agent.Agents["intake"] = intake
 		agent, err := Build(pkg)
 		if err != nil {
@@ -1488,4 +1578,138 @@ func TestBuildPromptSuffixMovesNoCacheScope(t *testing.T) {
 	if len(with) == 0 {
 		t.Fatal("no scopes derived, so the comparison proved nothing")
 	}
+}
+
+// TestBuildRefusesANameInTheWrongList (FR-014, FR-032). The single mixed list
+// could not ask this question: any name that resolved to anything was accepted.
+// Four lists make "which list is this in" answerable, so the answer carries the
+// fix, and the message names both halves of it.
+func TestBuildRefusesANameInTheWrongList(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		mutate  func(*packagespec.Package)
+		defines string // the block the name is actually declared in
+		belongs string // the list the author should have used
+	}{
+		{
+			name: "a handoff listed under tools",
+			mutate: func(pkg *packagespec.Package) {
+				def := pkg.Agent.Agents["intake"]
+				def.Handoffs = nil
+				def.Tools = append(def.Tools, "to_billing")
+				pkg.Agent.Agents["intake"] = def
+			},
+			defines: "handoff", belongs: "handoffs:",
+		},
+		{
+			name: "a delegate listed under handoffs",
+			mutate: func(pkg *packagespec.Package) {
+				addTask(pkg, "check_balance")
+				task := "check_balance"
+				pkg.Agent.Delegates = map[string]packagespec.Delegate{"run_check": {Task: &task}}
+				def := pkg.Agent.Agents["intake"]
+				def.Handoffs = append(def.Handoffs, "run_check")
+				pkg.Agent.Agents["intake"] = def
+			},
+			defines: "delegate", belongs: "delegates:",
+		},
+		{
+			name: "an escalation listed under delegates",
+			mutate: func(pkg *packagespec.Package) {
+				def := pkg.Agent.Agents["billing"]
+				def.Escalations = nil
+				def.Delegates = append(def.Delegates, "to_human")
+				pkg.Agent.Agents["billing"] = def
+			},
+			defines: "escalation", belongs: "escalations:",
+		},
+		{
+			name: "a tool listed under delegates",
+			mutate: func(pkg *packagespec.Package) {
+				def := pkg.Agent.Agents["billing"]
+				def.Tools = nil
+				def.Delegates = append(def.Delegates, "get_invoice")
+				pkg.Agent.Agents["billing"] = def
+			},
+			defines: "tool", belongs: "tools:",
+		},
+		{
+			name: "a handoff listed under a task's tools",
+			mutate: func(pkg *packagespec.Package) {
+				detach(pkg, "intake", "to_billing")
+				addTask(pkg, "routing")
+				task := pkg.Agent.Tasks["routing"]
+				task.Tools = []string{"to_billing"}
+				pkg.Agent.Tasks["routing"] = task
+				delegate := "routing"
+				pkg.Agent.Delegates = map[string]packagespec.Delegate{"run_routing": {Task: &delegate}}
+				def := pkg.Agent.Agents["intake"]
+				def.Delegates = append(def.Delegates, "run_routing")
+				pkg.Agent.Agents["intake"] = def
+			},
+			defines: "handoff", belongs: "handoffs:",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pkg := loadSafeCore(t)
+			addColdHumanTransfer(pkg)
+			test.mutate(pkg)
+			_, err := Build(pkg)
+			if err == nil {
+				t.Fatal("a name in the wrong list was accepted")
+			}
+			// Both halves, because either alone leaves the author guessing: what
+			// the thing is, and where it goes.
+			if !strings.Contains(err.Error(), test.defines) {
+				t.Errorf("message does not say what the name is (%q): %v", test.defines, err)
+			}
+			if !strings.Contains(err.Error(), test.belongs) {
+				t.Errorf("message does not name the list it belongs on (%q): %v", test.belongs, err)
+			}
+		})
+	}
+}
+
+// A catalog entry nothing attaches is still refused, and one name in two
+// catalogs is still a collision. Both rules predate the re-spelling; what
+// changed is that the second one is now expressible at all, because there are
+// three catalogs to collide across.
+func TestBuildRefusesUnattachedAndCollidingCatalogEntries(t *testing.T) {
+	t.Run("nothing attaches it", func(t *testing.T) {
+		pkg := loadSafeCore(t)
+		pkg.Agent.Escalations = map[string]packagespec.Escalation{
+			"to_manager": {Cold: &packagespec.ColdTransfer{Destination: "billing_line"}},
+		}
+		pkg.Agent.Destinations = map[string]string{"billing_line": "BILLING_PHONE_NUMBER"}
+		_, err := Build(pkg)
+		if err == nil || !strings.Contains(err.Error(), `escalation "to_manager" is declared but no agent reaches it`) {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("one name in two catalogs", func(t *testing.T) {
+		pkg := loadSafeCore(t)
+		pkg.Agent.Escalations = map[string]packagespec.Escalation{
+			"to_billing": {Cold: &packagespec.ColdTransfer{Destination: "billing_line"}},
+		}
+		_, err := Build(pkg)
+		if err == nil || !strings.Contains(err.Error(), "collide") {
+			t.Fatalf("a name in two catalogs must collide: %v", err)
+		}
+		if !strings.Contains(err.Error(), "one namespace") {
+			t.Errorf("message does not say why it collides: %v", err)
+		}
+	})
+	t.Run("requires names a variable, and says so", func(t *testing.T) {
+		pkg := loadSafeCore(t)
+		handoff := pkg.Agent.Handoffs["to_billing"]
+		handoff.Requires = []string{"get_invoice"} // a tool, not a variable
+		pkg.Agent.Handoffs["to_billing"] = handoff
+		_, err := Build(pkg)
+		if err == nil || !strings.Contains(err.Error(), "requires names variables") {
+			t.Fatalf("got %v", err)
+		}
+		if !strings.Contains(err.Error(), "variables:") {
+			t.Errorf("message does not name the block to declare it in: %v", err)
+		}
+	})
 }

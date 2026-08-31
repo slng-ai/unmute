@@ -293,18 +293,10 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 		if len(task.Result) == 0 {
 			errors = add(errors, fmt.Sprintf("task %q result must not be empty", name))
 		}
-		for _, ref := range task.Tools {
-			var kind ControlKind
-			switch agent.Controls[ref].(type) {
-			case *Delegate:
-				kind = ControlDelegate
-			case *HumanTransfer:
-				kind = ControlHumanTransfer
-			}
-			if kind != "" {
-				errors = add(errors, fmt.Sprintf("task %q references control %q with kind %q; tasks may reference agent_transfer controls only", name, ref, kind))
-			}
-		}
+		// "A task may attach handoffs only" used to be checked here, because a task
+		// had one mixed list that could hold any kind. A task now has `tools:` and
+		// `handoffs:` and no other key, so the illegal thing has nowhere to be
+		// written and the rule is structure rather than a check.
 		for fieldName, field := range task.Result {
 			if fieldName == UnservedResultField {
 				errors = add(errors, fmt.Sprintf("task %q result %q is reserved: every generated task finish already takes %s for a request the step cannot serve", name, fieldName, UnservedResultField))

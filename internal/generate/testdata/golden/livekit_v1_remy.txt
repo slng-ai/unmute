@@ -114,7 +114,7 @@ interfere with a trace exporter you have configured.
 
 ## Agent handoffs
 
-An `agent_transfer` with `announce:` gives the exact sentence spoken once by
+A handoff with `announce:` gives the exact sentence spoken once by
 the active agent. LiveKit finishes it before it activates the receiving agent. The
 `requires:` guard runs first, so a refused handoff never speaks the
 announcement. Without `announce`, the handoff stays silent.
@@ -162,13 +162,13 @@ turn has the full list back.
 
 ## Tasks and task groups
 
-A task may list an `agent_transfer` control in its `tools:`. Calling it ends
-the active task and any remaining task-group steps, then hands the caller
-directly to the receiving agent. It does not return through the task owner.
-`delegate` and `human_transfer` controls are not legal inside a task; validation
-rejects them before this project is generated.
+A task may list a handoff in its own `handoffs:`. Calling it ends the active
+task and any remaining task-group steps, then hands the caller directly to the
+receiving agent. It does not return through the task owner. A task definition
+has `tools:` and `handoffs:` and no other list, so a delegate or an escalation
+on a task is unwritable rather than rejected: there is no key to put one in.
 
-A task that lists no such control still has a way out. Every task prompt here
+A task that lists no handoff still has a way out. Every task prompt here
 ends with one generated rule: when the caller asks for something none of the
 step's tools can do, and no handoff on the step covers it, call `finish` right
 away with the closest result, naming that request in `unserved_request`. Every

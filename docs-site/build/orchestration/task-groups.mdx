@@ -23,7 +23,7 @@ agents:
     instructions: instructions.md
     model: reasoning
     voice: voice
-    tools:
+    delegates:
       - manage_appointment
 
 tasks:
@@ -70,9 +70,8 @@ task_groups:
     then: return
     merge: results
 
-controls:
+delegates:
   manage_appointment:
-    kind: delegate
     group: appointment_flow
     when: The caller wants to book, reschedule, or cancel an appointment.
 ```
@@ -91,16 +90,19 @@ Every task, including a task inside a group, needs a non-empty `result:` and `co
 
 ## Delegate to the group
 
-The complete example uses the same `delegate` control as a single task, with
-`group:` instead of `task:`. The agent lists that control by name. Each member
-task lists the loaded tools and controls it may call.
+A group rides `delegates:` like any other delegate, with `group:` instead of
+`task:`. The agent names it in its own `delegates:` list. Each member task lists
+the tools it may call.
 
-The agent has one control and no domain tools at all.
+The agent has one delegate and no domain tools at all.
 
-A member task may also list an `agent_transfer` control. Calling it ends that
-task and skips the group's remaining steps, then hands the caller directly to
-the receiving agent. Tasks cannot list `delegate` or `human_transfer` controls;
-validation rejects those shapes before generation.
+A member task may also list a handoff, under its own `handoffs:` key. Calling it
+ends that task and skips the group's remaining steps, then hands the caller
+directly to the receiving agent.
+
+A task has `tools:` and `handoffs:` and no other list. There is no `delegates:`
+and no `escalations:` key on a task, so the shapes that used to be rejected are
+now unwritable.
 
 ## Shared context is the point
 

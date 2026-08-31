@@ -3,6 +3,31 @@
 Four ways to organize an agent. Each one owns a different boundary. Choose from
 the brief before you write files, then say what context crosses that boundary.
 
+## How an agent declares what it can do
+
+One rule carries the whole surface:
+
+> Every agent-level list has a same-named top-level catalog. Attach by name.
+
+| Agent list | Catalog | What it does | Does control come back? |
+|---|---|---|---|
+| `tools:` | `tools:` | does one piece of work and returns a value | yes |
+| `delegates:` | `delegates:` | runs a task or a task group | yes |
+| `handoffs:` | `handoffs:` | the conversation becomes another agent | no |
+| `escalations:` | `escalations:` | the caller goes through to a person | no |
+
+Which block a thing is written in is its kind, so nothing carries a `kind:`
+field. All four become callable function names at runtime, so they share one
+namespace and a name belongs to exactly one of them.
+
+`tools:` is the odd one in shape only: the package-level `tools:` is a list of
+names, because each tool is its own file under `tools/<name>.yaml`. The other
+three are maps of definitions written inline in `agent.yaml`.
+
+A task has `tools:` and `handoffs:` and no other list. There is no `delegates:`
+and no `escalations:` key on a task, so those shapes are unwritable rather than
+rejected.
+
 ## Choose the native shape
 
 | The brief needs | Native shape | Do not invent |
@@ -43,8 +68,8 @@ the server, not the package, owns that order.
 | the model calls a tool it should not have yet | move the tool. Lists are per agent and per task, so a tool the current step does not hold cannot be called at all |
 | you need a value out of a step and want to keep it | a task with `result:`, delegated with `assign:` |
 | two phases need different tools or different permissions | a handoff |
-| the caller changes intent while a task is active | put the destination's `agent_transfer` control on that task |
-| the caller needs a person | none of these. That is a human transfer, and what it can do depends on the phone route. See `transfers.md` |
+| the caller changes intent while a task is active | put the destination's handoff on that task's own `handoffs:` list |
+| the caller needs a person | none of these. That is an escalation, and what it can do depends on the phone route. See `transfers.md` |
 
 A prompt that says "always identify the caller first" is a request. A task group
 is a guarantee. That is the difference you are buying.
@@ -89,7 +114,7 @@ agents:
     instructions: instructions.md
     model: reasoning
     voice: voice
-    tools:
+    handoffs:
       - to_appointment_manager
 
   appointment_manager:
@@ -97,12 +122,12 @@ agents:
     model: reasoning
     voice: voice
     tools:
-      - to_booking_desk
       - cancel_appointment
+    handoffs:
+      - to_booking_desk
 
-controls:
+handoffs:
   to_appointment_manager:
-    kind: agent_transfer
     to: appointment_manager
     when: The caller wants to reschedule or cancel an existing appointment.
     announce: "I’m connecting you with our appointment manager now."
@@ -111,7 +136,6 @@ controls:
       variables: all
 
   to_booking_desk:
-    kind: agent_transfer
     to: booking_desk
     when: The caller wants to make a new appointment instead.
     announce: "I’m connecting you back to the booking desk for your new appointment."
@@ -120,8 +144,8 @@ controls:
       variables: all
 ```
 
-`entry_agent` decides who answers. Each agent has its own prompt file, its own
-tool list, and the call for good once it arrives.
+`entry_agent` decides who answers. Each agent has its own prompt file and its
+own four lists of what it can do, and keeps the call once it arrives.
 
 `when` is the condition the model reads. Write it as the situation, not as an
 instruction to call a tool.
@@ -129,19 +153,19 @@ instruction to call a tool.
 `announce` is optional. Give it the exact short sentence the caller should hear.
 The active agent speaks it once and finishes before the next agent takes over.
 Leave it out for a silent handoff. Do not duplicate the cue in the prompt; the
-control owns its order.
+handoff owns its order.
 
 **A handoff does not come back.** Nothing returns and no result is passed back.
-That is why the example declares a control in each direction: coming back is
+That is why the example declares a handoff in each direction: coming back is
 another handoff, not a return. If you want a step that runs and hands control
 back with an answer, that is a task. A handoff back to the entry agent continues
 the call and never repeats the call-start greeting.
 
-The same `agent_transfer` control may appear in a task's `tools:` list. Calling
-it ends that task and any remaining task-group steps, then activates the target
-without returning through the owner. Tasks cannot list `delegate` or
-`human_transfer` controls; shared validation rejects those shapes before
-generation.
+The same handoff may appear in a task's own `handoffs:` list. Calling it ends
+that task and any remaining task-group steps, then activates the target without
+returning through the owner. A task has `tools:` and `handoffs:` and no other
+list, so a delegate or an escalation on a task is unwritable rather than
+rejected.
 
 On LiveKit, a receiving agent cannot fire another agent transfer during its
 automatic entry turn. Ordinary tools still work, and transfer tools return on
@@ -162,8 +186,8 @@ cancellation.
 Leave them out and the caller gets asked for their phone number twice. Choose on
 purpose, and tell the user what you chose.
 
-`requires:` is legal on an `agent_transfer` control when variables must exist
-before the call leaves this agent. It is also legal on a delegate, which is
+`requires:` is legal on a handoff when variables must exist before the call
+leaves this agent. It is also legal on a delegate, which is
 usually the better place for it: see [Guarding a step](#guarding-a-step) below.
 
 ## Delegated task
@@ -187,9 +211,8 @@ tasks:
     context:
       history: full
 
-controls:
+delegates:
   check_customer:
-    kind: delegate
     task: customer_record
     when: Identify the caller before handling an appointment request.
     assign:
@@ -222,16 +245,14 @@ A step that needs a value the conversation has not collected yet declares
 that reaches it:
 
 ```yaml agent.yaml
-controls:
+delegates:
   check_customer:
-    kind: delegate
     task: customer_record
     when: Identify the caller before handling an appointment request.
     assign:
       customer_phone: result.customer_phone
 
   manage_appointment:
-    kind: delegate
     task: appointment
     when: The caller wants to make, change, or cancel an appointment.
     requires:
@@ -257,15 +278,15 @@ step to a second agent and guard the handoff to it. That agent then had to be
 spoken through, which cost the caller a turn and taught a shape nobody needed.
 One agent, one guarded step.
 
-**And do not gate reaching a person.** A `human_transfer` takes no `requires:`,
-and a handoff to the agent that hears complaints should not carry one either.
+**And do not gate reaching a person.** An escalation takes no `requires:` at
+all, and a handoff to the agent that hears complaints should not carry one.
 Someone who asks for a manager should not be interviewed first.
 
 **While a task runs, the caller is talking to the task**: its prompt, and only
-the tools and controls in that task's own `tools:` list. The agent's list is not
-offered again until the task returns. Put an `agent_transfer` control on the
-task when a caller must be able to change intent mid-step; invoking it exits the
-task and any remaining group steps. That is the useful half of delegation and
+what the task's own `tools:` and `handoffs:` lists name. The agent's lists are
+not offered again until the task returns. Put a handoff on the task when a
+caller must be able to change intent mid-step; invoking it exits the task and
+any remaining group steps. That is the useful half of delegation and
 also the part to plan for, because anything the task may need has to appear in
 its own list.
 
@@ -321,7 +342,7 @@ LiveKit agents and Pipecat output are unchanged.
 | `max_messages` | a positive number | legal with `last_n` only |
 | `summarizer` | a model entry name | legal with `summary` only |
 | `include_tool_calls` | `true` or `false` | whether tool calls travel too |
-| `variables` | `all` or a list of names | transfer controls only, not tasks |
+| `variables` | `all` or a list of names | handoffs only, not tasks |
 
 `history: full` is usually right, because the caller has already said something
 the task needs. `history: reset` is right when the step must not be influenced
@@ -340,7 +361,7 @@ agents:
     instructions: instructions.md
     model: reasoning
     voice: voice
-    tools:
+    delegates:
       - manage_appointment
 
 tasks:
@@ -387,9 +408,8 @@ task_groups:
     then: return
     merge: results
 
-controls:
+delegates:
   manage_appointment:
-    kind: delegate
     group: appointment_flow
     when: The caller wants to book, reschedule, or cancel an appointment.
 ```
@@ -436,7 +456,7 @@ answer out loud for each boundary the package actually has.
 
 | Boundary | The question | Where it is answered |
 |---|---|---|
-| a handoff | how much history does the new agent see? | `context.history` on the `agent_transfer` control |
+| a handoff | how much history does the new agent see? | `context.history` on the handoff entry |
 | a handoff | which variables travel with the caller? | `context.variables`: `all` or a list |
 | a handoff | do tool calls travel too? | `context.include_tool_calls` |
 | a delegated task | what does the task see when it starts? | `context.history` on the task |
@@ -449,20 +469,21 @@ A boundary with no stated decision is a default nobody chose. Name it.
 
 Two things the table does not cover, because they trip people up:
 
-- **A control is not a tool file.** Names under `controls:` go in an agent's or
-  a task's `tools:` list, but never in the package-level `tools:` list, which
-  loads files from `tools/`. A task may name only an `agent_transfer` control.
-- **Declaring a control without attaching it is a build error**, not dead
+- **A catalog entry is not a tool file.** Names under `delegates:`, `handoffs:`
+  and `escalations:` go in the agent's or task's list of the same name, never in
+  the package-level `tools:` list, which loads files from `tools/`. A task may
+  name a handoff and nothing else.
+- **Declaring a catalog entry without attaching it is a build error**, not dead
   config. Write both halves in the same edit. The refusal names the file, the
   line, and the agents you could attach it to:
 
   ```
-  agent.yaml:73: control "to_front_desk" is declared but no agent reaches it; add it to the
-    tools: of one of these agents: front_desk, disputes_specialist
+  agent.yaml:73: handoff "to_front_desk" is declared but no agent reaches it; add it to the
+    handoffs: of one of these agents: front_desk, disputes_specialist
   ```
 
   The same check covers a task or task group nothing delegates to, an agent no
-  `agent_transfer` reaches, a `destinations:` entry no control resolves to, and
+  handoff reaches, a `destinations:` entry no escalation resolves to, and
   a `tools:` entry no agent lists. An unreferenced `models:` entry is the one
   exception: that map is a palette and unused entries are legal.
 - **A second agent's instructions cannot read a `conversation` variable.** An
@@ -506,16 +527,17 @@ deciding whether to ship should hear it:
   livekit: LiveKit TaskGroup is experimental
 ```
 
-## Delegate or transfer
+## Delegate or hand off
 
-Both are controls. The difference is whether control comes back.
+The difference is whether control comes back. That is why they are two blocks
+rather than one block with a kind field.
 
-| | `delegate` | `agent_transfer` |
+| | `delegates:` | `handoffs:` |
 |---|---|---|
 | returns | yes | no |
 | typed result | yes, `result:` | no |
 | targets | a task or a task group | another agent |
-| context control | `context:` on the task | `context:` on the control |
+| context control | `context:` on the task | `context:` on the handoff entry |
 
 ## The shapes, as packages
 

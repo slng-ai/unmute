@@ -12,8 +12,45 @@
 # two is not a shape a package can have.
 
 version: 1
+
 name: summary-core-fixture
+
 entry_agent: intake
+
+agents:
+  intake:
+    instructions: instructions.md
+    model: reasoning
+    voice: front_desk
+    tools:
+      - lookup_customer
+    handoffs:
+      - to_billing
+
+  billing:
+    instructions: agents/billing.md
+    model: reasoning
+    voice: specialist
+    tools:
+      - get_invoice
+
+handoffs:
+  to_billing:
+    to: billing
+    when: Caller asks about billing, an invoice, or a refund.
+    context:
+      # The reason this package exists: one summarizer turn replaces the running
+      # transcript, and that turn's prompt is the site Build cannot reach.
+      history: summary
+      summarizer: reasoning
+      variables: all
+
+variables:
+  customer_id:
+    type: string
+  verified:
+    type: boolean
+    default: false
 
 # Every model is defined once, here, in the central map grouped by kind (N15):
 # think (LLM), speak (TTS), listen (STT), turn (VAD). Agents reference think
@@ -62,41 +99,6 @@ models:
       provider: local
       model: silero
       semantic_endpointing: preferred
-
-variables:
-  customer_id:
-    type: string
-  verified:
-    type: boolean
-    default: false
-
-agents:
-  intake:
-    instructions: instructions.md
-    model: reasoning
-    voice: front_desk
-    tools:
-      - lookup_customer
-      - to_billing
-
-  billing:
-    instructions: agents/billing.md
-    model: reasoning
-    voice: specialist
-    tools:
-      - get_invoice
-
-controls:
-  to_billing:
-    kind: agent_transfer
-    to: billing
-    when: Caller asks about billing, an invoice, or a refund.
-    context:
-      # The reason this package exists: one summarizer turn replaces the running
-      # transcript, and that turn's prompt is the site Build cannot reach.
-      history: summary
-      summarizer: reasoning
-      variables: all
 
 tools:
   - lookup_customer

@@ -39,10 +39,11 @@ or permissions, or a server's **next step**, open
 `references/orchestration.md`. Choose the smallest native shape and tell the
 user what you chose.
 
-**Define each tool once.** Its contract and execution block live only in
-`tools/<name>.yaml`; every `tools:` list in `agent.yaml` contains names only.
-An agent or task list may also name a control. Tasks may use only
-`agent_transfer`; validation rejects `delegate` and `human_transfer` there.
+**Every agent-level list has a same-named top-level catalog; attach by name.**
+Four kinds: `tools:` and `delegates:` come back, `handoffs:` and `escalations:`
+do not. No `kind:` field, all four share one namespace, and a task has `tools:`
+and `handoffs:` and no other list. `references/orchestration.md` has the table.
+**Define each tool once.** Its contract lives in `tools/<name>.yaml`; `tools:` lists hold names only.
 
 **Task `result:` and tool `output:` are different contracts.** Shape a task
 result for its caller instead of copying a tool output.

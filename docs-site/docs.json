@@ -122,6 +122,7 @@
         "icon": "bot",
         "pages": [
           "build/your-first-agent",
+          "build/how-a-package-fits-together",
           "build/variables",
           {
             "group": "Tools",

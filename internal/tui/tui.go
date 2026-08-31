@@ -143,7 +143,7 @@ func sectionChildren(id string) []string {
 	case "behavior":
 		return []string{"Instructions", "Greeting", "Variables", "Advanced"}
 	case "integrations":
-		return []string{"Tools", "Channels", "Human transfers"}
+		return []string{"Tools", "Channels", "Escalations"}
 	case "lifecycle":
 		return []string{"Agents", "Handoffs", "Tasks", "Task groups"}
 	}
@@ -317,7 +317,7 @@ func editorSectionOptions(data scaffold.Data) []menuChoice {
 		newChoice("Identity  ·  target", "section:identity"),
 		newChoice("Models  ·  "+modelsLabel(data), "section:models"),
 		newChoice("Behavior  ·  instructions, greeting, variables, advanced", "section:behavior"),
-		newChoice("Integrations  ·  tools, channels, human transfers", "section:integrations"),
+		newChoice("Integrations  ·  tools, channels, escalations", "section:integrations"),
 		newChoice("Lifecycle  ·  agents, handoffs, tasks, groups", "section:lifecycle"),
 	}
 }
@@ -340,7 +340,7 @@ func chooseEditorSection(runner *fieldRunner, data *scaffold.Data, section strin
 		options = []menuChoice{
 			newChoice(fmt.Sprintf("Tools  ·  %d", len(data.Tools)), "tools"),
 			newChoice("Caller channels  ·  "+channelsLabel(*data), "channels"),
-			newChoice(fmt.Sprintf("Human transfers  ·  %d", len(data.HumanTransfers)), "humans"),
+			newChoice(fmt.Sprintf("Escalations  ·  %d", len(data.HumanTransfers)), "humans"),
 		}
 	case "lifecycle":
 		options = []menuChoice{
@@ -368,7 +368,7 @@ func repairPreflight(runner *fieldRunner, data *scaffold.Data, preflightErr erro
 			newChoice(fmt.Sprintf("Task groups  ·  %d", len(data.TaskGroups)), "groups"),
 			newChoice(fmt.Sprintf("Tools  ·  %d", len(data.Tools)), "tools"),
 			newChoice(fmt.Sprintf("Variables  ·  %d", len(data.Variables)), "variables"),
-			newChoice(fmt.Sprintf("Human transfers  ·  %d", len(data.HumanTransfers)), "humans"),
+			newChoice(fmt.Sprintf("Escalations  ·  %d", len(data.HumanTransfers)), "humans"),
 			newChoice("← Back", actionBack),
 		}, true)
 		if err != nil || choice == actionBack {
@@ -1550,7 +1550,7 @@ func editHandoffs(runner *fieldRunner, data *scaffold.Data) error {
 		agents := data.AllAgents()
 		handoff := scaffold.Handoff{Source: agents[0].Name, To: agents[1].Name, History: "full", AllVariables: true}
 		handoff.Name = "to_" + handoff.To
-		back, err := runner.input("Handoff name", "Lowercase snake_case; controls and tools share one namespace.", &handoff.Name, func(value string) error {
+		back, err := runner.input("Handoff name", "Lowercase snake_case; tools, delegates, handoffs and escalations share one namespace.", &handoff.Name, func(value string) error {
 			if err := validateIdentifier(value); err != nil {
 				return err
 			}
@@ -2349,15 +2349,15 @@ func editChannels(runner *fieldRunner, data *scaffold.Data) error {
 
 func editHumanTransfers(runner *fieldRunner, data *scaffold.Data) error {
 	if !hasTelephony(data) && len(data.HumanTransfers) == 0 {
-		return showNotice(runner, "Human transfers unavailable", "Add a telephony caller channel first.")
+		return showNotice(runner, "Escalations unavailable", "Add a telephony caller channel first.")
 	}
 	for {
 		options := make([]menuChoice, 0, len(data.HumanTransfers)+2)
 		for _, transfer := range data.HumanTransfers {
 			options = append(options, newChoice(fmt.Sprintf("%s  ·  %s  ·  %s", transfer.Name, transfer.Agent, transfer.Destination), "view:"+transfer.Name))
 		}
-		options = append(options, newChoice("Add human transfer", "add"), newChoice("← Back", actionBack))
-		choice, _, err := runner.selectOne("Human transfers", runner.describe(
+		options = append(options, newChoice("Add escalation", "add"), newChoice("← Back", actionBack))
+		choice, _, err := runner.selectOne("Escalations", runner.describe(
 			"Destinations live in agent.yaml and name environment variables, never numbers. Unmute does not buy numbers, create trunks, or configure carriers.",
 		), options, true)
 		if err != nil || choice == actionBack {
@@ -2370,13 +2370,13 @@ func editHumanTransfers(runner *fieldRunner, data *scaffold.Data) error {
 			continue
 		}
 		if !hasTelephony(data) {
-			if err := showNotice(runner, "Cannot add human transfer", "Add a telephony caller channel first. Existing transfers remain available above for repair or deletion."); err != nil {
+			if err := showNotice(runner, "Cannot add escalation", "Add a telephony caller channel first. Existing escalations remain available above for repair or deletion."); err != nil {
 				return err
 			}
 			continue
 		}
 		transfer := scaffold.HumanTransfer{Agent: cmp.Or(data.EntryAgent, "assistant"), Mode: "cold"}
-		back, err := runner.input("Control name", "Lowercase snake_case; controls and tools share one namespace.", &transfer.Name, func(value string) error {
+		back, err := runner.input("Escalation name", "Lowercase snake_case; tools, delegates, handoffs and escalations share one namespace.", &transfer.Name, func(value string) error {
 			if err := validateIdentifier(value); err != nil {
 				return err
 			}
@@ -2404,14 +2404,14 @@ func editHumanTransferDetails(runner *fieldRunner, data *scaffold.Data, name str
 		if transfer == nil {
 			return nil
 		}
-		choice, _, err := runner.selectOne(name, "Edit this saved human transfer or remove it.", []menuChoice{
+		choice, _, err := runner.selectOne(name, "Edit this saved escalation or remove it.", []menuChoice{
 			newChoice("Agent  ·  "+transfer.Agent, "agent"),
 			newChoice("Trigger  ·  "+oneLine(transfer.When), "trigger"),
 			newChoice("Destination  ·  "+transfer.Destination, "destination"),
 			newChoice("Destination value  ·  "+transfer.Value, "value"),
 			newChoice("Mode  ·  "+transfer.Mode, "mode"),
 			newChoice("Briefing  ·  "+cmp.Or(transfer.Briefing, "none"), "briefing"),
-			newChoice("Delete human transfer", "delete"),
+			newChoice("Delete escalation", "delete"),
 			newChoice("← Back", actionBack),
 		}, true)
 		if err != nil || choice == actionBack {
@@ -2486,7 +2486,7 @@ func editHumanTransferDetails(runner *fieldRunner, data *scaffold.Data, name str
 				transfer.Briefing = selected
 			}
 		case "delete":
-			confirmed, err := confirmDelete(runner, "human transfer", name)
+			confirmed, err := confirmDelete(runner, "escalation", name)
 			if err != nil {
 				return err
 			}
@@ -2933,30 +2933,33 @@ func validateDestination(value string) error {
 	return nil
 }
 
+// validateControlName refuses a name any of the four kinds already uses. They
+// all become callable function names at runtime, so they share one namespace and
+// the check has to see all of them.
 func validateControlName(data *scaffold.Data, name string) error {
 	for _, tool := range data.Tools {
 		if tool.Name == name {
-			return errors.New("control name already used by a tool")
+			return errors.New("name already used by a tool")
 		}
 	}
 	for _, handoff := range data.Handoffs {
 		if handoff.Name == name {
-			return errors.New("control name already used by a handoff")
+			return errors.New("name already used by a handoff")
 		}
 	}
 	for _, task := range data.Tasks {
 		if task.RunName() == name {
-			return errors.New("control name already used by a task")
+			return errors.New("name already used by a delegate that runs a task")
 		}
 	}
 	for _, group := range data.TaskGroups {
 		if group.RunName() == name {
-			return errors.New("control name already used by a task group")
+			return errors.New("name already used by a delegate that runs a task group")
 		}
 	}
 	for _, transfer := range data.HumanTransfers {
 		if transfer.Name == name {
-			return errors.New("control name already used by a human transfer")
+			return errors.New("name already used by an escalation")
 		}
 	}
 	return nil

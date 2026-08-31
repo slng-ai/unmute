@@ -158,9 +158,13 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 	owners := map[string]string{}
 	for _, name := range agentNames {
 		agent := pkg.Agent.Agents[name]
-		for _, tool := range agent.Tools {
-			if owners[tool] == "" {
-				owners[tool] = name
+		// All four lists, because an owner is whoever attached the thing, and that
+		// question does not care which kind it is.
+		for _, list := range [][]string{agent.Tools, agent.Delegates, agent.Handoffs, agent.Escalations} {
+			for _, attached := range list {
+				if owners[attached] == "" {
+					owners[attached] = name
+				}
 			}
 		}
 	}
@@ -230,12 +234,16 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		task := pkg.Agent.Tasks[name]
 		value := scaffold.Task{
 			Name: name, Instructions: pkg.Markdown[task.Instructions], Tools: append([]string(nil), task.Tools...),
-			Model: task.Model, Result: jsonText(task.Result), History: task.Context.History,
+			Handoffs: append([]string(nil), task.Handoffs...),
+			Model:    task.Model, Result: jsonText(task.Result), History: task.Context.History,
 			MaxMessages: task.Context.MaxMessages, Summarizer: task.Context.Summarizer,
 			IncludeToolCalls: task.Context.IncludeToolCalls, Agent: "assistant",
 		}
-		if control, ok := pkg.Agent.Controls["run_"+name]; ok {
-			value.When, value.Assign = control.When, jsonText(control.Assign)
+		// A task named X is run by the delegate named run_X. That convention is
+		// what pairs the two back up on the way out; it is unchanged by the
+		// re-spelling and only the catalog it reads from moved.
+		if delegate, ok := pkg.Agent.Delegates["run_"+name]; ok {
+			value.When, value.Assign = delegate.When, jsonText(delegate.Assign)
 			value.Agent = cmp.Or(owners["run_"+name], "assistant")
 		}
 		data.Tasks = append(data.Tasks, value)
@@ -243,57 +251,53 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.TaskGroups)) {
 		group := pkg.Agent.TaskGroups[name]
 		value := scaffold.TaskGroup{Name: name, Steps: append([]string(nil), group.Steps...), ContextScope: group.ContextScope, Then: group.Then, ThenTarget: group.ThenTarget, Agent: "assistant"}
-		if control, ok := pkg.Agent.Controls["run_"+name]; ok {
-			value.When = control.When
+		if delegate, ok := pkg.Agent.Delegates["run_"+name]; ok {
+			value.When = delegate.When
 			value.Agent = cmp.Or(owners["run_"+name], "assistant")
 		}
 		data.TaskGroups = append(data.TaskGroups, value)
 	}
 
-	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.Controls)) {
-		control := pkg.Agent.Controls[name]
-		switch control.Kind {
-		case "agent_transfer":
-			value := scaffold.Handoff{Name: name, Source: cmp.Or(owners[name], "assistant"), When: control.When}
-			if control.Announce != nil {
-				value.Announce = *control.Announce
-			}
-			if control.To != nil {
-				value.To = *control.To
-			}
-			value.Requires = append([]string(nil), control.Requires...)
-			if control.Context != nil {
-				value.History, value.MaxMessages, value.Summarizer = control.Context.History, control.Context.MaxMessages, control.Context.Summarizer
-				value.IncludeToolCalls = control.Context.IncludeToolCalls
-				switch variables := control.Context.Variables.(type) {
-				case string:
-					value.AllVariables = variables == "all"
-				case []any:
-					for _, item := range variables {
-						if text, ok := item.(string); ok {
-							value.Variables = append(value.Variables, text)
-						}
+	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.Handoffs)) {
+		handoff := pkg.Agent.Handoffs[name]
+		value := scaffold.Handoff{Name: name, Source: cmp.Or(owners[name], "assistant"), When: handoff.When, To: handoff.To}
+		if handoff.Announce != nil {
+			value.Announce = *handoff.Announce
+		}
+		value.Requires = append([]string(nil), handoff.Requires...)
+		if handoff.Context != nil {
+			value.History, value.MaxMessages, value.Summarizer = handoff.Context.History, handoff.Context.MaxMessages, handoff.Context.Summarizer
+			value.IncludeToolCalls = handoff.Context.IncludeToolCalls
+			switch variables := handoff.Context.Variables.(type) {
+			case string:
+				value.AllVariables = variables == "all"
+			case []any:
+				for _, item := range variables {
+					if text, ok := item.(string); ok {
+						value.Variables = append(value.Variables, text)
 					}
 				}
 			}
-			data.Handoffs = append(data.Handoffs, value)
-		case "human_transfer":
-			value := scaffold.HumanTransfer{Name: name, Agent: cmp.Or(owners[name], "assistant"), When: control.When}
-			if destination := control.TransferDestination(); destination != "" {
-				value.Destination = destination
-				// Destinations are declared once for the package, in agent.yaml.
-				value.Value = pkg.Agent.Destinations[destination]
-			}
-			value.Mode = control.TransferShape()
-			switch {
-			case control.Cold != nil:
-				value.RingTimeout, value.OnUnavailable = control.Cold.RingTimeout, control.Cold.OnUnavailable
-			case control.Warm != nil:
-				value.Briefing = control.Warm.Briefing
-				value.RingTimeout, value.OnUnavailable = control.Warm.RingTimeout, control.Warm.OnUnavailable
-			}
-			data.HumanTransfers = append(data.HumanTransfers, value)
 		}
+		data.Handoffs = append(data.Handoffs, value)
+	}
+	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.Escalations)) {
+		escalation := pkg.Agent.Escalations[name]
+		value := scaffold.HumanTransfer{Name: name, Agent: cmp.Or(owners[name], "assistant"), When: escalation.When}
+		if destination := escalation.TransferDestination(); destination != "" {
+			value.Destination = destination
+			// Destinations are declared once for the package, in agent.yaml.
+			value.Value = pkg.Agent.Destinations[destination]
+		}
+		value.Mode = escalation.TransferShape()
+		switch {
+		case escalation.Cold != nil:
+			value.RingTimeout, value.OnUnavailable = escalation.Cold.RingTimeout, escalation.Cold.OnUnavailable
+		case escalation.Warm != nil:
+			value.Briefing = escalation.Warm.Briefing
+			value.RingTimeout, value.OnUnavailable = escalation.Warm.RingTimeout, escalation.Warm.OnUnavailable
+		}
+		data.HumanTransfers = append(data.HumanTransfers, value)
 	}
 
 	for profile, model := range pkg.Agent.Models.Think {

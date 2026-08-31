@@ -1,7 +1,7 @@
 # Transfers to a person
 
-Sooner or later a caller needs a human. One authoring shape, `kind:
-human_transfer`, two forms, and the phone route decides which you can have.
+Sooner or later a caller needs a human. One authoring shape, an entry under
+`escalations:`, two forms, and the phone route decides which you can have.
 
 ## Cold and warm
 
@@ -19,15 +19,13 @@ The shape you write is the shape you get. There is no `mode:` field, so a warm
 only setting cannot be written on a cold transfer.
 
 ```yaml agent.yaml
-controls:
+escalations:
   send_to_billing:
-    kind: human_transfer
     when: The caller asks about an invoice, a refund, or a charge they do not recognise.
     cold:
       destination: billing_line
 
   escalate_to_supervisor:
-    kind: human_transfer
     when: The caller is unhappy with how something was handled and asks for a manager.
     warm:
       destination: supervisor_line
@@ -48,19 +46,20 @@ controls:
 
 ### The control's name goes in an agent's tool list, and that half is enforced
 
-Declaring a human transfer is half the job. Until a reachable agent lists its
-name in `tools:`, no agent can reach it, and the build refuses with the file,
-the line, and the agents you could attach it to. Human transfers are not task
-controls; validation rejects `human_transfer` in a task's list.
+Declaring an escalation is half the job. Until a reachable agent lists its name
+in its own `escalations:`, no agent can reach it, and the build refuses with the
+file, the line, and the agents you could attach it to. An escalation is not
+something a task can hold: a task has `tools:` and `handoffs:` and no other list,
+so there is no key to put one in.
 
 ```
-agent.yaml:47: control "send_to_billing" is declared but no agent reaches it; add it to the
-  tools: of one of these agents: front_desk, billing
+agent.yaml:47: escalation "send_to_billing" is declared but no agent reaches it; add it to the
+  escalations: of one of these agents: front_desk, billing
 ```
 
 The same refusal covers anything else the entry agent cannot reach: a
-`destinations:` entry no control resolves to, a top-level `tools:` entry no agent
-lists, a task or task group nothing delegates to, an agent no `agent_transfer`
+`destinations:` entry no escalation resolves to, a top-level `tools:` entry no
+agent lists, a task or task group nothing delegates to, an agent no handoff
 points at. An unreferenced `models:` entry is the one exception and stays legal,
 because that map is a palette.
 
@@ -153,8 +152,8 @@ session proves a transfer works.
 
 One more thing worth saying out loud, because it wastes real time: **a model will
 announce a transfer the package never declared.** If an agent says it is putting
-somebody through and nothing happens, check for a `human_transfer` control with a
-`cold:` or `warm:` block before looking anywhere else.
+somebody through and nothing happens, check for an entry under `escalations:`
+with a `cold:` or `warm:` block before looking anywhere else.
 
 Do not blur those two when you explain a limit.
 

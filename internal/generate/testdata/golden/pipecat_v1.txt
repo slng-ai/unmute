@@ -129,7 +129,7 @@ reports no total streaming time per service here, only time to first byte.
 
 ## Agent handoffs
 
-An `agent_transfer` with `announce:` gives the exact sentence spoken once by
+A handoff with `announce:` gives the exact sentence spoken once by
 the active agent. Pipecat waits for that speech to stop before it activates the
 receiving worker. The `requires:` guard runs first, so a refused handoff never
 speaks the announcement. Without `announce`, the handoff stays silent.

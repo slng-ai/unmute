@@ -62,16 +62,23 @@ type AgentFile struct {
 	// Package-level, beside Models and Destinations, because a corpus belongs to
 	// the package: two tools over one folder is normal, and putting the folder on
 	// the tool would re-index the same documents once per tool reading them.
-	Knowledge    map[string]KnowledgeDef `json:"knowledge,omitempty" yaml:"knowledge,omitempty"`
-	Agents       map[string]AgentDef     `json:"agents" yaml:"agents"`
-	Tasks        map[string]Task         `json:"tasks,omitempty" yaml:"tasks,omitempty"`
-	TaskGroups   map[string]TaskGroup    `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
-	Controls     map[string]Control      `json:"controls,omitempty" yaml:"controls,omitempty"`
-	Tools        []string                `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Conversation *Conversation           `json:"conversation,omitempty" yaml:"conversation,omitempty"`
-	Tracing      *Tracing                `json:"tracing,omitempty" yaml:"tracing,omitempty"`
-	Channels     map[string]Channel      `json:"channels" yaml:"channels"`
-	Capacity     *Capacity               `json:"capacity,omitempty" yaml:"capacity,omitempty"`
+	Knowledge map[string]KnowledgeDef `json:"knowledge,omitempty" yaml:"knowledge,omitempty"`
+	Agents    map[string]AgentDef     `json:"agents" yaml:"agents"`
+	// The three catalogs. Every agent-level list has a same-named top-level
+	// catalog, and the block an entry is written in IS its kind, so there is no
+	// `kind:` field that could disagree with where the entry sits. Declared here,
+	// after Agents and before Tasks, because struct order is what the derived
+	// schema publishes and the canonical section order starts from the reader.
+	Delegates    map[string]Delegate   `json:"delegates,omitempty" yaml:"delegates,omitempty"`
+	Handoffs     map[string]Handoff    `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
+	Escalations  map[string]Escalation `json:"escalations,omitempty" yaml:"escalations,omitempty"`
+	Tasks        map[string]Task       `json:"tasks,omitempty" yaml:"tasks,omitempty"`
+	TaskGroups   map[string]TaskGroup  `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
+	Tools        []string              `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Conversation *Conversation         `json:"conversation,omitempty" yaml:"conversation,omitempty"`
+	Tracing      *Tracing              `json:"tracing,omitempty" yaml:"tracing,omitempty"`
+	Channels     map[string]Channel    `json:"channels" yaml:"channels"`
+	Capacity     *Capacity             `json:"capacity,omitempty" yaml:"capacity,omitempty"`
 }
 
 type Tracing struct {
@@ -249,16 +256,27 @@ type Variable struct {
 // Secret declares one runtime environment value the package needs. The map key
 // IS the environment variable name (UPPER_SNAKE), so there is no field a value
 // could ever be written into (variable_secrets_specs.md C3, V9).
+// AgentDef is one entry under `agents:`. The four lists are what this agent can
+// do, one list per kind, each naming entries in the same-named catalog. All four
+// are optional: an agent with no delegates omits the key.
 type AgentDef struct {
 	Instructions string   `json:"instructions" yaml:"instructions"`
 	Model        string   `json:"model" yaml:"model"`
 	Voice        string   `json:"voice" yaml:"voice"`
 	Tools        []string `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Delegates    []string `json:"delegates,omitempty" yaml:"delegates,omitempty"`
+	Handoffs     []string `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
+	Escalations  []string `json:"escalations,omitempty" yaml:"escalations,omitempty"`
 }
 
+// Task is one entry under `tasks:`. It has `tools:` and `handoffs:` and no
+// `delegates:` and no `escalations:`, which is how "a task may attach handoffs
+// only" stops being a validation rule and becomes structure: there is no key to
+// write the illegal thing in.
 type Task struct {
 	Instructions string         `json:"instructions" yaml:"instructions"`
 	Tools        []string       `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Handoffs     []string       `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
 	Model        string         `json:"model,omitempty" yaml:"model,omitempty"`
 	Result       map[string]any `json:"result" yaml:"result"`
 	Context      TaskContext    `json:"context" yaml:"context"`
@@ -287,22 +305,44 @@ type TransferContext struct {
 	Variables        any    `json:"variables" yaml:"variables"`
 }
 
-// Control is the strict superset decoded before Build selects the kind.
-type Control struct {
-	Kind     string            `json:"kind" yaml:"kind"`
-	When     string            `json:"when,omitempty" yaml:"when,omitempty"`
+// Delegate is one entry under `delegates:`. It runs a task or a task group and
+// then control comes back to the agent that ran it.
+//
+// Task and Group stay pointers because exactly one of them must be present,
+// which no struct can express, so the check survives in Build and needs to tell
+// an absent key from one written empty.
+type Delegate struct {
 	Task     *string           `json:"task,omitempty" yaml:"task,omitempty"`
 	Group    *string           `json:"group,omitempty" yaml:"group,omitempty"`
-	Assign   map[string]string `json:"assign,omitempty" yaml:"assign,omitempty"`
-	To       *string           `json:"to,omitempty" yaml:"to,omitempty"`
-	Announce *string           `json:"announce,omitempty" yaml:"announce,omitempty"`
+	When     string            `json:"when,omitempty" yaml:"when,omitempty"`
 	Requires []string          `json:"requires,omitempty" yaml:"requires,omitempty"`
-	Context  *TransferContext  `json:"context,omitempty" yaml:"context,omitempty"`
-	// A human_transfer names its shape with a block, never a `mode:` field, so a
-	// warm-only field on a cold transfer is unwritable rather than rejected by a
-	// cross-field rule (SCHEMA N25, the N19 argument applied to controls). The
-	// block carries every parameter of the transfer, `destination` included, so
-	// there is no such thing as an empty shape block (SCHEMA N27).
+	Assign   map[string]string `json:"assign,omitempty" yaml:"assign,omitempty"`
+}
+
+// Handoff is one entry under `handoffs:`. The conversation becomes another
+// agent and never comes back.
+//
+// To is a plain string, not a pointer: a handoff always has a `to:`, so a
+// missing one is the empty string and is refused by the same check that refuses
+// a `to:` naming an agent that does not exist.
+type Handoff struct {
+	To       string           `json:"to" yaml:"to"`
+	When     string           `json:"when,omitempty" yaml:"when,omitempty"`
+	Announce *string          `json:"announce,omitempty" yaml:"announce,omitempty"`
+	Requires []string         `json:"requires,omitempty" yaml:"requires,omitempty"`
+	Context  *TransferContext `json:"context,omitempty" yaml:"context,omitempty"`
+}
+
+// Escalation is one entry under `escalations:`. The caller goes through to a
+// person.
+//
+// The shape is named by a block, never by a `mode:` field, so a warm-only field
+// on a cold transfer is unwritable rather than rejected by a cross-field rule
+// (SCHEMA N25, the N19 argument applied to controls). The block carries every
+// parameter of the transfer, `destination` included, so there is no such thing
+// as an empty shape block (SCHEMA N27).
+type Escalation struct {
+	When string        `json:"when,omitempty" yaml:"when,omitempty"`
 	Cold *ColdTransfer `json:"cold,omitempty" yaml:"cold,omitempty"`
 	Warm *WarmTransfer `json:"warm,omitempty" yaml:"warm,omitempty"`
 }
@@ -326,28 +366,28 @@ type WarmTransfer struct {
 }
 
 // TransferDestination reports the destination the selected shape block names.
-func (c Control) TransferDestination() string {
+func (e Escalation) TransferDestination() string {
 	switch {
-	case c.Cold != nil && c.Warm != nil:
+	case e.Cold != nil && e.Warm != nil:
 		return ""
-	case c.Cold != nil:
-		return c.Cold.Destination
-	case c.Warm != nil:
-		return c.Warm.Destination
+	case e.Cold != nil:
+		return e.Cold.Destination
+	case e.Warm != nil:
+		return e.Warm.Destination
 	}
 	return ""
 }
 
-// TransferShape reports the shape block the control selects, or "" when it
-// carries neither. Build rejects zero and two, so a built package always
-// answers with exactly one.
-func (c Control) TransferShape() string {
+// TransferShape reports the shape block the escalation selects, or "" when it
+// carries neither. Build rejects zero and two, so a built package always answers
+// with exactly one.
+func (e Escalation) TransferShape() string {
 	switch {
-	case c.Cold != nil && c.Warm != nil:
+	case e.Cold != nil && e.Warm != nil:
 		return ""
-	case c.Cold != nil:
+	case e.Cold != nil:
 		return "cold"
-	case c.Warm != nil:
+	case e.Warm != nil:
 		return "warm"
 	}
 	return ""

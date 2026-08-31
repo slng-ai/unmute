@@ -35,15 +35,13 @@ The route is `connections/twilio_sip.yaml`, below. The two desks are in
 ## Two transfers, side by side
 
 ```yaml agent.yaml
-controls:
+escalations:
   send_to_billing:
-    kind: human_transfer
     when: The caller asks about an invoice, a refund, or a charge they do not recognise.
     cold:
       destination: billing_line
 
   escalate_to_supervisor:
-    kind: human_transfer
     when: The caller is unhappy with how something was handled and asks for a manager.
     warm:
       destination: supervisor_line

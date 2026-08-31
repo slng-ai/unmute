@@ -98,10 +98,21 @@ func TestValidateOmitsPrerequisiteWithoutTheCapabilityThatNeedsIt(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	trimmed := content[:bytes.Index(content, []byte("controls:"))]
-	trimmed = append(trimmed, content[bytes.Index(content, []byte("conversation:")):]...)
-	trimmed = bytes.Replace(trimmed, []byte("      - send_to_billing\n"), nil, 1)
-	trimmed = bytes.Replace(trimmed, []byte("    tools:\n"), nil, 1)
+	// Cut the escalation, the list that attaches it, and the destination it
+	// resolves to. Written as whole-block substitutions rather than byte offsets,
+	// because an offset into a fixture is a stack trace waiting for whoever edits
+	// the fixture next.
+	trimmed := content
+	for _, block := range []string{
+		"    escalations:\n      - send_to_billing\n",
+		"escalations:\n  send_to_billing:\n    when: The caller asks about an invoice or a refund.\n    cold:\n      destination: billing_line\n\n",
+		"destinations:\n  billing_line: BILLING_PHONE_NUMBER\n\n",
+	} {
+		if !bytes.Contains(trimmed, []byte(block)) {
+			t.Fatalf("fixture no longer contains the block this test removes:\n%s", block)
+		}
+		trimmed = bytes.Replace(trimmed, []byte(block), nil, 1)
+	}
 	trimmed = bytes.Replace(trimmed, []byte("    outbound: true\n"), []byte("    outbound: false\n"), 1)
 	if err := os.WriteFile(path, trimmed, 0o600); err != nil {
 		t.Fatal(err)

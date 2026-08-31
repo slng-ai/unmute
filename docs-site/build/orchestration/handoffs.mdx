@@ -23,14 +23,14 @@ agents:
     instructions: instructions.md
     model: reasoning
     voice: voice
-    tools:
+    handoffs:
       - to_appointment_manager
 
   appointment_manager:
     instructions: agents/appointment-manager.md
     model: reasoning
     voice: voice
-    tools:
+    handoffs:
       - to_booking_desk
 ```
 
@@ -39,13 +39,14 @@ share models, or not.
 
 ## The handoff
 
-A handoff is a control. You declare it once and put its name in the tool list
-of the agent or task that may use it:
+You declare a handoff once under `handoffs:`, then put its name in the
+`handoffs:` list of the agent or task that may use it. That pairing is the whole
+model: every agent-level list has a same-named top-level catalog, and you attach
+by name.
 
 ```yaml agent.yaml
-controls:
+handoffs:
   to_appointment_manager:
-    kind: agent_transfer
     to: appointment_manager
     when: The caller wants to reschedule or cancel an existing appointment.
     announce: "I’m connecting you with our appointment manager now."
@@ -54,7 +55,6 @@ controls:
       variables: all
 
   to_booking_desk:
-    kind: agent_transfer
     to: booking_desk
     when: The caller wants to make a new appointment instead.
     announce: "I’m connecting you back to the booking desk for your new appointment."

@@ -63,7 +63,7 @@ capacity:
 | `turn` | string | with 2 or more turn entries | sole entry | declared `models.turn` name | turn entry to use |
 | `variables` | map | no | — | lower snake case names | per-call values |
 | `secrets` | list of strings | no | — | UPPER_SNAKE names | environment values the generated project reads |
-| `destinations` | map of strings | when `human_transfer` is used | — | lower snake case names to UPPER_SNAKE env names | phone destinations controls may use |
+| `destinations` | map of strings | when an escalation is used | — | lower snake case names to UPPER_SNAKE env names | phone destinations an escalation may use |
 | `knowledge` | map | no | — | 3 to 64 characters of `[a-z0-9_]` | folders of documents a tool can search |
 | `agents` | map | yes | — | one or more lower snake case names | agent prompts, models, and callable names |
 | `tasks` | map | no | — | lower snake case names | delegated steps |
@@ -259,7 +259,7 @@ destinations:
   supervisor_line: SUPERVISOR_PHONE_NUMBER
 ```
 
-The symbols a `human_transfer` control can name. A value is only the UPPER_SNAKE
+The symbols an escalation can name. A value is only the UPPER_SNAKE
 name of an environment variable holding an E.164 number or a `sip:` URI, read at
 call time. A number written here is refused, because `agent.yaml` is the portable
 half of a package:
@@ -415,36 +415,62 @@ task_groups:
 When a task runs inside a group, the group's `context_scope` governs it. The
 member task's own `context` does not override the group.
 
-## `controls`
+## `delegates`, `handoffs`, `escalations`
 
-Everything the model can trigger besides a tool. One `kind` per control.
+Everything the model can trigger besides a tool, in one block per kind. The
+block an entry is written in is what it is, so there is no `kind:` field.
 
 ```yaml
-controls:
+delegates:
   check_customer:
-    kind: delegate
     task: customer_record
     when: Identify the caller first.
     assign:
       customer_id: result.customer_id
 ```
 
-| Kind | Fields |
+### `delegates`
+
+Runs a task or a task group, then control comes back.
+
+| Field | Notes |
 |---|---|
-| `delegate` | `task` or `group`, `when`, `assign`, `requires` |
-| `agent_transfer` | `to`, `when`, `announce`, `context`, `requires` |
-| `human_transfer` | `when`, and exactly one of `cold:` or `warm:` |
+| `task` | one of; names an entry under `tasks:` |
+| `group` | one of; names an entry under `task_groups:` |
+| `when` | the situation the model reads |
+| `requires` | guard: declared variable names |
+| `assign` | write-back: `result.<field>` into a declared variable |
 
-A delegate needs exactly one of `task` or `group`. `assign` is legal only when
-delegating to one task, because each mapping reads `result.<field>` from that
-task.
+Exactly one of `task` or `group`. `assign` is legal only with `task:`, because
+each mapping reads `result.<field>` from that one task.
 
-An `agent_transfer.context` block needs both `history` and `variables`. The
-`variables` value is `all` or a non-empty list of declared variable names.
+### `handoffs`
 
-For `agent_transfer`, `announce` is optional exact spoken text. It is not a
-model instruction: write the short sentence the caller should hear. Omit it
-for a silent handoff.
+The conversation becomes another agent, and never comes back.
+
+| Field | Notes |
+|---|---|
+| `to` | required; names an entry under `agents:` |
+| `when` | the situation the model reads |
+| `announce` | optional exact spoken text |
+| `requires` | guard: declared variable names |
+| `context` | payload: `history` plus a `variables` selection |
+
+A `context:` block needs both `history` and `variables`. The `variables` value
+is `all` or a non-empty list of declared variable names.
+
+`announce` is exact spoken text, not a model instruction: write the short
+sentence the caller should hear. Omit it for a silent handoff.
+
+### `escalations`
+
+Puts the caller through to a person.
+
+| Field | Notes |
+|---|---|
+| `when` | the situation the model reads |
+| `cold` | one of; hand the caller over and drop out |
+| `warm` | one of; hold the caller, brief the person, then bridge |
 
 A human transfer names its shape with a block, so a warm only field cannot be
 written on a cold transfer:

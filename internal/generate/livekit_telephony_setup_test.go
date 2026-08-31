@@ -46,10 +46,10 @@ func livekitSIPFixture(t *testing.T, carrier string, inbound, outbound, cold boo
 	}
 	pkg.Connections["primary_phone"] = connection
 	if !cold {
-		human := pkg.Agent.Controls["to_human"]
+		human := pkg.Agent.Escalations["to_human"]
 		human.Cold = nil
 		human.Warm = &spec.WarmTransfer{Destination: "billing_line"}
-		pkg.Agent.Controls["to_human"] = human
+		pkg.Agent.Escalations["to_human"] = human
 	}
 	agent, err := ir.Build(pkg)
 	if err != nil {

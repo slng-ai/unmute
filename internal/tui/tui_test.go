@@ -332,7 +332,7 @@ func TestV34EditorSectionsStayGrouped(t *testing.T) {
 		{"section:identity", "Identity  ·  target"},
 		{"section:models", "Models  ·  "},
 		{"section:behavior", "Behavior  ·  instructions, greeting, variables, advanced"},
-		{"section:integrations", "Integrations  ·  tools, channels, human transfers"},
+		{"section:integrations", "Integrations  ·  tools, channels, escalations"},
 		{"section:lifecycle", "Lifecycle  ·  agents, handoffs, tasks, groups"},
 	}
 	if len(options) != len(want) {

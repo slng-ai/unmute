@@ -13,14 +13,121 @@ name: [[yaml .AgentName]]
 [[- end]]
 entry_agent: [[.EntryAgent]]
 
-[[if .DeclaredSecrets]]# Every runtime value you supply, by environment variable name. A secret has no
+# Each agent is a prompt plus the models it thinks and speaks with. The
+# instructions file is sent to the model verbatim as its system prompt, so
+# everything in it is addressed to the agent and nothing in it is addressed to
+# you — put your own notes here, in a comment, where the model never sees them.
+#
+# The starter prompt is a real one, and it is meant to be replaced. Rewrite it
+# to say what your agent actually does; the greeting below is separate, and it
+# is spoken word for word without going through the model at all.
+#
+# What an agent can do is four lists, one per kind, and each one names entries
+# in the catalog of the same name further down: tools do work and come back,
+# delegates run a task and come back, handoffs make the conversation somebody
+# else's, and escalations put the caller through to a person.
+agents:
+[[range .AllAgents]]  [[.Name]]:
+    instructions: [[.PromptPath]]
+    model: [[.ModelProfile]]
+    voice: [[.VoiceProfile]]
+[[$tools := $.AgentTools .Name]][[if $tools]]    tools:
+[[range $tools]]      - [[.]]
+[[end]][[end]][[$delegates := $.AgentDelegates .Name]][[if $delegates]]    delegates:
+[[range $delegates]]      - [[.]]
+[[end]][[end]][[$handoffs := $.AgentHandoffs .Name]][[if $handoffs]]    handoffs:
+[[range $handoffs]]      - [[.]]
+[[end]][[end]][[$escalations := $.AgentEscalations .Name]][[if $escalations]]    escalations:
+[[range $escalations]]      - [[.]]
+[[end]][[end]]
+[[end]][[if or .Tasks .TaskGroups]]delegates:
+[[range .Tasks]]  [[.RunName]]:
+    task: [[.Name]]
+    when: [[quote .When]]
+[[if .Assign]]    assign:[[yamlBlock 6 .Assign]]
+[[end]][[end]][[range .TaskGroups]]  [[.RunName]]:
+    group: [[.Name]]
+    when: [[quote .When]]
+[[end]]
+[[end]][[if .Handoffs]]handoffs:
+[[range .Handoffs]]  [[.Name]]:
+    to: [[.To]]
+    when: [[quote .When]]
+[[if .Announce]]    announce: [[quote .Announce]]
+[[end]]
+[[if .Requires]]    requires:
+[[range .Requires]]      - [[.]]
+[[end]][[end]]    context:
+      history: [[.History]]
+[[if .MaxMessages]]      max_messages: [[.MaxMessages]]
+[[end]][[if .Summarizer]]      summarizer: [[.Summarizer]]
+[[end]][[if .IncludeToolCalls]]      include_tool_calls: [[boolValue .IncludeToolCalls]]
+[[end]][[if .AllVariables]]      variables: all
+[[else]]      variables:
+[[range .Variables]]        - [[.]]
+[[end]][[end]]
+[[end]]
+[[end]][[if .HumanTransfers]]escalations:
+[[range .HumanTransfers]]  [[.Name]]:
+[[if .When]]    when: [[quote .When]]
+[[end]]    [[.Mode]]:
+      destination: [[.Destination]]
+[[if .Briefing]]      briefing: [[quote .Briefing]]
+[[end]][[if .RingTimeout]]      ring_timeout: [[.RingTimeout]]
+[[end]][[if .OnUnavailable]]      on_unavailable: [[.OnUnavailable]]
+[[end]][[end]]
+[[end]][[if .Tasks]]tasks:
+[[range .Tasks]]  [[.Name]]:
+    instructions: [[.PromptPath]]
+[[$tools := $.TaskTools .Name]][[if $tools]]    tools:
+[[range $tools]]      - [[.]]
+[[end]][[end]][[$handoffs := $.TaskHandoffs .Name]][[if $handoffs]]    handoffs:
+[[range $handoffs]]      - [[.]]
+[[end]][[end]][[if .Model]]    model: [[.Model]]
+[[end]]    result:[[yamlBlock 6 .Result]]
+    context:
+      history: [[.History]]
+[[if .MaxMessages]]      max_messages: [[.MaxMessages]]
+[[end]][[if .Summarizer]]      summarizer: [[.Summarizer]]
+[[end]][[if .IncludeToolCalls]]      include_tool_calls: [[boolValue .IncludeToolCalls]]
+[[end]][[end]]
+[[end]][[if .TaskGroups]]task_groups:
+[[range .TaskGroups]]  [[.Name]]:
+    steps:
+[[range .Steps]]      - [[.]]
+[[end]]    context_scope: [[.ContextScope]]
+    then: [[.Then]]
+[[if .ThenTarget]]    then_target: [[.ThenTarget]]
+[[end]]    merge: results
+[[end]]
+[[end]][[if .Variables]]variables:
+[[range .Variables]]  [[.Name]]:
+    type: [[.Type]]
+[[if .Default]]    default: [[.Default]]
+[[end]][[if .Source]]    source: [[.Source]]
+[[end]][[end]]
+[[end]][[if .DeclaredSecrets]]# Every runtime value you supply, by environment variable name. A secret has no
 # other fields, and a value never appears in a package file: put the values in
 # `.env`, which is gitignored. `unmute validate` warns when this package
 # references a name you have not listed here.
 secrets:
 [[range .DeclaredSecrets]]  - [[.]]
+[[end]]
+[[end]][[if .HumanTransfers]]# Who this agent escalates to. A value is the UPPER_SNAKE name of an environment
+# variable holding the number, read at call time: agent.yaml is the portable
+# half of a package, so a phone number does not belong in it.
+destinations:
+[[range .Destinations]]  [[.Destination]]: [[.Value]]
+[[end]]
+[[end]][[if .Knowledge]]# Folders of documents the agents can search. Each one is read, split and
+# embedded once when the agent starts, and held in memory, so content is fixed
+# until the next compile. A tool with a `knowledge:` block points at one by name.
+knowledge:
+[[range .Knowledge]]  [[.Name]]:
+    documents: [[.Documents]]
+[[if .Embed]]    embed: [[.Embed]]
 [[end]][[end]]
-# Every model is defined here once, in the central map grouped by kind (N15):
+[[end]]# Every model is defined here once, in the central map grouped by kind (N15):
 # think (LLM), speak (TTS), listen (STT), turn (VAD). Agents reference think
 # and speak entries by name; the sole listen/turn entries select themselves.
 # Add alternates alongside and swap with a top-level `listen: <name>` pointer.
@@ -64,86 +171,7 @@ models:
       provider: livekit
       model: turn-detector-mini
 [[end]]
-[[if .Variables]]variables:
-[[range .Variables]]  [[.Name]]:
-    type: [[.Type]]
-[[if .Default]]    default: [[.Default]]
-[[end]][[if .Source]]    source: [[.Source]]
-[[end]][[end]]
-[[end]]# Each agent is a prompt plus the models it thinks and speaks with. The
-# instructions file is sent to the model verbatim as its system prompt, so
-# everything in it is addressed to the agent and nothing in it is addressed to
-# you — put your own notes here, in a comment, where the model never sees them.
-#
-# The starter prompt is a real one, and it is meant to be replaced. Rewrite it
-# to say what your agent actually does; the greeting below is separate, and it
-# is spoken word for word without going through the model at all.
-agents:
-[[range .AllAgents]]  [[.Name]]:
-    instructions: [[.PromptPath]]
-    model: [[.ModelProfile]]
-    voice: [[.VoiceProfile]]
-[[$tools := $.AgentTools .Name]][[if $tools]]    tools:
-[[range $tools]]      - [[.]]
-[[end]][[end]]
-[[end]][[if .Tasks]]tasks:
-[[range .Tasks]]  [[.Name]]:
-    instructions: [[.PromptPath]]
-[[$tools := $.TaskTools .Name]][[if $tools]]    tools:
-[[range $tools]]      - [[.]]
-[[end]][[end]][[if .Model]]    model: [[.Model]]
-[[end]]    result:[[yamlBlock 6 .Result]]
-    context:
-      history: [[.History]]
-[[if .MaxMessages]]      max_messages: [[.MaxMessages]]
-[[end]][[if .Summarizer]]      summarizer: [[.Summarizer]]
-[[end]][[if .IncludeToolCalls]]      include_tool_calls: [[boolValue .IncludeToolCalls]]
-[[end]][[end]]
-[[end]][[if .TaskGroups]]task_groups:
-[[range .TaskGroups]]  [[.Name]]:
-    steps:
-[[range .Steps]]      - [[.]]
-[[end]]    context_scope: [[.ContextScope]]
-    then: [[.Then]]
-[[if .ThenTarget]]    then_target: [[.ThenTarget]]
-[[end]]    merge: results
-[[end]]
-[[end]][[if or .Handoffs .Tasks .TaskGroups .HumanTransfers]]controls:
-[[range .Handoffs]]  [[.Name]]:
-    kind: agent_transfer
-    to: [[.To]]
-    when: [[quote .When]]
-[[if .Announce]]    announce: [[quote .Announce]]
-[[end]]
-[[if .Requires]]    requires:
-[[range .Requires]]      - [[.]]
-[[end]][[end]]    context:
-      history: [[.History]]
-[[if .MaxMessages]]      max_messages: [[.MaxMessages]]
-[[end]][[if .Summarizer]]      summarizer: [[.Summarizer]]
-[[end]][[if .IncludeToolCalls]]      include_tool_calls: [[boolValue .IncludeToolCalls]]
-[[end]][[if .AllVariables]]      variables: all
-[[else]]      variables:
-[[range .Variables]]        - [[.]]
-[[end]][[end]]
-[[end]][[range .Tasks]]  [[.RunName]]:
-    kind: delegate
-    task: [[.Name]]
-    when: [[quote .When]]
-[[if .Assign]]    assign:[[yamlBlock 6 .Assign]]
-[[end]][[end]][[range .TaskGroups]]  [[.RunName]]:
-    kind: delegate
-    group: [[.Name]]
-    when: [[quote .When]]
-[[end]][[range .HumanTransfers]]  [[.Name]]:
-    kind: human_transfer
-[[if .When]]    when: [[quote .When]]
-[[end]]    [[.Mode]]:
-      destination: [[.Destination]]
-[[if .Briefing]]      briefing: [[quote .Briefing]]
-[[end]][[if .RingTimeout]]      ring_timeout: [[.RingTimeout]]
-[[end]][[if .OnUnavailable]]      on_unavailable: [[.OnUnavailable]]
-[[end]][[end]][[end]][[if .Tools]]tools:
+[[if .Tools]]tools:
 [[range .Tools]]  - [[.Name]]
 [[end]]
 [[end]]conversation:
@@ -160,21 +188,7 @@ agents:
 [[end]][[if .EndAfter]]    end_after: [[.EndAfter]]
 [[end]][[end]][[if .MaxDuration]]  max_duration: [[.MaxDuration]]
 [[end]][[if .ThinkingAudio]]  thinking_audio: [[.ThinkingAudio]]
-[[end]][[if .Knowledge]]
-# Folders of documents the agents can search. Each one is read, split and
-# embedded once when the agent starts, and held in memory, so content is fixed
-# until the next compile. A tool with a `knowledge:` block points at one by name.
-knowledge:
-[[range .Knowledge]]  [[.Name]]:
-    documents: [[.Documents]]
-[[if .Embed]]    embed: [[.Embed]]
-[[end]][[end]][[end]][[if .HumanTransfers]]
-# Who this agent escalates to. A value is the UPPER_SNAKE name of an environment
-# variable holding the number, read at call time: agent.yaml is the portable
-# half of a package, so a phone number does not belong in it.
-destinations:
-[[range .Destinations]]  [[.Destination]]: [[.Value]]
-[[end]][[end]]
+[[end]]
 channels:
 [[range .AllChannels]][[if eq .Kind "realtime_audio"]]  [[.Name]]:
     kind: realtime_audio

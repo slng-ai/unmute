@@ -53,21 +53,23 @@ needs.
 
 ## Delegate to it
 
+A task is run by a delegate. You declare the delegate under `delegates:` and
+attach it by name from the agent's `delegates:` list.
+
 ```yaml agent.yaml
-controls:
+agents:
+  appointment_desk:
+    delegates:
+      - check_customer
+      - manage_appointment
+
+delegates:
   check_customer:
-    kind: delegate
     task: customer_record
     when: Identify the caller before handling an appointment request.
     assign:
       customer_id: result.customer_id
       customer_name: result.customer_name
-
-agents:
-  appointment_desk:
-    tools:
-      - check_customer
-      - manage_appointment
 ```
 
 `assign` copies fields out of the result into package variables, so the rest of
@@ -87,9 +89,8 @@ A step that needs a value the conversation has not collected yet declares
 `requires:`:
 
 ```yaml agent.yaml
-controls:
+delegates:
   manage_appointment:
-    kind: delegate
     task: appointment
     when: The caller wants to make, change, or cancel an appointment.
     requires:
@@ -102,7 +103,7 @@ silently never starts.
 
 **The caller hears nothing.** While `customer_phone` is empty the step does not
 run, and the refusal goes to the model rather than to the caller. It names the
-missing variable and the control that supplies it, so the model runs
+missing variable and the delegate that supplies it, so the model runs
 `check_customer` and calls the step again in the same turn. The caller just hears
 the next natural question.
 
@@ -138,20 +139,21 @@ Each task holds the tools its own step needs:
 Booking before identification is not a rule in a prompt here. It is
 unavailable.
 
-While a task runs, the caller is talking to the task: its prompt, and only the
-tools and controls in that task's `tools:` list. The agent's own list is not
-offered again until the task returns.
+While a task runs, the caller is talking to the task: its prompt, and only what
+its own `tools:` and `handoffs:` name. The agent's own lists are not offered
+again until the task returns.
 
-The one control a task may list is `agent_transfer`. Use it when the caller can
-change intent during the step and should go straight to another agent. Calling
-it ends the task and any remaining task-group steps; the destination takes over
-without returning through the task owner. `delegate` and `human_transfer`
-controls are rejected on tasks during validation.
+Besides tools, the one thing a task may list is a handoff, under its own
+`handoffs:`. Use it when the caller can change intent during the step and should
+go straight to another agent. Calling it ends the task and any remaining
+task-group steps; the destination takes over without returning through the task
+owner. A task has `tools:` and `handoffs:` and no other list, so a delegate or an
+escalation on a task is unwritable rather than rejected.
 
 That scoping is the useful half of delegation, and also the part to plan for,
 because anything the task may need must appear in its own list.
 
-A task that lists no `agent_transfer` still has a way out. Every generated task
+A task that lists no handoff still has a way out. Every generated task
 prompt ends with one compiler-written rule: when the caller asks for something
 none of the step's tools can do, and no handoff on the step covers it, call the
 step's finish function right away with the closest result it has, and name that

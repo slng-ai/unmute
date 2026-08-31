@@ -1,7 +1,115 @@
 version: 1
 
 name: salon-concierge
+
 entry_agent: concierge
+
+agents:
+  concierge:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - look_up_salon_info
+    delegates:
+      - verify_customer
+      - manage_booking
+    handoffs:
+      - to_complaints
+    escalations:
+      - to_manager
+
+  complaint_specialist:
+    instructions: agents/complaint-specialist.md
+    model: reasoning
+    voice: voice
+    tools:
+      - look_up_refund_policy
+      - record_complaint
+    delegates:
+      - verify_customer
+    handoffs:
+      - to_concierge
+    escalations:
+      - to_manager
+
+delegates:
+  verify_customer:
+    task: customer_verification
+    when: >-
+      Confirm who the caller is before any specialist handoff. The task reads
+      the phone number back and needs a yes before it looks anyone up.
+    assign:
+      customer_phone: result.customer_phone
+
+  manage_booking:
+    task: booking
+    when: The caller wants to create, modify, or cancel a booking.
+    requires:
+      - customer_phone
+
+handoffs:
+  to_complaints:
+    to: complaint_specialist
+    when: The verified caller has a complaint or service problem.
+    context:
+      history: full
+      variables: all
+
+  to_concierge:
+    to: concierge
+    when: The caller changes to a request owned by another specialist.
+    context:
+      history: full
+      variables: all
+
+escalations:
+  to_manager:
+    when: The caller explicitly asks for a manager or is clearly and strongly frustrated.
+    cold:
+      destination: manager_line
+      ring_timeout: 30s
+      on_unavailable: hangup
+
+tasks:
+  customer_verification:
+    instructions: tasks/verify-customer.md
+    tools:
+      - find_or_create_customer
+    result:
+      customer_phone: string
+      status:
+        enum:
+          - existing
+          - created
+          - invalid
+      summary: string
+    context:
+      history: full
+
+  booking:
+    instructions: tasks/booking.md
+    tools:
+      - list_bookings
+      - get_current_date
+      - check_availability
+      - create_booking
+      - modify_booking
+      - cancel_booking
+    handoffs:
+      - to_complaints
+    result:
+      action:
+        enum:
+          - create
+          - modify
+          - cancel
+          - none
+      booking_id: string
+      status: string
+      summary: string
+    context:
+      history: full
 
 variables:
   customer_phone:
@@ -22,7 +130,9 @@ variables:
 secrets:
   - OPENAI_API_KEY
   - SLNG_API_KEY
-  - COVAL_API_KEY
+  - LANGFUSE_SECRET_KEY
+  - LANGFUSE_PUBLIC_KEY
+  - LANGFUSE_BASE_URL
   - MANAGER_PHONE_NUMBER
   - TWILIO_ACCOUNT_SID
   - TWILIO_AUTH_TOKEN
@@ -77,109 +187,6 @@ models:
       pace: balanced
       endpointing_delay: 400ms
 
-agents:
-  concierge:
-    instructions: instructions.md
-    model: reasoning
-    voice: voice
-    tools:
-      - verify_customer
-      - look_up_salon_info
-      - manage_booking
-      - to_complaints
-      - to_manager
-
-  complaint_specialist:
-    instructions: agents/complaint-specialist.md
-    model: reasoning
-    voice: voice
-    tools:
-      - verify_customer
-      - record_complaint
-      - look_up_refund_policy
-      - to_manager
-      - to_concierge
-
-tasks:
-  customer_verification:
-    instructions: tasks/verify-customer.md
-    tools:
-      - find_or_create_customer
-    result:
-      customer_phone: string
-      status:
-        enum:
-          - existing
-          - created
-          - invalid
-      summary: string
-    context:
-      history: full
-
-  booking:
-    instructions: tasks/booking.md
-    tools:
-      - list_bookings
-      - get_current_date
-      - check_availability
-      - create_booking
-      - modify_booking
-      - cancel_booking
-      - to_complaints
-    result:
-      action:
-        enum:
-          - create
-          - modify
-          - cancel
-          - none
-      booking_id: string
-      status: string
-      summary: string
-    context:
-      history: full
-
-controls:
-  verify_customer:
-    kind: delegate
-    task: customer_verification
-    when: >-
-      Confirm who the caller is before any specialist handoff. The task reads
-      the phone number back and needs a yes before it looks anyone up.
-    assign:
-      customer_phone: result.customer_phone
-
-  manage_booking:
-    kind: delegate
-    task: booking
-    when: The caller wants to create, modify, or cancel a booking.
-    requires:
-      - customer_phone
-
-  to_complaints:
-    kind: agent_transfer
-    to: complaint_specialist
-    when: The verified caller has a complaint or service problem.
-    context:
-      history: full
-      variables: all
-
-  to_concierge:
-    kind: agent_transfer
-    to: concierge
-    when: The caller changes to a request owned by another specialist.
-    context:
-      history: full
-      variables: all
-
-  to_manager:
-    kind: human_transfer
-    when: The caller explicitly asks for a manager or is clearly and strongly frustrated.
-    cold:
-      destination: manager_line
-      ring_timeout: 30s
-      on_unavailable: hangup
-
 tools:
   - find_or_create_customer
   - look_up_refund_policy
@@ -204,7 +211,7 @@ conversation:
   max_duration: 15m
 
 tracing:
-  provider: coval
+  provider: langfuse
 
 channels:
   web:

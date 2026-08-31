@@ -66,45 +66,23 @@ func TestValidateTaskRequiresResultAndHistory(t *testing.T) {
 	}
 }
 
-func TestValidateTaskControlKinds(t *testing.T) {
-	tests := []struct {
-		name    string
-		control string
-		want    string
-	}{
-		{name: "agent transfer", control: "to_billing"},
-		{name: "delegate", control: "run_check", want: `task "routing" references control "run_check" with kind "delegate"; tasks may reference agent_transfer controls only`},
-		{name: "human transfer", control: "to_human", want: `task "routing" references control "to_human" with kind "human_transfer"; tasks may reference agent_transfer controls only`},
+// A task may attach a handoff, and nothing else. Only the legal half is still
+// checkable here: a task definition has `tools:` and `handoffs:` and no other
+// key, so a delegate or an escalation on a task is no longer a package Validate
+// can be handed. The illegal halves moved to
+// TestBuildRefusesAFieldFromAnotherKind, which proves the file is refused at
+// decode with a line and a column.
+func TestValidateTaskMayAttachAHandoff(t *testing.T) {
+	agent := safeAgent(t)
+	agent.Tasks["routing"] = Task{
+		Instructions: "Route the caller.",
+		Tools:        []string{"to_billing"},
+		Result:       map[string]ResultField{"done": {Type: PrimitiveBoolean}},
+		Context:      TaskContext{History: HistoryFull},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			agent := safeAgent(t)
-			if test.control == "to_human" {
-				agent.Controls["to_human"] = &HumanTransfer{
-					Kind: ControlHumanTransfer, Mode: TransferCold, Destination: "billing_line", OnUnavailable: OnUnavailableReturn,
-				}
-			}
-			agent.Controls["run_check"] = &Delegate{Kind: ControlDelegate, Task: "routing"}
-			agent.Tasks["routing"] = Task{
-				Instructions: "Route the caller.",
-				Tools:        []string{test.control},
-				Result:       map[string]ResultField{"done": {Type: PrimitiveBoolean}},
-				Context:      TaskContext{History: HistoryFull},
-			}
-			report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
-			if test.want == "" {
-				if err != nil {
-					t.Fatalf("agent transfer rejected: %v %#v", err, report.PerTarget)
-				}
-				return
-			}
-			if err == nil {
-				t.Fatalf("task control %q passed validation", test.control)
-			}
-			if errors := strings.Join(report.PerTarget[0].Errors, "\n"); !strings.Contains(errors, test.want) {
-				t.Fatalf("errors =\n%s\nwant one containing %q", errors, test.want)
-			}
-		})
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	if err != nil {
+		t.Fatalf("handoff on a task rejected: %v %#v", err, report.PerTarget)
 	}
 }
 
@@ -1400,9 +1378,9 @@ func TestV12_WarmTransferRequiresOutboundDirection(t *testing.T) {
 		pkg.Agent.Channels["phone"] = phone
 		// The shipped cold transfer, made warm: same tool wiring, same
 		// destination, only the shape block differs.
-		human := pkg.Agent.Controls["to_human"]
+		human := pkg.Agent.Escalations["to_human"]
 		human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
-		pkg.Agent.Controls["to_human"] = human
+		pkg.Agent.Escalations["to_human"] = human
 		routeTarget(pkg, "pipecat", "primary_phone", "cloud-websocket", "twilio")
 		agent, err := Build(pkg)
 		if err != nil {
@@ -1424,9 +1402,9 @@ func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
 	// Non-telephony Pipecat target: the control row.
 	pkg := loadSafeCore(t)
 	addColdHumanTransfer(pkg)
-	human := pkg.Agent.Controls["to_human"]
+	human := pkg.Agent.Escalations["to_human"]
 	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
-	pkg.Agent.Controls["to_human"] = human
+	pkg.Agent.Escalations["to_human"] = human
 	pipecatTarget := pkg.Targets["pipecat"]
 	pkg.Targets = map[string]packagespec.Target{"pipecat": pipecatTarget}
 	agent, err := Build(pkg)
@@ -1453,9 +1431,9 @@ func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
 	phone := pkg.Agent.Channels["phone"]
 	phone.Outbound = &outbound
 	pkg.Agent.Channels["phone"] = phone
-	human = pkg.Agent.Controls["to_human"]
+	human = pkg.Agent.Escalations["to_human"]
 	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
-	pkg.Agent.Controls["to_human"] = human
+	pkg.Agent.Escalations["to_human"] = human
 	routeTarget(pkg, "pipecat", "primary_phone", "cloud-websocket", "twilio")
 	agent, err = Build(pkg)
 	if err != nil {
@@ -1471,9 +1449,9 @@ func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
 	// route grants no warm feature, so the refusal must still arrive, and it must
 	// still say which thing it means.
 	pkg = dailyCarrierPackage(t)
-	human = pkg.Agent.Controls["send_to_billing"]
+	human = pkg.Agent.Escalations["send_to_billing"]
 	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
-	pkg.Agent.Controls["send_to_billing"] = human
+	pkg.Agent.Escalations["send_to_billing"] = human
 	phone = pkg.Agent.Channels["phone"]
 	phone.Outbound = &outbound
 	pkg.Agent.Channels["phone"] = phone
@@ -1735,9 +1713,9 @@ func TestValidateDeploymentRegions(t *testing.T) { // N32
 func TestWarmTransferWithoutAConnectionIsGated(t *testing.T) {
 	pkg := loadSafeCore(t)
 	addColdHumanTransfer(pkg)
-	human := pkg.Agent.Controls["to_human"]
+	human := pkg.Agent.Escalations["to_human"]
 	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
-	pkg.Agent.Controls["to_human"] = human
+	pkg.Agent.Escalations["to_human"] = human
 	livekitTarget := pkg.Targets["livekit"]
 	pkg.Targets = map[string]packagespec.Target{"livekit": livekitTarget}
 	agent, err := Build(pkg)
@@ -1822,9 +1800,9 @@ func TestSIPRouteRequiresEveryConnectionValue(t *testing.T) {
 		pkg := loadSafeCore(t)
 		addColdHumanTransfer(pkg)
 		enableTelephony(pkg)
-		human := pkg.Agent.Controls["to_human"]
+		human := pkg.Agent.Escalations["to_human"]
 		human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
-		pkg.Agent.Controls["to_human"] = human
+		pkg.Agent.Escalations["to_human"] = human
 		routeTarget(pkg, "livekit", "primary_phone", "sip", "twilio")
 		connection := pkg.Connections["primary_phone"]
 		connection.Environment = map[string]string{
@@ -1867,9 +1845,9 @@ func cloudWebsocketPackage(t *testing.T) *packagespec.Package {
 			"from_number": "TWILIO_PHONE_NUMBER",
 		},
 	}}
-	control := pkg.Agent.Controls["to_human"]
+	control := pkg.Agent.Escalations["to_human"]
 	control.Cold.OnUnavailable = string(OnUnavailableHangup)
-	pkg.Agent.Controls["to_human"] = control
+	pkg.Agent.Escalations["to_human"] = control
 	return pkg
 }
 
@@ -1885,9 +1863,9 @@ func TestValidatePipecatCloudWebsocketRequiresHangupOnUnavailable(t *testing.T) 
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			pkg := cloudWebsocketPackage(t)
-			control := pkg.Agent.Controls["to_human"]
+			control := pkg.Agent.Escalations["to_human"]
 			control.Cold.OnUnavailable = test.policy
-			pkg.Agent.Controls["to_human"] = control
+			pkg.Agent.Escalations["to_human"] = control
 			agent, err := Build(pkg)
 			if err != nil {
 				t.Fatal(err)

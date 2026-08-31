@@ -98,9 +98,8 @@ cannot call book_appointment yet: requested_service not set. Ask the caller firs
 ## Getting a value out of a task
 
 ```yaml agent.yaml
-controls:
+delegates:
   check_customer:
-    kind: delegate
     task: customer_record
     assign:
       customer_id: result.customer_id

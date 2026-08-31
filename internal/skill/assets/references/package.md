@@ -95,11 +95,13 @@ That is the shape `unmute init <name>` scaffolds, and it runs in a browser.
 | `turn` | when `models.turn` has two or more entries | which turn entry to use |
 | `variables` | no | per call values |
 | `secrets` | no | environment names the generated project reads |
-| `destinations` | when a `human_transfer` is used | symbol to the environment variable holding a number |
+| `destinations` | when an escalation is used | symbol to the environment variable holding a number |
 | `agents` | yes | one or more agents |
 | `tasks` | no | delegated steps |
 | `task_groups` | no | ordered sequences of tasks |
-| `controls` | no | delegate, agent transfer, human transfer |
+| `delegates` | no | steps that run and come back |
+| `handoffs` | no | the conversation becomes another agent |
+| `escalations` | no | the caller goes through to a person |
 | `tools` | no | which tool files to load |
 | `conversation` | no | greeting, interruption, inactivity, limits |
 | `tracing` | no | tracing provider |
@@ -202,7 +204,10 @@ agents:
 | `instructions` | path to a Markdown prompt in the package |
 | `model` | a `models.think` entry name |
 | `voice` | a `models.speak` entry name |
-| `tools` | names this agent may call: tool files and controls |
+| `tools` | tool files this agent may call, by name |
+| `delegates` | entries under `delegates:` this agent may run |
+| `handoffs` | entries under `handoffs:` this agent may take |
+| `escalations` | entries under `escalations:` this agent may take |
 
 The prompt lives in its own file so it reviews like prose rather than like YAML.
 

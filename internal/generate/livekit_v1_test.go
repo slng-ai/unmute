@@ -2129,10 +2129,10 @@ func configuredLiveKitSIP(t *testing.T) (*ir.Agent, ir.Target) {
 	pkg.Agent.Variables["campaign_id"] = spec.Variable{Type: "string", Source: "call_start", Default: "manual"}
 	pkg.Agent.Variables["provider_call_id"] = spec.Variable{Type: "string", Source: "call_id"}
 	pkg.Agent.Variables["call_direction"] = spec.Variable{Type: "string", Source: "direction"}
-	human := pkg.Agent.Controls["to_human"]
+	human := pkg.Agent.Escalations["to_human"]
 	human.Cold = nil
 	human.Warm = &spec.WarmTransfer{Destination: "billing_line", Briefing: "Say who is calling and why."}
-	pkg.Agent.Controls["to_human"] = human
+	pkg.Agent.Escalations["to_human"] = human
 
 	agent, err := ir.Build(pkg)
 	if err != nil {

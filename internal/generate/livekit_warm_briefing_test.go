@@ -51,18 +51,17 @@ func configuredLiveKitSIPTwoWarm(t *testing.T) (*ir.Agent, ir.Target) {
 	}
 	pkg.Connections["primary_phone"] = connection
 
-	human := pkg.Agent.Controls["to_human"]
+	human := pkg.Agent.Escalations["to_human"]
 	human.Cold = nil
 	human.Warm = &spec.WarmTransfer{Destination: "billing_line", Briefing: "Say who is calling and why."}
-	pkg.Agent.Controls["to_human"] = human
-	second := spec.Control{
-		Kind: "human_transfer",
+	pkg.Agent.Escalations["to_human"] = human
+	second := spec.Escalation{
 		When: "Caller asks for the manager by name.",
 		Warm: &spec.WarmTransfer{Destination: "billing_line"},
 	}
-	pkg.Agent.Controls["to_manager"] = second
+	pkg.Agent.Escalations["to_manager"] = second
 	billing := pkg.Agent.Agents["billing"]
-	billing.Tools = append(billing.Tools, "to_manager")
+	billing.Escalations = append(billing.Escalations, "to_manager")
 	pkg.Agent.Agents["billing"] = billing
 
 	agent, err := ir.Build(pkg)

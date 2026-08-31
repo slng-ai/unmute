@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -156,9 +157,13 @@ func TestTaskTransferAndSharedResultDocsStayAligned(t *testing.T) {
 		"internal/generate/templates/livekit_v1/README.md": trackedFile(t, "internal/generate/templates/livekit_v1/README.md.tmpl"),
 		"internal/generate/templates/pipecat_v1/README.md": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
 	}
+	// The intermediate representation still calls this kind agent_transfer, and
+	// the emitted runbooks still say so, but the authoring word is `handoff`. A
+	// page teaching authors may use either, so long as it teaches the shape.
+	taught := regexp.MustCompile(`agent_transfer|handoffs?\b`)
 	for name, content := range transferDocs {
-		if !strings.Contains(content, "agent_transfer") {
-			t.Errorf("%s does not document task-scoped agent_transfer", name)
+		if !taught.MatchString(content) {
+			t.Errorf("%s does not document a task-scoped handoff", name)
 		}
 	}
 	for name, content := range map[string]string{
@@ -678,9 +683,18 @@ func TestOrchestrationGuidanceMatchesCodeOwnedFacts(t *testing.T) {
 		t.Error("references/variables.md must say task instructions render when the task starts")
 	}
 
-	delegateRow := regexp.MustCompile("(?m)^\\| `delegate` \\| (.*) \\|$").FindStringSubmatch(agentReference)
-	if delegateRow == nil || delegateRow[1] != "`task` or `group`, `when`, `assign`, `requires`" {
-		t.Errorf("docs-site/reference/agent-yaml.mdx delegate fields = %q, want task/group, when, assign, requires", delegateRow)
+	// The single delegate row became a per-block table when `controls:` split into
+	// three catalogs, so the assertion moved with it: the reference must still
+	// name every field a delegate takes, and the shape it names them in is the
+	// page's business rather than this test's.
+	delegateSection := regexp.MustCompile(`(?s)### ` + "`delegates`" + `(.*?)### `).FindStringSubmatch(agentReference)
+	if delegateSection == nil {
+		t.Fatal("docs-site/reference/agent-yaml.mdx has no delegates section")
+	}
+	for _, field := range []string{"`task`", "`group`", "`when`", "`assign`", "`requires`"} {
+		if !strings.Contains(delegateSection[1], field) {
+			t.Errorf("docs-site/reference/agent-yaml.mdx delegates section does not document %s", field)
+		}
 	}
 
 	// This assertion used to run the other way: it failed when the reference put
@@ -691,7 +705,7 @@ func TestOrchestrationGuidanceMatchesCodeOwnedFacts(t *testing.T) {
 	// this feature exists to remove.
 	guarded := false
 	for _, match := range regexp.MustCompile("(?s)```yaml[^\\n]*\\n(.*?)```").FindAllStringSubmatch(orchestration, -1) {
-		if strings.Contains(match[1], "kind: delegate") && strings.Contains(match[1], "requires:") {
+		if strings.Contains(match[1], "delegates:") && strings.Contains(match[1], "requires:") {
 			guarded = true
 		}
 	}
@@ -1449,6 +1463,233 @@ func TestCovalCorrelationRoutesStayDocumented(t *testing.T) {
 	for _, fact := range []string{"coval.simulation_id", "RoomAgentDispatch", "headers_to_attributes"} {
 		if !strings.Contains(livekitReadme, fact) {
 			t.Errorf("the LiveKit runbook does not tell the operator about %q", fact)
+		}
+	}
+}
+
+// TestNoReaderFacingSurfaceTeachesARetiredKindName is the gate whose absence let
+// the controls-block re-spelling ship half done.
+//
+// The lints in internal/generate cover shipped packages and the scaffold
+// template, so they catch `kind: agent_transfer` inside a YAML fence. Nothing
+// covered prose. Twelve sentences across four documentation pages, two bundle
+// references and both emitted runbooks went on telling authors to write an
+// `agent_transfer` or a `human_transfer` while `make test`, `make lint` and
+// `make build` were all green. One of them, in the emitted runbook, was a direct
+// instruction to write a package that no longer decodes.
+//
+// `delegate` is deliberately NOT in the retired set. It was a `kind:` value and
+// it is now the authoring word for an entry under `delegates:`, so flagging it
+// would flag the correct spelling.
+//
+// Three exclusions, each with its reason:
+//
+//   - docs-site/changelog.mdx is generated from GitHub Releases and is a
+//     historical record. An entry describing what shipped in an older version
+//     said `agent_transfer` because that is what it was called then.
+//   - internal/ir keeps these strings on purpose. They are the intermediate
+//     representation's own kind names and this feature changed only the
+//     authoring words, so they are out of this walk entirely.
+//   - a generated file may still name them when it is describing generated code
+//     rather than telling a reader what to write.
+//     internal/generate/templates/pipecat_v1/bot.py.tmpl says "agent_transfer is
+//     activate_worker()", which is a runtime mapping, not authoring guidance.
+//     Only the emitted README templates are walked here, because those are the
+//     runbook a human reads.
+func TestNoReaderFacingSurfaceTeachesARetiredKindName(t *testing.T) {
+	retired := regexp.MustCompile(`agent_transfer|human_transfer`)
+
+	surfaces := map[string]string{}
+
+	root := filepath.Join("..", "..")
+	err := filepath.WalkDir(filepath.Join(root, "docs-site"), func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".mdx" {
+			return nil
+		}
+		if filepath.Base(path) == "changelog.mdx" {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		surfaces[filepath.ToSlash(rel)] = string(content)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(surfaces) < 20 {
+		t.Fatalf("found only %d documentation pages; the walk is looking in the wrong place", len(surfaces))
+	}
+
+	files, err := New("test").Files(Canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range files {
+		if filepath.Ext(name) != ".md" {
+			continue
+		}
+		surfaces["bundle/"+name] = string(content)
+	}
+
+	for _, template := range []string{
+		"internal/generate/templates/livekit_v1/README.md.tmpl",
+		"internal/generate/templates/pipecat_v1/README.md.tmpl",
+	} {
+		surfaces[template] = trackedFile(t, template)
+	}
+
+	// The shipped packages too, for their comments. A package lint that reads
+	// only keys cannot see a header comment describing a handoff as an
+	// "(agent_transfer)", and internal/testdata/remy carried exactly that
+	// through this whole feature: the package gate matched keys, this gate
+	// walked prose, and the comment fell between them.
+	listed, err := exec.Command("git", "-C", root, "ls-files", "*agent.yaml").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range strings.Fields(string(listed)) {
+		surfaces[name] = trackedFile(t, name)
+	}
+
+	for name, content := range surfaces {
+		for i, line := range strings.Split(content, "\n") {
+			if found := retired.FindString(line); found != "" {
+				t.Errorf("%s:%d teaches the retired kind name %q: the authoring words are delegates:, handoffs: and escalations:, and which block an entry sits in is its kind\n    %s",
+					name, i+1, found, strings.TrimSpace(line))
+			}
+		}
+	}
+}
+
+// catalogFences is every YAML example a reader learns the authoring shape from:
+// the documentation site, and the bundle a coding assistant reads before it
+// writes a package.
+//
+// changelog.mdx is excluded for the same reason it is excluded from the
+// retired-name gate: it is generated from GitHub Releases and records what an
+// older version looked like.
+func catalogFences(t *testing.T) map[string][]string {
+	t.Helper()
+	fence := regexp.MustCompile("(?s)```yaml[^\n]*\n(.*?)```")
+	out := map[string][]string{}
+
+	root := filepath.Join("..", "..")
+	err := filepath.WalkDir(filepath.Join(root, "docs-site"), func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".mdx" || filepath.Base(path) == "changelog.mdx" {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		for _, match := range fence.FindAllStringSubmatch(string(content), -1) {
+			name := filepath.ToSlash(rel)
+			out[name] = append(out[name], match[1])
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := New("test").Files(Canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range files {
+		if filepath.Ext(name) != ".md" {
+			continue
+		}
+		for _, match := range fence.FindAllStringSubmatch(string(content), -1) {
+			out["bundle/"+name] = append(out["bundle/"+name], match[1])
+		}
+	}
+	if len(out) < 10 {
+		t.Fatalf("found only %d files with YAML examples; the walk is looking in the wrong place", len(out))
+	}
+	return out
+}
+
+// TestDocumentedExamplesAttachUnderTheRightKey is the gate for a defect this
+// repository shipped twice in the same feature.
+//
+// Re-spelling the orchestration pages converted the `controls:` catalogs and
+// left the agent-level lists behind, so `docs-site/build/orchestration/handoffs.mdx`
+// defined two handoffs under `handoffs:` and then showed both agents attaching
+// them under `tools:`. Four examples across three files did not compile. They
+// survived two green `make test` runs, `make lint`, and a full convergence pass,
+// because every other check reads packages or reads prose and nothing read the
+// examples. These fences use the right words in the wrong arrangement, so a
+// vocabulary grep cannot see them.
+//
+// The check is per file rather than per fence on purpose: handoffs.mdx puts the
+// `agents:` block and the `handoffs:` catalog in two different fences, and a
+// per-fence check misses exactly the case that caused this.
+//
+// It reads only what a file defines itself, so a fragment naming something
+// declared on another page is left alone rather than guessed at.
+func TestDocumentedExamplesAttachUnderTheRightKey(t *testing.T) {
+	const catalogs = "delegates handoffs escalations"
+	topLevel := regexp.MustCompile(`^(\w+):\s*$`)
+	entry := regexp.MustCompile(`^ {2}(\w+):\s*$`)
+	listKey := regexp.MustCompile(`^ {4}(\w+):\s*$`)
+	item := regexp.MustCompile(`^ {6}- (\w+)\s*$`)
+
+	for name, fences := range catalogFences(t) {
+		// Pass one: what does this file declare, and in which catalog.
+		declared := map[string]string{}
+		for _, fence := range fences {
+			block := ""
+			for _, line := range strings.Split(fence, "\n") {
+				if found := topLevel.FindStringSubmatch(line); found != nil {
+					block = found[1]
+					continue
+				}
+				if !strings.Contains(catalogs, block) || block == "" {
+					continue
+				}
+				if found := entry.FindStringSubmatch(line); found != nil {
+					declared[found[1]] = block
+				}
+			}
+		}
+		if len(declared) == 0 {
+			continue
+		}
+		// Pass two: every agent-level and task-level list in the same file.
+		for _, fence := range fences {
+			list := ""
+			for i, line := range strings.Split(fence, "\n") {
+				if found := listKey.FindStringSubmatch(line); found != nil {
+					list = found[1]
+					continue
+				}
+				found := item.FindStringSubmatch(line)
+				if found == nil || list == "" {
+					continue
+				}
+				if belongs, known := declared[found[1]]; known && belongs != list {
+					t.Errorf("%s line %d of a yaml fence attaches %q under %s:, but the same file declares it under %s:; the example does not compile",
+						name, i+1, found[1], list, belongs)
+				}
+			}
 		}
 	}
 }
