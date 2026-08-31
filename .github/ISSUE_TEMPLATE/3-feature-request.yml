@@ -1,0 +1,92 @@
+name: Feature request
+description: Something new that does not exist today. A new target, provider, transport, tool kind, or behaviour.
+labels: ["enhancement"]
+title: "feat: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for something that is not there at all: a framework unmute
+        cannot compile to, a provider it cannot bind, a transport no route
+        covers, a tool kind it cannot emit, a call behaviour nothing reaches.
+
+        If the thing exists and is only too slow, too costly, or too rough, file
+        an improvement instead.
+
+        Unmute compiles one authored package into whatever a target framework
+        needs, so the useful question is rarely "add this option". It is "here is
+        the agent behaviour I need, and no target reaches it today". Tell us the
+        behaviour first. The field name is the easy part.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What can you not do today
+      description: >
+        The agent behaviour, call flow, or workflow you are trying to build, and
+        where it stops.
+      placeholder: |
+        I need the agent to hold a call while it waits for a slow lookup, and say
+        something every few seconds so the caller does not hang up. Today the
+        tool call just goes quiet.
+    validations:
+      required: true
+
+  - type: textarea
+    id: want
+    attributes:
+      label: What you would like unmute to do
+      description: >
+        If you already have a shape in mind, write it as YAML the way you would
+        author it. If you do not, describe the outcome and leave the shape to us.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of thing is this
+      multiple: true
+      options:
+        - A new field or behaviour in the authoring spec
+        - A new target framework
+        - A new model or provider (STT, TTS, LLM, turn detection)
+        - A new telephony route (transport or carrier)
+        - A new tool kind
+        - Tracing or evaluation
+        - A new CLI command or flag
+        - Docs, examples, or the coding-agent skill
+    validations:
+      required: true
+
+  - type: dropdown
+    id: targets
+    attributes:
+      label: Which target would you use it on
+      description: >
+        A capability only lands where the framework can honour it, so this
+        decides how much of it is possible.
+      multiple: true
+      options:
+        - livekit
+        - pipecat
+        - slng
+        - Whichever one supports it
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried, or how you do it now
+      description: >
+        Another field you tried to bend into shape, hand edits to
+        `build/<target>/`, or a change you made outside unmute. Hand edits are
+        worth naming: anything you patch after a compile is a gap in the
+        compiler.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Provider docs for the thing you want, links, prior art in another framework.
