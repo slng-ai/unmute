@@ -262,6 +262,7 @@
           "reference/cli/compile",
           "reference/cli/deploy",
           "reference/cli/dev",
+          "reference/cli/resources",
           "reference/cli/skill"
         ]
       },

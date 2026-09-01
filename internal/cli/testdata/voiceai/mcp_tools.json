@@ -1,0 +1,4 @@
+[
+  { "name": "firecrawl_scrape", "description": "Scrape one URL and return its content.", "input_schema": { "type": "object", "properties": { "url": { "type": "string" } }, "required": ["url"] } },
+  { "name": "firecrawl_search", "description": "Search the web.", "input_schema": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] } }
+]

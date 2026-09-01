@@ -102,6 +102,18 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | the docs-site states one version, in one snippet, and no page hardcodes a version literal that disagrees | `internal/docsite/version_test.go` |
 | the docs-site declares its Markdown surface, and the coding-agents page names all three endpoints | `internal/skill/markdown_surface_test.go` |
 | the changelog runs newest first, every entry carries a label, a version and its own release link, the newest matches the version snippet, and no entry keeps a heading, a dash or a commit hash | `internal/docsite/changelog_test.go` |
+| the runbook's vault table names exactly the entries the preflight checks | `internal/generate/slng_requirements_test.go` (`TestSlngRequirementsIsWhatTheRunbookPrints`) |
+| a `builtin:` reference is checked by its tool **file** name, because that is what the emitted ref carries, and a control is never checked because it emits no ref | `internal/cli/preflight_test.go`, `internal/generate/slng_requirements_test.go` |
+| a code or webhook tool is never reported missing from the account, because the push creates it | `internal/cli/preflight_test.go` (`TestPreflightNeverReportsAToolThePushCreates`) |
+| an account read that could not be made warns, never counts as satisfied, and never stops a deploy | `internal/cli/preflight_test.go`, `internal/cli/deploy_test.go` (`TestDeployPreflightDegrades`) |
+| the preflight refuses before anything is written, `--dry-run` included | `internal/cli/deploy_test.go` (`TestDeployPreflightRefusesBeforeWritingAnything`, `TestDeployRunsThePreflightUnderDryRun`) |
+| no secret value reaches argv, a written file, or either output stream | `internal/cli/preflight_test.go` (`TestFillNeverPutsAValueOnACommandLineOrInOutput`) |
+| a secret create is the only write a deploy makes; no tool, MCP server or trunk is ever created, changed or deleted | `internal/cli/preflight_test.go` (`TestDeployWritesNothingButSecrets`) |
+| each account resource kind is read at most once per deploy, the post-push trunk read included | `internal/cli/voiceai_test.go` (`TestVoiceaiReadsEachResourceKindOnce`) |
+| every `voiceai` command any surface or constant names is one the CLI has | `internal/target/slng_target_test.go` (`TestEveryVoiceaiCommandNamedExists`) |
+| attaching a trunk is a one-field PATCH on the agent, chosen by the operator, and never happens unasked or unattended | `internal/cli/deploy_test.go` (`TestAttachTrunkPatchesOneFieldByDirection`, `TestOfferTrunkAttachesNothingWhenDeclined`, `TestDeployAttachesTheChosenTrunk`) |
+| the deployed agent name comes from the package, never read back from the push (which sends none), so a free trunk's empty `in_use_by` cannot match it and be reported as reaching the agent | `internal/cli/deploy_test.go` (`TestDeployNeverReadsTheAgentNameBackFromThePush`) |
+| an `mcp:` package deploys to slng, and no surface says the push must reach the server | `internal/ir/validate_slng_test.go` (`TestSlngRequiresAnExplicitMCPToolList`), `internal/generate/slng_v1_test.go`, `internal/docsite/tool_table_test.go` |
 | checked-in Python is clean | CI `python`, `ruff check .` |
 | no known-vulnerable dependency or stdlib | CI `vuln`, `govulncheck ./...` |
 | release config still builds 6 platforms with version stamps | CI `release-config` |

@@ -255,13 +255,16 @@ func TestSlngV1WritesNoFileForMCPOrBuiltin(t *testing.T) {
 	}
 	for _, entry := range refs {
 		ref, _ := entry.(map[string]any)
-		if ref["server"] != "internal_docs" || ref["tool"] == "" {
-			t.Errorf("mcp ref = %v, want a server and tool name pair", ref)
+		// tool_name, not tool: that is the key SLNG reads, and reading the wrong
+		// one here made this assertion vacuous rather than failing.
+		if ref["server"] != "internal_docs" || ref["tool_name"] == nil || ref["tool_name"] == "" {
+			t.Errorf("mcp ref = %v, want a server and tool_name pair", ref)
 		}
-		// Written by name and incomplete on purpose: the hash cannot be computed
-		// offline, so unmute must not invent one.
+		// Names only. The push fills in server_id and observed_schema_hash from
+		// the platform's stored capability snapshot, and a hash unmute invented
+		// offline would not match that snapshot, so the push would refuse it.
 		if _, present := ref["observed_schema_hash"]; present {
-			t.Error("an mcp ref carries a schema hash; that value is read from the live server")
+			t.Error("an mcp ref carries a schema hash; the push copies that from the account, so an invented one is refused")
 		}
 	}
 }
@@ -354,9 +357,9 @@ func TestSlngV1RunbookNamesTheTrapsAndTheCredential(t *testing.T) {
 		// named as the thing not to reach for, because it posts the body verbatim.
 		"carries a name where the API wants an id",
 		"The push step resolves those names", "voiceai agents create",
-		// R12: an MCP reference needs a connection, not a lookup, so it is the one
-		// thing the push cannot finish.
-		"connecting to the MCP server",
+		// R12: an MCP reference is a lookup like the others. The runbook has to say
+		// nothing connects to the server, because it said the opposite for a year.
+		"nothing here connects to the server",
 		// FR-025: an export is not always postable back.
 		"not** always a body the API will accept", "orchestrator",
 	} {

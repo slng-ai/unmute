@@ -540,7 +540,10 @@ type Tool struct {
 	// the choice to the platform's own rule for the URL (SCHEMA N40).
 	MCPTransport string `json:"mcp_transport,omitempty" yaml:"mcp_transport,omitempty"`
 	// MCPTools selects server tool names to expose (mcp only); empty = all.
-	MCPTools     []string         `json:"mcp_tools,omitempty" yaml:"mcp_tools,omitempty"`
+	MCPTools []string `json:"mcp_tools,omitempty" yaml:"mcp_tools,omitempty"`
+	// MCPServer is the platform's name for the server when it differs from the
+	// tool's name (mcp only). Empty means they are the same.
+	MCPServer    string           `json:"mcp_server,omitempty" yaml:"mcp_server,omitempty"`
 	Interruption ToolInterruption `json:"interruption,omitempty" yaml:"interruption,omitempty"`
 	Effect       ToolEffect       `json:"effect,omitempty" yaml:"effect,omitempty"`
 	// Announce is one fixed sentence spoken as the tool starts, so a slow call

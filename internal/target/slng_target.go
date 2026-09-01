@@ -81,6 +81,115 @@ const (
 	SlngWebSessionCommand = "voiceai agents web-sessions create <agent_id> --file session.json"
 )
 
+// SlngResourcesVerified is when the shared-resource commands below were last
+// read out of a released `voiceai` and run against a live organisation. The
+// commands are stable; the *shapes* they return are the part with a shelf life,
+// and internal/cli/testdata/voiceai holds captures from the same session.
+const SlngResourcesVerified = "2026-08-31"
+
+// SlngCommand is one `voiceai` invocation: the argv after the binary name.
+//
+// It is a slice rather than a string because both forms are needed and only one
+// of them may be the owner. `deploy` execs these, and a refusal quotes them back
+// to the author. Writing the argv here and the sentence somewhere else is how
+// the web-session command shipped without its agent id: two copies, one of them
+// wrong, and no test that could see the difference.
+type SlngCommand []string
+
+// String renders the command the way an author would type it, which is what a
+// diagnostic prints and what the agreement test greps the four surfaces for.
+func (c SlngCommand) String() string { return SlngPushBinary + " " + strings.Join(c, " ") }
+
+// With appends the arguments a command takes at the call site: a secret's name,
+// a server's name, an agent id. The receiver is never modified, because these
+// are package-level values and one caller's append would be every caller's.
+func (c SlngCommand) With(args ...string) SlngCommand {
+	return append(slices.Clip(slices.Clone(c)), args...)
+}
+
+// SlngPushBinary is the tool that owns the account, the credential and every
+// write. unmute opens no socket to the SLNG API and shells out to this instead.
+const SlngPushBinary = "voiceai"
+
+// The shared-resource commands, read from `voiceai` 0.1.15 on 2026-08-31.
+//
+// Note the singular `tool` and `mcp` against the plural `trunks`: that is the
+// CLI's own spelling, not a typo here, and TestSlngPushCommandsAgree guards the
+// plural `voiceai tools`, which still does not exist.
+var (
+	// SlngWhoami names the account before anything else runs. A lightweight auth
+	// probe that spends no TTS or STT credits, so it is cheap enough to run on
+	// every deploy and is the only way to say which organisation a run resolved
+	// *before* writing to it. An environment key and a stored profile can belong
+	// to different ones.
+	SlngWhoami = SlngCommand{"whoami"}
+
+	// SlngSecretList answers every vault question in one read: each entry carries
+	// its name, its kind and whether it holds a value, so absent, empty and
+	// wrong-kind are all decidable without a lookup per name.
+	SlngSecretList = SlngCommand{"secret", "list"}
+
+	// SlngSecretCreate takes a name with .With(). There is deliberately no value
+	// argument: the CLI has no --value flag because argv lands in shell history
+	// and in `ps`, so the value is prompted for without echo or read from stdin.
+	SlngSecretCreate = SlngCommand{"secret", "create"}
+
+	// SlngToolList is what makes a builtin check positive rather than a guess.
+	// Curated capabilities appear here as ordinary tools with ids, so a reference
+	// either resolves or is positively absent.
+	SlngToolList = SlngCommand{"tool", "list"}
+
+	// SlngMCPList and SlngMCPTools both read the stored capability probe rather
+	// than calling the server. A server can be listed healthy and be unreachable,
+	// so neither result may be rendered as a promise that the server works.
+	SlngMCPList  = SlngCommand{"mcp", "list"}
+	SlngMCPTools = SlngCommand{"mcp", "tools"}
+
+	// SlngTrunksList carries `in_use_by`, one agent name, which answers "which
+	// number reaches my agent" on its own. `voiceai trunks get` adds a per-agent
+	// breakdown and costs the same reads, because there is no per-trunk route and
+	// both enumerate every agent, so it buys nothing on the deploy path.
+	SlngTrunksList = SlngCommand{"trunks", "list"}
+
+	// SlngCallDispatch takes an agent id and a destination with .With(). It rings
+	// a real phone and costs real money, so nothing calls it unasked.
+	SlngCallDispatch = SlngCommand{"agents", "calls", "dispatch"}
+
+	// SlngAgentUpdate PATCHes one agent: partial, so a body naming one field
+	// changes that field and nothing else. It is how an existing SIP trunk is
+	// pointed at a deployed agent, which is the one carrier-adjacent thing unmute
+	// does. It still creates no trunk and buys no number; both live in the
+	// dashboard, and the CLI has no command for either.
+	SlngAgentUpdate = SlngCommand{"agents", "update"}
+)
+
+// SlngTrunkFields are the agent fields that attach a SIP trunk, by direction.
+// Read from a live agent body on 2026-08-31. unmute's own create body emits
+// neither, so a trunk is attached after the push rather than declared in the
+// package: the package stays portable and names no carrier state.
+var SlngTrunkFields = map[string]string{
+	"inbound":  "sip_inbound_trunk_id",
+	"outbound": "sip_outbound_trunk_id",
+}
+
+// SlngProfileFlag selects a stored credential profile. It is a *root* option on
+// the CLI, so it goes before the subcommand and not after it. Getting that
+// backwards is not an error the tool reports; it is an unknown flag on the
+// subcommand, or worse, a silently different account from the one the push
+// writes to.
+const SlngProfileFlag = "--profile"
+
+// SlngVaultDashboardURL is the page that fixes a missing vault entry. It is
+// known because the push tool returns it on a `vault_missing` blocker.
+//
+// There is deliberately no constant for attaching an MCP server or creating a
+// curated tool. Those pages exist, but this repository has never seen their
+// URLs, and the preflight runs before the push so it cannot borrow one from a
+// blocker the way printPushBlockers does. A guessed link 404s in front of an
+// author who is already stuck, which is worse than a sentence naming the
+// dashboard.
+const SlngVaultDashboardURL = "https://app.slng.ai/vault/secrets"
+
 // SlngReservedToolNames are the tool names SLNG keeps for its own curated
 // capabilities (shared_tool_contract.py:545). A package tool carrying one of
 // these collides with a builtin, so the value here is what to use instead.

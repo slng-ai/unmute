@@ -1,6 +1,36 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 7.0.0 -> 7.1.0
+Bump rationale: MINOR. Technology and Boundaries gains a permitted case. Nothing
+is removed or redefined: the sentence that forbids buying numbers and
+provisioning trunks stands word for word, and one thing it did not mean is now
+said out loud.
+
+Modified in 7.1.0:
+- The carrier boundary bullet gains a second sentence. Unmute MAY point a
+  deployed agent at a trunk that already exists, when an operator chooses one.
+  That is agent configuration, not provisioning.
+- The footer version is corrected. It read 6.0.0 while the report above it
+  described 7.0.0, so the document disagreed with itself about what it was.
+
+Reason: `unmute deploy` now offers to attach a free inbound trunk after a
+successful push. The trunk, the number and the carrier configuration all exist
+already and are made in the SLNG dashboard; what unmute writes is one field on
+an agent it just deployed. Under the old text a reader could not tell whether
+that was permitted, because "provision a SIP trunk" and "select among trunks
+that exist" are different acts the sentence did not separate.
+
+What contributors do differently: nothing about packages changes. A package
+still declares no carrier state, and `validate` still refuses `connection:` on
+the slng target, because which number answers is a property of one deployment
+and not of a portable package. What is now allowed is an operator choosing that
+number at a terminal, at deploy time, from trunks the organisation already has.
+Attaching without asking, or in a run with no terminal, is still forbidden: a
+number is somebody's phone bill.
+
+Previous report
+---------------
 Version change: 6.0.0 -> 7.0.0
 Bump rationale: MAJOR. Technology and Boundaries redefines what makes a target.
 A driver that owns its whole output makes a target, whether that output is a
@@ -63,28 +93,6 @@ or a test level that imitates one. Verify telephony by deploying. `make rig` and
 the `rig` build tag are gone, so the test levels are L1 to L3 (required) and L4
 smoke (opt-in).
 
-Previous report
----------------
-Version change: 4.0.1 -> 5.0.0
-Bump rationale: MAJOR. Technology and Boundaries no longer permits validation to
-cover more targets than generation. A provider with no driver is not a target.
-
-Modified in 5.0.0:
-- The bullet "Pipecat and LiveKit have shipped drivers; validation may cover more
-  targets than generation" is replaced. It permitted `vapi` and `deepgram` to be
-  accepted target values that validate and then fail at compile with "driver is
-  not implemented". Both are retired.
-- The targets-and-vendors sentence stays and gains a clause, because retiring
-  the Deepgram *target* while keeping the Deepgram *model vendor* is exactly the
-  distinction that bullet exists to protect.
-
-Reason: a documented surface that never emitted a runnable project. An author
-could write `provider: vapi`, watch `validate` pass, and only learn at compile
-that nothing would be produced. The capability tables carried four columns to
-describe two working drivers.
-
-What contributors do differently: a capability row now supplies two values, not
-four. A new target provider arrives with its driver, not ahead of it.
 -->
 
 # Unmute Constitution
@@ -205,7 +213,9 @@ Four commands take an author from nothing to a voice they can talk to:
   produces nothing. A provider with no driver is not accepted as a target value,
   so `validate` and `compile` agree about what exists.
 - Unmute does not buy phone numbers or provision carrier-side applications or
-  SIP trunks.
+  SIP trunks. It MAY point a deployed agent at a trunk that already exists, when
+  an operator chooses one at a terminal: that is agent configuration, not
+  provisioning. No package field declares it, and no unattended run performs it.
 
 ## Development Workflow and Gates
 
@@ -241,4 +251,4 @@ topology change.
   knob needs a concrete reason. Without one, do less.
 - Rules added to `CLAUDE.md` need a failing gate or the label `(advisory)`.
 
-**Version**: 6.0.0 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-25
+**Version**: 7.1.0 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-09-01

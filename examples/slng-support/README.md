@@ -34,11 +34,16 @@ That writes:
 
 ```text
 examples/slng-support/build/slng/
-├── agent.json    the agent create body
-└── README.md     the runbook: what to create, what to run, what to watch for
+├── agent.json              the agent create body
+├── tools/
+│   ├── check_order.json    the code tool's body
+│   └── refund.json         the webhook tool's body
+├── samples/
+│   └── check_order.json    one call's arguments, so the code tool can publish
+└── README.md               the runbook: what to create, what to run, what to watch for
 ```
 
-No `tools/` directory, because every tool here is a builtin.
+`end_call` gets no file: a builtin is referenced, not created.
 
 ## The agent's name
 
@@ -68,12 +73,32 @@ voiceai agents list
 Renaming later does not move a deployed agent. It leaves the old one running and
 creates a second, so rename early or clean up after.
 
-## Why every tool is a builtin
+## Three kinds of tool, and why the difference matters
 
-`end_call` names a capability SLNG already owns, so nothing has to be *created*
-before this agent can exist. That is the smallest push there is.
+This package has one of each, because they behave differently at deploy time.
 
-It is still not a body you can post by hand. SLNG's `tool_refs` entries require
+| File | Kind | Who creates it | Catch |
+|---|---|---|---|
+| `tools/end_call.yaml` | builtin | nobody: SLNG already owns it | must ALREADY EXIST in your org, and is referenced by the **file's** name |
+| `tools/check_order.yaml` | code | the push | no internet access; cannot publish without a sample run |
+| `tools/refund.yaml` | webhook | the push | the only one that may reach the network; carries the Vault secret |
+
+**The builtin trap.** The emitted reference carries the tool *file's* name, not
+the `builtin: id` inside it. Name the file `hang_up.yaml` while selecting
+`builtin: end_call` and the body asks SLNG for a tool called `hang_up`, which
+does not exist. Nothing refuses that at validate; `unmute deploy` catches it and
+tells you to rename the file.
+
+**The code trap.** Custom code on SLNG runs in a sandbox with **no internet
+access at all**. `requests`, `httpx` and `urllib` are refused at validate rather
+than failing on a live call. Anything that needs the network is a webhook tool.
+
+**The publish trap.** A `code` or `api_request` tool cannot be published until
+one successful run proves it. That needs a sample, one JSON object of arguments
+at `build/slng/samples/<tool>.json`, run with `unmute deploy --run-samples`.
+
+A builtin-only package would be the smallest push there is. Even that is not a
+body you can post by hand. SLNG's `tool_refs` entries require
 `attachment_id`, `tool_id` and `version`, and unmute writes a name where the
 `tool_id` goes, because no compiler can invent an id a server assigns. A curated
 capability has an id too.
@@ -89,12 +114,6 @@ voiceai agents push examples/slng-support/build/slng
 ```
 
 `voiceai login` stores the key instead, if you prefer.
-
-A package with a `local:` or `webhook:` tool compiles too, and its bodies land
-under `tools/`. Those get created, introspected and published by the push, and
-each needs a sample: one JSON object of arguments at
-`build/slng/samples/<tool>.json`, run with `unmute deploy --run-samples`. A tool
-of either kind cannot be published until one successful run proves it works.
 
 A `local:` tool may also pin what its handler imports, with exact
 `name==version` entries under `local.dependencies`. The sandbox runs Python 3.14
@@ -153,11 +172,57 @@ to do instead. None is dropped silently.
 
 ## The Vault
 
-This package needs no SLNG Vault entries, and the runbook says so rather than
-printing an empty list. A package that authenticates a webhook tool, or writes a
-`{{$NAME}}` Vault token into a prompt, gets a table of the names it needs and
-where each one came from. Unmute lists names and never values: no secret value
-reaches any emitted file or any command in the runbook.
+`refund` authenticates with a bearer token, so this package needs one Vault
+entry: `REFUND_API_TOKEN`. The emitted runbook prints it in a table with the line
+of the package that asked for it. Unmute lists names and never values: no secret
+value reaches any emitted file or any command in the runbook.
+
+`agent.yaml` also declares `REFUND_URL` under `secrets:`, and that one does *not*
+become a Vault entry. The livekit and pipecat targets read the whole URL from the
+environment at run time; SLNG stores a literal `base_url` in the tool body
+instead, because its URL validator rejects a token in the host. Same package,
+two mechanisms, and only the token is a secret on SLNG.
+
+`unmute deploy` checks that same list against your organisation before it
+compiles anything, and offers to create whatever is missing. It does not prompt
+for the value itself: it runs `voiceai secret create`, which masks its own
+input, so the value never passes through unmute at all.
+
+## What deploy checks before it writes anything
+
+The push refuses a body whose references do not resolve, and it refuses them all
+at once. `unmute deploy` asks your organisation the same questions first, before
+it compiles, so a refusal costs nothing and names the line of the package that
+caused it:
+
+- **`builtin:` tools.** This package's `end_call` has to exist in your
+  organisation, and it does: SLNG lists its curated capabilities as ordinary
+  tools. The name checked is **the tool file's own name**, because that is what
+  the emitted reference carries. `tools/hang_up.yaml` selecting
+  `builtin: end_call` emits a reference to `hang_up`, which resolves nowhere.
+- **MCP servers and their tools.** Checked by name, against the server's last
+  stored capability probe. That probe is not a live call, so a healthy server can
+  still be unreachable.
+- **Vault secrets and variables.** Checked for existing *and* for holding a
+  value. An entry created without one is reported differently from a missing
+  name, because the fix is different.
+
+`check_order` and `refund` are never reported as missing. The push creates them,
+so their absence is the expected state of a first deploy.
+
+Run [`unmute resources`](https://unmute.mintlify.app/reference/cli/resources) to
+see what your organisation offers before you write a name.
+
+## Giving it a phone number
+
+This package declares no `connection:`, and the slng target refuses one. Carrier
+state is not a package field here: the compiled body is portable, and which
+number answers is an operator's choice about one deployment.
+
+After a successful push, `unmute deploy` says which number reaches the agent. If
+none does and an inbound trunk is free, it offers to attach one, and does so only
+if you pick a number at a terminal. Buying the number and configuring the trunk
+stay in the SLNG dashboard; this chooses among trunks that already exist.
 
 ## Regions
 

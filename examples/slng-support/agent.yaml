@@ -4,19 +4,42 @@
 # operate. `unmute compile --target slng` writes a deployment body and a runbook
 # into build/slng/, and the voiceai CLI pushes them.
 #
-# Every tool here is a builtin, which is deliberate. A builtin names a
-# capability SLNG already owns, so this package needs no tool bodies created
-# first and no names resolved to identifiers: the emitted agent.json is postable
-# exactly as written.
+# This package exercises all four tool kinds SLNG runs, because they behave
+# differently at deploy time and the difference is what catches people:
+#
+#   builtin (end_call)     a capability SLNG already owns. It must ALREADY EXIST
+#                          in your organisation, and it is referenced by the
+#                          tool FILE's name, not by the `builtin: id`.
+#   code (check_order)     Python SLNG runs in its own sandbox. The push CREATES
+#                          it. No internet access, and it cannot publish until a
+#                          sample run proves it.
+#   webhook (search_places_text)
+#                          an HTTPS call to your own endpoint. The push CREATES
+#                          it. This is the one that may reach the network, and
+#                          the one that carries a Vault secret.
+#
+#   mcp (web_search)       tools an MCP server your organisation has already
+#                          attached offers. The server must ALREADY EXIST; the
+#                          push resolves it by name and copies each tool's
+#                          schema hash from the snapshot SLNG stores for it, so
+#                          nothing connects to the server at deploy time. The
+#                          name in `server:` is the server's name on the
+#                          platform, which is not a legal tool name here: read
+#                          it with `voiceai mcp list`.
+#
+# It also declares a phone channel, so a real call can reach it. Which NUMBER
+# reaches it is deliberately not in this file: see targets.yaml.
 #
 # What this package leaves out, and why:
 #   - a `turn:` section: SLNG owns its own turn taking, so a bound turn model
 #     reaches nothing
 #   - tasks, task groups, agent transfers: SLNG's agent carries one prompt
 #   - inactivity, max_duration, interruption thresholds: no field to hold them
-#   - tracing, capacity: unmute instruments and sizes no process here
+#   - tracing: unmute instruments no process here, so there is nothing to
+#     instrument (`capacity:` IS used, at the bottom of this file: SLNG sizes
+#     the deployment from it)
 #
-# All five are refused at validate rather than dropped, so `unmute validate
+# All four are refused at validate rather than dropped, so `unmute validate
 # --target slng` tells you before anything is written.
 
 version: 1
@@ -37,6 +60,9 @@ agents:
     model: reasoning
     voice: front_desk
     tools:
+      - check_order
+      - search_places_text
+      - web_search
       - end_call
 
 variables:
@@ -65,7 +91,18 @@ models:
       model: slng/deepgram/nova:3-en
       language: en
 
+# Every environment variable the package names, declared once. On SLNG these
+# become Vault entries: `unmute deploy` checks each one exists and holds a
+# value, and offers to create the ones that do not.
+secrets:
+  - SLNG_TOOL_RENDER
+  - SEARCH_PLACES_URL
+  - FIRECRAWL_MCP_URL
+
 tools:
+  - web_search
+  - check_order
+  - search_places_text
   - end_call
 
 conversation:
@@ -79,5 +116,21 @@ conversation:
     enabled: true
 
 channels:
+  # Browser, for `unmute dev` and for SLNG's own web session.
   web:
     kind: realtime_audio
+  # Phone. Declaring the channel is what makes the agent answerable by a
+  # carrier; it does not choose a number. `unmute deploy` offers to attach one
+  # of your existing trunks after a successful push.
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: false
+
+# Required once a telephony or code target is in play, because SLNG sizes the
+# deployment from it. These are your numbers, not a default worth copying.
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  peak_starts_per_second: 0.5
+  avg_session_duration: 4m

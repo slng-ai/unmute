@@ -430,15 +430,20 @@ func Default() Table {
 			// lands somewhere real.
 			FieldToolOutput: field(allow(Slng)),
 			FieldToolLocal:  field(allow(Slng)),
-			// Warn, not core: unmute writes {server, tool} by name, and SLNG also
-			// wants observed_schema_hash, which is a sha256 over schemas read from
-			// the live server's own tools/list response (mcp_server.py:197-236). No
-			// name-to-id lookup supplies it, so the push step has to connect. That is
-			// a caveat on a working feature, not a refusal, and the author has to
-			// hear it before the first push rather than after.
-			FieldToolMCP: field(
-				warn(Slng, "slng target writes an MCP reference by name and the push step must connect to the server to finish it: the schema hash SLNG requires is read from the server's own tool list and cannot be computed at compile time"),
-			),
+			// Core since voiceai 0.1.16, verified against a live deploy 2026-09-01.
+			// unmute writes {server, tool} by name; the push resolves the name to
+			// server_id and copies each tool's observed_schema_hash out of the
+			// platform's OWN stored capability snapshot, so nothing connects to the
+			// server. This row warned for a year that the push had to reach the
+			// server and that a package with an mcp: tool could not deploy. Both
+			// were wrong, and the second was wrong in the direction that stops
+			// people trying.
+			//
+			// What remains is a freshness window, not a compile-time fact: the
+			// backend refuses a snapshot older than mcp_capability_ttl_seconds
+			// (300s) or one whose probe failed. Neither is knowable from a package,
+			// and both are visible in the account, so the preflight owns them.
+			FieldToolMCP: field(allow(Slng)),
 			// Scope, not kind: Pipecat emits MCP sources on an agent, but a
 			// Flows node advertises only the function schemas it lists, and
 			// pipecat's MCPClient exposes no per-tool handler to wrap in one.
@@ -519,7 +524,7 @@ func Default() Table {
 			FieldToolAnnounceTask: field(allow(Slng)),
 			FieldOutbound: field(
 				deny(Pipecat, "the Pipecat driver does not emit outbound calling yet"),
-				deny(Slng, "slng target creates no carrier state and writes no trunk: place outbound calls from the SLNG dashboard or its API against a trunk configured there, or compile to livekit which dials from the agent"),
+				deny(Slng, "slng target writes no trunk and dials nothing from a package: place outbound calls from the SLNG dashboard or its API against a trunk configured there, or compile to livekit which dials from the agent"),
 			),
 			FieldVoicemail: field(
 				deny(Pipecat, "the Pipecat driver does not emit voicemail handling yet"),

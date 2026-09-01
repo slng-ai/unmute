@@ -541,18 +541,21 @@ package because it is operator input, like `.env`: what counts as a safe set of
 arguments depends on the environment and the real dependencies, not on the agent
 definition. Those two are the only things a recompile preserves inside `build/`.
 
-A tool on slng has **no network access at all** — the handler runs in SLNG's
+A tool on slng has **no network access at all**: the handler runs in SLNG's
 sandbox, in the region serving the call, which is why it is fast and why a
-handler that must reach a service has to be a `webhook:` tool. Today that whole
-path is unusable: the only slng packages that publish are the ones whose tools
-are all builtins, like `examples/slng-support`, so a package that needs a tool of
-its own belongs on pipecat or livekit. An MCP reference is
-the one thing the push cannot finish — the schema hash SLNG wants is read off the
-live server — so attach MCP servers in the dashboard.
+handler that must reach a service has to be a `webhook:` tool. A `local:` or
+`webhook:` tool needs a sample before it can publish, and `examples/slng-support`
+now ships code, webhook and mcp tools and deploys today.
+
+An MCP reference resolves by name at push time: the push looks up the server's
+`server_id` and copies each tool's `observed_schema_hash` out of the platform's
+own stored capability snapshot. Nothing connects to the server. The one caveat
+is a stale or unhealthy snapshot, which the push refuses; refresh it first with
+`voiceai mcp run <server>`.
 
 A refused deploy has changed nothing, and reports every problem together with the
 dashboard page that fixes each: `vault missing`, `sample missing`,
-`tool unresolved`, `mcp unsupported`, `agent ambiguous`.
+`tool unresolved`, `agent ambiguous`.
 
 The pushed agent is called **`<name>-<target>`**, so a package named
 `acme-support` on the target below pushes `acme-support-slng`. Check the name is
@@ -592,7 +595,7 @@ validate, by name, with what to do instead:
 | `tracing:` | unmute instruments no process here |
 | more than one `deployment_region` | SLNG takes exactly one |
 | `variables` with `source: conversation` | nothing captures a value mid-call |
-| outbound calling, `on_voicemail`, a warm human transfer | unmute creates no carrier state on SLNG |
+| outbound calling, `on_voicemail`, a warm human transfer | a package declares no carrier state on SLNG; `unmute deploy` attaches an existing trunk after a push |
 
 A tool named `end_call`, `detected_answering_machine`, `get_current_datetime`,
 `get_user_phone_number` or `set_runtime_variables` is refused: SLNG keeps those
@@ -624,7 +627,12 @@ it from an environment. Keep `url_env` beside it for the code targets; each
 target reads the field it needs and ignores the other.
 
 An `mcp:` tool must list its tools under `mcp.tools`: SLNG attaches one
-reference per tool, and unmute cannot ask the server what it offers.
+reference per tool, and there is no "whole server" attachment to write.
+
+Set `mcp.server` when the server's name on the platform is not a legal tool file
+name, which is usual: `firecrawl-mcp-2` carries dashes and a tool file name is
+lowercase snake_case. Read the names with `voiceai mcp list`, and the tools each
+one offers with `voiceai mcp tools <server>`.
 
 ### Vault names and Vault tokens
 

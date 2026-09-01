@@ -21,11 +21,14 @@ SLNG route each call itself{{end}}.
 {{if .NeedsVault -}}
 ## 1. Create these Vault entries first
 
-SLNG reads these from its own secret store. Unmute knows the names and can
-create none of them, and it has never seen a value: no secret value appears in
-any file in this directory or on any command line below.
+SLNG reads these from its own secret store. No secret value appears in any file
+in this directory or on any command line below, and unmute has never seen one.
 
-Create each one in the SLNG dashboard before you push. A name is {{.NameShape}}.
+You do not have to create these by hand. `unmute deploy` checks this exact list
+against your organisation before it writes anything, and offers to create any
+that are missing: it hands the prompt to `voiceai`, which masks what you type,
+so the value never passes through unmute. Create them in the SLNG dashboard
+instead if you prefer. A name is {{.NameShape}}.
 
 {{if .VaultSecrets -}}
 **Secrets** — credentials a tool authenticates with.
@@ -151,13 +154,15 @@ Each also needs a sample. Write one per tool as
 directory the way `.env` is.
 {{end -}}
 {{if .MCPRefs -}}
-Each MCP reference is the one thing the push **cannot** finish. SLNG requires a
-schema hash computed over the tool's input and output schemas **as the live
-server reports them**, so completing the reference means connecting to the MCP
-server. Attach these in the SLNG dashboard instead:
+Each MCP reference is written by name. The push resolves the server name to its
+id and copies each tool's schema hash from the snapshot SLNG already stores for
+that server, so nothing here connects to the server:
 
 {{range .MCPRefs}}- {{.}}
 {{end}}
+SLNG refuses a snapshot that is unhealthy or more than five minutes old. If the
+push reports that, refresh it with `voiceai mcp run <server>` and push again.
+
 {{end -}}
 {{else -}}
 ### This body needs nothing resolved
