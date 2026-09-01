@@ -282,12 +282,16 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 			"class Userdata:", "class Booking(", "class CustomerVerification(",
 			"class ComplaintSpecialist(", "class _TaskTransfer(",
 			"async def record_complaint(", "async def to_complaints(",
+			// The smoke scripts drive the pre-fetch directly, because that is the
+			// one part of it a conversation cannot reach: an entry that skips looks
+			// exactly like an entry that ran, from outside.
+			"async def _prefetch(",
 		}},
 		{ir.ProviderPipecat, "bot.py", []string{
 			"class State:", "class ConciergeAgent(", "class ComplaintSpecialistAgent(",
 			"def _flow_tool_cancel_booking(", "def _flow_tool_check_availability(",
 			"def _flow_tool_create_booking(", "def _flow_tool_find_or_create_customer(",
-			"def _flow_tool_get_current_date(", "def _flow_tool_list_bookings(",
+			"def _flow_tool_list_bookings(", "async def _prefetch(",
 			"_manage_booking_active_step", "_manage_booking_results",
 			"_manage_booking_snapshot", "_manage_booking_finish_booking",
 			"_manage_booking_transfer_booking_to_complaints",
@@ -354,6 +358,12 @@ func TestSmokeStubbedNamesExistInTheEmittedModule(t *testing.T) {
 		"LocalSmartTurnAnalyzerV3": true,
 		"LLMContextAggregatorPair": false,
 		"WorkerRunner":             false,
+		// The pre-fetch smoke scripts replace the pre-fetched lookup with a slow
+		// stub and then with an exploding one, to drive the budget and the except
+		// arm. Both stubs take **kwargs, so the emitted call has to pass some: a
+		// generator that started calling it positionally would make both stubs
+		// pass for the wrong reason.
+		"tools.look_up_customer.look_up_customer": true,
 	} {
 		if !strings.Contains(emitted, name) {
 			t.Errorf("bot.py no longer names %q, so the smoke script that patches bot.%s patches nothing", name, name)

@@ -63,18 +63,39 @@ func loweredInject(tool ir.Tool, variables map[string]ir.Variable, stateExpr str
 	return values, neededVars(tool, variables)
 }
 
+// oneLine collapses every run of whitespace to a single space, for text emitted
+// as a trailing `# comment` on one line.
+//
+// A variable description is free prose and an author may well write it as several
+// paragraphs, which is what the folded YAML block invites. Rendered straight into
+// a comment slot, the second paragraph starts a new line with no `#` in front of
+// it and the emitted module stops being Python: the failure is a syntax error in
+// generated code, hundreds of lines from the description that caused it.
+func oneLine(text string) string { return strings.Join(strings.Fields(text), " ") }
+
 // neededVars collects the variables a tool's inject values and path read that
 // could still be unset when the model calls it, in name order. Two kinds are
 // left out: one carrying a default (it always has a value), and a system one
 // (B2 — a refusal tells the model to go and ask, and nobody can be asked for a
 // value the runtime owns; a route that owns it fails at session start instead).
+//
+// One kind is deliberately kept in despite carrying a default: a variable
+// declaring `confirm:`. It has a value the moment the pre-fetch runs, and that
+// value is a proposal rather than a fact, so a tool that injected it before the
+// caller agreed would list somebody else's bookings or record a complaint against
+// somebody else's record. The emitted refusal is what stops that, and it stops it
+// wherever the tool is attached, which is why this needs no walk over the control
+// graph to work out whether the tool is reachable unguarded.
 func neededVars(tool ir.Tool, variables map[string]ir.Variable) []neededVar {
 	seen := make(map[string]bool)
 	var needed []neededVar
 	collect := func(text string) {
 		for _, ref := range ir.TemplateRefs(text) {
 			variable, ok := variables[ref]
-			if !ok || seen[ref] || variable.Default != nil || ir.IsSystemSource(variable.Source) {
+			if !ok || seen[ref] || ir.IsSystemSource(variable.Source) {
+				continue
+			}
+			if variable.Default != nil && variable.Confirm == "" {
 				continue
 			}
 			seen[ref] = true

@@ -47,8 +47,8 @@ tool_names = (
     "check_availability",
     "create_booking",
     "find_or_create_customer",
-    "get_current_date",
     "list_bookings",
+    "look_up_customer",
     "modify_booking",
     "record_complaint",
 )
@@ -84,7 +84,7 @@ for _attribute in ("customers", "bookings", "complaints", "lock"):
 actions = []
 for tool_name in (
     "find_or_create_customer",
-    "get_current_date",
+    "look_up_customer",
     "check_availability",
     "create_booking",
     "list_bookings",
@@ -197,8 +197,14 @@ def run_context(userdata, call_id):
 async def create_then_cancel(userdata):
     ctx = run_context(userdata, "booking-finish")
     task = recording_task(agent.Booking)
-    current = await task.get_current_date(ctx)
-    requested = (date.fromisoformat(current["date"]) + timedelta(days=1)).isoformat()
+    # The date is pre-fetched now, not asked for: driving the block here is what
+    # proves it resolves in the emitted module rather than only in a Go string,
+    # and that the value it lands is the one the booking step then works from.
+    await agent._prefetch(userdata, None)
+    assert userdata.booking_date, "the pre-fetch landed no booking_date"
+    requested = (
+        date.fromisoformat(userdata.booking_date) + timedelta(days=1)
+    ).isoformat()
     available = await task.check_availability(ctx, date=requested, service="haircut")
     slot_id = available["slots"][-1]["slot_id"]
     created = await task.create_booking(
@@ -297,8 +303,11 @@ async def main():
     userdata = agent.Userdata(customer_phone=customer["customer_phone"])
     booking_id, slot_id = await create_then_cancel(userdata)
     booking_actions = [name for name, _, _ in actions]
+    # look_up_customer appears because the pre-fetch runs it: this journey sets a
+    # number on the state before driving the block, so the profile entry has an
+    # input and resolves. A journey with no number sees it skip.
     assert booking_actions == [
-        "get_current_date",
+        "look_up_customer",
         "check_availability",
         "create_booking",
         "list_bookings",
@@ -401,8 +410,7 @@ async def booking_flow(worker, context, *, action, booking_id=""):
     # flow_manager.worker.queue_frame before doing its work (2026-08-23,
     # "Speak before a tool runs, on both code drivers"). worker.queue_frame is
     # already a no-op from quiet(worker), so a flow_manager stand-in exposing
-    # just that worker is enough; get_current_date has no announce and never
-    # touches flow_manager at all.
+    # just that worker is enough.
     flow_manager = SimpleNamespace(worker=worker)
     worker._manage_booking_results = {}
     worker._manage_booking_active_step = "booking"
@@ -411,9 +419,12 @@ async def booking_flow(worker, context, *, action, booking_id=""):
         context.tools,
     )
     if action == "create":
-        current = await bot._flow_tool_get_current_date({}, None)
+        # Same as the LiveKit side: the date is pre-fetched, and driving the block
+        # here is what proves the emitted Pipecat module resolves it.
+        await bot._prefetch(worker.state, None)
+        assert worker.state.booking_date, "the pre-fetch landed no booking_date"
         requested = (
-            date.fromisoformat(current["date"]) + timedelta(days=1)
+            date.fromisoformat(worker.state.booking_date) + timedelta(days=1)
         ).isoformat()
         available = await bot._flow_tool_check_availability(
             {"service": "haircut", "date": requested}, flow_manager
@@ -564,8 +575,11 @@ async def main():
     )
     assert cancelled_id == booking_id
     booking_actions = [name for name, _, _ in actions]
+    # look_up_customer appears because the pre-fetch runs it: this journey sets a
+    # number on the state before driving the block, so the profile entry has an
+    # input and resolves. A journey with no number sees it skip.
     assert booking_actions == [
-        "get_current_date",
+        "look_up_customer",
         "check_availability",
         "create_booking",
         "list_bookings",

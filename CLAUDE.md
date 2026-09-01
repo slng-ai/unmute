@@ -24,6 +24,15 @@ Unmute is written in Go, so you maintain **Go code**, but you also write some Py
 ## IR
 Go structs are the schema source for their own surface: `internal/spec` derives the unresolved authoring schema, while `internal/ir` derives the resolved/debug schema. **Do not hand-author `.json` schema files.** Flow: `spec.Load` → `ir.Build` → `ir.Validate` → `generate.Generate`.
 
+### No dictionaries in the authoring surface
+**A new authored field is a list, never a map.** An entry with a name carries the name as a field (`- name: caller`); a mapping from one name to one value is a list whose every item holds exactly one key (`- customer_phone: result.value`), decoded by an `UnmarshalYAML` into a struct so no `map[...]` reaches the Go type. Two reasons, and the second is the one that bites: a map has no order a reader can see, so a file that lists three things says nothing about which runs first; and a map field cannot carry a per-entry comment where anybody will find it.
+
+This is a **ratchet**, not a migration. Every map field that exists today is on the allowlist in `internal/spec/no_dictionaries_test.go`, in two sections that mean different things:
+- **Permanent.** `input:`, `output:`, `result:` and `params:` are JSON Schema or provider passthrough. A JSON Schema object *is* a dictionary; converting it would stop it being one. These never move.
+- **Debt.** The rest carry a one-line reason and a "migrate when". This section may shrink. It must never grow.
+
+Adding a map-typed authored field fails `TestNoNewDictionaryInTheAuthoringSurface`, which names the field and says to write a list. `internal/ir` is out of scope: it is the resolved shape, not something a person writes.
+
 ## Testing
 `make test` (`go test -race ./...`) runs L1–L3 and needs **zero Python**:
 - L1 unit (pure logic, table-driven) · L2 in-process command tests (real tree, capture output) · L3 golden files (`-update` to regenerate).
@@ -44,6 +53,18 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | errors wrapped with `%w` and matched with `errors.Is`/`As`, never `==` | `errorlint` |
 | L1–L3 green, zero Python, no data races | CI `test`, `go test -race ./...` |
 | no color literal outside `internal/style` | `internal/style/style_test.go` |
+| no new map-typed field in the authoring surface; a new field is a list, and every existing map is allowlisted as permanent (JSON Schema passthrough) or as debt that may shrink and never grow | `internal/spec/no_dictionaries_test.go` (`TestNoNewDictionaryInTheAuthoringSurface`) |
+| a pair-list item holding two keys or none is refused at decode, with its line, because that is what a dropped indent produces and what a `map[string]string` swallowed | `internal/spec/pair_test.go` |
+| a package declaring no `prefetch:`, no `confirm:` and no delegate `announce:` emits byte-identical output; the emitted block, its constants and the unconfirmed set appear only when authored | `internal/generate/prefetch_test.go` (`TestPrefetchEmitsNothingForAPackageThatDeclaresNone`) |
+| a pre-fetch runs at the seam on both targets, in **authored order**, and never past its budget or into a raise | `internal/generate/prefetch_test.go`, proven at L4 by `TestSmokePrefetchOutcomes` driving resolved, skipped, timed-out and raised through one module |
+| a shared emitted log line carries no `%s` and no `.format()`: LiveKit logs through stdlib `logging` and Pipecat through loguru, so either style prints literally on the other target | `internal/generate/prefetch_test.go` (`TestPrefetchLogsCarryNoLibrarySpecificPlaceholder`) |
+| an entry reading a value only a later entry assigns is refused, naming both entries and which to move | `internal/ir/prefetch_test.go` (`TestBuildPrefetchRefusesABackwardsOrder`) |
+| a value carrying `confirm:` satisfies no gate and renders in no prompt but its confirming step's; the mark is cleared through `getattr` so a path that skipped the pre-fetch cannot raise | `internal/ir/prefetch_test.go`, `internal/generate/prefetch_test.go`, `internal/generate/guard_test.go` |
+| a `prefetch:` tool must declare `read_only: true`, and the refusal says a pre-fetch would write on every call including wrong numbers | `internal/ir/prefetch_test.go` (`TestBuildPrefetchRefusesTheSource`) |
+| a clock with no `timezone:` is refused, and the message says a container clock is UTC | `internal/ir/prefetch_test.go`, and the zone resolving in the emitted image is `TestSmokePrefetchZoneResolves` |
+| `--source` seeds a call fact and reaches the container; `--var` keeps its exact refusal | `internal/cli/dev_vars_test.go`, `internal/generate/prefetch_test.go` (`TestPrefetchSeedReachesTheContainer`) |
+| every prompt naming a pre-fetched value reads as a whole sentence when that value is empty | `internal/generate/prefetch_test.go` (`TestPrefetchedPromptsReadWholeWithEveryValueEmpty`) |
+| a delegate `announce:` is spoken after the guard, so a refused step stays silent, and a delegate with none emits nothing | `internal/generate/delegate_announce_test.go` |
 | every direct dependency is on the allowlist | `internal/cli/deps_test.go` |
 | no declaration is reachable only from its own definition | `internal/cli/reachability_test.go` (`deadcode -test ./...`) |
 | every declared capability `Field` constant has a row in the table | `internal/target/table_test.go` (`TestEveryFieldConstantHasARow`) |

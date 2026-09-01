@@ -238,6 +238,30 @@ schema by default.
 the call uses them without asking again. Declare each of those variables at the
 top level.
 
+### Covering the entry with `announce:`
+
+Entering a step costs two model requests, and they were silence. A delegate takes
+one fixed sentence, spoken as the step is entered:
+
+```yaml
+delegates:
+  check_customer:
+    task: customer_record
+    when: Identify the caller before handling an appointment request.
+    announce: One moment while I check.
+```
+
+Same field as a tool's, same rules: one fixed sentence, spoken word for word.
+**Not spoken when the step is refused for unmet prerequisites**, which matters:
+a caller who hears "one moment while I check" and is then asked for a phone number
+has been told something untrue.
+
+Do not put one on a step whose first tool already announces. Both lines queue, and
+two in a row read as a stutter. The step's line covers two model requests and the
+tool's covers a request body, so the step's is usually the one worth keeping.
+
+Denied on the `slng` target, which writes one agent with no steps.
+
 ## Guarding a step
 
 A step that needs a value the conversation has not collected yet declares

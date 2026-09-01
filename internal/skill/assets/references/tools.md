@@ -68,6 +68,7 @@ also the list of what you could have written.
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` and `knowledge:` |
 | `announce` | no | `webhook:`, `local:` and `knowledge:` only |
+| `read_only` | no | `webhook:` and `local:` only, and only useful with `prefetch:` |
 
 An `mcp:` file is the block and nothing else, because the server owns each
 tool's contract. A `builtin:` file needs no `description` or `input`, because
@@ -501,12 +502,13 @@ Use `inject` for anything the caller should not be able to change: the customer
 id, the channel, a tenant. A parameter in `input` is a parameter the model can
 invent.
 
-## The three behaviour fields
+## The behaviour fields
 
 ```yaml
 interruption: provider_default
 effect: returns_data
 announce: Let me check the calendar.
+read_only: true
 ```
 
 | Field | Values | Default | Meaning |
@@ -514,6 +516,22 @@ announce: Let me check the calendar.
 | `interruption` | `provider_default`, `continue`, `cancel` | `provider_default` | what happens to the call if the caller speaks while the tool runs |
 | `effect` | `returns_data`, `ends_conversation` | `returns_data` | whether the conversation continues after the tool |
 | `announce` | any one sentence | absent, nothing is spoken | a fixed line the agent speaks as the tool starts, so a slow call is not silence |
+| `read_only` | `true` | absent, which reads as false | your promise that this tool writes nothing, which a `prefetch:` entry requires before it may run the tool |
+
+### `read_only:` is a promise, not a guarantee
+
+**The compiler cannot check it.** It checks that you made it. Nothing reads your
+handler or your endpoint to see whether it writes; `read_only: true` is a claim
+about a tool, and a wrong claim compiles.
+
+It is required before `prefetch:` may run a tool, because a pre-fetch runs unasked
+on every call: a tool that writes would write on every call, wrong numbers
+included. So a lookup that creates a record when it finds none is exactly the tool
+this field must not be put on, however convenient. Write a reading tool beside it
+and pre-fetch that one.
+
+Declaring it on a tool no `prefetch:` names is a warning: the declaration reaches
+nothing.
 
 All three are honoured differently per target. Pipecat maps `interruption` onto
 its own cancel-on-interruption setting. LiveKit runs tools to completion, so a

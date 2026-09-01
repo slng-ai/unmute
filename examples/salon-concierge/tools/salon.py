@@ -11,6 +11,7 @@ import threading
 import types
 from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 # ponytail: worker-local state behind one lock. `setdefault` is the whole
 # race-free part: dict.setdefault is atomic under the GIL, so whichever copy
@@ -20,6 +21,11 @@ from uuid import uuid4
 # lock becomes that service's transaction.
 _fresh = types.ModuleType("unmute_salon_state")
 _fresh.customers = set()
+# One seeded record, so the pre-fetched read-back has something to read back and
+# a demo call from a known number behaves differently from one from a stranger.
+# Invented, and the only invented data in this file: a real salon's store would
+# already hold names, and look_up_customer would read them from it.
+_fresh.names = {"34680830464": "Robin Vega"}
 _fresh.bookings = {}
 _fresh.complaints = {}
 _fresh.lock = threading.Lock()
@@ -27,6 +33,10 @@ _state = sys.modules.setdefault("unmute_salon_state", _fresh)
 
 _SERVICES = {"haircut", "hair-color", "blowout"}
 _TIMES = ("09:00", "11:30", "15:00")
+# Kept in step with `timezone:` in agent.yaml by hand. Two owners for one fact is
+# not ideal; a handler receives no compiler-resolved values, so the alternative is
+# an injected variable, which is worth doing the day a second handler needs it.
+_SALON_TIMEZONE = "Europe/Madrid"
 
 
 def _now():
@@ -34,8 +44,15 @@ def _now():
 
 
 def _booking_today() -> date:
-    """Return the calendar date used by booking validation."""
-    return date.today()
+    """Return the calendar date used by booking validation, in the salon's zone.
+
+    Not `date.today()`, which reads the container clock. That clock is UTC, so a
+    booking taken at 23:30 in Madrid landed on the following day and every date
+    check here disagreed with the caller by one. The zone matches `timezone:` in
+    agent.yaml, which is also what the pre-fetched {{booking_date}} is read in, so
+    the prompt and the validation agree about what day it is.
+    """
+    return datetime.now(ZoneInfo(_SALON_TIMEZONE)).date()
 
 
 def _normalize_phone(phone):
@@ -129,9 +146,26 @@ def list_bookings(customer_phone):
     return {"bookings": sorted(rows, key=lambda row: row["start_time"])}
 
 
-def get_current_date() -> dict[str, str]:
-    """Return the current booking date for relative-date requests."""
-    return {"date": _booking_today().isoformat()}
+def look_up_customer(phone):
+    """Read the record a number belongs to. Writes nothing.
+
+    This is the whole difference from find_or_create_customer, and the reason both
+    exist: a prefetch runs unasked on every inbound call, so a tool that writes
+    would create a customer record for every wrong number that ever rang. Nothing
+    below mutates _state, and that is what `read_only: true` in the tool file is
+    promising.
+
+    An unknown number is not an error. It returns an empty name, the prefetch
+    assigns that empty value, and the verification step asks for a number exactly
+    as it did before any of this existed.
+    """
+    normalized_phone = _normalize_phone(phone)
+    if not normalized_phone:
+        return {"name": "", "status": "unknown"}
+    with _state.lock:
+        name = _state.names.get(normalized_phone, "")
+        known = normalized_phone in _state.customers or bool(name)
+    return {"name": name, "status": "existing" if known else "unknown"}
 
 
 def check_availability(service, date):
@@ -334,8 +368,20 @@ def _demo():
             assert len({result["customer_phone"] for result in concurrent}) == 1
             assert [result["status"] for result in concurrent].count("created") == 1
 
-    current_date = get_current_date()["date"]
-    assert current_date == _booking_today().isoformat()
+    # look_up_customer reads and never writes, which is the promise read_only:
+    # true makes and the reason a prefetch may run it on every inbound call.
+    before = (set(_state.customers), dict(_state.names))
+    seeded = look_up_customer("+34 680 830 464")
+    assert seeded == {"name": "Robin Vega", "status": "existing"}
+    assert look_up_customer("+1 555 010 0000") == {"name": "", "status": "unknown"}
+    assert look_up_customer("nonsense") == {"name": "", "status": "unknown"}
+    assert (set(_state.customers), dict(_state.names)) == before, "look_up_customer wrote"
+
+    # The clock reads the salon's own zone, not the container's. Asserted against
+    # the zone rather than against date.today(), which is the bug this replaced:
+    # the two agree for most of the day and differ exactly when it matters.
+    current_date = _booking_today().isoformat()
+    assert current_date == datetime.now(ZoneInfo(_SALON_TIMEZONE)).date().isoformat()
     first_date = (date.fromisoformat(current_date) + timedelta(days=1)).isoformat()
     second_date = (date.fromisoformat(current_date) + timedelta(days=2)).isoformat()
     assert check_availability("haircut", "not-a-date")["status"] == "invalid"

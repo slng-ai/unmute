@@ -52,7 +52,20 @@ type AgentFile struct {
 	Listen    string              `json:"listen,omitempty" yaml:"listen,omitempty"`
 	Turn      string              `json:"turn,omitempty" yaml:"turn,omitempty"`
 	Variables map[string]Variable `json:"variables,omitempty" yaml:"variables,omitempty"`
-	Secrets   []string            `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	// Timezone is the IANA zone every clock reading in this package is taken in.
+	// Required before a clock can be pre-fetched, and required rather than
+	// defaulted because the wrong answer here is silent: a container clock is
+	// UTC, so a salon in Spain taking a booking for "tomorrow" at 23:30 local
+	// would confidently name the wrong day. Package-level, beside Variables,
+	// because it is a fact about the business rather than about one target.
+	Timezone string `json:"timezone,omitempty" yaml:"timezone,omitempty"`
+	// Prefetch names the facts resolved once per call, before the greeting, and
+	// where each one lands. An ordered list: entries resolve top to bottom, so
+	// the order the file shows is the order the agent uses, and an entry reading
+	// a value a later entry assigns is refused rather than quietly reordered
+	// (CLAUDE.md, no dictionaries in the authoring surface).
+	Prefetch []Prefetch `json:"prefetch,omitempty" yaml:"prefetch,omitempty"`
+	Secrets  []string   `json:"secrets,omitempty" yaml:"secrets,omitempty"`
 	// Destinations maps a symbolic name a control escalates to onto the name of
 	// an environment variable holding the number. A destination is who this agent
 	// escalates to, which is the same desk whichever carrier reaches it, so it
@@ -247,10 +260,41 @@ type Upstream struct {
 }
 
 type Variable struct {
-	Type        string `json:"type" yaml:"type"`
-	Default     any    `json:"default,omitempty" yaml:"default,omitempty"`
-	Source      string `json:"source,omitempty" yaml:"source,omitempty"`
+	Type    string `json:"type" yaml:"type"`
+	Default any    `json:"default,omitempty" yaml:"default,omitempty"`
+	Source  string `json:"source,omitempty" yaml:"source,omitempty"`
+	// Confirm names the step that must hear the caller agree before anything acts
+	// on this value. Until then the value satisfies no prerequisite and renders
+	// only in that step's own prompt. Empty means the value is settled the moment
+	// it arrives, which is true of every variable that existed before this field.
+	Confirm     string `json:"confirm,omitempty" yaml:"confirm,omitempty"`
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+}
+
+// Prefetch is one entry under `prefetch:`. Exactly one source key is present:
+// `clock:` reads the package clock, `source:` reads a fact the call itself
+// carries, and `tool:` runs one already-declared read-only tool. `args:` belongs
+// to a `tool:` entry and nowhere else.
+//
+// The three source keys are plain strings rather than pointers, matching
+// Handoff.To: each carries its own value, so an absent key is the empty string
+// and Build refuses zero or more than one. Delegate.Task needs a pointer only
+// because it must tell an absent key from one written empty; nothing here does.
+//
+// Source is the field that keeps a variable from ever having to declare a
+// `source:` its target cannot supply, which is what leaves the existing
+// per-route refusal exactly as strict as it is today.
+type Prefetch struct {
+	// Name is a field, not a map key, and that is the whole reason this block has
+	// an order a reader can see. It is also what makes a per-entry comment land
+	// somewhere a reader will find it, and what lets a refusal or a log line say
+	// which entry it means.
+	Name   string `json:"name" yaml:"name"`
+	Clock  string `json:"clock,omitempty" yaml:"clock,omitempty"`
+	Source string `json:"source,omitempty" yaml:"source,omitempty"`
+	Tool   string `json:"tool,omitempty" yaml:"tool,omitempty"`
+	Args   []Pair `json:"args,omitempty" yaml:"args,omitempty"`
+	Assign []Pair `json:"assign,omitempty" yaml:"assign,omitempty"`
 }
 
 // Secret declares one runtime environment value the package needs. The map key
@@ -312,9 +356,18 @@ type TransferContext struct {
 // which no struct can express, so the check survives in Build and needs to tell
 // an absent key from one written empty.
 type Delegate struct {
-	Task     *string           `json:"task,omitempty" yaml:"task,omitempty"`
-	Group    *string           `json:"group,omitempty" yaml:"group,omitempty"`
-	When     string            `json:"when,omitempty" yaml:"when,omitempty"`
+	Task  *string `json:"task,omitempty" yaml:"task,omitempty"`
+	Group *string `json:"group,omitempty" yaml:"group,omitempty"`
+	When  string  `json:"when,omitempty" yaml:"when,omitempty"`
+	// Announce is one fixed sentence the agent speaks as the step is entered, so
+	// the two model requests it takes to enter one are not silence. Not spoken
+	// when the step is refused for unmet prerequisites: the caller hearing "let
+	// me pull up the diary" and then being asked for a phone number is worse than
+	// hearing nothing.
+	//
+	// A plain string, matching Tool.Announce. Handoff.Announce is a *string for
+	// its own historical reason and is not the model to copy here.
+	Announce string            `json:"announce,omitempty" yaml:"announce,omitempty"`
 	Requires []string          `json:"requires,omitempty" yaml:"requires,omitempty"`
 	Assign   map[string]string `json:"assign,omitempty" yaml:"assign,omitempty"`
 }
@@ -418,6 +471,21 @@ type Tool struct {
 
 	Interruption string `json:"interruption,omitempty" yaml:"interruption,omitempty"`
 	Effect       string `json:"effect,omitempty" yaml:"effect,omitempty"`
+
+	// ReadOnly is the author's promise that this tool writes nothing. Required
+	// before a prefetch entry may run it, because a prefetch runs unasked on
+	// every call: a tool that writes would write on every call, wrong numbers
+	// included.
+	//
+	// Deliberately distinct from Effect, which describes what the tool does to
+	// the conversation rather than what it does to data. The compiler cannot
+	// check either claim, so this is a declaration and not a guarantee, and both
+	// the docs and the skill say so in those words.
+	//
+	// ponytail: a plain bool, not a pointer, for the same reason Announce is a
+	// plain string: both execution-block agreement tests read every pointer field
+	// on Tool as an execution block.
+	ReadOnly bool `json:"read_only,omitempty" yaml:"read_only,omitempty"`
 
 	// Announce is one fixed sentence the agent speaks as the tool starts, so a
 	// slow call is not silence. Legal on webhook and local only: every other

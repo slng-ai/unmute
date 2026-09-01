@@ -645,12 +645,12 @@ func TestBuildRefusesAFieldFromAnotherKind(t *testing.T) {
 			to:   "  to_billing:\n    task: collect\n    to: billing",
 			want: "task",
 		},
-		{
-			name: "announce on a delegate",
-			from: "\nhandoffs:\n  to_billing:",
-			to:   "\ndelegates:\n  run_it:\n    task: collect\n    announce: Please hold.\n\nhandoffs:\n  to_billing:",
-			want: "announce",
-		},
+		// `announce:` on a delegate used to sit here, refused as a field belonging
+		// to another kind. It is a delegate's own field now: entering a step costs
+		// two model requests, and covering that silence is the same job the tool
+		// and handoff announcements already do. The positive case lives in
+		// TestDelegateAnnounceIsAFieldOfItsOwn below, and both drivers assert it
+		// is spoken on entry and not on the refusal path.
 		{
 			name: "assign on an escalation",
 			from: "\nhandoffs:\n  to_billing:",
@@ -1092,6 +1092,43 @@ func addTask(pkg *packagespec.Package, name string) {
 		Instructions: "instructions.md",
 		Result:       map[string]any{"balance": "string"},
 		Context:      packagespec.TaskContext{History: "full"},
+	}
+}
+
+// TestDelegateAnnounceIsAFieldOfItsOwn. It used to be refused as a field
+// belonging to another kind, and it is a delegate's own field now: entering a
+// step costs two model requests, and covering that silence is the same job the
+// tool and handoff announcements already do.
+//
+// The whitespace assertion is not fussiness. Both drivers render the line through
+// a template partial, and a partial that emits a newline when the field is empty
+// moves every golden file in the tree, which is exactly what happened the first
+// time this shipped.
+func TestDelegateAnnounceIsAFieldOfItsOwn(t *testing.T) {
+	pkg := loadSafeCore(t)
+	task := packagespec.Task{Instructions: "instructions.md", Result: map[string]any{"ok": "boolean"}}
+	pkg.Agent.Tasks = map[string]packagespec.Task{"collect": task}
+	name := "collect"
+	pkg.Agent.Delegates = map[string]packagespec.Delegate{
+		"run_it": {Task: &name, When: "Collect the details.", Announce: "  One moment.  "},
+	}
+	def := pkg.Agent.Agents["intake"]
+	def.Delegates = []string{"run_it"}
+	pkg.Agent.Agents["intake"] = def
+
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delegate, ok := agent.Controls["run_it"].(*Delegate)
+	if !ok {
+		t.Fatalf("run_it is not a delegate: %T", agent.Controls["run_it"])
+	}
+	// One TrimSpace, matching buildTool: a blank or whitespace-only line reads as
+	// no announcement, so every driver sees a settled value and none of them has
+	// to decide what " " means.
+	if delegate.Announce != "One moment." {
+		t.Errorf("announce = %q, want the trimmed sentence", delegate.Announce)
 	}
 }
 

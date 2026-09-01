@@ -192,6 +192,13 @@ func (p *Package) readFile(name string) ([]byte, error) {
 
 func (p *Package) decode(name string, content []byte, out any) error {
 	if err := yaml.UnmarshalWithOptions(content, out, yaml.Strict()); err != nil {
+		// A pair list item knows its line but not its file, so the two are joined
+		// here. Everything else keeps goccy's own excerpt, which is better than
+		// anything we would write: it shows the line, its neighbours and a caret.
+		var pair *PairError
+		if errors.As(err, &pair) {
+			return fmt.Errorf("%s:%d: %s", name, pair.Line, pair.Msg)
+		}
 		return fmt.Errorf("%s: %s", name, redactSourceValues(err.Error()))
 	}
 	return nil

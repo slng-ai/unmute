@@ -108,6 +108,9 @@ already has been.
 A repeated refusal with nothing in the log is not this guard. Look for a model
 that is not calling the control at all.
 {{- end}}
+{{- if .NeedsPrefetch}}
+{{.PrefetchRunbook}}
+{{- end}}
 ## Turn taking
 
 Two numbers decide how long a caller waits, and they are not the same number.

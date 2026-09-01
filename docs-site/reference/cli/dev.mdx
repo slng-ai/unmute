@@ -13,13 +13,14 @@ Usage:
   unmute dev [agent-dir] [flags]
 
 Flags:
-      --bot-port string   host port for the local agent runtime (with Compose, UNMUTE_DEV_PORT) (default "7860")
-  -h, --help              help for dev
-      --no-open           do not open the browser automatically
-      --port string       port for the local dev UI (default "8765")
-      --target string     target instance name (required without a TTY when multiple exist)
-      --var stringArray   seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)
-      --verbose           follow container/agent logs on stderr (default: write to the log file only)
+      --bot-port string      host port for the local agent runtime (with Compose, UNMUTE_DEV_PORT) (default "7860")
+  -h, --help                 help for dev
+      --no-open              do not open the browser automatically
+      --port string          port for the local dev UI (default "8765")
+      --source stringArray   seed a fact the call carries: --source from_number=+34600111222 (repeatable; the local stand-in for a caller ID, read by prefetch)
+      --target string        target instance name (required without a TTY when multiple exist)
+      --var stringArray      seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)
+      --verbose              follow container/agent logs on stderr (default: write to the log file only)
 ```
 
 ## One mode: the browser
@@ -65,6 +66,23 @@ steps for the route you chose.
   with `source: call_start` can be seeded; values are parsed against the
   declared type, and an undeclared name is refused. This is the local stand in
   for the dispatch payload production sends.
+</ResponseField>
+
+<ResponseField name="--source" type="name=value">
+  Seed a fact the call itself carries, such as the caller's number. Repeatable.
+  Only the eight facts a call carries are accepted (`from_number`, `to_number`,
+  `call_id`, `direction`, `carrier`, `connection`, `session_id`, `stream_id`); a
+  name that is not one is refused. This is the local stand in for a caller ID.
+
+  It seeds the **fact**, which a `prefetch:` entry then reads, so the run
+  exercises the pre-fetch, the confirmation marking and the read back. On a real
+  call the carrier's own value wins: a seed only fills in what the route gave
+  nothing for.
+
+  `--source` and `--var` are different flags for different jobs. Do not reach for
+  `--var` to seed a caller's number: that writes the variable directly, skips the
+  pre-fetch, marks nothing as awaiting confirmation, and lets a local run act on a
+  number it never read back. The run would pass a path a real call fails.
 </ResponseField>
 
 ## Flags that were removed

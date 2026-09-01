@@ -227,6 +227,22 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	for _, t := range data.Tasks {
 		collectTools(t.Tools, t.MCPServers)
 	}
+	// A pre-fetched tool reaches no agent's tools: list by design (FR-003), so
+	// the loop above never sees it. Its handler still has to travel into the
+	// artifact and still has to be imported, or the module raises
+	// ModuleNotFoundError at startup and the call is never answered.
+	for _, entry := range agent.Prefetch {
+		if entry.Tool == "" {
+			continue
+		}
+		tool := agent.Tools[entry.Tool]
+		if tool.Execution != ir.ToolLocal || seenLocal[entry.Tool] {
+			continue
+		}
+		seenLocal[entry.Tool] = true
+		data.NeedsInspect = true
+		data.LocalTools = append(data.LocalTools, livekitLocalTool{Name: entry.Tool, Source: tool.HandlerSource})
+	}
 	sort.Slice(data.LocalTools, func(i, j int) bool { return data.LocalTools[i].Name < data.LocalTools[j].Name })
 	for _, a := range data.Agents {
 		for _, tool := range a.Tools {
@@ -295,7 +311,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		if v.Default != nil {
 			def = pyLiteral(v.Default)
 		}
-		data.Vars = append(data.Vars, livekitVar{Name: name, PyType: pyType(v.Type), Default: def, Description: v.Description})
+		data.Vars = append(data.Vars, livekitVar{Name: name, PyType: pyType(v.Type), Default: def, Description: oneLine(v.Description)})
 		if v.Source == ir.VariableSourceCallStart || v.Source == "" {
 			data.CallStartVars = append(data.CallStartVars, livekitCallStartVar{
 				Name: name, Type: string(v.Type), TypeCheck: livekitTypeCheck(v.Type),
@@ -314,6 +330,13 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	if len(data.CallStartVars) > 0 {
 		data.DevOptionalEnv = append(data.DevOptionalEnv, "UNMUTE_CALL_START")
 	}
+	// The seeded call facts ride the same door. The worker runs in a container, so
+	// inheriting the parent process environment is not enough, and a deployed
+	// artifact still declares nothing: this list is passed through when the host
+	// sets it and absent otherwise.
+	if PrefetchNeedsSeed(agent) {
+		data.DevOptionalEnv = append(data.DevOptionalEnv, LocalCallFactsEnv)
+	}
 	slices.Sort(data.DevOptionalEnv)
 	// Every mcp source's env names join the startup check as well. Declared
 	// secrets cover most packages, but the address and token a tool source
@@ -324,6 +347,25 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	}
 	data.NeedsRender = renderNeeds(agent)
 	data.PrerequisiteGuard, data.NeedsPrerequisiteGuard = PrerequisiteGuard(agent)
+	data.NeedsPrefetchUnconfirmed = PrefetchUnconfirmed(agent)
+	if block, needed := Prefetch(agent, prefetchStateExpr, func(entry ir.Prefetch) PrefetchRequest {
+		// The env names a pre-fetched webhook reads join the startup check the
+		// same way a mid-call one's do, so a missing URL is named before anything
+		// dials rather than swallowed by the block's own except arm.
+		if tool := agent.Tools[entry.Tool]; tool.Execution == ir.ToolWebhook {
+			env.addRead(tool.URLEnv)
+			if tool.Auth != nil {
+				env.addRead(tool.Auth.TokenEnv)
+			}
+		}
+		return prefetchRequestFor(agent, entry)
+	}); needed {
+		data.Prefetch, data.NeedsPrefetch = block.Source, true
+		data.NeedsPrefetchClock, data.NeedsPrefetchAsync = block.NeedsClock, block.NeedsAsync
+		data.NeedsPrefetchLocal, data.NeedsPrefetchSeed = block.NeedsLocal, block.NeedsSeed
+		data.NeedsHTTPX = data.NeedsHTTPX || prefetchNeedsHTTPX(agent)
+		data.PrefetchRunbook, _ = PrefetchRunbook(agent)
+	}
 	if data.Capture != nil {
 		data.NeedsFunctionTools = true // the generated capture tool is a @function_tool too
 	}
@@ -962,7 +1004,10 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 			single.CtxExpr, _ = livekitCtxExpr(task.Context)
 		}
 		for variable, path := range c.Assign {
-			single.Assign = append(single.Assign, livekitAssign{Var: variable, Field: strings.TrimPrefix(path, "result.")})
+			single.Assign = append(single.Assign, livekitAssign{
+				Var: variable, Field: strings.TrimPrefix(path, "result."),
+				Confirms: agent.Variables[variable].Confirm == c.Task,
+			})
 		}
 		sort.Slice(single.Assign, func(i, j int) bool { return single.Assign[i].Var < single.Assign[j].Var })
 		// A single task always returns to the owner (SCHEMA 4.7); the AgentTask
@@ -973,6 +1018,7 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 			Task:            single,
 			Then:            "return",
 			Requires:        c.Requires,
+			Announce:        c.Announce,
 			CanTaskTransfer: livekitTaskCanTransfer(agent, task),
 		}, nil
 	}
@@ -984,6 +1030,7 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 	// sequence of standalone AgentTasks (each starts fresh, C4) instead.
 	delegate := livekitDelegate{
 		Method: ref, When: delegateWhen(c) + delegateForwardDeclaration(agent, c), Then: string(group.Then),
+		Announce: c.Announce,
 		Isolated: group.ContextScope == ir.ContextIsolated,
 		Requires: c.Requires,
 	}
