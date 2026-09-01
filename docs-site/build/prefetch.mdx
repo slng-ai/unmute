@@ -1,0 +1,220 @@
+---
+title: "Pre-fetch"
+description: "Resolve what you already know before the greeting, so the model never spends a turn discovering it."
+---
+
+Some things are true before anybody speaks. Today's date. The number the call
+came from. Whatever your own records say about that number.
+
+`prefetch:` resolves those once per call, before the greeting, and lands them in
+variables. The model starts the conversation already knowing them.
+
+This page teaches the workflow. For every field and every rule, use the
+[Variables reference](/reference/variables#prefetch-resolving-a-value-before-the-call-starts).
+
+## The question to ask
+
+**Could this have been known before anyone spoke?**
+
+That is the whole test, and it is not the same question as "is this slow". A
+caller's chosen appointment time is not knowable in advance, however long it
+takes to collect. Today's date is knowable, and asking a model to fetch it costs
+a round trip that buys nothing.
+
+Three shapes come up over and over:
+
+| You need | It is knowable because | Use |
+|---|---|---|
+| today's date, to turn "tomorrow" into a real day | a clock is not a conversation | `clock: date` |
+| the caller's number | an inbound call carries it | `source: from_number` |
+| who that number belongs to | your records are keyed on it | `tool: look_up_customer` |
+
+## Write one
+
+Three entries, and the order is the point:
+
+```yaml agent.yaml
+timezone: Europe/Madrid
+
+prefetch:
+  - name: today
+    clock: date
+    assign:
+      - booking_date: result.date
+
+  - name: caller
+    source: from_number
+    assign:
+      - customer_phone: result.value
+
+  - name: profile
+    tool: look_up_customer
+    args:
+      - phone: "{{customer_phone}}"
+    assign:
+      - customer_name: result.name
+```
+
+Read it top to bottom, because that is how it runs. `caller` puts the number in
+`customer_phone`, and `profile` then looks that number up. Write them the other
+way round and the compiler refuses it, naming both entries and which one to move:
+
+```text wrap
+agent.yaml:196: prefetch "profile" reads {{customer_phone}}, which prefetch "caller" assigns further down the list. Entries resolve in the order you wrote them: move "caller" above "profile"
+```
+
+The variables are ordinary variables. They need no `source:` of their own, just a
+type and a default:
+
+```yaml agent.yaml
+variables:
+  booking_date:
+    type: string
+    default: ""
+    description: Today's date, resolved before the call. Use it to turn a relative day into a real one.
+  customer_phone:
+    type: string
+    default: ""
+    confirm: customer_verification
+  customer_name:
+    type: string
+    default: ""
+```
+
+<Note>
+  `assign:` and `args:` are **lists**, and each pair gets its own `- ` line. An
+  item holding two pairs is a dropped indent, and it is refused with its line
+  number rather than silently keeping one of them.
+</Note>
+
+### A clock needs a timezone
+
+`timezone:` is required before any entry reads the clock, and it is never
+defaulted. A container clock is UTC. A salon in Spain taking a booking at 23:30
+local would otherwise write down tomorrow, and nothing would report it.
+
+### A tool has to promise it writes nothing
+
+A pre-fetch runs unasked, on every call, including calls from wrong numbers. So
+`tool:` only accepts a tool that declares itself read only:
+
+```yaml tools/look_up_customer.yaml
+read_only: true
+
+local:
+  handler: tools/salon.py
+```
+
+<Warning>
+  `read_only: true` is a promise you make, not something the compiler can check.
+  It reads your handler's declaration, not your handler. Point a pre-fetch at a
+  lookup, never at a "find or create".
+</Warning>
+
+## A carrier fact is a proposal
+
+A number arriving from the phone network tells you which handset dialled. It does
+not tell you who is holding it. People ring from a partner's phone, from work,
+from a second account.
+
+`confirm:` says so out loud:
+
+```yaml agent.yaml
+variables:
+  customer_phone:
+    type: string
+    default: ""
+    confirm: customer_verification   # the task that confirms it
+```
+
+Until that step hears the caller agree, the value:
+
+- satisfies no `requires:` guard, so a step needing it will not start;
+- renders in no prompt except that step's own, refused at compile time everywhere else, the greeting included;
+- makes any tool injecting it refuse itself to the model, naming what it is waiting for.
+
+Confirmation is inherited. `customer_name` was looked up from an unconfirmed
+number, so it is unconfirmed too, which is what stops the agent greeting a
+stranger by the account holder's name.
+
+Then write the confirming step to read the value back when it has one, and to ask
+from scratch when it does not:
+
+```md tasks/verify-customer.md
+The call came from {{customer_phone}}. If that is filled in, read it back and ask
+if it is the right number for the booking. If it is empty, ask for a number
+instead.
+```
+
+This is where the win actually comes from. The step still runs, but it confirms
+instead of collecting, and confirming is one turn where collecting was several.
+
+## When it cannot resolve
+
+Often. The browser loop has no carrier. **No Pipecat route supplies a caller
+number**, so `source: from_number` resolves on LiveKit `sip` and `connector` and
+nowhere else. And a caller can always withhold their number.
+
+An entry whose input is empty is **skipped**, along with every later entry that
+reads what it would have assigned. The variables keep their defaults and the call
+carries on. `unmute validate` says so per target, before you ship:
+
+```text wrap
+warning: target "pipecat": prefetch "caller" reads source: from_number, which route (pipecat, cloud-websocket) does not supply, so this entry is skipped on every call there and customer_phone holds its default. prefetch "profile" reads it, so that entry is skipped too. Call sources compile on (livekit, sip) trunks and on (livekit, connector)
+```
+
+So write every prompt to read as a whole sentence when the value is empty. An
+unset variable renders as nothing at all, never as the word `None`, and the
+sentence around it has to survive that.
+
+<Tip>
+  Write the prompt for the empty case first, then check it still reads well once
+  the value is there. Doing it the other way round produces sentences like "Your
+  number is ." on every call the pre-fetch skipped.
+</Tip>
+
+The whole block has a two second budget and cannot fail a call. A lookup that
+times out or raises is logged and stepped over, one line per entry:
+
+```text
+prefetch today: resolved booking_date=2026-09-01
+prefetch caller: skipped, the call carries no from_number
+prefetch profile: skipped, customer_phone is empty
+```
+
+<Note>
+  Not available on the `slng` target. That platform owns session start, so there is
+  no seam to resolve a fact in, and a package declaring `prefetch:` for it is
+  refused rather than compiled with the block dropped. The refusal says to fold the
+  value into the agent's instructions instead.
+</Note>
+
+## Try it
+
+The browser loop has no caller ID, so stand in for one:
+
+```sh
+unmute dev examples/salon-concierge --source from_number=<a number in E.164>
+```
+
+Use a number your lookup actually knows and the agent should read it back and ask
+for a yes. Leave the flag off and it should ask for a number from scratch. Both
+runs are real paths, and both are worth hearing.
+
+<Warning>
+  Do not seed the variable with `--var` instead. That writes the value straight
+  in, skips the pre-fetch, marks nothing as awaiting confirmation, and lets a
+  local run act on a number it never read back. The run would pass where a real
+  call fails.
+</Warning>
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="How to think about pre-fetch" icon="gauge" href="/optimization/prefetch">
+    Which facts are worth resolving early, and the traps we hit doing it.
+  </Card>
+  <Card title="Variables reference" icon="file-code" href="/reference/variables">
+    Every source, every rule, every refusal.
+  </Card>
+</CardGroup>

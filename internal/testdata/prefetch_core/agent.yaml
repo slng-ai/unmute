@@ -49,7 +49,8 @@ handoffs:
   to_billing:
     to: billing
     when: Caller asks about billing, an invoice, or a refund.
-    requires: [caller_phone]
+    requires:
+      - caller_phone
     context:
       history: full
       variables: all

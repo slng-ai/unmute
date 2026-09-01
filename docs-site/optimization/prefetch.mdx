@@ -1,0 +1,195 @@
+---
+title: "What to resolve before the call"
+description: "How to decide which facts are worth pre-fetching, what it actually buys, and the traps we hit doing it on a real agent."
+sidebarTitle: "Pre-fetch"
+---
+
+The largest span in a voice turn is the model, and a tool turn costs two round
+trips instead of one. So the cheapest turn is the one that never happens.
+
+[`prefetch:`](/build/prefetch) is how you delete one. This page is about deciding
+which ones are worth deleting, and it is written from doing it to
+`examples/salon-concierge` and reading the traces afterwards.
+
+<Note>
+  The costs quoted here are measured, on two real calls of that agent. The
+  savings are arithmetic: a removed round trip is a removed round trip. Measure
+  your own agent before and after, because that is the only number that is about
+  your agent.
+</Note>
+
+## Where this came from
+
+Two traces, one per target, read span by span. Real `llm_request` p50 was
+1.09s to 1.20s on both. Three things stood out, and all three were the model
+spending round trips on facts that were already knowable:
+
+| What the caller experienced | What it cost | What was already true |
+|---|---|---|
+| being asked for a phone number, digit by digit | 23.3s, 5 model round trips | the call arrived carrying the number |
+| saying "tomorrow" and hearing nothing | 2.56s of silence, two chained tool hops | a clock had the date |
+| being moved to a booking step | 2.07s of silence, two round trips | nothing needed discovering at all |
+
+The third one is not a pre-fetch. It is a cover line, and it belongs to
+[`announce:`](/optimization/overview#speak-before-a-tool-runs). Keeping the two
+apart is most of the thinking here, so it is the last section on this page.
+
+## Count round trips, not seconds
+
+This is the habit worth building. When you look at a slow stretch of a call, do
+not ask how many seconds it took. Ask how many times the model had to speak,
+listen and speak again.
+
+A round trip on our agents costs about 1.1s, and it is close to constant. So a
+step's cost is roughly its round trip count times that number, plus whatever the
+caller spends talking. The 23.3s step above was five round trips and a lot of
+human speech, which is why removing round trips is the change that moves it and
+tuning a connection is not.
+
+The arithmetic then tells you what a pre-fetch is worth before you write it:
+
+- a fact the model would have fetched with a tool: **two round trips**, because a tool turn is a call and a reply;
+- a fact the model would have asked a person for: **at least two**, usually more, because people answer partially and get read back to;
+- a fact already in the prompt: **zero**.
+
+## Three kinds of fact
+
+The test is one question. **Could this have been known before anybody spoke?**
+Not "is it slow", and not "is it annoying to collect".
+
+**A clock reading.** The cheapest win and the easiest to miss, because a date
+tool looks like a legitimate tool. It is not: it takes no conversational input,
+so it can only ever return something you could have put in the prompt. Ours was
+called `get_current_date` and it is now deleted. Any tool whose arguments are
+empty is this same case in disguise.
+
+**A fact the transport carries.** A caller ID, a called number, a direction. The
+agent is handed these before the greeting, and then in our case asked for one of
+them out loud anyway.
+
+**A lookup keyed on one of those.** This is where the real value sits, because
+the answer is your own data. A number becomes a customer, an account, a booking
+history. One read only tool call before the greeting replaces a conversation.
+
+What is not on the list: anything the caller has to decide. Their appointment
+time, the service they want, whether they are happy with a slot. No amount of
+pre-fetching touches those, and a step that collects a decision is doing its job.
+
+## Filling a value is enough. You do not rewrite the flow
+
+This surprised us, and it is the part worth internalising.
+
+The prerequisite guard already skips a step whose required values are present.
+So a step that exists to collect something stops running the moment something
+else supplies it. You add a `prefetch:` entry, and the step you wanted to avoid
+gets skipped, with no edit to the step, the delegate, or the routing.
+
+Which cuts both ways, so check it deliberately: a pre-fetch that fills a value
+silently removes a step from the call. If that step also greeted the caller,
+verified them, or set expectations, its removal is a behaviour change and not
+just a speed one.
+
+## Collecting becomes confirming
+
+The 23.3s step is the headline, and the naive fix is wrong. A number from the
+carrier tells you which handset dialled, not who is holding it. People ring from
+a partner's phone or hold two accounts, and an agent that acts on caller ID alone
+will eventually read one stranger's details to another.
+
+So the step does not disappear. It changes job:
+
+- **before:** ask for a number, hear part of it, read it back, get corrected, confirm. Five round trips.
+- **after:** read back the number you already have, hear a yes. One.
+
+That is the shape to aim for on any pre-fetched fact a person could dispute.
+[`confirm:`](/build/prefetch#a-carrier-fact-is-a-proposal) enforces it: until the
+caller agrees, the value satisfies no guard, appears in no prompt but the
+confirming step's, and makes any tool using it refuse itself. You cannot forget
+to confirm, because the compiler will not let the value be used.
+
+<Tip>
+  Confirmation is inherited. A name looked up from an unconfirmed number is
+  itself unconfirmed. That is what stops a greeting from using it, and it means
+  you mark the number rather than having to find every value derived from it.
+</Tip>
+
+## Do not move the wait to before the greeting
+
+The trap. A pre-fetch runs before the agent says anything, so time spent there is
+silence with nothing at all to listen to, not even a ringing tone's worth of
+expectation. Dead air before hello is worse than dead air mid-call.
+
+Three rules that keep it honest, and the first two are enforced:
+
+1. The whole block has a **two second budget**. A lookup that overruns is logged and stepped over.
+2. It **cannot fail a call**. A raise is logged and stepped over too.
+3. Keep the number of entries small, and never chain a lookup off a lookup off a lookup. Entries run in order, so a chain spends the budget serially.
+
+If your lookup is routinely slow, a pre-fetch is the wrong home for it. Leave it
+as a tool the model calls mid-call with an `announce:` line over it, where the
+caller has already heard a voice.
+
+## Design for empty, because empty is the common case
+
+Every source of a pre-fetched fact can be absent, and on some routes it always
+is. The browser loop has no carrier. No Pipecat route supplies a caller number.
+Callers withhold theirs. Your lookup will not know a first-time customer.
+
+So the empty call is not the edge case to handle later. It is the case to write
+first:
+
+- Write each prompt so it reads as a whole sentence with the value empty. An unset variable renders as nothing, so "Your number is {{customer_phone}}." becomes "Your number is ." unless you write around it.
+- Then check it still reads well once the value is there.
+- Then run the agent both ways: `unmute dev` with `--source from_number=...` and without it. Both are real paths in production.
+
+`unmute validate` tells you which entries can never resolve on a given target,
+naming the route and the knock-on entries, so read its warnings rather than
+discovering it on a call.
+
+## A pre-fetch is not a cover line
+
+Both make a gap shorter to sit through, and they are not interchangeable.
+
+| | `prefetch:` | `announce:` |
+|---|---|---|
+| what it does | removes a round trip | gives the caller something to hear during one |
+| when it runs | once, before the greeting | every time that tool fires |
+| use it for | a fact that was already knowable | a fact that genuinely has to be fetched now |
+
+The 2.07s gap on entering a booking step was neither a lookup nor a discovery, so
+no pre-fetch could touch it. It got an `announce:` on the delegate instead.
+
+Reach for a pre-fetch first, because a removed round trip is gone. Reach for an
+announce for what is left. And keep the line shorter than the gap it covers: put
+one on two tools that fire in the same turn and the caller hears two cover lines
+for one request.
+
+## Checking that you actually gained
+
+One call proves nothing. We have seen two calls on an identical build differ by
+1.1s of mean silence, which is a whole round trip of noise.
+
+Make at least three calls per configuration, and compare **the span the change
+touched** rather than the end to end number. A removed round trip is one of the
+few changes clear enough to see in a single span comparison: count
+`llm_request` spans inside the step you changed, and the count should have
+dropped by a whole number.
+
+The container also logs one line per entry, which is the fastest way to see
+whether a pre-fetch resolved, skipped, or ran out of budget:
+
+```text
+prefetch today: resolved booking_date=2026-09-01
+prefetch caller: skipped, the call carries no from_number
+```
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Writing a pre-fetch" icon="bot" href="/build/prefetch">
+    The primitive: three sources, the ordering rule, and confirmation.
+  </Card>
+  <Card title="Reading the latency numbers" icon="chart-line" href="/optimization/latency">
+    Finding the span that is actually slow before you change anything.
+  </Card>
+</CardGroup>
