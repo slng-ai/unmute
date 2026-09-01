@@ -58,11 +58,12 @@ mint a11y                                               # contrast and media alt
 9. **No provider-branded environment variable name is used as an invalid
    example.** A name that starts with a digit is the point; whose product it looks
    like is not. The neutral `2FACTOR_*` names are what the site uses.
-10. **The version this site describes is stated once, in
-    `snippets/unmute-version.mdx`, and never typed into a page.** A page that
-    names a version imports `unmuteVersion` and renders it. The release
-    automation rewrites that one line when a tag is cut, so a typed literal goes
-    stale the moment the next release ships and nothing tells you.
+10. **No page states a version.** Releases come faster than pages get re-read,
+    so a stated version is stale the day after it is written and nothing about
+    the page changes when it goes stale. Point the reader at `unmute --version`
+    and the changelog instead. `snippets/unmute-version.mdx` stays
+    as the release automation's own cursor over the changelog, not as a sentence
+    anybody reads.
 11. **`changelog.mdx` is derived, not written.** Its one source of truth is the
     GitHub Release that GoReleaser publishes, and
     `scripts/render_changelog.py` turns that into an entry. Edit the release on
@@ -98,7 +99,7 @@ Prose rots. These facts cannot:
 | `internal/cli/help_capture_test.go` | `internal/cli/testdata/help.txt` still matches the cobra tree, and every flag in it appears on the CLI page that documents that command (two tests) |
 | `internal/target/providers_docsite_test.go` | `models/{stt,tts,llm}.mdx` list exactly the catalog's vendors per target per role, with SLNG first; and `models/turn-detection.mdx` carries no vendor list, because the `turn` role has no catalog entries (two tests) |
 | `internal/spec/tools_docsite_test.go` | `build/tools/overview.mdx` names exactly the execution blocks the `Tool` struct has |
-| `internal/docsite/version_test.go` | `snippets/unmute-version.mdx` holds one valid version, the installation and quickstart pages import it, and no other page hardcodes a version literal (three tests) |
+| `internal/docsite/version_test.go` | `snippets/unmute-version.mdx` holds one valid version for the release automation, and no page states a version, by a literal or by rendering the marker (two tests) |
 | `internal/docsite/changelog_test.go` | `changelog.mdx` runs newest first, every entry has a label, a version and a link to its own release, the newest entry matches the version snippet, the insert marker survives, and no entry keeps a heading, an em or en dash, or a commit hash (five tests) |
 | `internal/skill/markdown_surface_test.go` | `docs.json` declares the contextual menu in order and states the two facts agents get wrong, and `start/coding-agents.mdx` names all three Markdown endpoints and the suffix rule (three tests) |
 

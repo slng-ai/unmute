@@ -120,7 +120,7 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | the local-run marker is one string across `generate.LocalRunEnv` and both tracing templates, a local run's Coval labels carry `-local`, a deployed run's do not, and both targets stay distinguishable | `internal/generate/coval_tracing_test.go` (`TestCovalTracingOwnsTheLocalRunMarker`, `TestCovalTracingMarksLocalRuns`, `TestCovalTracingLabelsEveryPlaceCovalFilters`) |
 | `unmute dev` actually sets that marker, and a stale value in a `.env` cannot beat it | `internal/cli/dev_test.go` (`TestDevChildEnv_marksTheRunAsLocal`) |
 | the agent logs one startup line naming provider, destination and whether a credential is present, one line per trace outcome, and no line claims a trace is not exported when the conversation route will export it | `internal/generate/coval_tracing_test.go` (`TestCovalTracingLogsWhatActuallyHappened`) |
-| the docs-site states one version, in one snippet, and no page hardcodes a version literal that disagrees | `internal/docsite/version_test.go` |
+| no docs-site page states a version, by a literal or by rendering the release automation's marker | `internal/docsite/version_test.go` |
 | the docs-site declares its Markdown surface, and the coding-agents page names all three endpoints | `internal/skill/markdown_surface_test.go` |
 | the changelog runs newest first, every entry carries a label, a version and its own release link, the newest matches the version snippet, and no entry keeps a heading, a dash or a commit hash | `internal/docsite/changelog_test.go` |
 | the runbook's vault table names exactly the entries the preflight checks | `internal/generate/slng_requirements_test.go` (`TestSlngRequirementsIsWhatTheRunbookPrints`) |

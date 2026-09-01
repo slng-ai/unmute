@@ -3,8 +3,6 @@ title: "Installation"
 description: "Install Unmute on macOS, Windows, or Linux and check the one Quickstart prerequisite."
 ---
 
-import { unmuteVersion } from '/snippets/unmute-version.mdx';
-
 Unmute is one static binary. Pick your operating system and install it. Normal
 use does not need Go.
 
@@ -51,12 +49,11 @@ use does not need Go.
   </Tab>
 </Tabs>
 
-## Which version this site describes
+## Keep it current
 
-This site describes Unmute **{unmuteVersion}**. Compare it with what
-`unmute --version` prints. If your binary is older, upgrade before you follow a
-page here, because a field or a flag on the page may not exist in your build.
-The [changelog](/changelog) says what changed in each release.
+This site is written against the newest release, and releases come often. If a
+field or a flag on a page does not exist in your build, upgrade. The
+[changelog](/changelog) says what changed in each release.
 
 ## What you need to run an agent
 
@@ -111,13 +108,10 @@ deploy; see [phone calls](/telephony/overview) for what each route needs.
       bin/unmute --version
       ```
 
-      ```text
-      unmute version 1.2.0 (3a9f2c1 2026-08-14T10:11:12Z)
-      ```
-
-      The three parts are the version, the commit it was built from, and that
-      commit's date. You will see your own build's values, not these. A plain
-      `go build` with no link-time stamping prints `unmute version dev`.
+      It prints the release, the commit it was built from and that commit's
+      date, then a second line naming the framework versions this build
+      supports. A plain `go build` with no link-time stamping prints
+      `unmute version dev`.
     </Step>
   </Steps>
 

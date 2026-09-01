@@ -16,6 +16,132 @@ kinds were validated live here.
 
 {/* changelog:entries */}
 
+<Update label="September 2026" description="v0.3.2" tags={["CLI"]}>
+
+Pre-fetch known facts, and a deploy that checks the account first.
+
+Highlights:
+
+* `prefetch:` resolves known facts before the greeting. A package declares an
+  ordered list that reads three sources: `clock:` (a date under the package's
+  `timezone:`), `source:` (a call fact the carrier supplies) and `tool:` (one
+  read-only lookup, keyed on a value an earlier entry assigned). Each entry gets
+  a 2s budget and cannot raise: a skip leaves the variable on its default and the
+  existing guard runs the step that asks. `confirm:` marks a value the caller has
+  not agreed to yet, so it renders in no prompt but its confirming step's and
+  satisfies no gate until it is settled. `announce:` on a delegate covers the
+  entry gap, spoken after the guard so a refused step stays silent.
+  `unmute dev --source from_number=...` seeds a call fact into the browser loop,
+  which has no carrier. Salon is rebuilt around it and `get_current_date` is gone.
+  A package declaring none of the new fields emits byte-identical output.
+* `unmute deploy` checks the account before it writes anything. It asks the
+  organisation what it already has, compares it with what the package needs, and
+  reports every gap in one pass with the line that asked for it and the one action
+  that fixes it. Checked: every `builtin:` tool, every MCP server and exposed
+  server tool, and every vault secret and variable including whether it holds a
+  value. A code or webhook tool is never reported missing because the push creates
+  it. Secrets are filled by handing the prompt to `voiceai secret create`, so no
+  value enters unmute or reaches argv. A refused run leaves build/ and the account
+  untouched. Adds `unmute resources` and `--call`.
+* `mcp:` is core on slng. voiceai 0.1.16 resolves a reference by server name and
+  copies each tool's schema hash from the platform's own snapshot, so nothing
+  connects to the server; unmute warned the opposite and told authors an `mcp:`
+  package could not deploy at all. Both were wrong. Adds `mcp.server` for a
+  platform name carrying a dash or a space. Proven on a live deploy.
+* An agent declares what it can do in `tools:`, `delegates:`, `handoffs:` and
+  `escalations:`. The block a thing is written in is its kind, so `kind:` and
+  `controls:` are gone. A strict re-spelling: every package compiles byte for byte
+  identical on every target.
+* Tracing: salon-concierge moves to Langfuse, and `scripts/read_langfuse_trace.py`
+  reads a `unmute dev` call back out of it, transcript, tool calls and per-span
+  latency, newest trace by default. Coval self-verification is push-based and is
+  unaffected.
+* Docs: two new pre-fetch pages (the primitive, and how to decide what to
+  pre-fetch), one page that explains the shape of a package before Orchestration
+  needs it, and our own measured costs are out of the reader-facing pages.
+
+Breaking:
+
+* `controls:` and `kind:` are removed with no alias. An old package fails as an
+  unknown key, with file, line and column.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.3.2)
+
+</Update>
+
+<Update label="August 2026" description="v0.3.1" tags={["CLI"]}>
+
+One deploy command, deployment names that stop colliding, and honest Coval traces.
+
+Highlights:
+
+* `unmute deploy [package-dir]` validates, compiles and pushes a package to
+  SLNG in one command. It shells out to `voiceai agents push --json`, so the
+  push contract stays in one released binary. A refused push relays every
+  problem with the fix line and the dashboard page. Credentials come from
+  SLNG_API_KEY, then VOICEAI_API_KEY, then a stored `voiceai login` profile,
+  read from the package's own .env, and the organisation is printed every run.
+* Deployments are now named after the package, not the target. Before this,
+  every package deployed as `slng`, `livekit` or `pipecat`, so a second package
+  replaced the first one's live agent and two LiveKit packages split one
+  worker's dispatch. `agent.yaml` now requires `name:`, and a deployment is
+  that name joined to its target. This also fixes `unmute dev`, which minted a
+  browser token for a room nothing ever joined.
+* Coval traces are per call again. Pipecat Cloud serves many calls from one
+  warm container, and every call after the first was filed under the first
+  call's conversation with nothing logged either way. Correlation now resets on
+  every call, late spans are dropped instead of misfiled, local runs label
+  themselves `<name>-local`, and one accurate log line replaces the message
+  that claimed no trace was exported when one was.
+* Pipecat support raised to 1.8.0, with pipecat-slng >= 0.5.1. 0.5.0 imported a
+  private name that 1.8.0 renamed, which broke every emitted bot at import.
+* The salon concierge example sounds like a person. Prompts now separate the
+  speech contract from the personality, leave numbers, money and times in plain
+  written form so the voice engine normalizes them, and drop the second
+  acknowledgment that talked over each tool's announce line. Three defects came
+  off a live call, and the evidence sits next to each rule. The skill teaches
+  the same shape.
+* Docs: a runbook for the second deploy, including the routing records a rename
+  strands, on every target's own page.
+
+Breaking:
+
+* `agent.yaml` must carry a `name:`. A package without one is refused with the
+  shape and an example.
+* Deployed identities change name, so the first deploy after this upgrade
+  creates a new agent and leaves the old one live. Delete the old one.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.3.1)
+
+</Update>
+
+<Update label="August 2026" description="v0.3.0" tags={["CLI"]}>
+
+Compile to SLNG, knowledge search, and turn timing you can set.
+
+Highlights:
+- New `slng` target: compile a package straight to the SLNG platform.
+- Knowledge bases: point a tool at your own documents - txt, md or pdf files.
+- Turn timing is yours to set. `endpointing_delay` is the silence floor, `pace`
+  is the ceiling, and `semantic_endpointing` can switch the turn model off.
+- Pipecat phone calls are faster and quieter: `warm_instances` keeps containers
+  warm, and the agent no longer interrupts its own greeting on speakerphone.
+- Faster turns on both targets, from pipecat-slng 0.5.0 and the quicker SLNG route.
+- Context Router sends model settings per request, and `prompt_suffix` adds one
+  line to every prompt in a package.
+- Task groups: a step that returns can carry its own prerequisites.
+- Console rebuilt on Bubble Tea and Lip Gloss, with one owner for colour.
+- Versioned docs, a full carrier setup guide, and a changelog that writes itself.
+
+Breaking:
+- The `vapi` and `deepgram` targets are retired. deepgram is still a model
+  vendor.
+- Local telephony testing is gone. Test phone calls on a deployed agent.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.3.0)
+
+</Update>
+
 <Update label="August 2026" description="v0.2.5" tags={["CLI"]}>
 
 Per-site Context Router cache scopes.
