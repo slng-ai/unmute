@@ -129,14 +129,28 @@ pre-fetch at a lookup, never at anything that saves or changes data.
 
 ## Where it works
 
-`prefetch:`, `confirm:` and a delegate's `announce:` all work on `livekit` and
-`pipecat`. The `slng` target refuses them, because it starts the session itself,
-so there is no gap before the greeting to fetch anything in.
+| | LiveKit | Pipecat | slng |
+|---|---|---|---|
+| `prefetch:` | yes | yes | refused |
+| `confirm:` on a variable | yes | yes | refused |
+| `announce:` on a delegate | yes | yes | refused |
+| `clock:` entry | yes | yes | — |
+| `tool:` entry | yes | yes | — |
+| `source:` entry | on `sip` and `connector` | compiles, never gets a value | — |
 
-`clock:` and `tool:` behave the same on both. `source:` is the exception. It only
-gets a value on LiveKit `sip` and `connector`. **No Pipecat route supplies call
-facts**, so on Pipecat a `source:` entry is skipped on every call, and
-`unmute validate` tells you so.
+`slng` refuses all of it, because it starts the session itself, so there is no gap
+before the greeting to fetch anything in.
+
+The `source:` row is the one to read twice. **No Pipecat route supplies call
+facts**, so there a `source: from_number` entry compiles, is skipped on every call,
+and `unmute validate` tells you so. The variable keeps its default and the call
+carries on.
+
+<Note>
+  The same fact declared as a variable's own `source:` is stricter: on Pipecat that
+  is a hard error, not a warning. Letting the entry fill the variable instead is
+  what keeps one package compiling on every route.
+</Note>
 
 ## Always check a value with the caller
 
