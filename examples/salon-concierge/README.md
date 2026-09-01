@@ -283,13 +283,19 @@ Two rules protect the latency work in the section above:
 - **A filler rides on a turn that also does its job.** A turn that is only
   "let me have a look" costs a whole extra round trip and buys nothing, so the
   prompts forbid it, alongside the older rule against asking the caller to hold.
-- **A turn that follows a tool does not acknowledge anything.** Each tool carries
-  an `announce` line that plays while it runs, so the caller has already been
-  acknowledged by the time the model speaks. Without this rule the two stack up:
-  a live call produced "Okay, one sec. A haircut, lovely. What day suits you?"
-  and "Booking that in. Lovely, your haircut is booked." The announce is worth
-  keeping, it covers about a second of real model latency, so the prompts drop
-  the second acknowledgement instead.
+- **A turn that follows a tool does not acknowledge anything.** Every data tool
+  here carries an `announce` line that plays while it runs, so the caller has
+  already been acknowledged by the time the model speaks. Without this rule the
+  two stack up: a live call produced "Okay, one sec. A haircut, lovely. What day
+  suits you?" and "Booking that in. Lovely, your haircut is booked." The announce
+  is worth keeping, it covers a real gap, so the prompts drop the second
+  acknowledgement instead.
+- **Two cover lines for one handover is the same fault one level up.**
+  `find_or_create_customer` carries no `announce`, and that is the reason: it
+  runs at the end of identification, and the delegate into booking announces
+  immediately after. A live call played "Okay, one sec." and then "Let me pull up
+  the diary." for a single transition. When a tool sits right before a delegate
+  that announces, only one of the two should speak.
 - **The agent has one name for the whole call.** The greeting introduces Robin,
   and customer care is still Robin: the handoff is silent, the voice is the same,
   and a second introduction is how a caller finds out they were transferred.

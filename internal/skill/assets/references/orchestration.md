@@ -256,9 +256,12 @@ Same field as a tool's, same rules: one fixed sentence, spoken word for word.
 a caller who hears "one moment while I check" and is then asked for a phone number
 has been told something untrue.
 
-Do not put one on a step whose first tool already announces. Both lines queue, and
-two in a row read as a stutter. The step's line covers two model requests and the
-tool's covers a request body, so the step's is usually the one worth keeping.
+Do not put one on a step whose first tool already announces, and check the tool
+that runs immediately **before** the delegate too: a lookup at the end of one
+step and a delegate into the next cover the same handover, so the caller hears
+two lines for one request. Both cases read as a stutter. The step's line covers
+two model requests and the tool's covers a request body, so the step's is usually
+the one worth keeping.
 
 Denied on the `slng` target, which writes one agent with no steps.
 

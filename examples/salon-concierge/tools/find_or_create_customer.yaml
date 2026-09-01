@@ -42,4 +42,9 @@ local:
 
 interruption: provider_default
 effect: returns_data
-announce: Okay, one sec.
+
+# No announce, deliberately. This tool runs at the end of the identification
+# step, and the delegate into booking announces right after it, so a line here
+# and that one covered the same handover: a live call played "Okay, one sec."
+# and then "Let me pull up the diary." The delegate's line says more, so it is
+# the one that stayed.
