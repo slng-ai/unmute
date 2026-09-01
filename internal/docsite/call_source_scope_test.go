@@ -29,6 +29,7 @@ func TestCallSourcePagesScopeThemToLiveKit(t *testing.T) {
 		filepath.Join(siteRoot, "build", "variables.mdx"),
 		filepath.Join(siteRoot, "build", "prefetch.mdx"),
 		filepath.Join(siteRoot, "optimization", "prefetch.mdx"),
+		filepath.Join(siteRoot, "optimization", "overview.mdx"),
 		filepath.Join(siteRoot, "telephony", "outbound-calls.mdx"),
 		filepath.Join("..", "skill", "assets", "references", "variables.md"),
 	}

@@ -80,6 +80,13 @@ Every entry carries a `name:` and exactly one source key.
 | `source: <name>` | a fact the call itself carries | `result.value` |
 | `tool: <name>` | one already-declared read-only tool | `result.<field>` from its `output:` |
 
+`tool:` is the general case. Any read-only tool qualifies when every argument is
+something the package already holds: a fixed value, a call fact, the clock, or a
+value an earlier entry assigned. An account record, a price list, a rota, a
+caller's last order: if the prompt would otherwise tell the model to call it
+first, pre-fetch it instead. A tool whose arguments depend on what the caller says
+cannot be pre-fetched.
+
 **Write these as lists, not maps.** `assign:` and `args:` take **one pair per
 item**: `- customer_phone: result.value`, each on its own `- ` line. Writing them
 as a mapping is refused, and so is an item holding two pairs, which is what a
@@ -104,7 +111,9 @@ Three rules that catch most first attempts:
   call fact declares no `source:` of its own. That is what keeps a package
   compiling on a route that supplies no caller ID: the entry skips there, the
   variable keeps its default, and validation warns naming the target and the
-  route.
+  route. A call fact resolves on LiveKit `sip` and `connector` and nowhere else.
+  Declaring the same fact as a variable's own `source:` is a hard error on a
+  Pipecat target rather than a warning, which is the whole reason for this rule.
 
 **An entry that resolves nothing is normal.** Skipping is the specified behaviour,
 not a failure. The whole block has a two second budget and cannot fail a call: a

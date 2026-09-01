@@ -224,6 +224,11 @@ prefetch:
       - customer_phone: result.value
 ```
 
+A `clock:` entry works on any route, and so does a `tool:` entry whose arguments
+you already hold. A `source:` entry only receives a value where the route supplies
+call facts, which is LiveKit `sip` and `connector`: no Pipecat route supplies them,
+and `unmute validate` warns when an entry can never resolve on a target.
+
 A fact from the carrier is a proposal, not a settled value, so mark anything a
 caller could dispute with `confirm:`. The step that used to collect it then reads
 it back and asks for a yes, which is one round trip where collecting was several.
