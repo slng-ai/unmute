@@ -109,6 +109,9 @@ const (
 	FieldTracingLangfuse       Field = "tracing.provider.langfuse"
 	FieldTracingCoval          Field = "tracing.provider.coval"
 	FieldVariableConversation  Field = "variables.source.conversation"
+	FieldPrefetch              Field = "prefetch"
+	FieldVariableConfirm       Field = "variables.confirm"
+	FieldDelegateAnnounce      Field = "controls.delegate.announce"
 	FieldToolInject            Field = "tools.inject"
 	FieldWebhookPath           Field = "tools.webhook.path"
 	FieldToolDependencies      Field = "tools.local.dependencies"
@@ -348,6 +351,24 @@ func Default() Table {
 			// one: the slng target has no separate step to hold back, so there is
 			// nothing for the guard to guard.
 			FieldDelegateRequires: field(deny(Slng, slngNoTasks("a step requirement"))),
+			// A step announcement is refused for the task reason too: with one
+			// agent and no steps there is no entry to speak over.
+			FieldDelegateAnnounce: field(deny(Slng, slngNoTasks("a step announcement"))),
+			// Prefetch needs a seam between the call arriving and the agent
+			// greeting, and both code drivers have one: LiveKit between hydration
+			// and session.start, Pipecat between build_state and the agent
+			// construction. The SLNG platform owns session start, so there is no
+			// seam of ours to resolve a fact in.
+			//
+			// The clock case is genuinely reachable there through the router's
+			// own template_variables, and is left undone rather than half done:
+			// half of a prefetch block working on one target is worse than none of
+			// it, because the package would compile and behave differently.
+			FieldPrefetch: field(deny(Slng, "slng target compiles no session-start hook of its own, so a prefetch has no seam to run in: "+
+				"fold the value into the agent's instructions, or compile to livekit or pipecat which emit the block")),
+			// Confirmation holds a value back from a gate, and the gate is the
+			// prerequisite guard on a step. No steps, no guard, nothing to hold.
+			FieldVariableConfirm: field(deny(Slng, slngNoTasks("a value awaiting confirmation"))),
 			FieldContextNoToolCalls: field(
 				deny(Pipecat, "the Pipecat driver does not shape transfer context (include_tool_calls) yet"),
 				deny(Slng, slngNoHandoff("include_tool_calls: false")),

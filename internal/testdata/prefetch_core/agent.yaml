@@ -1,0 +1,167 @@
+# Prefetch fixture: safe_core plus one prefetch block that uses all three
+# sources, and one variable that has to be confirmed before anything acts on it.
+#
+# It exists because no other fixture has all four pieces a prefetch needs: a
+# declared variable to land in, a read-only tool to run, a task a delegate runs
+# so `confirm:` has a step to name, and a clock with a timezone to read it in.
+#
+# Deliberately kept compiling on both code targets, so the byte-identical and
+# per-target-warning tests have one package to read rather than two.
+
+version: 1
+
+name: prefetch-fixture
+
+entry_agent: intake
+
+# The zone every clock reading in this package is taken in. A container clock is
+# UTC, so without this the agent would name the wrong day for anybody who is not.
+timezone: Europe/Madrid
+
+agents:
+  intake:
+    instructions: instructions.md
+    model: fast_reasoning
+    voice: front_desk
+    tools:
+      - get_invoice
+    delegates:
+      - verify_caller
+    handoffs:
+      - to_billing
+
+  billing:
+    instructions: agents/billing.md
+    model: careful_reasoning
+    voice: specialist
+    tools:
+      - get_invoice
+
+delegates:
+  verify_caller:
+    task: verify_caller
+    when: Confirm who you are speaking to.
+    announce: One moment while I check.
+    assign:
+      caller_phone: result.caller_phone
+
+handoffs:
+  to_billing:
+    to: billing
+    when: Caller asks about billing, an invoice, or a refund.
+    requires:
+      - caller_phone
+    context:
+      history: full
+      variables: all
+
+tasks:
+  verify_caller:
+    instructions: tasks/verify_caller.md
+    result:
+      caller_phone: string
+    context:
+      history: full
+
+variables:
+  customer_id:
+    type: string
+    default: ""
+  verified:
+    type: boolean
+    default: false
+  # Read once at session start, in the zone above.
+  booking_date:
+    type: string
+    default: ""
+  # No source: here on purpose. The prefetch below reads the carrier fact and
+  # this variable receives it, which is what keeps the per-route refusal for a
+  # variable naming a source its target cannot supply exactly as strict as it is.
+  caller_phone:
+    type: string
+    default: ""
+    confirm: verify_caller
+  caller_name:
+    type: string
+    default: ""
+
+# An ordered list. Entries resolve top to bottom, so "caller" has to sit above
+# "profile", which reads what it assigns. Written the other way round it is
+# refused rather than quietly reordered.
+prefetch:
+  - name: today
+    clock: date
+    assign:
+      - booking_date: result.date
+
+  - name: caller
+    source: from_number
+    assign:
+      - caller_phone: result.value
+
+  - name: profile
+    tool: lookup_customer
+    args:
+      - phone: "{{caller_phone}}"
+    assign:
+      - caller_name: result.name
+
+models:
+  think:
+    fast_reasoning:
+      description: cheap and quick, greeting and routing
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.4
+    careful_reasoning:
+      description: slower and careful, billing work
+      provider: openai
+      model: gpt-4o
+  speak:
+    front_desk:
+      description: "warm, concise"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+    specialist:
+      description: "slower, more deliberate"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-orion-en"
+  listen:
+    transcriber:
+      description: default STT; targets that cannot run it override the entry
+      provider: deepgram
+      model: nova-3
+  turn:
+    vad:
+      description: end-of-turn preference; integrated targets warn and ignore it
+      provider: local
+      model: silero
+      semantic_endpointing: preferred
+
+tools:
+  - lookup_customer
+  - get_invoice
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, you have reached Acme Support. How can I help you today?"
+  interruption:
+    enabled: true
+    minimum_words: 2
+  inactivity:
+    nudge_after: 15s
+    end_after: 45s
+  max_duration: 20m
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 40
+  max_sessions: 60
+  peak_starts_per_second: 4
+  avg_session_duration: 6m

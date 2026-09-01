@@ -30,18 +30,20 @@ the typed results.{{end}}
 
 from __future__ import annotations
 
-{{if or (not .Inline) .NeedsEndAfter .Inactivity}}import asyncio
+{{if or (not .Inline) .NeedsEndAfter .Inactivity .NeedsPrefetchAsync}}import asyncio
 {{end}}{{if .Slng.Vertex}}import base64
 {{end}}{{if .HasFlows}}import copy
 {{end}}{{if .NeedsFunctionCalls}}import functools
 {{end}}{{if or .NeedsInspect .NeedsFunctionCalls}}import inspect
-{{end}}{{if or .HasFlows .CallStartVars .Slng.Vertex}}import json
+{{end}}{{if or .HasFlows .CallStartVars .Slng.Vertex .NeedsPrefetchSeed}}import json
 {{end}}import os
 {{if .NeedsRender}}import re
 {{end}}import sys
 {{if .Slng.Any}}import uuid
 {{end}}{{if .Variables}}from dataclasses import dataclass
+{{end}}{{if .NeedsPrefetchClock}}from datetime import datetime
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
+{{end}}{{if .NeedsPrefetchClock}}from zoneinfo import ZoneInfo
 {{end}}{{if .DailyCarrier}}{{if .DailyCarrier.HasInbound}}
 import aiohttp
 {{end}}{{end}}{{if .CloudWebsocket}}{{if .HasColdTransfer}}
@@ -689,7 +691,17 @@ def _render(text: str, state, *, quote_values: bool = False) -> str:
 def _refusal(tool: str, state, needed: list[tuple[str, str]]) -> str:
     """Refuse a call whose injected variables are still unset (V4): the model is
     told what to ask for, and no half-formed request is ever sent."""
-    unset = [(name, hint) for name, hint in needed if getattr(state, name, None) in (None, "")]
+    unset = [
+        (name, hint)
+        for name, hint in needed
+        if getattr(state, name, None) in (None, "")
+{{- if .NeedsPrefetchUnconfirmed}}
+        # A value the caller has not agreed to is present and not usable. Without
+        # this, a pre-fetched number would reach somebody else's record: the
+        # request would go out against a proposal rather than a fact.
+        or name in getattr(state, "_unconfirmed", ())
+{{- end}}
+    ]
     if not unset:
         return ""
     names = ", ".join(name for name, _ in unset)
@@ -702,6 +714,9 @@ def _refusal(tool: str, state, needed: list[tuple[str, str]]) -> str:
 # worker because activating another worker replaces the object and a caller who
 # keeps refusing across a handoff has not started over.
 _prerequisite_refusals: dict[str, int] = {}
+{{end}}{{if .NeedsPrefetch}}
+
+{{.Prefetch}}
 {{end}}{{if .NeedsEndAfter}}
 async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
     await asyncio.sleep(timeout_secs)
@@ -1121,6 +1136,13 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             await params.result_callback({"refused": _prerequisite_refusal(_unmet, _at_limit)})
             return
         _prerequisite_refusals[{{pyq $d.MethodName}}] = 0
+{{end}}{{if $d.Announce}}        # Cover the entry: two model requests pass between the caller finishing and
+        # the step's first word, and this puts speech in them. TTSSpeakFrame is a
+        # DataFrame, so it is queued and speech starts while the flow is built.
+        # Queued after the guard, so a refused step stays silent: the caller
+        # hearing "let me pull up the diary" and then being asked for a phone
+        # number is worse than hearing nothing.
+        await self.queue_frame(TTSSpeakFrame({{pyq $d.Announce}}))
 {{end}}        self._{{$d.MethodName}}_results = {}
 {{if $d.HasTransfers}}        self._{{$d.MethodName}}_active_step = {{pyq (index $d.StepTasks 0).Name}}
 {{end}}        flow = FlowManager(
@@ -1284,7 +1306,14 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 
     async def _{{$d.MethodName}}_complete_{{$t.Name}}(self):
 {{end}}{{if not (and $d.HasTransfers (ne $d.Then "end"))}}{{range $d.Assign}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
-{{end}}{{if and $d.Assign $agentSlngBody}}        # The router substitutes these into the prompt's placeholders, so the value
+{{if .Confirms}}        # The step that confirms this value has just assigned it, so it is settled
+        # now and the guard stops holding it back. Discarded here rather than in the
+        # step's prompt: a model can be talked out of an instruction, not out of a
+        # set membership test. getattr with a default, matching the guard: this step
+        # can be reached on a path where the pre-fetch never ran, and a bare read
+        # there is an AttributeError inside a finish handler.
+        getattr(self.state, "_unconfirmed", set()).discard({{pyq .Var}})
+{{end}}{{end}}{{if and $d.Assign $agentSlngBody}}        # The router substitutes these into the prompt's placeholders, so the value
         # this step just learned has to reach it before the next turn asks. A
         # settings delta merges `extra` key by key, so this body-only one leaves
         # the speaking site's cache scope exactly where it is.
@@ -1330,7 +1359,14 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         }])
         self.context.set_tools(tools)
 {{end}}{{if and $d.HasTransfers (ne $d.Then "end")}}{{range $d.Assign}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
-{{end}}{{if and $d.Assign $agentSlngBody}}        # Same refresh as the other assignment path: the value reaches the router
+{{if .Confirms}}        # The step that confirms this value has just assigned it, so it is settled
+        # now and the guard stops holding it back. Discarded here rather than in the
+        # step's prompt: a model can be talked out of an instruction, not out of a
+        # set membership test. getattr with a default, matching the guard: this step
+        # can be reached on a path where the pre-fetch never ran, and a bare read
+        # there is an AttributeError inside a finish handler.
+        getattr(self.state, "_unconfirmed", set()).discard({{pyq .Var}})
+{{end}}{{end}}{{if and $d.Assign $agentSlngBody}}        # Same refresh as the other assignment path: the value reaches the router
         # before the next turn asks under it.
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(extra={"extra_body": {{$agentSlngBody}}}),
@@ -1561,6 +1597,10 @@ def build_stt():
     context = LLMContext()
 {{if .Variables}}    state = build_state(call_context)
 {{else}}    state = None
+{{end}}{{if .NeedsPrefetch}}    # Facts knowable before the greeting, resolved once, here: after the state
+    # exists so there is somewhere to put them, and before the agents are built
+    # so every prompt they render already sees them.
+    await _prefetch(state, call_context)
 {{end}}    agents = [{{range $i, $a := .Agents}}{{if $i}}, {{end}}{{$a.Class}}(state=state, context=context, call_context=call_context{{if $.Slng.Any}}, slng_session_id=slng_session_id{{end}}){{end}}]
 {{if .NeedsMCP}}    mcp_agents = [
 {{range $i, $a := .Agents}}{{if $a.MCPSources}}        agents[{{$i}}],

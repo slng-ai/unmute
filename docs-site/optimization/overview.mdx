@@ -198,6 +198,46 @@ See [Turn taking](/optimization/turn-taking) for every legal value and what each
 becomes on each target, and [Turn detection](/models/turn-detection) for what
 actually runs.
 
+### Resolve what you already know before the call
+
+The cheapest turn is the one that never happens. A date, the number a call came
+from, and whatever your own records say about that number are all knowable before
+anybody speaks. `prefetch:` resolves them once, before the greeting, and lands
+them in variables the prompt can name.
+
+The two worst stretches we found on our own agent were both this shape: a step
+that collected a phone number the call already carried, and a caller saying
+"tomorrow" costing two chained tool hops with nothing spoken over them.
+
+```yaml agent.yaml
+timezone: Europe/Madrid          # required before any entry reads the clock
+
+prefetch:
+  - name: today
+    clock: date
+    assign:
+      - booking_date: result.date
+
+  - name: caller
+    source: from_number
+    assign:
+      - customer_phone: result.value
+```
+
+A `clock:` entry works on any route, and so does a `tool:` entry whose arguments
+you already hold. A `source:` entry only receives a value where the route supplies
+call facts, which is LiveKit `sip` and `connector`: no Pipecat route supplies them,
+and `unmute validate` warns when an entry can never resolve on a target.
+
+A fact from the carrier is a proposal, not a settled value, so mark anything a
+caller could dispute with `confirm:`. The step that used to collect it then reads
+it back and asks for a yes, which is one round trip where collecting was several.
+
+Deciding what qualifies is most of the work, and it has its own traps: a slow
+lookup moves the wait to before the greeting, where the caller has nothing at all
+to listen to. See [Pre-fetch](/optimization/prefetch) for how to think about it,
+and [writing one](/build/prefetch) for the syntax.
+
 ### Cut LLM round trips before tuning connections
 
 The largest span, and every control hop costs a whole round trip. Collapsing a
@@ -224,6 +264,10 @@ The tool is usually not the wait. A local handler returns in milliseconds; the
 caller is waiting through the second LLM round trip and the speech after it.
 `announce:` fills that gap with something to listen to.
 
+This is for a fact that genuinely has to be fetched now. If it was knowable
+before the call, pre-fetch it instead: a cover line shortens a round trip to sit
+through, while a pre-fetch removes it.
+
 ```yaml tools/check_availability.yaml
 local:
   handler: tools/salon.py
@@ -234,8 +278,8 @@ announce: Let me check.
 Keep the line **shorter than the gap it covers**. A long line runs into the answer
 and breaks its own promise of a wait — "Okay, one sec." works where "One sec, let
 me pull up your details and see what we have" does not. Put it only on tools that
-fetch or push data, and never on two tools that fire in the same turn, or the
-caller hears two lines for one request.
+fetch or push data, and never on two things that speak for one request: two tools
+in the same turn, or a tool at the end of one step and a delegate into the next.
 
 ## All of it in one package
 

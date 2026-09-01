@@ -84,7 +84,8 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	for name, variable := range pkg.Agent.Variables {
 		out.Variables[name] = Variable{
 			Type: PrimitiveType(variable.Type), Default: variable.Default,
-			Source: VariableSource(variable.Source), Description: variable.Description,
+			Source: VariableSource(variable.Source), Confirm: variable.Confirm,
+			Description: variable.Description,
 		}
 	}
 	for name, tool := range pkg.Tools {
@@ -260,6 +261,13 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		out.Controls[name] = control
 	}
 	if err := checkInject(pkg); err != nil {
+		return nil, err
+	}
+	// After the controls, because a confirm: names a task a delegate runs, and
+	// before checkTemplates, because a prefetch-assigned variable is one that has
+	// a value when a session-start prompt is built and the template check has to
+	// know that.
+	if err := buildPrefetch(pkg, out); err != nil {
 		return nil, err
 	}
 	if err := checkTemplates(pkg, out); err != nil {
@@ -643,6 +651,7 @@ func buildTool(name string, raw packagespec.Tool) Tool {
 	// whitespace-only line reads as no announcement, so every driver sees a
 	// settled value and none has to decide what " " means.
 	tool.Announce = strings.TrimSpace(raw.Announce)
+	tool.ReadOnly = raw.ReadOnly
 	return tool
 }
 
@@ -787,7 +796,13 @@ func buildDelegate(pkg *packagespec.Package, raw packagespec.Delegate, agent *Ag
 	if err := checkAssignments(task, raw.Assign, agent); err != nil {
 		return nil, err
 	}
-	return &Delegate{Kind: ControlDelegate, When: raw.When, Task: task, Group: group, Requires: raw.Requires, Assign: raw.Assign}, nil
+	// ponytail: one TrimSpace, matching buildTool. A blank line reads as no
+	// announcement, so no driver has to decide what " " means.
+	return &Delegate{
+		Kind: ControlDelegate, When: raw.When, Task: task, Group: group,
+		Requires: raw.Requires, Assign: raw.Assign,
+		Announce: strings.TrimSpace(raw.Announce),
+	}, nil
 }
 
 func buildHandoff(pkg *packagespec.Package, raw packagespec.Handoff, agent *Agent) (Control, error) {
@@ -1608,6 +1623,17 @@ func checkReachability(pkg *packagespec.Package) error {
 		}
 	}
 	visitAgent(pkg.Agent.EntryAgent)
+	// A prefetch entry reaches its tool. This is the whole point of FR-003: a tool
+	// that exists only to be pre-fetched is never advertised to any model, so it
+	// appears in no agent's tools: list, and without this it would read as
+	// unreachable and be refused. The refusal it replaces is a real one though, so
+	// the name still has to resolve: an entry naming a tool the package does not
+	// declare is refused by name in buildPrefetch.
+	for _, entry := range pkg.Agent.Prefetch {
+		if entry.Tool != "" {
+			tools[entry.Tool] = true
+		}
+	}
 
 	// The fix rides the message, and never suggests an impossible one: with no
 	// reachable agent to attach to, the hint is omitted rather than invented.

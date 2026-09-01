@@ -124,6 +124,7 @@
           "build/your-first-agent",
           "build/how-a-package-fits-together",
           "build/variables",
+          "build/prefetch",
           {
             "group": "Tools",
             "icon": "wrench",
@@ -234,6 +235,7 @@
         "pages": [
           "optimization/overview",
           "optimization/latency",
+          "optimization/prefetch",
           "optimization/turn-taking",
           "optimization/execution-layer",
           "optimization/context-router",

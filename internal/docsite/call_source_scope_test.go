@@ -13,13 +13,13 @@ import (
 //
 // A system source is filled by an emitted carrier adapter, and only the LiveKit
 // routes emit one, so `source: from_number` on a Pipecat target is refused at
-// validation. Four surfaces teach that field. Two of them used to say only "on a
+// validation. Six surfaces teach that field now. Two of them used to say only "on a
 // phone call", which reads as "any phone route", and a Pipecat author following
 // them wrote a package the compiler would not build (2026-08-27).
 //
 // The claim is pinned in both directions. If a Pipecat route ever does grant a
 // call source, the first half fails and names the pages that would then be wrong
-// the other way, instead of leaving four pages quietly understating what works.
+// the other way, instead of leaving those pages quietly understating what works.
 func TestCallSourcePagesScopeThemToLiveKit(t *testing.T) {
 	// The pages that name a system source, wherever they live. The skill is in
 	// here too: a coding agent reads it before it writes a package, so a scope it
@@ -27,6 +27,9 @@ func TestCallSourcePagesScopeThemToLiveKit(t *testing.T) {
 	pages := []string{
 		filepath.Join(siteRoot, "reference", "variables.mdx"),
 		filepath.Join(siteRoot, "build", "variables.mdx"),
+		filepath.Join(siteRoot, "build", "prefetch.mdx"),
+		filepath.Join(siteRoot, "optimization", "prefetch.mdx"),
+		filepath.Join(siteRoot, "optimization", "overview.mdx"),
 		filepath.Join(siteRoot, "telephony", "outbound-calls.mdx"),
 		filepath.Join("..", "skill", "assets", "references", "variables.md"),
 	}

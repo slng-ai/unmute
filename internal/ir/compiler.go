@@ -23,7 +23,16 @@ type Agent struct {
 	Listen    string              `json:"listen,omitempty" yaml:"listen,omitempty"`
 	Turn      string              `json:"turn,omitempty" yaml:"turn,omitempty"`
 	Variables map[string]Variable `json:"variables,omitempty" yaml:"variables,omitempty"`
-	Secrets   []string            `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	// Timezone is the validated IANA zone every clock reading in this package is
+	// taken in. Empty when the package declares none, which only a clock prefetch
+	// refuses.
+	Timezone string `json:"timezone,omitempty" yaml:"timezone,omitempty"`
+	// Prefetch is the resolved prefetch list, **in the order the author wrote
+	// it**, which is the order the emitted agent resolves them in. Nothing sorts
+	// this slice: an entry reading a value a later entry assigns was refused at
+	// build time, so by here the order is known good.
+	Prefetch []Prefetch `json:"prefetch,omitempty" yaml:"prefetch,omitempty"`
+	Secrets  []string   `json:"secrets,omitempty" yaml:"secrets,omitempty"`
 	// Knowledge is the resolved knowledge: section, one entry per declared base.
 	Knowledge map[string]KnowledgeBase `json:"knowledge,omitempty" yaml:"knowledge,omitempty"`
 	// Documents holds each knowledge base document, keyed by its artifact path
@@ -328,10 +337,42 @@ const (
 )
 
 type Variable struct {
-	Type        PrimitiveType  `json:"type" yaml:"type"`
-	Default     any            `json:"default,omitempty" yaml:"default,omitempty"`
-	Source      VariableSource `json:"source,omitempty" yaml:"source,omitempty"`
-	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
+	Type    PrimitiveType  `json:"type" yaml:"type"`
+	Default any            `json:"default,omitempty" yaml:"default,omitempty"`
+	Source  VariableSource `json:"source,omitempty" yaml:"source,omitempty"`
+	// Confirm names the task that must hear the caller agree before anything acts
+	// on this value. Empty means settled on arrival, which is every variable that
+	// existed before the prefetch feature.
+	Confirm     string `json:"confirm,omitempty" yaml:"confirm,omitempty"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+}
+
+// Pair is one resolved item of an authored pair list. Ordered, because the
+// authoring surface is ordered and losing the order here would put back exactly
+// what the list shape exists to remove.
+type Pair struct {
+	Key   string `json:"key" yaml:"key"`
+	Value any    `json:"value,omitempty" yaml:"value,omitempty"`
+}
+
+// Prefetch is one resolved prefetch entry. Exactly one of Clock, Source and Tool
+// is set; Build refuses zero or more than one.
+type Prefetch struct {
+	Name   string         `json:"name" yaml:"name"`
+	Clock  string         `json:"clock,omitempty" yaml:"clock,omitempty"`
+	Source VariableSource `json:"source,omitempty" yaml:"source,omitempty"`
+	Tool   string         `json:"tool,omitempty" yaml:"tool,omitempty"`
+	Args   []Pair         `json:"args,omitempty" yaml:"args,omitempty"`
+	Assign []Pair         `json:"assign,omitempty" yaml:"assign,omitempty"`
+	// Inputs are the declared variables Args reads, sorted. Resolved here so the
+	// emitted skip check and the per-target warning both read one list rather
+	// than each re-parsing the templates.
+	Inputs []string `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	// Confirm is derived, never authored: when any name in Inputs belongs to a
+	// variable carrying Confirm, every value this entry assigns inherits it. A
+	// name looked up from an unconfirmed number is exactly as unconfirmed as the
+	// number was.
+	Confirm string `json:"confirm,omitempty" yaml:"confirm,omitempty"`
 }
 
 // Agent.Secrets is the declared environment names, sorted in Build. A secret has
@@ -455,6 +496,10 @@ type Delegate struct {
 	// caller, and names the control that supplies each missing value.
 	Requires []string          `json:"requires,omitempty" yaml:"requires,omitempty"`
 	Assign   map[string]string `json:"assign,omitempty" yaml:"assign,omitempty"`
+	// Announce is one fixed sentence spoken as the step is entered, so the two
+	// model requests it takes to enter one are not silence. Spoken after the
+	// prerequisite guard, never before it: a refused step stays silent.
+	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
 }
 
 func (*Delegate) control() {}
@@ -550,6 +595,10 @@ type Tool struct {
 	// is not silence. Webhook, local and knowledge only; blank means no
 	// announcement, so no driver has to interpret whitespace.
 	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
+	// ReadOnly is the author's promise that this tool writes nothing, required
+	// before a prefetch entry may run it. A declaration, not a guarantee: the
+	// compiler cannot check it.
+	ReadOnly bool `json:"read_only,omitempty" yaml:"read_only,omitempty"`
 	// KnowledgeBase names the base this tool searches (knowledge only).
 	// Validation has proven the name is declared.
 	KnowledgeBase string `json:"knowledge_base,omitempty" yaml:"knowledge_base,omitempty"`

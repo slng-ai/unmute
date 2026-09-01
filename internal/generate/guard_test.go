@@ -57,12 +57,13 @@ func TestSupplierIndex(t *testing.T) {
 // there was one.
 func TestForwardDeclaration(t *testing.T) {
 	suppliers := map[string]string{"customer_phone": "verify_customer"}
+	variables := map[string]ir.Variable{"customer_phone": {Type: ir.PrimitiveString}}
 
-	if got := ForwardDeclaration(nil, suppliers); got != "" {
+	if got := ForwardDeclaration(nil, suppliers, variables); got != "" {
 		t.Errorf("an unguarded control gets no sentence, got %q", got)
 	}
 
-	got := ForwardDeclaration([]string{"customer_phone"}, suppliers)
+	got := ForwardDeclaration([]string{"customer_phone"}, suppliers, variables)
 	for _, want := range []string{"customer_phone", "verify_customer"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("forward declaration %q omits %q", got, want)
@@ -72,7 +73,7 @@ func TestForwardDeclaration(t *testing.T) {
 	// Where nothing supplies the value, because it arrives from source:, from
 	// --var or from the carrier, the sentence names the requirement and stops
 	// rather than pointing at a control that cannot help.
-	got = ForwardDeclaration([]string{"caller_number"}, suppliers)
+	got = ForwardDeclaration([]string{"caller_number"}, suppliers, variables)
 	if !strings.Contains(got, "caller_number") {
 		t.Errorf("forward declaration %q omits the requirement", got)
 	}
@@ -81,11 +82,88 @@ func TestForwardDeclaration(t *testing.T) {
 	}
 }
 
+// The sentence is a claim, and it used to be made unconditionally. These are the
+// two cases from research.md R7, and they pull in opposite directions, which is
+// why the fix is a condition rather than a deletion.
+func TestForwardDeclarationDropsAClauseTheRuntimeWillNeverNeed(t *testing.T) {
+	suppliers := map[string]string{"customer_phone": "verify_customer"}
+
+	t.Run("settled: the clause goes", func(t *testing.T) {
+		// The value arrives from the carrier and needs no confirmation, so the
+		// agent already has it, usable, before it speaks. Telling the model to
+		// call verify_customer here is an instruction to re-verify a caller it
+		// already knows, and the model obeys.
+		variables := map[string]ir.Variable{
+			"customer_phone": {Type: ir.PrimitiveString, Source: ir.VariableSourceFromNumber},
+		}
+		if got := ForwardDeclaration([]string{"customer_phone"}, suppliers, variables); got != "" {
+			t.Errorf("a settled value keeps a sentence that is false: %q", got)
+		}
+	})
+
+	t.Run("proposed: the clause stays", func(t *testing.T) {
+		// The value is present and unusable until the caller agrees, so the
+		// sentence is exactly right and has to survive. This is the half a
+		// blanket deletion would have got wrong.
+		variables := map[string]ir.Variable{
+			"customer_phone": {Type: ir.PrimitiveString, Confirm: "verify_customer"},
+		}
+		got := ForwardDeclaration([]string{"customer_phone"}, suppliers, variables)
+		if !strings.Contains(got, "verify_customer") {
+			t.Errorf("an unconfirmed value loses the step that confirms it: %q", got)
+		}
+	})
+
+	t.Run("a pre-fetched value keeps its clause", func(t *testing.T) {
+		// A prefetch entry may skip, so the value may be at its default. "May
+		// hold" is not "does hold", and the sentence has to stay for the case
+		// where it does not.
+		variables := map[string]ir.Variable{"customer_phone": {Type: ir.PrimitiveString, Default: ""}}
+		got := ForwardDeclaration([]string{"customer_phone"}, suppliers, variables)
+		if !strings.Contains(got, "customer_phone") {
+			t.Errorf("a value that may be skipped loses its sentence: %q", got)
+		}
+	})
+
+	t.Run("one settled name among two leaves the other", func(t *testing.T) {
+		variables := map[string]ir.Variable{
+			"customer_phone": {Type: ir.PrimitiveString, Source: ir.VariableSourceFromNumber},
+			"account_id":     {Type: ir.PrimitiveString},
+		}
+		got := ForwardDeclaration([]string{"customer_phone", "account_id"}, suppliers, variables)
+		if strings.Contains(got, "customer_phone") {
+			t.Errorf("the settled name survived: %q", got)
+		}
+		if !strings.Contains(got, "account_id") {
+			t.Errorf("the unsettled name was dropped with it: %q", got)
+		}
+	})
+}
+
+// FR-024, FR-029 and the byte-identical promise, in one place: the guard reads
+// the unconfirmed set only when a package has one.
+func TestGuardConsultsUnconfirmedOnlyWhenAPackageHasAny(t *testing.T) {
+	with := guardHelperSource(map[string]string{"customer_phone": "verify_customer"}, true)
+	if !strings.Contains(with, `name in getattr(state, "_unconfirmed", ())`) {
+		t.Errorf("an unconfirmed value satisfies a gate it should not:\n%s", with)
+	}
+
+	without := guardHelperSource(map[string]string{"customer_phone": "verify_customer"}, false)
+	if strings.Contains(without, "_unconfirmed") {
+		t.Errorf("a package with no confirm: gained the set, so its emitted output moved:\n%s", without)
+	}
+	// getattr with a default, not a bare attribute read: the guard has to work on
+	// a call where the pre-fetch has not run yet.
+	if !strings.Contains(with, `getattr(state, "_unconfirmed", ())`) {
+		t.Error("the set is read without a default, so a call before the pre-fetch raises")
+	}
+}
+
 // The generated block is the single owner of the refusal wording. Both drivers
 // render this same text, which is why the two targets cannot drift: there is
 // only one string to change.
 func TestGuardHelperSource(t *testing.T) {
-	src := guardHelperSource(map[string]string{"customer_phone": "verify_customer"})
+	src := guardHelperSource(map[string]string{"customer_phone": "verify_customer"}, false)
 
 	for _, want := range []string{
 		`"customer_phone": "verify_customer"`,

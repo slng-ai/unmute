@@ -172,8 +172,17 @@ knows who is calling. Put `requires: customer_id` on a delegate and the step
 goes straight through with a value already set, while without the flag the agent
 has to ask first. That difference is the variable doing its job.
 
+That difference is also the whole idea behind [pre-fetch](/build/prefetch): fill
+a value before the greeting and the step that existed to collect it is skipped,
+with no edit to the step itself.
+
 ## Where to go next
 
-<Card title="Tools" icon="wrench" href="/build/tools/overview">
-  Give the agent something to do besides talk.
-</Card>
+<CardGroup cols={2}>
+  <Card title="Pre-fetch" icon="clock" href="/build/prefetch">
+    Resolve the values that were knowable before anybody spoke.
+  </Card>
+  <Card title="Tools" icon="wrench" href="/build/tools/overview">
+    Give the agent something to do besides talk.
+  </Card>
+</CardGroup>

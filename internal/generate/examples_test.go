@@ -328,12 +328,44 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// The one task has to reach every step it absorbed: read the diary, resolve a
 	// relative date, offer times, and write exactly one of the three mutations.
 	for _, want := range []string{
-		"list_bookings", "get_current_date", "check_availability",
+		"list_bookings", "check_availability",
 		"create_booking", "modify_booking", "cancel_booking",
 	} {
 		if !slices.Contains(booking.Tools, want) {
 			t.Errorf("booking tools = %v, want %q", booking.Tools, want)
 		}
+	}
+	// Resolving a relative date is no longer a tool call. get_current_date was a
+	// clock read dressed as a conversation: two chained requests and 2.56 seconds
+	// of silence on every "tomorrow", for a value the container already knew. It
+	// is pre-fetched into {{booking_date}} before the greeting now, and the tool is
+	// gone from the package entirely rather than left declared and unused.
+	if slices.Contains(booking.Tools, "get_current_date") {
+		t.Error("booking still calls get_current_date; the date is pre-fetched")
+	}
+	if _, declared := resolved.Tools["get_current_date"]; declared {
+		t.Error("get_current_date is still declared; the prefetch replaced it")
+	}
+	if resolved.Timezone == "" {
+		t.Error("the package declares no timezone:, so the pre-fetched date would be read in UTC")
+	}
+	var clock, caller, profile bool
+	for _, entry := range resolved.Prefetch {
+		clock = clock || entry.Clock == ir.PrefetchClockDate
+		caller = caller || entry.Source == ir.VariableSourceFromNumber
+		profile = profile || entry.Tool == "look_up_customer"
+	}
+	if !clock || !caller || !profile {
+		t.Errorf("prefetch = %+v, want a clock entry, a from_number entry and a look_up_customer entry", resolved.Prefetch)
+	}
+	// The lookup a prefetch runs has to be the read-only one. Pre-fetching
+	// find_or_create_customer would create a customer record on every inbound
+	// call, wrong numbers included, which is the reason both tools exist.
+	if !resolved.Tools["look_up_customer"].ReadOnly {
+		t.Error("look_up_customer does not declare read_only: true, so no prefetch could run it")
+	}
+	if resolved.Tools["find_or_create_customer"].ReadOnly {
+		t.Error("find_or_create_customer claims read_only: true, and it writes")
 	}
 	wantBookingResult := []string{"action", "booking_id", "status", "summary"}
 	if got := slices.Sorted(maps.Keys(booking.Result)); !slices.Equal(got, wantBookingResult) {
@@ -343,24 +375,24 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if !ok || bookingDelegate.Task != "booking" || bookingDelegate.Group != "" {
 		t.Fatalf("manage_booking = %#v, want a delegate to the single booking task", resolved.Controls["manage_booking"])
 	}
-	currentDate, ok := resolved.Tools["get_current_date"]
+	// The clock tool's input and output schema used to be pinned here. Its
+	// replacement has no schema to pin: the clock is not a tool. What is worth
+	// pinning is the shape the lookup returns, because the prefetch's assign:
+	// names a field of it and a renamed field is a refusal rather than a silence.
+	prefetched, ok := resolved.Tools["look_up_customer"]
 	if !ok {
-		t.Fatal("tools omit get_current_date")
+		t.Fatal("tools omit look_up_customer")
 	}
-	inputProperties, ok := currentDate.Input["properties"].(map[string]any)
-	if !ok || len(inputProperties) != 0 {
-		t.Errorf("get_current_date input properties = %#v, want empty object", currentDate.Input["properties"])
-	}
-	outputProperties, ok := currentDate.Output["properties"].(map[string]any)
+	prefetchedOutput, ok := prefetched.Output["properties"].(map[string]any)
 	if !ok {
-		t.Fatalf("get_current_date output properties = %#v, want object", currentDate.Output["properties"])
+		t.Fatalf("look_up_customer output properties = %#v, want object", prefetched.Output["properties"])
 	}
-	dateProperty, ok := outputProperties["date"].(map[string]any)
-	if !ok || dateProperty["type"] != "string" {
-		t.Errorf("get_current_date date output = %#v, want string", outputProperties["date"])
+	nameProperty, ok := prefetchedOutput["name"].(map[string]any)
+	if !ok || nameProperty["type"] != "string" {
+		t.Errorf("look_up_customer name output = %#v, want string", prefetchedOutput["name"])
 	}
-	if required, ok := currentDate.Output["required"].([]any); !ok || !slices.Contains(required, any("date")) {
-		t.Errorf("get_current_date required output = %#v, want date", currentDate.Output["required"])
+	if prefetched.Execution != ir.ToolLocal {
+		t.Errorf("look_up_customer execution = %q; a prefetch runs webhook and local tools", prefetched.Execution)
 	}
 	for _, name := range []string{"create_booking", "modify_booking", "cancel_booking"} {
 		tool := resolved.Tools[name]
@@ -421,8 +453,19 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// only where a prompt says it. A phone number in this shape is long and
 	// specific enough not to. The blank rule is here because the value is absent
 	// until verification returns, which is most of the call.
+	//
+	// The concierge no longer holds the placeholder at all, and that is the point
+	// of confirmation rather than a regression: the number now arrives pre-fetched
+	// from the carrier, so before the verification step has heard the caller agree
+	// it is a proposal, and a proposal in front of a model is a number the model
+	// acts on. The compiler refuses this prompt naming it. What the prompt has to
+	// do instead is say why it holds none, so the next author does not add it back.
 	requireText("concierge", resolved.Agents["concierge"].Instructions,
-		"{{customer_phone}}", "empty until they have been identified")
+		"never say the caller's phone number",
+		"this prompt deliberately does not")
+	if strings.Contains(resolved.Agents["concierge"].Instructions, "{{customer_phone}}") {
+		t.Error("the concierge prompt holds {{customer_phone}}; an unconfirmed number must reach no prompt but the confirming step's")
+	}
 
 	// FR-007c: an agent that holds a tool injecting a variable must be able to
 	// SEE that variable, or it cannot tell whether the value is already there.
@@ -470,6 +513,20 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		for _, toolName := range tools {
 			for _, variable := range injectedBy[toolName] {
 				if strings.Contains(prompt, "{{"+variable+"}}") || slices.Contains(given, variable) {
+					continue
+				}
+				// A third way out, and the one this package now takes for the
+				// caller's number: the variable declares `confirm:`, so it may not
+				// appear in this prompt at all, and the emitted refusal is what
+				// tells the model the value is not usable yet. The prompt does not
+				// need to see the value to avoid asking for it: it is told, by name,
+				// which value is missing, on the turn it tries to use it.
+				//
+				// Seeing it was the right rule while the only way to have the value
+				// was to have collected it. It stops being the right rule once a
+				// value can be present and not yet agreed to, because then showing
+				// it to the model is the harm rather than the fix.
+				if resolved.Variables[variable].Confirm != "" {
 					continue
 				}
 				t.Errorf("%s %q holds %q, which injects %s, but it can neither see {{%s}} nor is it reached through a guard that requires it: it has no way to tell whether the value is already collected, so it asks the caller for something it already has",
@@ -569,7 +626,11 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		"including the caller choosing the time",
 		"On a clear yes, save it in the same turn with `confirmed` set to true",
 		"On a no, or on a second unclear answer, finish with action `none` and save nothing",
-		"call `get_current_date` first", "never guess today's date",
+		// The date arrives pre-fetched, so the prompt names the value rather than a
+		// tool to call for it, and it says out loud not to call one. A model handed
+		// a date and still told to "call get_current_date first" would call a tool
+		// that no longer exists.
+		"Today is `{{booking_date}}`", "Do not call a tool to ask what day it is",
 		"Never say a booking is saved, moved, or cancelled unless the matching tool ran in this turn")
 	// Open chat is the entry agent's job now, and it holds exactly one lookup:
 	// the salon's own documents. The prompt's job is the same as the deleted chat
@@ -1377,10 +1438,16 @@ func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 	// were reformatted by the model, so the value never appeared in the answer,
 	// and none of the three reads was served.
 	//
-	// So E.164 is not a shape to speak, and the description has to say both
-	// things: which shape the value takes, and that no prompt reads it aloud. A
-	// package that pins E.164 and then tells an agent to recite it pays the cache
-	// on every one of those turns with no error anywhere to notice.
+	// The measurement stands. What changed is the decision made in light of it:
+	// the read-back turn is now allowed to lose its cache, deliberately, because
+	// it replaced twelve spoken digits and five model requests with one yes. That
+	// is 11.3 seconds off a 23.3 second step, against one turn that will not be
+	// served from cache, and it was traded on purpose rather than overlooked.
+	//
+	// So the assertion inverts rather than disappearing: exactly one prompt reads
+	// the number back, it is the step that confirms it, and the description says
+	// the trade was made. Anything else is the old defect back, or a second turn
+	// paying for it.
 	phone, declared := resolved.Variables["customer_phone"]
 	if !declared {
 		t.Fatal("the package declares no customer_phone")
@@ -1388,23 +1455,45 @@ func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 	for _, want := range []string{
 		"E.164",
 		"no spaces, brackets or dashes",
-		"character for character",
-		"never read this value back to the caller",
+		"does not cache",
 	} {
 		if !strings.Contains(phone.Description, want) {
-			t.Errorf("customer_phone description omits %q: the shape has to be pinned, and an E.164 value the agent speaks silently stops caching the turn", want)
+			t.Errorf("customer_phone description omits %q: the shape has to be pinned, and the cache trade has to be stated where the next reader will find it", want)
 		}
 	}
-	// And the prompts have to actually hold that line, because the description is
-	// only a comment to them.
+	if phone.Confirm == "" {
+		t.Error("customer_phone declares no confirm:, so a pre-fetched number would be acted on without the caller agreeing")
+	}
+	// Exactly one prompt holds the value, and it is the confirming step's. The
+	// compiler refuses any other prompt naming it, so this asserts the package
+	// actually uses the one place it is allowed rather than none.
+	var holders []string
 	for _, bodies := range []map[string]string{promptBodies(resolved.Agents), taskBodies(resolved.Tasks)} {
 		for name, body := range bodies {
-			if !strings.Contains(body, "{{customer_phone}}") {
+			if strings.Contains(body, "{{customer_phone}}") {
+				holders = append(holders, name)
+			}
+		}
+	}
+	if len(holders) != 1 || holders[0] != phone.Confirm {
+		t.Errorf("prompts holding {{customer_phone}} = %v, want exactly [%s], the step that confirms it", holders, phone.Confirm)
+	}
+	// And that prompt has to read it back rather than ask for it, which is the
+	// whole user-visible half of the feature.
+	// Whitespace-normalised, because the prompt is wrapped prose and the phrases
+	// worth pinning straddle line breaks.
+	verification := strings.Join(strings.Fields(taskBodies(resolved.Tasks)[phone.Confirm]), " ")
+	for _, want := range []string{"read it back", "Never ask for a number you were handed"} {
+		if !strings.Contains(verification, want) {
+			t.Errorf("the confirming step's prompt omits %q, so a caller with a known number is still asked to recite it", want)
+		}
+	}
+	for _, bodies := range []map[string]string{promptBodies(resolved.Agents), taskBodies(resolved.Tasks)} {
+		for name, body := range bodies {
+			if name == phone.Confirm || !strings.Contains(body, "{{customer_name}}") {
 				continue
 			}
-			if !strings.Contains(body, "never say it back") && !strings.Contains(body, "do not repeat the caller's phone number") {
-				t.Errorf("prompt %q substitutes {{customer_phone}} without forbidding the agent to say it back; an E.164 number read aloud is regrouped and the turn stops caching", name)
-			}
+			t.Errorf("prompt %q holds {{customer_name}}; a name found from an unconfirmed number must not reach any other prompt", name)
 		}
 	}
 	if strings.Contains(all, "{{customer_id}}") {

@@ -21,6 +21,7 @@ variables:
 | `type` | yes | `string`, `number`, `integer`, or `boolean` |
 | `source` | no | where the value comes from |
 | `default` | no | the value to use when nothing supplies one |
+| `confirm` | no | the step that must hear the caller agree before anything acts on this value |
 | `description` | no | a note; for `conversation` variables the model reads it |
 
 ## Sources
@@ -47,20 +48,142 @@ For an inbound LiveKit or Pipecat telephony channel, every `call_start` variable
 needs a default. There is no dispatch payload to supply an unsolicited incoming
 call before its greeting.
 
+## `prefetch:` — resolving a value before the call starts
+
+Some values are knowable before anybody speaks: today's date, the number the call
+came from, whatever a lookup keyed on that number returns. `prefetch:` resolves
+them once per call, before the greeting, so the model never spends a turn
+discovering them.
+
+**It is an ordered list. Entries resolve top to bottom.**
+
+```yaml agent.yaml
+timezone: Europe/Madrid          # required before any entry reads the clock
+
+prefetch:
+  - name: today
+    clock: date
+    assign:
+      - booking_date: result.date
+
+  - name: caller
+    source: from_number
+    assign:
+      - customer_phone: result.value
+
+  - name: profile
+    tool: look_up_customer
+    args:
+      - phone: "{{customer_phone}}"
+    assign:
+      - customer_name: result.name
+```
+
+Every entry carries a `name:` and exactly one source key.
+
+| Key | Reads | Result fields |
+|---|---|---|
+| `clock: date` | the package clock, in the declared `timezone:` | `result.date` |
+| `source: <name>` | one of the eight facts a call carries | `result.value` |
+| `tool: <name>` | one already-declared read-only tool | `result.<field>`, from the tool's `output:` |
+
+`args:` belongs to a `tool:` entry only, and takes the same value grammar as a
+tool's `inject:`.
+
+<Note>
+`assign:` and `args:` are **lists of one-key items**, not mappings. Each pair gets
+its own `- ` line. An item holding two pairs is a dropped indent and is refused
+with its line number.
+</Note>
+
+### Rules worth knowing before you write one
+
+- **The order you write is the order it runs.** An entry reading a value that a
+  later entry assigns is refused, naming both entries and which one to move up.
+  Reading a value an earlier entry assigned is the intended shape.
+- **`tool:` requires `read_only: true`** on the tool, and webhook or local
+  execution. A pre-fetch runs unasked on every call.
+- **The variable receiving a call fact declares no `source:` of its own.** That is
+  what keeps the package compiling on a route that supplies no caller ID.
+- **`timezone:` is required for a clock, never defaulted.** A container clock is
+  UTC, so a business in Spain taking a booking for "tomorrow" at 23:30 local would
+  name the wrong day, and nothing would report it.
+
+### What happens when it cannot resolve
+
+An entry whose inputs are empty is **skipped**, and so is every later entry that
+reads what it would have assigned. The values keep their declared defaults and the
+call carries on. That is the specified behaviour, not a failure: no Pipecat route
+supplies a caller number, a caller can withhold theirs, and the browser loop has
+no carrier at all.
+
+`unmute validate` warns per target, naming the route, the entry, and the knock-on
+entry:
+
+```
+warning: target "pipecat": prefetch "caller" reads source: from_number, which route
+  (pipecat, cloud-websocket) does not supply, so this entry is skipped on every call
+  there and customer_phone holds its default. prefetch "profile" reads it, so that
+  entry is skipped too. Call sources compile on (livekit, sip) trunks and on
+  (livekit, connector)
+```
+
+So **every prompt naming a pre-fetched value has to read as a whole sentence when
+that value is empty.** An unset variable renders as nothing, never as the word
+`None`.
+
+The whole block has a two second budget, and it cannot fail a call: a lookup that
+times out or raises is logged and stepped over. Every outcome is one log line
+naming the entry.
+
+Denied on the `slng` target: that platform owns session start, so there is no seam
+to resolve a fact in.
+
+## `confirm:` — a value the caller has to agree to
+
+A fact that arrives from the carrier is a proposal, not a settled value. Somebody
+may be ringing from a friend's phone, or may hold a second account.
+
+```yaml agent.yaml
+variables:
+  customer_phone:
+    type: string
+    default: ""
+    confirm: customer_verification   # names the task, not the delegate
+```
+
+Until that step has heard the caller agree, the value:
+
+- **satisfies no `requires:` guard**, so a step needing it will not start;
+- **renders in no prompt but that step's own**, refused at compile time everywhere
+  else, including the greeting and every agent prompt;
+- **makes every tool injecting it refuse itself to the model**, naming the value it
+  is waiting for.
+
+The mark clears the moment the confirming step assigns the value. Confirmation is
+**inherited**: a value looked up from an unconfirmed value carries the same
+confirming step, because a name found from a number nobody agreed to is exactly as
+unconfirmed as the number was. That is what stops an agent greeting a stranger by
+the account holder's name.
+
+Write the confirming step's prompt to read the value back and ask for a yes when it
+has one, and to ask from scratch when it does not.
+
 ## Where a variable can be used
 
 `{{name}}` renders a variable. Two kinds of site, with different timing:
 
 | Site | Renders | Can name |
 |---|---|---|
-| `conversation.greeting.text` | once, at session start | a variable that already has a value |
-| an agent's instructions | once, at session start | a variable that already has a value |
-| a task's instructions | when that task starts | a variable that already has a value, or one assigned from a task result |
-| a tool's `inject:` value | on every tool call | any declared variable |
+| `conversation.greeting.text` | once, at session start | a variable that already has a value, never one awaiting confirmation |
+| an agent's instructions | once, at session start | a variable that already has a value, never one awaiting confirmation |
+| a task's instructions | when that task starts | a variable that already has a value, or one assigned from a task result; one awaiting confirmation only in the step that confirms it |
+| a tool's `inject:` value | on every tool call | any declared variable; one awaiting confirmation makes the call refuse itself until it is settled |
 | a webhook tool's `path` | on every tool call | any declared variable, URL encoded |
 
-"Already has a value" means `source: call_start`, a system source, or a
-`default`. Naming anything else in a session-start site is an error:
+"Already has a value" means `source: call_start`, a system source, a `default`, or
+a `prefetch:` entry that assigns it. Naming anything else in a session-start site
+is an error:
 
 ```text wrap
 conversation.greeting.text references {{requested_service}}, which has no value when the prompt is built; give it source: call_start, a system source, or a default
@@ -89,6 +212,25 @@ unmute: dev my-agent: --var requested_service=haircut: "requested_service" has s
 ```
 
 An undeclared name is refused rather than accepted and dropped.
+
+### Seeding a caller ID
+
+`--var` stands in for the dispatch payload. To stand in for a **caller ID**, use
+`--source`, which seeds the fact a `prefetch:` entry reads:
+
+```sh
+unmute dev ./agent --source from_number=<a number in E.164>
+```
+
+Repeatable, and only the eight facts a call carries are accepted. On a real call
+the carrier's own value wins: a seed fills only what the route supplied nothing
+for.
+
+<Warning>
+Do not seed the variable with `--var` instead. That writes the value directly,
+skips the pre-fetch, marks nothing as awaiting confirmation, and lets a local run
+act on a number it never read back. The run would pass a path a real call fails.
+</Warning>
 
 ## Letting the model save one
 

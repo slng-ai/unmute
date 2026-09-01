@@ -27,7 +27,7 @@ import (
 func newDevCmd() *cobra.Command {
 	var uiPort, botPort, targetName string
 	var noOpen, verbose bool
-	var vars []string
+	var vars, sources []string
 
 	cmd := &cobra.Command{
 		Use:   "dev [agent-dir]",
@@ -59,6 +59,21 @@ func newDevCmd() *cobra.Command {
 				}
 			}
 
+			// The facts a carrier would supply ride their own payload, read by the
+			// emitted pre-fetch only where nothing else filled them. This is what
+			// makes the whole identification path reproducible with no phone: the
+			// value goes through the pre-fetch, so it is marked as awaiting
+			// confirmation and read back exactly as a real one is.
+			if len(sources) > 0 {
+				payload, err := callFactsPayload(sources)
+				if err != nil {
+					return fmt.Errorf("dev %s: %w", root, err)
+				}
+				if err := os.Setenv(generate.LocalCallFactsEnv, payload); err != nil {
+					return fmt.Errorf("dev %s: %w", root, err)
+				}
+			}
+
 			selected, err := selectDevTarget(cmd, root, targetName)
 			if err != nil {
 				return err
@@ -73,6 +88,7 @@ func newDevCmd() *cobra.Command {
 	cmd.Flags().StringVar(&botPort, "bot-port", "7860", "host port for the local agent runtime (with Compose, UNMUTE_DEV_PORT)")
 	cmd.Flags().StringVar(&targetName, "target", "", "target instance name (required without a TTY when multiple exist)")
 	cmd.Flags().StringArrayVar(&vars, "var", nil, "seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)")
+	cmd.Flags().StringArrayVar(&sources, "source", nil, "seed a fact the call carries: --source from_number=+34600111222 (repeatable; the local stand-in for a caller ID, read by prefetch)")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open the browser automatically")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "follow container/agent logs on stderr (default: write to the log file only)")
 	return cmd

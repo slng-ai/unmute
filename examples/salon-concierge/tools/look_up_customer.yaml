@@ -1,0 +1,36 @@
+description: >-
+  Look up a customer by phone number. Reads only: it never creates a record and
+  never touches one. Returns an empty name when the number is not on file.
+
+# The author's promise that this tool writes nothing, which is what lets a
+# prefetch entry run it. A prefetch runs unasked on every call, so a tool that
+# wrote would write on every call, wrong numbers included: that is why
+# find_or_create_customer is not pre-fetchable and this exists beside it.
+#
+# The compiler cannot check the promise. It checks that you made it.
+read_only: true
+
+input:
+  type: object
+  properties:
+    phone:
+      type: string
+      description: The caller's phone number, in any shape
+  required:
+    - phone
+
+output:
+  type: object
+  properties:
+    name:
+      type: string
+      description: The name on the record, or empty when the number is not on file
+    status:
+      type: string
+      description: existing or unknown
+
+local:
+  handler: tools/salon.py
+
+interruption: provider_default
+effect: returns_data

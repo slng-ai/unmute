@@ -62,6 +62,8 @@ capacity:
 | `listen` | string | with 2 or more listen chain heads | sole chain head | declared `models.listen` name | listen entry to use |
 | `turn` | string | with 2 or more turn entries | sole entry | declared `models.turn` name | turn entry to use |
 | `variables` | map | no | — | lower snake case names | per-call values |
+| `timezone` | string | before a `prefetch:` entry reads the clock | — | an IANA zone name, such as `Europe/Madrid` | the zone every clock reading in this package is taken in |
+| `prefetch` | **list** | no | — | one entry per fact, each with a `name:` | facts resolved once per call, before the greeting, in the order written |
 | `secrets` | list of strings | no | — | UPPER_SNAKE names | environment values the generated project reads |
 | `destinations` | map of strings | when an escalation is used | — | lower snake case names to UPPER_SNAKE env names | phone destinations an escalation may use |
 | `knowledge` | map | no | — | 3 to 64 characters of `[a-z0-9_]` | folders of documents a tool can search |
@@ -438,11 +440,19 @@ Runs a task or a task group, then control comes back.
 | `task` | one of; names an entry under `tasks:` |
 | `group` | one of; names an entry under `task_groups:` |
 | `when` | the situation the model reads |
+| `announce` | optional exact spoken text, said as the step is entered |
 | `requires` | guard: declared variable names |
 | `assign` | write-back: `result.<field>` into a declared variable |
 
 Exactly one of `task` or `group`. `assign` is legal only with `task:`, because
 each mapping reads `result.<field>` from that one task.
+
+`announce` covers the two model requests it takes to enter a step, which were
+otherwise silence. It is exact spoken text, not a model instruction, and it is
+**not spoken when the step is refused** for unmet prerequisites: a caller who
+hears "let me pull up the diary" and is then asked for a phone number has been
+told something untrue. Do not put one on a step whose first tool already
+announces, or two lines queue in a row.
 
 ### `handoffs`
 
@@ -532,6 +542,7 @@ exactly one execution block says how it runs.
 | `interruption` | `provider_default`, `continue`, `cancel` |
 | `effect` | `returns_data`, `ends_conversation` |
 | `announce` | one fixed sentence spoken as the tool starts; no `{{variables}}`; legal on `webhook`, `local` and `knowledge`; absent means nothing is spoken |
+| `read_only` | `true` declares that this tool writes nothing, which [`prefetch:`](/reference/variables#prefetch-resolving-a-value-before-the-call-starts) requires before it may run the tool. **A promise, not a guarantee: the compiler cannot check it.** Legal on `webhook` and `local`; declaring it where no pre-fetch names the tool is a warning |
 
 | Execution block | Fields |
 |---|---|

@@ -81,6 +81,7 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	globalWarnings = add(globalWarnings, unusedKnowledgeWarning(agent))
 	globalWarnings = add(globalWarnings, knowledgeBudgetWarning(agent))
 	globalWarnings = add(globalWarnings, knowledgeCutoffWarning(agent))
+	globalWarnings = append(globalWarnings, orphanReadOnlyWarnings(agent)...)
 	report := ValidateReport{PerTarget: make([]TargetValidation, 0, len(targets))}
 	failed := 0
 	for _, resolved := range targets {
@@ -706,6 +707,7 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	}
 	validateDriverValues(resolved, provider, row)
 	validateVaultTokens(agent, provider, row)
+	prefetchSkipWarnings(agent, resolved, row)
 	if provider == targetcap.Slng {
 		validateSlngTarget(agent, resolved, row)
 	}
@@ -828,6 +830,9 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 			}
 			if len(control.Requires) > 0 {
 				applyCapability(caps, targetcap.FieldDelegateRequires, provider, row)
+			}
+			if control.Announce != "" {
+				applyCapability(caps, targetcap.FieldDelegateAnnounce, provider, row)
 			}
 		case *AgentTransfer:
 			if control.Announce != "" {
@@ -1915,6 +1920,15 @@ func validateVariables(agent *Agent, provider targetcap.Provider, caps targetcap
 			applyCapability(caps, targetcap.FieldVariableConversation, provider, row)
 			break
 		}
+	}
+	for _, name := range sortedKeys(agent.Variables) {
+		if agent.Variables[name].Confirm != "" {
+			applyCapability(caps, targetcap.FieldVariableConfirm, provider, row)
+			break
+		}
+	}
+	if len(agent.Prefetch) > 0 {
+		applyCapability(caps, targetcap.FieldPrefetch, provider, row)
 	}
 	if agent.HasSessionStartTemplate() {
 		applyCapability(caps, targetcap.FieldTemplates, provider, row)

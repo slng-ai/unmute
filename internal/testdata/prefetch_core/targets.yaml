@@ -1,0 +1,31 @@
+# One instance per target. The same portable source compiles to both.
+# Each instance carries provider/version plus
+# a `models:` override map, keyed by model name, for the
+# entries this target cannot run as defined in agent.yaml (N15). An override
+# replaces the whole entry; overrides are forwarded to the provider as-is and
+# never validated (SCHEMA.md, D10); secrets and URLs are env var names only.
+# Instances are named after the provider: what you test is what you deploy.
+
+targets:
+  livekit:
+    provider: livekit
+    version: "1.6.10"
+    sdk_language: python
+    models:
+      # override the vad entry: LiveKit runs its own turn model, not Silero
+      vad:
+        provider: livekit
+        model: turn-detector-mini
+        semantic_endpointing: preferred
+      front_desk:
+        provider: elevenlabs
+        voice: cgSgspJ2msm6clMCkdW9
+      specialist:
+        provider: elevenlabs
+        voice: EXAVITQu4vr4xnSDxMaL
+
+  pipecat:
+    provider: pipecat
+    version: "1.8.0"
+    # no model overrides: the agent.yaml defaults (SLNG + OpenAI + deepgram STT
+    # + local silero VAD) run as defined

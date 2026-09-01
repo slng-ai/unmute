@@ -132,7 +132,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 			pt, def = pt+" | None", "None"
 		}
 		data.Variables = append(data.Variables, pipecatVariable{
-			Name: name, PyType: pt, Default: def, Source: string(v.Source), Description: v.Description,
+			Name: name, PyType: pt, Default: def, Source: string(v.Source), Description: oneLine(v.Description),
 		})
 		// Dispatched input variables hydrate before the greeting on every
 		// channel, not just telephony: the web and console dev paths read the
@@ -148,6 +148,13 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	data.DevOptionalEnv = []string{"UNMUTE_LOG_LEVEL", devmetrics.Env}
 	if len(data.CallStartVars) > 0 {
 		data.DevOptionalEnv = append(data.DevOptionalEnv, "UNMUTE_CALL_START")
+	}
+	// The seeded call facts ride the same door. The worker runs in a container, so
+	// inheriting the parent process environment is not enough, and a deployed
+	// artifact still declares nothing: this list is passed through when the host
+	// sets it and absent otherwise.
+	if PrefetchNeedsSeed(agent) {
+		data.DevOptionalEnv = append(data.DevOptionalEnv, LocalCallFactsEnv)
 	}
 	slices.Sort(data.DevOptionalEnv)
 	// Declared secrets join the startup check; a required one missing fails the
@@ -183,6 +190,34 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	setImportNeeds(&data)
 	data.NeedsRender = renderNeeds(agent)
 	data.PrerequisiteGuard, data.NeedsPrerequisiteGuard = PrerequisiteGuard(agent)
+	data.NeedsPrefetchUnconfirmed = PrefetchUnconfirmed(agent)
+	if block, needed := Prefetch(agent, prefetchStateExpr, func(entry ir.Prefetch) PrefetchRequest {
+		return prefetchRequestFor(agent, entry)
+	}); needed {
+		data.Prefetch, data.NeedsPrefetch = block.Source, true
+		data.NeedsPrefetchClock, data.NeedsPrefetchAsync = block.NeedsClock, block.NeedsAsync
+		data.NeedsPrefetchLocal, data.NeedsPrefetchSeed = block.NeedsLocal, block.NeedsSeed
+		data.NeedsHTTPX = data.NeedsHTTPX || prefetchNeedsHTTPX(agent)
+		data.NeedsInspect = data.NeedsInspect || block.NeedsLocal
+		data.PrefetchRunbook, _ = PrefetchRunbook(agent)
+		// A pre-fetched tool reaches no agent's tools: list by design (FR-003),
+		// so setImportNeeds never sees it. Its handler still has to ride the
+		// artifact, and pipecat_image_imports_test.go holds the COPY line that
+		// carries it: a module missing from there is a ModuleNotFoundError at
+		// startup, which is a call that is never answered.
+		for _, entry := range agent.Prefetch {
+			if entry.Tool == "" || agent.Tools[entry.Tool].Execution != ir.ToolLocal {
+				continue
+			}
+			if slices.ContainsFunc(data.LocalTools, func(t pipecatLocalTool) bool { return t.Name == entry.Tool }) {
+				continue
+			}
+			data.LocalTools = append(data.LocalTools, pipecatLocalTool{
+				Name: entry.Tool, Source: agent.Tools[entry.Tool].HandlerSource,
+			})
+		}
+		sort.Slice(data.LocalTools, func(i, j int) bool { return data.LocalTools[i].Name < data.LocalTools[j].Name })
+	}
 	for _, tool := range data.FlowTools {
 		// A task tool reading call state needs it bound onto its module-level
 		// flows handler; agent @tool methods already have self.state.
@@ -611,6 +646,11 @@ func setImportNeeds(data *pipecatData) {
 			}
 		}
 		for _, delegate := range agent.Delegates {
+			// A step's own entry line queues the same frame, so the import has to
+			// survive a package whose only speech is a delegate announcement.
+			if delegate.Announce != "" {
+				needsTTSSpeakFrame = true
+			}
 			for _, task := range delegate.StepTasks {
 				data.HasTaskTransfers = data.HasTaskTransfers || len(task.Transfers) > 0
 				for _, transfer := range task.Transfers {
@@ -853,13 +893,17 @@ func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, e
 		MethodName: ref,
 		When:       delegateReason(c) + delegateForwardDeclaration(agent, c),
 		Requires:   c.Requires,
+		Announce:   c.Announce,
 	}
 	steps := []string{c.Task}
 	if c.Task != "" {
 		delegate.Task = c.Task
 		delegate.Then = "return" // a single task always returns (SCHEMA 4.7)
 		for variable, path := range c.Assign {
-			delegate.Assign = append(delegate.Assign, pipecatAssign{Var: variable, Field: strings.TrimPrefix(path, "result.")})
+			delegate.Assign = append(delegate.Assign, pipecatAssign{
+				Var: variable, Field: strings.TrimPrefix(path, "result."),
+				Confirms: agent.Variables[variable].Confirm == c.Task,
+			})
 		}
 		sort.Slice(delegate.Assign, func(i, j int) bool { return delegate.Assign[i].Var < delegate.Assign[j].Var })
 	} else {

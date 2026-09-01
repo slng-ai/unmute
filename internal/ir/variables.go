@@ -204,17 +204,51 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 			}
 			return fmt.Errorf("%s: %s references {{%s}}, which is not a declared variable", where, site, ref)
 		}
-		if sessionStart && !hasSessionStartValue(variable) && !slices.Contains(alsoAllowed, ref) {
+		if sessionStart && !hasSessionStartValue(agent, ref, variable) && !slices.Contains(alsoAllowed, ref) {
 			return fmt.Errorf("%s: %s references {{%s}}, which has no value when the prompt is built; give it source: call_start, a system source, or a default", where, site, ref)
+		}
+		// Refusal 16. A value awaiting confirmation renders in exactly one prompt:
+		// the one belonging to the step that confirms it. Everywhere else is a
+		// place the model would read a number nobody has agreed to, and the worst
+		// version is not a wrong booking, it is greeting a stranger by the account
+		// holder's name.
+		//
+		// Scoped to prompt sites, which is what sessionStart marks: the greeting,
+		// an agent's instructions and a task's instructions all pass true here,
+		// while `inject:` and a webhook path pass false. That is not a coincidence
+		// worth relying on silently, so: a prompt is a thing the model reads, and
+		// this rule is about what the model may read.
+		//
+		// An `inject:` value is never read by the model at all, it goes straight
+		// into a request, so the risk there is different: the request would reach
+		// somebody else's record. That one is held at run time by the emitted
+		// refusal helper, which treats an unconfirmed name as unset wherever the
+		// tool is attached. Refusing it here instead would have made the value
+		// unusable by any tool, which is most of what a confirmed number is for.
+		if step := variable.Confirm; sessionStart && step != "" && site != fmt.Sprintf("task %q instructions", step) {
+			return fmt.Errorf("%s: %s references {{%s}}, which the caller has not confirmed yet. It renders only in "+
+				"task %q, the step that confirms it. Read it back there, and name it here only after that step has "+
+				"assigned it", where, site, ref, step)
 		}
 	}
 	return nil
 }
 
 // hasSessionStartValue reports whether a variable holds a value before the first
-// spoken word: dispatched at call start, owned by the runtime, or defaulted.
-func hasSessionStartValue(variable Variable) bool {
+// spoken word: dispatched at call start, owned by the runtime, defaulted, or
+// resolved by a prefetch entry.
+//
+// The prefetch case is what lets a pre-fetched value render in a session-start
+// prompt at all. It is a *may hold* rather than a *does hold*: an entry whose
+// inputs are empty is skipped and the variable keeps its default, which is why
+// FR-013 also requires every prompt to read as a whole sentence when the value
+// renders empty. The alternative, refusing the render, would make the whole
+// feature unusable on any route that supplies no caller ID.
+func hasSessionStartValue(agent *Agent, name string, variable Variable) bool {
 	if variable.Default != nil {
+		return true
+	}
+	if prefetchAssigns(agent, name) {
 		return true
 	}
 	return variable.Source == VariableSourceCallStart || slices.Contains(systemSources, variable.Source)

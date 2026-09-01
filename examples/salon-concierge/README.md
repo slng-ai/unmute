@@ -165,16 +165,19 @@ three reads per arm on fresh scopes:
 
 So a turn where the agent reads an E.164 number aloud will not cache, and nothing
 reports it: the caller hears a correct answer and the hit rate is simply zero.
-This package's answer is not to pick the spoken shape, it is to not read the
-number aloud. `{{customer_phone}}` is in both agent prompts so an agent can tell
-an identified caller from a new one, and both prompts forbid saying it back. The
-one place digits are spoken is the verification readback, which reads the
-caller's own digits one at a time, before any lookup has returned, on a turn that
-follows a tool result and was never cacheable anyway.
 
-If you copy this package for an agent that *does* read a number back to callers,
-put the spoken shape in the variable description instead and have the tool return
-that.
+**That turn now exists, on purpose.** The measurement above is unchanged; the
+decision made in light of it is. On an inbound call the number arrives from the
+carrier before the agent speaks, and the verification step reads it back and asks
+for a yes instead of asking the caller to recite twelve digits. That trades a
+whole collection step against exactly one turn that will not be served from
+cache. The trade was made deliberately, and it is the only turn that pays it:
+the read-back is the one place a number is ever spoken, and no other prompt in the
+package holds the value at all. The compiler refuses one that tries.
+
+If you copy this package for an agent that reads numbers back more often than
+once, put the spoken shape in the variable description and have the tool return
+that, so the value the model says is the value that was sent.
 
 ### One identifier, and every agent that needs it can see it
 
@@ -195,28 +198,38 @@ shared. A caller's first name is short enough to appear inside an unrelated word
 in some answer somewhere; a phone number in this shape is not. One long, specific
 value the agent actually says is the cheapest thing to send.
 
-**Both agents carry the `{{customer_phone}}` placeholder, and that is the point.**
-This page used to say the opposite: one placeholder in one prompt, on the
-reasoning that customer care never says the number so it should not hold a value
-it has no use for. That cost a live call. A caller identified during booking
-raised a complaint mid-flow, customer care picked up correctly with the whole
+**No agent prompt carries the `{{customer_phone}}` placeholder now, and that is a
+reversal worth explaining, because the reason it used to is still a real reason.**
+
+Both agents used to hold it. A live call had shown why: a caller identified during
+booking raised a complaint mid-flow, customer care picked up with the whole
 history, and then asked for the phone number again, because `record_complaint`
-injects the number into the tool call and nothing put it in front of the model.
-The agent could not tell an already-verified caller from a new one.
+injects the number and nothing put it in front of the model. The agent could not
+tell an already-verified caller from a new one. So the rule became: **an agent
+that holds a tool injecting a variable has to be able to see that variable.**
 
-The reasoning was wrong on its own terms too. The name set is a union sent on
-every request, so `customer_phone` was already going out with every one of
-customer care's requests. Referencing it in a second prompt sends nothing new and
-narrows nothing further. The value was being paid for and thrown away.
+That rule is right while the only way to have a value is to have collected it. It
+stops being right once a value can be **present and not yet agreed to**. The
+number now arrives from the carrier before anybody speaks, so a prompt holding it
+would put an unconfirmed number in front of a model, and a model with a number
+uses it. The worst version is not a wrong booking, it is greeting a stranger by
+the account holder's name.
 
-So the rule is not "one placeholder per package". It is: **an agent that holds a
-tool injecting a variable has to be able to see that variable.** Otherwise it
-cannot tell whether the value is already collected, and it asks the caller for
-something the package already has. `internal/generate/examples_test.go` holds
-that, for every agent and every injected variable, not just this pair.
+So the protection moved from the prompt to the tool call. `customer_phone`
+declares `confirm: customer_verification`, and until that step has heard the
+caller agree:
 
-Seeing it is not saying it. Customer care still never reads a number aloud; the
-prompt says so on the same line that shows it the value.
+- it satisfies no `requires:` guard, so the booking step will not start;
+- it renders in no prompt but the verification step's own, enforced by a
+  compile-time refusal rather than by a note in this file;
+- and every tool that injects it refuses itself to the model, by name, saying
+  which value it is waiting for.
+
+That last one is what replaced "the agent can see it". The agent does not need to
+see the number to avoid asking for it: it is told, on the turn it tries to use it,
+exactly which value is not usable yet. `internal/generate/examples_test.go` holds
+all three, and the route to customer care is deliberately **not** gated on
+identifying the caller, because somebody with a complaint must be able to make it.
 
 Every think request also logs one line saying where its answer came from, so
 whether any of this is working is a question you answer by reading the run:
@@ -270,16 +283,70 @@ Two rules protect the latency work in the section above:
 - **A filler rides on a turn that also does its job.** A turn that is only
   "let me have a look" costs a whole extra round trip and buys nothing, so the
   prompts forbid it, alongside the older rule against asking the caller to hold.
-- **A turn that follows a tool does not acknowledge anything.** Each tool carries
-  an `announce` line that plays while it runs, so the caller has already been
-  acknowledged by the time the model speaks. Without this rule the two stack up:
-  a live call produced "Okay, one sec. A haircut, lovely. What day suits you?"
-  and "Booking that in. Lovely, your haircut is booked." The announce is worth
-  keeping, it covers about a second of real model latency, so the prompts drop
-  the second acknowledgement instead.
+- **A turn that follows a tool does not acknowledge anything.** Every data tool
+  here carries an `announce` line that plays while it runs, so the caller has
+  already been acknowledged by the time the model speaks. Without this rule the
+  two stack up: a live call produced "Okay, one sec. A haircut, lovely. What day
+  suits you?" and "Booking that in. Lovely, your haircut is booked." The announce
+  is worth keeping, it covers a real gap, so the prompts drop the second
+  acknowledgement instead.
+- **Two cover lines for one handover is the same fault one level up.**
+  `find_or_create_customer` carries no `announce`, and that is the reason: it
+  runs at the end of identification, and the delegate into booking announces
+  immediately after. A live call played "Okay, one sec." and then "Let me pull up
+  the diary." for a single transition. When a tool sits right before a delegate
+  that announces, only one of the two should speak.
 - **The agent has one name for the whole call.** The greeting introduces Robin,
   and customer care is still Robin: the handoff is silent, the voice is the same,
   and a second introduction is how a caller finds out they were transferred.
+
+## Facts the call already knew
+
+Three things were being discovered during the conversation that were knowable
+before it started. The `prefetch:` block resolves them once, before the greeting,
+in the order the file lists them.
+
+| Entry | Reads | Lands in | What it replaced |
+|---|---|---|---|
+| `today` | the clock, in `Europe/Madrid` | `booking_date` | `get_current_date`, a tool call: two chained requests with nothing spoken over them on every "tomorrow" |
+| `caller` | the call's own `from_number` | `customer_phone` | asking the caller to recite twelve digits, then reading them back |
+| `profile` | `look_up_customer` | `customer_name` | a lookup inside the identification step |
+
+**Nothing here can fail a call.** The whole block has two seconds. Past that it
+gives up, the values keep their declared defaults, and the greeting happens on
+time. An entry whose inputs are empty is skipped, and every outcome is one log
+line naming the entry.
+
+**On a route with no caller ID, most of this does nothing, and that is fine.**
+`unmute validate` prints a warning naming the target, the route, and every entry
+that will skip there. The Pipecat route is one: no Pipecat route supplies a caller
+number, so `caller` skips, `profile` skips with it, and the identification step
+asks for a number exactly as it did before any of this existed. A withheld caller
+ID on the LiveKit route behaves the same way. The browser loop has no carrier at
+all, which is what `--source` is for:
+
+```console
+$ unmute dev . --source from_number=+34600111222
+```
+
+That seeds the **fact**, which the pre-fetch then reads, so a local run exercises
+the read-back and the confirmation. Do not reach for `--var customer_phone=...`:
+that writes the variable directly, skips the pre-fetch, marks nothing as awaiting
+confirmation, and books an appointment against a number it never read back. The
+run would pass a path a real call fails.
+
+**A pre-fetched value can need confirming, and the number does.** See the
+identifier section above for what that buys and what it costs.
+
+**Two cover lines can still stack.** `manage_booking` declares an `announce:`,
+and so do the tools it calls, so entering the step and then running its first tool
+can queue two lines in a row: "Let me pull up the diary." followed by "Just
+checking the diary." The step's line is spoken after the prerequisite guard, so a
+refused step stays silent, but nothing dedupes a step line against a tool line
+inside it. If you hear it doubled on a call, take the `announce:` off whichever
+one covers less: the step's line covers two model requests, the tool's covers a
+request body that returns in milliseconds, so the step's is usually the one worth
+keeping.
 
 ## How the call moves
 
@@ -565,7 +632,10 @@ Repeat it on an inbound phone route only when that route is separately reachable
 | Check | What to say | Pass result |
 |---|---|---|
 | Unverified booking | “I want to book a haircut.” Do not give identity until asked. | Verification runs first. No booking action runs before it succeeds. |
-| Relative-date booking | Give a fake 10–15 digit phone number, confirm the digit readback, say “Book a haircut tomorrow afternoon,” pick an offered time, then explicitly confirm the full booking. | `find_or_create_customer` runs once after the phone confirmation and returns `created`. The trace then calls `get_current_date` before `check_availability`; the availability date is one day after the returned date, with no guessed-year invalid call. One `create_booking` returns `booked` for the offered slot. |
+| Relative-date booking | Give a fake 10–15 digit phone number, confirm the digit readback, say “Book a haircut tomorrow afternoon,” pick an offered time, then explicitly confirm the full booking. | `find_or_create_customer` runs once after the phone confirmation and returns `created`. **No date tool is called at all:** `check_availability` is the first tool of that turn, and its date is one day after the pre-fetched `booking_date`, with no guessed-year invalid call. One `create_booking` returns `booked` for the offered slot. |
+| Pre-fetched caller | `unmute dev . --source from_number=+34680830464`, then “I want to book a haircut.” | The agent reads `+34 680 830 464` back and asks only for a yes. It never asks you to supply a number, and it never says the name on the record. Saying yes lets the booking step run. |
+| Pre-fetched caller, rejected | The same, but answer “no, use a different number.” | The agent asks for a number and the call proceeds exactly as it does with no seed. Nothing acts on the seeded number. |
+| No caller ID | `unmute dev .` with no `--source`. | The identification step asks for a number, unchanged from before this feature. This is also the Pipecat behaviour and the withheld-caller-ID behaviour, both reproduced with no phone. |
 | No confirmation | Prepare a create, modify, or cancel request, then say no, stay silent, or change topic instead of confirming. | No booking mutation runs. An explicit no or a second unclear answer finishes unconfirmed; silence waits for inactivity handling, and a topic change hands off without completing the booking. |
 | Neutral complaint | “My last haircut was uneven, but I’d like the salon to fix it.” | One `record_complaint` returns `recorded` for the same customer, no booking mutation runs, and no manager transfer starts. |
 | Book then cancel | Ask to cancel the active booking and confirm. | One `cancel_booking` returns `cancelled`; a later `list_bookings` has no active booking. |
@@ -636,8 +706,7 @@ verify_customer
 find_or_create_customer       exactly once
 to_booking
 manage_booking
-get_current_date
-check_availability
+check_availability                no date tool before it: the date was pre-fetched
 to_complaints                 from the active booking task
 record_complaint              exactly once
 to_manager                    exactly once

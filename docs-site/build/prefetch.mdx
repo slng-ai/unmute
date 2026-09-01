@@ -1,0 +1,242 @@
+---
+title: "Pre-fetch"
+description: "Run a lookup before the call starts, when you already have everything it needs."
+---
+
+Agents look things up before they can help. Today's date. Who is calling. What
+that person ordered last time.
+
+If you already have what a lookup needs, the model should not spend the call doing
+it. `prefetch:` runs it once, before the greeting, and puts the answer in a
+variable.
+
+## Why bother
+
+When the model calls a tool, it thinks twice: once to decide to call it, once to
+use what came back. The caller waits through both, in silence.
+
+A pre-fetch has already run by the time the caller says hello. Nobody waits.
+
+Our own salon agent used to ask people to read out a phone number the phone
+network had already given it. It also called one tool to ask today's date, then a
+second one to check the diary. Both were questions it already had the answers to.
+
+## What you can fetch
+
+| Write this | And you get |
+|---|---|
+| `clock: date` | today's date, in your `timezone:` |
+| `source: from_number` | a fact the call carries, like the number it came from |
+| `tool: my_tool` | whatever one of your read-only tools returns |
+
+### The big one: any read-only tool
+
+Any tool in your package can run before the call, as long as:
+
+- it says `read_only: true`, so running it on its own changes nothing;
+- you already have every input it needs. A fixed value, a fact the call carries, the date, or something an earlier entry looked up.
+
+That covers a lot of tools. A customer record, looked up by phone number. Today's
+opening hours, looked up by date. Someone's last order, looked up by their
+customer id. What plan an account is on.
+
+Here is a good sign. If your prompt tells the model "call `get_x` first", `get_x`
+is a tool to pre-fetch.
+
+You cannot pre-fetch a tool that needs to know what the caller said. The time they
+picked, the service they want, the reason they called. Those still happen during
+the call.
+
+## How to write it
+
+Give each entry a name, one thing to fetch, and where to put the answer.
+
+```yaml agent.yaml
+timezone: Europe/Madrid
+
+prefetch:
+  - name: today
+    clock: date
+    assign:
+      - booking_date: result.date
+
+  - name: caller
+    source: from_number
+    assign:
+      - customer_phone: result.value
+
+  - name: profile
+    tool: look_up_customer
+    args:
+      - phone: "{{customer_phone}}"
+    assign:
+      - customer_name: result.name
+```
+
+The variables it fills are normal variables. Give each one a type and a default:
+
+```yaml agent.yaml
+variables:
+  booking_date:
+    type: string
+    default: ""
+  customer_phone:
+    type: string
+    default: ""
+  customer_name:
+    type: string
+    default: ""
+```
+
+Now you can write `{{booking_date}}` in a prompt.
+
+<Note>
+  Do not give these variables a `source:` of their own. The pre-fetch entry is
+  what fills them. That is why the same package still works on a phone route
+  carrying no caller ID.
+</Note>
+
+## Entries run in order
+
+Top to bottom, in the order you wrote them. Above, `caller` gets the phone number
+and then `profile` uses it. Put them the other way round and the build stops:
+
+```text wrap
+agent.yaml:196: prefetch "profile" reads {{customer_phone}}, which prefetch "caller" assigns further down the list. Entries resolve in the order you wrote them: move "caller" above "profile"
+```
+
+## Rules that will stop the build
+
+**A clock needs a `timezone:`.** Containers run on UTC time. Without a timezone, a
+business in Spain taking a late evening booking for "tomorrow" writes down the
+wrong day.
+
+**A tool needs `read_only: true`.** A pre-fetch runs on every single call, whether
+the inputs turn out to be right or wrong. So it can only call a tool that reads
+something:
+
+```yaml tools/look_up_customer.yaml
+read_only: true
+
+local:
+  handler: tools/customers.py
+```
+
+The build trusts that line. It cannot open your handler and check. So point a
+pre-fetch at a lookup, never at anything that saves or changes data.
+
+**`assign:` and `args:` are lists.** One pair per `- ` line.
+
+## Where it works
+
+| Entry | LiveKit | Pipecat |
+|---|---|---|
+| `clock:` | yes | yes |
+| `tool:` | yes | yes |
+| `source:` | on `sip` and `connector` only | compiles, never gets a value |
+
+`source:` is the row to read twice. **No Pipecat route supplies call facts**, so
+there a `source: from_number` entry compiles, is skipped on every call, and
+`unmute validate` tells you so. The variable keeps its default and the call
+carries on.
+
+The `slng` target refuses `prefetch:` and `confirm:` outright. It starts the
+session itself, so there is no gap before the greeting to fetch anything in.
+
+<Note>
+  The same fact declared as a variable's own `source:` is stricter: on Pipecat that
+  is a hard error, not a warning. Letting the entry fill the variable instead is
+  what keeps one package compiling on every route.
+</Note>
+
+## Always check a value with the caller
+
+The phone network tells you which phone called. It does not tell you who is
+holding it. People call from a partner's phone, or from work.
+
+So mark the value with `confirm:`. It names the step that has to hear the caller
+say yes:
+
+```yaml agent.yaml
+variables:
+  customer_phone:
+    type: string
+    default: ""
+    confirm: customer_verification
+```
+
+Until they say yes, the value is held back:
+
+- no prompt can use it, except that one step's own;
+- it will not unlock a step that `requires:` it;
+- any tool you hand it to refuses to run, and says which value it is waiting for.
+
+This carries over. `customer_name` was looked up from a number nobody has
+confirmed yet, so it is unconfirmed too. That is what stops the agent greeting a
+stranger by the account holder's name.
+
+Then write that step to read the value back:
+
+```md tasks/verify-customer.md
+The call came from {{customer_phone}}. If there is a number there, read it back
+and ask if it is the right one for the booking. If it is empty, ask for a number.
+```
+
+Now the step checks a number instead of collecting one, which is a much shorter
+conversation.
+
+## What happens when there is nothing to fetch
+
+This is common. Your own machine has no phone network. Callers hide their number.
+Your lookup will not know a first-time customer.
+
+The entry is skipped, and so is anything later that needed its answer. The
+variables keep their defaults and the call carries on as normal.
+
+So write your prompts to still make sense when the value is empty. An empty
+variable prints nothing at all.
+
+<Tip>
+  Write the sentence for the empty case first. Then check it still sounds right
+  once the value is there. The other way round gives you "Your number is ." on
+  every call that skipped.
+</Tip>
+
+A pre-fetch can never break a call. There is a time limit, and if a lookup is too
+slow or hits an error the call goes ahead without that value. Every entry writes
+one log line:
+
+```text
+prefetch today: resolved booking_date=2026-09-01
+prefetch caller: skipped, the call carries no from_number
+prefetch profile: skipped, customer_phone is empty
+```
+
+## Try it
+
+Your machine has no caller ID, so stand in for one:
+
+```sh
+unmute dev ./my-agent --source from_number=<a number in E.164>
+```
+
+Give it a number your lookup knows and the agent should read it back and ask for a
+yes. Leave the flag off and it should ask for a number from scratch. Both of those
+happen in production.
+
+<Warning>
+  Do not use `--var` for this. It writes the value straight in, skips the
+  pre-fetch and marks nothing as needing confirmation. Your local run would then
+  act on a value it never read back, and pass where a real call fails.
+</Warning>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Deciding what to pre-fetch" icon="gauge" href="/optimization/prefetch">
+    Which lookups are worth moving earlier, and the traps we hit doing it.
+  </Card>
+  <Card title="Variables reference" icon="file-code" href="/reference/variables">
+    Every source, every rule, every error message.
+  </Card>
+</CardGroup>

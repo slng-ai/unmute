@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -13,6 +14,66 @@ import (
 // the dispatch payload production sends (variable_secrets_specs.md I.dispatch).
 // The generated runtimes read it only when the call context supplies nothing.
 const CallStartEnv = "UNMUTE_CALL_START"
+
+// callFactsPayload turns repeated --source name=value flags into the JSON object
+// the generated runtime's pre-fetch reads, standing in for the facts a carrier
+// supplies on a real call.
+//
+// A separate flag from --var, and that is the whole point. --var stands in for the
+// dispatch payload and writes a variable directly; a caller's number is not a
+// dispatch value, and seeding the variable would skip the pre-fetch, mark nothing
+// as awaiting confirmation, and let a local run book an appointment without ever
+// reading a number back. That is a local run passing a path a real call fails,
+// which is worse than no local path at all (research R8).
+//
+// Only a call fact is accepted. A name that is not one is refused rather than
+// carried into an env var nothing reads, which is the same silent no-op V13
+// forbids of --var.
+func callFactsPayload(flags []string) (string, error) {
+	if len(flags) == 0 {
+		return "", nil
+	}
+	values := make(map[string]string, len(flags))
+	for _, flag := range flags {
+		name, raw, ok := strings.Cut(flag, "=")
+		if !ok {
+			return "", fmt.Errorf("--source %q must be name=value", flag)
+		}
+		source := ir.VariableSource(name)
+		if !ir.IsSystemSource(source) {
+			switch source {
+			case ir.VariableSourceConversation:
+				return "", fmt.Errorf("--source %s: a conversation value is one the model saves mid-call, "+
+					"so there is nothing for a call to carry; talk to the agent instead", flag)
+			case ir.VariableSourceCallStart:
+				return "", fmt.Errorf("--source %s: call_start arrives with the dispatch, not from the carrier; "+
+					"seed it with --var %s=... instead", flag, name)
+			default:
+				return "", fmt.Errorf("--source %s: %q is not a fact a call carries. The facts are: %s",
+					flag, name, strings.Join(callFactNames(), ", "))
+			}
+		}
+		values[name] = raw
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+// callFactNames lists the facts --source accepts, sorted, for the refusal that
+// names them. Derived from ir's own list so the two cannot drift.
+func callFactNames() []string {
+	names := []string{
+		string(ir.VariableSourceCallID), string(ir.VariableSourceCarrier),
+		string(ir.VariableSourceConnection), string(ir.VariableSourceDirection),
+		string(ir.VariableSourceFromNumber), string(ir.VariableSourceSessionID),
+		string(ir.VariableSourceStreamID), string(ir.VariableSourceToNumber),
+	}
+	slices.Sort(names)
+	return names
+}
 
 // callStartPayload turns repeated --var name=value flags into the JSON object the
 // generated runtime expects. Each value is parsed against its declared type, and
