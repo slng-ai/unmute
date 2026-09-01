@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/slng-ai/unmute/internal/generate"
@@ -25,10 +27,12 @@ import (
 // than being reimplemented here against an API this repository is not allowed to
 // call. `--json` is parseable on success *and* on failure, which is what makes
 // this readable rather than a screen-scrape.
-const (
-	deployPushBinary  = "voiceai"
-	deployPushInstall = "brew install slng-ai/tap/voiceai"
-)
+const deployPushInstall = "brew install slng-ai/tap/voiceai"
+
+// deployPushBinary is the tool that owns the account, the credential and every
+// write. Named in internal/target because four documentation surfaces quote it
+// and a second copy here is a second thing to get wrong.
+var deployPushBinary = target.SlngPushBinary
 
 type deployOptions struct {
 	targets    []string
@@ -36,6 +40,8 @@ type deployOptions struct {
 	runSamples bool
 	agentID    string
 	label      string
+	profile    string
+	call       string
 }
 
 func newDeployCmd() *cobra.Command {
@@ -68,6 +74,8 @@ func newDeployCmd() *cobra.Command {
 	f.BoolVar(&opts.runSamples, "run-samples", false, "run each tool's sample against your real dependencies")
 	f.StringVar(&opts.agentID, "agent-id", "", "update this agent, when more than one has the package's name")
 	f.StringVar(&opts.label, "label", "", "version label (default: the package name and a timestamp)")
+	f.StringVar(&opts.profile, "profile", "", "voiceai credential profile to check and push with")
+	f.StringVar(&opts.call, "call", "", "after a successful push, place one outbound call to this E.164 number")
 	return cmd
 }
 
@@ -121,6 +129,15 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 			target.SlngRouterKeyEnv, target.SlngPushCredentialEnv, target.SlngLoginCommand)
 	}
 
+	// The environment the push will run under, handed to every account read too.
+	// Reading with one credential and pushing with another would make every
+	// finding a statement about an organisation this run never touches.
+	pushEnv := env
+	if key != "" {
+		// Last duplicate wins in os/exec, so this overrides an inherited value.
+		pushEnv = append(append([]string(nil), env...), target.SlngPushCredentialEnv+"="+key)
+	}
+
 	caps := target.Default()
 	for _, resolved := range pushable {
 		artifact, err := generate.Generate(agent, resolved, caps)
@@ -133,6 +150,17 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 			}
 			fmt.Fprintf(errOut, "warning: %s: %s\n", resolved.Name, warning)
 		}
+
+		// Generate wrote nothing: it returns an artifact and writeArtifactFiles
+		// below is what puts it on disk. So the account is asked what it already
+		// has here, between the two, and a run refused at this point leaves both
+		// the build directory and the organisation exactly as it found them.
+		runner := newVoiceaiRunner(bin, pushEnv, opts.profile)
+		account, err := runPreflight(cmd, runner, resolved.Name, artifact.Requires, env)
+		if err != nil {
+			return fmt.Errorf("deploy %s: %w", dir, err)
+		}
+
 		outDir := filepath.Join(dir, "build", resolved.Name)
 		if err := writeArtifactFiles(errOut, outDir, artifact.Files); err != nil {
 			return fmt.Errorf("deploy %s: %w", dir, err)
@@ -146,11 +174,45 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		if err != nil {
 			return fmt.Errorf("deploy %s: %w", dir, err)
 		}
-		if err := printPushResult(out, errOut, resolved.Name, outDir, keySource, result); err != nil {
+		if err := printPushResult(out, errOut, resolved.Name, outDir, keySource, account, result); err != nil {
 			return fmt.Errorf("deploy %s: %w", dir, err)
+		}
+		// After the push and only after it succeeded, because both of these are
+		// about an agent that now exists. A dry run created nothing, so there is
+		// nothing to reach and nothing to call.
+		if !opts.dryRun {
+			in := cmd.InOrStdin()
+			reportReach(in, out, errOut, runner, resolved.Name, result.Agent.Name, result.Agent.ID, interactiveTerminal(in))
+			if opts.call != "" {
+				placeTestCall(out, errOut, runner, resolved.Name, result.Agent.ID, opts.call)
+			}
 		}
 	}
 	return nil
+}
+
+// runPreflight names the account, asks it what it has, and compares.
+//
+// The order matters. The organisation is printed before any finding, because a
+// finding is a statement about one account and an environment key and a stored
+// profile can belong to different ones. A run that cannot name the account at
+// all stops here rather than reporting on an organisation it cannot identify.
+func runPreflight(cmd *cobra.Command, runner *voiceaiRunner, name string, requires generate.Requirements, env []string) (slngAccount, error) {
+	out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
+	resources, err := readResources(runner, requires.ServerNames())
+	if err != nil {
+		return slngAccount{}, err
+	}
+	fmt.Fprintf(out, "%s: organisation %s\n", name, resources.Account)
+
+	report := comparePreflight(requires, resources)
+	// Between comparing and rendering, because a gap unmute can close should be
+	// closed rather than reported. Secrets are the only kind it can: a missing
+	// tool, MCP server or trunk is made in the dashboard, and for those the
+	// report is the whole of what this command can do.
+	in := cmd.InOrStdin()
+	offerToFill(in, out, errOut, runner, &report, env, interactiveTerminal(in))
+	return resources.Account, renderPreflight(out, errOut, name, report)
 }
 
 // noSlngTargetGuidance names what the package does declare and the block that
@@ -266,7 +328,15 @@ type pushResult struct {
 // JSON. Only output that will not parse is an error, because that means the tool
 // itself went wrong and there is nothing to report to the author.
 func runPush(bin, dir string, env []string, key string, opts deployOptions) (pushResult, error) {
-	args := []string{"agents", "push", dir, "--json"}
+	args := []string{}
+	if opts.profile != "" {
+		// A root option, so it goes before the subcommand. After it, it is an
+		// unknown flag; worse, a run that silently resolved a different account
+		// from the one the preflight checked would make every finding a statement
+		// about somewhere else.
+		args = append(args, target.SlngProfileFlag, opts.profile)
+	}
+	args = append(args, "agents", "push", dir, "--json")
 	if opts.dryRun {
 		args = append(args, "--dry-run")
 	}
@@ -307,9 +377,19 @@ func runPush(bin, dir string, env []string, key string, opts deployOptions) (pus
 // printPushResult renders one push. Facts go to stdout in the `name: fact` form
 // the rest of the CLI uses; anything the author has to act on goes to stderr and
 // comes back as an error, so the exit code matches what was printed.
-func printPushResult(out, errOut io.Writer, name, outDir, keySource string, result pushResult) error {
-	if org := organisationLine(result); org != "" {
-		fmt.Fprintf(out, "%s: organisation %s\n", name, org)
+func printPushResult(out, errOut io.Writer, name, outDir, keySource string, named slngAccount, result pushResult) error {
+	// The organisation is named once per target, by the preflight, before any
+	// finding: a finding is a statement about one account, so the reader needs
+	// the account first. Restating it here was a second identical line.
+	//
+	// What is worth saying is a *difference*. The preflight reads with the
+	// resolved credential and the push runs as its own process; if those ever
+	// land in different organisations, every check just performed was about
+	// somewhere else, and that is a warning rather than a duplicate.
+	if org := organisationLine(result); org != "" && !sameOrganisation(named, result) {
+		fmt.Fprintf(errOut, "warning: %s: the checks ran against %s and the push reported %s. "+
+			"Those are different organisations, so what was checked is not what was written\n",
+			name, named, org)
 	}
 	// Pushing REPLACES: a reference or field the package no longer names is
 	// removed, not merged. Which agent gets replaced is decided by the name in
@@ -334,6 +414,16 @@ func printPushResult(out, errOut io.Writer, name, outDir, keySource string, resu
 		printPushOutcome(out, name, result)
 	}
 	return nil
+}
+
+// sameOrganisation compares by id, because that is the identity; a workspace can
+// be renamed. A push that reported no id at all cannot be compared, and an
+// unanswerable question is not a mismatch.
+func sameOrganisation(named slngAccount, result pushResult) bool {
+	if result.Organisation.ID == "" || named.Account.OrgID == "" {
+		return true
+	}
+	return named.Account.OrgID == result.Organisation.ID
 }
 
 func organisationLine(result pushResult) string {
@@ -532,4 +622,187 @@ func plural(n int, noun string) string {
 // tool's own errors are several lines when they list what it looked for.
 func indentLines(text, indent string) string {
 	return strings.ReplaceAll(strings.TrimSpace(text), "\n", "\n"+indent)
+}
+
+// --- what can actually reach the agent --------------------------------------
+
+// reportReach says which number reaches the agent that was just pushed, and how
+// to make it ring.
+//
+// Reporting only. Unmute buys no numbers and provisions no carrier state, so a
+// trunk this names was attached by somebody in the dashboard, and a trunk it
+// cannot find is not a trunk it will create.
+//
+// One read, and never during a preflight. Reading trunks enumerates every agent
+// in the organisation, and `voiceai trunks get` costs the same as `trunks list`
+// for a per-agent breakdown that `in_use_by` already answers.
+func reportReach(in io.Reader, out, errOut io.Writer, runner *voiceaiRunner, name, agentName, agentID string, interactive bool) {
+	trunks, notes, err := readTrunks(runner)
+	for _, note := range notes {
+		fmt.Fprintf(errOut, "note: %s: %s\n", name, note)
+	}
+	if err != nil {
+		// Never a deploy failure. The agent is live either way, and an unreadable
+		// trunk listing says nothing about whether a call would connect.
+		fmt.Fprintf(errOut, "warning: %s: %s, so the numbers that reach this agent could not be read\n", name, err)
+		return
+	}
+
+	// A candidate is an inbound trunk that is free *and* usable. Filtering on
+	// usable matters: attaching a trunk the account reports as broken produces a
+	// number that does not ring, and offering one as a choice invites exactly
+	// that. Unusable free trunks are still worth naming, with the reason, because
+	// "there is a number here and it does not work" is a different problem from
+	// "there is no number", and the fix is in the dashboard either way.
+	var attached, candidates, broken []slngTrunk
+	for _, trunk := range trunks {
+		switch {
+		case trunk.InUseBy == agentName:
+			attached = append(attached, trunk)
+		case trunk.Direction != "inbound" || trunk.InUseBy != "":
+			// An outbound trunk, or one already answering for another agent.
+		case trunk.Usable:
+			candidates = append(candidates, trunk)
+		default:
+			broken = append(broken, trunk)
+		}
+	}
+
+	for _, trunk := range attached {
+		fmt.Fprintf(out, "%s: %s trunk %s reaches this agent on %s%s\n",
+			name, trunk.Direction, trunk.Name, numbersOf(trunk), unusableSuffix(trunk))
+	}
+	if len(attached) > 0 {
+		return
+	}
+
+	// The ordinary state of a first deploy, and printing nothing here reads as a
+	// failure to look rather than as an answer.
+	fmt.Fprintf(out, "%s: no number reaches this agent yet\n", name)
+	// Named whether or not there is anything to offer: an author looking for a
+	// free number needs to know that one exists and is broken, rather than
+	// concluding the organisation has none.
+	for _, trunk := range broken {
+		fmt.Fprintf(out, "%s:   %s on %s is free but cannot be used%s\n",
+			name, trunk.Name, numbersOf(trunk), reasonSuffix(trunk))
+	}
+	if len(candidates) == 0 {
+		fmt.Fprintf(out, "%s:   no usable free inbound trunk to attach. A number is bought and a trunk configured in the SLNG dashboard\n", name)
+		return
+	}
+	offerTrunk(in, out, errOut, runner, name, agentID, candidates, interactive)
+}
+
+// offerTrunk asks which existing trunk should answer for this agent.
+//
+// The trunk already exists: somebody bought the number and configured the trunk
+// in the dashboard, and unmute does neither. What is left is pointing the
+// deployed agent at one of them, which is a single field on the agent and the
+// last step between a successful deploy and a phone that rings.
+//
+// It runs after the push, not before, so it is idempotent and self-healing: if a
+// push ever clears the field, the next deploy offers to set it again.
+func offerTrunk(in io.Reader, out, errOut io.Writer, runner *voiceaiRunner, name, agentID string, candidates []slngTrunk, interactive bool) {
+	if agentID == "" {
+		// A dry run, or a push that reported no id. Nothing to attach to.
+		return
+	}
+	if !interactive {
+		fmt.Fprintf(out, "%s:   %s free. Attach one in the SLNG dashboard, or re-run this deploy from a terminal to choose:\n",
+			name, plural(len(candidates), "inbound trunk"))
+		for _, trunk := range candidates {
+			fmt.Fprintf(out, "%s:     %s on %s%s\n", name, trunk.Name, numbersOf(trunk), unusableSuffix(trunk))
+		}
+		return
+	}
+
+	fmt.Fprintf(out, "\n%s free, and this agent has none. Which should answer for it?\n", plural(len(candidates), "inbound trunk is"))
+	for index, trunk := range candidates {
+		fmt.Fprintf(out, "  [%d] %s on %s%s\n", index+1, trunk.Name, numbersOf(trunk), unusableSuffix(trunk))
+	}
+	fmt.Fprintf(out, "  [0] none, leave it unattached\n")
+	fmt.Fprint(out, "  choose [0]: ")
+
+	answer, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && strings.TrimSpace(answer) == "" {
+		fmt.Fprintf(out, "\n  no answer to read, so no trunk was attached.\n")
+		return
+	}
+	choice, convErr := strconv.Atoi(strings.TrimSpace(answer))
+	switch {
+	case strings.TrimSpace(answer) == "" || choice == 0:
+		fmt.Fprintf(out, "  left unattached. `%s` shows the trunks again.\n", resourcesCommandName())
+		return
+	case convErr != nil || choice < 0 || choice > len(candidates):
+		fmt.Fprintf(errOut, "  %q is not one of the choices, so no trunk was attached.\n", strings.TrimSpace(answer))
+		return
+	}
+
+	trunk := candidates[choice-1]
+	if err := runner.attachTrunk(agentID, trunk); err != nil {
+		fmt.Fprintf(errOut, "warning: %s: the agent deployed, but %s was not attached: %v\n", name, trunk.Name, err)
+		return
+	}
+	fmt.Fprintf(out, "%s: %s attached. Call %s to reach this agent.\n", name, trunk.Name, numbersOf(trunk))
+}
+
+// resourcesCommandName is how an author sees the trunks again later, read from
+// the command itself rather than written out here.
+//
+// A literal would be a second copy of a name newResourcesCmd already owns, and a
+// rename would leave this diagnostic pointing at a command that does not exist.
+// Cheap enough to derive that there is no reason not to.
+func resourcesCommandName() string {
+	return "unmute " + newResourcesCmd().Name()
+}
+
+// unusableSuffix relays the account's own reason a trunk will not work, rather
+// than re-deriving one. A trunk that is both unusable and attached to no agent
+// is withheld by the platform and appears in no listing at all, which is what
+// the advisory on the error stream is about.
+func unusableSuffix(trunk slngTrunk) string {
+	if trunk.Usable {
+		return ""
+	}
+	return " (not usable" + strings.TrimSuffix(reasonSuffix(trunk), ")") + ")"
+}
+
+// reasonSuffix is the account's own words for why a trunk will not work,
+// relayed rather than re-derived. A trunk with no stated reason gets no
+// invented one.
+func reasonSuffix(trunk slngTrunk) string {
+	if trunk.UnavailableReason == "" {
+		return ""
+	}
+	return ": " + trunk.UnavailableReason
+}
+
+// numbersOf renders a trunk's numbers, and says so when it has none. An empty
+// list printed bare reads as a formatting bug, and "no number" is usually the
+// reason the trunk is unusable in the first place.
+func numbersOf(trunk slngTrunk) string {
+	if len(trunk.Numbers) == 0 {
+		return "no number"
+	}
+	return strings.Join(trunk.Numbers, ", ")
+}
+
+// placeTestCall rings a phone, and only ever because this run was asked to.
+//
+// Telephony is verified on a deployed agent against a real carrier, and there is
+// no local stand-in for it, so this is the last step of the only loop that
+// proves a phone agent works. It is also a real call that costs real money, so
+// it is never a default and never implied by a successful deploy.
+func placeTestCall(out, errOut io.Writer, runner *voiceaiRunner, name, agentID, phone string) {
+	if agentID == "" {
+		fmt.Fprintf(errOut, "warning: %s: the push reported no agent id, so no test call was placed\n", name)
+		return
+	}
+	if err := runner.dispatchCall(agentID, phone); err != nil {
+		// The deploy succeeded. A call that would not connect is worth saying and
+		// is not a reason to report the deploy as failed.
+		fmt.Fprintf(errOut, "warning: %s: the agent deployed, but the test call to %s was not placed: %v\n", name, phone, err)
+		return
+	}
+	fmt.Fprintf(out, "%s: calling %s from this agent now\n", name, phone)
 }

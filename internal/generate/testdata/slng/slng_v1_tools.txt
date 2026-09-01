@@ -19,11 +19,14 @@ The agent deploys to region **eu-central**.
 
 ## 1. Create these Vault entries first
 
-SLNG reads these from its own secret store. Unmute knows the names and can
-create none of them, and it has never seen a value: no secret value appears in
-any file in this directory or on any command line below.
+SLNG reads these from its own secret store. No secret value appears in any file
+in this directory or on any command line below, and unmute has never seen one.
 
-Create each one in the SLNG dashboard before you push. A name is an uppercase name starting with a letter, such as ACME_API_KEY, at most 64 characters.
+You do not have to create these by hand. `unmute deploy` checks this exact list
+against your organisation before it writes anything, and offers to create any
+that are missing: it hands the prompt to `voiceai`, which masks what you type,
+so the value never passes through unmute. Create them in the SLNG dashboard
+instead if you prefer. A name is an uppercase name starting with a letter, such as ACME_API_KEY, at most 64 characters.
 
 **Secrets** — credentials a tool authenticates with.
 

@@ -55,9 +55,10 @@ func GenerateSlng(agent *ir.Agent, tgt ir.Target) (Artifact, error) {
 	files = append(files, File{Path: "README.md", Content: runbook})
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return Artifact{
-		Kind:  BodyTarget,
-		Files: files,
-		Notes: GenerateReport{Notes: built.Notes, Warnings: built.Warnings},
+		Kind:     BodyTarget,
+		Files:    files,
+		Notes:    GenerateReport{Notes: built.Notes, Warnings: built.Warnings},
+		Requires: built.Requires,
 	}, nil
 }
 

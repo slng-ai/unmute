@@ -159,6 +159,47 @@ printing an empty list. A package that authenticates a webhook tool, or writes a
 where each one came from. Unmute lists names and never values: no secret value
 reaches any emitted file or any command in the runbook.
 
+`unmute deploy` checks that same list against your organisation before it
+compiles anything, and offers to create whatever is missing. It does not prompt
+for the value itself: it runs `voiceai secret create`, which masks its own
+input, so the value never passes through unmute at all.
+
+## What deploy checks before it writes anything
+
+The push refuses a body whose references do not resolve, and it refuses them all
+at once. `unmute deploy` asks your organisation the same questions first, before
+it compiles, so a refusal costs nothing and names the line of the package that
+caused it:
+
+- **`builtin:` tools.** This package's `end_call` has to exist in your
+  organisation, and it does: SLNG lists its curated capabilities as ordinary
+  tools. The name checked is **the tool file's own name**, because that is what
+  the emitted reference carries. `tools/hang_up.yaml` selecting
+  `builtin: end_call` emits a reference to `hang_up`, which resolves nowhere.
+- **MCP servers and their tools.** Checked by name, against the server's last
+  stored capability probe. That probe is not a live call, so a healthy server can
+  still be unreachable.
+- **Vault secrets and variables.** Checked for existing *and* for holding a
+  value. An entry created without one is reported differently from a missing
+  name, because the fix is different.
+
+`check_order` and `refund` are never reported as missing. The push creates them,
+so their absence is the expected state of a first deploy.
+
+Run [`unmute resources`](https://unmute.mintlify.app/reference/cli/resources) to
+see what your organisation offers before you write a name.
+
+## Giving it a phone number
+
+This package declares no `connection:`, and the slng target refuses one. Carrier
+state is not a package field here: the compiled body is portable, and which
+number answers is an operator's choice about one deployment.
+
+After a successful push, `unmute deploy` says which number reaches the agent. If
+none does and an inbound trunk is free, it offers to attach one, and does so only
+if you pick a number at a terminal. Buying the number and configuring the trunk
+stay in the SLNG dashboard; this chooses among trunks that already exist.
+
 ## Regions
 
 `deployment_region` takes exactly one of `any`, `us-east`, `eu-central` or

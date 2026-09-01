@@ -519,7 +519,7 @@ func Default() Table {
 			FieldToolAnnounceTask: field(allow(Slng)),
 			FieldOutbound: field(
 				deny(Pipecat, "the Pipecat driver does not emit outbound calling yet"),
-				deny(Slng, "slng target creates no carrier state and writes no trunk: place outbound calls from the SLNG dashboard or its API against a trunk configured there, or compile to livekit which dials from the agent"),
+				deny(Slng, "slng target writes no trunk and dials nothing from a package: place outbound calls from the SLNG dashboard or its API against a trunk configured there, or compile to livekit which dials from the agent"),
 			),
 			FieldVoicemail: field(
 				deny(Pipecat, "the Pipecat driver does not emit voicemail handling yet"),

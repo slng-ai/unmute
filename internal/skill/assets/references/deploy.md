@@ -97,6 +97,66 @@ agent. Present them as a starting point and tell the user to measure.
   attach. Per route and per carrier, and the part no compiler can do. The
   generated runbook has them.
 
+## Deploying to SLNG: what is checked before anything is written
+
+`unmute deploy` asks the organisation what it already has, compares it with what
+the package needs, and reports every gap in one pass **before** it compiles or
+pushes. A refused run leaves both `build/slng` and the organisation untouched.
+
+Four things are checked, and knowing which is which is the difference between a
+useful package and one that fails at the push:
+
+| Checked | Not checked |
+|---|---|
+| every `builtin:` tool, by the **tool file's own name** | a `local:` or `webhook:` tool, because the push creates it |
+| every MCP server named by an `mcp:` tool | a control, because the compiled body carries no reference to one |
+| every tool listed under `mcp.tools` | |
+| every vault secret and variable, including whether it holds a value | |
+
+**The builtin name rule matters when you write a package.** A `builtin:` tool's
+emitted reference carries the *file's* name, not the id it selects. So
+`tools/hang_up.yaml` declaring `builtin: {id: end_call}` compiles clean, emits a
+reference to `hang_up`, and fails at the push because the organisation's curated
+tool is called `end_call`. **Name the file after the capability.**
+
+SLNG lists its curated capabilities as ordinary tools, which is why this check
+can be positive rather than a guess. The names, read 2026-08-31: `end_call`,
+`transfer_call`, `voicemail_detection`, `current_datetime`, `user_phone_number`,
+`send_sms`.
+
+**Never suggest creating a tool, an MCP server or a trunk from the CLI.** There
+is no command for any of them. They are created in the SLNG dashboard, and
+`unmute deploy` says so when one is missing. The one resource unmute writes is a
+vault entry, and it offers that during a deploy.
+
+**Never suggest passing a secret value on a command line.** `voiceai secret
+create` has no `--value` flag on purpose: argv lands in shell history and is
+visible in `ps`. The value is prompted for with the input masked, or piped on
+stdin.
+
+`unmute resources` lists the tools, MCP servers and phone numbers an
+organisation offers, in the exact spelling a package must use. Suggest it before
+writing a `builtin:` or `mcp:` name from memory.
+
+## After a deploy, on a phone
+
+Telephony is verified on a deployed agent against a real carrier. There is no
+local stand-in, and `unmute dev` is the browser loop only.
+
+`unmute deploy` reports which number reaches the agent after a successful push.
+When none does and an inbound trunk is free, it offers to attach one, which is a
+single-field PATCH on the agent and happens only when an operator picks a number
+at a terminal. A run with no terminal never attaches.
+
+Do not put a trunk, a number or a `connection:` in a package for the slng
+target: the compiler refuses it, the package stays portable, and attaching is an
+operator's choice at deploy time. Creating a trunk and buying a number stay in
+the SLNG dashboard.
+
+`unmute deploy --call <e164>` places one outbound call from the agent, which
+rings a real phone and costs a real call, so it happens only when it is asked
+for.
+
 ## Route report
 
 ```

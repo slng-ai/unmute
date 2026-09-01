@@ -248,7 +248,7 @@ func refuseSlngProjectValues(resolved Target, row *TargetValidation) {
 		{resolved.Version != "", "version", "SLNG owns the runtime version its agents run on: remove the field"},
 		{len(resolved.Pins) > 0, "pins", "there is no generated project whose packages could be pinned: remove the field"},
 		{resolved.SDKLanguage != "", "sdk_language", "no SDK is generated for this target: remove the field"},
-		{resolved.Connection != "", "connection", "unmute creates no carrier state on SLNG: configure the trunk and number in the SLNG dashboard and remove the field"},
+		{resolved.Connection != "", "connection", "a package declares no carrier state on SLNG: which number reaches an agent belongs to one deployment, not to a portable package, so buy the number and configure the trunk in the SLNG dashboard and remove the field. `unmute deploy` offers to attach a free trunk after a successful push"},
 	} {
 		if refusal.set {
 			row.Errors = add(row.Errors, targetcap.SlngDiagnostic("does not take %s. %s", refusal.field, refusal.why))

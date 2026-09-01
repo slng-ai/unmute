@@ -179,6 +179,11 @@ type slngArtifacts struct {
 	Runbook   slngRunbook
 	Notes     []string
 	Warnings  []string
+	// Requires is what the account must already hold. Derived after the body is
+	// built, because two of its five sources exist only after lowering: the vault
+	// tokens in the resolved prompt and greeting, and the references the body
+	// carries.
+	Requires Requirements
 }
 
 func buildSlng(agent *ir.Agent, tgt ir.Target) (slngArtifacts, error) {
@@ -247,6 +252,12 @@ func buildSlng(agent *ir.Agent, tgt ir.Target) (slngArtifacts, error) {
 			built.Body.Defaults[name] = text
 		}
 	}
+	// Before the runbook, which renders half of it. Deriving it here rather than
+	// inside slngRunbookFor keeps the runbook a renderer: what a package needs
+	// from the account is a fact about the body, not about the document that
+	// describes it, and `unmute deploy` reads the same value without rendering
+	// anything.
+	built.Requires = slngRequirements(agent, built)
 	built.Runbook = slngRunbookFor(agent, tgt, built)
 	built.Notes = append(built.Notes, slngNotes(built)...)
 	return built, nil

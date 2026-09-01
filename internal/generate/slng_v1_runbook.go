@@ -34,8 +34,8 @@ type slngRunbook struct {
 	WebSessionCommand string
 	// VaultSecrets and VaultVariables are names only. Unmute can list what a
 	// package needs and can create none of them, and it never sees a value.
-	VaultSecrets   []slngVaultName
-	VaultVariables []slngVaultName
+	VaultSecrets   []Requirement
+	VaultVariables []Requirement
 	NameShape      string
 	// ToolFiles and MCPRefs drive the two "this body is not postable as written"
 	// sections. A package with neither gets neither section.
@@ -54,14 +54,6 @@ type slngRunbook struct {
 	// often misses: a variable declared in agent.yaml is a value supplied per
 	// call, not a constant.
 	VariableNames []string
-}
-
-type slngVaultName struct {
-	Name string
-	// Where says which line of the package asked for this name, because "create
-	// ACME_TOKEN" is only actionable with "because check_order authenticates with
-	// it" beside it.
-	Where string
 }
 
 // NeedsVault reports whether the package needs any Vault entry at all. A package
@@ -110,57 +102,12 @@ func slngRunbookFor(agent *ir.Agent, tgt ir.Target, built slngArtifacts) slngRun
 		}
 	}
 	runbook.VariableNames = slices.Sorted(maps.Keys(built.Body.Variables))
-	secrets, variables := slngVaultNames(agent, built)
-	runbook.VaultSecrets, runbook.VaultVariables = secrets, variables
+	// The same value `unmute deploy` checks against the account. The runbook
+	// prints what the preflight looks for, so a table here that omitted a name
+	// would be a table that lies about what the push needs.
+	runbook.VaultSecrets = built.Requires.Secrets
+	runbook.VaultVariables = built.Requires.Variables
 	return runbook
-}
-
-// slngVaultNames collects every SLNG Vault name the package needs, grouped by
-// where it came from. Two kinds, because they are created differently and an
-// author looking at a flat list cannot tell which is which:
-//
-//   - a secret is a credential a tool authenticates with, named in the package
-//     as an environment variable and stored in the Vault under the same name;
-//   - a variable is a {{$NAME}} token SLNG substitutes at run time.
-//
-// Only names. Unmute has no value to write and would refuse to write one.
-func slngVaultNames(agent *ir.Agent, built slngArtifacts) (secrets, variables []slngVaultName) {
-	seenSecret, seenVariable := map[string]string{}, map[string]string{}
-	addSecret := func(name, where string) {
-		if name != "" && seenSecret[name] == "" {
-			seenSecret[name] = where
-		}
-	}
-	addVariable := func(value, where string) {
-		for _, ref := range ir.TemplateRefs(value) {
-			if name, ok := ir.VaultToken(ref); ok && seenVariable[name] == "" {
-				seenVariable[name] = where
-			}
-		}
-	}
-	for _, name := range slices.Sorted(maps.Keys(agent.Tools)) {
-		tool := agent.Tools[name]
-		if tool.Auth != nil {
-			addSecret(tool.Auth.TokenEnv, "tools/"+name+".yaml authenticates with it")
-		}
-		addVariable(tool.Description, "tools/"+name+".yaml description")
-		addVariable(tool.BaseURL, "tools/"+name+".yaml webhook base_url")
-		addVariable(tool.Path, "tools/"+name+".yaml webhook path")
-		for _, key := range slices.Sorted(maps.Keys(tool.Inject)) {
-			if text, ok := tool.Inject[key].(string); ok {
-				addVariable(text, "tools/"+name+".yaml inject."+key)
-			}
-		}
-	}
-	addVariable(built.Body.SystemPrompt, "the entry agent's instructions")
-	addVariable(built.Body.Greeting, "conversation.greeting.text")
-	for _, name := range slices.Sorted(maps.Keys(seenSecret)) {
-		secrets = append(secrets, slngVaultName{Name: name, Where: seenSecret[name]})
-	}
-	for _, name := range slices.Sorted(maps.Keys(seenVariable)) {
-		variables = append(variables, slngVaultName{Name: name, Where: seenVariable[name]})
-	}
-	return secrets, variables
 }
 
 // DeployCommand is the one command the runbook tells an author to run. It

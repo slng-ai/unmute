@@ -1,0 +1,108 @@
+---
+title: "unmute resources"
+description: "See the tools, MCP servers and phone numbers your SLNG organisation offers."
+---
+
+```text
+$ unmute resources --help
+List the tools, MCP servers and phone numbers your SLNG organisation offers.
+
+Names are shown in the exact spelling a package must use: SLNG matches them exactly and is case-sensitive everywhere. Nothing is written, and no package is read, so this is safe to run from anywhere.
+
+Tools and MCP servers are created in the SLNG dashboard, not from here. `unmute deploy` checks a package against this same list before it pushes.
+
+Usage:
+  unmute resources [flags]
+
+Flags:
+  -h, --help             help for resources
+      --profile string   voiceai credential profile to read with
+```
+
+## Why it exists
+
+You cannot name what you cannot see.
+
+A package references a curated tool with `builtin:` and an MCP server with
+`mcp:`, both by exact name. Both are created in the SLNG dashboard, not by
+unmute. Without a way to look, you write the name from memory, the package
+compiles clean, and you find out at the push.
+
+This is the same list [`unmute deploy`](/reference/cli/deploy) checks your
+package against before it writes anything. Running it while you author means the
+deploy has nothing to tell you.
+
+## What it needs
+
+The `voiceai` CLI on your PATH and a key, exactly as
+[`unmute deploy`](/reference/cli/deploy) needs them. It reads no package, so you
+can run it from anywhere.
+
+## Usage
+
+```sh
+unmute resources
+```
+
+```text
+━━ resources
+organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd), profile default
+
+tools (7)
+  api_request              api_request
+  current_datetime         current_datetime
+  end_call                 end_call
+  send_sms                 send_sms
+  transfer_call            transfer_call
+  user_phone_number        user_phone_number
+  voicemail_detection      voicemail_detection
+
+mcp servers (1)
+  firecrawl-mcp            streamable_http, last probe healthy
+    firecrawl_scrape
+    firecrawl_search
+  status and tool lists come from each server's last stored probe, not a live call.
+
+phone numbers (4 trunks)
+  inbound  1_inbound                +447700900111        free
+  inbound  2_inbound                +447700900222        in use by acme-support-slng
+  outbound demo-general             +447700900333        in use by acme-support-slng
+```
+
+## Reading it
+
+**The tool type is the useful column.** A curated capability such as `end_call`
+is one you *reference*, by writing a tool file of that name with a `builtin:`
+block. A `code` or `api_request` tool is one a push *writes*, so seeing one here
+means some package already created it.
+
+The name to write is the tool file's own name. `tools/end_call.yaml` selecting
+`builtin: end_call` works; `tools/hang_up.yaml` selecting the same builtin emits
+a reference to `hang_up`, which your organisation has never heard of.
+
+**MCP status is a stored probe, not a live call.** A server can be listed here
+as healthy and be unreachable right now. The tool names come from the same
+probe.
+
+**A free trunk reaches nothing.** Attaching a trunk to an agent is done in the
+dashboard; unmute buys no numbers and provisions no carrier state. A trunk that
+is both unusable and attached to no agent is withheld by the platform and
+appears in no listing at all, so this is never a complete inventory of what your
+organisation owns.
+
+## What it cannot do
+
+Create anything. Tools, MCP servers and trunks are all made in the SLNG
+dashboard. The one resource unmute can write is a vault entry, and it offers
+that during [`unmute deploy`](/reference/cli/deploy), where it knows which names
+your package actually needs.
+
+## Where to go next
+
+<Card title="unmute deploy" icon="rocket" href="/reference/cli/deploy">
+  Checks your package against this list, then pushes.
+</Card>
+
+<Card title="The SLNG target" icon="cloud" href="/targets/slng">
+  What the compiler writes, and what SLNG refuses.
+</Card>

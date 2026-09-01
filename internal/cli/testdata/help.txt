@@ -12,6 +12,7 @@ Available Commands:
   dev         Compile, run the agent locally, and talk to it in the browser.
   help        Help about any command
   init        Scaffold a new v1 agent package.
+  resources   List the tools, MCP servers and phone numbers your SLNG organisation offers.
   skill       Install the coding-agent skill into a project.
   validate    Validate a v1 agent package against its targets.
 
@@ -68,9 +69,11 @@ Usage:
 
 Flags:
       --agent-id string   update this agent, when more than one has the package's name
+      --call string       after a successful push, place one outbound call to this E.164 number
       --dry-run           check everything and report, changing nothing
   -h, --help              help for deploy
       --label string      version label (default: the package name and a timestamp)
+      --profile string    voiceai credential profile to check and push with
       --run-samples       run each tool's sample against your real dependencies
       --target strings    slng target instance name (repeatable; default: every slng target)
 
@@ -90,6 +93,20 @@ Flags:
       --target string     target instance name (required without a TTY when multiple exist)
       --var stringArray   seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)
       --verbose           follow container/agent logs on stderr (default: write to the log file only)
+
+$ unmute resources --help
+List the tools, MCP servers and phone numbers your SLNG organisation offers.
+
+Names are shown in the exact spelling a package must use: SLNG matches them exactly and is case-sensitive everywhere. Nothing is written, and no package is read, so this is safe to run from anywhere.
+
+Tools and MCP servers are created in the SLNG dashboard, not from here. `unmute deploy` checks a package against this same list before it pushes.
+
+Usage:
+  unmute resources [flags]
+
+Flags:
+  -h, --help             help for resources
+      --profile string   voiceai credential profile to read with
 
 $ unmute skill --help
 Install the coding-agent skill into a project.

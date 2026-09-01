@@ -259,7 +259,7 @@ func TestSlngRunsTheChannelBranchThatNeverRan(t *testing.T) {
 	agent := slngAgent(t)
 	agent.Channels["phone"] = Channel{Kind: ChannelTelephony, Outbound: &outbound, RequiredControls: []string{"hangup"}}
 	row := validateSlng(t, agent)
-	wantSlngError(t, row, "creates no carrier state")
+	wantSlngError(t, row, "writes no trunk and dials nothing from a package")
 
 	// on_voicemail additionally applies FieldVoicemail and resolves the
 	// voicemail_detection control. The field is what refuses; the control is core,

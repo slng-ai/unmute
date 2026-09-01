@@ -1,0 +1,4 @@
+[
+  { "name": "firecrawl-mcp", "transport": "streamable_http", "capability_status": "healthy", "capability_tool_count": 2 },
+  { "name": "flaky-mcp", "transport": "sse", "capability_status": "error", "capability_tool_count": 0, "capability_error": "probe timed out after 10s" }
+]

@@ -28,6 +28,13 @@ type Artifact struct {
 	Files     []File
 	Notes     GenerateReport
 	Telephony *TelephonyRuntimePlan
+	// Requires is what the account must already hold for this artifact to
+	// deploy. Only the slng driver fills it: the other two targets emit a
+	// project somebody else's platform runs, and that platform owns whatever it
+	// needs to already have. `unmute deploy` checks these before writing
+	// anything, and the emitted runbook prints the same value, so the two cannot
+	// disagree about what a package needs.
+	Requires Requirements
 }
 
 type File struct {
@@ -98,6 +105,10 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		artifact.Files = emitted.Files
 		artifact.Notes.Notes = append(artifact.Notes.Notes, emitted.Notes.Notes...)
 		artifact.Notes.Warnings = append(artifact.Notes.Warnings, emitted.Notes.Warnings...)
+		// The only branch that sets this. A livekit or pipecat project is deployed
+		// by that platform's own tool, which owns whatever it needs to find
+		// already in place; unmute has nothing to check on its behalf.
+		artifact.Requires = emitted.Requires
 		return artifact, nil
 	default:
 		return Artifact{}, fmt.Errorf("unsupported provider %q", resolved.Provider)

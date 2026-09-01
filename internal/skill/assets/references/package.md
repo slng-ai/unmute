@@ -592,7 +592,7 @@ validate, by name, with what to do instead:
 | `tracing:` | unmute instruments no process here |
 | more than one `deployment_region` | SLNG takes exactly one |
 | `variables` with `source: conversation` | nothing captures a value mid-call |
-| outbound calling, `on_voicemail`, a warm human transfer | unmute creates no carrier state on SLNG |
+| outbound calling, `on_voicemail`, a warm human transfer | a package declares no carrier state on SLNG; `unmute deploy` attaches an existing trunk after a push |
 
 A tool named `end_call`, `detected_answering_machine`, `get_current_datetime`,
 `get_user_phone_number` or `set_runtime_variables` is refused: SLNG keeps those

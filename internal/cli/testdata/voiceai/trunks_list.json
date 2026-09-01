@@ -1,0 +1,6 @@
+[
+  { "direction": "inbound", "id": "1a4b3428-2724-491b-8946-aaf09b3b6616", "name": "1_inbound", "numbers": ["+447700900111"], "status": "active", "livekit_trunk_id": "ST_iJL3eTUjLhbD", "usable": true, "unavailable_reason": null, "in_use_by": null },
+  { "direction": "inbound", "id": "dcab6a3b-b2ed-40c5-963c-266cb10f3131", "name": "2_inbound", "numbers": ["+447700900222"], "status": "active", "livekit_trunk_id": "ST_suvXkH5bcysi", "usable": true, "unavailable_reason": null, "in_use_by": "acme-support-slng" },
+  { "direction": "inbound", "id": "5e6f7081-9234-4a56-b789-abcdef012345", "name": "broken_inbound", "numbers": [], "status": "inactive", "livekit_trunk_id": null, "usable": false, "unavailable_reason": "no numbers assigned", "in_use_by": null },
+  { "direction": "outbound", "id": "fb0e7434-d652-4b6c-9836-1bf903057c0b", "name": "demo-general", "numbers": ["+447700900333"], "status": "active", "livekit_trunk_id": "ST_VBU8Dx8ypYSo", "usable": true, "unavailable_reason": null, "in_use_by": "some other agent" }
+]

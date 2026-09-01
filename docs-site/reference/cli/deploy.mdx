@@ -18,9 +18,11 @@ Usage:
 
 Flags:
       --agent-id string   update this agent, when more than one has the package's name
+      --call string       after a successful push, place one outbound call to this E.164 number
       --dry-run           check everything and report, changing nothing
   -h, --help              help for deploy
       --label string      version label (default: the package name and a timestamp)
+      --profile string    voiceai credential profile to check and push with
       --run-samples       run each tool's sample against your real dependencies
       --target strings    slng target instance name (repeatable; default: every slng target)
 ```
@@ -75,11 +77,16 @@ The organisation is printed on every run because an exported key and a stored
 profile can belong to different ones, and nothing else on screen would tell you
 which you just wrote to.
 
-## Three stages, and the first two are local
+## Four stages, and only the last one writes
 
 **Validate.** The same checks as [`unmute validate`](/reference/cli/validate),
 against the slng target only. The slng target refuses what SLNG will not run,
 and hearing it here costs no network call.
+
+**Preflight.** Your organisation is asked what it already has, and the answer is
+compared with what the package needs. This happens *before* anything is written,
+so a run refused here leaves both `build/slng` and your organisation exactly as
+it found them.
 
 **Compile.** The same output as [`unmute compile --target slng`](/reference/cli/compile),
 written to `build/slng/`. Compiling as part of deploying is deliberate: it means
@@ -87,6 +94,125 @@ you cannot push an artifact that is older than the package.
 
 **Push.** Handed to `voiceai agents push build/slng --json`. You can run that
 yourself; `unmute deploy` reads its result and prints it in unmute's format.
+
+## What the preflight checks
+
+Four reads, plus one per MCP server your package names. The cost does not grow
+with how many tools or secrets you declare.
+
+| It checks | Against | If it is missing |
+|---|---|---|
+| every `builtin:` tool | your organisation's tool list | create it in the SLNG dashboard, or rename the file |
+| every MCP server | the servers attached to your organisation | attach it in the SLNG dashboard |
+| every MCP tool you expose | that server's last stored probe | correct the name, or expose a different tool |
+| every vault secret and variable | the vault, including whether it holds a value | `unmute deploy` offers to create it |
+
+A `code` or `webhook` tool is **never** reported as missing. The push creates
+those, so their absence is the ordinary state of a first deploy.
+
+A control is never checked either. It reaches SLNG as a curated capability you
+attach to the agent in the dashboard, and the compiled body carries no reference
+to it, so there is nothing for a check to resolve.
+
+<Warning>
+A `builtin:` reference carries **the tool file's own name**, not the builtin id
+it selects. `tools/hang_up.yaml` declaring `builtin: end_call` emits a reference
+to `hang_up`, which your organisation has never heard of. The fix is to rename
+the file; the preflight says so.
+</Warning>
+
+## When a check cannot be made
+
+An old `voiceai`, a restricted network, or a key without the right scope means a
+question goes unanswered. That is reported as a warning and the run continues to
+the push, which stays the authority on what your organisation will accept:
+
+```text
+warning: slng: `voiceai mcp list` could not be run: insufficient scope; the push decides what it would have covered
+```
+
+A check that could not be made is never reported as one that passed, and never
+stops a deploy. Only a resource *positively found absent* does that.
+
+## Creating missing secrets
+
+Secrets are the only thing unmute can write, so they are the only gap it offers
+to close:
+
+```text
+2 entries missing from the vault, and unmute can create them.
+
+  REFUND_API_TOKEN (secret)
+    tools/refund.yaml authenticates with it
+    a value for REFUND_API_TOKEN is set in this package's environment. Use it? [y/N]
+```
+
+Say no and the run stops with the entry still missing. Say yes and one of two
+things happens: a value already in your package's `.env` is piped to
+`voiceai secret create` on standard input, or, if there is none, the terminal is
+handed to `voiceai secret create`, which prompts with the input masked.
+
+Either way the value never reaches a command line, a file unmute writes, or your
+screen. There is no `--value` flag anywhere in this path, deliberately: an
+argument lands in shell history and is visible in `ps`.
+
+A run with no terminal, such as CI, prompts for nothing. It prints the command
+that would fix each entry and exits non-zero.
+
+An entry that exists under the *other* kind, a variable where you need a secret,
+is reported as a mismatch and is **not** offered a fill: the name is taken, so
+creating it again would be refused.
+
+## After a successful push
+
+The run says which number reaches the agent, read once from your organisation's
+SIP trunks:
+
+```text
+slng: inbound trunk 2_inbound reaches this agent on +447700900222
+```
+
+Or, far more often on a first deploy, that none does yet:
+
+```text
+slng: no number reaches this agent yet; a trunk is attached to an agent in the SLNG dashboard
+slng:   free inbound trunk 1_inbound on +447700900111
+```
+
+When a trunk is free and you are at a terminal, the run offers to point one at
+the agent it just deployed:
+
+```text
+slng: no number reaches this agent yet
+
+2 inbound trunks are free, and this agent has none. Which should answer for it?
+  [1] 1_inbound on +447700900111
+  [2] 2_inbound on +447700900222
+  [0] none, leave it unattached
+  choose [0]: 2
+slng: 2_inbound attached. Call +447700900222 to reach this agent.
+```
+
+That is a single-field `PATCH` on the agent, so it disturbs nothing else, and it
+runs *after* the push, so re-running a deploy offers it again rather than
+leaving you with a silent number.
+
+Anything other than a listed number leaves it unattached, and a run with no
+terminal never asks and never attaches: a deploy that quietly claimed a phone
+number would be somebody's phone bill.
+
+Unmute still buys no numbers and configures no trunks. Both happen in the SLNG
+dashboard; this only chooses among trunks that already exist.
+
+`--call` places one outbound call from the agent you just deployed, which is how
+you hear a phone agent without waiting for someone to ring it:
+
+```sh
+unmute deploy --call +447700900123
+```
+
+It rings a real phone and costs a real call, so it happens only when you ask. A
+call that fails does not fail the deploy: the agent is live either way.
 
 ## A push replaces
 

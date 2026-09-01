@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "status": 200,
+  "profile": "default",
+  "masked_key": "slng_cu_...YLIS",
+  "account": {
+    "name": null,
+    "email": null,
+    "org_id": "00000000-0000-4000-8000-000000000000",
+    "org_name": "Example Workspace",
+    "api_key_label": "ci",
+    "tier": "enterprise"
+  }
+}
