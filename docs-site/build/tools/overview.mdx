@@ -107,22 +107,18 @@ rather than a surprise on a call.
 | `webhook:` | yes | yes | yes |
 | `local:` | yes | yes | yes |
 | `builtin:` | yes | yes | yes |
-| `mcp:` | yes | yes | yes, with a warning |
+| `mcp:` | yes | yes | yes |
 | `knowledge:` | yes | yes | **no** |
 | `client:` | no | no | no |
 | `provider_hosted:` | no | no | no |
 
-Three of those rows are worth a sentence.
+Two of those rows are worth a sentence.
 
 **`knowledge:` needs a runtime of ours to live in.** LiveKit and Pipecat compile to
 a Python project, so the documents ride in the image and the search runs in the
 process. The SLNG target writes a deployment body and SLNG runs the agent, so
 there is no image to carry a folder and no process of ours to index it in. Put the
 facts in the agent's instructions, or compile to a code target.
-
-**`mcp:` on SLNG warns rather than fails.** Unmute writes the server and tool by
-name, and SLNG also wants a hash of the schemas read from the live server's own
-tool list. That cannot be computed at compile time, so the push step finishes it.
 
 **`client:` and `provider_hosted:` are names with nothing behind them.** They exist
 in the schema and no target emits them. They are documented so a refusal reads as
@@ -191,10 +187,11 @@ not to.
 | `webhook` | `path` | no | path beginning with `/`; may contain `{{variable}}` tokens |
 | `webhook` | `auth` | no | bearer or API-key authentication |
 | `local` | `handler` | no | package Python path; omitted means `tools/<tool-name>.py` |
+| `mcp` | `server` | no | the server's name on the platform, when it is not this tool's own name. Read it with `voiceai mcp list` |
 | `mcp` | `url_env` | yes | UPPER_SNAKE name holding the server URL |
 | `mcp` | `transport` | no | `sse` or `streamable_http`; omitted lets the SDK infer it from the URL |
 | `mcp` | `auth` | no | bearer or API-key authentication |
-| `mcp` | `tools` | no | non-empty, unique server tool names; omitted means all tools |
+| `mcp` | `tools` | no | non-empty, unique server tool names; omitted means all tools. Required on slng, which attaches one reference per tool and has no "whole server" attachment |
 | `builtin` | `id` | yes | an id from the closed registry, listed on the [prebuilt tools](/build/tools/prebuilt) page |
 | `builtin` | `instructions` | no | instruction applied by the prebuilt as it runs |
 | `client`, `provider_hosted` | none | — | explicit empty block only |

@@ -144,6 +144,9 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		if err != nil {
 			return fmt.Errorf("deploy %s: %w", dir, err)
 		}
+		// The name this push writes, computed the same way the body was. The push
+		// result does not carry it back, so reading it there yielded "".
+		deployName := agent.DeployName(resolved)
 		for _, warning := range artifact.Notes.Warnings {
 			if reported[resolved.Name+": "+warning] {
 				continue
@@ -174,7 +177,7 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		if err != nil {
 			return fmt.Errorf("deploy %s: %w", dir, err)
 		}
-		if err := printPushResult(out, errOut, resolved.Name, outDir, keySource, account, result); err != nil {
+		if err := printPushResult(out, errOut, resolved.Name, deployName, outDir, keySource, account, result); err != nil {
 			return fmt.Errorf("deploy %s: %w", dir, err)
 		}
 		// After the push and only after it succeeded, because both of these are
@@ -182,7 +185,7 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		// nothing to reach and nothing to call.
 		if !opts.dryRun {
 			in := cmd.InOrStdin()
-			reportReach(in, out, errOut, runner, resolved.Name, result.Agent.Name, result.Agent.ID, interactiveTerminal(in))
+			reportReach(in, out, errOut, runner, resolved.Name, deployName, result.Agent.ID, interactiveTerminal(in))
 			if opts.call != "" {
 				placeTestCall(out, errOut, runner, resolved.Name, result.Agent.ID, opts.call)
 			}
@@ -286,9 +289,14 @@ type pushResult struct {
 		Name string `json:"name"`
 	} `json:"organisation"`
 
+	// Agent carries no name: `voiceai agents push --json` reports the id and the
+	// action only, and prints the name on its human stream alone. A Name field
+	// here decoded as "" on every run, and "" compares equal to a free trunk's
+	// empty in_use_by, which reported every unattached number as already
+	// reaching the agent. The deployed name is ir.Agent.DeployName, which unmute
+	// computed to build the body, so it is passed in rather than read back.
 	Agent struct {
 		ID     string `json:"id"`
-		Name   string `json:"name"`
 		Action string `json:"action"`
 	} `json:"agent"`
 
@@ -377,7 +385,7 @@ func runPush(bin, dir string, env []string, key string, opts deployOptions) (pus
 // printPushResult renders one push. Facts go to stdout in the `name: fact` form
 // the rest of the CLI uses; anything the author has to act on goes to stderr and
 // comes back as an error, so the exit code matches what was printed.
-func printPushResult(out, errOut io.Writer, name, outDir, keySource string, named slngAccount, result pushResult) error {
+func printPushResult(out, errOut io.Writer, name, deployName, outDir, keySource string, named slngAccount, result pushResult) error {
 	// The organisation is named once per target, by the preflight, before any
 	// finding: a finding is a statement about one account, so the reader needs
 	// the account first. Restating it here was a second identical line.
@@ -399,7 +407,7 @@ func printPushResult(out, errOut io.Writer, name, outDir, keySource string, name
 	if result.Agent.Action == "update" {
 		fmt.Fprintf(errOut, "warning: %s: an agent named %q already exists%s, so this push replaces it rather than adding one; "+
 			"the name is `name:` in agent.yaml joined to this target, so change `name:` or pass --agent-id to write a different agent\n",
-			name, result.Agent.Name, parenthesised(result.Agent.ID))
+			name, deployName, parenthesised(result.Agent.ID))
 	}
 	switch {
 	case len(result.Blockers) > 0:
@@ -409,7 +417,7 @@ func printPushResult(out, errOut io.Writer, name, outDir, keySource string, name
 	case !result.OK:
 		return pushFailure(errOut, name, keySource, result)
 	case result.DryRun:
-		printPushPlan(out, name, result)
+		printPushPlan(out, name, deployName, result)
 	default:
 		printPushOutcome(out, name, result)
 	}
@@ -511,8 +519,8 @@ func pushFailure(errOut io.Writer, name, keySource string, result pushResult) er
 	return fmt.Errorf("slng target %q: %s", name, message)
 }
 
-func printPushPlan(out io.Writer, name string, result pushResult) {
-	fmt.Fprintf(out, "%s: agent %s — %s\n", name, result.Agent.Name, result.Agent.Action)
+func printPushPlan(out io.Writer, name, deployName string, result pushResult) {
+	fmt.Fprintf(out, "%s: agent %s — %s\n", name, deployName, result.Agent.Action)
 	for _, tool := range result.Tools {
 		run := "no run needed"
 		if tool.WillRun {

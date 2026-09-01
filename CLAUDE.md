@@ -112,6 +112,8 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | each account resource kind is read at most once per deploy, the post-push trunk read included | `internal/cli/voiceai_test.go` (`TestVoiceaiReadsEachResourceKindOnce`) |
 | every `voiceai` command any surface or constant names is one the CLI has | `internal/target/slng_target_test.go` (`TestEveryVoiceaiCommandNamedExists`) |
 | attaching a trunk is a one-field PATCH on the agent, chosen by the operator, and never happens unasked or unattended | `internal/cli/deploy_test.go` (`TestAttachTrunkPatchesOneFieldByDirection`, `TestOfferTrunkAttachesNothingWhenDeclined`, `TestDeployAttachesTheChosenTrunk`) |
+| the deployed agent name comes from the package, never read back from the push (which sends none), so a free trunk's empty `in_use_by` cannot match it and be reported as reaching the agent | `internal/cli/deploy_test.go` (`TestDeployNeverReadsTheAgentNameBackFromThePush`) |
+| an `mcp:` package deploys to slng, and no surface says the push must reach the server | `internal/ir/validate_slng_test.go` (`TestSlngRequiresAnExplicitMCPToolList`), `internal/generate/slng_v1_test.go`, `internal/docsite/tool_table_test.go` |
 | checked-in Python is clean | CI `python`, `ruff check .` |
 | no known-vulnerable dependency or stdlib | CI `vuln`, `govulncheck ./...` |
 | release config still builds 6 platforms with version stamps | CI `release-config` |

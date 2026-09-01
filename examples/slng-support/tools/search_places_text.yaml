@@ -1,0 +1,35 @@
+# A WEBHOOK tool. SLNG calls your HTTPS endpoint, so your code runs on your own
+# infrastructure. This is the kind that may reach the network.
+#
+# base_url must be a literal https host: SLNG's URL validator rejects a template
+# token in the scheme or the authority, so the host cannot come from a variable.
+# The path may carry {{tokens}}.
+#
+# This reproduces the tool of this name that already exists in the organisation,
+# host, path, method and auth. A push REPLACES what it finds, so anything
+# different here would rewrite a working tool.
+description: Call this tool to search for places via a simple text query using the places api from google.
+
+input:
+  type: object
+  properties:
+    query:
+      type: string
+      description: 'Query to search for, for example: "Tapas bar in Madrid"'
+  required:
+    - query
+  additionalProperties: false
+
+webhook:
+  # Read at run time by the livekit and pipecat targets.
+  url_env: SEARCH_PLACES_URL
+  # Stored in the tool body by SLNG, which needs a literal host.
+  base_url: https://tools-agent-infra.onrender.com
+  path: /tools/search-text
+  auth:
+    type: bearer
+    # THE SECRET. A name in SLNG's Vault, never a value. `unmute deploy` checks
+    # it exists and holds a value, and offers to create it if not.
+    token_env: SLNG_TOOL_RENDER
+
+effect: returns_data

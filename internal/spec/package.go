@@ -483,6 +483,19 @@ type ToolKnowledge struct {
 // value.
 type ToolMCP struct {
 	URLEnv string `json:"url_env" yaml:"url_env"`
+	// Server is the server's name on the platform, when it differs from this
+	// tool's own name.
+	//
+	// It exists because the two live in different namespaces. A package tool name
+	// is lowercase snake_case, checked at build; a platform's server name is
+	// whatever somebody typed in a dashboard, and real ones carry dashes
+	// (`firecrawl-mcp` is the common case). Without this field such a server
+	// cannot be referenced at all: the emitted reference uses the tool's name,
+	// and no legal tool name can spell it.
+	//
+	// Empty means the tool's own name is the server's name, which stays the
+	// simple case and the one worth writing when the names can agree.
+	Server string `json:"server,omitempty" yaml:"server,omitempty"`
 	// Transport is `sse` or `streamable_http`. Empty means the platform's own
 	// default for the URL (a path ending in /mcp is streamable HTTP).
 	Transport string `json:"transport,omitempty" yaml:"transport,omitempty"`

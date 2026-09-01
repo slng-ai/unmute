@@ -83,8 +83,11 @@ func TestEveryVoiceaiCommandNamedExists(t *testing.T) {
 	// The subcommands under the groups this repository drives. A group not listed
 	// here is not checked past its first word, because unmute does not use it.
 	subcommands := map[string]map[string]bool{
-		"tool":   {"list": true, "get": true},
-		"mcp":    {"list": true, "get": true, "tools": true},
+		"tool": {"list": true, "get": true},
+		// `run` connects to the server and refreshes its stored capability
+		// snapshot. It is the fix unmute points at when a push refuses a snapshot
+		// as stale, so it is a command the surfaces name and this must know.
+		"mcp":    {"list": true, "get": true, "tools": true, "run": true},
 		"secret": {"list": true, "get": true, "create": true},
 		"trunks": {"list": true, "get": true},
 		"agents": {"list": true, "get": true, "create": true, "update": true, "replace": true,

@@ -102,7 +102,9 @@ func TestSlngMatchesThePublishedPositiveFixture(t *testing.T) {
 	}
 
 	// The MCP row. Ours has names where the fixture has identifiers, and it is
-	// missing the hash on purpose: that value is read from the live server.
+	// missing the hash on purpose: the push copies that out of the platform's own
+	// stored capability snapshot, so a value unmute made up offline is one the
+	// push would compare against that snapshot and refuse.
 	ourMCP := firstEntry(t, body, "mcp_refs")
 	fixtureMCP := firstEntry(t, fixture, "mcp_refs")
 	if _, ok := fixtureMCP["tool_name"]; !ok {
@@ -112,7 +114,7 @@ func TestSlngMatchesThePublishedPositiveFixture(t *testing.T) {
 		t.Errorf("our mcp row does not carry tool_name: %v", ourMCP)
 	}
 	if _, present := ourMCP["observed_schema_hash"]; present {
-		t.Error("our mcp row carries a schema hash; no offline compiler can compute one")
+		t.Error("our mcp row carries a schema hash; the push copies that from the account")
 	}
 }
 

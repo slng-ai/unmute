@@ -154,13 +154,15 @@ Each also needs a sample. Write one per tool as
 directory the way `.env` is.
 {{end -}}
 {{if .MCPRefs -}}
-Each MCP reference is the one thing the push **cannot** finish. SLNG requires a
-schema hash computed over the tool's input and output schemas **as the live
-server reports them**, so completing the reference means connecting to the MCP
-server. Attach these in the SLNG dashboard instead:
+Each MCP reference is written by name. The push resolves the server name to its
+id and copies each tool's schema hash from the snapshot SLNG already stores for
+that server, so nothing here connects to the server:
 
 {{range .MCPRefs}}- {{.}}
 {{end}}
+SLNG refuses a snapshot that is unhealthy or more than five minutes old. If the
+push reports that, refresh it with `voiceai mcp run <server>` and push again.
+
 {{end -}}
 {{else -}}
 ### This body needs nothing resolved

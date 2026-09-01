@@ -140,13 +140,15 @@ Each also needs a sample. Write one per tool as
 `samples/<tool>.json`, holding a single set of arguments, and deploy with
 `--run-samples`. A recompile keeps them: `samples/*.json` is preserved in this
 directory the way `.env` is.
-Each MCP reference is the one thing the push **cannot** finish. SLNG requires a
-schema hash computed over the tool's input and output schemas **as the live
-server reports them**, so completing the reference means connecting to the MCP
-server. Attach these in the SLNG dashboard instead:
+Each MCP reference is written by name. The push resolves the server name to its
+id and copies each tool's schema hash from the snapshot SLNG already stores for
+that server, so nothing here connects to the server:
 
 - internal_docs · search_docs
 - internal_docs · read_doc
+
+SLNG refuses a snapshot that is unhealthy or more than five minutes old. If the
+push reports that, refresh it with `voiceai mcp run <server>` and push again.
 
 
 ## 3. Talk to it

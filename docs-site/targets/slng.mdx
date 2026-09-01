@@ -233,10 +233,11 @@ successful run proves it works. So each needs a sample, one JSON object of
 arguments at `build/slng/samples/<tool>.json`, run with
 `unmute deploy --run-samples`. Samples survive a recompile.
 
-An MCP reference is the one thing the push cannot finish. SLNG requires a hash
-computed over the tool's schemas **as the live server reports them**, so
-completing the reference means connecting to the MCP server. Attach MCP servers
-in the dashboard instead.
+An MCP reference resolves the same way. The push looks up the server's name for
+its `server_id`, then copies each tool's schema hash out of the platform's own
+stored capability snapshot. Nothing connects to the MCP server. The one caveat:
+the platform refuses a snapshot that is unhealthy or older than five minutes.
+Refresh it first with `voiceai mcp run <server>`.
 
 The runbook says which case your package is in.
 
@@ -326,8 +327,9 @@ None is dropped quietly.
 | outbound calling, `on_voicemail` | a package declares no carrier state on SLNG; `unmute deploy` attaches an existing trunk after a push |
 | a warm human transfer | SLNG's curated transfer places a single blind transfer |
 
-An MCP tool works, and carries one caveat rather than a refusal: the push step
-must reach the server.
+An MCP tool works. Its one caveat: the platform's stored capability snapshot
+for that server has to be healthy and no older than five minutes, or the push
+refuses it.
 
 ## If the agent answers with silence
 

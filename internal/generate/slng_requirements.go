@@ -112,12 +112,12 @@ func slngRequirements(agent *ir.Agent, built slngArtifacts) Requirements {
 	seenServer := map[string]string{}
 	for _, ref := range built.Body.MCPRefs {
 		if seenServer[ref.Server] == "" {
-			seenServer[ref.Server] = "tools/" + ref.Server + ".yaml names this MCP server"
+			seenServer[ref.Server] = mcpOrigin(agent, ref.Server) + " names this MCP server"
 		}
 		requirements.MCPTools = append(requirements.MCPTools, Requirement{
 			Name:   ref.Tool,
 			Server: ref.Server,
-			Where:  "tools/" + ref.Server + ".yaml exposes it under mcp.tools",
+			Where:  mcpOrigin(agent, ref.Server) + " exposes it under mcp.tools",
 		})
 	}
 	for _, name := range slices.Sorted(maps.Keys(seenServer)) {
@@ -126,6 +126,22 @@ func slngRequirements(agent *ir.Agent, built slngArtifacts) Requirements {
 
 	requirements.Secrets, requirements.Variables = slngVaultRequirements(agent, built)
 	return requirements
+}
+
+// mcpOrigin names the package file that asked for a server.
+//
+// It is a lookup rather than "tools/<server>.yaml" because the two names can
+// differ: a tool may set `mcp.server` to reach a server whose platform name is
+// not a legal tool name. Pointing an author at a file that does not exist is
+// worse than not pointing at all.
+func mcpOrigin(agent *ir.Agent, server string) string {
+	for _, name := range slices.Sorted(maps.Keys(agent.Tools)) {
+		tool := agent.Tools[name]
+		if tool.Execution == ir.ToolMCP && mcpServerName(name, tool) == server {
+			return "tools/" + name + ".yaml"
+		}
+	}
+	return "a tool"
 }
 
 // slngVaultRequirements collects every SLNG Vault name the package needs,

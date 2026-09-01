@@ -156,10 +156,11 @@ type slngSegment struct {
 	Value string `json:"value"`
 }
 
-// slngMCP is deliberately incomplete, and not only in its identifiers. SLNG also
-// wants observed_schema_hash, a sha256 over schemas read from the live server's
-// own tools/list response, which no offline compiler can produce. The runbook
-// says the push step connects to the server rather than looking an id up.
+// slngMCP is deliberately incomplete. SLNG stores an attachment as a server_id
+// and an observed_schema_hash, and neither is a package fact: the id is the
+// platform's, and the hash is over the schemas in the platform's own stored
+// capability snapshot. The push fills both in by name (voiceai 0.1.16), so the
+// compiler emits the names and stops.
 //
 // `server` is a name standing where server_id goes, and is spelled differently
 // from the platform's field on purpose: a reader who sees `server_id` expects a
@@ -392,7 +393,7 @@ func slngTools(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) ([]slngRef, []
 		}
 		if tool.Execution == ir.ToolMCP {
 			for _, exposed := range tool.MCPTools {
-				mcpRefs = append(mcpRefs, slngMCP{Server: name, Tool: exposed, Invocation: slngInvocation})
+				mcpRefs = append(mcpRefs, slngMCP{Server: mcpServerName(name, tool), Tool: exposed, Invocation: slngInvocation})
 			}
 			continue
 		}
@@ -422,6 +423,20 @@ func slngTools(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) ([]slngRef, []
 	return refs, mcpRefs, files, nil
 }
 
+// mcpServerName is the platform's name for the server a tool reads.
+//
+// The tool's own name by default, and an explicit `mcp.server` when the two
+// cannot be the same. They often cannot: a package tool name is lowercase
+// snake_case, and a server named in a dashboard is whatever somebody typed.
+// `firecrawl-mcp` carries a dash, so before this existed no legal tool name
+// could spell it and the server was unreachable from any package.
+func mcpServerName(name string, tool ir.Tool) string {
+	if tool.MCPServer != "" {
+		return tool.MCPServer
+	}
+	return name
+}
+
 // slngNotes are the forwarded-without-validation facts the compile report must
 // carry, because a value unmute passes through untouched is a value it cannot
 // promise anything about (Principle II).
@@ -430,7 +445,7 @@ func slngNotes(built slngArtifacts) []string {
 		"slng target: model strings are forwarded to SLNG exactly as written; SLNG owns its own model list, so unmute checks no vendor or model name here",
 	}
 	if len(built.Body.MCPRefs) > 0 {
-		notes = append(notes, "slng target: each MCP reference is written by name and is incomplete on purpose; the push step must connect to the server to obtain the schema hash SLNG requires")
+		notes = append(notes, "slng target: each MCP reference is written by name; the push resolves the server and copies each tool's schema hash from the platform's stored capability snapshot, so nothing connects to the server")
 	}
 	if len(built.ToolFiles) > 0 {
 		notes = append(notes, "slng target: tool bodies are written with names where the platform assigns identifiers; the push step creates each tool and resolves its name")

@@ -10,12 +10,14 @@ The file that does it holds one block and nothing else:
 
 ```yaml tools/web_search.yaml
 mcp:
+  server: firecrawl-mcp-2
   url_env: FIRECRAWL_MCP_URL
   transport: streamable_http
   auth:
     type: bearer
     token_env: FIRECRAWL_API_KEY
   tools:
+    - firecrawl_scrape
     - firecrawl_search
 ```
 
@@ -34,17 +36,24 @@ tools:
   - web_search
 ```
 
-No shipped example declares an MCP server, so that is a worked example rather
-than a quote. It compiles on both targets as written.
+That is quoted from [`examples/slng-support`](https://github.com/slng-ai/unmute/tree/main/examples/slng-support),
+which deploys with it. It compiles on all three targets as written.
 
 ## The block
 
 | Field | Required | What it is |
 |---|---|---|
+| `server` | no | the server's name on the platform, when that is not this tool's own file name |
 | `url_env` | yes | the UPPER_SNAKE name of the environment variable holding the server address |
 | `transport` | no | `sse` or `streamable_http` |
 | `auth` | no | `bearer` with `token_env`, or `api_key` with `token_env` and an optional `header` |
-| `tools` | no | non-empty, unique server tool names to offer; absent means all of them |
+| `tools` | no | non-empty, unique server tool names to offer; absent means all of them. Required on slng |
+
+`server` exists because the two names live in different namespaces. A tool file
+name is lowercase snake_case, and a server's name on the platform is whatever
+somebody typed in a dashboard: real ones carry dashes and spaces. Without
+`server`, a server called `firecrawl-mcp-2` could not be named at all. Read the
+names your organisation has with `voiceai mcp list`.
 
 `url_env` is a name, never an address. Writing the URL there is refused:
 

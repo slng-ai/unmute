@@ -120,10 +120,11 @@ func validateSlngTool(name string, tool Tool, row *TargetValidation) {
 		row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
 			"tool %q names only url_env, and SLNG stores the URL in the tool body rather than reading it from an environment: add base_url with the literal https host, keeping url_env for the code targets", name))
 	}
-	// An MCP server on SLNG becomes one reference per tool, and unmute cannot ask
-	// the server what it offers: mcp_refs carries a name pair per tool and the
-	// schema hash is read from the live server at push time. So "expose
-	// everything" has nothing to expand into here.
+	// An MCP server on SLNG becomes one reference per tool: mcp_refs is a list of
+	// attachments, and there is no "the whole server" attachment to write. unmute
+	// compiles offline and so cannot expand "everything" into that list. The push
+	// does know the server's tools, but by then the package has already had to say
+	// which ones it wanted, so the list is authored rather than inferred.
 	if tool.Execution == ToolMCP && len(tool.MCPTools) == 0 {
 		row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
 			"tool %q exposes every tool on its MCP server, and SLNG attaches one reference per tool: list the tools you want under mcp.tools", name))

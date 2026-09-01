@@ -1,0 +1,7 @@
+mcp:
+  # The platform's name for the server, which is not a legal tool name.
+  server: firecrawl-mcp
+  url_env: FIRECRAWL_MCP_URL
+  transport: streamable_http
+  tools:
+    - firecrawl_search

@@ -487,8 +487,8 @@ func TestWebhookBaseURLShapeIsChecked(t *testing.T) {
 	}
 }
 
-// An MCP source on slng becomes one reference per tool, and unmute cannot ask
-// the server what it offers, so "expose everything" has nothing to expand into.
+// An MCP source on slng becomes one reference per tool, and unmute compiles
+// offline, so "expose everything" has nothing to expand into.
 func TestSlngRequiresAnExplicitMCPToolList(t *testing.T) {
 	agent := slngAgent(t)
 	agent.Tools["internal_docs"] = Tool{Execution: ToolMCP, URLEnv: "DOCS_MCP_URL", Interruption: ToolProviderDefault, Effect: ToolReturnsData}
@@ -505,8 +505,13 @@ func TestSlngRequiresAnExplicitMCPToolList(t *testing.T) {
 	if len(row.Errors) > 0 {
 		t.Errorf("an MCP source with an explicit tool list was refused: %#v", row.Errors)
 	}
-	// It is a caveat, not a refusal, and the author hears it before the push.
-	if !strings.Contains(strings.Join(row.Warnings, "\n"), "connect to the server") {
-		t.Errorf("no warning says the push step must reach the server: %#v", row.Warnings)
+	// And no caveat about reaching the server. voiceai 0.1.16 resolves the server
+	// by name and copies each tool's schema hash from the platform's own stored
+	// capability snapshot, so nothing connects to it. unmute warned otherwise for
+	// a year, and the same warning told authors an mcp: package could not deploy
+	// at all, which stopped people trying something that works.
+	if joined := strings.Join(row.Warnings, "\n"); strings.Contains(joined, "connect to the server") ||
+		strings.Contains(joined, "must reach the server") {
+		t.Errorf("a warning still says the push has to reach the MCP server: %#v", row.Warnings)
 	}
 }

@@ -30,7 +30,7 @@ const (
   "dry_run": true,
   "organisation": { "id": "550fffde", "name": "[SLNG] Example Workspace" },
   "package": "/pkg/build/slng/agent.json",
-  "agent": { "name": "acme-support-slng", "action": "create" },
+  "agent": { "action": "create" },
   "tools": [
     { "name": "check_order", "action": "create", "toolType": "code", "needsGreenRun": true, "hasSample": true, "willRun": true }
   ],
@@ -67,7 +67,7 @@ const (
   "tools": [
     { "name": "check_order", "created": true, "introspected": true, "ran": "succeeded", "published": 1 }
   ],
-  "agent": { "id": "01998a7c", "name": "acme-support-slng", "action": "update" },
+  "agent": { "id": "01998a7c", "action": "update" },
   "version": { "number": 4, "label": "slng 2026-08-27T10:00:00Z" }
 }`
 
@@ -94,8 +94,8 @@ func TestPushDocumentsDecode(t *testing.T) {
 	if !plan.OK || !plan.DryRun {
 		t.Errorf("plan: ok=%t dry_run=%t, want both true", plan.OK, plan.DryRun)
 	}
-	if plan.Agent.Name != "acme-support-slng" || plan.Agent.Action != "create" {
-		t.Errorf("plan agent = %+v, want name acme-support-slng action create", plan.Agent)
+	if plan.Agent.Action != "create" {
+		t.Errorf("plan agent = %+v, want action create", plan.Agent)
 	}
 	if len(plan.Tools) != 1 || !plan.Tools[0].WillRun || plan.Tools[0].ToolType != "code" {
 		t.Errorf("plan tools = %+v, want one code tool that will run its sample", plan.Tools)
@@ -116,8 +116,8 @@ func TestPushDocumentsDecode(t *testing.T) {
 	if got := blocked.Blockers[0]; got.Kind != "vault_missing" || len(got.Items) != 2 || got.URL == "" {
 		t.Errorf("first blocker = %+v, want vault_missing with 2 items and a url", got)
 	}
-	if blocked.Agent.Name != "" {
-		t.Errorf("a blocked check names no agent, got %q", blocked.Agent.Name)
+	if blocked.Agent.ID != "" {
+		t.Errorf("a blocked check names no agent, got %q", blocked.Agent.ID)
 	}
 
 	outcome := decodePush(t, pushOutcomeJSON)
@@ -204,7 +204,7 @@ func TestBlockerHintOnlyAddsWhatTheToolCannotKnow(t *testing.T) {
 // read from the wrong one and told the author to rename the wrong thing.
 func TestPushResultWarnsThatAnUpdateReplaces(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if err := printPushResult(&out, &errOut, "slng", "build/slng", target.SlngRouterKeyEnv, slngAccount{}, decodePush(t, pushOutcomeJSON)); err != nil {
+	if err := printPushResult(&out, &errOut, "slng", "acme-support-slng", "build/slng", target.SlngRouterKeyEnv, slngAccount{}, decodePush(t, pushOutcomeJSON)); err != nil {
 		t.Fatalf("a successful outcome returned %v", err)
 	}
 	warned := errOut.String()
@@ -229,13 +229,13 @@ func TestPushResultWarnsThatAnUpdateReplaces(t *testing.T) {
 func TestPushResultReturnsAnErrorWheneverItPrintedOne(t *testing.T) {
 	for name, raw := range map[string]string{"blocked": pushBlockedJSON, "errored": pushErrorJSON} {
 		var out, errOut bytes.Buffer
-		err := printPushResult(&out, &errOut, "slng", "build/slng", "", slngAccount{}, decodePush(t, raw))
+		err := printPushResult(&out, &errOut, "slng", "acme-support-slng", "build/slng", "", slngAccount{}, decodePush(t, raw))
 		if err == nil {
 			t.Errorf("%s: printPushResult returned nil, so unmute would exit 0 after printing:\n%s", name, errOut.String())
 		}
 	}
 	var out, errOut bytes.Buffer
-	if err := printPushResult(&out, &errOut, "slng", "build/slng", target.SlngRouterKeyEnv, slngAccount{}, decodePush(t, pushPlanJSON)); err != nil {
+	if err := printPushResult(&out, &errOut, "slng", "acme-support-slng", "build/slng", target.SlngRouterKeyEnv, slngAccount{}, decodePush(t, pushPlanJSON)); err != nil {
 		t.Errorf("a dry run that found nothing wrong returned %v", err)
 	}
 }
@@ -611,7 +611,7 @@ esac`
 // deployed agent against a real carrier, so the moment after a push is exactly
 // when an author needs the number.
 func TestDeployReportsTheNumberThatReachesTheAgent(t *testing.T) {
-	stub := provisionedStub(`printf '[{"direction":"inbound","name":"2_inbound","numbers":["+447700900222"],"usable":true,"in_use_by":"slng-tools-slng"}]'`)
+	stub := provisionedStub(`printf '[{"direction":"inbound","name":"2_inbound","numbers":["+447700900222"],"usable":true,"in_use_by":"slng-tools-fixture-slng"}]'`)
 	_, out, _, err := deployWithStub(t, stub)
 	if err != nil {
 		t.Fatalf("deploy: %v", err)
@@ -621,6 +621,47 @@ func TestDeployReportsTheNumberThatReachesTheAgent(t *testing.T) {
 	}
 	if !strings.Contains(out, "inbound trunk 2_inbound") {
 		t.Errorf("the run does not name the trunk and its direction:\n%s", out)
+	}
+}
+
+// TestDeployNeverReadsTheAgentNameBackFromThePush.
+//
+// `voiceai agents push --json` reports the agent's id and action and no name;
+// the name goes to its human stream alone. unmute decoded a Name field from it
+// anyway, which yielded "" on every run, and "" is also what a FREE trunk's
+// in_use_by decodes to. The equality that answers "which number reaches my
+// agent" therefore matched every unattached trunk, so a first deploy printed
+// "inbound trunk X reaches this agent" about a number that reached nothing, and
+// returned early without ever offering to attach one. Verified against the live
+// CLI 2026-09-01.
+//
+// The deployed name is one unmute already computed to build the body, so this
+// holds that it comes from there and that an empty in_use_by is never a match.
+func TestDeployNeverReadsTheAgentNameBackFromThePush(t *testing.T) {
+	// A free trunk, exactly as the account reports one.
+	stub := provisionedStub(`printf '[{"direction":"inbound","id":"trunk-1","name":"1_inbound","numbers":["+447700900111"],"usable":true,"in_use_by":null}]'`)
+	_, out, _, err := deployWithStub(t, stub)
+	if err != nil {
+		t.Fatalf("deploy: %v", err)
+	}
+	if strings.Contains(out, "trunk 1_inbound reaches this agent") {
+		t.Errorf("a free trunk is reported as reaching the agent, so the name comparison matched two empty strings:\n%s", out)
+	}
+	if !strings.Contains(out, "no number reaches this agent yet") {
+		t.Errorf("the run does not say the agent is unreachable:\n%s", out)
+	}
+
+	// And the push document itself may not carry a name for anything to read.
+	if strings.Contains(pushOutcomeJSON, `"name"`) && strings.Contains(pushOutcomeJSON, `"agent"`) {
+		var doc struct {
+			Agent map[string]any `json:"agent"`
+		}
+		if err := json.Unmarshal([]byte(pushOutcomeJSON), &doc); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := doc.Agent["name"]; ok {
+			t.Error("the push fixture invents an agent name the real CLI does not send")
+		}
 	}
 }
 

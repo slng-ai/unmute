@@ -139,3 +139,31 @@ func all(r Requirements) []Requirement {
 	out = append(out, r.Secrets...)
 	return append(out, r.Variables...)
 }
+
+// TestSlngMCPServerNameCanDifferFromTheToolName.
+//
+// A package tool name is lowercase snake_case, checked at build. A platform's
+// MCP server name is whatever somebody typed in a dashboard, and real ones carry
+// dashes: `firecrawl-mcp` is the common case. Before `mcp.server` existed, the
+// emitted reference used the tool's own name, so no legal package could spell
+// that server and it was unreachable. This holds the override, and that the
+// finding still points at a file that exists.
+func TestSlngMCPServerNameCanDifferFromTheToolName(t *testing.T) {
+	artifact, files := compileSlng(t, "slng_mcp_server")
+	requires := artifact.Requires
+
+	if got := names(requires.MCPServers); !slices.Equal(got, []string{"firecrawl-mcp"}) {
+		t.Fatalf("MCP servers are %v, want [firecrawl-mcp]", got)
+	}
+	// What is checked has to be what the body asks SLNG to resolve.
+	if !strings.Contains(files["agent.json"], `"server": "firecrawl-mcp"`) {
+		t.Error("the emitted reference does not carry the server name the requirement checks")
+	}
+	// And the origin has to name a file that exists, which is the whole reason
+	// this is a lookup rather than "tools/<server>.yaml".
+	for _, requirement := range append(slices.Clone(requires.MCPServers), requires.MCPTools...) {
+		if !strings.Contains(requirement.Where, "tools/web_search.yaml") {
+			t.Errorf("origin %q does not name the file that asked; tools/firecrawl-mcp.yaml does not exist", requirement.Where)
+		}
+	}
+}
