@@ -18,6 +18,7 @@ Available Commands:
   dev         Compile, run the agent locally, and talk to it in the browser.
   help        Help about any command
   init        Scaffold a new v1 agent package.
+  resources   List the tools, MCP servers and phone numbers your SLNG organisation offers.
   skill       Install the coding-agent skill into a project.
   validate    Validate a v1 agent package against its targets.
 
@@ -43,14 +44,17 @@ machine. `deploy` is the one that puts an agent somewhere else, and it is SLNG
 only: a livekit or pipecat target compiles to a project that platform deploys
 with its own tool.
 
-## One command off that path
+## Two commands off that path
 
 | Command | What it does |
 |---|---|
+| [`resources`](/reference/cli/resources) | list the tools, MCP servers and phone numbers your SLNG organisation offers |
 | [`skill`](/reference/cli/skill) | install the Unmute skill so a coding assistant can build agents for you |
 
-`skill` touches no package and makes no network call. You never have to run it,
-and skipping it costs you nothing.
+Neither reads or writes a package. `resources` reads your SLNG organisation and
+changes nothing there, so it is the command to run before you write a
+`builtin:` or `mcp:` tool and have to spell a name exactly. `skill` makes no
+network call at all: the skill ships inside the binary.
 
 `help` and `completion` come from the command framework.
 
@@ -97,11 +101,9 @@ with no name in a terminal it opens the interactive console instead.
 unmute --version
 ```
 
-```text
-unmute version ae9f8cc
-```
-
-The version is stamped in at build time. `-v` is the short form.
+It prints the release, the commit it was built from and that commit's date,
+then a second line naming the framework versions this build supports. All of it
+is stamped in at build time. `-v` is the short form.
 
 ## Exit codes
 
