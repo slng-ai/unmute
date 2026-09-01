@@ -169,9 +169,9 @@ reports it: the caller hears a correct answer and the hit rate is simply zero.
 **That turn now exists, on purpose.** The measurement above is unchanged; the
 decision made in light of it is. On an inbound call the number arrives from the
 carrier before the agent speaks, and the verification step reads it back and asks
-for a yes instead of asking the caller to recite twelve digits. That is 11.3
-seconds off a 23.3 second step, against exactly one turn that will not be served
-from cache. The trade was made deliberately, and it is the only turn that pays it:
+for a yes instead of asking the caller to recite twelve digits. That trades a
+whole collection step against exactly one turn that will not be served from
+cache. The trade was made deliberately, and it is the only turn that pays it:
 the read-back is the one place a number is ever spoken, and no other prompt in the
 package holds the value at all. The compiler refuses one that tries.
 
@@ -302,8 +302,8 @@ in the order the file lists them.
 
 | Entry | Reads | Lands in | What it replaced |
 |---|---|---|---|
-| `today` | the clock, in `Europe/Madrid` | `booking_date` | `get_current_date`, a tool call: two chained requests and 2.56s of silence on every "tomorrow" |
-| `caller` | the call's own `from_number` | `customer_phone` | five model requests and twelve spoken digits |
+| `today` | the clock, in `Europe/Madrid` | `booking_date` | `get_current_date`, a tool call: two chained requests with nothing spoken over them on every "tomorrow" |
+| `caller` | the call's own `from_number` | `customer_phone` | asking the caller to recite twelve digits, then reading them back |
 | `profile` | `look_up_customer` | `customer_name` | a lookup inside the identification step |
 
 **Nothing here can fail a call.** The whole block has two seconds. Past that it

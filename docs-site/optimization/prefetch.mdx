@@ -12,23 +12,20 @@ which ones are worth deleting, and it is written from doing it to
 `examples/salon-concierge` and reading the traces afterwards.
 
 <Note>
-  The costs quoted here are measured, on two real calls of that agent. The
-  savings are arithmetic: a removed round trip is a removed round trip. Measure
-  your own agent before and after, because that is the only number that is about
-  your agent.
+  Measure your own agent before and after a change. That is the only number that
+  is about your agent, and it is the only one worth acting on.
 </Note>
 
 ## Where this came from
 
-Two traces, one per target, read span by span. Real `llm_request` p50 was
-1.09s to 1.20s on both. Three things stood out, and all three were the model
-spending round trips on facts that were already knowable:
+Two traces, one per target, read span by span. Three things stood out, and all
+three were the model spending round trips on facts that were already knowable:
 
-| What the caller experienced | What it cost | What was already true |
-|---|---|---|
-| being asked for a phone number, digit by digit | 23.3s, 5 model round trips | the call arrived carrying the number |
-| saying "tomorrow" and hearing nothing | 2.56s of silence, two chained tool hops | a clock had the date |
-| being moved to a booking step | 2.07s of silence, two round trips | nothing needed discovering at all |
+| What the caller experienced | What was already true |
+|---|---|
+| being asked for a phone number, digit by digit | the call arrived carrying the number |
+| saying "tomorrow" and hearing nothing back | a clock had the date |
+| being moved to a booking step in silence | nothing needed discovering at all |
 
 The third one is not a pre-fetch. It is a cover line, and it belongs to
 [`announce:`](/optimization/overview#speak-before-a-tool-runs). Keeping the two
@@ -40,13 +37,11 @@ This is the habit worth building. When you look at a slow stretch of a call, do
 not ask how many seconds it took. Ask how many times the model had to speak,
 listen and speak again.
 
-A round trip on our agents costs about 1.1s, and it is close to constant. So a
-step's cost is roughly its round trip count times that number, plus whatever the
-caller spends talking. The 23.3s step above was five round trips and a lot of
-human speech, which is why removing round trips is the change that moves it and
-tuning a connection is not.
+A round trip is close to constant on a given setup, so a step's cost is roughly
+its round trip count plus whatever the caller spends talking. That is why
+removing round trips moves a slow step and tuning a connection does not.
 
-The arithmetic then tells you what a pre-fetch is worth before you write it:
+Counting them tells you what a pre-fetch is worth before you write it:
 
 - a fact the model would have fetched with a tool: **two round trips**, because a tool turn is a call and a reply;
 - a fact the model would have asked a person for: **at least two**, usually more, because people answer partially and get read back to;
@@ -91,14 +86,14 @@ just a speed one.
 
 ## Collecting becomes confirming
 
-The 23.3s step is the headline, and the naive fix is wrong. A number from the
+This is the headline, and the naive fix is wrong. A number from the
 carrier tells you which handset dialled, not who is holding it. People ring from
 a partner's phone or hold two accounts, and an agent that acts on caller ID alone
 will eventually read one stranger's details to another.
 
 So the step does not disappear. It changes job:
 
-- **before:** ask for a number, hear part of it, read it back, get corrected, confirm. Five round trips.
+- **before:** ask for a number, hear part of it, read it back, get corrected, confirm. Several round trips.
 - **after:** read back the number you already have, hear a yes. One.
 
 That is the shape to aim for on any pre-fetched fact a person could dispute.
@@ -156,8 +151,9 @@ Both make a gap shorter to sit through, and they are not interchangeable.
 | when it runs | once, before the greeting | every time that tool fires |
 | use it for | a fact that was already knowable | a fact that genuinely has to be fetched now |
 
-The 2.07s gap on entering a booking step was neither a lookup nor a discovery, so
-no pre-fetch could touch it. It got an `announce:` on the delegate instead.
+The gap a caller sits through on entering a booking step is neither a lookup nor
+a discovery, so no pre-fetch can touch it. That one got an `announce:` on the
+delegate instead.
 
 Reach for a pre-fetch first, because a removed round trip is gone. Reach for an
 announce for what is left. And keep the line shorter than the gap it covers: put
@@ -167,7 +163,7 @@ for one request.
 ## Checking that you actually gained
 
 One call proves nothing. We have seen two calls on an identical build differ by
-1.1s of mean silence, which is a whole round trip of noise.
+more than a whole round trip of silence, as noise alone.
 
 Make at least three calls per configuration, and compare **the span the change
 touched** rather than the end to end number. A removed round trip is one of the

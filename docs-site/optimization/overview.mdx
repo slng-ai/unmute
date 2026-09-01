@@ -205,10 +205,9 @@ from, and whatever your own records say about that number are all knowable befor
 anybody speaks. `prefetch:` resolves them once, before the greeting, and lands
 them in variables the prompt can name.
 
-The two largest single costs we found on our own agent were both this shape: a
-step that spent 23.3s and five model round trips collecting a phone number the
-call already carried, and a caller saying "tomorrow" costing two chained tool hops
-and 2.56s of silence.
+The two worst stretches we found on our own agent were both this shape: a step
+that collected a phone number the call already carried, and a caller saying
+"tomorrow" costing two chained tool hops with nothing spoken over them.
 
 ```yaml agent.yaml
 timezone: Europe/Madrid          # required before any entry reads the clock
