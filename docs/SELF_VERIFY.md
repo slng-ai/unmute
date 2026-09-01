@@ -179,6 +179,55 @@ and Pipecat waits out a flat 1.0s safety net. Observed transcripts arrive from
 
 ---
 
+## Counting the round trips inside one turn
+
+Turn taking decides when a turn *starts*. This decides how long it then runs,
+and it is the half that a latency complaint about one step is usually about.
+
+A turn costs one model request per step the model takes before it speaks. A step
+that calls a tool, reads the result and then calls a second tool has spent three
+requests, and the caller hears nothing through the first two unless a tool
+`announce` covers them. That count is structural: it falls out of the shape of
+the emitted agent, not out of the provider, so it is knowable with no key, no
+room and no phone.
+
+[`scripts/probe_turn_structure.py`](../scripts/probe_turn_structure.py) reads it
+off a compiled LiveKit package. The model, the voice and the ears are local fakes
+with fixed latencies, so two runs are comparable and the agent is the only thing
+that varies:
+
+```bash
+pip install "livekit-agents==1.6.10"   # the version the package pins
+python3 scripts/probe_turn_structure.py examples/salon-concierge/build/livekit
+```
+
+It prints, per caller turn, how many requests ran, how many of them finished
+before the caller heard anything, and what the first sound was. **A turn whose
+first sound arrives after two or more requests has an audible hole in it**, and
+the projection at the end says how big that hole gets as model latency rises.
+
+Three things it is worth pointing at:
+
+- **A delegate entry costs a full uncovered request.** The owning agent spends
+  one request deciding to delegate, and the step spends another opening its
+  mouth. `delegates:` has no `announce:`, so nothing covers the first one.
+- **Two tools in a row cost two requests.** A step that must resolve a date
+  before it can check availability waits out both. Covering the first tool with
+  an `announce` does not fix this, it stacks two fillers back to back, which is
+  the failure `examples/salon-concierge/README.md` already warns about. Removing
+  the hop is the fix; covering it is not.
+- **A step's `finish` is its own request, and the owner's reply is another.**
+  Closing a delegated step costs three requests from the caller's "yes".
+
+Do not reach for the chat context first. Read the prompt-versus-conversation
+split the probe prints at the end: in this package the system prompt is 90% of
+the largest request in the call, and the conversation the whole step accumulated
+is under 800 characters. Compacting context there buys almost nothing, because
+splitting an agent into tasks does not shrink the prompt, it swaps one prompt for
+another of about the same size.
+
+---
+
 ## Reading the call somebody just made
 
 This is the local loop. You change something, a person runs `unmute dev` and
