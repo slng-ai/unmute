@@ -129,22 +129,19 @@ pre-fetch at a lookup, never at anything that saves or changes data.
 
 ## Where it works
 
-| | LiveKit | Pipecat | slng |
-|---|---|---|---|
-| `prefetch:` | yes | yes | refused |
-| `confirm:` on a variable | yes | yes | refused |
-| `announce:` on a delegate | yes | yes | refused |
-| `clock:` entry | yes | yes | — |
-| `tool:` entry | yes | yes | — |
-| `source:` entry | on `sip` and `connector` | compiles, never gets a value | — |
+| Entry | LiveKit | Pipecat |
+|---|---|---|
+| `clock:` | yes | yes |
+| `tool:` | yes | yes |
+| `source:` | on `sip` and `connector` only | compiles, never gets a value |
 
-`slng` refuses all of it, because it starts the session itself, so there is no gap
-before the greeting to fetch anything in.
-
-The `source:` row is the one to read twice. **No Pipecat route supplies call
-facts**, so there a `source: from_number` entry compiles, is skipped on every call,
-and `unmute validate` tells you so. The variable keeps its default and the call
+`source:` is the row to read twice. **No Pipecat route supplies call facts**, so
+there a `source: from_number` entry compiles, is skipped on every call, and
+`unmute validate` tells you so. The variable keeps its default and the call
 carries on.
+
+The `slng` target refuses `prefetch:` and `confirm:` outright. It starts the
+session itself, so there is no gap before the greeting to fetch anything in.
 
 <Note>
   The same fact declared as a variable's own `source:` is stricter: on Pipecat that
