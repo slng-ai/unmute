@@ -1,0 +1,57 @@
+description: >-
+  Create one confirmed booking for the verified customer using an exact slot
+  returned by availability. Never invent a slot or a phone number.
+
+input:
+  type: object
+  properties:
+    customer_phone:
+      type: string
+      description: >-
+        The caller's confirmed phone number, exactly as find_or_create_customer
+        returned it. The model retypes it here on every call, because nothing in
+        this package holds it.
+    service:
+      type: string
+      enum:
+        - haircut
+        - hair-color
+        - blowout
+    slot_id:
+      type: string
+      description: Exact slot ID returned by check_availability
+    confirmed:
+      type: boolean
+      description: Exact true value from the shared confirm_booking result
+  required:
+    - customer_phone
+    - service
+    - slot_id
+    - confirmed
+
+output:
+  type: object
+  properties:
+    booking_id:
+      type: string
+    status:
+      type: string
+      enum:
+        - booked
+        - not_confirmed
+        - invalid
+        - customer_not_found
+        - slot_unavailable
+    summary:
+      type: string
+  required:
+    - booking_id
+    - status
+    - summary
+
+local:
+  handler: tools/salon.py
+
+interruption: provider_default
+effect: returns_data
+announce: Booking that in.

@@ -1,0 +1,45 @@
+description: >-
+  Record the verified customer's complaint after enough facts are known. This
+  does not replace a requested manager transfer.
+
+input:
+  type: object
+  properties:
+    customer_phone:
+      type: string
+      description: >-
+        The caller's confirmed phone number, exactly as find_or_create_customer
+        returned it. The model retypes it here on every call, because nothing in
+        this package holds it.
+    summary:
+      type: string
+      description: Short factual summary of the complaint
+    requested_resolution:
+      type: string
+      description: What the customer wants the salon to do, or an empty string
+  required:
+    - customer_phone
+    - summary
+    - requested_resolution
+
+output:
+  type: object
+  properties:
+    complaint_id:
+      type: string
+    status:
+      type: string
+      enum:
+        - recorded
+        - invalid
+        - customer_not_found
+  required:
+    - complaint_id
+    - status
+
+local:
+  handler: tools/salon.py
+
+interruption: provider_default
+effect: returns_data
+announce: Noting that down.

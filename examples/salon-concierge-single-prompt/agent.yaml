@@ -1,0 +1,192 @@
+version: 1
+
+# The baseline. This is examples/salon-concierge with every structural
+# optimization taken back out, and nothing else changed: the same salon, the same
+# tools, the same knowledge bases, the same voice, the same phone routes.
+#
+# It exists to be read next to the optimized package, not to be copied. Everything
+# below that carries a "the baseline pays" comment is a cost this package accepts
+# on purpose so the two files can be compared line for line.
+#
+# What was taken out, and where the optimized package puts it back:
+#
+#   one prompt for the whole call        salon-concierge splits it into two agents
+#                                        and two tasks, each holding only what its
+#                                        own step needs
+#   no variables:                        salon-concierge declares three, and the
+#                                        compiler decides which prompt may render
+#                                        each one
+#   no prefetch:                         salon-concierge resolves the date, the
+#                                        caller's number and their name before the
+#                                        greeting, in three entries
+#   the model carries the phone number   salon-concierge injects it into every tool
+#                                        from a confirmed variable, so the model
+#                                        never retypes it
+#   a tool call to read the clock        salon-concierge reads the clock once, in
+#                                        the salon's own timezone, before anybody
+#                                        speaks
+#   the model's own endpoint             salon-concierge routes thinking through
+#                                        the SLNG Context Router
+#   framework-default turn taking        salon-concierge sets a pace and a measured
+#                                        silence window
+
+name: salon-concierge-single-prompt
+
+entry_agent: concierge
+
+# No `timezone:` here, and nothing refuses it, because nothing in this package
+# reads a clock at compile time. The salon's zone is still a fact the agent needs,
+# so it lives in tools/salon.py instead, where no prompt and no reader can see it.
+# The baseline pays: one fact, one owner, and the owner is a Python constant.
+
+agents:
+  # One agent, one prompt, every tool. The prompt has to hold the voice contract,
+  # the identity check, the whole booking flow, the complaint flow and the
+  # escalation rule at once, and all of it is sent on every single request whether
+  # the caller is booking a haircut or asking what time the salon opens.
+  concierge:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - get_current_date
+      - look_up_salon_info
+      - look_up_refund_policy
+      - find_or_create_customer
+      - list_bookings
+      - check_availability
+      - create_booking
+      - modify_booking
+      - cancel_booking
+      - record_complaint
+    escalations:
+      - to_manager
+
+escalations:
+  to_manager:
+    when: The caller explicitly asks for a manager or is clearly and strongly frustrated.
+    cold:
+      destination: manager_line
+      ring_timeout: 30s
+      on_unavailable: hangup
+
+# No `variables:` block at all, and that is the difference the rest of this file
+# keeps paying for. There is no name for the caller's number, so nothing can hold
+# it, nothing can gate on it, and nothing can decide which prompt is allowed to
+# render it. The number lives in the conversation, and the model retypes it into
+# every tool call from the transcript. A transcriber that heard "six eight oh"
+# once and "six eighty" the next time produces two customers.
+
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+  - LANGFUSE_SECRET_KEY
+  - LANGFUSE_PUBLIC_KEY
+  - LANGFUSE_BASE_URL
+  - MANAGER_PHONE_NUMBER
+  - TWILIO_ACCOUNT_SID
+  - TWILIO_AUTH_TOKEN
+  - TWILIO_PHONE_NUMBER
+  - SIP_TRUNK_HOSTNAME
+  - SIP_AUTH_USERNAME
+  - SIP_AUTH_PASSWORD
+  - SIP_FROM_NUMBER
+
+destinations:
+  manager_line: MANAGER_PHONE_NUMBER
+
+knowledge:
+  refunds:
+    documents: knowledge/refunds
+  services:
+    documents: knowledge/services
+    chunk_size: 220
+    chunk_overlap: 40
+
+models:
+  think:
+    reasoning:
+      # Straight at OpenAI, which is where most packages start. The same model the
+      # optimized package thinks on, so a token count from one is comparable with a
+      # token count from the other.
+      #
+      # The baseline pays: no `agent_id`, so there is no cache scope, and every
+      # turn is a model request. salon-concierge sends this through the SLNG
+      # Context Router instead, which judges which turns are repeatable and
+      # answers those from cache without calling the model. A repeat it sends on
+      # to the model is expected rather than a fault.
+      provider: openai
+      model: gpt-5.6-luna
+      params:
+        # Not optional once the agent has tools: the GPT-5 family rejects function
+        # tools on chat completions without it. This one is not an optimization,
+        # it is what makes the package run.
+        reasoning_effort: "none"
+  speak:
+    voice:
+      provider: slng
+      model: "cartesia/sonic:3.5"
+      voice: "62ae83ad-4f6a-430b-af41-a9bede9286ca"
+      language: en
+      params:
+        world_part_override: eu
+        warm_standby_enabled: true
+  listen:
+    transcriber:
+      provider: slng
+      model: "soniox/speech-ai:rt-v5"
+      language: en
+      params:
+        world_part_override: eu
+  turn:
+    detector:
+      provider: local
+      model: silero
+      # The baseline pays: `patient` reproduces the framework defaults exactly, so
+      # a turn here closes at 2.5s on LiveKit and 3.0s on Pipecat. That is what a
+      # package that never thought about turn taking is running today, and it is
+      # the largest single number in most of its turns.
+      #
+      # And no `endpointing_delay:` anywhere, on either target, so the floor comes
+      # from the pace rather than from a measurement.
+      pace: patient
+
+tools:
+  - get_current_date
+  - find_or_create_customer
+  - look_up_refund_policy
+  - look_up_salon_info
+  - list_bookings
+  - check_availability
+  - create_booking
+  - modify_booking
+  - cancel_booking
+  - record_complaint
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, you've reached Sage and Stone. Robin speaking, what can I do for you?"
+  interruption:
+    enabled: true
+  inactivity:
+    nudge_after: 15s
+    end_after: 45s
+  max_duration: 15m
+
+tracing:
+  provider: langfuse
+
+channels:
+  web:
+    kind: realtime_audio
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: false
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  peak_starts_per_second: 1
+  avg_session_duration: 5m
