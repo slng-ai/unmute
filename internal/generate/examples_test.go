@@ -925,10 +925,18 @@ func TestPublicExamplePackages(t *testing.T) {
 			directories = append(directories, entry.Name())
 		}
 	}
-	// Two packages: salon-concierge as the composite release fixture that also
+	// Three packages: salon-concierge as the composite release fixture that also
 	// carries the only shipped telephony route, and slng-support, which emits no
 	// runnable project. slng-support references only builtins, so its push
 	// creates nothing, and that is the only slng shape that publishes today.
+	//
+	// salon-concierge-single-prompt is the third, added 2026-09-01, and it is the
+	// one exception to the rule that a shipped example is something to copy. It is
+	// salon-concierge with the structural optimizations removed: one prompt, no
+	// variables, no prefetch, framework-default turn taking, no router. It exists
+	// so the optimized package can be read against something, and it is held to
+	// every gate the others are, because a baseline that did not validate, compile
+	// and run would prove nothing about the package it is compared with.
 	// slng-orders, which shipped a `local:` tool for the deploy walkthrough, was
 	// removed 2026-08-28 because that push path does not work end to end.
 	// The focused telephony, outbound, transfer, MCP and regional examples were
@@ -936,7 +944,7 @@ func TestPublicExamplePackages(t *testing.T) {
 	// 2026-08-28, and a reader who wants a package to run scaffolds one with
 	// `unmute init`. simple-prompt lives on as internal/testdata/simple-prompt,
 	// because it is the minimal single-agent shape a dozen tests compile.
-	want := []string{"salon-concierge", "slng-support"}
+	want := []string{"salon-concierge", "salon-concierge-single-prompt", "slng-support"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}

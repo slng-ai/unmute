@@ -576,7 +576,16 @@ func setImportNeeds(data *pipecatData) {
 			}
 			if t.Local {
 				data.NeedsInspect = true // isawaitable on the user handler (V13)
-			} else {
+			}
+			// Only a webhook body writes `httpx.AsyncClient()`, and a webhook body
+			// is the one that has a URL to post to. This used to be the `else` of
+			// the branch above, which made every non-local tool set it: a knowledge
+			// tool answers from knowledge.py and posts nothing, so a package whose
+			// only remote-looking tools are knowledge lookups emitted an import it
+			// never used, failed the emitted project's own ruff gate, and declared
+			// no httpx in pyproject.toml to back it up. livekit reads URLEnv here
+			// and always did.
+			if t.URLEnv != "" {
 				data.NeedsHTTPX = true // webhook tool POSTs with httpx
 			}
 			if t.Auth != nil {
@@ -595,7 +604,8 @@ func setImportNeeds(data *pipecatData) {
 				for _, t := range step.Tools {
 					if t.Local {
 						data.NeedsInspect = true
-					} else {
+					}
+					if t.URLEnv != "" {
 						data.NeedsHTTPX = true // flows tool handlers POST with httpx
 					}
 					if t.Auth != nil {

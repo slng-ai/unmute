@@ -1,9 +1,11 @@
 # Examples
 
-Two packages. `salon-concierge` is the full Sage and Stone Salon project and the
-one to read when you want to see every path working together. `slng-support` is
-the hosted target, which emits no runnable project and today publishes only
-agents whose tools are already built.
+Three packages. `salon-concierge` is the full Sage and Stone Salon project and
+the one to read when you want to see every path working together.
+`salon-concierge-single-prompt` is that same salon with the structural
+optimizations removed, so the optimized package can be read against something.
+`slng-support` is the hosted target, which emits no runnable project and today
+publishes only agents whose tools are already built.
 
 If you want a package of your own to start from rather than one to read, run
 `unmute init my-agent`. The scaffold writes the smallest package that does
@@ -16,10 +18,13 @@ provider request and a human conversation, not only the automated checks.
 
 | Package | Structure | Responsibility split |
 |---|---|---|
-| [`salon-concierge`](salon-concierge/) | Two agents, two tasks, handoffs, a guarded delegate, a cold manager transfer, tracing, and inbound phone routes | **Release-readiness example.** Verify once, manage stored bookings, answer or escalate complaints, cold-transfer to a manager, and inspect Coval traces. Every tool is local Python, so nothing remote has to be up before the greeting. Browser and inbound phone on two targets, one per telephony plane, no outbound. |
+| [`salon-concierge`](salon-concierge/) | Two agents, two tasks, handoffs, a guarded delegate, a cold manager transfer, tracing, and inbound phone routes | **Release-readiness example.** Verify once, manage stored bookings, answer or escalate complaints, cold-transfer to a manager, and inspect Langfuse traces. Every tool is local Python, so nothing remote has to be up before the greeting. Browser and inbound phone on two targets, one per telephony plane, no outbound. |
+| [`salon-concierge-single-prompt`](salon-concierge-single-prompt/) | One agent, one 13,978-character prompt, every tool on every turn, framework-default turn taking, the model's own endpoint | **The baseline, not a template.** The same salon as above with no tasks, no handoffs, no variables and no pre-fetch: the caller is asked for a number the carrier already supplied, the model calls a tool to find out what day it is, and it retypes the phone number into every tool call. Validates, compiles and runs on the same two targets, because a baseline that did not would prove nothing. |
 | [`slng-support`](slng-support/) | One agent, one builtin tool, hosted by SLNG | **The hosted target, smallest form.** Produces no runnable project: `unmute deploy` compiles a deployment body and pushes it. Builtins only, so the push creates nothing — SLNG already owns every capability it names. No `unmute dev`. |
 
-`salon-concierge` is the only package with a telephony route. The
+The two salon packages are the ones with a telephony route, and they carry the
+same pair: a Twilio Elastic SIP Trunk on their LiveKit target and Pipecat Cloud's
+Twilio websocket on their Pipecat target. The
 [telephony overview](../docs-site/telephony/overview.mdx) explains the routes
 each platform offers and which one to pick.
 
@@ -52,9 +57,10 @@ from the repository root. A package-level `.env` can override shared values.
 bin/unmute dev examples/salon-concierge --target pipecat
 ```
 
-`salon-concierge` sets `tracing.provider: coval` and needs `COVAL_API_KEY`. A
-package that wants Langfuse instead sets `tracing.provider: langfuse` and needs
+Both salon packages set `tracing.provider: langfuse` and need
 `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_BASE_URL` together.
+A package that wants Coval instead sets `tracing.provider: coval` and needs
+`COVAL_API_KEY`.
 A scaffolded package sets neither, so the first run needs only model-provider
 keys. Add `tracing:` to any package that wants traces; the block is two lines
 and the section below explains what you get.

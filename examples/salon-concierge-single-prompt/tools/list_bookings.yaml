@@ -1,0 +1,47 @@
+description: >-
+  List the customer's active bookings. The model supplies the phone number, so it
+  has to be the exact number find_or_create_customer returned: a number typed back
+  in a different shape finds no bookings and looks like a customer with none.
+
+input:
+  type: object
+  properties:
+    customer_phone:
+      type: string
+      description: >-
+        The caller's confirmed phone number, exactly as find_or_create_customer
+        returned it. The model retypes it here on every call, because nothing in
+        this package holds it.
+  required:
+    - customer_phone
+
+output:
+  type: object
+  properties:
+    bookings:
+      type: array
+      items:
+        type: object
+        properties:
+          booking_id:
+            type: string
+          service:
+            type: string
+          start_time:
+            type: string
+          status:
+            type: string
+        required:
+          - booking_id
+          - service
+          - start_time
+          - status
+  required:
+    - bookings
+
+local:
+  handler: tools/salon.py
+
+interruption: provider_default
+effect: returns_data
+announce: Let me look.

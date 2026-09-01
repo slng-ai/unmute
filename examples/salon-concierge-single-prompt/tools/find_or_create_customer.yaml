@@ -1,0 +1,50 @@
+description: >-
+  Look up or create one salon customer from the exact confirmed phone number.
+  Use only after the digit readback got a clear yes. Reuse the record that
+  already owns the number, or create one for a number that is new. Never guess
+  a number or pass one the caller has not confirmed.
+
+input:
+  type: object
+  properties:
+    phone:
+      type: string
+      description: Exact confirmed phone; 10 to 15 digits with no inferred country code
+  required:
+    - phone
+
+output:
+  type: object
+  properties:
+    # The confirmed number is the identifier. There is no second id: a synthetic
+    # one would be a value the caller never says, that every tool would have to
+    # carry, and that buys nothing the number does not already give.
+    customer_phone:
+      type: string
+      description: >-
+        The confirmed number in E.164: a plus sign then digits, no spaces or
+        punctuation. Return it exactly as it comes back, character for character.
+    status:
+      type: string
+      enum:
+        - existing
+        - created
+        - invalid
+    summary:
+      type: string
+  required:
+    - customer_phone
+    - status
+    - summary
+
+local:
+  handler: tools/salon.py
+
+interruption: provider_default
+effect: returns_data
+
+# No announce, deliberately. This tool runs at the end of the identification
+# step, and the delegate into booking announces right after it, so a line here
+# and that one covered the same handover: a live call played "Okay, one sec."
+# and then "Let me pull up the diary." The delegate's line says more, so it is
+# the one that stayed.

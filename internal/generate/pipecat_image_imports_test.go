@@ -110,3 +110,53 @@ func loadedPipecatAgent(t *testing.T) *ir.Agent {
 	agent.Agents["intake"] = intake
 	return agent
 }
+
+// TestPipecatHTTPXImportMatchesItsUseAndItsDependency. Three things have to agree
+// about httpx, and they were decided in three different places: `import httpx` in
+// bot.py, `"httpx>=0.27"` in pyproject.toml, and whether any emitted body writes
+// `httpx.`.
+//
+// They disagreed. The dependency was gated on a webhook tool and the import was
+// gated on a tool not being local, so a knowledge tool — which answers from
+// knowledge.py and posts nothing — set the import without setting the dependency.
+// A package whose only non-local tools are knowledge lookups then emitted a
+// project that fails its own ruff gate (F401) and, had ruff not caught it, would
+// have shipped an image importing a distribution it never declared.
+//
+// Written as an agreement rather than against one example, because the same three
+// decisions have to hold for every package: two of them are made while lowering
+// tools and the third is made in a template.
+func TestPipecatHTTPXImportMatchesItsUseAndItsDependency(t *testing.T) {
+	// One package with no httpx anywhere, one with it everywhere, so a build that
+	// simply stopped emitting the import could not pass this.
+	checkedWith, checkedWithout := false, false
+	for _, name := range []string{"salon-concierge", "salon-concierge-single-prompt"} {
+		t.Run(name, func(t *testing.T) {
+			agent := loadExample(t, name)
+			artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+			if err != nil {
+				t.Fatalf("generate: %v", err)
+			}
+			bot := artifactFile(t, artifact, "bot.py")
+			pyproject := artifactFile(t, artifact, "pyproject.toml")
+
+			imported := strings.Contains(bot, "\nimport httpx\n")
+			// The import line itself is a `httpx` occurrence, so strip it before
+			// asking whether anything uses the module.
+			used := strings.Contains(strings.Replace(bot, "\nimport httpx\n", "\n", 1), "httpx.")
+			declared := strings.Contains(pyproject, `"httpx`)
+
+			if imported != used {
+				t.Errorf("bot.py imports httpx = %v but uses it = %v: an unused import fails the emitted project's ruff gate, and a use with no import is a NameError", imported, used)
+			}
+			if imported != declared {
+				t.Errorf("bot.py imports httpx = %v but pyproject declares it = %v: the image would import a distribution it never asked for", imported, declared)
+			}
+			checkedWith = checkedWith || imported
+			checkedWithout = checkedWithout || !imported
+		})
+	}
+	if !checkedWith || !checkedWithout {
+		t.Errorf("covered a package that imports httpx = %v and one that does not = %v; this agreement needs both", checkedWith, checkedWithout)
+	}
+}
