@@ -137,9 +137,23 @@ authored `placement:` does not change that.
 
 ## Semantic endpointing
 
-`semantic_endpointing` is a model setting rather than a target one, and both targets
-warn that its effect depends on the model you bound. Set it if the bound model
-documents support for it, and expect nothing from it otherwise.
+`semantic_endpointing` takes one of three values: `required`, `preferred`, or
+`off`.
+
+`required` and `preferred` are forwarded and change nothing else Unmute emits.
+Whether either one does anything depends on whether the model behind the turn
+binding documents support for the setting.
+
+`off` is different: it removes the turn model instead of forwarding a value
+nothing reads. On LiveKit the session drops `inference.TurnDetector` and
+decides end of turn from voice activity alone, `turn_detection="vad"`; the
+`pace` ceiling still applies, because the endpointing dict does not depend on
+the detector. On Pipecat it replaces the Smart Turn analyzer's stop strategy
+with `SpeechTimeoutUserTurnStopStrategy()`, and loses the ceiling along with
+it, because on this target the ceiling *is* the analyzer's own `stop_secs`.
+
+A `turn` entry cannot carry `fallback:` either. That field is legal only on
+`think` and `listen` models; see [Reasoning model](/models/llm#fallback).
 
 ## Where to go next
 
@@ -147,7 +161,7 @@ documents support for it, and expect nothing from it otherwise.
   <Card title="SLNG Execution Layer" icon="zap" href="/optimization/execution-layer">
     The SLNG Execution Layer behind the speech models.
   </Card>
-  <Card title="Targets" icon="boxes" href="/targets/overview">
-    What else differs between the two runtimes.
+  <Card title="agent.yaml" icon="file-code" href="/reference/agent-yaml">
+    Every field a model entry takes.
   </Card>
 </Columns>

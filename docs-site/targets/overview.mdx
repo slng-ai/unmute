@@ -3,8 +3,9 @@ title: "Targets"
 description: "What a target is, what targets.yaml holds, and how one package compiles to two runtimes."
 ---
 
-A target is one place your agent can run. Unmute generates three, and they are
-not all the same shape.
+A target is where your agent runs. Unmute compiles one package into a native
+project for the target you pick: Pipecat, LiveKit Agents, or SLNG. Two are code
+targets, and one is hosted.
 
 **Pipecat** and **LiveKit Agents** are code targets: `unmute compile` writes a
 Python project you own, host and run.
@@ -155,11 +156,14 @@ browser agent, either.
 
 ## Where to go next
 
-<Columns cols={2}>
+<CardGroup cols={3}>
   <Card title="The Pipecat project" icon="boxes" href="/targets/pipecat">
     What `build/pipecat/` contains.
   </Card>
   <Card title="The LiveKit project" icon="boxes" href="/targets/livekit">
     What `build/livekit/` contains.
   </Card>
-</Columns>
+  <Card title="The SLNG deployment body" icon="cloud" href="/targets/slng">
+    What `build/slng/` contains, and what SLNG runs for you.
+  </Card>
+</CardGroup>

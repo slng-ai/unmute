@@ -40,11 +40,10 @@ yourself.
 | the event loop wiring STT to LLM to TTS | SLNG's pipeline |
 | where each provider is called from | one region, chosen per call |
 
-So here you author intent — prompt, models, tools, greeting, variables — and the
-layer under it is already running, already in-region, already warm, with STT,
-LLM, TTS and the tool sandbox one network hop apart rather than one internet
-apart. You give up owning the runtime and you get one that is co-located and
-tuned.
+So here you author intent: prompt, models, tools, greeting, variables. The layer
+under it is already running, already in-region, already warm, with STT, LLM,
+TTS and the tool sandbox one network hop apart rather than one internet apart.
+You give up owning the runtime and you get one that is co-located and tuned.
 
 That is also why the refusals below are refusals rather than silent drops: a
 setting that describes a runtime you no longer own has nothing to act on, and
@@ -201,7 +200,7 @@ uploaded and becomes an org-level object in SLNG with a version number. Your
 package names it; SLNG owns it.
 
 That is the fast shape as well as the necessary one. A tool sits on the critical
-path of a turn — nobody speaks until it returns — and a handler inside SLNG's
+path of a turn: nobody speaks until it returns, and a handler inside SLNG's
 sandbox, in the region serving the call, answers in a hop. The same logic behind
 a webhook of your own is a round trip out of SLNG's network and back, on every
 call. Two consequences: a tool on SLNG has **no network access at all**, so a
@@ -233,8 +232,14 @@ successful run proves it works. So each needs a sample, one JSON object of
 arguments at `build/slng/samples/<tool>.json`, run with
 `unmute deploy --run-samples`. Samples survive a recompile.
 
-An MCP reference resolves the same way. The push looks up the server's name for
-its `server_id`, then copies each tool's schema hash out of the platform's own
+An MCP reference resolves the same way, and it needs one thing agent.yaml has to
+say up front: which tools you want. Unmute compiles offline, so it cannot expand
+"every tool on the server" into a reference list; an `mcp:` tool with no
+`mcp.tools` list is refused at validate, naming the tool and pointing at
+`mcp.tools`.
+
+Once the list is there, the push looks up the server's name for its
+`server_id`, then copies each named tool's schema hash out of the platform's own
 stored capability snapshot. Nothing connects to the MCP server. The one caveat:
 the platform refuses a snapshot that is unhealthy or older than five minutes.
 Refresh it first with `voiceai mcp run <server>`.
@@ -314,8 +319,9 @@ None is dropped quietly.
 
 | Package feature | Why SLNG cannot take it |
 |---|---|
-| tasks, task groups, agent transfers | the create body carries one prompt and one greeting |
+| tasks, task groups, handoffs | the create body carries one prompt and one greeting |
 | a `turn:` section, `semantic_endpointing`, `endpointing_delay`, `pace` | SLNG owns its own turn taking |
+| an `mcp:` tool with no `mcp.tools` list | unmute compiles offline and cannot expand "every tool on the server" into a reference list: name the tools you want |
 | `placement: local` on any model | SLNG runs the pipeline; there is no machine of yours |
 | `conversation.inactivity` | SLNG's idle nudges need three spoken texts a package does not carry |
 | `conversation.max_duration`, `thinking_audio` | no field on the create body holds them |
@@ -348,7 +354,7 @@ problem with the compiled body, and swapping that one binding is the fix.
 
 ## There is no `unmute dev`
 
-`dev` runs the generated project locally, and this target generates no project.
+`dev` runs the generated project locally, and this target compiles no project.
 To talk to a pushed agent, open a web session:
 
 ```sh
@@ -363,3 +369,14 @@ The `--file` is required even though every field in it is optional, because the
 endpoint declares a request body and the CLI sends none without it. A minimal
 `session.json` is `{"arguments": {}}`; `arguments` is where the package's
 declared variables get their value for one session.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Speech to text" icon="mic" href="/models/stt">
+    Which vendors each target accepts, and how SLNG fits in.
+  </Card>
+  <Card title="Deploy to SLNG" icon="cloud-upload" href="/deploy/slng">
+    The walkthrough: what you need first, and every failure message.
+  </Card>
+</Columns>
