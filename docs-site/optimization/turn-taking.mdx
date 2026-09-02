@@ -1,6 +1,6 @@
 ---
 title: "Setting how long the agent waits"
-description: "pace and endpointing_delay: the two settings that decide how long a caller waits before the agent answers, what each legal value does, and how to choose between them."
+description: "pace and endpointing_delay: the two settings that decide how long a caller waits before the agent answers."
 sidebarTitle: "Turn taking"
 ---
 
@@ -18,6 +18,18 @@ models:
       endpointing_delay: 400ms  # the floor
 ```
 
+`local`/`silero` is what Pipecat runs. LiveKit needs its own turn model, so a
+package that ships to both overrides it in `targets.yaml`:
+
+```yaml targets.yaml
+targets:
+  livekit:
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+```
+
 **`pace` is the ceiling**: the longest the agent will keep waiting before it
 answers regardless. Reach for this first.
 
@@ -29,7 +41,7 @@ agent believes you finished. Nothing downstream can start earlier.
   is sitting at the ceiling, and only `pace` moves that.
 
   Before `pace` existed nothing in a package could reach the ceiling, so it stayed
-  at the framework default — **2.5s** on LiveKit and **3.0s** on Pipecat — no
+  at the framework default, **2.5s** on LiveKit and **3.0s** on Pipecat, no
   matter how small you made the window. If replies feel slow and your
   `endpointing_delay` is already short, this is why.
 </Warning>
@@ -61,7 +73,7 @@ have to look either up. Two differences are worth knowing before you read them:
   equivalent, so its wait is the same fixed window every turn.
 
 `pace` takes **no per-target override**. One word is meant to work on both
-targets, and a value that differed per target would be a duration in disguise —
+targets, and a value that differed per target would be a duration in disguise,
 which is what `endpointing_delay` is for. Writing a `pace` inside a
 `targets.yaml` override is refused, naming what to do instead.
 
@@ -72,13 +84,14 @@ pace sets the floor too.
 
 Set it when you have measured a value for your transcriber. Lowering it makes
 short replies finalise sooner as well, because the transcriber is only asked to
-finalise once the silence window elapses — so it pays twice on a "yes, that's
+finalise once the silence window elapses, so it pays twice on a "yes, that's
 right".
 
 **Do not take it to the minimum.** LiveKit refuses anything under 250ms and
 `unmute compile` rejects it rather than letting the worker raise on its first
-call. But even a legal short value splits utterances: we had "tomorrow" committed
-as one turn and "afternoon" as the next, and the agent asked twice.
+call. But even a legal short value splits utterances: a pause between words
+gets read as the end of the turn, and the agent answers before the sentence is
+finished.
 
 Unlike `pace`, this one **does** take a per-target override, because a silence
 window is tied to one target's mechanism. `examples/salon-concierge` authors
@@ -93,17 +106,22 @@ counter-intuitive thing on this page.
 `pipecat-slng` asks the bridge to finalise when voice activity detection reports
 the caller stopped. A final transcript that has already arrived by then finds no
 request outstanding, so the frame goes out unfinalized and Pipecat waits out a
-flat **1.0s** safety net instead.
+flat safety-net timeout instead, on top of the window you set.
 
 So the relationship between the window and the wait is not monotonic. Below the
-transcript's arrival time the turn ends promptly. Above it, the turn costs a flat
-extra second — and transcripts can arrive in under 300ms, so "above it" starts
-sooner than you would guess.
+transcript's arrival time the turn ends promptly. Above it, the turn pays that
+flat extra wait, and a transcript can arrive sooner than you would guess, so
+"above it" starts sooner too.
 
 That is why the Pipecat column in the pace table stays at 0.2s for every pace, and
 why a patient Pipecat agent gets its patience from the ceiling instead. If you
 raise this window on Pipecat, check the wait afterwards rather than assuming it
 went up by what you added.
+
+Setting `interruption.minimum_words` on a Pipecat target used to replace the
+floor and ceiling with a plain timeout, which stopped the end-of-turn
+classifier running and made turn taking worse instead of better. It no longer
+does: the classifier survives, and it still carries the `pace` ceiling.
 
 ## Reading what you set
 
@@ -132,9 +150,9 @@ ceiling, and simply compiling on a current build moves it.
 
 Pick the pace from what your callers actually say, before measuring anything:
 
-- Do they answer in a few words — confirmations, a menu choice, a yes? Start at
+- Do they answer in a few words: confirmations, a menu choice, a yes? Start at
   `snappy`.
-- Do they read things out — phone numbers, dates, postcodes, an email address,
+- Do they read things out: phone numbers, dates, postcodes, an email address,
   a name being spelled? Start at `balanced`, and be ready to go to `patient`.
 - Do they think aloud, with pauses inside a sentence? `patient`.
 
@@ -174,12 +192,11 @@ Compare each turn's `user_turn` against the floor and ceiling from step 1:
 
 ### 5. When turn taking is not the answer
 
-This is the common outcome once the ceiling is set sensibly, and it is worth
-naming so you do not keep tuning a setting that is already right.
+This is the common outcome once the ceiling is set sensibly.
 
 Look at how many model round trips the slow turns took. A turn that calls a tool
-pays time-to-first-token **twice** — once to decide the tool, once to answer with
-its result — so tool turns cost roughly double, and two tools in one turn cost
+pays time-to-first-token **twice**: once to decide the tool, once to answer with
+its result. Tool turns cost roughly double, and two tools in one turn cost
 more again. That is usually a bigger number than anything on this page, and no
 pace will touch it.
 
@@ -188,22 +205,12 @@ information instead of three, or answer from context rather than looking somethi
 up. See [Optimizing your agent](/optimization/overview) for that side.
 
 <Warning>
-  **A latency figure only shows you half of turn taking.** It fails two ways —
-  dead air after the caller finishes, and answering the caller mid-sentence — and
-  shrinking the window trades one for the other. Only the first appears in a
-  number.
-
-  So a run that reports the wait getting shorter and says nothing about cutoffs
-  has measured half the change. Do step 3 every time you change the pace, not
-  just the first time.
+  **A latency figure only shows you half of turn taking.** It fails two ways:
+  dead air after the caller finishes, and answering the caller mid-sentence. And
+  shrinking the window trades one for the other, while only the first appears
+  in a number. Do step 3 every time you change the pace, not just the first
+  time.
 </Warning>
-
-<Note>
-  **One call is not evidence.** Identical builds have swung more than a second of
-  mean silence between runs here, and a person cannot hold two conversations still
-  enough to compare them. If you are going to quote a number, take three runs per
-  setting and say how many agreed.
-</Note>
 
 ## Where the rest of turn taking lives
 
@@ -211,7 +218,7 @@ Everything on this page is on the `turn` binding under `models`. Two related
 things are not, and it is worth knowing why:
 
 - **`conversation.interruption`** decides who holds the floor while the *agent* is
-  speaking — whether a caller can barge in, how many words it takes, and which
+  speaking: whether a caller can barge in, how many words it takes, and which
   stretches of the call are protected. It is a conversation policy rather than a
   property of the turn detector, so it sits under `conversation`. Its fields are
   in the [agent.yaml reference](/reference/agent-yaml).
@@ -219,8 +226,8 @@ things are not, and it is worth knowing why:
   names `turn-detector-mini` in its `targets.yaml` override. See
   [Turn detection](/models/turn-detection) for what actually runs on each target.
 
-Individual framework parameters — LiveKit's `alpha` and `unlikely_threshold`,
-Pipecat's `pre_speech_ms` and VAD confidence — are **not** reachable from a
+Individual framework parameters, LiveKit's `alpha` and `unlikely_threshold`,
+Pipecat's `pre_speech_ms` and VAD confidence, are **not** reachable from a
 package today. `pace` and `endpointing_delay` are the whole surface.
 
 A `params:` block on a turn binding is not the escape hatch either. It is accepted
@@ -233,3 +240,14 @@ target reads: turn params are not forwarded to either framework.
 ```
 
 The same goes for `agent_id` and `fallback` on a turn binding.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Execution Layer" icon="bolt" href="/optimization/execution-layer">
+    Caching and routing for speech, on SLNG's own layer.
+  </Card>
+  <Card title="Reading the latency numbers" icon="chart-line" href="/optimization/latency">
+    Read `user_turn` against the floor and ceiling you just set.
+  </Card>
+</CardGroup>

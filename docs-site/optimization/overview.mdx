@@ -1,20 +1,16 @@
 ---
 title: "Optimizing your agent"
-description: "The settings we recommend for a faster agent, why each one matters, and how to write them in agent.yaml."
+description: "Settings that speed up a call, why each one matters, and how to write them in agent.yaml."
 sidebarTitle: "Overview"
 ---
 
 A caller judges a voice agent on how long it waits. This page is the short list of
-settings we recommend, why each one matters, and where it goes in `agent.yaml`.
+settings that make a call faster, why each one matters, and where it goes in
+`agent.yaml`.
 
 Two different jobs, two different pages. This one is **what to change**. If you
 are looking at a slow call and want to know *which part* was slow, start with
 [Reading the latency numbers](/optimization/latency) instead, then come back here.
-
-<Note>
-  These are the settings we recommend, based on building and calling these agents
-  ourselves.
-</Note>
 
 ## Where the wait actually is
 
@@ -25,24 +21,24 @@ One turn is four spans, and they are nothing like equal:
 | silence window | how long you have to stay quiet before the agent believes you finished |
 | turn ceiling | the longest the agent will keep waiting before answering regardless |
 | transcript | your last word to the final text |
-| LLM | one round trip — a tool turn costs two |
+| LLM | one round trip, and a tool turn costs two |
 | TTS | synthesis to the first audio |
 | network | every hop between your agent and each model, on every turn |
 
-In our experience the LLM is the largest and the silence window is the most
-predictable, and the rest are smaller than people expect. That is why the order
-below is not the order of size — it is the order of how reliably each one pays
+The LLM is typically the largest span, and the silence window is the most
+predictable, with the rest smaller than people expect. That is why the order
+below is not the order of size. It is the order of how reliably each one pays
 off.
 
 The turn ceiling is the exception, and it is worth checking early rather than
-last. Nothing in a package could reach it before `pace` existed, so it sat at the
-framework default — and on a measured LiveKit call two turns spent 2.5s there
-while the authored silence window was 400ms. If your waits look flat and long,
-that is where to look.
+last. Nothing in a package could reach it before `pace` existed, so it sat at
+the framework default no matter how short the authored silence window was. A
+wait that stays flat and long, turn after turn, is usually the ceiling rather
+than the floor.
 
-Measure your own agent rather than trusting anyone's numbers, including ours.
 [Reading the latency numbers](/optimization/latency) shows what `unmute dev`
-reports for every turn.
+reports for every turn, so you can see which span is slow on your own agent
+before you change anything.
 
 ## The short list
 
@@ -107,21 +103,21 @@ models:
 
 Not on its accuracy score. The turn detector reads the transcript to decide
 whether you have finished talking, so a transcriber that has not finalised yet
-holds the whole turn open — the agent is waiting on text, not on thinking.
+holds the whole turn open: the agent is waiting on text, not on thinking.
 
 The number to compare is **time from the end of speech to the final transcript**,
 and it varies a lot between models that score similarly on accuracy. Two models
 can return the same words with very different waits.
 
-For independent, like-for-like comparisons across providers, we recommend
+For independent, like-for-like comparisons across providers, see
 [Coval's voice AI benchmarks](https://benchmarks.coval.ai/overview). Then confirm
 on your own audio, because accents, phone codecs and the length of a typical
 utterance all move the result.
 
 The same model reached two ways is also two different waits. `deepgram/nova:3`
 and `slng/deepgram/nova:3-en` are the same vendor model, one proxied through SLNG
-and one hosted by it, and we measured 280ms against 605ms to the final
-transcript. That is why the scaffold and the examples take the proxied route.
+and one hosted by it, and the proxied route finishes noticeably sooner to the
+final transcript. That is why the scaffold and the examples take it.
 [Speech to text](/models/stt) has the numbers and the caveats.
 
 <Tip>
@@ -171,7 +167,7 @@ that feels flat and long is sitting at the ceiling, and only this moves it.
 `endpointing_delay` is the floor: how long you have to stay quiet before the
 agent believes you finished. Lowering it also makes short replies finalise
 sooner, because the transcriber is only asked to finalise once the silence window
-elapses — so it pays twice on a "yes, that's right". **But lowering the floor
+elapses, so it pays twice on a "yes, that's right". **But lowering the floor
 alone does not shorten a long turn.**
 
 ```yaml agent.yaml
@@ -184,10 +180,23 @@ models:
       endpointing_delay: 400ms  # the floor
 ```
 
+`local`/`silero` is what Pipecat runs. LiveKit needs its own turn model, so a
+package that ships to both overrides it in `targets.yaml`:
+
+```yaml targets.yaml
+targets:
+  livekit:
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+```
+
 Do not take the floor to the minimum. Too short and a caller who pauses
-mid-sentence gets cut in two: we had "tomorrow" committed as one turn and
-"afternoon" as the next, and the agent asked twice. Come down from the default in
-steps and listen for interruptions rather than chasing the number.
+mid-sentence gets cut in two: a pause between words reads as the end of the
+turn, and the agent answers before the sentence is finished. Come down from
+the default in steps and listen for interruptions rather than chasing the
+number.
 
 The same trade applies to `pace`. `snappy` will occasionally answer someone who
 was pausing to think, and that failure never appears in a latency figure, so
@@ -205,9 +214,9 @@ from, and whatever your own records say about that number are all knowable befor
 anybody speaks. `prefetch:` resolves them once, before the greeting, and lands
 them in variables the prompt can name.
 
-The two worst stretches we found on our own agent were both this shape: a step
-that collected a phone number the call already carried, and a caller saying
-"tomorrow" costing two chained tool hops with nothing spoken over them.
+Two shapes cover most of what is worth moving: a step that collects a phone
+number the call already carried, and a date that costs two chained tool hops
+with nothing spoken over them.
 
 ```yaml agent.yaml
 timezone: Europe/Madrid          # required before any entry reads the clock
@@ -242,7 +251,8 @@ and [writing one](/build/prefetch) for the syntax.
 
 The largest span, and every control hop costs a whole round trip. Collapsing a
 multi-step flow into one task, and asking for one piece of information instead of
-three, bought us more than every connection-level setting on this page combined.
+three, removes whole round trips, which usually outweighs every
+connection-level setting on this page combined.
 
 Look for: a task that could be one task instead of three, a confirmation step the
 tool already enforces, and a prompt long enough to slow the first token.
@@ -276,7 +286,7 @@ announce: Let me check.
 ```
 
 Keep the line **shorter than the gap it covers**. A long line runs into the answer
-and breaks its own promise of a wait — "Okay, one sec." works where "One sec, let
+and breaks its own promise of a wait: "Okay, one sec." works where "One sec, let
 me pull up your details and see what we have" does not. Put it only on tools that
 fetch or push data, and never on two things that speak for one request: two tools
 in the same turn, or a tool at the end of one step and a delegate into the next.
@@ -322,6 +332,17 @@ models:
       endpointing_delay: 400ms
 ```
 
+```yaml targets.yaml
+targets:
+  livekit:
+    models:
+      # local/silero above is what Pipecat runs. LiveKit needs its own turn
+      # model, so a package shipping to both overrides it here.
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+```
+
 <Warning>
   If your package has a `targets.yaml` that overrides a model, a target's
   `params:` block **replaces** the base block rather than merging into it. A param
@@ -329,22 +350,18 @@ models:
   Author it on the override.
 </Warning>
 
-## Two things that will mislead you
-
-**One call will not tell you whether a setting helped.** We have seen two calls on
-an identical build differ by more than any single setting here is worth. Make a
-few calls per change, and compare the specific span the setting touches rather
-than the end-to-end number, which only gives you two or three samples a call.
-
-**A struggling provider looks exactly like a latency problem.** We have had calls
-where speech took seconds to start and then arrived slower than real time, which a
-caller hears as broken audio rather than as delay. Nothing on this page fixes
-that, so check your provider's own per-segment timings before you change a
-setting.
-
 ## Next
 
 <CardGroup cols={3}>
+  <Card title="Reading the latency numbers" icon="chart-line" href="/optimization/latency">
+    Where the time goes in a turn, and what to change when one number is too big.
+  </Card>
+  <Card title="Pre-fetch" icon="bot" href="/optimization/prefetch">
+    Deciding which lookups to remove before the greeting.
+  </Card>
+  <Card title="Turn taking" icon="clock" href="/optimization/turn-taking">
+    `pace` and `endpointing_delay`, the two settings above, in full.
+  </Card>
   <Card title="Execution Layer" icon="bolt" href="/optimization/execution-layer">
     Caching and routing for speech, on SLNG's own layer.
   </Card>

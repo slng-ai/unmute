@@ -1,6 +1,6 @@
 ---
 title: "What to fetch before the call"
-description: "How to decide which lookups belong before the greeting, and the traps we hit moving them there."
+description: "How to decide which lookups belong before the greeting, and the traps in moving them there."
 sidebarTitle: "Pre-fetch"
 ---
 
@@ -10,11 +10,6 @@ never happens.
 
 [`prefetch:`](/build/prefetch) is how you remove one. This page is about deciding
 which ones to remove.
-
-<Note>
-  Measure your own agent before and after a change. That is the only number that
-  is about your agent, and it is the only one worth acting on.
-</Note>
 
 ## Count round trips, not seconds
 
@@ -62,7 +57,7 @@ job.
 
 ## Filling a value is enough. You do not rewrite anything
 
-This one surprised us.
+This is easy to miss the first time.
 
 A step that `requires:` a value is already skipped when that value is there. So a
 step whose job is to collect something stops running as soon as something else
@@ -101,6 +96,49 @@ cannot forget to confirm, because the build will not let the value be used.
   mark one value at the start rather than hunting down everything that came from
   it.
 </Tip>
+
+## Where a fetched value is allowed to go
+
+A value does not sit in front of every prompt just because a pre-fetch found
+it. Variables are declared once, with a type and a default. From there, four
+controls decide how far each value travels.
+
+- **`confirm:`**, covered above, is the strictest. An unconfirmed value
+  renders in no prompt but its confirming step's. The phone number tells you
+  which phone called, not who is holding it, so it appears in the verification
+  step and nowhere else: not the greeting, not the booking step.
+- **`inject:`** hands a value straight to a tool. The model never types it, so
+  it cannot type it in a shape your records do not match. See
+  [Hand a value to a tool](/build/variables#hand-a-value-to-a-tool).
+- **`{{ }}` placeholders** give a prompt only the values it names. Two
+  placeholders, two values. The greeting names none, so it gets none, however
+  many variables the call has collected by then.
+- **`result:` and `assign:`** do the same for a step's own return. A task can
+  come back with several typed fields, and the delegate that ran it keeps only
+  the ones it assigns to a variable. The rest did their job inside the step and
+  stop there. One line decides whether a value lives for one step or the whole
+  call. See [Tasks](/build/orchestration/tasks).
+
+### Why this beats a prompt instruction
+
+None of this is a rule written in a prompt and hoped for. Paste a confirmed
+value into the greeting and you do not get a bad call, you get a build error.
+A `requires:` naming a variable you never declared is refused the same way. The
+default flips from "every value sits in front of every prompt, because that was
+easier" to "a value goes where the file says it goes, and the build checks".
+
+A `prefetch:` entry itself is not held to that bar. An entry whose input is
+empty for this call is skipped with a warning, and the call carries on with the
+variable's default. What an entry does enforce is on
+[Rules that will stop the build](/build/prefetch#rules-that-will-stop-the-build):
+a tool needs `read_only: true`, and `assign:` and `args:` are lists, one pair
+per line, never a mapping.
+
+Behind all of it is one plain fact. The model remembers nothing between turns,
+so every token in the prompt is paid again on every turn. Routing a value to
+the one place that needs it keeps it off that bill everywhere else. A turn the
+[Context Router](/optimization/context-router) judges repeatable can answer
+from cache instead of paying at all, and that is a package's own opt-in.
 
 ## Do not move the wait to before the greeting
 
@@ -156,23 +194,17 @@ request: two tools in the same turn, or a tool at the end of one step and a
 delegate into the next. The caller hears two cover lines for one thing they
 asked for.
 
-## Checking that you actually gained
+## What you see in the log
 
-One call proves nothing. Two calls on the same build have come out more than a
-whole round trip apart, just from run to run.
-
-Make at least three calls per setup, and compare **the part of the call you
-changed** rather than the total. A removed round trip is one of the few changes
-clear enough to see in a single comparison: count the `llm_request` spans inside
-the step you changed, and the count should have dropped by a whole number.
-
-The agent also logs one line per entry, which is the quickest way to see whether a
-pre-fetch got its value, was skipped, or ran out of time:
+Every entry writes one line, whether it resolved or was skipped:
 
 ```text
 prefetch today: resolved booking_date=2026-09-01
 prefetch caller: skipped, the call carries no from_number
 ```
+
+A removed round trip is one fewer `llm_request` span on LiveKit's own trace for
+that turn.
 
 ## Next
 
@@ -180,7 +212,7 @@ prefetch caller: skipped, the call carries no from_number
   <Card title="Writing a pre-fetch" icon="bot" href="/build/prefetch">
     The three sources, the ordering rule, and confirmation.
   </Card>
-  <Card title="Reading the latency numbers" icon="chart-line" href="/optimization/latency">
-    Finding the span that is actually slow before you change anything.
+  <Card title="Setting how long the agent waits" icon="clock" href="/optimization/turn-taking">
+    The two settings that decide how long a caller waits before the agent answers.
   </Card>
 </CardGroup>
