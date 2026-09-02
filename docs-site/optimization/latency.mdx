@@ -146,11 +146,7 @@ both targets, and a value that differed per target would be a duration in
 disguise. `endpointing_delay` is the field for that, and it does take one.
 
 Each target's emitted `README.md` states the resolved floor and ceiling, and
-`unmute compile` prints them:
-
-```
-livekit: turn pace balanced (silence 0.4s authored, closes at 1.6s)
-```
+`build/<target>/compile-report.json` carries the same numbers.
 
 Faster turn taking is a trade rather than a free win. Endpointing fails two
 ways — dead air after you finish, and answering you mid-sentence — and shrinking

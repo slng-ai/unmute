@@ -80,31 +80,24 @@ it. It does not import Unmute.
 
 ## The compile report
 
-`unmute compile` prints what it decided. Three kinds of line matter.
+`unmute compile` writes what it decided to `build/<target>/compile-report.json`,
+next to the project it describes. The terminal itself only shows which files
+were written; the report is where you read the detail. Three kinds of entry
+matter.
 
 **Model bindings.** Unmute passes your model and voice strings through to the
-provider without checking them:
-
-```text
-pipecat: binding listen provider=slng model=deepgram/nova:3 (forwarded as-is, not validated)
-```
+provider without checking them, and the report names the provider and model
+for every role, marked as forwarded and not validated.
 
 **Sizing.** Unmute turns your `capacity:` block into worker and quota numbers.
-They carry `[unbenchmarked]` and the date of the assumption they came from, so
-you know they are a starting point:
+Each one carries an `unbenchmarked` status and the date of the assumption it
+came from, so you know it is a starting point.
 
-```text
-pipecat: sizing workers=20 [unbenchmarked] (2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio)
-```
+**Telephony evidence.** A phone route's entry says how well each capability is
+proven, with the vendor document it was checked against.
 
-**Telephony evidence.** Phone routes say how well they are proven, with the
-vendor document and the date it was checked:
-
-```text wrap
-pipecat: telephony evidence inbound=provisional docs=https://docs.pipecat.ai/pipecat-cloud/guides/telephony/twilio-websocket smoke=false
-```
-
-See [the compile report](/reference/cli/compile#the-report) for each field.
+See [the compile report](/reference/cli/compile#the-report) for the exact
+shape of each field.
 
 ## Warnings never fail quietly
 
@@ -112,7 +105,7 @@ Warnings go to standard error and the command still exits 0. Errors exit 1.
 A warning is a real difference worth reading, for example:
 
 ```text
-warning: livekit: LiveKit turn placement is a preference
+warning: livekit: LiveKit runs tool executions to completion; a per-tool interruption preference is not enforced
 ```
 
 ## Where to go next

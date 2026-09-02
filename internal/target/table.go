@@ -271,8 +271,11 @@ func Default() Table {
 			// semantic endpointing choice and a silence window all reach nothing.
 			// Dropping them quietly would change how the agent hears a caller
 			// without saying so, which is the downgrade Principle II forbids.
+			//
+			// LiveKit places the detector itself, which is a fact about LiveKit
+			// and not a problem with the package, so it warns nowhere: the
+			// emitted runbook and the turn-taking page are where that is taught.
 			FieldTurnPlacement: field(
-				warn(LiveKit, "LiveKit turn placement is a preference"),
 				deny(Slng, "slng target owns its own turn taking and its create body carries no turn section: remove the turn binding, or compile to livekit or pipecat which place the turn detector themselves"),
 			),
 			// Both code targets warned here until 2026-08-27, and the warning was
@@ -340,7 +343,6 @@ func Default() Table {
 			),
 			FieldTaskNestedResult: field(deny(Slng, slngNoTasks("a nested task result"))),
 			FieldTaskGroup: field(
-				warn(LiveKit, "LiveKit TaskGroup is experimental"),
 				deny(Slng, slngNoTasks("a task group")),
 			),
 			FieldTaskGroupReturn:  field(deny(Slng, slngNoTasks("a task group return step"))),
@@ -395,8 +397,6 @@ func Default() Table {
 				deny(Slng, "slng target speaks the greeting it is given rather than composing one: write conversation.greeting.text, or compile to livekit or pipecat which let the model open the call"),
 			),
 			FieldGreetingAbsent: field(
-				warn(LiveKit, "LiveKit has no greeting block: the agent opens with a model-written line"),
-				warn(Pipecat, "Pipecat has no greeting block: the agent opens with a model-written line"),
 				deny(Slng, "slng target requires a greeting and cannot invent one: add a conversation.greeting with a text, or compile to livekit or pipecat where the agent opens with a model-written line"),
 			),
 			FieldInterruptionMinWords: field(
@@ -419,8 +419,6 @@ func Default() Table {
 				deny(Slng, "slng target takes interruptions as on or off with no way to protect one stretch of a call: drop conversation.interruption.protect, or compile to pipecat which mutes per stretch"),
 			),
 			FieldInactivity: field(
-				warn(LiveKit, "LiveKit driver must range-check inactivity durations"),
-				warn(Pipecat, "Pipecat driver must range-check inactivity durations"),
 				// SLNG's idle nudges take three spoken texts, each 1 to 500 characters
 				// (voice_agent.py:232-243), and a package carries two durations and no
 				// texts. There is no honest mapping, so the field is refused by name and
@@ -428,8 +426,6 @@ func Default() Table {
 				deny(Slng, "slng target cannot carry an inactivity window: SLNG's idle nudges need three spoken texts a package does not declare, so remove conversation.inactivity and let SLNG use its own, or compile to livekit or pipecat which take the durations"),
 			),
 			FieldMaxDuration: field(
-				warn(LiveKit, "LiveKit driver must verify a max-duration cap"),
-				warn(Pipecat, "Pipecat driver must verify a max-duration cap"),
 				deny(Slng, "slng target's create body has no maximum call duration: cap the call in the SLNG dashboard, or compile to livekit or pipecat which enforce it inside the agent"),
 			),
 			FieldThinkingAudio: field(

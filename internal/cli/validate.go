@@ -60,6 +60,15 @@ func runValidate(cmd *cobra.Command, dir string, names []string) error {
 // printValidationReport writes the per-target result rows to out and every
 // prerequisite, warning and error to errOut.
 //
+// Nothing else. A correct package prints its result rows and stops: what the
+// compiler decided about a binding it forwards, how a role lowers and what each
+// worker number was derived from all ride build/<target>/compile-report.json
+// instead, because they fired on every run and buried the three things here
+// that somebody has to act on.
+//
+// That makes a warning mean something again. Every one that remains names a
+// package problem with a fix in it, so an empty run really is a clean one.
+//
 // `deploy` validates before it pushes and prints the same report, so the format
 // has one owner rather than two renderers that agree by hand until they do not.
 func printValidationReport(out, errOut io.Writer, report ir.ValidateReport) {

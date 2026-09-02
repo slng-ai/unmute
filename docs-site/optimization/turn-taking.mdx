@@ -50,9 +50,9 @@ already has today's behaviour, so it is always safe to fall back to.
 
 ### The two targets are not equally capable
 
-`unmute compile` prints the resolved floor and ceiling for each target, so you
-never have to look either up. Two differences are worth knowing before you read
-them:
+`unmute compile` writes the resolved floor and ceiling for each target to
+`build/<target>/compile-report.json` and the emitted `README.md`, so you never
+have to look either up. Two differences are worth knowing before you read them:
 
 - **The Pipecat floor never moves.** It is the same 0.2s at every pace,
   deliberately. See [the cliff](#the-pipecat-floor-is-a-cliff-not-a-dial) below.
@@ -107,19 +107,10 @@ went up by what you added.
 
 ## Reading what you set
 
-`unmute compile` prints the resolved values, so you never have to infer them from
-the generated code:
-
-```
-livekit: turn pace balanced (silence 0.4s authored, closes at 1.6s)
-pipecat: turn pace balanced (silence 0.2s authored, closes at 1.6s)
-```
-
-`authored` means the floor came from your `endpointing_delay`; `from the pace`
-means it came from `pace`.
-
-Each target's emitted `build/<target>/README.md` says the same thing at more
-length, including — on Pipecat — which of the two identically named `stop_secs`
+Each target's emitted `build/<target>/README.md` names the resolved pace, the
+floor, and the ceiling, so you never have to infer them from the generated
+code. It also says whether the floor came from your own `endpointing_delay` or
+from the pace, and, on Pipecat, which of the two identically named `stop_secs`
 fields in `bot.py` is the floor and which is the ceiling.
 
 ## How to tune it

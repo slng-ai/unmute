@@ -65,7 +65,7 @@ unmute validate
 ✓ livekit (livekit)
 
 Warnings:
-  livekit: LiveKit turn placement is a preference
+  livekit: LiveKit runs tool executions to completion; a per-tool interruption preference is not enforced
 ```
 
 One line per target: the target instance name, then its provider in brackets. A
@@ -86,7 +86,7 @@ Warnings go to standard error and the command still exits 0. They are real
 differences worth reading and worth repeating to the user:
 
 ```
-  livekit: LiveKit TaskGroup is experimental
+  livekit: environment variables referenced but not declared in secrets: DEEPGRAM_API_KEY (agent.yaml models listen transcriber)
 ```
 
 Do not silence a warning and do not skip past one. A warning names what the

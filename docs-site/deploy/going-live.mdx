@@ -76,13 +76,11 @@ repository.
 
 ## Sizing
 
-The compile report turns your `capacity:` block into worker and quota numbers:
+The compile report turns your `capacity:` block into worker and quota numbers,
+written to `build/<target>/compile-report.json` under `sizing`. Each number
+carries a status tag, `unbenchmarked` today, and the basis for that tag.
 
-```text
-pipecat: sizing workers=10 [unbenchmarked] (2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio)
-```
-
-`[unbenchmarked]` is not decoration. The numbers come from a conservative
+The `unbenchmarked` tag is not decoration. The numbers come from a conservative
 assumption, one session per worker, not from a measurement of your agent. Use
 them as a starting point and then measure.
 
@@ -139,10 +137,22 @@ steps: the markup to paste, the trunk to configure, or the number to attach.
 Those steps are per route and per carrier, and they are the part no compiler can
 do for you.
 
-Route maturity is printed in the compile report:
+Route maturity is written to `build/<target>/compile-report.json`, under
+`telephony`:
 
-```text wrap
-livekit: telephony evidence inbound=provisional docs=https://docs.livekit.io/telephony/start/providers/twilio/ smoke=false
+```json
+{
+  "telephony": {
+    "evidence": [
+      {
+        "feature": "inbound",
+        "tag": "provisional",
+        "docs": "https://docs.livekit.io/telephony/start/providers/twilio/",
+        "smoke": false
+      }
+    ]
+  }
+}
 ```
 
 See [the compile report](/reference/cli/compile#the-report) for each field.

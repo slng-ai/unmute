@@ -70,13 +70,12 @@ error of its own. The compiler refuses one first.
 
 ## Sizing is an estimate, and says so
 
-The compile report turns the `capacity:` block into worker and quota numbers:
+`unmute compile` turns the `capacity:` block into worker and quota numbers and
+writes them to `build/<target>/compile-report.json` under `sizing`, one entry
+per metric: the value, a status such as `unbenchmarked`, and the basis it was
+computed from, for example "conservative 1 session per worker/GPU".
 
-```
-pipecat: sizing workers=10 [unbenchmarked] (2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio)
-```
-
-`[unbenchmarked]` is not decoration. The numbers come from a conservative
+`unbenchmarked` is not decoration. The numbers come from a conservative
 assumption of one session per worker, not from a measurement of the user's
 agent. Present them as a starting point and tell the user to measure.
 
@@ -159,12 +158,11 @@ for.
 
 ## Route report
 
-```
-livekit: telephony evidence inbound=provisional docs=https://docs.livekit.io/telephony/start/providers/twilio/ smoke=false
-```
-
-The compile report marks the route and prints the vendor document, last-checked
-date, and smoke status. Give the user that line instead of replacing it with a
+`build/<target>/compile-report.json` marks the telephony route under
+`telephony` and records the vendor document, last-checked date, and whether it
+has been proven by a smoke call, for example
+`inbound=provisional docs=https://docs.livekit.io/telephony/start/providers/twilio/ smoke=false`.
+Give the user that, read from the report, instead of replacing it with a
 stronger claim.
 
 ## Tracing

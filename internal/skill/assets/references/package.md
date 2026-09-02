@@ -174,8 +174,9 @@ transcriber covers it.
 
 Unmute keeps no list of valid model ids. `model:` and `voice:` are forwarded to
 the provider exactly as written, so a typo is a provider error at run time, not
-a compile error. The compile report says so out loud. Which `provider:` values
-are legal per role per target is in `models.md`.
+a compile error. `build/<target>/compile-report.json` records the binding, so
+it can be checked without guessing. Which `provider:` values are legal per role
+per target is in `models.md`.
 
 `params:` is normally the same passthrough. The narrow exception is
 `api: responses` on a LiveKit OpenAI reasoning binding: Unmute checks the

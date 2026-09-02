@@ -132,17 +132,8 @@ forwards the field unchecked, so the same `agent.yaml` is legal there and not
 here, which is what the target prefix on the refusal is telling you.
 
 Because LiveKit decides for itself where that work runs, `placement:` is only a
-preference there, and validation says so rather than pretending otherwise:
-
-```text
-✓ livekit (livekit)
-
-Warnings:
-  livekit: LiveKit turn placement is a preference
-```
-
-That warning appears on every LiveKit target. It is information, not a problem: the
-command still exits 0.
+preference there. LiveKit picks whichever side actually does the check, and an
+authored `placement:` does not change that.
 
 ## Semantic endpointing
 

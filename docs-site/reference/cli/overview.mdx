@@ -101,9 +101,8 @@ with no name in a terminal it opens the interactive console instead.
 unmute --version
 ```
 
-It prints the release, the commit it was built from and that commit's date,
-then a second line naming the framework versions this build supports. All of it
-is stamped in at build time. `-v` is the short form.
+It prints one line: the release, the commit it was built from, and that
+commit's date. All of it is stamped in at build time. `-v` is the short form.
 
 ## Exit codes
 
@@ -120,7 +119,7 @@ Warnings go to standard error and **do not** change the exit code. A command
 that prints warnings and exits 0 succeeded:
 
 ```text
-warning: livekit: LiveKit turn placement is a preference
+warning: livekit: environment variables referenced but not declared in secrets: SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address)
 ```
 
 Errors are printed to standard error too, prefixed with `unmute:`, and exit 1:

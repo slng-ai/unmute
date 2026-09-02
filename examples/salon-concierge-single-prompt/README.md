@@ -79,20 +79,21 @@ the point.
 [`scripts/read_langfuse_trace.py`](../../scripts/read_langfuse_trace.py) reads the
 newest trace back: transcript, tool calls, and per-span latency.
 
-## The turn-taking numbers, printed
+## The turn-taking numbers
 
-`unmute compile` prints the resolved floor and ceiling for each target, so the
-difference needs no measurement to see:
+`unmute compile` resolves a floor and a ceiling for each target from the
+package's `pace`. The difference needs no measurement to see:
 
-```text
-salon-concierge-single-prompt
-  livekit: turn pace patient (silence 0.4s from the pace, closes at 2.5s)
-  pipecat: turn pace patient (silence 0.2s from the pace, closes at 3s)
+| Package | Target | Pace | Floor | Ceiling |
+|---|---|---|---|---|
+| `salon-concierge-single-prompt` | livekit | patient | 0.4s, from the pace | 2.5s |
+| `salon-concierge-single-prompt` | pipecat | patient | 0.2s, from the pace | 3s |
+| `salon-concierge` | livekit | balanced | 0.4s, authored | 1.6s |
+| `salon-concierge` | pipecat | balanced | 0.2s, authored | 1.6s |
 
-salon-concierge
-  livekit: turn pace balanced (silence 0.4s authored, closes at 1.6s)
-  pipecat: turn pace balanced (silence 0.2s authored, closes at 1.6s)
-```
+Both the emitted `build/<target>/README.md` (which also says whether the wait
+adapts) and `build/<target>/compile-report.json`, under `notes`, name these
+same numbers.
 
 `patient` is not a mistake in this file. It reproduces the framework defaults
 exactly, which is what a package that never thought about turn taking is running

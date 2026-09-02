@@ -552,8 +552,7 @@ bin/unmute validate examples/salon-concierge
 bin/unmute compile examples/salon-concierge
 ```
 
-Both targets warn that inactivity and maximum-duration values still need
-driver-side range checks. These are warnings, not silent downgrades.
+Both targets validate clean and compile to a runnable project.
 
 The generated `build/<target>/README.md` is the deployment and carrier runbook.
 Do not commit `build/`; it is disposable.

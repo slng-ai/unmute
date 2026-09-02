@@ -494,11 +494,9 @@ loaded by name rather than sent to a provider. Everywhere else `model:` and
 narrow exception is the LiveKit OpenAI `api: responses` directive above, which
 selects the Responses client and maps `reasoning_effort` to nested reasoning. A
 model typo becomes a provider error on the first call, not a compile error, and
-the compile report says so:
-
-```
-pipecat: binding reason.reasoning provider=openai model=gpt-5.6-terra (forwarded as-is, not validated)
-```
+`build/<target>/compile-report.json` records the exact binding that will be
+forwarded, unvalidated, at runtime: provider, model, and every param, under the
+`bindings` key.
 
 So when you pick a model id, pick one the user named or one from that vendor's
 own documentation. Do not invent an id that looks plausible.

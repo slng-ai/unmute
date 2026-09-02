@@ -1,6 +1,6 @@
 ---
 title: "unmute compile"
-description: "Write the generated project for each target, and read the report it prints."
+description: "Write the generated project for each target, and read the report written next to it."
 ---
 
 ```text
@@ -47,60 +47,37 @@ every declared target is compiled. `--target` is repeatable.
 
 ## The report
 
-After the files, the compiler prints what it decided. Every line is prefixed
-with the target instance name.
+The compiler does not print what it decided. It writes that to
+`build/<target>/compile-report.json`, next to the files it describes, one JSON
+object per target:
 
-**Bindings.** What each model role resolved to, and the honest note that the
-model string is not checked:
+- `bindings`: what each model role resolved to, forwarded to the provider
+  without being checked. A LiveKit OpenAI Responses binding is the one
+  exception: its entry names the compiler directive it consumed and the
+  reasoning setting it lowered, instead of claiming every param passed through
+  unchanged.
+- `sizing`: your `capacity:` block turned into numbers, tagged with the
+  assumption they came from.
+- `telephony`: present only for a target with a phone route. The resolved
+  route, its endpoints, and an evidence line per capability.
+- `route_prerequisites`: setup work you must do outside Unmute before a real
+  call, when the route needs any.
+- `required_env`, `variables`, `secrets`: what the generated project reads
+  from its environment, and where each name comes from.
+- `generated_files`: the same paths `compile` printed above.
+- `supported`: the framework version window this build was verified against.
+- `notes`: driver detail, such as how a role was routed or how a turn pace
+  resolved to a silence window.
 
-```text
-pipecat: binding listen provider=slng model=deepgram/nova:3 (forwarded as-is, not validated)
-pipecat: binding turn provider=local model=silero (forwarded as-is, not validated)
-pipecat: binding speak.voice provider=slng model=deepgram/aura:2 voice=aura-2-thalia-en (forwarded as-is, not validated)
-pipecat: binding reason.reasoning provider=openai model=gpt-5.6-terra (forwarded as-is, not validated)
-pipecat:   param temperature=0.2
-```
-
-A LiveKit OpenAI Responses binding is the narrow exception. Its report names
-the compiler directive and the transformed reasoning setting instead of
-claiming that every param was forwarded unchanged:
-
-```text
-livekit: binding reason.reasoning provider=openai model=gpt-5.6-terra (OpenAI Responses mode; api is consumed and reasoning_effort is lowered when present)
-livekit:   param api=responses (compiler directive)
-livekit:   param reasoning_effort=low (lowered to reasoning.effort)
-livekit:   param use_websocket=false (forwarded as-is, not validated)
-```
-
-**Sizing.** Your `capacity:` block turned into numbers, tagged with the
-assumption they came from:
-
-```text wrap
-pipecat: sizing workers=10 [unbenchmarked] (2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio)
-pipecat: sizing provider_concurrency_quota.realtime_audio=5 [unbenchmarked] (2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio)
-```
-
-**Telephony.** Present only for a target with a phone route: the resolved
-route, the endpoints, every required environment variable, and an evidence line
-per capability:
-
-```text wrap
-livekit: telephony route provider=livekit transport=sip carrier=twilio coordination=shared admission=livekit_dispatch
-livekit: telephony required env SIP_TRUNK_HOSTNAME
-livekit: telephony evidence inbound=provisional docs=https://docs.livekit.io/telephony/start/providers/twilio/ smoke=false
-```
-
-`provisional` means implemented and compiling, with no credentialed test in CI.
-`smoke=false` says the same thing in the machine readable half.
-
-The same information is written to `build/<target>/compile-report.json`.
+Open the file to see what a package resolved to. None of it appears on the
+terminal.
 
 ## Warnings
 
-Warnings print first, on standard error, and do not change the exit code:
+Warnings print on standard error, and do not change the exit code:
 
 ```text
-warning: livekit: LiveKit turn placement is a preference
+warning: livekit: environment variables referenced but not declared in secrets: SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address)
 ```
 
 ## Compiling is safe to repeat

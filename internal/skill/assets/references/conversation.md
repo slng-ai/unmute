@@ -38,14 +38,9 @@ conversation:
 
 Write it. Do not leave it out and hope.
 
-With no `greeting` block at all, both code targets warn and the agent opens with
-a line the model writes on the spot. That is a different first impression every
-call, which is almost never what a user wants:
-
-```
-  livekit: LiveKit has no greeting block: the agent opens with a model-written line
-  pipecat: Pipecat has no greeting block: the agent opens with a model-written line
-```
+With no `greeting` block at all, both code targets have the agent open with a
+line the model writes on the spot. That is a different first impression every
+call, which is almost never what a user wants.
 
 `speaks_first: user` means the agent says nothing until spoken to. Use it for
 outbound calls where the person answering speaks first, and for anything where a
@@ -92,12 +87,13 @@ compiles on Pipecat only:
 ```
 
 You rarely need to write it, because a phone route protects the greeting on its
-own and says so in the compile output. That default exists for a reason worth
-knowing: a phone leg has no echo cancellation. A caller on speakerphone sends the
-agent's own greeting back through their microphone, the transcriber reports it as
-caller speech, and the agent interrupts itself a second into the call. The
-garbled turn then sits in the model's context for the rest of the conversation
-and every later answer is built on top of it.
+own, and `build/<target>/compile-report.json` records it under `notes`. That
+default exists for a reason worth knowing: a phone leg has no echo cancellation.
+A caller on speakerphone sends the agent's own greeting back through their
+microphone, the transcriber reports it as caller speech, and the agent
+interrupts itself a second into the call. The garbled turn then sits in the
+model's context for the rest of the conversation and every later answer is
+built on top of it.
 
 Write `protect` when you want something other than that default: add
 `tool_calls` so a cough cannot abandon a booking mid-write, or set `protect: []`
@@ -117,8 +113,8 @@ already mutes the caller for the whole call.
   max_duration: 20m
 ```
 
-Both warn on every target, and the warning is real: the driver has to range
-check the durations, so an absurd value is your problem rather than the
+Neither `unmute validate` nor `unmute compile` range-checks these durations
+against each other or against reason: an absurd value is your problem, not the
 compiler's. Pick numbers a person would pick. A nudge under about five seconds
 interrupts a caller who is thinking.
 
@@ -208,16 +204,9 @@ targets:
         model: turn-detector-mini
 ```
 
-Every LiveKit target with a turn entry gets this warning, whether or not you
-wrote a `placement:` field. LiveKit decides for itself where turn detection
-runs, so the field is a preference there:
-
-```
-  livekit: LiveKit turn placement is a preference
-```
-
-It is information, not a problem, and the command still exits 0. Do not go
-looking for a `placement:` line to remove; there usually is not one.
+LiveKit decides for itself where turn detection runs. A `placement:` field on
+a LiveKit turn entry is a preference, not a guarantee, whether or not you write
+one. Do not go looking for a way to force it; there is not one.
 
 `semantic_endpointing` no longer warns on the code targets. It used to, and the
 warning said its effect depended on the bound model; the real situation was that

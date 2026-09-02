@@ -153,8 +153,9 @@ joined twice, which is how a Context Router model such as
 `slng/deepgram/nova:3-en` reaches the body unchanged. Both shapes are in this
 example's `agent.yaml`.
 
-SLNG owns its model list, so unmute checks no vendor and no model name here. The
-compile report says so for every binding it forwards.
+SLNG owns its model list, so unmute checks no vendor and no model name here.
+`build/slng/compile-report.json` records every binding it forwards, unchecked,
+under `bindings`.
 
 ## What this package deliberately leaves out
 
