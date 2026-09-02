@@ -146,23 +146,13 @@ The transport is not a detail. It decides what the agent can do on a call.
 
 [Transfers](/transfers/overview) covers which route can reach a human, and how.
 
-## A phone call is verified after you deploy
+## Point the carrier at the deployment
 
-A phone call reaches an agent that is deployed. There is no local phone loop.
-[`unmute dev`](/dev/overview) runs the agent in your browser, and that loop
-covers the prompt, the tools, and the models. It stops exactly where the phone
-leg starts.
-
-To hear a real call: compile, deploy to the route's platform, finish the
-carrier setup, then call the number.
-
-```sh
-unmute compile my-agent
-```
-
-[Deploy to LiveKit Cloud](/deploy/livekit-cloud) or
-[deploy to Pipecat Cloud](/deploy/pipecat-cloud) covers the rest, one platform
-at a time.
+Your project is deployed by the time you reach this page, so what is left is
+carrier-side: finish the setup for your route, then call the number. There is
+no local phone loop. [`unmute dev`](/dev/overview) runs the agent in your
+browser, and that loop covers the prompt, the tools, and the models, but it
+stops exactly where the phone leg starts.
 
 ## Where to go next
 
@@ -175,8 +165,5 @@ at a time.
   </Card>
   <Card title="Get your Twilio details" icon="key" href="/telephony/twilio">
     Which console value fills which name.
-  </Card>
-  <Card title="The dev loop" icon="play" href="/dev/overview">
-    Check the prompt, the tools, and the models in your browser first.
   </Card>
 </Columns>

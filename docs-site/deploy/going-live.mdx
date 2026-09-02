@@ -63,8 +63,8 @@ value is one command, and it belongs to your secret store, not to the
 repository.
 
 <Warning>
-  Every variable name must be a valid shell identifier: letters, digits, and
-  underscores, never starting with a digit. Platforms export secrets through a
+  Every variable name must be UPPER_SNAKE: an uppercase letter, then only
+  uppercase letters, digits, and underscores. Platforms export secrets through a
   shell, so a name like `2FACTOR_API_KEY` fails at export and the value is simply
   missing at run time. The compiler refuses one before you get there:
 

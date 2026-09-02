@@ -107,9 +107,9 @@ lk agent update-secrets --secrets-file .env --overwrite  # replaces the whole se
 ```
 
 <Warning>
-  Every name must be a valid shell identifier: letters, digits, and underscores,
-  never starting with a digit. Unmute refuses a bad name before it generates the
-  project. LiveKit applies the same rule to any names added outside the package;
+  Every name must be UPPER_SNAKE: an uppercase letter, then only uppercase
+  letters, digits, and underscores. Unmute refuses a bad name before it writes
+  the project. LiveKit applies the same rule to any names added outside the package;
   those names must use only letters, numbers, and underscores too.
 </Warning>
 

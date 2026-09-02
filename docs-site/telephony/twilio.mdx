@@ -281,32 +281,18 @@ and in your platform's secret store for a deployment.
   nobody answers](/telephony/inbound-calls#if-the-call-does-not-arrive).
 </Warning>
 
-## Where this page's facts come from
-
-The key names and which route accepts which are read from this repository's own
-route table, and they match the connection files in
-`examples/salon-concierge`, which carries one target per transport.
-
-The Console workflow was checked against
-[Twilio's step-by-step Elastic SIP Trunking guide](https://www.twilio.com/en-us/blog/elastic-sip-trunking-step-by-step-setup)
-and [Twilio's SIP Trunking documentation](https://www.twilio.com/docs/sip-trunking)
-on 2026-08-18. The transfer caller ID behaviour, the shape of a rejected transfer
-leg, and the regional isolation notes come from a live inbound call and its Twilio
-call logs on 2026-08-26. The account dashboard location of the Account SID and auth
-token comes from this repository's generated runbooks; the Twilio pages name the two
-values without giving a console path for them.
-
-Your build's `build/<target>/README.md` is the authority for your route, because it
-was generated from your package and names your region and your number.
+Your build's `build/<target>/README.md` is the authority for your own route: it
+was generated from your package, so it already names your region and your
+number.
 
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="connections/<name>.yaml" icon="phone" href="/reference/connections-yaml">
-    The file these values fill.
+  <Card title="Pipecat over Twilio" icon="phone" href="/telephony/pipecat-twilio">
+    The `cloud-websocket` route end to end.
   </Card>
-  <Card title="Your first phone call" icon="phone-incoming" href="/telephony/inbound-calls">
-    Take a real call, once you deploy.
+  <Card title="connections/<name>.yaml" icon="braces" href="/reference/connections-yaml">
+    The file these values fill.
   </Card>
   <Card title="Transfers on LiveKit" icon="phone-forwarded" href="/transfers/livekit">
     Hand the caller to a person.

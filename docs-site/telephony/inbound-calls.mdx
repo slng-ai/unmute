@@ -62,7 +62,6 @@ SLNG_API_KEY=...
 TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TWILIO_AUTH_TOKEN=your_auth_token
 TWILIO_PHONE_NUMBER=+15551234567
-PIPECAT_CLOUD_ORGANIZATION=your-org-slug
 SIP_TRUNK_HOSTNAME=your-trunk.pstn.twilio.com
 SIP_AUTH_USERNAME=your_trunk_username
 SIP_AUTH_PASSWORD=your_trunk_password
@@ -77,10 +76,10 @@ you are only testing the `pipecat` target you can put any placeholder there. The
 names comes from.
 
 <Warning>
-  Every environment variable name must be a valid shell identifier: letters,
-  digits, and underscores, never starting with a digit. A name like
-  `2FACTOR_API_KEY` would fail when a platform exports it, so Unmute refuses the
-  name during validation, before it deploys anything.
+  Every environment variable name must be UPPER_SNAKE: an uppercase letter,
+  then only uppercase letters, digits, and underscores. A name like
+  `2factor_api_key` fails both rules at once, so Unmute refuses it during
+  validation, before it deploys anything.
 </Warning>
 
 ## Deploy, then point the number at it
@@ -152,7 +151,7 @@ Call it. The agent answers and greets you. Speak, and it replies.
 An ordinary redeploy leaves all of this alone: the trunk, the rule, and the
 number keep working. Renaming the agent does not, because the dispatch rule
 names the old worker as a string and no deploy updates it. The number then rings
-and nothing answers, while the agent reports healthy — it was never dispatched.
+and nothing answers, while the agent reports healthy: it was never dispatched.
 [Renaming the agent breaks that rule](/deploy/livekit-cloud#renaming-the-agent-breaks-that-rule)
 walks the swap; [changing the agent](/deploy/going-live#except-changing-its-name)
 lists the equivalent record on every other route.
@@ -222,14 +221,11 @@ attention than swapping one.
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="Outbound calls" icon="phone-outgoing" href="/telephony/outbound-calls">
-    Make the agent dial you.
-  </Card>
   <Card title="Get your Twilio details" icon="key" href="/telephony/twilio">
     Which console value fills which name.
   </Card>
-  <Card title="The dev loop" icon="play" href="/dev/overview">
-    Check the prompt, the tools, and the models in your browser first.
+  <Card title="Pipecat over Twilio" icon="phone" href="/telephony/pipecat-twilio">
+    The `cloud-websocket` route end to end.
   </Card>
   <Card title="Transfers" icon="phone-forwarded" href="/transfers/overview">
     Hand the caller to a person.
