@@ -74,9 +74,11 @@ mint a11y                                               # contrast and media alt
 
 ## The structure
 
-Eleven top-level groups, 56 pages: Get started, Build the agent, Configuration
-files, Develop and test, Tracing, Phone calls, Targets and models, Optimization,
-Deploy, CLI, and Releases. Build the agent nests Tools and Orchestration; Phone
+Ten top-level groups, in the order the reader needs them: Get started, Build
+the agent, Run and observe, Optimization, Deploy, Phone calls, Targets and
+models, Configuration files, CLI, and Releases. The first six are the story:
+learn it, build it, run it, make it faster, ship it, put it on a phone. The
+last four are reference. Build the agent nests Tools and Orchestration; Phone
 calls nests Transfers; Targets and models nests Targets and Models. Releases
 holds the single `changelog` page.
 

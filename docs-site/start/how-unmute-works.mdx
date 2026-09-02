@@ -1,10 +1,12 @@
 ---
 title: "How Unmute works"
-description: "The four stages between your package and the Python project you deploy."
+description: "The four stages between your package and what each target runs."
 ---
 
-Unmute is a compiler. It reads your package, resolves it against one target,
-and writes a project. Nothing of Unmute is left in the project it writes.
+Unmute is a compiler for a declarative package. It reads the package, resolves
+it against one target, and writes what that target runs: a Python project for
+Pipecat or LiveKit Agents, a deployment body for SLNG. Nothing of Unmute is
+left in what it writes.
 
 ## The four stages
 
@@ -48,8 +50,10 @@ compiles the directory you are standing in:
 build/pipecat/
 ├── bot.py              # the agent
 ├── tools/              # your local handlers, copied
+├── dev_metrics.py      # per-turn timings, read by unmute dev
 ├── pyproject.toml      # pinned dependencies
 ├── Dockerfile
+├── .dockerignore
 ├── compose.dev.yaml
 ├── pcc-deploy.toml
 ├── .env.example        # exactly the variables you supply
@@ -61,17 +65,27 @@ build/pipecat/
 build/livekit/
 ├── agent.py            # the agent
 ├── tools/              # your local handlers, copied
+├── dev_metrics.py      # per-turn timings, read by unmute dev
 ├── pyproject.toml      # pinned dependencies
 ├── Dockerfile
+├── .dockerignore
 ├── compose.dev.yaml
 ├── .env.example        # exactly the variables you supply
 ├── README.md           # the runbook for this build
 └── compile-report.json
 ```
+
+```text SLNG
+build/slng/
+├── agent.json          # the deployment body unmute deploy pushes
+├── tools/              # one JSON body per tool
+└── README.md           # the runbook for this build
+```
 </CodeGroup>
 
-That project is a normal Python project. You can read it, run it, and deploy
-it. It does not import Unmute.
+On a code target that is a normal Python project. You can read it, run it,
+and deploy it. It does not import Unmute. On SLNG there is nothing to run
+yourself: `unmute deploy` pushes `agent.json` and SLNG runs the agent.
 
 <Warning>
   Treat `build/` as output. Edit the package and compile again. Anything you
