@@ -26,8 +26,9 @@ To keep synthesis compute in a world part or exact region, see
 
 <Info>
   Model ids and voice ids are forwarded to the vendor exactly as you write them.
-  Unmute keeps no allowlist, so a typo surfaces as a provider error at run time. The
-  compile report says so on every binding: `(forwarded as-is, not validated)`.
+  Unmute keeps no allowlist, so a typo surfaces as a provider error at run time.
+  `build/<target>/compile-report.json` records this on every binding as
+  `forwarded as-is, not validated`.
 </Info>
 
 ## The SLNG models this repository uses

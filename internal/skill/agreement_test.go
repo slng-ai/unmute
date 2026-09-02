@@ -746,9 +746,18 @@ func TestOrchestrationGuidanceMatchesCodeOwnedFacts(t *testing.T) {
 		t.Errorf("references/orchestration.md Pipecat rejected task history = %v, want %v", got, rejected)
 	}
 
-	warning := table.Capability(target.FieldTaskGroup, target.LiveKit).Note
-	if warning == "" || !strings.Contains(orchestration, "livekit: "+warning) {
-		t.Error("references/orchestration.md dropped the LiveKit task-group warning")
+	// This used to require the page to quote the LiveKit task-group warning. That
+	// warning is gone: it stated a fact about LiveKit's own maturity, on every
+	// run of a package with nothing wrong with it, and named nothing to do about
+	// it. The page still teaches the fact, in prose, where somebody is choosing
+	// a shape. What is gated now is that it does not go back to teaching a line
+	// the CLI does not print, because a reader who copies that goes looking for
+	// output that never comes.
+	if table.Capability(target.FieldTaskGroup, target.LiveKit).Tag == target.Warn {
+		t.Error("FieldTaskGroup warns again; either restore the quoted warning on the page or keep the row quiet")
+	}
+	if strings.Contains(orchestration, "LiveKit TaskGroup is experimental") {
+		t.Error("references/orchestration.md quotes a warning the CLI no longer prints")
 	}
 }
 

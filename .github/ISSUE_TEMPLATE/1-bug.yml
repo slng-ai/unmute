@@ -95,13 +95,11 @@ body:
     attributes:
       label: Output of `unmute --version`
       description: >
-        Paste both lines. The second one names the framework versions your
-        binary supports, and a package that passes on one unmute and fails on
-        another usually differs by exactly that.
+        The commit is the part that matters. A package that passes on one unmute
+        and fails on another usually differs by a build, not by a release.
       render: text
       placeholder: |
-        unmute version <version>
-        supported frameworks: <package> <version> (verified <date>), <package> <version> (verified <date>)
+        unmute version <version> (<commit> <date>)
     validations:
       required: true
 

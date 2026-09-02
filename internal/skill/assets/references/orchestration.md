@@ -528,7 +528,6 @@ Raise these **before** you write files, not after validate fails.
 | `model:` on a task | Pipecat | the Pipecat driver does not emit per-task model yet |
 | `include_tool_calls: false` on a transfer context | Pipecat | the Pipecat driver does not shape transfer context yet |
 | a variables subset on a transfer context | Pipecat | Pipecat accepts context, not a subset |
-| `task_groups` | LiveKit warns | LiveKit TaskGroup is experimental. It compiles and runs |
 
 ### Task history by target
 
@@ -546,13 +545,11 @@ Two things follow from that table.
 one step and an expensive one for another, and the target is Pipecat, say so
 before you write it. On LiveKit it compiles.
 
-**LiveKit's task group warning is worth repeating.** The package validates,
-compiles, and runs. The warning names what it is standing on, and a user
-deciding whether to ship should hear it:
-
-```
-  livekit: LiveKit TaskGroup is experimental
-```
+**Task groups stand on a LiveKit beta.** They compile and run, and unmute does
+not warn about it: a note about a framework's own maturity fired on every run of
+a working package and told the author nothing to do. Say it here instead, where
+somebody is choosing the shape, and point them at the LiveKit release notes if
+they are deciding whether to ship.
 
 ## Delegate or hand off
 

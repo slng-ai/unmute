@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -55,6 +54,12 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 		if err != nil {
 			return fmt.Errorf("compile %s: %w", dir, err)
 		}
+		// Every warning left is a package problem with a fix in it, so these are
+		// worth the two lines they cost. What used to print here as well - each
+		// forwarded binding, each derived worker count, the resolved telephony
+		// route - is written to compile-report.json in the same directory as the
+		// rest of the artifact, which is where it belongs: it described the
+		// output, and it is now next to the output.
 		for _, warning := range artifact.Notes.Warnings {
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s: %s\n", resolved.Name, warning)
 		}
@@ -75,169 +80,8 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 			return fmt.Errorf("compile %s: target %q produced artifact kind %q, which this command does not know how to write",
 				dir, resolved.Name, artifact.Kind)
 		}
-		printContract(cmd.OutOrStdout(), resolved.Name, resolved.Provider, artifact.Notes)
-		printTelephonyPlan(cmd.OutOrStdout(), resolved.Name, artifact.Telephony)
 	}
 	return nil
-}
-
-func printTelephonyPlan(out io.Writer, name string, plan *generate.TelephonyRuntimePlan) {
-	if plan == nil {
-		return
-	}
-	fmt.Fprintf(out, "%s: telephony route provider=%s transport=%s carrier=%s coordination=%s admission=%s\n",
-		name, plan.Route.Provider, plan.Route.Transport, plan.Route.Carrier, plan.Coordination, plan.AdmissionOwner)
-	for _, endpoint := range plan.PublicEndpoints {
-		fmt.Fprintf(out, "%s: telephony endpoint %s %s %s\n", name, endpoint.Name, endpoint.Method, endpoint.Path)
-	}
-	for _, env := range plan.RequiredEnv {
-		fmt.Fprintf(out, "%s: telephony required env %s\n", name, env)
-	}
-	// No verified= here. The date is when a maintainer last read the vendor's
-	// docs, which is our provenance and not the reader's business: it tells
-	// someone compiling a package nothing they can act on, and reads like a
-	// claim about their route. The tag already says how firm the support is and
-	// docs= is where to check. The field stays on the evidence, because
-	// ir.Validate requires one before a feature may claim support, and it still
-	// rides compile-report.json for tools that want it.
-	for _, evidence := range plan.Evidence {
-		fmt.Fprintf(out, "%s: telephony evidence %s=%s docs=%s smoke=%t\n",
-			name, evidence.Feature, evidence.Tag, evidence.Docs, evidence.Smoke)
-	}
-}
-
-// printContract prints every resolved binding/param and derived sizing line.
-// Most provider values are relayed verbatim. The narrow LiveKit Responses mode
-// is a compiler directive, so its consumed/transformed params are named here.
-func printContract(out io.Writer, name string, provider ir.Provider, notes generate.GenerateReport) {
-	for _, fb := range notes.ForwardedBindings {
-		role := fb.Role
-		if fb.Profile != "" {
-			role += "." + fb.Profile
-		}
-		responses := provider == ir.ProviderLiveKit && fb.Role == "reason" &&
-			(fb.Binding.Provider == "" || fb.Binding.Provider == "openai") &&
-			fb.Binding.Params["api"] == "responses"
-		if responses {
-			fmt.Fprintf(out, "%s: binding %s %s (OpenAI Responses mode; api is consumed and reasoning_effort is lowered when present)\n", name, role, bindingSummary(fb.Binding))
-			for _, p := range fb.Params {
-				suffix := " (forwarded as-is, not validated)"
-				switch p.Name {
-				case "api":
-					suffix = " (compiler directive)"
-				case "reasoning_effort":
-					suffix = " (lowered to reasoning.effort)"
-				}
-				fmt.Fprintf(out, "%s:   param %s=%s%s\n", name, p.Name, paramValue(p.Value), suffix)
-			}
-			continue
-		}
-		// The SLNG Context Router consumes two authored things rather than
-		// forwarding them, so neither is silent: the region becomes the base URL,
-		// and the upstream block becomes the inline configuration the request
-		// body carries. The upstream line names the URL and the *name* of each
-		// credential variable, never a value (FR-004, FR-036).
-		if fb.Role == "reason" && fb.Binding.Router() {
-			if base, ok := target.SlngRouterBaseURL(routerRegion(fb.Binding)); ok {
-				fmt.Fprintf(out, "%s: binding %s %s (SLNG Context Router; world_part_override is consumed into base_url=%s)\n",
-					name, role, bindingSummary(fb.Binding), base)
-				for _, p := range fb.Params {
-					suffix := ""
-					if p.Name == "world_part_override" {
-						suffix = " (consumed as the router base URL)"
-					}
-					fmt.Fprintf(out, "%s:   param %s=%s%s\n", name, p.Name, paramValue(p.Value), suffix)
-				}
-				fmt.Fprintf(out, "%s:   upstream %s (sent inline in the request body)\n", name, upstreamSummary(fb.Binding))
-				if fb.Binding.PromptSuffix != "" {
-					fmt.Fprintf(out, "%s:   prompt_suffix %q (appended to every system prompt this binding sends)\n", name, fb.Binding.PromptSuffix)
-				}
-				continue
-			}
-		}
-		fmt.Fprintf(out, "%s: binding %s %s (forwarded as-is, not validated)\n", name, role, bindingSummary(fb.Binding))
-		if fb.Binding.PromptSuffix != "" {
-			fmt.Fprintf(out, "%s:   prompt_suffix %q (appended to every system prompt this binding sends)\n", name, fb.Binding.PromptSuffix)
-		}
-		for _, p := range fb.Params {
-			fmt.Fprintf(out, "%s:   param %s=%s\n", name, p.Name, paramValue(p.Value))
-		}
-	}
-	for _, s := range notes.Sizing {
-		fmt.Fprintf(out, "%s: sizing %s=%s [%s] (%s)\n", name, s.Metric, s.Value, s.Status, s.Basis)
-	}
-	// Driver notes are facts about what the artifact will do that no binding or
-	// sizing line covers: today, what each knowledge base carries (FR-015). The
-	// target name prefixes them like every other line here, because two targets
-	// each print their own and an unprefixed pair would be indistinguishable.
-	for _, note := range notes.Notes {
-		fmt.Fprintf(out, "%s: %s\n", name, note)
-	}
-}
-
-// routerRegion reads the authored router region off a binding's params.
-func routerRegion(b ir.Binding) string {
-	region, _ := b.Params["world_part_override"].(string)
-	return region
-}
-
-// upstreamSummary names the resolved upstream, its URL, and each credential
-// variable by name. A value never appears: the compiler checks that a credential
-// field is present, not that it is right, and the report is one of the surfaces
-// the constitution keeps free of secret values.
-func upstreamSummary(b ir.Binding) string {
-	if b.Upstream == nil {
-		return "unresolved"
-	}
-	fields, ok := target.SlngResolveUpstream(b.Upstream.Provider, b.Upstream.Fields())
-	if !ok {
-		return b.Upstream.Provider
-	}
-	parts := []string{b.Upstream.Provider}
-	for _, field := range fields {
-		switch {
-		case field.Wire == "provider":
-			continue
-		case field.Env:
-			parts = append(parts, field.Wire+"="+field.Value+" (env)")
-		default:
-			parts = append(parts, field.Wire+"="+field.Value)
-		}
-	}
-	return strings.Join(parts, " ")
-}
-
-// paramValue renders a forwarded param the way it leaves, which for anything
-// nested means JSON, because JSON is what the request body carries.
-//
-// %v prints a nested value as Go: a host pin reads `provider=map[only:[nebius]]`,
-// which matches neither what the author wrote nor what is sent, and this line is
-// their only compile-time view of it. Scalars are untouched, so the ordinary
-// param line reads exactly as it did.
-func paramValue(value any) string {
-	switch value.(type) {
-	case map[string]any, []any:
-		if encoded, err := json.Marshal(value); err == nil {
-			return string(encoded)
-		}
-	}
-	return fmt.Sprintf("%v", value)
-}
-
-// bindingSummary renders the forwarded identity fields of a binding for stdout.
-// Placement is a derived routing fact, not a forwarded value, so it stays out of
-// the "forwarded as-is" line (N15).
-func bindingSummary(b ir.Binding) string {
-	var parts []string
-	for _, kv := range []struct{ k, v string }{
-		{"provider", b.Provider}, {"model", b.Model}, {"voice", b.Voice},
-		{"voice_id", b.VoiceID}, {"endpoint_env", b.EndpointEnv},
-	} {
-		if kv.v != "" {
-			parts = append(parts, kv.k+"="+kv.v)
-		}
-	}
-	return strings.Join(parts, " ")
 }
 
 // loadPackage loads, builds, and selects target instances — the shared front of

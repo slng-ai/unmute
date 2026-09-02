@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/slng-ai/unmute/internal/generate"
-	"github.com/slng-ai/unmute/internal/ir"
 )
 
 // TestWriteArtifactFilesFormatsPython: the write path runs a best-effort
@@ -127,20 +126,6 @@ func mustReplace(t *testing.T, src, old, new string) string {
 	return out
 }
 
-func TestPrintTelephonyPlanUsesArtifactWithoutCarrierDispatch(t *testing.T) {
-	plan := &generate.TelephonyRuntimePlan{
-		Route:       ir.TelephonyKey{Provider: ir.ProviderPipecat, Transport: "cloud-websocket", Carrier: "twilio"},
-		RequiredEnv: []string{"TWILIO_AUTH_TOKEN"}, Coordination: "local", AdmissionOwner: "generated_runtime",
-	}
-	var out bytes.Buffer
-	printTelephonyPlan(&out, "phone", plan)
-	for _, want := range []string{"provider=pipecat", "transport=cloud-websocket", "carrier=twilio", "required env TWILIO_AUTH_TOKEN"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("output missing %q: %s", want, out.String())
-		}
-	}
-}
-
 func runCompileCommand(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
 	cmd := newRootCmd()
@@ -152,21 +137,21 @@ func runCompileCommand(t *testing.T, args ...string) (string, string, error) {
 	return stdout.String(), stderr.String(), err
 }
 
-// gap #2: forwarded bindings + derived sizing reach compile stdout and the
-// compile-report.json on disk — SCHEMA.md §6.2 rule 6, §5.1 ("the contract").
-func TestCompilePrintsBindingsAndSizing(t *testing.T) {
+// Forwarded bindings and derived sizing reach compile-report.json, which is now
+// the only place they are written. compile's stdout is the generated file list
+// and nothing else, so this file is where somebody goes to read what the
+// compiler decided about a binding it forwards without checking.
+func TestCompileWritesBindingsAndSizingToTheReport(t *testing.T) {
 	dir := copySafeCore(t)
 	stdout, _, err := runCompileCommand(t, "--target", "pipecat", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{
-		"pipecat: binding listen provider=deepgram model=nova-3 (forwarded as-is, not validated)",
-		"pipecat:   param temperature=0.4",
-		"pipecat: sizing workers=60 [unbenchmarked]",
-	} {
-		if !strings.Contains(stdout, want) {
-			t.Errorf("stdout missing %q:\n%s", want, stdout)
+	// Nothing but the generated file list. A binding, param, sizing or driver
+	// note back on stdout is the noise this command was quietened to remove.
+	for _, unwanted := range []string{"forwarded as-is", "binding ", "param ", "sizing ", "telephony "} {
+		if strings.Contains(stdout, unwanted) {
+			t.Errorf("stdout carries %q, which belongs only in compile-report.json:\n%s", unwanted, stdout)
 		}
 	}
 
@@ -174,56 +159,12 @@ func TestCompilePrintsBindingsAndSizing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"bindings"`, `"sizing"`, `"nova-3"`, `"unbenchmarked"`} {
+	for _, want := range []string{
+		`"bindings"`, `"sizing"`, `"nova-3"`, `"unbenchmarked"`, `"temperature"`, `"workers"`,
+	} {
 		if !strings.Contains(string(report), want) {
 			t.Errorf("compile-report.json missing %q:\n%s", want, report)
 		}
-	}
-}
-
-func TestPrintContractExplainsOpenAIResponsesLowering(t *testing.T) {
-	notes := generate.GenerateReport{ForwardedBindings: []ir.ForwardedBinding{{
-		Target:  "livekit",
-		Role:    "reason",
-		Profile: "reasoning",
-		Binding: ir.Binding{
-			Provider: "openai",
-			Model:    "gpt-5.6-terra",
-			Params: map[string]any{
-				"api":              "responses",
-				"reasoning_effort": "low",
-				"use_websocket":    false,
-			},
-		},
-		Params: []ir.ForwardedParam{
-			{Name: "api", Value: "responses"},
-			{Name: "reasoning_effort", Value: "low"},
-			{Name: "use_websocket", Value: false},
-		},
-	}}}
-
-	var out bytes.Buffer
-	printContract(&out, "livekit", ir.ProviderLiveKit, notes)
-	for _, want := range []string{
-		"OpenAI Responses mode; api is consumed and reasoning_effort is lowered when present",
-		"param api=responses (compiler directive)",
-		"param reasoning_effort=low (lowered to reasoning.effort)",
-		"param use_websocket=false (forwarded as-is, not validated)",
-	} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("output missing %q:\n%s", want, out.String())
-		}
-	}
-	if strings.Contains(out.String(), "binding reason.reasoning provider=openai model=gpt-5.6-terra (forwarded as-is, not validated)") {
-		t.Errorf("Responses binding is falsely reported as wholly forwarded:\n%s", out.String())
-	}
-
-	notes.ForwardedBindings[0].Binding.Params = map[string]any{"api": "responses"}
-	notes.ForwardedBindings[0].Params = []ir.ForwardedParam{{Name: "api", Value: "responses"}}
-	out.Reset()
-	printContract(&out, "livekit", ir.ProviderLiveKit, notes)
-	if !strings.Contains(out.String(), "reasoning_effort is lowered when present") || strings.Contains(out.String(), "param reasoning_effort") {
-		t.Errorf("default reasoning report is inaccurate:\n%s", out.String())
 	}
 }
 
@@ -307,54 +248,3 @@ func TestWriteArtifactFilesPreservesPlatformConfig(t *testing.T) {
 //
 // The second half is the constitution's rule that no report holds a secret
 // value: the upstream line names each credential *variable* and never reads it.
-func TestPrintContractNamesTheRouterRegionAndUpstream(t *testing.T) {
-	notes := generate.GenerateReport{ForwardedBindings: []ir.ForwardedBinding{{
-		Target:  "pipecat",
-		Role:    "reason",
-		Profile: "reasoning",
-		Binding: ir.Binding{
-			Provider: "slng",
-			Model:    "gpt-5.6-luna",
-			AgentID:  "salon-concierge-v1",
-			Upstream: &ir.Upstream{Provider: "openai"},
-			Params: map[string]any{
-				"world_part_override": "eu",
-				"reasoning_effort":    "none",
-			},
-		},
-		Params: []ir.ForwardedParam{
-			{Name: "reasoning_effort", Value: "none"},
-			{Name: "world_part_override", Value: "eu"},
-		},
-	}}}
-
-	var out bytes.Buffer
-	printContract(&out, "pipecat", ir.ProviderPipecat, notes)
-	for _, want := range []string{
-		"binding reason.reasoning provider=slng model=gpt-5.6-luna (SLNG Context Router; world_part_override is consumed into base_url=https://eu.context-router.slng.ai/v1)",
-		"param world_part_override=eu (consumed as the router base URL)",
-		"upstream openai url=https://api.openai.com/v1 api_key=OPENAI_API_KEY (env) (sent inline in the request body)",
-	} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("report missing %q:\n%s", want, out.String())
-		}
-	}
-	if strings.Contains(out.String(), "(forwarded as-is, not validated)") {
-		t.Errorf("a router binding is falsely reported as wholly forwarded:\n%s", out.String())
-	}
-
-	// An author-named credential is still named and never read. The test sets a
-	// value in the environment so a report that read one would show it.
-	t.Setenv("HOST_LLM_KEY", "sk-live-not-a-real-key")
-	notes.ForwardedBindings[0].Binding.Upstream = &ir.Upstream{
-		Provider: "openai-compat", URL: "https://host/v1", KeyEnv: "HOST_LLM_KEY",
-	}
-	out.Reset()
-	printContract(&out, "pipecat", ir.ProviderPipecat, notes)
-	if !strings.Contains(out.String(), "upstream openai-compat url=https://host/v1 api_key=HOST_LLM_KEY (env)") {
-		t.Errorf("report does not name the author's credential variable:\n%s", out.String())
-	}
-	if strings.Contains(out.String(), "sk-live-not-a-real-key") {
-		t.Errorf("the report read a credential value:\n%s", out.String())
-	}
-}

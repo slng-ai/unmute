@@ -37,8 +37,9 @@ validates Twilio's signature over the complete `/call` form before using the
 Pipecat Cloud key; a missing or invalid signature returns 403 and starts no
 session.
 
-The compile report marks each phone route and prints the vendor document and
-the date it was last checked. Read that report before describing the route.
+`build/<target>/compile-report.json` marks each phone route and records the
+vendor document and the date it was last checked. Read that report before
+describing the route.
 
 Every Pipecat route here deploys to Pipecat Cloud, with `pipecat cloud deploy`.
 Every LiveKit route here deploys to LiveKit Cloud, or to a LiveKit Server the

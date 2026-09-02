@@ -1,50 +1,34 @@
 CASE safe_core
 livekit (livekit): PASS
-  warning: LiveKit driver must range-check inactivity durations
-  warning: LiveKit driver must verify a max-duration cap
-  warning: LiveKit turn placement is a preference
   warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml, connections/twilio_sip.yaml
   warning: environment variables referenced but not declared in secrets: DEEPGRAM_API_KEY (agent.yaml models listen transcriber), ELEVEN_API_KEY (agent.yaml models speak front_desk), GET_INVOICE_URL (tools/get_invoice.yaml webhook.url_env), LOOKUP_CUSTOMER_URL (tools/lookup_customer.yaml webhook.url_env), OPENAI_API_KEY (agent.yaml models think careful_reasoning), SIP_AUTH_PASSWORD (connections/twilio_sip.yaml environment sip_password), SIP_AUTH_USERNAME (connections/twilio_sip.yaml environment sip_username), SIP_FROM_NUMBER (connections/twilio_sip.yaml environment from_number), SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address), SLNG_API_KEY (agent.yaml models speak front_desk), TWILIO_ACCOUNT_SID (connections/primary_phone.yaml environment account_sid), TWILIO_AUTH_TOKEN (connections/primary_phone.yaml environment auth_token), TWILIO_PHONE_NUMBER (connections/primary_phone.yaml environment from_number)
 pipecat (pipecat): PASS
-  warning: Pipecat driver must range-check inactivity durations
-  warning: Pipecat driver must verify a max-duration cap
   warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml, connections/twilio_sip.yaml
   warning: environment variables referenced but not declared in secrets: DEEPGRAM_API_KEY (agent.yaml models listen transcriber), ELEVEN_API_KEY (agent.yaml models speak front_desk), GET_INVOICE_URL (tools/get_invoice.yaml webhook.url_env), LOOKUP_CUSTOMER_URL (tools/lookup_customer.yaml webhook.url_env), OPENAI_API_KEY (agent.yaml models think careful_reasoning), SIP_AUTH_PASSWORD (connections/twilio_sip.yaml environment sip_password), SIP_AUTH_USERNAME (connections/twilio_sip.yaml environment sip_username), SIP_FROM_NUMBER (connections/twilio_sip.yaml environment from_number), SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address), SLNG_API_KEY (agent.yaml models speak front_desk), TWILIO_ACCOUNT_SID (connections/primary_phone.yaml environment account_sid), TWILIO_AUTH_TOKEN (connections/primary_phone.yaml environment auth_token), TWILIO_PHONE_NUMBER (connections/primary_phone.yaml environment from_number)
 
 CASE then_return
 pipecat (pipecat): PASS
-  warning: Pipecat driver must range-check inactivity durations
-  warning: Pipecat driver must verify a max-duration cap
   warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml, connections/twilio_sip.yaml
   warning: environment variables referenced but not declared in secrets: DEEPGRAM_API_KEY (agent.yaml models listen transcriber), ELEVEN_API_KEY (agent.yaml models speak front_desk), GET_INVOICE_URL (tools/get_invoice.yaml webhook.url_env), LOOKUP_CUSTOMER_URL (tools/lookup_customer.yaml webhook.url_env), OPENAI_API_KEY (agent.yaml models think careful_reasoning), SIP_AUTH_PASSWORD (connections/twilio_sip.yaml environment sip_password), SIP_AUTH_USERNAME (connections/twilio_sip.yaml environment sip_username), SIP_FROM_NUMBER (connections/twilio_sip.yaml environment from_number), SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address), SLNG_API_KEY (agent.yaml models speak front_desk), TWILIO_ACCOUNT_SID (connections/primary_phone.yaml environment account_sid), TWILIO_AUTH_TOKEN (connections/primary_phone.yaml environment auth_token), TWILIO_PHONE_NUMBER (connections/primary_phone.yaml environment from_number)
 
 CASE history_messages
 pipecat (pipecat): FAIL
-  warning: Pipecat driver must range-check inactivity durations
-  warning: Pipecat driver must verify a max-duration cap
   warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml, connections/twilio_sip.yaml
   warning: environment variables referenced but not declared in secrets: DEEPGRAM_API_KEY (agent.yaml models listen transcriber), ELEVEN_API_KEY (agent.yaml models speak front_desk), GET_INVOICE_URL (tools/get_invoice.yaml webhook.url_env), LOOKUP_CUSTOMER_URL (tools/lookup_customer.yaml webhook.url_env), OPENAI_API_KEY (agent.yaml models think careful_reasoning), SIP_AUTH_PASSWORD (connections/twilio_sip.yaml environment sip_password), SIP_AUTH_USERNAME (connections/twilio_sip.yaml environment sip_username), SIP_FROM_NUMBER (connections/twilio_sip.yaml environment from_number), SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address), SLNG_API_KEY (agent.yaml models speak front_desk), TWILIO_ACCOUNT_SID (connections/primary_phone.yaml environment account_sid), TWILIO_AUTH_TOKEN (connections/primary_phone.yaml environment auth_token), TWILIO_PHONE_NUMBER (connections/primary_phone.yaml environment from_number)
   error: the Pipecat driver emits history: full only; other values are not shaped yet
 
 CASE local_listen
 pipecat (pipecat): FAIL
-  warning: Pipecat driver must range-check inactivity durations
-  warning: Pipecat driver must verify a max-duration cap
   warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml, connections/twilio_sip.yaml
   warning: environment variables referenced but not declared in secrets: DEEPGRAM_API_KEY (agent.yaml models listen transcriber), ELEVEN_API_KEY (agent.yaml models speak front_desk), GET_INVOICE_URL (tools/get_invoice.yaml webhook.url_env), LOOKUP_CUSTOMER_URL (tools/lookup_customer.yaml webhook.url_env), OPENAI_API_KEY (agent.yaml models think careful_reasoning), SIP_AUTH_PASSWORD (connections/twilio_sip.yaml environment sip_password), SIP_AUTH_USERNAME (connections/twilio_sip.yaml environment sip_username), SIP_FROM_NUMBER (connections/twilio_sip.yaml environment from_number), SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address), SLNG_API_KEY (agent.yaml models speak front_desk), TWILIO_ACCOUNT_SID (connections/primary_phone.yaml environment account_sid), TWILIO_AUTH_TOKEN (connections/primary_phone.yaml environment auth_token), TWILIO_PHONE_NUMBER (connections/primary_phone.yaml environment from_number)
   error: pipecat listen binding provider "local" has no slot; listen providers on pipecat: assemblyai, cartesia, deepgram, elevenlabs, gradium, openai, slng, soniox, speechmatics; an unlisted provider needs endpoint_env (an OpenAI-compatible endpoint)
 livekit (livekit): FAIL
-  warning: LiveKit driver must range-check inactivity durations
-  warning: LiveKit driver must verify a max-duration cap
-  warning: LiveKit turn placement is a preference
   warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml, connections/twilio_sip.yaml
   warning: environment variables referenced but not declared in secrets: DEEPGRAM_API_KEY (agent.yaml models listen transcriber), ELEVEN_API_KEY (agent.yaml models speak front_desk), GET_INVOICE_URL (tools/get_invoice.yaml webhook.url_env), LOOKUP_CUSTOMER_URL (tools/lookup_customer.yaml webhook.url_env), OPENAI_API_KEY (agent.yaml models think careful_reasoning), SIP_AUTH_PASSWORD (connections/twilio_sip.yaml environment sip_password), SIP_AUTH_USERNAME (connections/twilio_sip.yaml environment sip_username), SIP_FROM_NUMBER (connections/twilio_sip.yaml environment from_number), SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address), SLNG_API_KEY (agent.yaml models speak front_desk), TWILIO_ACCOUNT_SID (connections/primary_phone.yaml environment account_sid), TWILIO_AUTH_TOKEN (connections/primary_phone.yaml environment auth_token), TWILIO_PHONE_NUMBER (connections/primary_phone.yaml environment from_number)
   error: livekit listen binding provider "local" has no slot; listen providers on livekit: assemblyai, cartesia, deepgram, elevenlabs, gradium, sarvam, slng, soniox, speechmatics
 
 CASE mcp
 pipecat (pipecat): FAIL
-  warning: Pipecat driver must range-check inactivity durations
-  warning: Pipecat driver must verify a max-duration cap
   warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml, connections/twilio_sip.yaml
   warning: environment variables referenced but not declared in secrets: DEEPGRAM_API_KEY (agent.yaml models listen transcriber), ELEVEN_API_KEY (agent.yaml models speak front_desk), GET_INVOICE_URL (tools/get_invoice.yaml webhook.url_env), OPENAI_API_KEY (agent.yaml models think careful_reasoning), SIP_AUTH_PASSWORD (connections/twilio_sip.yaml environment sip_password), SIP_AUTH_USERNAME (connections/twilio_sip.yaml environment sip_username), SIP_FROM_NUMBER (connections/twilio_sip.yaml environment from_number), SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address), SLNG_API_KEY (agent.yaml models speak front_desk), TWILIO_ACCOUNT_SID (connections/primary_phone.yaml environment account_sid), TWILIO_AUTH_TOKEN (connections/primary_phone.yaml environment auth_token), TWILIO_PHONE_NUMBER (connections/primary_phone.yaml environment from_number)
   error: tool "lookup_customer" mcp execution takes no description, input, or output: the server describes its own tools
@@ -52,14 +36,9 @@ pipecat (pipecat): FAIL
 
 CASE thinking_audio
 pipecat (pipecat): FAIL
-  warning: Pipecat driver must range-check inactivity durations
-  warning: Pipecat driver must verify a max-duration cap
   warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml, connections/twilio_sip.yaml
   warning: environment variables referenced but not declared in secrets: DEEPGRAM_API_KEY (agent.yaml models listen transcriber), ELEVEN_API_KEY (agent.yaml models speak front_desk), GET_INVOICE_URL (tools/get_invoice.yaml webhook.url_env), LOOKUP_CUSTOMER_URL (tools/lookup_customer.yaml webhook.url_env), OPENAI_API_KEY (agent.yaml models think careful_reasoning), SIP_AUTH_PASSWORD (connections/twilio_sip.yaml environment sip_password), SIP_AUTH_USERNAME (connections/twilio_sip.yaml environment sip_username), SIP_FROM_NUMBER (connections/twilio_sip.yaml environment from_number), SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address), SLNG_API_KEY (agent.yaml models speak front_desk), TWILIO_ACCOUNT_SID (connections/primary_phone.yaml environment account_sid), TWILIO_AUTH_TOKEN (connections/primary_phone.yaml environment auth_token), TWILIO_PHONE_NUMBER (connections/primary_phone.yaml environment from_number)
   error: the Pipecat driver does not emit thinking audio yet
 livekit (livekit): PASS
-  warning: LiveKit driver must range-check inactivity durations
-  warning: LiveKit driver must verify a max-duration cap
-  warning: LiveKit turn placement is a preference
   warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml, connections/twilio_sip.yaml
   warning: environment variables referenced but not declared in secrets: DEEPGRAM_API_KEY (agent.yaml models listen transcriber), ELEVEN_API_KEY (agent.yaml models speak front_desk), GET_INVOICE_URL (tools/get_invoice.yaml webhook.url_env), LOOKUP_CUSTOMER_URL (tools/lookup_customer.yaml webhook.url_env), OPENAI_API_KEY (agent.yaml models think careful_reasoning), SIP_AUTH_PASSWORD (connections/twilio_sip.yaml environment sip_password), SIP_AUTH_USERNAME (connections/twilio_sip.yaml environment sip_username), SIP_FROM_NUMBER (connections/twilio_sip.yaml environment from_number), SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address), SLNG_API_KEY (agent.yaml models speak front_desk), TWILIO_ACCOUNT_SID (connections/primary_phone.yaml environment account_sid), TWILIO_AUTH_TOKEN (connections/primary_phone.yaml environment auth_token), TWILIO_PHONE_NUMBER (connections/primary_phone.yaml environment from_number)

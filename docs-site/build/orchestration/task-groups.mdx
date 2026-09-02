@@ -121,24 +121,12 @@ map is keyed by task name and returns to the owner.
 member tasks share the group's running context. Each task still declares
 `context.history` so the task is complete wherever it is used.
 
-## The LiveKit warning
+## Standing on a LiveKit beta
 
-`unmute validate` on a package with a task group and both code targets prints a
-second warning:
-
-```text
-✓ livekit (livekit)
-✓ pipecat (pipecat)
-
-Warnings:
-  livekit: LiveKit turn placement is a preference
-  livekit: LiveKit TaskGroup is experimental
-```
-
-Read the second one. Task groups lower onto a LiveKit primitive that upstream
-marks experimental. The package validates, compiles, and runs; the warning
-tells you what you are standing on. Warnings go to standard error and the
-command still exits 0.
+Task groups lower onto a LiveKit primitive that upstream itself marks
+experimental. `unmute validate` prints no warning about this: the package
+validates, compiles, and runs cleanly. Know it anyway, because it is a fact
+about the platform underneath the feature, not about your package.
 
 ## Try it
 

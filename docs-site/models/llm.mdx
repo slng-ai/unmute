@@ -21,10 +21,11 @@ yours to choose, and so is the provider that serves it.
 
 <Info>
   Model ids are forwarded to the vendor exactly as you write them. Unmute keeps no
-  allowlist, so a typo surfaces as a provider error at run time. The compile report
-  says so on ordinary bindings: `(forwarded as-is, not validated)`. The LiveKit
-  Responses mode below is the narrow exception: `api` selects the generated client
-  and `reasoning_effort` becomes the API's nested reasoning setting.
+  allowlist, so a typo surfaces as a provider error at run time.
+  `build/<target>/compile-report.json` records this on ordinary bindings as
+  `forwarded as-is, not validated`. The LiveKit Responses mode below is the narrow
+  exception: `api` selects the generated client and `reasoning_effort` becomes the
+  API's nested reasoning setting.
 </Info>
 
 ## Why `reasoning_effort` is there

@@ -21,6 +21,23 @@ Unmute is written in Go, so you maintain **Go code**, but you also write some Py
 4. `os.Exit` lives only in `main.go`. `Execute()` builds the root, prints any error once to stderr, returns the exit code.
 - `SilenceUsage` + `SilenceErrors` on the root. Exit codes: `0` ok, `1` error — add more only when a consumer actually reads them. Warnings → stderr + exit 0 (never a silent downgrade).
 
+### A command says what it did, and what somebody has to fix
+Nothing else. `unmute --version` is one line, `validate` is its result rows,
+`compile` is the list of files it wrote, and `init` is the list of files it
+created. A warning, a prerequisite or an error is added to that; a description
+of the output is not, because the output is on disk and
+`build/<target>/compile-report.json` is next to it.
+
+This is not taste, it is what makes the warnings readable. Every forwarded
+binding, derived worker count and resolved route used to print on every run
+alongside eight advisory notes about how a framework works, so twenty-odd lines
+of nothing-to-do buried the two lines that said a secret was undeclared and a
+tool call would 400. **A new line on stdout has to name something the reader
+did or has to do.** A new `Warn` row in the capability table has to name a
+difference the author can act on, and the table is allowed exactly one
+(`internal/target/table_test.go`), so adding a second is a deliberate decision
+and not a place to park a note to self.
+
 ## IR
 Go structs are the schema source for their own surface: `internal/spec` derives the unresolved authoring schema, while `internal/ir` derives the resolved/debug schema. **Do not hand-author `.json` schema files.** Flow: `spec.Load` → `ir.Build` → `ir.Validate` → `generate.Generate`.
 
@@ -53,6 +70,9 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | errors wrapped with `%w` and matched with `errors.Is`/`As`, never `==` | `errorlint` |
 | L1–L3 green, zero Python, no data races | CI `test`, `go test -race ./...` |
 | no color literal outside `internal/style` | `internal/style/style_test.go` |
+| no docs-site page, skill reference or example README quotes CLI output the CLI no longer prints | `internal/docsite/retired_output_test.go` (`TestNoPageQuotesRetiredCLIOutput`), which walks three of the four surfaces |
+| the capability table carries exactly one `Warn` row, and it names a difference an author can act on | `internal/target/table_test.go` (`TestDefaultTableIsCompleteAndTyped`) |
+| `compile` stdout is the generated file list and nothing else, and every binding, param and sizing figure it used to print is in `compile-report.json` | `internal/cli/compile_test.go` (`TestCompileWritesBindingsAndSizingToTheReport`) |
 | no new map-typed field in the authoring surface; a new field is a list, and every existing map is allowlisted as permanent (JSON Schema passthrough) or as debt that may shrink and never grow | `internal/spec/no_dictionaries_test.go` (`TestNoNewDictionaryInTheAuthoringSurface`) |
 | a pair-list item holding two keys or none is refused at decode, with its line, because that is what a dropped indent produces and what a `map[string]string` swallowed | `internal/spec/pair_test.go` |
 | a package declaring no `prefetch:`, no `confirm:` and no delegate `announce:` emits byte-identical output; the emitted block, its constants and the unconfirmed set appear only when authored | `internal/generate/prefetch_test.go` (`TestPrefetchEmitsNothingForAPackageThatDeclaresNone`) |
@@ -157,7 +177,7 @@ The generated `build/<target>/README.md` is the runbook, and almost nobody reads
 3. the relevant page in `docs-site/`, which is the public answer a reader lands on,
 4. **the skill** in `internal/skill/assets/`, which is what a coding assistant reads before it writes a package.
 
-A fact that is only true in generated output is a fact the reader never sees, and a feature the skill does not know about is a feature no coding agent will use. `docs/ARCHITECTURE.md` changes only when a system boundary, compiler stage, or runtime topology changes. Tests hold the parts that can be held: `internal/generate/examples_test.go` (example routes and links), `internal/skill/agreement_test.go` (the skill's factual lists), and `internal/cli/skill_bundle_test.go` (the commands and flags the skill names). Prose can still rot, so read the example page before you claim you are done.
+A fact that is only true in generated output is a fact the reader never sees, and a feature the skill does not know about is a feature no coding agent will use. The reverse rots too, and now fails: `internal/docsite/retired_output_test.go` refuses a page, a skill reference or an example README that quotes a line the CLI has stopped printing, because a reader who copies a stale sample and waits for it cannot tell a stale doc from a broken install. `docs/ARCHITECTURE.md` changes only when a system boundary, compiler stage, or runtime topology changes. Tests hold the parts that can be held: `internal/generate/examples_test.go` (example routes and links), `internal/skill/agreement_test.go` (the skill's factual lists), and `internal/cli/skill_bundle_test.go` (the commands and flags the skill names). Prose can still rot, so read the example page before you claim you are done.
 
 ## Layout
 `internal/` not `pkg/`. One file per command in `internal/cli/`. Hand-write cobra commands — **no `cobra-cli` generator**.

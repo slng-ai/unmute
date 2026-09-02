@@ -345,7 +345,7 @@ stray image is not an error.
 
 | When | What |
 |---|---|
-| `unmute compile` | checks the folder exists and holds a supported file, copies the documents into `build/<target>/knowledge/<name>/` byte for byte, and prints one line per base |
+| `unmute compile` | checks the folder exists and holds a supported file, copies the documents into `build/<target>/knowledge/<name>/` byte for byte, and records one line per base in `compile-report.json` |
 | Agent startup | reads the documents, splits them into passages, indexes them, and holds the index in memory |
 | Each lookup | searches the index. No file is read and nothing is re-indexed |
 

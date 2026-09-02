@@ -100,8 +100,30 @@ func TestDefaultTableIsCompleteAndTyped(t *testing.T) {
 	if !provisionalSeen {
 		t.Error("no route carries the Provisional tag; the tag has lost its only producer")
 	}
-	if table.Capability(FieldInactivity, LiveKit).Tag != Warn || table.Capability(FieldMaxDuration, Pipecat).Tag != Warn {
-		t.Fatal("warn-tagged lifecycle fields must produce target warnings")
+	// Warn means the target takes the field and then does something other than
+	// what the author wrote. It used to be spent on notes about how a framework
+	// works and on driver TODOs addressed to us, which printed on every run of a
+	// correct package and taught readers to skip the whole block; those rows are
+	// gone. What is left has to keep earning the tag, so the gate names the row
+	// rather than the count: a per-tool interruption preference is authored,
+	// accepted, and then not honoured, which is exactly the silent difference a
+	// warning exists to say out loud.
+	if table.Capability(FieldToolInterruption, LiveKit).Tag != Warn {
+		t.Fatal("FieldToolInterruption on LiveKit must warn: the preference is accepted and not enforced")
+	}
+	warnRows := 0
+	for _, byProvider := range table.Fields {
+		for _, capability := range byProvider {
+			if capability.Tag == Warn {
+				warnRows++
+			}
+		}
+	}
+	// A ratchet on noise. Warn is the one tag that fires on a package with
+	// nothing wrong with it, so growing this number is a decision somebody makes
+	// on purpose, with a reader in mind, and not a place to park a note to self.
+	if warnRows > 1 {
+		t.Errorf("the table carries %d warn rows, want 1: a new one prints on every run of a correct package, so it needs a fix an author can act on", warnRows)
 	}
 	// Tracing needs a process to instrument, which every remaining target has.
 	// The other half of this check used to assert both fields were Gated on the

@@ -32,7 +32,7 @@ that declares two prints two:
 ✓ pipecat (pipecat)
 
 Warnings:
-  livekit: LiveKit turn placement is a preference
+  livekit: environment variables referenced but not declared in secrets: SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address)
 ```
 
 ## Choosing targets
@@ -52,9 +52,10 @@ unmute validate my-agent --target pipecat --target livekit
 ## Warnings and prerequisites
 
 Warnings are printed after the results, on standard error, and the command
-still exits 0. They are real differences worth reading, for example that
-LiveKit places turn detection differently, or that its task group primitive is
-experimental.
+still exits 0. Each one names a package problem with a fix in it, for example
+an environment variable your package references but never declares in
+`secrets:`, or a capability a target does not enforce that your package
+assumes it does.
 
 Some routes also print a setup prerequisite block, which is work you must do
 outside Unmute before a real call:

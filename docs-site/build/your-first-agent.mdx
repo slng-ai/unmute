@@ -149,11 +149,9 @@ models:
 `provider` names the integration; `model` and `voice` are passed to that
 provider exactly as you wrote them. Unmute does not keep a list of valid model
 ids, so a typo shows up as a provider error at run time, not at compile time.
-The compile report says so out loud:
-
-```text
-livekit: binding reason.assistant_model provider=openai model=gpt-5.6-terra (forwarded as-is, not validated)
-```
+`build/livekit/compile-report.json` records this plainly: it names
+`reason.assistant_model`, the provider and model you gave it, and marks the
+binding as forwarded and not validated.
 
 `params:` is normally passthrough for anything else the provider takes. The one
 line here earns its place: `gpt-5.6-terra` is a reasoning model, and OpenAI
@@ -264,13 +262,12 @@ unmute validate my-agent
 
 ```text
 ✓ livekit (livekit)
-
-Warnings:
-  livekit: LiveKit turn placement is a preference
 ```
 
-A warning is a real difference worth reading, not a failure: the command still
-exits 0. Then talk to it in your browser:
+This scaffolded package validates clean. When `unmute validate` does print a
+warning, it goes to standard error and the command still exits 0: a warning is
+a real difference worth reading, not a failure. Then talk to it in your
+browser:
 
 ```sh
 unmute dev my-agent
