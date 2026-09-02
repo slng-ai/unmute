@@ -88,6 +88,8 @@ its own `build/<target>/` directory.
 | LiveKit Agents | `sip` | Twilio, Telnyx, Plivo | a SIP trunk carries the call into LiveKit SIP |
 | LiveKit Agents | `connector` | Twilio | a generated bridge turns Twilio Media Streams into a LiveKit room |
 
+Exotel is not listed for LiveKit SIP: no adapter, so this route is refused at validation.
+
 ### Where each route deploys
 
 | Route | Deploys to |
