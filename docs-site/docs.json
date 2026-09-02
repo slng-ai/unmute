@@ -195,6 +195,7 @@
           "telephony/outbound-calls",
           "telephony/inbound-calls",
           "telephony/twilio",
+          "telephony/livekit-twilio",
           "telephony/pipecat-twilio",
           {
             "group": "Transfers",
