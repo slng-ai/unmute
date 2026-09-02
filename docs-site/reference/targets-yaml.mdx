@@ -27,7 +27,7 @@ targets:
 | Key | Type | Required | Default | Allowed values | Meaning |
 |---|---|---|---|---|---|
 | `targets` | map | yes | — | one or more target instance names | target definitions selected by `--target` |
-| `targets.<name>.provider` | string | yes | — | `livekit`, `pipecat` | target provider |
+| `targets.<name>.provider` | string | yes | — | `livekit`, `pipecat`, `slng` | target provider |
 | `targets.<name>.version` | string | for code targets | — | exact `x.y.z` in the supported window for LiveKit and Pipecat | framework version pinned in an emitted project |
 | `targets.<name>.pins` | map of strings | no | — | known LiveKit package names to semantic versions | LiveKit package overrides; other providers do not consume them |
 | `targets.<name>.sdk_language` | string | no | — | `python` when written | SDK used by an emitted project |
@@ -41,14 +41,22 @@ what names the output directory, `build/<name>/`. Two targets may use the same
 provider with different settings, for example `pipecat_twilio` and
 `pipecat_telnyx`.
 
-That is the whole list. `unmute validate` accepts all four provider values so a
-package can be checked for portability. `unmute compile` emits a project only
-for `livekit` and `pipecat` today. A target says where the agent runs and, for a
-phone agent, which one connection carries the call.
+That is the whole list. A target says where the agent runs and, for a phone
+agent, which one connection carries the call. `unmute compile` compiles a
+project only for `livekit` and `pipecat` today; a `slng` target compiles to a
+deployment body instead, which [Deploy to SLNG](/deploy/slng) covers.
 
-`deepgram` is classified as a code target, so validation requires a non-empty
-`version` even though this release emits no Deepgram project. There is no
-Deepgram version window in this release; compile refuses the missing driver.
+`vapi` and `deepgram` used to be target names too. Both are retired, and
+`unmute validate` refuses either one:
+
+```text
+provider "deepgram" was retired: the deepgram target never emitted a runnable project and
+  was retired on 2026-08-24; deepgram remains available as a model vendor, for example
+  slng/deepgram/nova:3-en. Supported providers: livekit, pipecat, slng
+```
+
+Deepgram stays a model vendor: what the refusal calls out is the target name,
+never the vendor.
 
 ## Framework versions are exact
 
@@ -95,14 +103,14 @@ survive.
 and the agent id and nothing else, and on LiveKit Cloud a warm production replica
 is a property of the billing plan rather than something the compiler can write.
 See [Pipecat over Twilio](/telephony/pipecat-twilio#deploy-with-a-warm-instance)
-for the measurement behind this.
+for a deployed example.
 
 ## Package pins
 
 `pins` is a LiveKit-only escape hatch for packages already known to the LiveKit
 driver. Unknown package names and versions below the catalogue floor are errors.
-Pipecat and the validation-only providers do not consume this map, so leave it
-out for them.
+On a `pipecat` or `slng` target the map validates with no error, and nothing
+reads it, so leave it out there.
 
 ## models overrides
 
@@ -116,6 +124,13 @@ out for them.
 Keyed by the entry name from `agent.yaml`, and taking the same fields as an
 entry there. Use it when a target cannot run an entry as defined, or runs its
 own better.
+
+An override replaces the entry: a field it does not set is gone, not
+inherited from the base entry. Four fields are the exception. `pace`,
+`endpointing_delay`, `semantic_endpointing`, and `prompt_suffix` carry forward
+from the base entry whenever the override leaves them empty, because every
+target running this package wants the same turn timing and the same prompt
+directive. Set one explicitly on the override to replace it instead.
 
 ## The phone route is not here
 

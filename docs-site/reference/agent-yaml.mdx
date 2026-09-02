@@ -3,8 +3,9 @@ title: "Agent configuration"
 description: "Every block of the agent file, and the tool files beside it."
 ---
 
-`agent.yaml` is the agent. Nothing in it is specific to a runtime; that lives
-in [targets.yaml](/reference/targets-yaml).
+`agent.yaml` is the declarative description of the agent: what it says, what it
+can do, and who it can reach. Nothing in it belongs to one target; the runtime
+half lives in [targets.yaml](/reference/targets-yaml).
 
 YAML decoding is strict. An unknown field is an error with the file and the
 line, not a shrug.
@@ -51,31 +52,53 @@ capacity:
   avg_session_duration: 3m
 ```
 
+That `turn.detector` binding runs as written on Pipecat, which forwards a
+model identity unchecked. `silero` is a voice activity detector, not a turn
+detector, and LiveKit checks the identity and refuses it. A LiveKit target
+names its own detector in [targets.yaml](/reference/targets-yaml):
+
+```yaml targets.yaml
+targets:
+  livekit:
+    provider: livekit
+    version: "1.6.10"
+    sdk_language: python
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+```
+
+One `agent.yaml`, two targets, and only the override changes. That is the
+split this page and [targets.yaml](/reference/targets-yaml) hold between them.
+
 ## All keys
 
 | Key | Type | Required | Default | Allowed values | Meaning |
 |---|---|---|---|---|---|
-| `version` | integer | yes | — | `1` | schema version |
-| `name` | string | yes | — | lowercase letters, digits, single hyphens; 3 to 64 characters | what the deployed agent is called |
-| `entry_agent` | string | yes | — | declared agent name | agent that answers |
-| `models` | map | yes | — | sections `think`, `speak`, `listen`, `turn` | model palette grouped by kind |
+| `version` | integer | yes |  | `1` | schema version |
+| `name` | string | yes |  | lowercase letters, digits, single hyphens; 3 to 64 characters | what the deployed agent is called |
+| `entry_agent` | string | yes |  | declared agent name | agent that answers |
+| `models` | map | yes |  | sections `think`, `speak`, `listen`, `turn` | model palette grouped by kind |
 | `listen` | string | with 2 or more listen chain heads | sole chain head | declared `models.listen` name | listen entry to use |
 | `turn` | string | with 2 or more turn entries | sole entry | declared `models.turn` name | turn entry to use |
-| `variables` | map | no | — | lower snake case names | per-call values |
-| `timezone` | string | before a `prefetch:` entry reads the clock | — | an IANA zone name, such as `Europe/Madrid` | the zone every clock reading in this package is taken in |
-| `prefetch` | **list** | no | — | one entry per fact, each with a `name:` | facts resolved once per call, before the greeting, in the order written |
-| `secrets` | list of strings | no | — | UPPER_SNAKE names | environment values the generated project reads |
-| `destinations` | map of strings | when an escalation is used | — | lower snake case names to UPPER_SNAKE env names | phone destinations an escalation may use |
-| `knowledge` | map | no | — | 3 to 64 characters of `[a-z0-9_]` | folders of documents a tool can search |
-| `agents` | map | yes | — | one or more lower snake case names | agent prompts, models, and callable names |
-| `tasks` | map | no | — | lower snake case names | delegated steps |
-| `task_groups` | map | no | — | lower snake case names | ordered task sequences |
-| `controls` | map | no | — | lower snake case names | delegates and transfers |
-| `tools` | list of strings | no | — | loaded tool file names | tool files to load |
-| `conversation` | object | no | — | keys below | greeting, interruption, inactivity, and limits |
-| `tracing` | object | no | — | `provider: langfuse` or `provider: coval` | tracing provider |
-| `channels` | map | yes | — | one or more channel definitions | how people reach the agent |
-| `capacity` | object | for telephony or code targets | — | positive values; constraints below | traffic estimate |
+| `variables` | map | no |  | lower snake case names | per-call values |
+| `timezone` | string | before a `prefetch:` entry reads the clock |  | an IANA zone name, such as `Europe/Madrid` | the zone every clock reading in this package is taken in |
+| `prefetch` | **list** | no |  | one entry per fact, each with a `name:` | facts resolved once per call, before the greeting, in the order written |
+| `secrets` | list of strings | no |  | UPPER_SNAKE names | environment values the generated project reads |
+| `destinations` | map of strings | when an escalation is used |  | lower snake case names to UPPER_SNAKE env names | phone destinations an escalation may use |
+| `knowledge` | map | no |  | 3 to 64 characters of `[a-z0-9_]` | folders of documents a tool can search |
+| `agents` | map | yes |  | one or more lower snake case names | agent prompts, models, and callable names |
+| `tasks` | map | no |  | lower snake case names | delegated steps |
+| `task_groups` | map | no |  | lower snake case names | ordered task sequences |
+| `delegates` | map | no |  | lower snake case names | steps that run a task or task group, then return |
+| `handoffs` | map | no |  | lower snake case names | agent to agent, and never returns |
+| `escalations` | map | no |  | lower snake case names | agent to a person |
+| `tools` | list of strings | no |  | loaded tool file names | tool files to load |
+| `conversation` | object | no |  | keys below | greeting, interruption, inactivity, and limits |
+| `tracing` | object | no |  | `provider: langfuse` or `provider: coval` | tracing provider |
+| `channels` | map | yes |  | one or more channel definitions | how people reach the agent |
+| `capacity` | object | for telephony or code targets |  | positive values; constraints below | traffic estimate |
 
 ## `name`
 
@@ -172,6 +195,8 @@ Which fields are legal depends on the section:
 | `pace` | `turn`: `snappy`, `balanced`, or `patient`. How quickly the agent decides the caller has finished. Sets the ceiling on a turn, and the floor when `endpointing_delay` is absent. Defaults to `balanced`. No per-target override |
 | `endpointing_delay` | `turn`: a positive duration, the window of silence before the caller counts as finished. The floor on every turn, and only the floor. LiveKit refuses under `250ms` |
 | `fallback` | `think`, `listen` |
+| `prompt_suffix` | `think`: literal text appended to every prompt this binding sends, up to 512 characters, no `{{variables}}`. A per-target override cannot name a different value. See [Context Router](/optimization/context-router) |
+| `agent_id`, `upstream` | `think`, and only on a binding routed through the SLNG Context Router; refused on any other binding. See [Context Router](/optimization/context-router) |
 
 `pace` and `endpointing_delay` are the two turn-timing settings and they do
 different jobs: the pace sets the ceiling on a turn, the duration sets only the
@@ -187,7 +212,7 @@ each becomes on each target.
 | `language` | BCP-47 tag such as `en` or `en-US` |
 | `endpoint_env` | UPPER_SNAKE environment variable name for a custom endpoint |
 | `placement` | `api` or `local`; when omitted, `provider: local` means local and another named model means API |
-| `fallback` | names in the same section; chains are flattened and cycles are refused |
+| `fallback` | names in the same section; chains are flattened and cycles are refused. See [Reasoning model](/models/llm) and [Speech to text](/models/stt) |
 | `description` | author note |
 
 Entries you do not reference are legal alternates.
@@ -224,9 +249,38 @@ variables:
 | `type` | `string`, `number`, `integer`, `boolean` |
 | `source` | `call_start`, `conversation`, or a system source |
 | `default` | any value of the declared type |
+| `confirm` | the step that must hear the caller agree before anything acts on this value |
 | `description` | a note, also read by the model for `conversation` variables |
 
 Full detail on [variables](/reference/variables).
+
+## `timezone`
+
+```yaml
+timezone: Europe/Madrid
+```
+
+An IANA zone name. Required before a [`prefetch:`](#prefetch) entry reads the
+clock: a container's own clock is UTC, so a business elsewhere needs this to
+date a call correctly. Package level, because it is a fact about the business
+rather than about one target.
+
+## `prefetch`
+
+```yaml
+prefetch:
+  - name: today
+    clock: date
+    assign:
+      - booking_date: result.date
+```
+
+An ordered list of facts resolved once per call, before the greeting: the
+date, a fact the call itself carries, or the result of one already-declared
+read-only tool. Entries resolve top to bottom, and one that cannot resolve is
+skipped rather than failing the call. Full field reference, the ordering rule,
+and what an empty value does to a prompt:
+[variables](/reference/variables#prefetch-resolves-a-value-before-the-call-starts).
 
 ## `secrets`
 
@@ -291,8 +345,8 @@ held in memory, so content is fixed until the next compile.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| map key | yes | — | 3 to 64 characters of `[a-z0-9_]`. It is also the folder name inside the build and the search collection's name |
-| `documents` | yes | — | folder path relative to the package root, holding `.txt`, `.md` or `.pdf` files |
+| map key | yes |  | 3 to 64 characters of `[a-z0-9_]`. It is also the folder name inside the build and the search collection's name |
+| `documents` | yes |  | folder path relative to the package root, holding `.txt`, `.md` or `.pdf` files |
 | `embed` | no | `openai` | embedding service |
 | `mode` | no | `hybrid` | `meaning` (vector), `keyword` (BM25), or `hybrid` |
 | `chunk_size` | no | `90` | passage size in tokens, 1 to 2048 |
@@ -335,7 +389,10 @@ agents:
 | `instructions` | path to a Markdown prompt in the package |
 | `model` | a `models.think` entry name |
 | `voice` | a `models.speak` entry name |
-| `tools` | names this agent may call: loaded tool files and controls; definitions never go here |
+| `tools` | tool files this agent may call; definitions never go here |
+| `delegates` | entries under [`delegates:`](#delegates-handoffs-escalations) this agent may trigger |
+| `handoffs` | entries under [`handoffs:`](#delegates-handoffs-escalations) this agent may trigger |
+| `escalations` | entries under [`escalations:`](#delegates-handoffs-escalations) this agent may trigger |
 
 ## `tasks`
 
@@ -359,7 +416,8 @@ tasks:
 | Field | What it is |
 |---|---|
 | `instructions` | the task's own prompt file |
-| `tools` | names this task may call: loaded tool files and controls; definitions never go here |
+| `tools` | tool files this task may call; definitions never go here |
+| `handoffs` | entries under [`handoffs:`](#delegates-handoffs-escalations) this task may trigger |
 | `model` | optional override of the thinking model |
 | `result` | the typed result returned by the whole task, not a tool's `output` schema |
 | `context` | what the task sees, see below |
@@ -383,7 +441,7 @@ time.
 
 ### `context`
 
-Used by tasks and by transfer controls.
+Used by tasks and by handoffs.
 
 | Field | Values | Notes |
 |---|---|---|
@@ -391,7 +449,7 @@ Used by tasks and by transfer controls.
 | `max_messages` | a positive number | legal with `last_n` only |
 | `summarizer` | a model entry name | legal with `summary` only |
 | `include_tool_calls` | `true` or `false` | whether tool calls travel too |
-| `variables` | `all` or a list of names | transfer controls only |
+| `variables` | `all` or a list of names | handoffs only |
 
 ## `task_groups`
 
@@ -542,13 +600,13 @@ exactly one execution block says how it runs.
 | `interruption` | `provider_default`, `continue`, `cancel` |
 | `effect` | `returns_data`, `ends_conversation` |
 | `announce` | one fixed sentence spoken as the tool starts; no `{{variables}}`; legal on `webhook`, `local` and `knowledge`; absent means nothing is spoken |
-| `read_only` | `true` declares that this tool writes nothing, which [`prefetch:`](/reference/variables#prefetch-resolving-a-value-before-the-call-starts) requires before it may run the tool. **A promise, not a guarantee: the compiler cannot check it.** Legal on `webhook` and `local`; declaring it where no pre-fetch names the tool is a warning |
+| `read_only` | `true` declares that this tool writes nothing, which [`prefetch:`](/reference/variables#prefetch-resolves-a-value-before-the-call-starts) requires before it may run the tool. **A promise, not a guarantee: the compiler cannot check it.** Legal on `webhook` and `local`; declaring it where no pre-fetch names the tool is a warning |
 
 | Execution block | Fields |
 |---|---|
-| `local` | optional `handler`; omitted means `tools/<tool-name>.py` |
-| `webhook` | required `url_env`; optional `path` and `auth`; a non-empty path starts with `/` |
-| `mcp` | required `url_env`; optional `transport`, `auth`, and non-empty unique `tools` entries |
+| `local` | optional `handler`; omitted means `tools/<tool-name>.py`. Optional `dependencies`, exact `name==version` pins for a SLNG per-tool environment; refused on LiveKit and Pipecat, which build one dependency list for the whole project |
+| `webhook` | `url_env` or `base_url`, at least one: `url_env` to compile on LiveKit or Pipecat, `base_url` (a literal `https` host) to deploy on SLNG; optional `path` and `auth`; a non-empty path starts with `/` |
+| `mcp` | required `url_env`; optional `server` (the platform's name for it, when it differs from this tool's name), `transport`, `auth`, and non-empty unique `tools` entries |
 | `builtin` | required `id`; optional `instructions` |
 | `knowledge` | required `base`, naming an entry in [`knowledge:`](#knowledge) |
 | `client` | no fields; write `client: {}`; gated on every target today |
@@ -702,9 +760,9 @@ The compiler turns these into worker and quota numbers, marked
 ## Reachability
 
 Models are a palette, so an unused model entry is legal. Other declarations must
-be reachable from `entry_agent`. An unused control, destination, tool, task,
-task group, or non-entry agent is a build error. Attach it to the reachable graph
-or remove it.
+be reachable from `entry_agent`. An unused delegate, handoff, escalation,
+destination, tool, task, task group, or non-entry agent is a build error. Attach
+it to the reachable graph or remove it.
 
 ## Where to go next
 

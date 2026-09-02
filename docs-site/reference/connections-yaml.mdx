@@ -22,9 +22,9 @@ environment:
 
 | Key | Type | Required | Default | Allowed values | Meaning |
 |---|---|---|---|---|---|
-| `transport` | string | yes | — | `sip`, `connector`, `cloud-websocket`, `daily-sip`, as allowed by the target provider | mechanism that carries the call |
-| `carrier` | string | yes | — | `twilio`, `telnyx`, or `plivo`, as allowed by the route | carrier account behind the route |
-| `environment` | map of strings | when the route needs account values | — | route keys listed below to UPPER_SNAKE env names | names holding the route's account values |
+| `transport` | string | yes |  | `sip`, `connector`, `cloud-websocket`, `daily-sip`, as allowed by the target provider | mechanism that carries the call |
+| `carrier` | string | yes |  | `twilio`, `telnyx`, or `plivo`, as allowed by the route | carrier account behind the route |
+| `environment` | map of strings | when the route needs account values |  | route keys listed below to UPPER_SNAKE env names | names holding the route's account values |
 
 The target names the file and says nothing else about telephony:
 
@@ -212,10 +212,10 @@ Warnings:
 ## Where to go next
 
 <Columns cols={2}>
+  <Card title="Variables" icon="braces" href="/reference/variables">
+    Where a caller ID or a lookup result becomes a value the agent can use.
+  </Card>
   <Card title="Phone calls" icon="phone" href="/telephony/overview">
     What each route means, and what the transport decides.
-  </Card>
-  <Card title="Get your Twilio details" icon="key" href="/telephony/twilio">
-    Which console value fills which name.
   </Card>
 </Columns>
