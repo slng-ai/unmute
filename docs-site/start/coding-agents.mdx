@@ -7,8 +7,8 @@ If you use a supported coding assistant, Unmute ships an optional skill that
 teaches it how to write an Unmute package: the schema, the model catalog, the
 tool kinds, how to shape a prompt for speech, and what each target refuses.
 Install it once, then describe the agent you want in a sentence and check what
-comes back. Setup takes about a minute. Getting to a voice you can talk to
-takes about fifteen.
+comes back. Setup is quick, and talking to the agent it builds takes a bit
+longer.
 
 An assistant is not required. If you would rather write the YAML yourself, the
 [quickstart](/start/quickstart) is the same journey by hand, and it is the
@@ -32,6 +32,7 @@ unmute skill install
     references/conversation.md       written
     references/deploy.md             written
     references/examples.md           written
+    references/latency.md            written
     references/models.md             written
     references/orchestration.md      written
     references/package.md            written
@@ -240,7 +241,7 @@ one agent, browser audio, local tools, no phone number.
     compiled salon/build/livekit
     building and starting the container...
 
-      ▸ http://localhost:8765/?agent=livekit
+      ▸ http://localhost:8765/?agent=salon-livekit
         ctrl-c to stop  ·  logs: salon/build/livekit/dev.log
     ```
 
@@ -286,7 +287,7 @@ tell you what it chose.
 
 | You want | Say | It should tell you |
 |---|---|---|
-| a tool | what it does, where the data comes from, and whether there is an HTTP endpoint already | which of the four kinds it chose, and why |
+| a tool | what it does, where the data comes from, and whether there is an HTTP endpoint already | which of the five kinds it chose, and why |
 | an ordered workflow | which stages must happen in order and which parts are server-directed | which tasks and task groups it chose, and what context the steps share |
 | a second agent | what each one owns, and when control moves between them | what context crosses the handoff, and whether the handoff comes back |
 | a phone number | inbound, outbound, or both, and which carrier you have | which route, and what that route cannot do |
@@ -311,7 +312,7 @@ Six things that separate a good session from a frustrating one.
 2. **Never edit anything under `build/`.** The next compile overwrites it.
    Change the package and compile again.
 3. **Name the target, or one gets picked for you.** Pipecat and LiveKit both
-   generate and run, and they refuse different things.
+   compile to a project you run, and they refuse different things.
 4. **Trust the references over what the assistant remembers, and `unmute
    validate` over both.** Model memory of a fast moving schema is the single
    biggest source of confident wrong answers.
@@ -324,11 +325,14 @@ Six things that separate a good session from a frustrating one.
 ## Where to go next
 
 <Columns cols={2}>
+  <Card title="How Unmute works" icon="settings" href="/start/how-unmute-works">
+    What the compiler did between the package and that container.
+  </Card>
   <Card title="Orchestration" icon="git-branch" href="/build/orchestration/overview">
     Tasks, task groups, and handoffs.
   </Card>
   <Card title="Tools" icon="wrench" href="/build/tools/overview">
-    The four active kinds in full.
+    The five active kinds in full.
   </Card>
   <Card title="Telephony" icon="phone" href="/telephony/overview">
     Put the agent on a real phone number.

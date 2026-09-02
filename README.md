@@ -165,8 +165,10 @@ One directory per target, under `build/`.
 build/livekit/
 ├── agent.py             # the agent
 ├── tools/               # your local Python handlers, copied
+├── dev_metrics.py       # per-turn timings, read by unmute dev
 ├── pyproject.toml       # pinned dependencies
 ├── Dockerfile
+├── .dockerignore
 ├── compose.dev.yaml
 ├── .env.example         # exactly the variables you supply
 ├── README.md            # the runbook for this build
