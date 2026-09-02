@@ -6,6 +6,21 @@ description: "Tools, tasks, task groups, or a second agent. Which split to reach
 You have four ways to organize an agent. Each one owns a different boundary.
 Choose from the brief before you write files.
 
+## Compare the shapes
+
+Every shape trades something for control. This table is the whole trade, side
+by side.
+
+| | Holds the session | Context the next step sees | Cost in round trips | A caller's correction | Best for |
+|---|---|---|---|---|---|
+| One agent with tools | the agent, for the whole call | the whole conversation | none beyond the tool call itself | ask again, same turn | one job, one set of rules |
+| Task | the task, until it returns | what `context:` gives it | 2 to enter, the same as one tool call | delegate again | a step with a definite, typed answer |
+| Task group | the group, across its steps, until it returns | shared across steps, or isolated per step, by `context_scope` | 2 to enter the group, once, however many steps run inside | revisit a step inside the group | an order that has to hold, with shared context |
+| Handoff | the receiving agent, for good | only what `context:` carries over | 1 to leave, plus the receiving agent's forced opening turn, every time control changes hands | another handoff back | two roles with genuinely different rules or permissions |
+
+These are not exclusive. One agent can delegate a task in one phase and hand
+off in another.
+
 ## Choose the native shape
 
 | The brief needs | Native shape | Do not invent |
@@ -25,7 +40,7 @@ A server-directed sequence is dynamic, even when its response calls the field
 the real domain tools. If fixed stages surround the loop, those stages can be
 tasks in a task group. The server owns its dynamic order.
 
-## Do not rebuild the orchestrator
+## Let the compiler hold the state
 
 - Do not create current-step, happy-path, completion, or routing variables.
   Tasks, groups, handoffs, and an external server already hold that state.
@@ -55,58 +70,7 @@ when one *value* must be there before one step runs. The second is cheaper: no
 extra step, no extra prompt site, and nothing the caller has to be spoken
 through.
 
-## What each shape costs
-
-<Columns cols={2}>
-  <Card title="One agent and tools" icon="bot">
-    **Control:** stays with the agent for the whole call.
-
-    **Context:** the whole conversation.
-
-    **Correction:** ask again.
-
-    **Cost:** the prompt carries everything, and grows.
-  </Card>
-  <Card title="Task" icon="list-checks">
-    **Control:** returns when the task finishes.
-
-    **Context:** what `context:` gives the task.
-
-    **Correction:** delegate again.
-
-    **Cost:** one more prompt and tool list to keep straight.
-  </Card>
-  <Card title="Task group" icon="list-ordered">
-    **Control:** returns when the group finishes.
-
-    **Context:** shared across the steps in the group.
-
-    **Correction:** revisit a step inside the group.
-
-    **Cost:** an order you have to be sure about.
-  </Card>
-  <Card title="Handoff" icon="arrow-right-left">
-    **Control:** leaves for good.
-
-    **Context:** only what `context:` carries over.
-
-    **Correction:** another handoff back.
-
-    **Cost:** nothing returns, so there is no result or automatic way back. The
-    receiving agent speaks on arrival, so every handoff costs the caller a turn.
-  </Card>
-</Columns>
-
-These are not exclusive. One agent can delegate a task in one phase and hand off in
-another.
-
-For a combined release-readiness package, see
-[`examples/salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge).
-It uses a guarded delegate, a typed task, one handoff, and a human transfer in
-one inbound-only project. Two agents, because the second one holds a permission
-and a document set the first must not.
-
-## Delegate or transfer
+## Delegate or hand off
 
 The difference is whether control comes back. That is why they are two blocks
 rather than one block with a kind field: which block a thing is written in is
@@ -157,13 +121,45 @@ person: someone who asks for a manager should not be interviewed first.
 | where context is set | `context:` on the task | `context:` on the handoff entry |
 | `requires:` | yes | yes |
 
+## Choosing shapes for a booking flow
+
+A salon booking agent runs into all four decisions in one package. Each lands
+on a different shape, and together they are
+[`examples/salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge).
+
+**Look up services and answer questions.** One job, one set of rules: a single
+agent with tools handles it. `concierge` calls `look_up_salon_info` directly,
+no delegation needed.
+
+**Confirm who is calling before anything personal.** A bounded step with a
+definite, typed answer: a task. The `verify_customer` delegate runs the
+`customer_verification` task and assigns its result to `customer_phone`, and
+`manage_booking` waits behind `requires: customer_phone` until it lands.
+
+**Would identifying the caller, checking availability, then confirming ever
+have to run in that exact order, every time?** That is the task-group
+question, and here the answer is no: identification only has to happen before
+booking starts, not before browsing services, so `requires:` on one delegate
+is enough. A task group would buy nothing extra, and the package declares
+none.
+
+**Hand a complaint to someone who needs a different tool list and a refund
+policy the booking agent should never see.** A different role with different
+permissions, not another step in the same role: a handoff. `to_complaints`
+moves the caller to `complaint_specialist`, who alone holds `record_complaint`
+and the refund knowledge base, with `to_concierge` carrying the reverse
+direction.
+
+What is left over goes to a person. A caller who asks for a manager reaches
+`to_manager`, an escalation, not any of the four shapes above.
+
 ## Where to go next
 
 <Columns cols={2}>
   <Card title="Run it locally" icon="play" href="/dev/overview">
-    The dev loop in depth: ports, logs, and picking a target.
+    The dev loop: ports, logs, and picking a target.
   </Card>
-  <Card title="Telephony" icon="phone" href="/telephony/overview">
-    Put the agent on a phone number.
+  <Card title="Optimize the build" icon="gauge" href="/optimization/overview">
+    The settings that cut round trips and speed up a call.
   </Card>
 </Columns>

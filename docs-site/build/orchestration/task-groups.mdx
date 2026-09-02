@@ -6,6 +6,15 @@ description: "Run several tasks in a fixed order, sharing one context, and get o
 A task group is an ordered sequence of tasks. The order is a guarantee, not a
 request in a prompt.
 
+Use a task group instead of the other shapes when:
+
+- several steps must run in a fixed order, and a prompt asking for that order
+  is not a guarantee.
+- the steps should share what they have learned so far, rather than each
+  starting from its own prompt with nothing carried over.
+- control should still return to the caller's original agent once every step
+  finishes, the same as a single [task](/build/orchestration/tasks) does.
+
 The YAML on this page is one worked group: identify the customer, select the
 appointment, finalize it. No shipped example uses a task group, so copy the
 shape from here rather than looking for a package.

@@ -9,6 +9,16 @@ to the agent that called it. Its internal turns stay out of the agent's context,
 while the completed delegate call stays there so the same request does not run
 twice.
 
+Use a task instead of the other shapes when:
+
+- you want control, and a typed result, back. A
+  [handoff](/build/orchestration/handoffs) never returns either.
+- the work is one bounded step, not a sequence with an order that has to
+  hold. Several such steps in a fixed order are a
+  [task group](/build/orchestration/task-groups) instead.
+- the step needs its own scoped tool list, kept off the rest of the agent's
+  tools rather than folded into one longer prompt.
+
 The YAML on this page is one worked pair of tasks. For a shipped package that
 does it, read `examples/salon-concierge`: a verification task and a booking
 task, one of them behind a `requires:` guard.
@@ -41,6 +51,10 @@ different from a longer prompt: the outcome has a shape.
 
 Every task, including a task inside a group, needs a non-empty `result:` and `context.history`.
 
+A task can also declare its own `model:`, naming a different reasoning
+profile for that one step alone. Leave it out and the task runs on the agent's
+own model.
+
 **Task `result:` and tool `output:` are different contracts.** Tool contracts
 live in `tools/<name>.yaml`; the task's `tools:` list contains names only. The
 task result describes the outcome returned after all of its tool calls. Keep
@@ -49,7 +63,8 @@ schema by default.
 
 `context: history: full` gives the task the conversation so far, which is
 usually what you want, because the caller has already said something the task
-needs.
+needs. `history:` is one of `full`, `messages`, `last_n`, `summary`, or
+`reset`; `last_n` also needs `max_messages` alongside it.
 
 ## Delegate to it
 
@@ -82,6 +97,24 @@ variables:
   customer_name:
     type: string
 ```
+
+A delegate can also carry `announce:`, one fixed line spoken as the step
+starts, so the two model requests between the caller finishing and the task's
+first word are not silence. It never speaks when the step is held back by
+`requires:`: a caller who hears "let me pull up the diary" and is then asked
+for a phone number has been told something untrue.
+
+```yaml agent.yaml
+delegates:
+  manage_booking:
+    task: booking
+    when: The caller wants to create, modify, or cancel a booking.
+    announce: Let me pull up the diary.
+    requires:
+      - customer_phone
+```
+
+`examples/salon-concierge` declares it exactly this way on `manage_booking`.
 
 ## Guarding a step
 
@@ -211,9 +244,9 @@ unmute validate examples/salon-concierge
 unmute dev examples/salon-concierge --target pipecat
 ```
 
-Ask to book a haircut. The agent delegates to `customer_verification` first, and
-only then to the booking task, which is held back until the caller is
-identified.
+Ask to book a haircut. The agent calls the `verify_customer` delegate first,
+and only then `manage_booking`, which is held back by `requires:
+customer_phone` until the caller is identified.
 
 ## Where to go next
 

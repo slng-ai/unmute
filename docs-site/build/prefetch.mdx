@@ -17,9 +17,10 @@ use what came back. The caller waits through both, in silence.
 
 A pre-fetch has already run by the time the caller says hello. Nobody waits.
 
-Our own salon agent used to ask people to read out a phone number the phone
-network had already given it. It also called one tool to ask today's date, then a
-second one to check the diary. Both were questions it already had the answers to.
+The salon-concierge example agent used to ask people to read out a phone
+number the phone network had already given it. It also called one tool to ask
+today's date, then a second one to check the diary. Both were questions it
+already had the answers to.
 
 ## What you can fetch
 
@@ -187,30 +188,15 @@ conversation.
 
 ## What happens when there is nothing to fetch
 
-This is common. Your own machine has no phone network. Callers hide their number.
-Your lookup will not know a first-time customer.
+This is common. Your own machine has no phone network. Callers hide their
+number. Your lookup will not know a first-time customer. The entry is
+skipped, so is anything later that needed its answer, and the call carries on
+with the variables' defaults.
 
-The entry is skipped, and so is anything later that needed its answer. The
-variables keep their defaults and the call carries on as normal.
-
-So write your prompts to still make sense when the value is empty. An empty
-variable prints nothing at all.
-
-<Tip>
-  Write the sentence for the empty case first. Then check it still sounds right
-  once the value is there. The other way round gives you "Your number is ." on
-  every call that skipped.
-</Tip>
-
-A pre-fetch can never break a call. There is a time limit, and if a lookup is too
-slow or hits an error the call goes ahead without that value. Every entry writes
-one log line:
-
-```text
-prefetch today: resolved booking_date=2026-09-01
-prefetch caller: skipped, the call carries no from_number
-prefetch profile: skipped, customer_phone is empty
-```
+A pre-fetch also never breaks a call outright: it runs under a time limit and
+gives up quietly on an error. [Deciding what to pre-fetch](/optimization/prefetch)
+covers writing a prompt that still reads well with the value empty, and how to
+read the one log line each entry leaves.
 
 ## Try it
 
@@ -234,7 +220,7 @@ happen in production.
 
 <CardGroup cols={2}>
   <Card title="Deciding what to pre-fetch" icon="gauge" href="/optimization/prefetch">
-    Which lookups are worth moving earlier, and the traps we hit doing it.
+    Which lookups are worth moving earlier, and the traps to avoid doing it.
   </Card>
   <Card title="Variables reference" icon="file-code" href="/reference/variables">
     Every source, every rule, every error message.
