@@ -1,18 +1,3 @@
-# An MCP tool. The server must already be attached to your organisation: unmute
-# cannot create one, and there is no CLI command that does.
-#
-# `server:` names it, because the two names live in different namespaces. A
-# package tool name is lowercase snake_case; a server name is whatever somebody
-# typed in a dashboard, and real ones carry dashes and spaces. Without `server:`
-# the emitted reference would use this file's name and resolve to nothing.
-#
-# SLNG attaches one reference per exposed tool, so `tools:` is required here.
-# Leaving it out would mean "every tool this server offers", which SLNG has no
-# way to express and unmute refuses. This server offers 26; the agent gets 2.
-#
-# The names below come from the server's stored capability probe, not a live
-# call, so a server can list as healthy and still be unreachable. Read them with
-# `voiceai mcp tools firecrawl-mcp-2`.
 mcp:
   server: firecrawl-mcp-2
   url_env: FIRECRAWL_MCP_URL

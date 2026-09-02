@@ -1,7 +1,3 @@
-# One slng target. No version, no pins, no sdk_language and no connection:
-# all four describe a project this target does not emit, and all four are
-# refused by name.
-
 targets:
   slng:
     provider: slng

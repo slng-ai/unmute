@@ -1,6 +1,3 @@
-# The file name is the tool name, and `end_call` is one of the five names SLNG
-# keeps for its own curated capabilities. Writing it as a builtin is how you
-# reach that capability, so this spelling is correct rather than a collision.
 description: End the call when the caller is finished or says goodbye.
 
 builtin:

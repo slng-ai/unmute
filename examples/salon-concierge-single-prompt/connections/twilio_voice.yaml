@@ -1,4 +1,3 @@
-# Pipecat Cloud inbound and cold-transfer route through the Twilio REST account.
 transport: cloud-websocket
 carrier: twilio
 environment:
