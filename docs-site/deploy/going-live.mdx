@@ -3,14 +3,17 @@ title: "Going live"
 description: "From a generated build to production: what the compiler gives you and what stays yours."
 ---
 
-This page is about the **code targets**, pipecat and livekit. `unmute compile`
-hands you a project, and deploying it is deploying a normal Python container.
-Unmute is not involved at run time and is not a dependency of the thing you ship.
+You have an agent that works in the browser, tuned through `unmute dev`. This
+page takes it somewhere real. It covers the **code targets**, pipecat and
+livekit. `unmute compile` hands you a project, and deploying it is deploying a
+normal Python container. Unmute is not involved at run time and is not a
+dependency of the thing you ship. A phone route is finished on the Phone calls
+pages, once the agent is live.
 
 <Note>
 A **slng** target is the other shape: SLNG hosts the agent, so there is no
-container, no image and no platform step. One command does the whole thing — see
-[Deploy to SLNG](/deploy/slng).
+container, no image and no platform step. One command does the whole thing.
+See [Deploy to SLNG](/deploy/slng).
 </Note>
 
 ## What you get, what you provide
@@ -157,6 +160,11 @@ Route maturity is written to `build/<target>/compile-report.json`, under
 
 See [the compile report](/reference/cli/compile#the-report) for each field.
 
+<Card title="Phone calls" icon="phone" href="/telephony/overview">
+  Carrier setup, verifying a call, and transfers, once the agent above is
+  deployed.
+</Card>
+
 ## Changing the agent
 
 Edit the package, compile again, deploy again. Never edit `build/`.
@@ -197,8 +205,8 @@ the resource, so a new name means a new resource.
 
 A rename also strands the record that routes calls to the agent, and that record
 is different on every phone route. It is not part of the agent, so no deploy
-updates it: the number rings and nothing answers, while the agent reports healthy
-because it is — it was never dispatched.
+updates it: the number rings and nothing answers, while the agent reports
+healthy because it is. It was never dispatched.
 
 | Route | The record naming the agent | Walked in |
 |---|---|---|
@@ -216,6 +224,9 @@ because it is — it was never dispatched.
   </Card>
   <Card title="Pipecat Cloud" icon="cloud" href="/deploy/pipecat-cloud">
     The `pipecat` CLI path, in order.
+  </Card>
+  <Card title="Phone calls" icon="phone" href="/telephony/overview">
+    Carrier setup, verifying a call, and transfers, once the agent is deployed.
   </Card>
   <Card title="CLI reference" icon="terminal" href="/reference/cli/overview">
     Every command, flag, and exit code.

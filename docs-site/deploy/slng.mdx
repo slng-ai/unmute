@@ -27,10 +27,10 @@ passes, so a run that reports problems has changed nothing.
 </Warning>
 
 A builtin names a capability SLNG already owns, so the push has nothing to
-create first. In a package that is `builtin: end_call`. The other curated
-capabilities, voicemail detection, current date and time, and the caller's phone
-number, are attached to the agent in the SLNG dashboard rather than written in
-the package.
+create first. In a package that is a `builtin:` block naming `id: end_call`.
+The other curated capabilities, voicemail detection, current date and time,
+and the caller's phone number, are attached to the agent in the SLNG dashboard
+rather than written in the package.
 
 [`slng-support`](https://github.com/slng-ai/unmute/tree/main/examples/slng-support)
 is the working example and the shape to copy: one agent, one builtin, a greeting
@@ -194,9 +194,11 @@ apart instead of one internet apart.
 
 That is also why four `targets.yaml` keys are **refused by name** on this target
 rather than ignored: `version`, `pins`, `sdk_language` and `connection` each
-describe a generated project, and there is none. Five `agent.yaml` sections go
-the same way, including `turn:` and `tracing:`. `unmute validate` names each one
-and says what owns it instead, so a setting never disappears quietly.
+describe a generated project, and there is none. Other `agent.yaml` features go
+the same way, including `turn:` and `tracing:`. See
+[what a slng package may not ask for](/targets/slng#what-a-slng-package-may-not-ask-for)
+for the complete list. `unmute validate` names each one and says what owns it
+instead, so a setting never disappears quietly.
 
 <Card title="Regional infrastructure" icon="globe" href="/optimization/regional-infrastructure">
   What "one region" buys, measured.

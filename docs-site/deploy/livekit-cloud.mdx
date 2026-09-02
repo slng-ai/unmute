@@ -236,9 +236,9 @@ name in `.env.example` belongs there.
 
 ## Hosting it yourself instead
 
-The generated worker connects out to a LiveKit Server you run and needs no inbound
-ports. Build the `Dockerfile`, set `LIVEKIT_URL` and the API key pair to your
-server's values plus the provider keys from `.env.example`, and start it:
+The generated worker connects out to a LiveKit Server you run. Build the
+`Dockerfile`, set `LIVEKIT_URL` and the API key pair to your server's values
+plus the provider keys from `.env.example`, and start it:
 
 ```sh
 python -m livekit.agents start agent.py

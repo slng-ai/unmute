@@ -100,7 +100,7 @@ That becomes `[scaling] min_agents` in the manifest, so it applies to this deplo
 and every later one. On a phone route it is not a latency nicety: a cold start can
 outrun the session window, and then the call is never answered at all rather than
 answered slowly. See [Pipecat over Twilio](/telephony/pipecat-twilio#deploy-with-a-warm-instance)
-for the measurement.
+for what a cold start costs on that route.
 
 `pipecat cloud deploy --min-agents 1` does the same for one deploy, which is worth
 knowing for a quick test. It is not the durable answer, and neither is editing the
@@ -390,7 +390,7 @@ the same set.
   <Card title="Going live" icon="rocket" href="/deploy/going-live">
     The checklist both platforms share.
   </Card>
-  <Card title="LiveKit Cloud" icon="cloud" href="/deploy/livekit-cloud">
-    The same trip on the other platform.
+  <Card title="Phone calls" icon="phone" href="/telephony/overview">
+    Carrier setup, verifying a call, and transfers, once the agent is deployed.
   </Card>
 </Columns>
