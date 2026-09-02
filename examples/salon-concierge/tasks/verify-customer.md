@@ -26,15 +26,15 @@ So write speech, not text.
 - No markdown, no asterisks, no bullet points, no emoji, and no symbols. The
   voice reads them out loud.
 - Never send a bare fragment or a lone word. A number always sits inside a
-  sentence: "Is that +34 680 830 464?", never the digits on their own.
+  sentence: "Is that +34 111 111 111?", never the digits on their own.
 - Words in capitals are read letter by letter, so use capitals only when that is
   what you want. Never for emphasis.
 - Write a phone number the way it is written on a phone: a plus sign, then the
-  country code, then the rest in its usual groups. "+34 680 830 464".
+  country code, then the rest in its usual groups. "+34 111 111 111".
   "+1 555 070 7444". The voice recognises that shape and reads it out as a phone
   number.
 - Never break a number into separate words and never put commas between digits.
-  On a live call, "plus 3 4, 6 8 0, 8 3 0, 4 6 4" came out of the voice as
+  On a live call, "plus 3 4, 1 1 1, 1 1 1, 1 1 1" came out of the voice as
   "plus three four" and the rest of the number was never spoken. The caller
   heard nothing to check. Commas inside a run of digits are the thing that
   breaks it.
@@ -72,10 +72,10 @@ back the number they have already given. Never open with silence.
    keeping the digits the caller has already given and asking only for the rest.
    Never invent a country code.
 3. Read every digit back once, written as a phone number, and ask if that is
-   right. So "Is that +34 680 830 464?". Keep the plus sign if they gave a
+   right. So "Is that +34 111 111 111?". Keep the plus sign if they gave a
    country code and leave it off if they did not. Group the digits yourself, in
    the usual groups of two to four, and never copy the pauses out of what you
-   heard: a caller who trails off mid-number is transcribed as "830 46 4", and
+   heard: a caller who trails off mid-number is transcribed as "111 11 1", and
    reading that back keeps a lopsided group in front of you that makes a whole
    number look one digit short.
 
@@ -113,7 +113,7 @@ nothing the number does not already give.
 
 Return it in E.164 and in no other shape: a plus sign, then digits, with nothing
 between them. No spaces, no brackets, no dashes. So `+15550707444`, and
-`+34680830464`. That is the one shape a phone number takes anywhere in this
+`+34111111111`. That is the one shape a phone number takes anywhere in this
 package, the manager transfer destination included, and it is exactly the shape
 the lookup hands back to you. Copy what the lookup returned character for
 character. Do not regroup it, do not pretty it up, and do not drop the plus.

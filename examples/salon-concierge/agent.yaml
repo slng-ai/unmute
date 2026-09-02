@@ -209,7 +209,7 @@ models:
     reasoning:
       provider: slng
       model: gpt-5.6-luna
-      agent_id: optimized-salon-concierge-v12
+      agent_id: optimized-salon-concierge-v13
       upstream:
         provider: openai
       params:

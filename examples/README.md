@@ -19,7 +19,7 @@ provider request and a human conversation, not only the automated checks.
 | Package | Structure | Responsibility split |
 |---|---|---|
 | [`salon-concierge`](salon-concierge/) | Two agents, two tasks, handoffs, a guarded delegate, a cold manager transfer, tracing, and inbound phone routes | **Release-readiness example.** Verify once, manage stored bookings, answer or escalate complaints, cold-transfer to a manager, and inspect Langfuse traces. Every tool is local Python, so nothing remote has to be up before the greeting. Browser and inbound phone on two targets, one per telephony plane, no outbound. |
-| [`salon-concierge-single-prompt`](salon-concierge-single-prompt/) | One agent, one 13,978-character prompt, every tool on every turn, framework-default turn taking, the model's own endpoint | **The baseline, not a template.** The same salon as above with no tasks, no handoffs, no variables and no pre-fetch: the caller is asked for a number the carrier already supplied, the model calls a tool to find out what day it is, and it retypes the phone number into every tool call. Validates, compiles and runs on the same two targets, because a baseline that did not would prove nothing. |
+| [`salon-concierge-single-prompt`](salon-concierge-single-prompt/) | One agent, one prompt holding everything, every tool on every turn, framework-default turn taking, the model's own endpoint | **The baseline, not a template.** The same salon as above with no tasks, no handoffs, no variables and no pre-fetch: the caller is asked for a number the carrier already supplied, the model calls a tool to find out what day it is, and it retypes the phone number into every tool call. Validates, compiles and runs on the same two targets, because a baseline that did not would prove nothing. |
 | [`slng-support`](slng-support/) | One agent, one builtin tool, hosted by SLNG | **The hosted target, smallest form.** Produces no runnable project: `unmute deploy` compiles a deployment body and pushes it. Builtins only, so the push creates nothing — SLNG already owns every capability it names. No `unmute dev`. |
 
 The two salon packages are the ones with a telephony route, and they carry the
@@ -37,12 +37,11 @@ whole rule.
 
 ## Compile an example
 
-Build the CLI, then validate and compile both code targets for a package.
+Validate and compile both code targets for a package.
 
 ```sh
-make build
-bin/unmute validate examples/salon-concierge
-bin/unmute compile examples/salon-concierge
+unmute validate examples/salon-concierge
+unmute compile examples/salon-concierge
 ```
 
 The generated projects are in `examples/salon-concierge/build/livekit/` and
@@ -54,7 +53,7 @@ Keep credentials in the ignored repository-root `.env`, then run one target
 from the repository root. A package-level `.env` can override shared values.
 
 ```sh
-bin/unmute dev examples/salon-concierge --target pipecat
+unmute dev examples/salon-concierge --target pipecat
 ```
 
 Both salon packages set `tracing.provider: langfuse` and need

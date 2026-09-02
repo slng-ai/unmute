@@ -14,7 +14,7 @@ body:
         2. **The smallest thing that shows it.** If an `agent.yaml` of ten lines
            reproduces it, paste that instead of your whole package.
 
-        Docs: https://unmute.mintlify.app
+        Docs: https://unmute.ai
 
   - type: textarea
     id: what

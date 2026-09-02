@@ -26,7 +26,7 @@ mint a11y                                               # contrast and media alt
    structs in `internal/spec` and `internal/ir` are the schema truth,
    `internal/cli` is the command truth, and
    `internal/target/catalog_*.go` is the provider truth.
-2. **Every YAML snippet was run through `./bin/unmute validate`** in a scratch
+2. **Every YAML snippet was run through `unmute validate`** in a scratch
    package, and every example the site names validates and compiles.
 3. **There are three targets**: Pipecat and LiveKit Agents, which generate a
    Python project you run, and SLNG, which is hosted and generates a deployment
