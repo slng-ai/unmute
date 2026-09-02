@@ -141,6 +141,7 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | `unmute dev` actually sets that marker, and a stale value in a `.env` cannot beat it | `internal/cli/dev_test.go` (`TestDevChildEnv_marksTheRunAsLocal`) |
 | the agent logs one startup line naming provider, destination and whether a credential is present, one line per trace outcome, and no line claims a trace is not exported when the conversation route will export it | `internal/generate/coval_tracing_test.go` (`TestCovalTracingLogsWhatActuallyHappened`) |
 | no docs-site page states a version, by a literal or by rendering the release automation's marker | `internal/docsite/version_test.go` |
+| no docs-site page uses an em or en dash as punctuation outside a code fence, and none tells the reader how the author checked a fact ("we measured", "Measured on 20..", "Where this page's facts come from") | `internal/docsite/prose_test.go` |
 | the docs-site declares its Markdown surface, and the coding-agents page names all three endpoints | `internal/skill/markdown_surface_test.go` |
 | the changelog runs newest first, every entry carries a label, a version and its own release link, the newest matches the version snippet, and no entry keeps a heading, a dash or a commit hash | `internal/docsite/changelog_test.go` |
 | the runbook's vault table names exactly the entries the preflight checks | `internal/generate/slng_requirements_test.go` (`TestSlngRequirementsIsWhatTheRunbookPrints`) |

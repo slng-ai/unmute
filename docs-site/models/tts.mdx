@@ -27,11 +27,9 @@ To keep synthesis compute in a world part or exact region, see
 <Info>
   Model ids and voice ids are forwarded to the vendor exactly as you write them.
   Unmute keeps no allowlist, so a typo surfaces as a provider error at run time.
-  `build/<target>/compile-report.json` records this on every binding as
-  `forwarded as-is, not validated`.
 </Info>
 
-## The SLNG models this repository uses
+## The SLNG models the scaffold and examples use
 
 | Where | `model:` | `voice:` |
 |---|---|---|
@@ -40,10 +38,10 @@ To keep synthesis compute in a world part or exact region, see
 
 The `slng/` prefix picks a model SLNG hosts itself, and an id without it reaches
 the same vendor model through SLNG as a proxy. For **listening** the two differ
-in speed by enough to matter, and [Speech to text](/models/stt) has the numbers.
-For speaking nobody has measured them against each other; the scaffold takes the
-proxied route here to match the transcriber, not because it is known to be
-faster.
+in speed by enough to matter, and [Speech to text](/models/stt) explains the
+gap. For speaking nobody has measured them against each other; the scaffold
+takes the proxied route here to match the transcriber, not because it is known
+to be faster.
 
 Those are the only exact ids the docs name, because they are the ones the examples
 run. The full SLNG catalog is at
@@ -90,6 +88,9 @@ this role at all.
 ## The difference between the two
 
 Pipecat has `openai`, LiveKit has `gemini`. Everything else matches.
+
+A `speak` entry cannot carry `fallback:`. That field is legal only on `think`
+and `listen` models; see [Reasoning model](/models/llm#fallback).
 
 ## Where to go next
 

@@ -68,8 +68,8 @@ slng: version 4 labelled "slng 2026-08-27T09:12:44.010Z"
 slng: deployed. Talk to it: voiceai agents web-sessions create 01998a7c-4a1b-7f2e-9c33-8d5e1b0f7a62 --file session.json
 ```
 
-Only a `slng` target is deployed. A livekit or pipecat target emits a project
-that somebody else's platform runs, so it is `unmute compile` plus that
+Only a `slng` target is deployed. A livekit or pipecat target compiles to a
+project that somebody else's platform runs, so it is `unmute compile` plus that
 platform's own deploy step. Deploying a package with no slng target names the
 block that would add one.
 
@@ -251,7 +251,7 @@ the dashboard page that fixes it:
   vault missing (2)
     ACME_BRAND
     REFUND_API_TOKEN
-    create them, then push again. a name that exists as a variable does not count — the platform's publish gate counts secrets only.
+    create them, then push again. a name that exists as a variable does not count: the platform's publish gate counts secrets only.
     https://app.slng.ai/vault/secrets
 
   sample missing (1)
@@ -298,6 +298,6 @@ why it is a flag rather than the default. Samples survive a recompile:
 
 ## Where to go next
 
-<Card title="The SLNG target" icon="cloud" href="/targets/slng">
-  What the compiler writes, and what SLNG refuses.
+<Card title="unmute dev" icon="play" href="/reference/cli/dev">
+  Run a package locally before you push it.
 </Card>

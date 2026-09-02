@@ -74,9 +74,11 @@ mint a11y                                               # contrast and media alt
 
 ## The structure
 
-Eleven top-level groups, 56 pages: Get started, Build the agent, Configuration
-files, Develop and test, Tracing, Phone calls, Targets and models, Optimization,
-Deploy, CLI, and Releases. Build the agent nests Tools and Orchestration; Phone
+Ten top-level groups, in the order the reader needs them: Get started, Build
+the agent, Run and observe, Optimization, Deploy, Phone calls, Targets and
+models, Configuration files, CLI, and Releases. The first six are the story:
+learn it, build it, run it, make it faster, ship it, put it on a phone. The
+last four are reference. Build the agent nests Tools and Orchestration; Phone
 calls nests Transfers; Targets and models nests Targets and Models. Releases
 holds the single `changelog` page.
 
@@ -100,6 +102,7 @@ Prose rots. These facts cannot:
 | `internal/target/providers_docsite_test.go` | `models/{stt,tts,llm}.mdx` list exactly the catalog's vendors per target per role, with SLNG first; and `models/turn-detection.mdx` carries no vendor list, because the `turn` role has no catalog entries (two tests) |
 | `internal/spec/tools_docsite_test.go` | `build/tools/overview.mdx` names exactly the execution blocks the `Tool` struct has |
 | `internal/docsite/version_test.go` | `snippets/unmute-version.mdx` holds one valid version for the release automation, and no page states a version, by a literal or by rendering the marker (two tests) |
+| `internal/docsite/prose_test.go` | no page uses an em or en dash outside a code fence, and no page tells the reader how the author checked a fact ("we measured", "Measured on 20..", "Where this page's facts come from", "this repository"); rules 4 and 5 above, held |
 | `internal/docsite/changelog_test.go` | `changelog.mdx` runs newest first, every entry has a label, a version and a link to its own release, the newest entry matches the version snippet, the insert marker survives, and no entry keeps a heading, an em or en dash, or a commit hash (five tests) |
 | `internal/skill/markdown_surface_test.go` | `docs.json` declares the contextual menu in order and states the two facts agents get wrong, and `start/coding-agents.mdx` names all three Markdown endpoints and the suffix rule (three tests) |
 

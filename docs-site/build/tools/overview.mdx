@@ -183,7 +183,8 @@ not to.
 
 | Block | Field | Required | Values and defaults |
 |---|---|---|---|
-| `webhook` | `url_env` | yes | UPPER_SNAKE name holding the base URL |
+| `webhook` | `url_env` | at least one of `url_env`, `base_url` | UPPER_SNAKE name holding the base URL; read by the code targets |
+| `webhook` | `base_url` | at least one of `url_env`, `base_url`; required on SLNG | literal `https://` URL; read by SLNG, which stores the URL in the tool body instead of an environment |
 | `webhook` | `path` | no | path beginning with `/`; may contain `{{variable}}` tokens |
 | `webhook` | `auth` | no | bearer or API-key authentication |
 | `local` | `handler` | no | package Python path; omitted means `tools/<tool-name>.py` |
@@ -194,8 +195,15 @@ not to.
 | `mcp` | `tools` | no | non-empty, unique server tool names; omitted means all tools. Required on slng, which attaches one reference per tool and has no "whole server" attachment |
 | `builtin` | `id` | yes | an id from the closed registry, listed on the [prebuilt tools](/build/tools/prebuilt) page |
 | `builtin` | `instructions` | no | instruction applied by the prebuilt as it runs |
-| `client`, `provider_hosted` | none | — | explicit empty block only |
+| `client`, `provider_hosted` | none | | explicit empty block only |
 | `knowledge` | `base` | yes | the name of a knowledge base declared in `knowledge:` in `agent.yaml` |
+
+A `webhook:` tool needs `url_env`, `base_url`, or both. Pipecat and LiveKit Agents
+read `url_env` from the environment at run time and never look at `base_url`.
+SLNG stores the URL in the tool body it pushes, so it reads `base_url` and
+never looks at `url_env`. A package that targets both writes both fields; each
+target reads only the one it needs. Full rules in
+[Webhook tools](/build/tools/webhook#the-block).
 
 ## Which fields the block allows
 
@@ -205,7 +213,7 @@ The contract fields are shared, with one exception that matters:
 |---|---|---|
 | `description` | yes, except on `builtin:` and `mcp:` | optional on `builtin:`, illegal on `mcp:`, legal everywhere else |
 | `input` | yes on tool contracts | illegal on `builtin:`, `mcp:` and `knowledge:`, required everywhere else |
-| `output` | no | illegal on `builtin:`, `mcp:` and `knowledge:`; author-side only elsewhere, not sent to the model, not included in the compile report, and not enforced at run time |
+| `output` | no | illegal on `builtin:`, `mcp:` and `knowledge:`; author-side only elsewhere, not sent to the model, not included in the compile report, and not enforced at run time on the code targets |
 | `inject` | no | `webhook:` and `local:` only; values must be scalars |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` and `knowledge:` |
@@ -218,6 +226,14 @@ A `knowledge:` file takes no `input`, `output`, `inject` or `effect` either: the
 tool asks for one string and returns passages, so there is nothing to describe and
 nothing to merge into. It does take `description` and `announce`, and you should
 write both.
+
+**SLNG is the one exception, and only for `local:`.** There the compiler turns
+`output:` into a pydantic `Output` class, and the generated handler returns
+`Output(**result)`, so a Python handler's return value is checked against it.
+A `webhook:` tool's `output:` stays documentation everywhere, SLNG included:
+SLNG proxies that request rather than running code of its own, so it has
+nothing to check the response against. Full story in
+[Python tools](/build/tools/python#the-rules-the-function-follows).
 
 ## The three behavior fields
 
@@ -338,11 +354,12 @@ name with an inline mapping of `description`, `input`, `output`, `local`, or
 
 **Task `result:` and tool `output:` are different contracts.** A tool's optional
 `output:` is an author-side description of one tool call. No generator sends it
-to the model, puts it in the compile report, or enforces it at run time today. A
-task's required `result:` is enforced and describes what the whole delegated task
-returns to its caller after any tool calls. It may select or combine tool data,
-so design it for what the caller needs instead of copying a tool output schema by
-default.
+to the model or puts it in the compile report, and the code targets never
+enforce it at run time; SLNG enforces it, and only for a `local:` tool's own
+handler. A task's required `result:` is enforced and describes what the whole
+delegated task returns to its caller after any tool calls. It may select or
+combine tool data, so design it for what the caller needs instead of copying a
+tool output schema by default.
 
 A file in `tools/` that the package level list does not name is not loaded at all,
 and nothing complains. If a tool you wrote never seems to be offered, check that

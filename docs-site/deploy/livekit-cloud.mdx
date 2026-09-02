@@ -107,9 +107,9 @@ lk agent update-secrets --secrets-file .env --overwrite  # replaces the whole se
 ```
 
 <Warning>
-  Every name must be a valid shell identifier: letters, digits, and underscores,
-  never starting with a digit. Unmute refuses a bad name before it generates the
-  project. LiveKit applies the same rule to any names added outside the package;
+  Every name must be UPPER_SNAKE: an uppercase letter, then only uppercase
+  letters, digits, and underscores. Unmute refuses a bad name before it writes
+  the project. LiveKit applies the same rule to any names added outside the package;
   those names must use only letters, numbers, and underscores too.
 </Warning>
 
@@ -158,7 +158,7 @@ bash telephony-setup.sh
 It creates an inbound trunk that claims the number and a dispatch rule that
 sends those calls to this agent. Run it after `lk agent create`, because the
 rule names the agent. It needs `jq` as well as `lk`, and running it again is
-safe. See [create the LiveKit records](/telephony/inbound-calls#create-the-livekit-records)
+safe. See [create the LiveKit records](/telephony/livekit-twilio#create-the-livekit-records)
 for the detail, and [the Twilio setup](/telephony/twilio) for the carrier half.
 
 ### Renaming the agent breaks that rule
@@ -228,7 +228,7 @@ new build.
 ## Verifying a phone route
 
 `lk agent status` reporting ready is not the finish line: see [a phone call is
-verified after you deploy](/telephony/overview#a-phone-call-is-verified-after-you-deploy).
+verified after you deploy](/telephony/overview#point-the-carrier-at-the-deployment).
 
 A call that rings forever usually means a declared secret never reached the
 platform. `lk agent secrets` lists what the deploy actually holds, and every
@@ -236,9 +236,9 @@ name in `.env.example` belongs there.
 
 ## Hosting it yourself instead
 
-The generated worker connects out to a LiveKit Server you run and needs no inbound
-ports. Build the `Dockerfile`, set `LIVEKIT_URL` and the API key pair to your
-server's values plus the provider keys from `.env.example`, and start it:
+The generated worker connects out to a LiveKit Server you run. Build the
+`Dockerfile`, set `LIVEKIT_URL` and the API key pair to your server's values
+plus the provider keys from `.env.example`, and start it:
 
 ```sh
 python -m livekit.agents start agent.py

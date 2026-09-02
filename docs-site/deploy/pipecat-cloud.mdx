@@ -100,7 +100,7 @@ That becomes `[scaling] min_agents` in the manifest, so it applies to this deplo
 and every later one. On a phone route it is not a latency nicety: a cold start can
 outrun the session window, and then the call is never answered at all rather than
 answered slowly. See [Pipecat over Twilio](/telephony/pipecat-twilio#deploy-with-a-warm-instance)
-for the measurement.
+for what a cold start costs on that route.
 
 `pipecat cloud deploy --min-agents 1` does the same for one deploy, which is worth
 knowing for a quick test. It is not the durable answer, and neither is editing the
@@ -323,7 +323,7 @@ still points at it.
 ## Verifying a phone route
 
 `status` reporting `ready` is not the finish line: see [a phone call is verified
-after you deploy](/telephony/overview#a-phone-call-is-verified-after-you-deploy).
+after you deploy](/telephony/overview#point-the-carrier-at-the-deployment).
 
 Two checks come before the call, and both are cheaper than dialling.
 
@@ -379,9 +379,9 @@ credentials and `PIPECAT_CLOUD_ORGANIZATION` are in that same group and belong i
 the same set.
 
 <Warning>
-  Every name must be a valid shell identifier: letters, digits, and underscores,
-  never starting with a digit. Unmute refuses a bad name before it generates the
-  project. Pipecat Cloud applies the same rule to names added outside the package.
+  Every name must be UPPER_SNAKE: an uppercase letter, then only uppercase
+  letters, digits, and underscores. Unmute refuses a bad name before it writes
+  the project. Pipecat Cloud applies the same rule to names added outside the package.
 </Warning>
 
 ## Where to go next
@@ -390,7 +390,7 @@ the same set.
   <Card title="Going live" icon="rocket" href="/deploy/going-live">
     The checklist both platforms share.
   </Card>
-  <Card title="LiveKit Cloud" icon="cloud" href="/deploy/livekit-cloud">
-    The same trip on the other platform.
+  <Card title="Phone calls" icon="phone" href="/telephony/overview">
+    Carrier setup, verifying a call, and transfers, once the agent is deployed.
   </Card>
 </Columns>

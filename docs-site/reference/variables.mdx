@@ -48,7 +48,7 @@ For an inbound LiveKit or Pipecat telephony channel, every `call_start` variable
 needs a default. There is no dispatch payload to supply an unsolicited incoming
 call before its greeting.
 
-## `prefetch:` — resolving a value before the call starts
+## `prefetch:` resolves a value before the call starts
 
 Some values are knowable before anybody speaks: today's date, the number the call
 came from, whatever a lookup keyed on that number returns. `prefetch:` resolves
@@ -139,7 +139,7 @@ naming the entry.
 Denied on the `slng` target: that platform owns session start, so there is no seam
 to resolve a fact in.
 
-## `confirm:` — a value the caller has to agree to
+## `confirm:` marks a value the caller has to agree to
 
 A fact that arrives from the carrier is a proposal, not a settled value. Somebody
 may be ringing from a friend's phone, or may hold a second account.
@@ -236,9 +236,9 @@ act on a number it never read back. The run would pass a path a real call fails.
 
 Declaring any `source: conversation` variable creates a tool named
 `update_variables` in the generated project. You do not write it, and you do
-not list it. The name is reserved: a package tool or control cannot also be named
-`update_variables`. The model calls it when the caller says something worth
-keeping.
+not list it. The name is reserved: a package tool, delegate, handoff, or
+escalation cannot also be named `update_variables`. The model calls it when
+the caller says something worth keeping.
 
 ## Passing a value into a tool
 

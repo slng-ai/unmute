@@ -36,8 +36,8 @@ recommends for Twilio:
 
 | Target | Transport | How the call arrives |
 |---|---|---|
-| `pipecat` | `cloud-websocket` | your number points at a static TwiML Bin whose stream goes to Pipecat Cloud |
 | `livekit` | `sip` | your number is attached to a Twilio Elastic SIP Trunk pointed at LiveKit SIP |
+| `pipecat` | `cloud-websocket` | your number points at a static TwiML Bin whose stream goes to Pipecat Cloud |
 
 Both deploy to a managed platform, so either one can take a real call once it
 is live. `pipecat` needs one console object, a TwiML Bin. `livekit` needs a
@@ -48,10 +48,10 @@ table](/telephony/overview#the-routes) lists what each transport can do.
 ## What you need
 
 - A Twilio account with a voice capable phone number.
-- For `pipecat`: [Pipecat Cloud](/deploy/pipecat-cloud) set up, and `uv` on
-  your PATH to install its CLI.
 - For `livekit`: [LiveKit Cloud](/deploy/livekit-cloud) set up and the `lk`
   CLI installed, or a LiveKit Server of your own.
+- For `pipecat`: [Pipecat Cloud](/deploy/pipecat-cloud) set up, and `uv` on
+  your PATH to install its CLI.
 - Model provider keys.
 
 Put the values in `examples/salon-concierge/.env`:
@@ -62,7 +62,6 @@ SLNG_API_KEY=...
 TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TWILIO_AUTH_TOKEN=your_auth_token
 TWILIO_PHONE_NUMBER=+15551234567
-PIPECAT_CLOUD_ORGANIZATION=your-org-slug
 SIP_TRUNK_HOSTNAME=your-trunk.pstn.twilio.com
 SIP_AUTH_USERNAME=your_trunk_username
 SIP_AUTH_PASSWORD=your_trunk_password
@@ -74,13 +73,14 @@ They are in this list because `agent.yaml` declares every name the package
 writes, and the generated agent checks that whole list before it takes a call. If
 you are only testing the `pipecat` target you can put any placeholder there. The
 [connections reference](/reference/connections-yaml) shows where each group of
-names comes from.
+names comes from, and [Get your Twilio details](/telephony/twilio) says which
+console value fills which name.
 
 <Warning>
-  Every environment variable name must be a valid shell identifier: letters,
-  digits, and underscores, never starting with a digit. A name like
-  `2FACTOR_API_KEY` would fail when a platform exports it, so Unmute refuses the
-  name during validation, before it deploys anything.
+  Every environment variable name must be UPPER_SNAKE: an uppercase letter,
+  then only uppercase letters, digits, and underscores. A name like
+  `2factor_api_key` fails both rules at once, so Unmute refuses it during
+  validation, before it deploys anything.
 </Warning>
 
 ## Deploy, then point the number at it
@@ -89,84 +89,28 @@ names comes from.
 unmute compile examples/salon-concierge
 ```
 
-For `pipecat`, follow [Pipecat Cloud](/deploy/pipecat-cloud): set the secret
-set, then `pipecat cloud deploy`. Declare
-[`warm_instances: 1`](/reference/targets-yaml#instances-held-ready) on the target
-first, or the first call can arrive before the container is listening. The generated
-`build/pipecat/README.md` prints the exact TwiML Bin markup, with your region and
-agent name already filled in; paste it into a TwiML Bin in the Twilio Console and
-point the number's voice configuration at it. [Pipecat over
-Twilio](/telephony/pipecat-twilio) is that route end to end: what the markup
-carries, why the warm instance is what makes the call answerable, and the three
-ways it goes quiet.
+Each route has its own page from here, because the carrier steps differ
+completely:
 
-For `livekit`, follow [LiveKit Cloud](/deploy/livekit-cloud) to deploy with `lk
-agent create`, then do the [Twilio Console
-steps](/telephony/twilio#set-up-the-livekit-sip-trunk-in-twilio-console) and the
-LiveKit records below. All three are required.
+- **`livekit`**: deploy with `lk agent create`, set up the Elastic SIP Trunk,
+  then run the generated script that creates the two LiveKit records. All three
+  are required. [LiveKit over Twilio](/telephony/livekit-twilio) is that route
+  end to end.
+- **`pipecat`**: set the secret set, deploy with a warm instance, then paste the
+  generated markup into a TwiML Bin and point the number at it.
+  [Pipecat over Twilio](/telephony/pipecat-twilio) is that route end to end.
 
 Each generated `build/<target>/README.md` is the runbook of record: it names
 your region, your agent, and your secret set.
-
-## Create the LiveKit records
-
-Setting up the trunk in Twilio gets the call as far as LiveKit. LiveKit then
-rejects it, because nothing in your project claims that number yet. Two records
-fix that, and your build generates both along with the script that creates them:
-
-```sh
-cd build/livekit
-bash telephony-setup.sh
-```
-
-| Record | What it does |
-|---|---|
-| inbound trunk | claims your phone number for this LiveKit project |
-| dispatch rule | sends calls on that trunk to your agent, one room per caller |
-
-Three things about the script are worth knowing:
-
-- **Run it after the agent exists.** The dispatch rule names the agent, so
-  `lk agent create` comes first.
-- **It needs `lk` and `jq` on your PATH.** It checks for both and names the
-  missing one before it creates anything.
-- **Running it again is safe.** It finds records by your phone number rather
-  than by an ID, so nothing has to be copied anywhere, and whatever already
-  exists is reused.
-
-Check what it made:
-
-```sh
-lk sip inbound list
-lk sip dispatch list
-```
-
-A number that no inbound trunk lists is a number LiveKit will not answer for.
 
 ## Call the number
 
 Call it. The agent answers and greets you. Speak, and it replies.
 
-## Later, when you redeploy
-
-An ordinary redeploy leaves all of this alone: the trunk, the rule, and the
-number keep working. Renaming the agent does not, because the dispatch rule
-names the old worker as a string and no deploy updates it. The number then rings
-and nothing answers, while the agent reports healthy — it was never dispatched.
-[Renaming the agent breaks that rule](/deploy/livekit-cloud#renaming-the-agent-breaks-that-rule)
-walks the swap; [changing the agent](/deploy/going-live#except-changing-its-name)
-lists the equivalent record on every other route.
-
-## One number, one target at a time
-
-A number attached to a SIP trunk ignores its voice configuration, so it cannot
-also point at a TwiML Bin. Take the number off the trunk to test the `pipecat`
-target, and follow the [Twilio Console steps](/telephony/twilio#set-up-the-livekit-sip-trunk-in-twilio-console)
-to put it back for the `livekit` target.
-
-If you want both routes live at once, [give each one its own
-number](/telephony/twilio#give-each-route-its-own-number). Two numbers cost less
-attention than swapping one.
+One number serves one route at a time: a number attached to a SIP trunk ignores
+its voice configuration, so it cannot also point at a TwiML Bin. If you want
+both routes live, [give each one its own
+number](/telephony/twilio#give-each-route-its-own-number).
 
 ## If the call does not arrive
 
@@ -182,56 +126,25 @@ attention than swapping one.
     and run again.
   </Accordion>
   <Accordion title="the deployed agent never answers">
-    Check `pipecat cloud agent status <agent-name>` or `lk agent status` first: a
-    deploy that is not `ready` never picks up the call. Then check that every
+    Check `lk agent status` or `pipecat cloud agent status <agent-name>` first:
+    a deploy that is not `ready` never picks up the call. Then check that every
     name in `.env.example` is actually in the secret set you deployed with.
   </Accordion>
-  <Accordion title="the call rings and drops with no agent, on livekit">
-    Work backwards: does `lk sip inbound list` show a trunk claiming your
-    number, does `lk sip dispatch list` show a rule for it naming this agent,
-    and does `lk agent status` show the agent up. A missing trunk or rule means
-    [the setup script](#create-the-livekit-records) has not run.
-  </Accordion>
-  <Accordion title="the call rings and rings, and nobody ever answers">
-    A LiveKit SIP call is answered when something in the room publishes audio,
-    so a job that dies before the agent starts speaking leaves the caller
-    listening to ringing until LiveKit gives up three minutes later.
-
-    The usual cause is a secret that is declared but not deployed. The generated
-    agent checks its phone environment the moment it sees a SIP caller, so a
-    missing name fails the job there, on a real call only, and never in the
-    browser dev loop. Compare the two lists:
-
-    ```sh
-    lk agent secrets
-    cat build/livekit/.env.example
-    ```
-
-    Every name in the second belongs in the first. Add what is missing to
-    `.env`, then `lk agent update-secrets --secrets-file .env`, which restarts
-    the agent.
-  </Accordion>
-  <Accordion title="the number never reaches livekit at all">
-    Check the trunk's **Origination** tab. The URI must be your project's SIP
-    address with `;transport=tcp`, and that host is your LiveKit project id
-    without its `p_` prefix, not the subdomain in `LIVEKIT_URL`. See
-    [pointing origination at LiveKit](/telephony/twilio#set-up-the-livekit-sip-trunk-in-twilio-console).
-  </Accordion>
 </AccordionGroup>
+
+Each route page has the failures that belong to that route alone: the LiveKit
+records and the trunk's origination on
+[LiveKit over Twilio](/telephony/livekit-twilio#if-the-call-does-not-arrive),
+the organisation slug and the cold start on
+[Pipecat over Twilio](/telephony/pipecat-twilio#three-different-ways-nothing-happens).
 
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="Outbound calls" icon="phone-outgoing" href="/telephony/outbound-calls">
-    Make the agent dial you.
-  </Card>
   <Card title="Get your Twilio details" icon="key" href="/telephony/twilio">
     Which console value fills which name.
   </Card>
-  <Card title="The dev loop" icon="play" href="/dev/overview">
-    Check the prompt, the tools, and the models in your browser first.
-  </Card>
-  <Card title="Transfers" icon="phone-forwarded" href="/transfers/overview">
-    Hand the caller to a person.
+  <Card title="LiveKit over Twilio" icon="phone" href="/telephony/livekit-twilio">
+    The `sip` route end to end.
   </Card>
 </Columns>

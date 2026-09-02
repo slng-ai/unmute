@@ -1,10 +1,12 @@
 ---
 title: "How Unmute works"
-description: "The four stages between your package and the Python project you deploy."
+description: "The four stages between your package and what each target runs."
 ---
 
-Unmute is a compiler. It reads your package, resolves it against one target,
-and writes a project. Nothing of Unmute is left in the project it writes.
+Unmute is a compiler for a declarative package. It reads the package, resolves
+it against one target, and writes what that target runs: a Python project for
+Pipecat or LiveKit Agents, a deployment body for SLNG. Nothing of Unmute is
+left in what it writes.
 
 ## The four stages
 
@@ -48,8 +50,10 @@ compiles the directory you are standing in:
 build/pipecat/
 ├── bot.py              # the agent
 ├── tools/              # your local handlers, copied
+├── dev_metrics.py      # per-turn timings, read by unmute dev
 ├── pyproject.toml      # pinned dependencies
 ├── Dockerfile
+├── .dockerignore
 ├── compose.dev.yaml
 ├── pcc-deploy.toml
 ├── .env.example        # exactly the variables you supply
@@ -61,43 +65,32 @@ build/pipecat/
 build/livekit/
 ├── agent.py            # the agent
 ├── tools/              # your local handlers, copied
+├── dev_metrics.py      # per-turn timings, read by unmute dev
 ├── pyproject.toml      # pinned dependencies
 ├── Dockerfile
+├── .dockerignore
 ├── compose.dev.yaml
 ├── .env.example        # exactly the variables you supply
 ├── README.md           # the runbook for this build
 └── compile-report.json
 ```
+
+```text SLNG
+build/slng/
+├── agent.json          # the deployment body unmute deploy pushes
+├── tools/              # one JSON body per tool
+└── README.md           # the runbook for this build
+```
 </CodeGroup>
 
-That project is a normal Python project. You can read it, run it, and deploy
-it. It does not import Unmute.
+A code target is a normal Python project. You can read it, run it, and deploy
+it. It does not import Unmute. On SLNG there is nothing to run yourself:
+`unmute deploy` pushes `agent.json` and SLNG runs the agent.
 
 <Warning>
   Treat `build/` as output. Edit the package and compile again. Anything you
   change inside `build/` is overwritten on the next compile.
 </Warning>
-
-## The compile report
-
-`unmute compile` writes what it decided to `build/<target>/compile-report.json`,
-next to the project it describes. The terminal itself only shows which files
-were written; the report is where you read the detail. Three kinds of entry
-matter.
-
-**Model bindings.** Unmute passes your model and voice strings through to the
-provider without checking them, and the report names the provider and model
-for every role, marked as forwarded and not validated.
-
-**Sizing.** Unmute turns your `capacity:` block into worker and quota numbers.
-Each one carries an `unbenchmarked` status and the date of the assumption it
-came from, so you know it is a starting point.
-
-**Telephony evidence.** A phone route's entry says how well each capability is
-proven, with the vendor document it was checked against.
-
-See [the compile report](/reference/cli/compile#the-report) for the exact
-shape of each field.
 
 ## Warnings never fail quietly
 
@@ -115,6 +108,6 @@ warning: livekit: LiveKit runs tool executions to completion; a per-tool interru
     Start the guided path with the smallest real agent.
   </Card>
   <Card title="Targets" icon="boxes" href="/targets/overview">
-    What a target is, and what each generated project looks like.
+    What a target is, and what each compiled project looks like.
   </Card>
 </Columns>

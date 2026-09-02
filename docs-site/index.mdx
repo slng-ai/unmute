@@ -1,62 +1,61 @@
 ---
 title: "Unmute"
-description: "Write one voice agent spec. Compile it to a Pipecat or LiveKit Agents project you own."
+description: "A declarative standard for voice agents. Describe the agent once, compile it to Pipecat, LiveKit Agents, or SLNG."
 sidebarTitle: "Overview"
 ---
 
-Unmute is a command line compiler for voice agents. You write one package of
-YAML and Markdown. Unmute turns it into a real Python project for the
-orchestrator you picked, and that project is yours to run and deploy.
+Unmute is a declarative standard for voice agents. You describe the agent
+once, in YAML and Markdown. The compiler turns that package into a native
+project for the target you pick: Pipecat, LiveKit Agents, or SLNG.
 
 ## The problem
 
 A voice agent is a small idea buried in a lot of plumbing. Speech in, a model
 that thinks, speech out, a way to end the call, a way to hand the caller to a
-person. Every orchestrator asks you to write that plumbing again, in its own
+person. Every framework asks you to write that plumbing again, in its own
 shape.
 
 So teams end up here:
 
 - The prompt, the tools, and the phone number live in the same file as the
   session setup, the audio pipeline, and the retry logic.
-- Changing the voice means reading orchestrator code.
-- Trying a second orchestrator means rewriting the agent.
+- Changing the voice means reading framework code.
+- Trying a second framework means rewriting the agent.
 - Nobody can answer "what does this agent actually do" without reading Python.
 
 ## What Unmute does
 
-Unmute splits the agent from the runtime.
+Unmute splits the agent from the code that runs it.
 
 You describe the agent once: who it is, which models it uses, which tools it
 can call, how it hands work to another agent, what happens on a phone call.
-That description is the package. It has no orchestrator code in it.
+That description is the package. Nothing in it belongs to one framework.
 
-Then you pick a target. Unmute compiles the package into a native project for
-that target: a Pipecat bot or a LiveKit Agents worker, with a Dockerfile, a
-`.env.example`, and a runbook. The generated project has no Unmute dependency
-at runtime. Unmute is not in the call path.
+Then you pick a target. A target is where the agent will run, and Unmute
+compiles the package into what that target expects:
+
+- **Pipecat** and **LiveKit Agents** are code targets. You get a Python
+  project with a Dockerfile, a `.env.example`, and a runbook. The project does
+  not import Unmute, and Unmute is not in the call path.
+- **SLNG** is a hosted target. You get a deployment body, `unmute deploy`
+  pushes it, and SLNG runs the agent.
 
 <Columns cols={2}>
-  <Card title="One spec" icon="file-code">
+  <Card title="One package" icon="file-code" href="/build/how-a-package-fits-together">
     `agent.yaml`, your prompts, your tool files. Read it and you know what the
     agent does.
   </Card>
-  <Card title="Many runtimes" icon="boxes">
-    The same package compiles to Pipecat and to LiveKit Agents. Same prompt,
-    same tools, same behavior.
+  <Card title="Three targets" icon="boxes" href="/targets/overview">
+    The same package compiles to Pipecat, to LiveKit Agents, and to SLNG. Same
+    prompt, same tools, same behavior.
   </Card>
 </Columns>
 
-<Info>
-  Need regional compute or data residency? Configure the worker, media, and
-  speech model separately. Start with [regional infrastructure](/optimization/regional-infrastructure).
-</Info>
+## What a package looks like
 
-## What a spec looks like
-
-An Unmute package keeps the portable agent in `agent.yaml`, its prompt in a
-Markdown file, and runtime choices in `targets.yaml`. The guided example shows
-the complete files, then explains each block where you first need it.
+An Unmute package keeps the agent in `agent.yaml`, its prompt in a Markdown
+file, and the target choices in `targets.yaml`. The guided path shows the
+complete files, then explains each block where you first need it.
 
 <Columns cols={2}>
   <Card title="Build your first agent" icon="bot" href="/build/your-first-agent">
@@ -69,14 +68,14 @@ the complete files, then explains each block where you first need it.
 
 ## Who it is for
 
-- Teams who ship voice agents and are tired of maintaining orchestrator code.
-- Teams who want to compare Pipecat and LiveKit Agents without writing the
-  agent twice.
-- Anyone who wants the agent's behavior reviewable in a pull request, in files
-  a non-Python reader can follow.
+- Teams who ship voice agents and want the agent's behavior in files a
+  reviewer can read, not in framework code.
+- Teams who want to compare Pipecat, LiveKit Agents, and SLNG without writing
+  the agent three times.
+- Anyone who wants what the agent does reviewable in a pull request.
 
-Unmute is not a hosted platform and not a runtime. It compiles ahead of time,
-hands you the project, and gets out of the way.
+Unmute itself is not a runtime. It compiles ahead of time and hands the result
+to the target: a project you run, or a deployment SLNG runs for you.
 
 ## Where to go next
 
@@ -88,7 +87,7 @@ hands you the project, and gets out of the way.
     From nothing to an agent you can talk to in your browser.
   </Card>
   <Card title="How Unmute works" icon="settings" href="/start/how-unmute-works">
-    The four stages between your package and the generated project.
+    The four stages between your package and what each target runs.
   </Card>
   <Card title="Build the agent" icon="graduation-cap" href="/build/your-first-agent">
     The guided path: one agent, then tools, then everything else.

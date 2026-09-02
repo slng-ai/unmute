@@ -72,7 +72,25 @@ deploy; see [phone calls](/telephony/overview) for what each route needs.
   **Verify a release archive**
 
   Each archive holds the binary, LICENSE, and README. Every release also has a
-  `checksums.txt`, its signature, and one SBOM per archive.
+  `unmute_<version>_checksums.txt` file, its signature, and one SBOM per
+  archive.
+
+  Check the archive against the checksum file:
+
+  ```sh
+  sha256sum -c --ignore-missing unmute_<version>_checksums.txt
+  ```
+
+  Check that this project's release workflow, and nobody else, signed the
+  checksum file:
+
+  ```sh
+  cosign verify-blob \
+    --bundle unmute_<version>_checksums.txt.sigstore.json \
+    --certificate-identity-regexp "^https://github\.com/slng-ai/unmute/\.github/workflows/release\.yml@.*$" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    unmute_<version>_checksums.txt
+  ```
 
   **Install with Go**
 

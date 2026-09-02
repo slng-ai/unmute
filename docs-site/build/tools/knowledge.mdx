@@ -7,6 +7,12 @@ You have policies, price lists, or manuals, and you want the agent to quote them
 rather than invent something close. Put the documents in a folder, name the folder
 in `agent.yaml`, and give an agent a tool that searches it.
 
+Reach for a knowledge base when the agent should quote your own documents
+instead of guessing, especially when a caller's words and your document's
+words differ, or a caller wants an exact string off a price list or a policy.
+An API you already have is a [webhook](/build/tools/webhook) instead: a search
+service is a network hop and a service to run, not a folder of documents.
+
 ```yaml agent.yaml
 knowledge:
   policies:
@@ -50,8 +56,8 @@ that folder.
 
 | Field | Required | Default | Rule |
 |---|---|---|---|
-| map key | yes | — | 3 to 64 characters of `[a-z0-9_]`. It becomes the search collection's name, and the folder name inside the build |
-| `documents` | yes | — | folder path relative to the package root |
+| map key | yes | | 3 to 64 characters of `[a-z0-9_]`. It becomes the search collection's name, and the folder name inside the build |
+| `documents` | yes | | folder path relative to the package root |
 | `embed` | no | `openai` | one of the [embedding models](#embedding-models) below |
 | `mode` | no | `hybrid` | `meaning`, `keyword`, or `hybrid` |
 | `chunk_size` | no | `90` | passage size in **tokens**, 1 to 2048 |
@@ -379,5 +385,11 @@ offering the closest thing it found.
 
 ## Where to go next
 
-- [Tools overview](/build/tools/overview) for the seven execution blocks
-- [Prebuilt tools](/build/tools/prebuilt) for the tools the runtime already has
+<Columns cols={2}>
+  <Card title="Orchestration" icon="git-branch" href="/build/orchestration/overview">
+    Split work between prompts when one agent stops being enough.
+  </Card>
+  <Card title="Tools" icon="wrench" href="/build/tools/overview">
+    Return to all seven execution blocks.
+  </Card>
+</Columns>

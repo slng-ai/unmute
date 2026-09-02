@@ -26,11 +26,9 @@ To keep transcription compute in a world part or exact region, see
 <Info>
   Model ids are forwarded to the vendor exactly as you write them. Unmute keeps no
   allowlist, so a typo surfaces as a provider error at run time.
-  `build/<target>/compile-report.json` records this on every binding as
-  `forwarded as-is, not validated`.
 </Info>
 
-## The SLNG models this repository uses
+## The SLNG models the scaffold and examples use
 
 | Where | `model:` |
 |---|---|
@@ -50,21 +48,13 @@ are one binding and one `SLNG_API_KEY`; the difference is who runs the model and
 how it is billed, which
 [docs.slng.ai](https://docs.slng.ai/execution-layer/byok) covers.
 
-For **listening**, the two are not equally fast, and the gap is larger than most
-settings on the optimization pages. Measured against the live bridge in August
-2026, time from end of speech to the final transcript:
-
-| route | median | samples |
-|---|---|---|
-| `deepgram/nova:3` | 280ms | 13 |
-| `slng/deepgram/nova:3-en` | 605ms | 16 |
-
-The caller waits through that on every turn, which is why the scaffold and the
-examples take the proxied route. Two caveats before you read too much into it:
-those sample counts are small, and a hosted id is not offered in every world
-part, so a region you need may decide this for you. Measure your own route rather
-than trusting the table, as
-[Optimizing your agent](/optimization/overview) says of every number on it.
+For **listening**, the two are not equally fast: routing through the hosted id
+adds a hop the proxied route skips, on the one leg the caller waits through on
+every turn, from end of speech to the final transcript. That gap is why the
+scaffold and the examples take the proxied route. A hosted id is also not
+offered in every world part, so a region you need may decide this for you
+regardless. Measure your own route rather than assuming a default holds; see
+[Optimizing your agent](/optimization/overview).
 
 ## Pipecat
 
@@ -104,6 +94,49 @@ that is not here cannot be bound at all.
 ## The difference between the two
 
 Pipecat has `openai`, LiveKit has `sarvam`. Everything else matches.
+
+## Fallback
+
+`fallback:` on a `listen` entry names other listen entries, tried in order when
+the primary transcriber's call fails. It is the same field
+[the reasoning model documents](/models/llm#fallback), written on the `listen`
+section instead of `think`:
+
+```yaml agent.yaml
+models:
+  listen:
+    transcriber:
+      provider: slng
+      model: "deepgram/nova:3"
+      fallback:
+        - transcriber_backup
+    transcriber_backup:
+      provider: deepgram
+      model: nova-3
+```
+
+On LiveKit the chain lowers to one constructor call, `stt.FallbackAdapter`.
+Compiling the package above emits:
+
+```python
+stt=stt.FallbackAdapter(
+    stt=[
+        slng.STT(api_key=os.environ["SLNG_API_KEY"], model="deepgram/nova:3"),
+        deepgram.STT(api_key=os.environ["DEEPGRAM_API_KEY"], model="nova-3"),
+    ]
+),
+```
+
+Pipecat does not emit a generated fallback yet, and validating the same package
+against a Pipecat target refuses it before a file is written:
+
+```text
+pipecat: the Pipecat driver does not emit listen fallback yet
+```
+
+On SLNG the chain rides the push body as `fallbacks.stt`, a list of model
+strings in the same [vendor/model shape](/targets/slng#model-names) the primary
+binding uses.
 
 ## Where to go next
 

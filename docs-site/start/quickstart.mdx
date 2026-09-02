@@ -35,8 +35,10 @@ what you have, and upgrade if a flag here is missing from your build.
 
       [`agent.yaml`](/reference/agent-yaml) is the agent,
       `instructions.md` is its prompt, and
-      [`targets.yaml`](/reference/targets-yaml) selects LiveKit Agents as the
-      runtime. Their configuration pages list every supported key.
+      [`targets.yaml`](/reference/targets-yaml) picks the target this package
+      compiles to. Unmute compiles to three targets: Pipecat, LiveKit Agents,
+      or SLNG (see [targets](/targets/overview)); this scaffold picks LiveKit
+      Agents. Their configuration pages list every supported key.
       `.env.example` lists the keys to fill in. The scaffold uses SLNG speech
       models for listening and speaking.
     </Accordion>
@@ -88,7 +90,7 @@ what you have, and upgrade if a flag here is missing from your build.
       compiled build/livekit
       building and starting the container...
 
-        ▸ http://localhost:8765/?agent=livekit
+        ▸ http://localhost:8765/?agent=my-agent-livekit
           ctrl-c to stop  ·  logs: build/livekit/dev.log
       ```
 
@@ -111,7 +113,7 @@ The three commands serve different moments:
 |---|---|
 | `unmute validate` | checks the package against its targets without writing or running a build |
 | `unmute dev` | validates, compiles one target, runs it locally, and opens the browser |
-| `unmute compile` | writes the generated target projects without starting them |
+| `unmute compile` | writes the compiled target projects without starting them |
 
 Run `unmute validate` whenever you change the package. A warning is a real
 difference worth reading, but it still exits 0. An error names the file and
@@ -145,11 +147,15 @@ use the current directory.
 
 ## Where to go next
 
+Later, [Build the agent](/build/your-first-agent) continues with this same
+`my-agent` package, so you will not run `unmute init` again when you get
+there.
+
 <Columns cols={2}>
+  <Card title="Coding agents" icon="bot" href="/start/coding-agents">
+    Let a supported assistant write the package for you.
+  </Card>
   <Card title="How Unmute works" icon="settings" href="/start/how-unmute-works">
     What the compiler did between your files and that container.
-  </Card>
-  <Card title="Build the agent" icon="graduation-cap" href="/build/your-first-agent">
-    Grow this into a real agent, one concept at a time.
   </Card>
 </Columns>

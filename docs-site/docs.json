@@ -2,7 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
   "name": "Unmute",
-  "description": "Build portable voice agents and compile them to Pipecat or LiveKit Agents projects you own.",
+  "description": "A declarative standard for voice agents. Describe the agent once, compile it to Pipecat, LiveKit Agents, or SLNG.",
   "colors": {
     "primary": "#8A7300",
     "light": "#F7E98A",
@@ -151,33 +151,39 @@
         ]
       },
       {
-        "group": "Configuration files",
-        "public": true,
-        "icon": "file-code",
-        "pages": [
-          "reference/agent-yaml",
-          "reference/targets-yaml",
-          "reference/connections-yaml",
-          "reference/variables",
-          "reference/secrets"
-        ]
-      },
-      {
-        "group": "Develop and test",
+        "group": "Run and observe",
         "public": true,
         "icon": "terminal",
         "pages": [
-          "dev/overview"
-        ]
-      },
-      {
-        "group": "Tracing",
-        "public": true,
-        "icon": "chart-line",
-        "pages": [
+          "dev/overview",
           "tracing/overview",
           "tracing/coval",
           "tracing/langfuse"
+        ]
+      },
+      {
+        "group": "Optimization",
+        "public": true,
+        "icon": "gauge",
+        "pages": [
+          "optimization/overview",
+          "optimization/latency",
+          "optimization/prefetch",
+          "optimization/turn-taking",
+          "optimization/execution-layer",
+          "optimization/context-router",
+          "optimization/regional-infrastructure"
+        ]
+      },
+      {
+        "group": "Deploy",
+        "public": true,
+        "icon": "cloud-upload",
+        "pages": [
+          "deploy/going-live",
+          "deploy/slng",
+          "deploy/livekit-cloud",
+          "deploy/pipecat-cloud"
         ]
       },
       {
@@ -189,6 +195,7 @@
           "telephony/outbound-calls",
           "telephony/inbound-calls",
           "telephony/twilio",
+          "telephony/livekit-twilio",
           "telephony/pipecat-twilio",
           {
             "group": "Transfers",
@@ -229,28 +236,15 @@
         ]
       },
       {
-        "group": "Optimization",
+        "group": "Configuration files",
         "public": true,
-        "icon": "gauge",
+        "icon": "file-code",
         "pages": [
-          "optimization/overview",
-          "optimization/latency",
-          "optimization/prefetch",
-          "optimization/turn-taking",
-          "optimization/execution-layer",
-          "optimization/context-router",
-          "optimization/regional-infrastructure"
-        ]
-      },
-      {
-        "group": "Deploy",
-        "public": true,
-        "icon": "cloud-upload",
-        "pages": [
-          "deploy/going-live",
-          "deploy/slng",
-          "deploy/livekit-cloud",
-          "deploy/pipecat-cloud"
+          "reference/agent-yaml",
+          "reference/targets-yaml",
+          "reference/connections-yaml",
+          "reference/variables",
+          "reference/secrets"
         ]
       },
       {

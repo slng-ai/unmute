@@ -23,8 +23,7 @@ channels:
 ```
 
 Without `outbound: true`, this target has no outbound capability at all: no
-route reads a destination number for it, and the compile report never marks
-an outbound feature on it. [Read the report fields](/reference/cli/compile#the-report).
+route reads a destination number for it.
 
 ## One route per target
 
@@ -137,11 +136,11 @@ The [Variables reference](/reference/variables) has the per-source table.
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="Deploy to LiveKit Cloud" icon="cloud" href="/deploy/livekit-cloud">
-    Take the `sip` or `connector` route live.
+  <Card title="Inbound calls" icon="phone-incoming" href="/telephony/inbound-calls">
+    Take a real call, once the route is deployed.
   </Card>
-  <Card title="Deploy to Pipecat Cloud" icon="cloud" href="/deploy/pipecat-cloud">
-    Take the `cloud-websocket` or `daily-sip` route live.
+  <Card title="Get your Twilio details" icon="key" href="/telephony/twilio">
+    Which console value fills which name.
   </Card>
   <Card title="Variables reference" icon="braces" href="/reference/variables">
     Types, sources, and where each value can be used.

@@ -5,16 +5,15 @@ description: "The optimization layer for thinking: repeated turns come back from
 
 The SLNG Context Router is an **optimization layer for the `think` role**. It sits
 between your agent and your reasoning model. On every turn it decides whether it
-has answered this turn before. If it has, it replies from its cache. If it has
-not, it calls your model and answers as normal.
+has answered this turn before: if it has, it replies from its cache; if not, it
+calls your model and answers as normal. You keep your model, your provider,
+and your bill for the turns that reach it, and gain speed on the turns that
+repeat.
 
-You keep your model, your provider, and your bill for the turns that reach the
-model. What you gain is speed on the turns that repeat.
-
-This is the one SLNG optimization you opt into. Listening and speaking are already
-optimised behind their bindings, as the
-[Execution Layer](/optimization/execution-layer) page explains. Thinking is not, until you
-make this change.
+This is the one SLNG optimization you opt into. Listening and speaking are
+already optimised behind their bindings, as
+[Execution Layer](/optimization/execution-layer) explains. Thinking is not,
+until you make this change.
 
 ## Start here
 
@@ -57,90 +56,104 @@ models:
 That is the whole edit. Everything else in your package stays as it is: prompts,
 tools, agents, tasks, task groups, greetings, channels, capacity.
 
+## Reading the router's log line
+
+Every think request writes one line, at info level, in every run, deployed or
+local:
+
+```
+slng router: scope=clinic-scheduler-v1:concierge source=cache layer=l2_exact request_id=req_...
+slng router: scope=clinic-scheduler-v1:concierge source=llm model=gpt-5.6-luna request_id=req_...
+```
+
+`source=cache` means no model ran. Repeat an exchange and watch it change: that
+is the check, and it needs no dashboard and no code of yours. `layer` appears
+only on a hit, `model` only on a live answer, `request_id` is what to quote to
+support.
+
+The line is built from three response headers, which the generated project
+reads through a hook on its own HTTP client because neither framework surfaces
+them.
+
+| Header | Values | Meaning |
+|---|---|---|
+| `x-slng-response-source` | `llm`, `cache` | which path answered this turn |
+| `x-slng-cache-layer` | `l1_exact`, `l2_exact`, absent on the model path | which cache layer answered |
+| `x-slng-model` | a model id, present only on the model path | which model answered |
+| `x-slng-request-id` | always present, errors included | quote this to support |
+
+Read `x-slng-response-source` rather than inferring a hit from how fast the
+reply came back: fast is not proof of a hit, and a repeat served by the model
+is expected, not a fault, since the router judges which turns are worth
+serving from cache. A miss just costs a little, an extra hop in front of your
+own model. Streamed responses report no usage on either path, so token
+savings cannot be read off the stream either.
+
+If a repeat never caches, check: the same `agent_id` on both calls, a couple
+of seconds since the turn it repeats, the second turn or later, and the exact
+pair of previous reply and current message. If all four hold, stop looking:
+some turns just never cache.
+
 ## How it decides
 
 The router remembers pairs: **what your agent said last, and what the caller said
 next**. When that same pair comes round again, it can answer from the cache.
 
-Two things follow, and both matter more than they look:
-
 **A first turn never caches.** There is no preceding pair yet, so the first turn
-of every call takes the full path to your model. Measure a conversation with no
-repeat in it and you will measure nothing.
+of every call takes the full path to your model. A conversation with no repeat
+in it never shows a hit.
 
-**Not every repeat caches, and that is by design.** The router judges which turns
-are worth treating as repeatable. Measured on 2026-08-19: two pairs identical in
-everything a client controls behaved differently, one answering from cache on its
-second send and the other going to the model eight times in a row while returning
-a byte-identical answer each time. A repeat served by the model is expected, not a
-fault, and nothing here promises otherwise.
+**Not every repeat caches, and that is by design.** The router judges which
+turns are worth treating as repeatable, so two pairs identical in everything a
+client controls can still behave differently, one served from cache and one
+sent to the model every time. A repeat served by the model is expected, not a
+fault.
 
 ## One stable `agent_id`, one scope per prompt
 
-`agent_id` names your project's cache, and everything learned under one scope is
-invisible to another. You write one value; the compiler sends one scope per agent
-and per task underneath it. Both halves matter, and this section takes them in
-turn.
+`agent_id` names your project's cache, and everything learned under one scope
+is invisible to another. You write one value and own its version suffix:
+change a prompt in a way that should make old answers wrong, and bump it,
+`salon-concierge-v1` to `salon-concierge-v2`, so the router starts fresh. Fix
+a typo and leave it alone, since throwing the cache away buys nothing. The
+compiler never derives this value from your prompts or hashes them into it,
+because it has no way to know whether a reworded sentence changes what a good
+answer looks like. A package sends one `agent_id`, and compiling fails if two
+think profiles disagree about it.
 
-You write one value, and you own its version suffix. Change a prompt in a way that
-should make old answers wrong, and bump the suffix: `salon-concierge-v1` becomes
-`salon-concierge-v2`, and the router starts fresh. Fix a typo, and leave it alone,
-because throwing the cache away buys nothing.
-
-The compiler cannot make that judgement for you. It has no way to know whether a
-reworded sentence changes what a good answer looks like, so it never derives the
-value from your prompts and never hashes them into it. A package sends one
-`agent_id`, and compiling fails if two think profiles disagree about it.
-
-### One scope per agent, from the one id you wrote
-
-What the compiler does do is add the name of whoever is speaking. Each agent and
-each task sends the `agent_id`, a colon, then its own name:
+What the compiler does add is the name of whoever is speaking. Each agent and
+task sends the `agent_id`, a colon, then its own name:
 
 ```
-optimized-salon-concierge-v10:concierge
-optimized-salon-concierge-v10:complaint_specialist
-optimized-salon-concierge-v10:task.customer_verification
-optimized-salon-concierge-v10:task.booking
+optimized-salon-concierge-v12:concierge
+optimized-salon-concierge-v12:complaint_specialist
+optimized-salon-concierge-v12:task.customer_verification
+optimized-salon-concierge-v12:task.booking
 ```
 
 That is not decoration. The cache key is the last exchange, and it does not
 include the system prompt, so two agents sharing one scope can be served each
-other's answers. Measured on a live call: a receiving agent's opening line
-after a handoff was the concierge's "what phone number should I use to look up
-your customer profile?", served from cache in 1.27 ms with no model call. The
-caller heard the agent repeat itself. One scope per prompt is what the router's
-own contract asks for, and now that is what unmute sends.
+other's answers: an early build without per-prompt scopes hit exactly this, a
+receiving agent's opening line after a handoff served the previous agent's
+cached answer, no model call, because the two agents shared one scope. One
+scope per prompt is what the router's own contract asks for, and that is what
+unmute sends now.
 
 The names come from your package and nothing else, so the same package always
-compiles to the same scopes, on either target. A wording change never moves a
-scope: only your version suffix retires a cache, and bumping it retires every
-scope in the package together.
+compiles to the same scopes on either target, and a wording change never
+moves one. Two agents with identical instructions still get two scopes and
+stop sharing warmth, because they are two prompt sites. Hit rates build over
+calls either way, so a fresh id is a cold cache: bump it deliberately rather
+than as housekeeping. Pre-warmed answers, where they exist, are arranged
+against a scope rather than the bare `agent_id`, so an id bump or a package
+that just started sending one scope per prompt needs that arrangement redone;
+the generated runbook prints the exact list of scopes your package sends.
 
-Two things you will notice:
-
-- **Two agents with identical instructions now get two scopes** and stop sharing
-  warmth. They are two prompt sites, and keeping them apart is the point.
-- **An existing project goes cold once.** A single-agent package that used to send
-  a bare `agent_id` now sends `id:agent_name`, which is a different scope. Hit
-  rates rebuild over the next calls.
-
-One more consequence worth planning for: hit rates build over calls either way. A
-fresh id is a cold cache, so bump it deliberately rather than as housekeeping.
-
-**If we have pre-warmed answers for you, they are arranged against a scope, not
-against your `agent_id`.** So an arrangement made before your package sent one
-scope per prompt reaches nothing, and the same is true after any id bump. The
-generated runbook prints the exact list of scopes your package sends; that list is
-what we need to redo it.
-
-Compiling refuses a scope that will not fit. The value leaves as an HTTP header
-and the bound is 128 characters, counted on the finished scope rather than on the
-`agent_id` alone, so a long id plus a long agent name can be refused where the id
-by itself was fine. The message names which agent or task produced the long value
-and how the two lengths add up, so you know which of the two names to shorten. It
-refuses rather than truncating, because two truncated scopes could land on the
-same string and bring the collision back quietly.
+Compiling refuses a scope that will not fit: the value leaves as an HTTP
+header, the bound is 128 characters counted on the finished scope rather than
+the `agent_id` alone, and the message names which agent or task produced the
+long value so you know which name to shorten. It refuses rather than
+truncating, because two truncated scopes could land on the same string.
 
 ## Regions
 
@@ -161,8 +174,7 @@ same string and bring the collision back quietly.
   value the router does not serve and names the four.
 </Warning>
 
-The key is consumed rather than forwarded: it becomes the base URL, and the
-compile report says so on its own line.
+The key is consumed rather than forwarded: it becomes the base URL.
 
 ## Your model, and who serves it
 
@@ -178,35 +190,22 @@ the request and a package has to name whose they are.
 | `vertex` | `credentials_env`, `location` | `project` |
 | `bedrock` | `access_key_id_env`, `secret_access_key_env`, `region`, `model_id` | `session_token_env` |
 
-Five spellings over four kinds of upstream. The OpenAI-compatible kind was
-validated against the live router on 2026-08-19, which covers both `openai` and
-`openai-compat`. **`azure`, `vertex` and `bedrock` come from the router team's
-published field list and have not been run here**, so treat your first call on one
-of those as the test.
+The `openai` and `openai-compat` rows have been exercised against the live
+router. `azure`, `vertex` and `bedrock` come from the router team's published
+field list and have not been run here, so treat your first call on one of
+those as the test.
 
-On `openai` the compiler supplies the URL and the `OPENAI_API_KEY` name, so the
-block is one line. Any other upstream writes its own:
+On `openai` the compiler supplies the URL and the `OPENAI_API_KEY` name, so
+the block is one line, `upstream: {provider: openai}`. Any other upstream
+writes its own, naming its own secret:
 
 ```yaml agent.yaml
-secrets:
-  - SLNG_API_KEY
-  - AZURE_OPENAI_API_KEY            # you wrote this name, so you declare it
-
-models:
-  think:
-    reasoning:
-      provider: slng
-      model: gpt-5.6-luna
-      agent_id: salon-concierge-v1
-      upstream:
-        provider: azure
-        url: https://my-resource.cognitiveservices.azure.com/
-        key_env: AZURE_OPENAI_API_KEY
-        deployment: reasoning-deploy
-        api_version: 2024-12-01-preview
-      params:
-        world_part_override: eu
-        reasoning_effort: "none"   # an azure upstream serves OpenAI's models
+upstream:
+  provider: azure
+  url: https://my-resource.cognitiveservices.azure.com/
+  key_env: AZURE_OPENAI_API_KEY
+  deployment: reasoning-deploy
+  api_version: 2024-12-01-preview
 ```
 
 A key the router does not expect for that upstream is a compile error rather than
@@ -214,43 +213,22 @@ a silent pass-through, because an unknown field comes back as a 400 on every thi
 request. That check is on the `upstream` block only. Everything under `params:` is
 forwarded without checking, which is [what makes it useful](#params-ride-the-request-body).
 
-### Where your credentials go
+**The configuration travels inline, in the request body of every think
+request, so your upstream credentials are sent to SLNG.** That is a trust
+decision, and it is the price of not registering anything anywhere in
+advance. What the tooling guarantees is narrower: a credential is always
+*named*, never written. A `*_env` field holds an environment variable name,
+the generated agent reads it with `os.environ[...]` at run time, and no
+package, generated file, or compile report ever contains a value. Every name
+you write has to appear in `secrets:` and joins the generated startup check,
+so a missing value stops the agent at boot rather than on the first turn of a
+live call.
 
-**The configuration travels inline, in the request body of every think request,
-so your upstream credentials are sent to SLNG.** That is a trust decision, and it is the
-price of not registering anything anywhere in advance.
-
-What the tooling guarantees is narrower and worth being precise about: a
-credential is always *named*, never written. A `*_env` field holds an environment
-variable name, the generated agent reads the value with `os.environ[...]` at run
-time, and no package, generated file, or compile report ever contains a value.
-Every name you write has to appear in `secrets:`, and every name joins the
-generated startup check, so a missing value stops the agent at boot rather than on
-the first turn of a live call.
-
-`auth_header` is a header **name**, not a secret. It exists for an
-`openai-compat` host that wants the key somewhere other than
-`Authorization: Bearer`, for example `auth_header: x-goog-api-key`. The value
-still comes from `key_env`. No field mixes a literal with an environment value,
-which is what keeps a package free of secrets.
-
-### A Vertex service-account key
-
-`credentials_env` names one variable, and its value may be the key JSON itself,
-that JSON base64 encoded, or a path to the key file. The agent works out which at
-startup, so a malformed value fails at boot with a message naming all three
-shapes.
-
-To produce the base64 form:
-
-```sh
-base64 < service-account.json | tr -d '\n'
-```
-
-Verified on macOS 2026-08-19: `base64` writes one line there already, and
-`tr -d '\n'` is what makes the same command produce one line on GNU coreutils,
-whose `base64` wraps its output by default. Paste the result into your `.env` as
-one line, and keep the key file itself out of your repository.
+`auth_header` is a header **name**, not a secret, for an `openai-compat` host
+that wants the key somewhere other than `Authorization: Bearer`; the value
+still comes from `key_env`. A Vertex `credentials_env` may hold the key JSON
+itself, that JSON base64 encoded, or a path to the key file, and the agent
+works out which at startup.
 
 ## Params ride the request body
 
@@ -263,25 +241,12 @@ reads two names and forwards the rest:
 | `slng_pure_proxy` | consumed, and rides the body as the router's shadow-trial switch |
 | anything else | forwarded, in the request body, on both targets |
 
-The router passes a key it does not recognise to your upstream, so this is how you
-reach a provider-specific option Unmute has never heard of. It is also why the
-compiler cannot check one: it does not know what your upstream accepts, so a wrong
-value surfaces as the upstream's own error, relayed with its status code and its
-message intact.
-
-The body, on both targets, and that is worth one sentence of history. On LiveKit
-these used to be constructor arguments, so a key the plugin had never heard of was
-a `TypeError` when the agent booted rather than something a compile could catch.
-They travel in the body now, which takes any key.
-
-A nested value is fine, because the body is JSON:
-
-```yaml agent.yaml
-params:
-  world_part_override: eu
-  provider:                       # forwarded to the router, and on to OpenRouter
-    only: ["groq"]
-```
+The router passes a key it does not recognise to your upstream, so this is how
+you reach a provider-specific option Unmute has never heard of, and why the
+compiler cannot check one: a wrong value surfaces as the upstream's own
+error, relayed with its status code and message intact. A nested value is
+fine too, since the body is JSON, so `provider: {only: ["groq"]}` forwards
+straight through to OpenRouter.
 
 ## `prompt_suffix`, for what no parameter reaches
 
@@ -302,31 +267,28 @@ models:
         provider: openai-compat
         url: https://openrouter.ai/api/v1
         key_env: OPENROUTER_API_KEY
+      params:
+        world_part_override: eu
 ```
 
-The worked reason it exists: Qwen3 is a hybrid thinking model, and thinking costs
-your caller seconds of silence before the first word. On 2026-08-27 three
-spellings of the thinking-off parameter were sent to three of its hosts, nine
-requests in all, and every one was accepted and ignored. Qwen3's own `/no_think`
-directive in the prompt was the only thing that worked, and it works from the
-system prompt, mid-prompt, and on a tool turn.
+The worked reason it exists: Qwen3 is a hybrid thinking model, and thinking
+costs your caller seconds of silence before the first word. The usual
+parameters for turning that off are accepted and ignored on some of its
+hosts, with no error, but Qwen3's own `/no_think` directive in the prompt
+works across hosts, from the system prompt, mid-prompt, and on a tool turn.
 
-Four things to know:
+It goes on the model, not on an agent, since it is a fact about the model; an
+agent that needs different wording has its own prompt file. It is literal,
+never a placeholder: the router substitutes placeholders from a snapshot of
+the names your *prompts* reference, so one arriving from a suffix would be
+sent with no value and come back 422 mid-call, which the compiler refuses. It
+moves no cache, since scopes come from names and never from prompt content,
+so bumping `agent_id` is still the only way to retire one deliberately. And
+the compiler attaches no meaning to it: `/no_think` is just a string here,
+and the next model's directive works the same way.
 
-- **It goes on the model, not on an agent.** It is a fact about the model. An
-  agent that needs different wording has its own prompt file.
-- **It is literal.** No placeholders — the router substitutes placeholders from a
-  snapshot of the names your *prompts* reference, so one arriving from a suffix
-  would be sent with no value and come back 422 mid-call. The compiler refuses one.
-- **It moves no cache.** Scopes come from names, never from prompt content, so
-  adding or changing a suffix retires nothing. Bumping the version on your
-  `agent_id` is still the only way to do that deliberately.
-- **The compiler attaches no meaning to it.** `/no_think` is just a string here.
-  The next model's directive will be different and this field already works for it.
-
-You can read what it did in the emitted `*_PROMPT` constants, and `unmute compile`
-names it on its own line. A directive you cannot see is a directive you cannot
-check.
+You can read what it did in the emitted `*_PROMPT` constants, and `unmute
+compile` names it on its own line.
 
 ## `reasoning_effort`, and when it is the problem
 
@@ -340,130 +302,66 @@ To use function tools, use /v1/responses or set reasoning_effort to 'none'.
 ```
 
 `"none"` works. This is the same trap a direct OpenAI think binding has, and
-[the reasoning model page](/models/llm) explains it there too. The compiler warns
-when your package has tools and the param is missing.
+[the reasoning model page](/models/llm) explains it there too. The compiler
+warns when your package has tools and the param is missing, but only for the
+`openai` and `azure` upstreams, the ones serving the models the advice is
+about.
 
 **On an `openai-compat` upstream, ignore all of that**, and do not set it
-defensively. The advice is for OpenAI's own model families, and elsewhere the param
-ranges from useless to fatal depending on the host. Measured on `qwen/qwen3-32b`,
-2026-08-27: **Nebius answers a request carrying it with a 400**, and **Groq accepts
-it with a 200 and ignores it**. Same model, same param, two different failures — one
-loud, one silent — and neither is a reason to set it.
-
-So the warning fires only for the `openai` and `azure` upstreams, which are the ones
-serving the models the advice is about. Nothing warns on the others, and nothing
-should.
+defensively. The advice is for OpenAI's own model families; elsewhere the
+param ranges from useless to fatal depending on the host, one host answering
+a request carrying it with a 400 and another accepting it with a 200 and
+ignoring it. Same model, same param, two different failures, and neither is
+a reason to set it.
 
 ## Personal prompts stay cacheable
 
 A prompt that names the caller is different on every call, which would mean
-nothing ever repeats. So a router-bound prompt keeps its placeholders and the
-values travel separately:
+nothing ever repeats. So a router-bound prompt keeps its placeholders, for
+example `{{customer_name}}` in an instructions file with a matching
+`customer_name` variable, and the router receives the prompt with the
+placeholder intact plus a map of this call's values, substituting them
+itself. Every call sends the same prompt, so turns can still repeat. This
+applies to the system prompt only; greetings, tool arguments, injected
+values, and webhook paths keep rendering locally.
 
-```yaml agent.yaml
-variables:
-  customer_name:
-    type: string
-```
+Values are read again for every request, not once when the call started, so
+a value learned partway through is in the prompt from the next turn on. A
+router-bound prompt may also name a variable with no value yet, where a
+direct-provider prompt may not: a direct prompt renders once and an unset
+variable leaves a hole compiling refuses, while a router-bound prompt is
+never rendered here at all.
 
-```markdown instructions.md
-You are the concierge for Aurora Salon. The caller is {{customer_name}}.
-```
-
-The router receives that prompt with `{{customer_name}}` intact, plus a map of
-this call's values, and substitutes them itself. Every call sends the same prompt,
-so turns can still repeat.
-
-This applies to the system prompt only. Greetings, tool arguments, injected
-values, and webhook paths keep rendering locally exactly as before.
-
-The values are read again for every request, not once when the call started. So a
-value your call learns partway through, from a verification step or a lookup, is in
-the prompt from the next turn on.
-
-That is also why a router-bound prompt may name a variable that has no value when
-the call begins, where a prompt on a direct provider may not. A direct prompt is
-rendered once, before the call, so an unset variable leaves a hole in it and
-compiling refuses. A router-bound prompt is never rendered here at all, so there is
-no hole to leave: name a `source: conversation` variable or one a task assigns, and
-the value arrives when the call learns it. That is what makes a placeholder worth using for
-something the caller tells you during the call, rather than only for what you knew
-before it began.
-
-Three details worth knowing:
-
-- A variable with no value yet sends an empty string, never the word "None". It is
-  still sent: a placeholder the router was given no value for is a 422, and a 422
-  mid-call ends the call.
-- A value over 4000 characters is truncated with a warning on stderr, and the call
-  continues. An over-long value is not a reason to drop a live call.
-- On Pipecat the refresh happens where the call writes the value rather than on
-  every request, because that framework offers no per-request hook. The effect is
-  the same for every path a package can take today, since the only writes are at
-  call start and when a step finishes.
+Three details worth knowing: a variable with no value sends an empty string,
+never "None", and is still sent, so a placeholder the router got no value for
+is a 422 that ends the call; a value over 4000 characters is truncated with a
+warning on stderr and the call continues; and on Pipecat the refresh happens
+where the call writes the value rather than on every request, since that
+framework offers no per-request hook.
 
 ### Which values belong in a placeholder
 
-A placeholder is for a value your agent **says**: the caller's name, the company
-name, an appointment detail read back aloud. Those are the values that make an
-answer personal, and personal answers are the ones the router otherwise refuses to
-keep. Supplied as a value, the stored copy holds the placeholder instead of the
-name, so the turn caches like any other and the next caller hears their own name
-in it.
+A placeholder is for a value your agent **says**: the caller's name, an
+appointment detail read back aloud. Supplied that way, the stored copy holds
+the placeholder instead of the value, so the turn caches like any other and
+the next caller hears their own name in it. A value that changes **what the
+answer is**, like the reply language, does not belong in one however much it
+varies per call, since two callers would then share one cached answer written
+in only one language: write it into the prompt text instead, and give
+variants that must never share answers their own `agent_id`, the only thing
+that partitions the cache. The compiler does not judge a value by its name,
+so this is not checked for you.
 
-A value that changes **what the answer is** does not belong in one, however much
-it varies per call. The reply language is the clearest case:
-
-```markdown Wrong
-Reply to the caller in {{session_language}}.
-```
-
-Two callers who chose different languages would share one cached answer and one of
-them would hear the wrong language. Write a steering value into the prompt text
-instead, and if two variants must never receive each other's answers, give each
-its own `agent_id`: the agent id is the only thing that partitions the cache.
-
-Nothing checks this for you. The compiler will not judge a value by its name, so a
-steering value in a placeholder fails silently and only in production.
-
-### Give the value the shape the agent says it in
-
-A placeholder only earns its keep while the router can recognise the value in the
-answer. It substitutes back where the answer holds the value **character for
-character**, so a value the model tidies up on its way out, a phone number it
-regroups, a date it rewrites, leaves the real thing in the stored copy. The
-personal-data scan then refuses to share that copy, and the turn stops caching.
-
-Measured against the live EU router on 2026-08-24, three reads per arm on fresh
-scopes:
-
-| Value supplied | The model said it back | Served from cache |
-|---|---|---|
-| `555 070 1222` | unchanged | yes, 109ms on the third read |
-| `5550404111` | unchanged | yes, on the second read |
-| `+15550707444` | regrouped, so the value never appeared | **never, 0 of 3** |
-
-Nothing reports this. There is no error, no warning, and the caller hears a
-correct answer every time. The only symptom is a hit rate of zero.
-
-So write the format into the variable's own `description`, and make whatever
-produces the value follow it. A task that returns a phone number should say what
-shape it returns it in:
-
-```yaml agent.yaml
-variables:
-  customer_phone:
-    type: string
-    description: >-
-      The caller's confirmed phone number, as the verification task returns it:
-      digit groups separated by single spaces, with no plus sign, brackets or
-      dashes.
-```
-
-This only decides caching for a value the agent **says out loud**. A value it
-only passes to tools can take whatever single shape the rest of your package
-uses: `examples/salon-concierge` returns E.164, one format for every number it
-holds, and its prompts never read the number back to the caller.
+The value also has to match the answer **character for character** to be
+recognised and stored. A phone number the model regroups, or a date it
+rewrites, leaves the real thing in the stored copy instead, the personal-data
+scan refuses to share it, and the turn silently stops caching, no error, just
+a hit rate of zero. Write the expected shape into the variable's own
+`description`, and make whatever produces the value follow it. This only
+decides caching for a value the agent says out loud; a value passed only to
+tools can take whatever shape the rest of your package uses, the way
+`examples/salon-concierge` returns E.164 everywhere and never reads a number
+back to the caller.
 
 ### What the router will not cache, whatever you do
 
@@ -475,84 +373,30 @@ Three rules decide this, and none of them is about your placeholders:
 | contains a tool call | the turn is an instruction to act, not an answer |
 | follows a tool result | the result is this caller's data |
 
-There is a fourth rule, and unlike these three a placeholder does beat it: the
-router refuses to store an answer **holding a number in any script**, because a
-number in a reply is usually caller-specific. A number the agent says from a
-placeholder is not in the stored copy at all, so that answer caches like any
-other. Measured above. A number the agent renders itself, or one it reformats
-before saying, falls under the rule.
-
-So an agent that quotes times and prices from its own working sees fewer hits
-than one that asks questions, and that is the numeric rule working rather than a
-fault. Where those numbers are per-call values the agent reads back, a
-placeholder turns them into hits. The first turn of every call is always the
-model either way: there is no preceding turn to have cached.
-
-## Checking that it is working
-
-**Read the run's own log.** Every think request writes one line, at info level, in
-every run, deployed or local:
-
-```
-slng router: scope=clinic-scheduler-v1:concierge source=cache layer=l2_exact request_id=req_...
-slng router: scope=clinic-scheduler-v1:concierge source=llm model=gpt-5.6-luna request_id=req_...
-```
-
-`source=cache` means no model ran. Repeat an exchange and watch it change: that is
-the check, and it needs no dashboard and no code of yours. `layer` appears only on
-a hit, `model` only on a live answer, `request_id` is what to quote to us. Nothing
-aggregates the lines, so a hit rate is a count of them.
-
-Do not read a hit off the clock instead. A hit has been measured at 396ms and a
-generation faster than that, so latency alone tells you nothing on any single
-turn.
-
-The line is built from three response headers, which the generated project reads
-through a hook on its own HTTP client because neither framework surfaces them.
-
-| Header | Values | Meaning |
-|---|---|---|
-| `x-slng-response-source` | `llm`, `cache` | which path answered this turn |
-| `x-slng-cache-layer` | `l1_exact`, `l2_exact`, absent on the model path | which cache layer answered |
-| `x-slng-model` | a model id, present only on the model path | which model answered |
-| `x-slng-request-id` | always present, errors included | quote this to support |
-
-What to expect on a call where you repeat a turn: full latency on the first turn,
-then roughly 110 ms against 800 to 1500 ms when a repeat is served from cache.
-Tool turns always take the model path, both the request turn and the result turn.
-
-<Note>
-  Hit rates vary, so plan for the model path and treat cache hits as the upside.
-  Read `x-slng-response-source` rather than inferring from latency: fast is not
-  proof of a hit, and a repeat served by the model is expected rather than a
-  fault. On the turns that miss, the router is an extra hop in front of your own
-  model, so it costs a little rather than saving.
-</Note>
-
-Streamed responses report no usage on either path, so token savings cannot be read
-off the stream.
-
-If a repeat never caches, check in this order: is the agent id the same across the
-two calls, did at least two seconds pass since the turn it repeats, is it the
-second turn or later, and is it the exact pair of previous reply and current
-message. If all four hold, stop looking. The router decides, and some turns never
-cache.
+A fourth rule, and unlike these three a placeholder beats it: the router
+refuses to store an answer **holding a number in any script**, since a number
+in a reply is usually caller-specific. A number the agent says from a
+placeholder is not in the stored copy at all, so that answer still caches; a
+number the agent renders or reformats itself falls under the rule. So an
+agent that quotes times and prices from its own working sees fewer hits than
+one that asks questions, and a placeholder is what turns per-call numbers
+back into hits.
 
 ## The salon example
 
 [`examples/salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)
-is the package to read for this. It binds every think site to the router, sends
-one scope per prompt site, and its own README records what was measured against
-the live EU router.
+is the package to read for this. It binds every think site to the router and
+sends one scope per prompt site. To see the router's own contribution on your
+own agent, compile it once as it ships and once with the think profile bound
+directly to the upstream vendor, and run the same conversation through both.
 
-To measure the router's own contribution, compile it once as it ships and once
-with the think profile bound directly to the upstream vendor, and run the same
-conversation through both.
+## Next
 
-## Where to go next
-
-- [Reasoning model](/models/llm) for the `think` role and the vendors each target
-  can construct directly.
-- [Optimization](/optimization/execution-layer) for the other levers on latency and cost.
-- [Regional infrastructure](/optimization/regional-infrastructure) for how region works
-  across the three SLNG roles.
+<CardGroup cols={2}>
+  <Card title="Regional infrastructure" icon="globe" href="/optimization/regional-infrastructure">
+    How region works across all three SLNG roles, thinking included.
+  </Card>
+  <Card title="Reasoning model" icon="brain" href="/models/llm">
+    The `think` role and the vendors each target can construct directly.
+  </Card>
+</CardGroup>

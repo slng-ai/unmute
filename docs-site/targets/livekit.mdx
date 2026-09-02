@@ -15,6 +15,8 @@ my-agent/build/livekit/
 │   ├── __init__.py
 │   └── <name>.py         # one per local tool
 ├── knowledge.py          # present when the package sets knowledge
+├── knowledge/            # present when the package sets knowledge
+│   └── <name>/           # one directory per knowledge source, its documents copied in
 ├── tracing.py            # present when the package sets tracing
 ├── dev_metrics.py        # per-turn latency for `unmute dev`, inert elsewhere
 ├── pyproject.toml        # pinned dependencies
@@ -27,14 +29,10 @@ my-agent/build/livekit/
 ```
 
 A target with an inbound SIP route writes three more files:
-`sip-inbound-trunk.json`, `sip-dispatch-rule.json`, and the
-`telephony-setup.sh` that creates both. [Inbound calls](/telephony/inbound-calls)
-covers them.
-
-An inbound telephony target on the SIP route also gets `telephony-setup.sh` and
-the two records it feeds, `sip-inbound-trunk.json` and `sip-dispatch-rule.json`.
-Those create the inbound trunk and the dispatch rule that send calls on your
-number to this agent.
+`sip-inbound-trunk.json` and `sip-dispatch-rule.json`, the records that create
+the inbound trunk and the dispatch rule sending calls on your number to this
+agent, and the `telephony-setup.sh` that creates both.
+[Inbound calls](/telephony/inbound-calls) covers them.
 
 ## agent.py
 
@@ -131,8 +129,8 @@ first, then run the script.
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="The Pipecat project" icon="boxes" href="/targets/pipecat">
-    The same agent, the other runtime.
+  <Card title="The SLNG deployment body" icon="cloud" href="/targets/slng">
+    The third target: a hosted deployment body instead of a project.
   </Card>
   <Card title="Going live" icon="rocket" href="/deploy/going-live">
     What to do with the project you were handed.

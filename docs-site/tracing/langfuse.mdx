@@ -21,7 +21,14 @@ running for a week without traces.
 
 ## Trace and session names
 
-The trace name is `<entry_agent>-<project>`.
+The trace name is `<entry-agent>-<agent-name>`, where `agent-name` is the
+package's `name:` joined to the target it was compiled for, the same value a
+deploy uses as the agent's identity. Both targets build it the same way, so a
+trace from either one names the same agent the same way.
+
+A local `unmute dev` run and a deployed run get the same trace name. Unlike
+Coval tracing, the Langfuse integration adds no `-local` suffix, so the trace
+name alone does not tell you which one you are looking at.
 
 Each target picks its own session ID from something it already has:
 
@@ -53,3 +60,14 @@ Pipecat tracing owns the process OpenTelemetry provider and startup fails if ano
 Starting the worker or exporting a synthetic span proves connectivity only.
 Complete at least one user turn before you look at the trace, or you will be
 reading an empty one and concluding the wrong thing.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Coval" icon="flask" href="/tracing/coval">
+    Attach spans to the simulation that produced the call.
+  </Card>
+  <Card title="Optimizing your agent" icon="gauge" href="/optimization/overview">
+    The settings that make a call faster, and where each one goes.
+  </Card>
+</Columns>

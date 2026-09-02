@@ -6,10 +6,12 @@ description: "The smallest real agent: a prompt, four models, and one file that 
 Everything else in this section adds to this page. Start here.
 
 An Unmute package is a directory. The agent lives in `agent.yaml`, the prompt
-lives in a Markdown file next to it, and the runtime choice lives in
+lives in a Markdown file next to it, and the target choice lives in
 `targets.yaml`.
 
-Make one now, then read along in the file it writes:
+Make one now, then read along in the file it writes. Already ran this in the
+quickstart? You are sitting inside that `my-agent/` directory: `cd ..` first,
+or skip the command and read along in the file already on disk.
 
 ```sh
 unmute init my-agent
@@ -43,6 +45,14 @@ version: 1
 name: my-agent
 entry_agent: assistant
 
+agents:
+  assistant:
+    instructions: instructions.md
+    model: assistant_model
+    voice: assistant_voice
+    tools:
+      - end_call
+
 secrets:
   - OPENAI_API_KEY
   - SLNG_API_KEY
@@ -69,14 +79,6 @@ models:
     detector:
       provider: livekit
       model: turn-detector-mini
-
-agents:
-  assistant:
-    instructions: instructions.md
-    model: assistant_model
-    voice: assistant_voice
-    tools:
-      - end_call
 
 tools:
   - end_call
@@ -121,54 +123,6 @@ entry_agent: assistant
 Which agent answers. A package can hold several agents; exactly one starts the
 call. The name has to be a key in the `agents:` map.
 
-### `models`
-
-Four kinds of model, grouped by what they do:
-
-| Section | Job | Common name |
-|---|---|---|
-| `think` | decides what to say and which tool to call | LLM |
-| `speak` | turns text into audio | TTS |
-| `listen` | turns audio into text | STT |
-| `turn` | decides when the caller has finished speaking | turn detection or VAD |
-
-Each section holds named entries. The name is yours: `assistant_model`,
-`assistant_voice`, `transcriber`, `detector` above. An agent then points at the
-entries it wants by name.
-
-```yaml
-models:
-  think:
-    assistant_model:
-      provider: openai
-      model: "gpt-5.6-terra"
-      params:
-        reasoning_effort: none
-```
-
-`provider` names the integration; `model` and `voice` are passed to that
-provider exactly as you wrote them. Unmute does not keep a list of valid model
-ids, so a typo shows up as a provider error at run time, not at compile time.
-`build/livekit/compile-report.json` records this plainly: it names
-`reason.assistant_model`, the provider and model you gave it, and marks the
-binding as forwarded and not validated.
-
-`params:` is normally passthrough for anything else the provider takes. The one
-line here earns its place: `gpt-5.6-terra` is a reasoning model, and OpenAI
-refuses a chat request that carries function tools unless it sets
-`reasoning_effort`. This package has a tool, `end_call`, so the line is doing
-real work from the first run. The LiveKit Responses compiler directive is the
-narrow exception; [Reasoning model](/models/llm) has both forms.
-
-<Note>
-  You can define more entries than you use. Unused entries are legal
-  alternates, which makes swapping a voice a one line change.
-</Note>
-
-The `listen` and `turn` sections have one entry each here, so nothing needs to
-select them. With two or more entries you add a top level `listen:` or `turn:`
-line naming the one to use.
-
 ### `agents`
 
 ```yaml
@@ -200,6 +154,51 @@ failing on the first spoken word.
   There is no way to write a secret's value in the package, on purpose. See
   [secrets](/reference/secrets).
 </Warning>
+
+### `models`
+
+Four kinds of model, grouped by what they do:
+
+| Section | Job | Common name |
+|---|---|---|
+| `think` | decides what to say and which tool to call | LLM |
+| `speak` | turns text into audio | TTS |
+| `listen` | turns audio into text | STT |
+| `turn` | decides when the caller has finished speaking | turn detection or VAD |
+
+Each section holds named entries. The name is yours: `assistant_model`,
+`assistant_voice`, `transcriber`, `detector` above. An agent then points at the
+entries it wants by name.
+
+```yaml
+models:
+  think:
+    assistant_model:
+      provider: openai
+      model: "gpt-5.6-terra"
+      params:
+        reasoning_effort: none
+```
+
+`provider` names the integration; `model` and `voice` are passed to that
+provider exactly as you wrote them. Unmute does not keep a list of valid model
+ids, so a typo shows up as a provider error at run time, not at compile time.
+
+`params:` is normally passthrough for anything else the provider takes. The one
+line here earns its place: `gpt-5.6-terra` is a reasoning model, and OpenAI
+refuses a chat request that carries function tools unless it sets
+`reasoning_effort`. This package has a tool, `end_call`, so the line is doing
+real work from the first run. The LiveKit Responses compiler directive is the
+narrow exception; [Reasoning model](/models/llm) has both forms.
+
+<Note>
+  You can define more entries than you use. Unused entries are legal
+  alternates, which makes swapping a voice a one line change.
+</Note>
+
+The `listen` and `turn` sections have one entry each here, so nothing needs to
+select them. With two or more entries you add a top level `listen:` or `turn:`
+line naming the one to use.
 
 ### `conversation`
 
@@ -234,7 +233,7 @@ audio, which is what `unmute dev` serves. Phones come later, in
 [Telephony](/telephony/overview).
 
 `capacity` is your traffic estimate. The compiler turns it into worker counts
-and quota numbers in the generated project, and marks them `[unbenchmarked]`
+and quota numbers in the generated project, and marks them unbenchmarked
 because they come from a conservative assumption, not from a measurement of
 your agent.
 
@@ -248,7 +247,7 @@ targets:
     sdk_language: python
 ```
 
-One target. Nothing in `agent.yaml` names a runtime, so this file is the only
+One target. Nothing in `agent.yaml` names a target, so this file is the only
 place the choice lives, and one package can declare several. A second instance
 here compiles a second complete project from the same agent, and a target that
 cannot run a model entry as written overrides that entry by name rather than

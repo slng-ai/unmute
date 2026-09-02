@@ -93,9 +93,11 @@ targets:
     deployment_region: eu-central
 ```
 
-Regional overrides require `livekit-plugins-slng` `1.6.7` or newer and
-`pipecat-slng` `0.4.0` or newer. The LiveKit `pins` entry raises that generated
-project's plugin floor to `1.6.7`; Unmute supplies the Pipecat floor. See the official
+Unmute already installs `livekit-plugins-slng` at its catalog floor, `1.6.1` or
+newer, and `pipecat-slng` at `0.5.1` or newer, both of which carry regional
+overrides. The LiveKit `pins` entry above is optional: an escape hatch to
+require a newer patch than the floor when you need one. Pipecat has no
+equivalent field; its floor is fixed by Unmute directly. See the official
 [LiveKit SLNG plugin reference](https://docs.livekit.io/reference/python/livekit/plugins/slng/index.html)
 and [Pipecat SLNG source](https://github.com/slng-ai/pipecat-slng).
 
@@ -200,11 +202,11 @@ create a residency guarantee.
 | North America | `na` | `us-east-1` | `us-east` | `us` | `us-east` or `us-west` |
 | Europe | `eu` | `eu-north-1` | `eu-central` | `eu` | `eu-central` |
 | India | `ap` | `ap-south-1`, `asia-south1` | `ap-south` | `india` | `ap-south` |
-| Southeast Asia | `ap` | `asia-southeast2` | — | `asia` | — |
-| Australia | `ap` | `ap-southeast-2`, `australia-southeast1` | — | `aus` | — |
+| Southeast Asia | `ap` | `asia-southeast2` | | `asia` | |
+| Australia | `ap` | `ap-southeast-2`, `australia-southeast1` | | `aus` | |
 
-A dash means the platform does not currently advertise a worker option near
-that SLNG model region. Availability is model-specific and can change. Check
+A blank cell means the platform does not currently advertise a worker option
+near that SLNG model region. Availability is model-specific and can change. Check
 the official [SLNG region override guide](https://docs.slng.ai/region-override),
 [SLNG models by region](https://docs.slng.ai/models/by-region),
 [LiveKit agent regions](https://docs.livekit.io/deploy/admin/regions/agent-deployment/),
@@ -259,6 +261,9 @@ written. A worker region such as `eu-central` and an SLNG speech region such as
 ## Where to go next
 
 <Columns cols={2}>
+  <Card title="Going live" icon="rocket" href="/deploy/going-live">
+    Deploy the package you have been optimizing.
+  </Card>
   <Card title="Speech to text" icon="mic" href="/models/stt">
     Choose the model that listens to the caller.
   </Card>

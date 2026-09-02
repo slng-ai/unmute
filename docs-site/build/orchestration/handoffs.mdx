@@ -9,6 +9,16 @@ prompt, its own tools, and the call for good: nothing comes back.
 Reach for it when two jobs have genuinely different rules, not just different
 paragraphs. One prompt can only get so long before it starts contradicting itself.
 
+Use a handoff instead of the other shapes when:
+
+- nothing should come back. A [task](/build/orchestration/tasks) returns with
+  a result; a handoff never does.
+- the split is between two roles with different tools or permissions, not a
+  fixed sequence of steps one role runs through in order, which is what a
+  [task group](/build/orchestration/task-groups) is for.
+- the same conversation might need to come back later. That is a second
+  handoff in the other direction, not an automatic return.
+
 The YAML on this page is one worked pair of agents. For a shipped package that
 does it, read `examples/salon-concierge`: `concierge` handles bookings and
 `complaint_specialist` handles complaints, with a control in each direction.
@@ -90,15 +100,21 @@ hearing implementation details such as “I’m connecting you to another agent.
 
 Without them, the caller gets asked for their phone number twice.
 
+`variables:` also accepts a list of names instead of `all`, to carry over only
+those values. That list form works on LiveKit only: Pipecat and the SLNG
+target only support `all`, and refuse a named subset.
+
 When a task lists the handoff control, invoking it ends that task and any
 remaining task-group steps before the receiving agent takes over. It never
 returns through the agent that delegated the task. This is the direct path for
 a caller who changes intent while a focused task is active.
 
-On LiveKit, transfer tools are hidden only during the receiving agent's first
-automatic turn. Normal tools remain available, and transfers return on the
-next caller turn. Reciprocal controls therefore cannot bounce on older carried
-intent before the caller says anything new.
+On LiveKit, a receiving agent's own handoffs are hidden only during its first
+automatic turn; every other tool stays available, and the handoffs are back on
+the next caller turn. See [The opening turn cannot hand off
+again](#the-opening-turn-cannot-hand-off-again) below for why, and why
+reciprocal handoffs cannot bounce a caller on older carried intent before they
+say anything new.
 
 ## A handoff does not come back
 
@@ -130,8 +146,8 @@ It applies to the opening turn only. Every turn after it, the agent has its full
 list back, including the handoffs. That distinction is load-bearing: an earlier
 version leaned on LiveKit's own on-enter tool flag, whose filter follows the
 context of everything the opening reply starts, so an agent whose opening reply
-ran a delegate never saw its handoffs again. A live call offered one specialist
-nothing but its delegate for ten turns while the caller asked for another one.
+ran a delegate never saw its handoffs again, stranding a live caller who asked
+for another specialist for ten turns.
 
 ## Try it
 

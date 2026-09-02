@@ -26,20 +26,30 @@ Pick one. `provider` takes a single value.
 ## What works where
 
 Tracing needs a process to instrument, so it works on the two code targets and
-not on the managed ones.
+not on the hosted one.
 
 | Target | Tracing |
 |---|---|
 | `pipecat` | yes |
 | `livekit` | yes |
+| `slng` | no |
 
-Tracing works on both targets.
+A hosted target instruments no process of yours: read its calls in the SLNG
+dashboard instead.
 
 ## Secrets
 
-You do not have to list tracing keys under `secrets:` yourself. The compiler adds
-the ones your chosen provider needs, and `unmute compile` prints them in the
-required environment list. See [secrets](/reference/secrets).
+You do not have to list tracing keys under `secrets:` yourself. The compiler
+adds the ones your chosen provider needs, and `unmute compile` prints them in
+the required environment list. See [secrets](/reference/secrets).
+
+Leaving a tracing key out of `secrets:` does not stop it being required. Both
+`unmute validate` and `unmute compile` warn on it every time. `unmute compile`
+prints:
+
+```text
+warning: livekit: environment variables referenced but not declared in secrets: COVAL_API_KEY (tracing.provider: coval)
+```
 
 ## Before you send real calls through it
 
@@ -49,3 +59,14 @@ results. That is the point of it, and it is also the risk.
 Use fake identities and fake customer data for release tests. Keep those tests in
 a separate project on whichever provider you chose, and do not send real customer
 data until that project's access and retention rules are approved.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Coval" icon="flask" href="/tracing/coval">
+    Attach spans to the simulation that produced the call.
+  </Card>
+  <Card title="Langfuse" icon="eye" href="/tracing/langfuse">
+    Watch a live call and debug one conversation at a time.
+  </Card>
+</Columns>

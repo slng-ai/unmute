@@ -21,10 +21,8 @@ yours to choose, and so is the provider that serves it.
 
 <Info>
   Model ids are forwarded to the vendor exactly as you write them. Unmute keeps no
-  allowlist, so a typo surfaces as a provider error at run time.
-  `build/<target>/compile-report.json` records this on ordinary bindings as
-  `forwarded as-is, not validated`. The LiveKit Responses mode below is the narrow
-  exception: `api` selects the generated client and `reasoning_effort` becomes the
+  allowlist, so a typo surfaces as a provider error at run time. The LiveKit
+  Responses mode below is the narrow exception: `api` selects the generated client and `reasoning_effort` becomes the
   API's nested reasoning setting.
 </Info>
 
@@ -166,15 +164,15 @@ Two things this shape buys, both worth knowing before you copy it:
   Groq and 40,960 on Nebius, for the same model. Check the one you pinned.
 
 **Measure the host you pin, and measure two things separately.** On
-`qwen/qwen3-32b` the four providers spanned 564 ms to 1261 ms at p50 and 739 ms to
-7.3 s at p90, and latency did not predict correctness: the second-fastest spoke a
+`qwen/qwen3-32b` the four providers spanned a wide range at both the median and
+the tail, and latency did not predict correctness: the second-fastest spoke a
 fragment of its own tool-call template into every reply. A provider's published
 figures are aggregated over everybody's traffic, mostly short prompts with no
 tools, so they will not match a voice agent's request. Send your own prompt and
 your own tool schemas, and count tool calls as well as milliseconds.
 
 A model whose behaviour no parameter reaches may still need
-[`prompt_suffix`](/optimization/context-router#prompt-suffix-for-what-no-parameter-reaches).
+[`prompt_suffix`](/optimization/context-router#prompt_suffix-for-what-no-parameter-reaches).
 
 ```yaml
 models:
@@ -196,6 +194,62 @@ managed models billed through LiveKit Cloud, with no provider key of their own.
 That path needs `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`, in local development
 as well as in production.
 Writing `provider: livekit` passes your model string through verbatim.
+
+## Fallback
+
+`fallback:` on a `think` entry names other think entries, tried in order when
+the primary model's call fails:
+
+```yaml agent.yaml
+models:
+  think:
+    assistant_model:
+      provider: openai
+      model: gpt-5.6-terra
+      params:
+        reasoning_effort: none
+      fallback:
+        - backup_model
+    backup_model:
+      provider: anthropic
+      model: claude-sonnet-5
+```
+
+`fallback` is legal on `think` and `listen` models only. Naming it on a `speak`
+or `turn` entry is refused, by name. A name the section does not have, or a
+chain that loops back on itself, is refused too, naming the loop.
+
+LiveKit lowers the chain to one constructor call, wrapped in
+`llm.FallbackAdapter`. Compiling the package above emits:
+
+```python
+llm=llm.FallbackAdapter(
+    llm=[
+        openai.LLM(
+            api_key=os.environ["OPENAI_API_KEY"],
+            model="gpt-5.6-terra",
+            reasoning_effort="none",
+        ),
+        anthropic.LLM(
+            api_key=os.environ["ANTHROPIC_API_KEY"], model="claude-sonnet-5"
+        ),
+    ]
+),
+```
+
+Pipecat does not emit a generated fallback yet. Validating the same package
+against a Pipecat target refuses it before a file is written:
+
+```text
+pipecat: the Pipecat driver does not emit generated fallback yet
+```
+
+On SLNG the chain rides the push body as `fallbacks.llm`, a list of model
+strings in the same [vendor/model shape](/targets/slng#model-names) the primary
+binding uses.
+
+[Speech to text](/models/stt#fallback) documents the same field on the `listen`
+role.
 
 ## Where to go next
 
