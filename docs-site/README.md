@@ -102,6 +102,7 @@ Prose rots. These facts cannot:
 | `internal/target/providers_docsite_test.go` | `models/{stt,tts,llm}.mdx` list exactly the catalog's vendors per target per role, with SLNG first; and `models/turn-detection.mdx` carries no vendor list, because the `turn` role has no catalog entries (two tests) |
 | `internal/spec/tools_docsite_test.go` | `build/tools/overview.mdx` names exactly the execution blocks the `Tool` struct has |
 | `internal/docsite/version_test.go` | `snippets/unmute-version.mdx` holds one valid version for the release automation, and no page states a version, by a literal or by rendering the marker (two tests) |
+| `internal/docsite/prose_test.go` | no page uses an em or en dash outside a code fence, and no page tells the reader how the author checked a fact ("we measured", "Measured on 20..", "Where this page's facts come from", "this repository"); rules 4 and 5 above, held |
 | `internal/docsite/changelog_test.go` | `changelog.mdx` runs newest first, every entry has a label, a version and a link to its own release, the newest entry matches the version snippet, the insert marker survives, and no entry keeps a heading, an em or en dash, or a commit hash (five tests) |
 | `internal/skill/markdown_surface_test.go` | `docs.json` declares the contextual menu in order and states the two facts agents get wrong, and `start/coding-agents.mdx` names all three Markdown endpoints and the suffix rule (three tests) |
 

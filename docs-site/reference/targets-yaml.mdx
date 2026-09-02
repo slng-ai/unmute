@@ -26,15 +26,15 @@ targets:
 
 | Key | Type | Required | Default | Allowed values | Meaning |
 |---|---|---|---|---|---|
-| `targets` | map | yes | — | one or more target instance names | target definitions selected by `--target` |
-| `targets.<name>.provider` | string | yes | — | `livekit`, `pipecat`, `slng` | target provider |
-| `targets.<name>.version` | string | for code targets | — | exact `x.y.z` in the supported window for LiveKit and Pipecat | framework version pinned in an emitted project |
-| `targets.<name>.pins` | map of strings | no | — | known LiveKit package names to semantic versions | LiveKit package overrides; other providers do not consume them |
-| `targets.<name>.sdk_language` | string | no | — | `python` when written | SDK used by an emitted project |
-| `targets.<name>.connection` | string | for LiveKit or Pipecat telephony | — | connection file stem | this target's phone route; illegal when the package has no phone use |
-| `targets.<name>.deployment_region` | string or list of strings | no | — | non-empty platform region names, with no duplicates | deployment regions; more than one is LiveKit only |
-| `targets.<name>.warm_instances` | integer | no | — | zero or more; Pipecat only | instances the platform holds ready, so a call is not waiting on a cold container |
-| `targets.<name>.models` | map | no | — | existing model entry names to model definitions | per-target model overrides |
+| `targets` | map | yes | | one or more target instance names | target definitions selected by `--target` |
+| `targets.<name>.provider` | string | yes | | `livekit`, `pipecat`, `slng` | target provider |
+| `targets.<name>.version` | string | for code targets | | exact `x.y.z` in the supported window for LiveKit and Pipecat | framework version pinned in an emitted project |
+| `targets.<name>.pins` | map of strings | no | | known LiveKit package names to semantic versions | LiveKit package overrides; other providers do not consume them |
+| `targets.<name>.sdk_language` | string | no | | `python` when written | SDK used by an emitted project |
+| `targets.<name>.connection` | string | for LiveKit or Pipecat telephony | | connection file stem | this target's phone route; illegal when the package has no phone use |
+| `targets.<name>.deployment_region` | string or list of strings | no | | non-empty platform region names, with no duplicates | deployment regions; more than one is LiveKit only |
+| `targets.<name>.warm_instances` | integer | no | | zero or more; Pipecat only | instances the platform holds ready, so a call is not waiting on a cold container |
+| `targets.<name>.models` | map | no | | existing model entry names to model definitions | per-target model overrides |
 
 The map key is the **target instance name**. It is what `--target` takes and
 what names the output directory, `build/<name>/`. Two targets may use the same
