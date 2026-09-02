@@ -1,6 +1,3 @@
-# The same two targets as examples/salon-concierge, on the same versions, in the
-# same region, over the same two carriers. Only the turn-taking numbers differ,
-# and that is deliberate: it is the one thing the side-by-side is meant to show.
 targets:
   livekit:
     provider: livekit
@@ -19,14 +16,3 @@ targets:
     connection: twilio_voice
     deployment_region: eu-central
     warm_instances: 1
-    # No `endpointing_delay:` override here.
-    #
-    # examples/salon-concierge carries one, 200ms, with eight measured turns behind
-    # it. Leaving it out is not a slower floor on this target: `patient` resolves
-    # the Pipecat floor to the same 0.2s, because the Pipecat floor does not move
-    # with the pace at all. What the baseline gives up is knowing that. The
-    # optimized package can say why its floor is 200ms; this one has a number it
-    # never chose, and would have had a slower agent if it had raised it.
-    #
-    # The pace reaches this target through the ceiling alone, so the whole
-    # difference here is 3.0s against 1.6s.

@@ -1,4 +1,3 @@
-# LiveKit inbound and cold-transfer route through a Twilio Elastic SIP Trunk.
 transport: sip
 carrier: twilio
 environment:

@@ -6,11 +6,6 @@ targets:
     connection: twilio_sip
     deployment_region: eu-central
     models:
-      # No reasoning override here on purpose. A target's models block replaces
-      # the base one rather than merging into it, so an override would route
-      # this target straight past the Context Router with nothing to warn you.
-      # The router speaks Chat Completions, which also rules out the Responses
-      # API and its held websocket that this target used before.
       detector:
         provider: livekit
         model: turn-detector-mini
@@ -20,30 +15,8 @@ targets:
     version: "1.8.0"
     connection: twilio_voice
     deployment_region: eu-central
-    # One instance held ready, because this is a phone route with two knowledge
-    # bases: the corpus is embedded at import, before the server binds, so a cold
-    # start can outlast the session and the call is never answered at all. This
-    # becomes `[scaling] min_agents` in pcc-deploy.toml. It bills whether or not
-    # anybody calls.
     warm_instances: 1
     models:
-      # 200ms here, 400ms on the base binding, and the split is not a
-      # preference. Two reasons pull in the same direction.
-      #
-      # LiveKit refuses anything under 250ms, so the faster value cannot live on
-      # the base binding where both targets read it.
-      #
-      # And on Pipecat this window decides whether the turn ends on the
-      # transcript at all. pipecat-slng asks the bridge to finalise when VAD
-      # reports the caller stopped; a final that has already arrived by then
-      # finds no request outstanding, so the frame goes out unfinalized and
-      # Pipecat waits out its 1.0s safety net instead. Measured 2026-08-26 over
-      # eight turns at 400ms: every turn whose transcript beat the window paid a
-      # flat 1.000s, every turn whose transcript arrived after it ended within a
-      # millisecond of the transcript. Observed transcripts ran 0.27s and up, so
-      # a 200ms window puts all of them on the finalized path.
-      #
-      # Pipecat's own default is 200ms and its shipped TTFS figures assume it.
       detector:
         provider: local
         model: silero

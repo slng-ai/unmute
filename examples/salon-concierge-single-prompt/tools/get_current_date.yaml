@@ -1,13 +1,3 @@
-# The tool examples/salon-concierge deleted.
-#
-# It takes no arguments, so it can only return something that was knowable before
-# the call started: that is the whole test for a pre-fetch candidate. Here it is a
-# real tool the model has to decide to call, and every relative day a caller says
-# costs two chained model requests with nothing spoken over them.
-#
-# The optimized package reads the same clock once, in the zone `timezone:` names,
-# before the greeting, and hands the answer to the booking prompt as
-# {{booking_date}}.
 description: >-
   Get today's date in the salon's own timezone, as YYYY-MM-DD. Call this before
   you work out any relative day such as tomorrow or next Friday, and never guess

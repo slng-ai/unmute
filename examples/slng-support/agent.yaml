@@ -1,55 +1,5 @@
-# A support agent that runs on SLNG, and only on SLNG.
-#
-# SLNG hosts the agent, so there is no project to run and no infrastructure to
-# operate. `unmute compile --target slng` writes a deployment body and a runbook
-# into build/slng/, and the voiceai CLI pushes them.
-#
-# This package exercises all four tool kinds SLNG runs, because they behave
-# differently at deploy time and the difference is what catches people:
-#
-#   builtin (end_call)     a capability SLNG already owns. It must ALREADY EXIST
-#                          in your organisation, and it is referenced by the
-#                          tool FILE's name, not by the `builtin: id`.
-#   code (check_order)     Python SLNG runs in its own sandbox. The push CREATES
-#                          it. No internet access, and it cannot publish until a
-#                          sample run proves it.
-#   webhook (search_places_text)
-#                          an HTTPS call to your own endpoint. The push CREATES
-#                          it. This is the one that may reach the network, and
-#                          the one that carries a Vault secret.
-#
-#   mcp (web_search)       tools an MCP server your organisation has already
-#                          attached offers. The server must ALREADY EXIST; the
-#                          push resolves it by name and copies each tool's
-#                          schema hash from the snapshot SLNG stores for it, so
-#                          nothing connects to the server at deploy time. The
-#                          name in `server:` is the server's name on the
-#                          platform, which is not a legal tool name here: read
-#                          it with `voiceai mcp list`.
-#
-# It also declares a phone channel, so a real call can reach it. Which NUMBER
-# reaches it is deliberately not in this file: see targets.yaml.
-#
-# What this package leaves out, and why:
-#   - a `turn:` section: SLNG owns its own turn taking, so a bound turn model
-#     reaches nothing
-#   - tasks, task groups, agent transfers: SLNG's agent carries one prompt
-#   - inactivity, max_duration, interruption thresholds: no field to hold them
-#   - tracing: unmute instruments no process here, so there is nothing to
-#     instrument (`capacity:` IS used, at the bottom of this file: SLNG sizes
-#     the deployment from it)
-#
-# All four are refused at validate rather than dropped, so `unmute validate
-# --target slng` tells you before anything is written.
-
 version: 1
 
-# What this agent is called where it is deployed. The deployed name is this
-# joined to the target it was compiled for, so one package with two targets
-# of the same provider does not deploy one name twice. Required on every
-# target: the two names unmute could infer instead are not identities,
-# because every package calls its target after the platform, and the folder
-# is named by whoever cloned the repository.
 name: acme-support
 
 entry_agent: support
@@ -66,9 +16,6 @@ agents:
       - end_call
 
 variables:
-  # Declared with a default, so it appears in both of SLNG's variable maps: the
-  # declaration list and the defaults. A caller whose name is not supplied at
-  # dispatch is greeted with the default.
   customer_name:
     type: string
     default: there
@@ -91,9 +38,6 @@ models:
       model: slng/deepgram/nova:3-en
       language: en
 
-# Every environment variable the package names, declared once. On SLNG these
-# become Vault entries: `unmute deploy` checks each one exists and holds a
-# value, and offers to create the ones that do not.
 secrets:
   - SLNG_TOOL_RENDER
   - SEARCH_PLACES_URL
@@ -108,27 +52,18 @@ tools:
 conversation:
   greeting:
     speaks_first: agent
-    # SLNG requires a greeting and speaks the string it is given, so it is
-    # written out here rather than left to the model. The token is a package
-    # variable, rendered by SLNG at the start of the call.
     text: "Hi {{customer_name}}, you have reached Acme Support. How can I help?"
   interruption:
     enabled: true
 
 channels:
-  # Browser, for `unmute dev` and for SLNG's own web session.
   web:
     kind: realtime_audio
-  # Phone. Declaring the channel is what makes the agent answerable by a
-  # carrier; it does not choose a number. `unmute deploy` offers to attach one
-  # of your existing trunks after a successful push.
   phone:
     kind: telephony
     inbound: true
     outbound: false
 
-# Required once a telephony or code target is in play, because SLNG sizes the
-# deployment from it. These are your numbers, not a default worth copying.
 capacity:
   peak_sessions: 5
   max_sessions: 10

@@ -4,10 +4,6 @@ name: salon-concierge
 
 entry_agent: concierge
 
-# The zone every clock reading in this package is taken in. Required before a
-# prefetch entry can read the clock, and required rather than defaulted because
-# the wrong answer is silent: a container clock is UTC, so a salon in Spain taking
-# a booking for "tomorrow" at 23:30 local would confidently name the wrong day.
 timezone: Europe/Madrid
 
 agents:
@@ -51,11 +47,6 @@ delegates:
   manage_booking:
     task: booking
     when: The caller wants to create, modify, or cancel a booking.
-    # Two model requests pass between the caller finishing and this step's first
-    # word, and they were silence. Spoken after the prerequisite guard, so a step
-    # refused for an unconfirmed number stays quiet: hearing "let me pull up the
-    # diary" and then being asked to confirm a number is worse than hearing
-    # nothing. See README.md on the two-cover-lines case.
     announce: Let me pull up the diary.
     requires:
       - customer_phone
@@ -64,11 +55,6 @@ handoffs:
   to_complaints:
     to: complaint_specialist
     when: The verified caller has a complaint or service problem.
-    # Deliberately not gated on identifying the caller, even though the `when:`
-    # says "verified": somebody with a complaint must be able to make it, and a
-    # guard here would leave an angry caller stuck at an identity question. The
-    # specialist's record_complaint tool injects the number and is refused to the
-    # model while that number is unconfirmed, which is where the protection lives.
     context:
       history: full
       variables: all
@@ -108,10 +94,6 @@ tasks:
     instructions: tasks/booking.md
     tools:
       - list_bookings
-      # get_current_date used to sit here. Reading the clock is not a
-      # conversation, and asking a model to call a tool for it cost two chained
-      # requests and 2.56 seconds of silence on every relative day. The prefetch
-      # block below reads it once, before the greeting, into {{booking_date}}.
       - check_availability
       - create_booking
       - modify_booking
@@ -146,9 +128,6 @@ variables:
   customer_phone:
     type: string
     default: ""
-    # The step that has to hear the caller agree before anything acts on this.
-    # Names the task, not the delegate that runs it: the task is what has a
-    # prompt, and its prompt is the one place this value may render.
     confirm: customer_verification
     description: >-
       The caller's phone number in E.164: a plus sign, then digits, with no
@@ -181,12 +160,6 @@ variables:
       was: greeting a stranger by the account holder's name is the worst thing
       this feature could do, and the compiler refuses the prompt that would.
 
-# Facts knowable before the greeting, resolved once per call so the model never
-# spends a turn discovering them.
-#
-# An ordered list, and the order matters: "caller" has to sit above "profile",
-# which reads what it assigns. Written the other way round it is refused, naming
-# both entries, rather than quietly reordered.
 prefetch:
   - name: today
     clock: date
@@ -267,10 +240,6 @@ models:
 
 tools:
   - find_or_create_customer
-  # Reads and writes nothing, which is what lets a prefetch run it unasked on
-  # every call. find_or_create_customer stays where it is for the confirmed
-  # mid-call path: pre-fetching that one would create a customer record for every
-  # wrong number that ever rang.
   - look_up_customer
   - look_up_refund_policy
   - look_up_salon_info

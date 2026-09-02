@@ -2,12 +2,6 @@ description: >-
   Look up a customer by phone number. Reads only: it never creates a record and
   never touches one. Returns an empty name when the number is not on file.
 
-# The author's promise that this tool writes nothing, which is what lets a
-# prefetch entry run it. A prefetch runs unasked on every call, so a tool that
-# wrote would write on every call, wrong numbers included: that is why
-# find_or_create_customer is not pre-fetchable and this exists beside it.
-#
-# The compiler cannot check the promise. It checks that you made it.
 read_only: true
 
 input:

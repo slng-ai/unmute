@@ -22,18 +22,8 @@ from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-# ponytail: worker-local state behind one lock. `setdefault` is the whole
-# race-free part: dict.setdefault is atomic under the GIL, so whichever copy
-# imports first wins and the rest get that same object, and the throwaway
-# module the losers built is collected. Ceiling: one process. Put a real
-# service behind these functions before a second replica exists, and the
-# lock becomes that service's transaction.
 _fresh = types.ModuleType("unmute_salon_state")
 _fresh.customers = set()
-# One seeded record, kept so this store matches the optimized package's exactly.
-# Nothing in this package ever reads the name: there is no pre-fetch to look it up
-# before the greeting and no variable to hold it, so the caller is asked for their
-# number out loud whether or not the salon already knows them.
 _fresh.names = {"34680830464": "Robin Vega"}
 _fresh.bookings = {}
 _fresh.complaints = {}
@@ -42,9 +32,6 @@ _state = sys.modules.setdefault("unmute_salon_state", _fresh)
 
 _SERVICES = {"haircut", "hair-color", "blowout"}
 _TIMES = ("09:00", "11:30", "15:00")
-# Kept in step with `timezone:` in agent.yaml by hand. Two owners for one fact is
-# not ideal; a handler receives no compiler-resolved values, so the alternative is
-# an injected variable, which is worth doing the day a second handler needs it.
 _SALON_TIMEZONE = "Europe/Madrid"
 
 
@@ -103,11 +90,6 @@ def _e164(digits):
     "3 468 083 0464": a lone "3" standing in for a country code that is really
     34, and a caller hearing their own number read as somebody else's.
     """
-    # ponytail: the plus, and nothing else. Ceiling: a caller who gives a bare
-    # national number gets a plus in front of it, which is a consistent key but
-    # not a dialable E.164. Inventing the missing country code is worse, because
-    # a wrong guess merges two callers or splits one. Reach for `phonenumbers`
-    # with a default region if a caller ever needs the dialable form back.
     return "+" + digits
 
 
@@ -322,33 +304,19 @@ def _demo():
     assert _normalize_phone("(555) 010-1010") == "5550101010"
     assert _normalize_phone("123456789012345") == "123456789012345"
 
-    # E.164, and the same E.164 whatever punctuation the number arrived in. This
-    # is the shape tasks/verify-customer.md tells the step to return, and the one
-    # the `customer_phone` variable documents, so it is asserted rather than
-    # trusted: a second shape here would put two formats back in the package.
     assert _e164("15550707444") == "+15550707444"
     assert _e164("5550101010") == "+5550101010"
-    # A number whose local part is not ten digits long, kept in the order the
-    # caller said it. Splitting a country code off the last ten read this back as
-    # "3 468 083 0464", the caller's digits regrouped into somebody else's number.
     assert _e164("34680830464") == "+34680830464"
 
     created = find_or_create_customer("+1 555 010 1010")
     repeated = find_or_create_customer("15550101010")
     assert created["status"] == "created"
     assert repeated["status"] == "existing"
-    # One identifier, and it survives being written any of the ways a caller or
-    # a prompt might write it.
     assert repeated["customer_phone"] == created["customer_phone"] == "+15550101010"
     customer = created["customer_phone"]
-    # Punctuation is noise. A country code is not: the same local digits with
-    # and without a leading 1 are two different numbers, and therefore two
-    # different customers, which is why the prompt refuses to invent one.
     assert find_or_create_customer("1-555-010-1010")["status"] == "existing"
     assert find_or_create_customer("(555) 010-1010")["status"] == "created"
 
-    # The compiler emits this file once per tool. Load a second copy the way the
-    # runtime would and prove both copies read and write the one store.
     spec = importlib.util.spec_from_file_location("salon_copy_two", __file__)
     copy_two = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(copy_two)
@@ -368,14 +336,8 @@ def _demo():
             assert len({result["customer_phone"] for result in concurrent}) == 1
             assert [result["status"] for result in concurrent].count("created") == 1
 
-    # get_current_date returns the salon's day, not the container's. It reads the
-    # same clock every date check below reads, so a UTC container at 23:30 in
-    # Madrid cannot have the tool and the validation disagree about the day.
     assert get_current_date() == {"date": _booking_today().isoformat()}
 
-    # The clock reads the salon's own zone, not the container's. Asserted against
-    # the zone rather than against date.today(), which is the bug this replaced:
-    # the two agree for most of the day and differ exactly when it matters.
     current_date = _booking_today().isoformat()
     assert current_date == datetime.now(ZoneInfo(_SALON_TIMEZONE)).date().isoformat()
     first_date = (date.fromisoformat(current_date) + timedelta(days=1)).isoformat()
@@ -399,7 +361,6 @@ def _demo():
     assert booking["status"] == "booked"
     active = list_bookings(customer)["bookings"]
     assert len(active) == 1 and active[0]["booking_id"] == booking["booking_id"]
-    # One active booking per slot, checked through the second copy.
     assert (
         copy_two.create_booking(customer, "haircut", first_slot, confirmed=True)["status"]
         == "slot_unavailable"
@@ -443,12 +404,8 @@ def _demo():
     )
     complaint = record_complaint(customer, "My cut was uneven.")
     assert complaint["status"] == "recorded"
-    # Stored normalised, so a complaint and a booking made from differently
-    # spoken versions of one number belong to the same caller.
     assert _state.complaints[complaint["complaint_id"]]["customer_phone"] == "15550101010"
 
-    # The whole point of one identifier: the number the caller says in any shape
-    # reaches the record the number in any other shape created.
     reshaped = list_bookings("+1 (555) 010-1010")["bookings"]
     assert reshaped == list_bookings(customer)["bookings"]
 
