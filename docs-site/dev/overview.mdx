@@ -210,6 +210,27 @@ Leave the flag out and the `default` is used instead. See
 [variables](/build/variables) for what happens when you try to seed something
 else.
 
+## Seeding call facts
+
+`--source name=value` stands in for a fact the call itself carries, such as
+the caller's number. It is repeatable, and it only accepts the eight facts a
+call carries: `from_number`, `to_number`, `call_id`, `direction`, `carrier`,
+`connection`, `session_id`, `stream_id`.
+
+```sh
+unmute dev my-agent --source from_number=+34600111222
+```
+
+This seeds the fact, which a `prefetch:` entry then reads, so the run
+exercises the pre-fetch, the confirmation marking, and the read back. On a
+real call the carrier's own value wins: a seed only fills in what the route
+gave nothing for.
+
+Do not use `--var` to seed a caller's number. `--var` writes the variable
+directly, so it skips the pre-fetch, marks nothing as awaiting confirmation,
+and lets a local run act on a number it never read back. That is a path a
+real call cannot take.
+
 ## One run per package at a time
 
 LiveKit's Compose project name comes from the package path and target name. A
@@ -226,6 +247,10 @@ LIVEKIT_HOST_PORT=7890 LIVEKIT_TCP_HOST_PORT=7891 LIVEKIT_UDP_HOST_PORT=7892 \
 ## Where to go next
 
 <Columns cols={2}>
+  <Card title="Tracing" icon="chart-line" href="/tracing/overview">
+    See the whole call after it ends: transcript, tool calls, and per-span
+    timing.
+  </Card>
   <Card title="Phone calls" icon="phone" href="/telephony/overview">
     What each route means, and how a call reaches a deployed agent.
   </Card>
@@ -234,8 +259,5 @@ LIVEKIT_HOST_PORT=7890 LIVEKIT_TCP_HOST_PORT=7891 LIVEKIT_UDP_HOST_PORT=7892 \
   </Card>
   <Card title="Latency" icon="gauge" href="/optimization/latency">
     What each number under a turn means, and which part to fix.
-  </Card>
-  <Card title="Turn detection" icon="ear" href="/models/turn-detection">
-    Often the largest number in a turn, and a setting you control.
   </Card>
 </Columns>

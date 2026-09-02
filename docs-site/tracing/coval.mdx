@@ -159,12 +159,8 @@ A route the agent cannot identify records nothing rather than guessing.
    `lk agent update-secrets --secrets-file .env`.
 2. Deploy, place a call, and hang up. The trace is filed when the call ends, so
    nothing appears while the call is running.
-3. Open **Observability → Conversations** and filter on the agent name. The call
-   is normally there within a few seconds of hangup; a minute is the outside
-   case.
-4. Do it three times before you conclude anything. One call cannot support a
-   claim about a deployed agent, and the three conversations should be distinct,
-   each holding exactly one `conversation` root span.
+3. Open **Observability → Conversations** and filter on the agent name. Each
+   call is its own conversation, holding exactly one `conversation` root span.
 
 If nothing appears, read the agent's log rather than guessing. It says on
 startup whether `COVAL_API_KEY` is present and where traces are going, and it
@@ -226,19 +222,24 @@ open when the metric arrived.
 Each `llm` span carries the prompt that round actually ran on:
 `gen_ai.system_instructions` is the system prompt of the agent holding the floor,
 `input` is its message history as JSON, `tools` and `tool_count` are what it was
-offered, and `agent.label` says which agent that was. One exchange can take
-several rounds, through tools or a handoff, and only the round that produced
-the spoken reply carries it as `output`; a superseded or pre-handoff round
-claiming those words would be lying. Those names are Pipecat's own, used on both targets on purpose: a package
+offered, and `agent.label` says which agent that was.
+
+One exchange can take several rounds, through tools or a handoff. Only the
+round that produced the spoken reply carries it as `output`; a superseded or
+pre-handoff round claiming those words would be lying.
+
+Those names are Pipecat's own, used on both targets on purpose. A package
 compiles to both, so one vocabulary means a Coval trace metric or judge prompt
-written once reads either. With handoffs that matters more than
-usual, because the prompt changes under the caller mid-call and a transcript
-cannot show which one produced a given answer. The history is snapshotted when
-the round's metrics arrive, which is where it is right: LiveKit appends the reply
-and any tool results after the request that produced them has finished. A
-workflow task group is the one agent that keeps no prompt of its own, so its
-instructions are read from the newest `agent_config_update` in its context,
-which is the prompt actually in force.
+written once reads either. With handoffs that matters more than usual,
+because the prompt changes under the caller mid-call and a transcript cannot
+show which one produced a given answer.
+
+The history is snapshotted when the round's metrics arrive, which is where it
+is right: LiveKit appends the reply and any tool results only after the
+request that produced them has finished. A workflow task group is the one
+agent that keeps no prompt of its own, so its instructions are read from the
+newest `agent_config_update` in its context, which is the prompt actually in
+force.
 
 The prompt has its own size budget, spent on the newest messages. A chat context
 grows all call long and rides along on every model call, so `input` holds as
@@ -307,3 +308,14 @@ the live call.
 
 Submitting audio with a conversation, so Coval can score speech as well as text,
 is not emitted today. Only the transcript is submitted.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Langfuse" icon="eye" href="/tracing/langfuse">
+    Watch a live call and debug one conversation at a time.
+  </Card>
+  <Card title="Tracing overview" icon="book" href="/tracing/overview">
+    Turning tracing on, and what it costs in secrets.
+  </Card>
+</Columns>
