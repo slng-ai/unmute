@@ -6,6 +6,15 @@ description: "Call your own API: a URL from the environment, a path that renders
 The everyday tool. The model decides to call it, Unmute builds the request, and
 your API answers.
 
+Reach for a webhook when:
+
+- you already have an API to call
+- the URL is a deployment choice, not something to hardcode
+- you want no code of your own to write or review
+
+If the work is logic rather than a request, or there is no API to call, write a
+[Python handler](/build/tools/python) instead.
+
 ```yaml tools/confirm_appointment.yaml expandable wrap
 description: Confirm that the existing appointment stays as booked. Call it when the customer says the time works.
 
@@ -20,6 +29,7 @@ inject:
 
 webhook:
   url_env: SALON_API_URL
+  base_url: https://api.example.com
   path: /customers/{{customer_id}}/appointments/confirm
   auth:
     type: bearer
@@ -30,8 +40,11 @@ effect: returns_data
 interruption: provider_default
 ```
 
-This is a standalone webhook example. The shipped outbound live example uses
-local Python fixtures so it can run without an operator-specific API.
+This is a worked example rather than a quote. For a real one, every field here
+is real: [`examples/slng-support`](https://github.com/slng-ai/unmute/tree/main/examples/slng-support)
+ships `tools/search_places_text.yaml`, a webhook tool that carries both
+`url_env` and `base_url` the same way, so it deploys to slng and would compile
+to a code target too.
 
 `announce:` is the one line worth knowing about here, because a webhook is the
 tool most likely to keep the caller waiting. The agent speaks that exact sentence
@@ -43,12 +56,39 @@ refused. Full rules in [the behavior fields](/build/tools/overview#the-three-beh
 
 | Field | Required | What it is |
 |---|---|---|
-| `url_env` | yes | the UPPER_SNAKE name of an environment variable holding the base URL |
+| `url_env` | at least one of `url_env`, `base_url` | the UPPER_SNAKE name of an environment variable holding the base URL |
+| `base_url` | at least one of `url_env`, `base_url`; required on SLNG | the literal `https://` base URL |
 | `path` | no | appended to that base URL; when present it starts with `/` and may carry `{{variable}}` tokens |
 | `auth` | no | how the request authenticates |
 
 `url_env` holds a **name**, so the base URL is a deployment choice rather than a
 package one: staging and production run the same package against different APIs.
+Pipecat and LiveKit Agents read it at run time and never look at `base_url`.
+
+## Naming the base URL for SLNG
+
+SLNG stores the URL in the tool body it pushes, so there is no environment for
+it to read at run time: `url_env` alone is not enough there. Leave `base_url`
+out and SLNG refuses at compile:
+
+```text
+slng: slng target tool "confirm_appointment" names only url_env, and SLNG stores the
+  URL in the tool body rather than reading it from an environment: add base_url with
+  the literal https host, keeping url_env for the code targets
+```
+
+`base_url` has to be a literal address: no `{{variable}}` token in the scheme
+or the host, because a name is not a shape SLNG's URL validator accepts. A
+`path` on the same tool may still carry one, since that part renders per call
+rather than living in the stored body.
+
+Write both fields and each target reads only the one it needs. Drop `url_env`
+and the code targets refuse the mirror way:
+
+```text
+livekit: livekit target reads a webhook base URL from the environment: tool
+  "confirm_appointment" needs url_env, keeping base_url for a hosted target
+```
 
 ## The path renders per call
 
@@ -102,6 +142,12 @@ Every name you use here goes in `agent.yaml` under
 [`secrets:`](/reference/secrets). The compiler also infers these fields as
 required environment names, so leaving one out of `secrets:` warns without
 dropping it from generated environment instructions or checks.
+
+**SLNG has no `api_key` scheme of its own.** It sends the token as a bearer
+token whichever `type` you wrote, and drops a custom `header`. Write
+`type: bearer` if the target is SLNG, so the package says what actually goes
+over the wire; the code targets send `api_key` and its header exactly as
+written.
 
 ## What the model fills in, and what it cannot
 
@@ -161,11 +207,17 @@ output:
     - slots
 ```
 
-`output` is optional author documentation. The compiler checks that it is a JSON
-Schema object, but no generator sends it to the model, writes it to the compile
-report, or enforces the returned value at run time today. The example records the
-shape the API is expected to return; teach the model how to use that data in the
-tool description or prompt.
+`output` is optional author documentation. The compiler checks that it is a
+JSON Schema object, but no generator sends it to the model or writes it to the
+compile report. Nothing checks the API's response against it either, not even
+SLNG: SLNG proxies this request rather than running code of its own, so it has
+nothing to introspect a response with. The example records the shape the API
+is expected to return; teach the model how to use that data in the tool
+description or prompt.
+
+A [`local:`](/build/tools/python) handler's `output:` is the one exception:
+SLNG runs that handler itself and checks its return value against it. Full
+story in [Python tools](/build/tools/python#the-rules-the-function-follows).
 
 ## Where to go next
 

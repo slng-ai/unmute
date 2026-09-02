@@ -273,8 +273,9 @@ interruption: provider_default
 | Field | Required | What it is |
 |---|---|---|
 | `url_env` | yes | the `UPPER_SNAKE` name of a variable holding the base URL |
+| `base_url` | on slng | the literal `https://` host; SLNG stores the URL in the tool body and refuses a tool that names only `url_env` |
 | `path` | no | starts with `/`, is appended to that base URL, and may carry `{{variable}}` tokens |
-| `auth` | no | how the request authenticates |
+| `auth` | no | how the request authenticates; on slng an `api_key` with a custom `header` is sent as `bearer`, the header name is dropped |
 
 `url_env` holds a **name**, never a URL. Writing the address there is refused.
 That is what lets staging and production run the same package against different
@@ -372,8 +373,7 @@ def cancel_appointment(customer_id):
     return {"cancelled": True, "customer_id": customer_id}
 ```
 
-This is a self-contained fixture; its live
-test exercises outbound calling without requiring a booking API.
+This is a self-contained fixture that runs without a booking API.
 
 The rules the function follows:
 
@@ -381,8 +381,8 @@ The rules the function follows:
 |---|---|
 | the function name matches the tool name | that is how the generated code finds it |
 | its parameters match the `input` properties plus the `inject` keys | the call is built from both |
-| it returns the value your description and prompt expect | the result goes back to the model; `output` is not enforced |
-| it may be `async def` | the generated code awaits an awaitable result |
+| it returns the value your description and prompt expect | the result goes back to the model; the code targets do not enforce `output`, SLNG turns it into a pydantic `Output` class and validates the return value against it |
+| it may be `async def` on the code targets | the generated code awaits an awaitable result; SLNG calls the handler synchronously and refuses an `async def`, and refuses any import of `requests`, `httpx`, `urllib`, `urllib3`, `aiohttp`, `http.client` or `socket`, because custom code there has no network |
 | it imports nothing from Unmute | the generated project does not depend on Unmute at run time |
 
 **An optional `input` property is always passed, as an empty string.** The
@@ -423,7 +423,7 @@ mcp:
 | `url_env` | yes | the `UPPER_SNAKE` name of the variable holding the server address |
 | `transport` | no | `sse` or `streamable_http` |
 | `auth` | no | `bearer` with `token_env`, or `api_key` with `token_env` and an optional `header` |
-| `tools` | no | non-empty, unique server tool names to offer; absent means all of them |
+| `tools` | on slng | non-empty, unique server tool names to offer; absent means all of them on the code targets, and is refused on slng |
 
 `url_env` is a name, never an address. `transport` is optional because both
 platforms guess it from the URL: a path ending in `/mcp` is streamable HTTP,

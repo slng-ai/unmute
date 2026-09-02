@@ -6,6 +6,12 @@ description: "Point the agent at a remote MCP server and let it offer that serve
 An MCP server already describes its own tools. So instead of writing a tool, you
 name the server, and the agent offers what the server exposes.
 
+Reach for an MCP source when a whole catalogue of tools already exists behind
+one server, maintained by someone else, so attaching them one by one as
+separate tool files would just be repetition. For one tool of your own, write
+a [webhook](/build/tools/webhook) or a [Python handler](/build/tools/python)
+instead.
+
 The file that does it holds one block and nothing else:
 
 ```yaml tools/web_search.yaml
@@ -36,8 +42,15 @@ tools:
   - web_search
 ```
 
-That is quoted from [`examples/slng-support`](https://github.com/slng-ai/unmute/tree/main/examples/slng-support),
-which deploys with it. It compiles on all three targets as written.
+This is a worked example rather than a quote, with `auth:` added to show the
+field. The real one ships in
+[`examples/slng-support`](https://github.com/slng-ai/unmute/tree/main/examples/slng-support):
+its `tools/web_search.yaml` names the same server and the same two tools, and
+carries no `auth:`. SLNG has nothing to do with it there: the platform reads
+the server by name from its own registration, not from `url_env` or `auth`, so
+those fields matter only for a code target. This package deploys to slng only,
+agent name `support`, alongside three other tools, so there was nothing for
+`auth:` to reach.
 
 ## The block
 
@@ -135,6 +148,22 @@ Leave `tools` out and the agent gets everything the server exposes.
 An empty list entry or a name repeated twice is still an authoring error and is
 refused before the server is contacted.
 
+**SLNG has no "whole server" attachment, so `tools:` is required there.**
+Where LiveKit and Pipecat pass the server through and let it decide what it
+offers, SLNG writes one reference per tool up front, and compiling offline
+means it cannot ask the server what those are:
+
+```text
+slng: slng target tool "web_search" exposes every tool on its MCP server, and SLNG
+  attaches one reference per tool: list the tools you want under mcp.tools
+```
+
+`url_env`, `transport`, and `auth` reach no further than that same offline
+compile on SLNG: the platform already has the server registered, under
+`server`, with whatever credential it needs, so nothing in this block reaches
+it at run time except the tool list. Those three fields matter for the code
+targets only.
+
 ## Where the source can be listed
 
 | Scope | LiveKit | Pipecat |
@@ -182,35 +211,26 @@ With Langfuse tracing enabled, Pipecat MCP calls emit finite `tool:<name>` spans
 With Coval tracing enabled, the same calls emit `llm_tool_call` spans carrying `function.name`, `tool_call_id`, and `function.arguments`.
 Pipecat refuses to start when an agent tool, task function, or MCP source on the same agent exposes the same name.
 
-Either way the dependency the project declares picks up the extra for you:
-`livekit-agents[mcp,openai]==1.6.10` and `pipecat-ai[mcp,openai,runner,silero,webrtc]==1.8.0`.
+Either way the dependency the project declares picks up an `mcp` extra for
+you, alongside whatever your other models already need. Compiling the worked
+example above, with its other roles filled in, writes
+`livekit-agents[cartesia,deepgram,mcp,openai]==1.6.10` and
+`pipecat-ai[cartesia,deepgram,mcp,openai,runner,silero,webrtc]==1.8.0`.
 
 ## What the compile does with it
 
-Every name the block holds becomes part of the generated project. Compiling the
-package above gives:
-
-`build/livekit/.env.example`
+Every name the block holds becomes part of the generated project. Compiling a
+package that names the worked example's tool and also targets livekit adds,
+among the names `build/livekit/.env.example` collects from the rest of the
+package:
 
 ```text
 FIRECRAWL_API_KEY=
 FIRECRAWL_MCP_URL=
-OPENAI_API_KEY=
-SLNG_API_KEY=
 ```
 
-`build/livekit/agent.py`, the startup check
-
-```python
-REQUIRED_ENV = [
-    "FIRECRAWL_API_KEY",
-    "FIRECRAWL_MCP_URL",
-    "OPENAI_API_KEY",
-    "SLNG_API_KEY",
-]
-```
-
-`build/livekit/compile-report.json`, which says where each name came from
+The same two names land in `build/livekit/agent.py`'s startup check, `REQUIRED_ENV`,
+and in `build/livekit/compile-report.json`, which says where each one came from:
 
 ```json
 {
@@ -232,7 +252,7 @@ def _mcp_toolset(source: str) -> mcp.MCPToolset:
             mcp_server=mcp.MCPServerHTTP(
                 url=os.environ["FIRECRAWL_MCP_URL"],
                 transport_type="streamable_http",
-                allowed_tools=["firecrawl_search"],
+                allowed_tools=["firecrawl_scrape", "firecrawl_search"],
                 headers=_bearer("FIRECRAWL_API_KEY"),
                 timeout=30,
                 client_session_timeout_seconds=30,

@@ -6,6 +6,12 @@ description: "The tools the runtime already has: a closed registry with one entr
 Some tools need no code from you because both runtimes already have them. You
 select one by id.
 
+Reach for a prebuilt when the capability already exists in the runtime, so
+writing your own would just duplicate it. Today that is ending the call. For
+anything else, write a [webhook](/build/tools/webhook), a
+[Python handler](/build/tools/python), or point at an
+[MCP server](/build/tools/mcp).
+
 ```yaml tools/end_call.yaml
 description: "End the call when the caller is finished or says goodbye."
 builtin:
@@ -117,13 +123,35 @@ tools:
   - end_call
 ```
 
+## Resolving on SLNG
+
+SLNG already offers `end_call` as one of its own curated capabilities, so
+`unmute deploy`'s preflight check has to match your reference against it
+before pushing. It matches by the tool **file's** name, `tools/end_call.yaml`,
+never by the `builtin.id` you selected inside it.
+
+That is fine as written here, because the file is named `end_call` too. It
+stops being fine the moment you rename the file to something that describes
+what it does rather than the capability it selects: a file
+`tools/hang_up.yaml` with `builtin: {id: end_call}` inside compiles and
+validates, but the organisation has no tool named `hang_up`, so the preflight
+reports it absent even though the capability exists:
+
+```text wrap
+this organisation has no tool of this name (it has `end_call`). A builtin reference is
+  the tool file's own name, so either rename the file to a capability SLNG offers, or
+  create the tool in the SLNG dashboard
+```
+
+Keep a `builtin:` file's name matching its `id`.
+
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="Orchestration" icon="git-branch" href="/build/orchestration/overview">
-    Split work between prompts when one agent stops being enough.
+  <Card title="Knowledge bases" icon="book-open" href="/build/tools/knowledge">
+    Answer from a folder of your own documents.
   </Card>
   <Card title="Tools" icon="wrench" href="/build/tools/overview">
-    Return to all six execution blocks.
+    Return to all seven execution blocks.
   </Card>
 </Columns>
