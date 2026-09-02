@@ -280,7 +280,7 @@ async def _summarize(source: llm.ChatContext, summarizer: llm.LLM) -> llm.ChatCo
 {{- if .AuthKinds.Any}}
 # --- webhook auth ------------------------------------------------------------
 # One helper per scheme a tool actually declares; the token is read from the
-# environment at call time and never appears in the spec.
+# environment at call time and never appears in the package.
 {{- if .AuthKinds.Bearer}}
 def _bearer(env: str) -> dict[str, str]:
     """auth: bearer — the Authorization header read from the tool's token_env."""

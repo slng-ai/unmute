@@ -302,7 +302,7 @@ Entry agent: `intake`.
 """Generated Pipecat agent for safe-core-fixture.
 
 Compiled by `unmute`; do not edit by hand. Prompts, model routes, and the agent
-graph are baked in from the spec. Secret values are read from the environment
+graph are baked in from the package. Secret values are read from the environment
 and never written here. The agency model uses the Pipecat workers API: a main
 PipelineWorker owns the transport + STT, each agent is an LLMWorker with its own
 LLM and voice, and agent_transfer is activate_worker(). Tasks and task groups
