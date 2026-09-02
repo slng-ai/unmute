@@ -92,27 +92,6 @@ it. It does not import Unmute. On SLNG there is nothing to run yourself:
   change inside `build/` is overwritten on the next compile.
 </Warning>
 
-## The compile report
-
-`unmute compile` writes what it decided to `build/<target>/compile-report.json`,
-next to the project it describes. The terminal itself only shows which files
-were written; the report is where you read the detail. Three kinds of entry
-matter.
-
-**Model bindings.** Unmute passes your model and voice strings through to the
-provider without checking them, and the report names the provider and model
-for every role, marked as forwarded and not validated.
-
-**Sizing.** Unmute turns your `capacity:` block into worker and quota numbers.
-Each one carries an `unbenchmarked` status and the date of the assumption it
-came from, so you know it is a starting point.
-
-**Telephony evidence.** A phone route's entry says how well each capability is
-proven, with the vendor document it was checked against.
-
-See [the compile report](/reference/cli/compile#the-report) for the exact
-shape of each field.
-
 ## Warnings never fail quietly
 
 Warnings go to standard error and the command still exits 0. Errors exit 1.

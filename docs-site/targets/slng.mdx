@@ -142,8 +142,8 @@ That reaches SLNG as one string. A model name that already carries a slash is
 passed through whole rather than joined twice, which is how a SLNG Context
 Router model such as `slng/deepgram/nova:3-en` reaches the body unchanged.
 
-Nothing else about a model is checked here. SLNG owns its own model list, so the
-compile report says which values were forwarded and validates none of them.
+Nothing else about a model is checked here. SLNG owns its own model list, so
+Unmute forwards the values as written and validates none of them.
 
 That makes a model string the field most likely to fail your push, and it fails
 loudly: `AGENT_MODEL_UNAVAILABLE`, naming `models.stt`, `models.llm` or

@@ -101,28 +101,9 @@ billing, instead of waiting for someone to ring in.
 unmute compile examples/salon-concierge --target pipecat
 ```
 
-The route and the evidence for each capability are written to
-`build/pipecat/compile-report.json`, under `telephony`:
-
-```json
-{
-  "telephony": {
-    "route": { "provider": "pipecat", "transport": "cloud-websocket", "carrier": "twilio" },
-    "coordination": "shared",
-    "admission_owner": "generated_runtime",
-    "evidence": [
-      {
-        "feature": "cold_transfer",
-        "tag": "provisional",
-        "docs": "https://docs.pipecat.ai/pipecat-cloud/guides/telephony/twilio-websocket",
-        "smoke": false
-      }
-    ]
-  }
-}
-```
-
-See [the compile report](/reference/cli/compile#the-report) for each field.
+A clean compile means the route is legal for this target and the cold transfer
+is one the route supports. The emitted `README.md` carries the Twilio markup
+the route needs.
 
 ## Where to go next
 

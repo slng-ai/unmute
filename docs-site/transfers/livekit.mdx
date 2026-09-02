@@ -132,27 +132,9 @@ carries whatever you write through verbatim.
 unmute compile examples/salon-concierge
 ```
 
-The route, every required environment variable, and the evidence for each
-capability are all written to `build/livekit/compile-report.json`, under
-`telephony`:
-
-```json
-{
-  "telephony": {
-    "route": { "provider": "livekit", "transport": "sip", "carrier": "twilio" },
-    "coordination": "shared",
-    "admission_owner": "livekit_dispatch",
-    "evidence": [
-      {
-        "feature": "warm_transfer",
-        "tag": "provisional",
-        "docs": "https://docs.livekit.io/telephony/start/providers/twilio/",
-        "smoke": false
-      }
-    ]
-  }
-}
-```
+The build carries the route, every required environment variable, and the
+transfer capability the route supports. The emitted `README.md` walks the trunk
+setup for it.
 
 Inbound on this route is tested against a deployment: SIP needs the carrier to
 reach signalling and media at a routable address, which a laptop behind a home
