@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 _fresh = types.ModuleType("unmute_salon_state")
 _fresh.customers = set()
-_fresh.names = {"34680830464": "Robin Vega"}
+_fresh.names = {"34111111111": "Robin Vega"}
 _fresh.bookings = {}
 _fresh.complaints = {}
 _fresh.lock = threading.Lock()
@@ -86,8 +86,8 @@ def _e164(digits):
     rather than inventing a second one.
 
     It never splits a country code off, and never supplies one. Guessing took the
-    last ten digits for the local number, so `+34 680 830 464` came back as
-    "3 468 083 0464": a lone "3" standing in for a country code that is really
+    last ten digits for the local number, so `+34 111 111 111` came back as
+    "3 411 111 1111": a lone "3" standing in for a country code that is really
     34, and a caller hearing their own number read as somebody else's.
     """
     return "+" + digits
@@ -306,7 +306,7 @@ def _demo():
 
     assert _e164("15550707444") == "+15550707444"
     assert _e164("5550101010") == "+5550101010"
-    assert _e164("34680830464") == "+34680830464"
+    assert _e164("34111111111") == "+34111111111"
 
     created = find_or_create_customer("+1 555 010 1010")
     repeated = find_or_create_customer("15550101010")

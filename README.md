@@ -11,7 +11,7 @@
   <a href="https://github.com/slng-ai/unmute/releases"><img src="https://img.shields.io/github/v/release/slng-ai/unmute?label=release" alt="Release"></a>
   <a href="https://github.com/slng-ai/unmute/actions/workflows/ci.yml"><img src="https://github.com/slng-ai/unmute/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/slng-ai/unmute" alt="License"></a>
-  <a href="https://unmute.mintlify.app"><img src="https://img.shields.io/badge/docs-unmute.mintlify.app-8A7300" alt="Documentation"></a>
+  <a href="https://unmute.ai"><img src="https://img.shields.io/badge/docs-unmute.ai-8A7300" alt="Documentation"></a>
 </p>
 
 Unmute is a command line compiler for voice agents. You write a small package of
@@ -24,9 +24,9 @@ no dependency on Unmute at runtime. Unmute compiles ahead of time and gets out o
 the way. It is never in the call path.
 
 > [!TIP]
-> The [Quickstart](https://unmute.mintlify.app/start/quickstart) goes from nothing
+> The [Quickstart](https://unmute.ai/start/quickstart) goes from nothing
 > to a voice you can talk to in your browser. The full guide lives at
-> [unmute.mintlify.app](https://unmute.mintlify.app).
+> [unmute.ai](https://unmute.ai).
 
 ## Quickstart
 
@@ -49,7 +49,7 @@ says so.
 Windows uses Scoop, Linux takes the archive from the
 [releases page](https://github.com/slng-ai/unmute/releases), and every release
 also carries a signed `checksums.txt` and one SBOM per archive.
-[Installation](https://unmute.mintlify.app/start/installation) covers all four
+[Installation](https://unmute.ai/start/installation) covers all four
 ways, plus the one thing running an agent needs: Docker with Compose for the
 LiveKit browser loop, or [uv](https://docs.astral.sh/uv/) for Pipecat.
 
@@ -149,9 +149,9 @@ change.
 
 | Target | Kind | What you get |
 |---|---|---|
-| [LiveKit Agents](https://unmute.mintlify.app/targets/livekit) | code | `build/livekit/agent.py`, a Python project you host and run |
-| [Pipecat](https://unmute.mintlify.app/targets/pipecat) | code | `build/pipecat/bot.py`, plus a `pcc-deploy.toml` for Pipecat Cloud |
-| [SLNG](https://unmute.mintlify.app/targets/slng) | hosted | `unmute deploy` pushes a deployment body and SLNG runs the agent |
+| [LiveKit Agents](https://unmute.ai/targets/livekit) | code | `build/livekit/agent.py`, a Python project you host and run |
+| [Pipecat](https://unmute.ai/targets/pipecat) | code | `build/pipecat/bot.py`, plus a `pcc-deploy.toml` for Pipecat Cloud |
+| [SLNG](https://unmute.ai/targets/slng) | hosted | `unmute deploy` pushes a deployment body and SLNG runs the agent |
 
 `pipecat`, `livekit` and `slng` are the only values `provider` accepts. A code
 target gives you something to host. The hosted target has nothing to host, and
@@ -183,29 +183,29 @@ inside `build/` is overwritten on the next compile.
 
 | | Where it is taught |
 |---|---|
-| **Tools** that call a webhook, run local Python, reach an MCP server, use one the runtime already has, or search your own documents | [Tools](https://unmute.mintlify.app/build/tools/overview) |
-| **Handoffs, tasks and task groups**, for when one prompt stops being enough | [Orchestration](https://unmute.mintlify.app/build/orchestration/overview) |
-| **Escalation to a person**, cold or warm depending on the phone route | [Transfers](https://unmute.mintlify.app/transfers/overview) |
-| **Phone calls**, inbound and outbound, through Twilio, SIP trunks or a carrier stream | [Phone calls](https://unmute.mintlify.app/telephony/overview) |
-| **Pre-fetch**, so a known fact is in the prompt before the caller finishes the first sentence | [Pre-fetch](https://unmute.mintlify.app/build/prefetch) |
-| **Tracing** to Langfuse or Coval, with per-turn latency and tool calls | [Tracing](https://unmute.mintlify.app/tracing/overview) |
-| **Turn taking, the context router, and regional compute** | [Optimization](https://unmute.mintlify.app/optimization/overview) |
-| **Variables and secrets**, so a value never sits in a package file | [Variables](https://unmute.mintlify.app/reference/variables) |
+| **Tools** that call a webhook, run local Python, reach an MCP server, use one the runtime already has, or search your own documents | [Tools](https://unmute.ai/build/tools/overview) |
+| **Handoffs, tasks and task groups**, for when one prompt stops being enough | [Orchestration](https://unmute.ai/build/orchestration/overview) |
+| **Escalation to a person**, cold or warm depending on the phone route | [Transfers](https://unmute.ai/transfers/overview) |
+| **Phone calls**, inbound and outbound, through Twilio, SIP trunks or a carrier stream | [Phone calls](https://unmute.ai/telephony/overview) |
+| **Pre-fetch**, so a known fact is in the prompt before the caller finishes the first sentence | [Pre-fetch](https://unmute.ai/build/prefetch) |
+| **Tracing** to Langfuse or Coval, with per-turn latency and tool calls | [Tracing](https://unmute.ai/tracing/overview) |
+| **Turn taking, the context router, and regional compute** | [Optimization](https://unmute.ai/optimization/overview) |
+| **Variables and secrets**, so a value never sits in a package file | [Variables](https://unmute.ai/reference/variables) |
 
 Every key of every package file is listed under
-[configuration](https://unmute.mintlify.app/reference/agent-yaml).
+[configuration](https://unmute.ai/reference/agent-yaml).
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| [`init`](https://unmute.mintlify.app/reference/cli/init) | scaffold a new package, or open an interactive console with no name |
-| [`validate`](https://unmute.mintlify.app/reference/cli/validate) | check a package against its targets, naming the file and the line when a field is wrong |
-| [`compile`](https://unmute.mintlify.app/reference/cli/compile) | write the generated project for every target |
-| [`dev`](https://unmute.mintlify.app/reference/cli/dev) | compile, run locally, and talk to the agent in your browser |
-| [`deploy`](https://unmute.mintlify.app/reference/cli/deploy) | validate, compile and push a package to SLNG |
-| [`resources`](https://unmute.mintlify.app/reference/cli/resources) | list the tools, MCP servers and phone numbers your SLNG organisation offers |
-| [`skill`](https://unmute.mintlify.app/reference/cli/skill) | install the Unmute skill so a coding assistant can build packages |
+| [`init`](https://unmute.ai/reference/cli/init) | scaffold a new package, or open an interactive console with no name |
+| [`validate`](https://unmute.ai/reference/cli/validate) | check a package against its targets, naming the file and the line when a field is wrong |
+| [`compile`](https://unmute.ai/reference/cli/compile) | write the generated project for every target |
+| [`dev`](https://unmute.ai/reference/cli/dev) | compile, run locally, and talk to the agent in your browser |
+| [`deploy`](https://unmute.ai/reference/cli/deploy) | validate, compile and push a package to SLNG |
+| [`resources`](https://unmute.ai/reference/cli/resources) | list the tools, MCP servers and phone numbers your SLNG organisation offers |
+| [`skill`](https://unmute.ai/reference/cli/skill) | install the Unmute skill so a coding assistant can build packages |
 
 `validate`, `compile`, `dev` and `deploy` take the package directory as an
 optional argument. From inside the package you run them bare; from anywhere else
@@ -219,19 +219,22 @@ Warnings go to standard error and still exit 0. Errors exit 1.
 Code, Cursor, Codex and the rest know how to author a package. The skill ships
 inside the binary, so nothing is downloaded, and the files travel with the repo
 so a team shares one skill. The docs are also readable as
-[`llms.txt`](https://unmute.mintlify.app/llms.txt) and
-[`llms-full.txt`](https://unmute.mintlify.app/llms-full.txt), or one page at a
+[`llms.txt`](https://unmute.ai/llms.txt) and
+[`llms-full.txt`](https://unmute.ai/llms-full.txt), or one page at a
 time by adding `.md` to its URL. See
-[Coding agents](https://unmute.mintlify.app/start/coding-agents).
+[Coding agents](https://unmute.ai/start/coding-agents).
 
 ## Examples
 
-[`examples/`](examples/) holds two packages.
+[`examples/`](examples/) holds three packages.
 
 - [`salon-concierge`](examples/salon-concierge/) is the one to read: two agents,
   two tasks, handoffs, a guarded delegate, a cold manager transfer, tracing, and
   inbound phone on both code targets. Every tool is local Python, so nothing
   remote has to be up before the greeting.
+- [`salon-concierge-single-prompt`](examples/salon-concierge-single-prompt/) is
+  the same salon with the structural features taken back out, so the one above
+  can be read against something.
 - [`slng-support`](examples/slng-support/) is the hosted target in its smallest
   form. It produces no runnable project: `unmute deploy` compiles a deployment
   body and pushes it.
@@ -242,7 +245,7 @@ If you want a package to start from rather than one to read, run
 ## Develop
 
 ```sh
-make build    # writes bin/unmute
+make install  # builds and puts unmute on your PATH
 make test     # go test -race ./... , pure Go, no Python needed
 make lint
 make fmt
@@ -254,12 +257,12 @@ published SLNG conformance fixtures and needs network.
 
 ## Resources
 
-- [Documentation](https://unmute.mintlify.app) covers everything above in order.
-- [How Unmute works](https://unmute.mintlify.app/start/how-unmute-works) is the
+- [Documentation](https://unmute.ai) covers everything above in order.
+- [How Unmute works](https://unmute.ai/start/how-unmute-works) is the
   four compiler stages between your package and the generated project.
-- [Configuration reference](https://unmute.mintlify.app/reference/agent-yaml) is
+- [Configuration reference](https://unmute.ai/reference/agent-yaml) is
   every key of every package file.
-- [Changelog](https://unmute.mintlify.app/changelog) says what changed in each
+- [Changelog](https://unmute.ai/changelog) says what changed in each
   release.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) explains the design and points
   at the load-bearing code.

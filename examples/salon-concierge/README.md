@@ -1,749 +1,121 @@
 # salon-concierge
 
-The full Sage and Stone Salon project. Use this example before a release when
-you want one package to exercise the main Unmute paths together:
+The full Sage and Stone Salon project, and the package to read when you want to
+see every Unmute path working together in one agent.
 
-- a supervisor entry agent that identifies the caller, runs the booking step
-  itself, and answers open questions from the salon's own documents;
-- one booking task that handles create, modify, and cancel;
-- a guarded step: `requires:` on a delegate, so the booking step will not start
-  before the caller is identified and the caller never hears the guard;
-- one agent handoff, with shared context and no prerequisite, to a complaint
-  agent that holds the refund policy and a cold manager transfer;
-- local Python tools backed by one in-memory store;
-- Langfuse tracing for release inspection;
-- browser audio and inbound phone calls on two targets, one per telephony
-  plane.
+The salon takes calls. The agent works out who is calling, books, moves and
+cancels appointments, answers questions from the salon's own documents, writes
+down complaints, and puts a caller through to a manager when they ask for one.
 
-There is no outbound route. `channels.phone.outbound` is `false`.
+## Structure
 
-## Tuned for turn latency
+| Path | What it holds |
+|---|---|
+| `agent.yaml` | the package: agents, tasks, delegates, handoffs, escalations, variables, pre-fetch, knowledge and secrets |
+| `targets.yaml` | the two targets, one per telephony plane |
+| `instructions.md` | the concierge prompt |
+| `agents/complaint-specialist.md` | the customer care prompt |
+| `tasks/` | the two task prompts, verification and booking |
+| `tools/` | one file per tool, all local Python over one in-memory store |
+| `knowledge/refunds/`, `knowledge/services/` | two document sets, each its own index |
+| `connections/` | the two carrier connections |
 
-This package is tuned to cut the silence a caller hears between turns. Two
-structural choices do that, and both work by cutting the number of LLM round
-trips a turn needs, not by cutting what the agent can do:
+**Two agents.** The concierge is the one the caller talks to for almost the whole
+call. Customer care is a second agent because it holds a document set and a
+permission the concierge must not have: the refund policy and the complaint
+record.
 
-- Verification asks for a phone number only, with no name to spell out loud.
-  Spelling a name letter by letter over a transcriber is slow and error-prone,
-  and the number alone finds the record.
-- Booking is one task, not three. A separate draft, confirm, and apply step
-  each cost their own round trip to finish, and the mutation tools already
-  refuse a write that is not confirmed, so the split bought no extra safety.
+**Two tasks.** Verification confirms who is calling. Booking does create, modify
+and cancel in one step.
 
-### How long the agent waits before answering
+**A guarded step.** `manage_booking` declares `requires: [customer_phone]`, so
+booking cannot start before the caller is identified. The compiler refuses the
+step to the model rather than to the caller, so nobody hears the guard.
 
-Two numbers, and they are not the same number. Confusing them cost a whole round
-of measurement here, so both are set explicitly.
+**Facts resolved before the greeting.** The `prefetch:` block reads today's date
+off the clock and the caller's number off the call, then looks up the name on
+that record. Nothing in the block can fail a call: an entry whose inputs are
+empty is skipped and the values keep their defaults.
 
-**The floor** is `endpointing_delay`: how long silence has to last before the
-caller counts as finished. It is tuned per target, 400ms on the base binding and
-200ms on the Pipecat one, and `targets.yaml` carries the measurement behind that
-split. On Pipecat a *wider* window makes some turns a second slower, which is the
-opposite of what the name suggests.
+**A cold manager transfer.** Both agents hold it. Asking for a person is never
+gated on identifying yourself first.
 
-**The ceiling** is `pace: balanced`: the longest a turn may run before closing
-regardless. This is the number that was actually costing the caller time. Nothing
-in a package could reach it before, so it sat at the framework defaults of 2.5s
-on LiveKit and 3.0s on Pipecat, and a live LiveKit call spent 2.5s per turn there
-while the authored window was 400ms. `balanced` brings both to 1.6s.
+**Two knowledge bases.** An agent reaches one by holding its tool:
+`look_up_salon_info` for services, `look_up_refund_policy` for refunds. That is
+the whole access model. Both document sets are fictional and both are committed.
 
-**Lowering the floor alone does not shorten a turn.** The floor is when the
-runtime may start deciding; the ceiling is when it stops waiting.
+**Two routes, one per telephony plane.** The LiveKit target carries inbound calls
+and the transfer over a Twilio Elastic SIP Trunk (`sip`). The Pipecat target
+carries them over Pipecat Cloud's Twilio websocket (`cloud-websocket`). Both
+targets also do browser audio. There is no outbound route.
 
-`balanced` rather than `snappy` because callers here read out dates, times and
-the occasional phone number, and `snappy` would answer some of them mid-sentence.
-`patient` is the escape hatch if that still happens: it reproduces the framework
-defaults exactly. Faster turn taking is a trade, not a free win, and the failure
-it buys never shows up in a latency figure.
+**Tracing.** Both targets send traces to Langfuse.
 
-**If you set `conversation.interruption.minimum_words`, that used to cost you the
-end-of-turn model.** The emitted bot replaced Pipecat's smart-turn analyzer with
-a plain silence timer, so turn taking got worse rather than better. It no longer
-does, and this is the behaviour change in this release an author is most likely
-to notice.
+## What you need
 
-### The reasoning model, and why it is this one
+Keep every value in `.env`. No credential and no real phone number belongs in
+the package.
 
-Thinking runs on `gpt-5.6-luna` through the Context Router, on OpenAI's own
-endpoint. `params.reasoning_effort: "none"` is not optional here: the GPT-5 family
-rejects function tools on chat completions without it, and nearly every agent in
-this package has tools.
+| Name | Purpose |
+|---|---|
+| `OPENAI_API_KEY` | the reasoning model's upstream, and the knowledge embeddings at startup |
+| `SLNG_API_KEY` | the Context Router, the voice, and the transcription. One key for all three |
+| `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` | trace ingest. All three together, or startup fails |
+| `MANAGER_PHONE_NUMBER` | the transfer destination, in E.164. Needed only for a phone call |
 
-**A cheaper, faster model was tried and reverted on 2026-08-27.** The trial is
-worth recording, because the reason it failed is not the reason anyone expects.
+A real inbound call also needs its carrier credentials. The `livekit` target
+needs `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD` and
+`SIP_FROM_NUMBER`. The `pipecat` target needs `TWILIO_ACCOUNT_SID`,
+`TWILIO_AUTH_TOKEN` and `TWILIO_PHONE_NUMBER`. Neither is read by a browser
+session.
 
-`qwen/qwen3-32b` on OpenRouter is a fraction of the price and its thinking can be
-turned off, which looked like a straight latency win. On a live call it produced
-first tokens in about a second and then told a caller *"your appointment is all
-set"* when no booking tool had run at all. The booking task never executed: given a
-booking request, the model asked for the phone number itself instead of delegating
-to the verification step, improvised the rest of the flow, and reported success.
+## How to run it
 
-Measured on this package's own prompt and its five concierge tool schemas, twelve
-repetitions each, scoring whether a multi-turn booking request reaches the
-verification delegate:
+Validate and compile:
 
-| Model | Routing | p50 | p90 |
-|---|---|---|---|
-| **gpt-5.6-luna** | **12/12** | **1.08 s** | **1.15 s** |
-| qwen/qwen3.8-27b | 10/12 | 4.72 s | 5.66 s |
-| z-ai/glm-5.3-flash | 9/12 | 7.34 s | 8.55 s |
-| qwen/qwen3-32b | 4-8/12 | 1.30 s | 2.65 s |
-| deepseek/deepseek-v4-flash-0731 @ inceptron/fp4 | 2/12 | 0.95 s | 1.10 s |
-
-The last row is the whole lesson. It is the fastest thing on the list and the worst
-at the job. **If you are here to change the model, screen it on multi-turn tool
-routing before you look at latency**: neither time-to-first-token nor a single-turn
-tool call predicts whether an agent will follow a multi-step flow, and a model that
-improvises one will invent confirmations rather than refuse.
-
-### One router cache scope per prompt
-
-Thinking goes through the SLNG Context Router, which can answer a repeated turn
-from cache instead of asking the model. It judges which turns are worth treating
-as repeatable, so a repeat served by the model is expected and not a fault.
-`agent_id` is what keeps one project's learned answers apart from another's, and
-this package writes one value: `optimized-salon-concierge-v10`.
-
-The compiler adds the name of whoever is speaking, so this package sends six
-scopes:
-
-```
-optimized-salon-concierge-v10:concierge
-optimized-salon-concierge-v10:complaint_specialist
-optimized-salon-concierge-v10:task.customer_verification
-optimized-salon-concierge-v10:task.booking
+```sh
+unmute validate examples/salon-concierge
+unmute compile examples/salon-concierge
 ```
 
-One per prompt site and not one for the package, because the cache key is the
-last exchange and does not include the system prompt. Under one shared scope
-these sites were served each other's lines: on 2026-08-21 a receiving agent's
-opening turn after a handoff came back as the concierge's "what phone number
-should I use to look up your customer profile?", from cache, in 1.27 ms, with no
-model call. The caller heard the agent repeat itself.
+The generated projects land in `build/livekit/` and `build/pipecat/`. Each one
+carries its own `README.md`, which is the deployment and carrier runbook. Do not
+commit `build/`, it is disposable.
 
-It was six scopes then and is four now. Two of them belonged to agents that
-existed only to hold a guard the compiler could not put on a step, and each one
-was a separate prompt site paying for its own cache.
+Talk to it in the browser:
 
-This package used to carry `slng_pure_proxy: true` to stop that, which works by
-turning cache serving off entirely and giving up the speed the router is here for.
-It is gone. Cache serving is on, and nothing in the emitted output asks the router
-to stop.
-
-The values behind the prompt's placeholders are read again for every request, so a
-value this call learns partway through is in the prompt from the next turn on
-rather than being whatever it was when the call started. A name with no value yet
-is still sent, as an empty string, because a placeholder the router was given no
-value for is a 422 that would end the call.
-
-### One phone number format: E.164
-
-Every phone number in this package is E.164, a plus sign then digits with nothing
-between them. `MANAGER_PHONE_NUMBER` already was, and now
-`find_or_create_customer` returns the caller's number the same way,
-`tasks/verify-customer.md` tells the step to return exactly what it got back, and
-`customer_phone`'s own description names the shape. Nothing has to guess which of
-two formats it is holding.
-
-The tool never invents or splits off a country code. It puts the plus in front of
-the digits the caller gave and leaves their order alone, because telling a country
-code from the number after it needs a table of every country, and a wrong guess
-merges two callers or splits one. A caller who gives a bare national number
-therefore gets a plus in front of it: a consistent key, not a dialable number.
-`tools/salon.py` names that ceiling and the upgrade path.
-
-**The price of one format, paid on purpose.** The router substitutes a
-placeholder back into a stored answer only where the answer holds the value
-**character for character**. Measured 2026-08-24 against the live EU router,
-three reads per arm on fresh scopes:
-
-| Value supplied | The model said it back | Served from cache |
-|---|---|---|
-| `555 070 1222` | unchanged | yes, 109ms on the third read |
-| `+15550707444` | regrouped, so the value never appeared | never, 0 of 3 |
-
-So a turn where the agent reads an E.164 number aloud will not cache, and nothing
-reports it: the caller hears a correct answer and the hit rate is simply zero.
-
-**That turn now exists, on purpose.** The measurement above is unchanged; the
-decision made in light of it is. On an inbound call the number arrives from the
-carrier before the agent speaks, and the verification step reads it back and asks
-for a yes instead of asking the caller to recite twelve digits. That trades a
-whole collection step against exactly one turn that will not be served from
-cache. The trade was made deliberately, and it is the only turn that pays it:
-the read-back is the one place a number is ever spoken, and no other prompt in the
-package holds the value at all. The compiler refuses one that tries.
-
-If you copy this package for an agent that reads numbers back more often than
-once, put the spoken shape in the variable description and have the tool return
-that, so the value the model says is the value that was sent.
-
-### One identifier, and every agent that needs it can see it
-
-There is one caller identifier in this package and it is the phone number. A
-second, synthetic one used to sit beside it: never spoken, never shown, carried
-by every tool, and doing nothing the number could not. The caller's name is not a
-variable at all, and neither of those is only tidiness.
-
-The compiler sends **one set of names per think profile**, the union of every
-name any router-bound prompt on that profile references. Both agents and both
-tasks share the `reasoning` profile here, so whatever this package declares and
-references is sent on every request, not only on the prompt that says it.
-
-That matters because of a rule in the router's own guide: its sharing scan refuses
-any cached answer that still contains one of the values you sent for that call,
-matching whole words and word beginnings. So every extra value narrows what can be
-shared. A caller's first name is short enough to appear inside an unrelated word
-in some answer somewhere; a phone number in this shape is not. One long, specific
-value the agent actually says is the cheapest thing to send.
-
-**No agent prompt carries the `{{customer_phone}}` placeholder now, and that is a
-reversal worth explaining, because the reason it used to is still a real reason.**
-
-Both agents used to hold it. A live call had shown why: a caller identified during
-booking raised a complaint mid-flow, customer care picked up with the whole
-history, and then asked for the phone number again, because `record_complaint`
-injects the number and nothing put it in front of the model. The agent could not
-tell an already-verified caller from a new one. So the rule became: **an agent
-that holds a tool injecting a variable has to be able to see that variable.**
-
-That rule is right while the only way to have a value is to have collected it. It
-stops being right once a value can be **present and not yet agreed to**. The
-number now arrives from the carrier before anybody speaks, so a prompt holding it
-would put an unconfirmed number in front of a model, and a model with a number
-uses it. The worst version is not a wrong booking, it is greeting a stranger by
-the account holder's name.
-
-So the protection moved from the prompt to the tool call. `customer_phone`
-declares `confirm: customer_verification`, and until that step has heard the
-caller agree:
-
-- it satisfies no `requires:` guard, so the booking step will not start;
-- it renders in no prompt but the verification step's own, enforced by a
-  compile-time refusal rather than by a note in this file;
-- and every tool that injects it refuses itself to the model, by name, saying
-  which value it is waiting for.
-
-That last one is what replaced "the agent can see it". The agent does not need to
-see the number to avoid asking for it: it is told, on the turn it tries to use it,
-exactly which value is not usable yet. `internal/generate/examples_test.go` holds
-all three, and the route to customer care is deliberately **not** gated on
-identifying the caller, because somebody with a complaint must be able to make it.
-
-Every think request also logs one line saying where its answer came from, so
-whether any of this is working is a question you answer by reading the run:
-
-```
-slng router: scope=optimized-salon-concierge-v10:concierge source=cache layer=l2_exact request_id=req_...
+```sh
+cp examples/salon-concierge/build/pipecat/.env.example examples/salon-concierge/.env
+unmute dev examples/salon-concierge --target pipecat
 ```
 
-Say the same thing twice in a row and watch `source=` change from `llm` to
-`cache`. Expect `llm` on the first turn of every call, on every turn that calls a
-tool, and on the turn after a tool result: none of those can be cached.
+Use `--target livekit` for the same conversation on the other target. Use
+headphones, or the agent hears its own voice and interrupts itself.
 
-One rule to carry into your own package: a placeholder is for a value the agent
-**says**. A value that changes **what the answer is**, the reply language above
-all, belongs in the prompt text. Two callers who chose different languages would
-otherwise share one cached answer and one of them would hear the wrong language.
-Nothing warns you: the compiler cannot tell a spoken value from a steering one by
-its name.
+A browser session has no carrier, so nothing supplies a caller number. Seed one
+to exercise the pre-fetch and the readback:
 
-## How the agent sounds
-
-Every prompt here carries the same two blocks, `How you speak` and `How you
-sound`, and they do different jobs.
-
-`How you speak` is the contract with the TTS voice, which is
-`cartesia/sonic:3.5`. Sonic reads what it is given, so the prompts hand it
-written speech: whole sentences, ordinary capitalization, a full stop at the end
-of each one, no markdown or symbols, and no bare fragments. Numbers, money, dates
-and times go in their plain written form, `3:00 PM` and `28 euros`, and Sonic's
-own text normalization speaks them. That reverses what this package used to say.
-It told the model to spell amounts and times into words itself, and hand-written
-normalization is exactly the preprocessing the engine does better.
-
-A phone number is the same rule, and it took a live call to get right. The
-readback first asked for delimited characters, `plus 3 4, 6 8 0, 8 3 0, 4 6 4`,
-and Sonic spoke "plus three four" and dropped the rest: the caller heard nothing
-to check and confirmed it anyway. Cartesia's own guidance is that a phone number
-is a conventional format the engine normalizes, and that punctuation inside a run
-of characters may be read aloud or break it. So the readback writes `+34 680 830
-464` and lets the voice read it as a phone number.
-
-`How you sound` is the part that makes it a person rather than a correct
-transcript. Contractions, a rotating opener so no two turns start the same way, a
-filler at the front of a turn, a mid-sentence self-correction with no apology,
-and a calm baseline that only moves for a moment that earns it. Every one of
-those is written as an example, because a model copies an example far more
-reliably than it follows an adjective.
-
-Two rules protect the latency work in the section above:
-
-- **A filler rides on a turn that also does its job.** A turn that is only
-  "let me have a look" costs a whole extra round trip and buys nothing, so the
-  prompts forbid it, alongside the older rule against asking the caller to hold.
-- **A turn that follows a tool does not acknowledge anything.** Every data tool
-  here carries an `announce` line that plays while it runs, so the caller has
-  already been acknowledged by the time the model speaks. Without this rule the
-  two stack up: a live call produced "Okay, one sec. A haircut, lovely. What day
-  suits you?" and "Booking that in. Lovely, your haircut is booked." The announce
-  is worth keeping, it covers a real gap, so the prompts drop the second
-  acknowledgement instead.
-- **Two cover lines for one handover is the same fault one level up.**
-  `find_or_create_customer` carries no `announce`, and that is the reason: it
-  runs at the end of identification, and the delegate into booking announces
-  immediately after. A live call played "Okay, one sec." and then "Let me pull up
-  the diary." for a single transition. When a tool sits right before a delegate
-  that announces, only one of the two should speak.
-- **The agent has one name for the whole call.** The greeting introduces Robin,
-  and customer care is still Robin: the handoff is silent, the voice is the same,
-  and a second introduction is how a caller finds out they were transferred.
-
-## Facts the call already knew
-
-Three things were being discovered during the conversation that were knowable
-before it started. The `prefetch:` block resolves them once, before the greeting,
-in the order the file lists them.
-
-| Entry | Reads | Lands in | What it replaced |
-|---|---|---|---|
-| `today` | the clock, in `Europe/Madrid` | `booking_date` | `get_current_date`, a tool call: two chained requests with nothing spoken over them on every "tomorrow" |
-| `caller` | the call's own `from_number` | `customer_phone` | asking the caller to recite twelve digits, then reading them back |
-| `profile` | `look_up_customer` | `customer_name` | a lookup inside the identification step |
-
-**Nothing here can fail a call.** The whole block has two seconds. Past that it
-gives up, the values keep their declared defaults, and the greeting happens on
-time. An entry whose inputs are empty is skipped, and every outcome is one log
-line naming the entry.
-
-**On a route with no caller ID, most of this does nothing, and that is fine.**
-`unmute validate` prints a warning naming the target, the route, and every entry
-that will skip there. The Pipecat route is one: no Pipecat route supplies a caller
-number, so `caller` skips, `profile` skips with it, and the identification step
-asks for a number exactly as it did before any of this existed. A withheld caller
-ID on the LiveKit route behaves the same way. The browser loop has no carrier at
-all, which is what `--source` is for:
-
-```console
-$ unmute dev . --source from_number=+34600111222
+```sh
+unmute dev examples/salon-concierge --source from_number=<E.164 number>
 ```
 
-That seeds the **fact**, which the pre-fetch then reads, so a local run exercises
-the read-back and the confirmation. Do not reach for `--var customer_phone=...`:
-that writes the variable directly, skips the pre-fetch, marks nothing as awaiting
-confirmation, and books an appointment against a number it never read back. The
-run would pass a path a real call fails.
-
-**A pre-fetched value can need confirming, and the number does.** See the
-identifier section above for what that buys and what it costs.
-
-**Two cover lines can still stack.** `manage_booking` declares an `announce:`,
-and so do the tools it calls, so entering the step and then running its first tool
-can queue two lines in a row: "Let me pull up the diary." followed by "Just
-checking the diary." The step's line is spoken after the prerequisite guard, so a
-refused step stays silent, but nothing dedupes a step line against a tool line
-inside it. If you hear it doubled on a call, take the `announce:` off whichever
-one covers less: the step's line covers two model requests, the tool's covers a
-request body that returns in milliseconds, so the step's is usually the one worth
-keeping.
-
-## How the call moves
-
-Two agents, and the concierge is the one the caller talks to for almost the whole
-call. It runs the booking step itself, as a guarded delegate: `manage_booking`
-declares `requires: [customer_phone]`, so the step will not start until the
-caller is identified, and the compiler refuses it to the model rather than to the
-caller. The model is told which delegate supplies the number, runs verification,
-and calls the step again on the same turn. Nobody hears any of that.
-
-That guard is why there is no booking agent. There used to be one, and it existed
-for a single reason: `requires:` was legal on a handoff and not on a step, so the
-only machine-checked way to gate booking was to put an agent in front of it. That
-agent had to be spoken through, which cost the caller a turn and taught a shape
-nobody needed. Open chat had a second such agent, for no reason at all.
-
-Customer care is a real agent, because it holds a permission and a document set
-the concierge must not have: the refund policy and the complaint record. Asking
-for a person is not gated on anything: the concierge holds the manager transfer
-directly, and the handoff to customer care carries no prerequisite, so a caller
-who opens with "I want to speak to a manager" is never asked for a number first.
-Customer care listens, quotes published policy, and identifies the caller only
-when it is about to write the complaint down.
-
-The booking step leaves for a complaint without applying a booking change, since
-it holds that handoff itself. For any other request it cannot serve, it finishes
-first with whatever the last mutation actually returned, and names the request in
-`unserved_request`. The concierge reads that off the returned result and acts on
-it without the caller being asked twice. Every route keeps the identity collected
-so far and full history.
-During verification, the task reads every phone digit back once and waits for a
-new clear yes before the customer lookup. After verification, no specialist
-asks for or repeats the number unless the caller says the saved identity is
-wrong. This readback checks what speech recognition captured; it is not strong
-authentication such as an OTP.
-
-Both targets run the same reasoning profile, through the SLNG Context Router,
-with reasoning off. Neither overrides it. `targets.yaml` says why in full: a
-target's `models:` block replaces a profile rather than merging into it, so an
-override there would drop the router binding, and the router speaks Chat
-Completions, which rules out the Responses API and the held websocket this target
-used before.
-
-The complaint specialist records the case with a local Python tool. It calls a
-cold transfer when the caller asks for a manager or uses clearly and strongly
-frustrated language. Frustration is a prompt decision, not a built-in sentiment
-score. With no phone leg, a browser caller hears that direct transfer needs an
-inbound call. On an established phone call, a carrier failure is different: the
-explicit `hangup` policy ends the call because Pipecat `cloud-websocket` cannot
-return after carrier takeover.
-
-Every tool in the package is a local Python handler, so nothing has to be
-reachable before the greeting. Anything that is neither a booking nor a complaint
-is answered by the concierge from the salon's own documents, and it says plainly
-when a question is outside them rather than claiming a lookup it cannot do. For a
-remote tool over MCP, see
-[MCP servers](../../docs-site/build/tools/mcp.mdx).
-
-## Two knowledge bases
-
-The salon has paperwork, and the agents quote it instead of guessing. Two folders
-under `knowledge/`, each a separate in-memory index:
-
-| Base | Folder | The tool | Which agent holds it |
-|---|---|---|---|
-| `refunds` | `knowledge/refunds/` | `look_up_refund_policy` | `complaint_specialist` |
-| `services` | `knowledge/services/` | `look_up_salon_info` | `concierge` |
-
-**An agent reaches a knowledge base by being given its tool, and that is the whole
-access model.** The concierge can quote a price and cannot quote refund policy;
-the complaint specialist is the other way round. Move a tool onto another agent
-and that agent can quote that document, so tool attachment is the thing to get
-right.
-
-Both documents are fictional, and both PDFs are committed, so this works with no
-setup beyond `OPENAI_API_KEY`.
-
-Three things worth knowing before you change them:
-
-- **Content is fixed until the next compile.** Each folder is read, split and
-  embedded once when the agent starts, and held in memory. Editing a PDF changes
-  nothing until you compile and deploy again.
-- **The documents ride in the image.** `unmute compile` copies them into
-  `build/<target>/knowledge/`, byte for byte, because a managed platform offers
-  no mounted storage to read them from.
-- **A scanned PDF fails at startup, not at compile.** Deciding whether a PDF
-  yields text needs a parser the compiler does not have. A document with no text
-  layer is named and skipped, and a base where nothing yields text stops the
-  deployment. If a PDF is a photo of a page, run it through OCR first.
-
-Ask the concierge a price and the complaint specialist a timescale. Then ask each
-one the other's question: neither should answer from a document it was not given,
-and neither should invent one.
-
-## Local data
-
-All eight local tools share one in-process store: dicts of customers,
-bookings, and complaints guarded by one lock, held in a module that every copy
-of `tools/salon.py` imports under the same name. Every new worker starts with
-an empty store, and verification, booking, and complaint tasks in that worker
-all see the same data. Concurrent workers do not share data.
-
-This is disposable test storage with a hard ceiling: it lives in one process
-and disappears when the worker restarts. Restart `unmute dev` for a clean run.
-Put a real service behind these functions before a second replica exists.
-
-Run its fast behavior check directly:
+Run the tools' own check on its own:
 
 ```sh
 python3 examples/salon-concierge/tools/salon.py
 ```
 
-`make smoke` also proves that both generated targets start clean and share data
-within one worker.
-
-## What you need
-
-Common values:
-
-| Name | Purpose |
-|---|---|
-| `OPENAI_API_KEY` | the reasoning model's upstream, and the knowledge bases' embeddings at startup |
-| `SLNG_API_KEY` | the Context Router, plus the speech and transcription models. One key, all three roles |
-| `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` | Langfuse trace ingest. All three are required together, and a missing one fails startup rather than quietly disabling tracing |
-
-`MANAGER_PHONE_NUMBER` is the cold-transfer destination in E.164 form. It is
-needed only for inbound phone manager transfers, may stay unset for browser
-sessions, and is checked before a phone caller hears the greeting.
-
-The Pipecat target uses the `cloud-websocket` transport and also needs
-`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER` for a real
-inbound call and transfer. `PIPECAT_CLOUD_ORGANIZATION` is supplied by the route
-when deployed, not declared by the package. This route needs no `DAILY_API_KEY`.
-
-The `livekit` target uses the `sip` transport and needs `SIP_TRUNK_HOSTNAME`,
-`SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, and `SIP_FROM_NUMBER`. LiveKit Cloud
-supplies `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` and the Redis
-behind its SIP service after you deploy; a self-hosted server needs them set.
-
-Secrets stay in `.env`. No credential or phone number belongs in this package.
-Traces and debug logs can include caller speech, model input and output, phone
-details, complaint text, and tool arguments or results. Use only fake identities,
-fake phone numbers, and fake customer data for release tests, in a separate
-Langfuse project. Do not send real customer data until its access and retention
-rules are approved. Keep `UNMUTE_LOG_LEVEL=INFO` for normal runs.
-
-### Where the traces land
-
-The trace is named after the entry agent, the package and the target, so this
-one arrives as `concierge-salon-concierge-livekit` or
-`concierge-salon-concierge-pipecat`.
-
-Each target supplies its own session ID. On LiveKit the room name becomes the
-Langfuse session ID. On Pipecat the runner session ID is both the Pipecat
-conversation ID and the Langfuse session ID, and one trace holds the whole
-conversation.
-
-Starting the worker proves only that the credentials work. Complete at least one
-user turn before you go looking, because the generation observations are written
-per request.
-
-Unlike Coval, Langfuse gets no local marker, so a `unmute dev` session and a
-deployed call carry the same trace name. Point local runs at a different
-Langfuse project if you need to tell them apart.
-
-## Booking confirmation boundary
-
-Selection and confirmation happen inside the one booking task. Picking a time
-only finishes the selection step; it does not count as a yes. The task then
-states the full proposal in one sentence and asks a new yes-or-no question.
-A clear yes, or a matching “book it,” “move it,” or “cancel it,” saves the
-exact proposal in the same turn with `confirmed` set to true. One unclear or
-interrupted answer gets one full restatement; a second unclear answer, an
-explicit no, or omitted confirmation saves nothing. A topic change exits
-without saving the open proposal. This is a model-and-workflow gate, not hard
-authorization. The local mutation functions do not authenticate a caller or
-independently prove consent. A production booking service must enforce
-authorization, consent, and idempotency at its own boundary.
-
-## Empty LiveKit task responses
-
-Generated LiveKit tasks retry up to twice when a full successful response has
-neither non-whitespace text nor a tool call. Each retry starts immediately in
-the same speech turn. It keeps the task state and model settings, and
-adds a distinct temporary recovery instruction to a fresh copy of the
-conversation context before each retry. After a task tool returns, recovery
-keeps only `finish` instead of the full tool list. Non-whitespace text or an
-allowed tool call stops recovery.
-Errors and cancellations keep LiveKit's normal behavior.
-
-If all three opening attempts are empty, the task speaks one fixed brief
-failure, runs no action, and stays active for the caller's next turn. If an
-empty reply follows a task tool, recovery can only call `finish`; it cannot run
-another operation. Exhausting that recovery asks the caller to check the current
-state before trying again. This applies only to generated LiveKit tasks. Normal
-LiveKit agents and Pipecat output are unchanged.
-
-## Validate and compile
+Read a call back after somebody has talked to the agent:
 
 ```sh
-make build
-bin/unmute validate examples/salon-concierge
-bin/unmute compile examples/salon-concierge
+python3 scripts/read_langfuse_trace.py --env examples/salon-concierge/.env
 ```
 
-Both targets validate clean and compile to a runnable project.
+Phone calls need a deployment. Both targets deploy to a managed platform, and
+the generated runbook has the carrier steps for the route you chose. There is no
+local phone loop.
 
-The generated `build/<target>/README.md` is the deployment and carrier runbook.
-Do not commit `build/`; it is disposable.
-
-## Talk in the browser
-
-Copy one generated environment template, fill the common values, and start a
-target:
-
-```sh
-cp examples/salon-concierge/build/pipecat/.env.example examples/salon-concierge/.env
-bin/unmute dev examples/salon-concierge --target pipecat
-```
-
-Use `--target livekit` to run the same browser journey on LiveKit. A browser
-session does not read Twilio or SIP credentials. Pipecat browser development
-uses `uv`; LiveKit uses Docker Compose.
-
-## Test the phone routes
-
-You hear this agent on a phone once it is deployed. Both targets deploy to a
-managed platform, and the emitted `build/<target>/README.md` has the carrier
-steps for the route you chose:
-
-```sh
-bin/unmute compile examples/salon-concierge
-```
-
-Deploy the `pipecat` target to Pipecat Cloud and the `livekit` target to LiveKit
-Cloud, do the carrier setup each runbook dictates, then call your number and ask
-for a manager. This package declares a **cold** transfer to `manager_line`, so
-the handoff runs: the caller's leg leaves the agent and goes to the destination.
-
-Nothing local stands in for that. A carrier reaches an agent over publicly
-routable SIP signalling and media ingress, which a laptop behind normal NAT does
-not have. What you can do locally is the conversation itself:
-
-```sh
-bin/unmute dev examples/salon-concierge --target pipecat
-```
-
-That opens a browser session with the same prompt, tools and models, and no
-phone involved. Use headphones, or the agent hears itself and interrupts itself.
-
-The package environment must contain `MANAGER_PHONE_NUMBER`, matching
-`agent.yaml` and the generated `.env.example`. `SUPERVISOR_PHONE_NUMBER` is not
-an alias.
-
-## Testing this on a real phone
-
-Hold the handset to your ear. Do not use speakerphone, for the same reason the
-browser loop asks for headphones: a phone leg has no echo cancellation, so an
-open speaker sends the agent's own voice back into the microphone.
-
-The Pipecat build protects the greeting for you, because that is where the echo
-does the most damage. Everything after the opening line is still interruptible,
-so on speakerphone the agent will still hear itself mid-call, be cut off, and
-carry a garbled turn in its context for the rest of the conversation. A real
-call on 2026-08-26 produced a first user turn reading `hi you've reached`, which
-is the agent's own greeting, and every answer after that was built on it.
-
-The `pipecat` target declares `warm_instances: 1`, which compiles to
-`[scaling] min_agents` in `pcc-deploy.toml` and keeps one instance ready on every
-deploy. Keep it. This package carries two knowledge bases, and an unbaked index is
-embedded at import before the server binds, which on a cold start can push the
-container past the point where the session gives up. The symptom is a session that
-never reaches the bot at all rather than a slow one.
-
-## Release conversation script
-
-Use a future date when testing bookings. Start a new worker, then run the first
-five rows in order in one conversation. Judge the called actions and saved state,
-not exact wording. Run the relative-date booking in the browser on both targets.
-Repeat it on an inbound phone route only when that route is separately reachable.
-
-| Check | What to say | Pass result |
-|---|---|---|
-| Unverified booking | “I want to book a haircut.” Do not give identity until asked. | Verification runs first. No booking action runs before it succeeds. |
-| Relative-date booking | Give a fake 10–15 digit phone number, confirm the digit readback, say “Book a haircut tomorrow afternoon,” pick an offered time, then explicitly confirm the full booking. | `find_or_create_customer` runs once after the phone confirmation and returns `created`. **No date tool is called at all:** `check_availability` is the first tool of that turn, and its date is one day after the pre-fetched `booking_date`, with no guessed-year invalid call. One `create_booking` returns `booked` for the offered slot. |
-| Pre-fetched caller | `unmute dev . --source from_number=+34680830464`, then “I want to book a haircut.” | The agent reads `+34 680 830 464` back and asks only for a yes. It never asks you to supply a number, and it never says the name on the record. Saying yes lets the booking step run. |
-| Pre-fetched caller, rejected | The same, but answer “no, use a different number.” | The agent asks for a number and the call proceeds exactly as it does with no seed. Nothing acts on the seeded number. |
-| No caller ID | `unmute dev .` with no `--source`. | The identification step asks for a number, unchanged from before this feature. This is also the Pipecat behaviour and the withheld-caller-ID behaviour, both reproduced with no phone. |
-| No confirmation | Prepare a create, modify, or cancel request, then say no, stay silent, or change topic instead of confirming. | No booking mutation runs. An explicit no or a second unclear answer finishes unconfirmed; silence waits for inactivity handling, and a topic change hands off without completing the booking. |
-| Neutral complaint | “My last haircut was uneven, but I’d like the salon to fix it.” | One `record_complaint` returns `recorded` for the same customer, no booking mutation runs, and no manager transfer starts. |
-| Book then cancel | Ask to cancel the active booking and confirm. | One `cancel_booking` returns `cancelled`; a later `list_bookings` has no active booking. |
-| Mid-booking complaint | Begin another booking, then before confirmation say, “Actually, I need to complain about my last visit.” | Booking stops without a write; customer care receives the same identity, history, and latest request without another verification question or internal handoff announcement. |
-| Modify | Book another appointment, then ask to move it to another future date. | The same booking is updated atomically after confirmation. |
-| Human transfer | On an inbound call say, “I want to speak to a manager.” | The active caller receives a cold transfer attempt. |
-| Frustration | On an inbound call repeat that the issue is unresolved and refuse to continue with the agent. | The complaint specialist starts the same manager transfer. |
-| No claimed lookup | Ask the concierge something outside the salon's documents, such as another salon's prices today. | It says plainly that it cannot check, offers what it does know, and never claims to have searched. |
-| Guarded step, silently recovered | “I want to book a haircut,” with no number given yet. | Verification runs and the booking question follows. No booking action runs before identification, and the caller hears no refusal wording and no variable name. |
-| Guarded step, out loud | Ask to book, then refuse to give a number, five times. | By the fifth attempt the agent asks for the number in its own plain words. It does not go quiet and does not hang up. |
-| Escalation is never gated | Open the call with “I want to speak to a manager,” before saying anything else. | The escalation attempt starts on that turn, with no request for identifying information. |
-| Transfer failure truth | Try a manager transfer in a browser, then test an unavailable manager on a phone call. | Browser says an inbound phone leg is required. A carrier failure is not described as a browser limit, and the terminal policy may hang up. |
-
-### Verification stress checks
-
-Restart the worker before each case and run it in the browser on both targets.
-Repeat it on a phone route only when doing a separate carrier test. Every
-successful case must follow this order:
-
-```text
-verify_customer
-complete phone-number readback
-new clear caller confirmation
-find_or_create_customer       exactly once, with the confirmed number
-```
-
-Test the number given at once, a yes spoken before the readback, an
-interrupted readback, a digit correction, a fragmented phone number, an
-ambiguous answer, and an explicit no. No customer action may run before the
-final yes; the one later action must use the number that was read back. The
-Python self-check covers invalid and malformed phone numbers, and `make smoke`
-covers the clean restart.
-
-### Exact answered and unavailable transfer calls
-
-Start a new worker for every evidence run. Use this phone-only script once per
-target with the manager answering and once per target with the manager declining
-or not answering. Wait for each response.
-
-1. “I need help with a complaint.”
-2. “My phone number is plus one, five five five, zero one zero.” Pause, then
-   say: “Eight eight four four.”
-3. After the complete phone readback, say: “Yes, that is correct.”
-4. “My haircut was uneven and I want to speak to a manager.”
-
-An answered run needs observed two-way human audio. Carrier acceptance alone
-does not prove that the manager answered. An unavailable run must end without a
-new concierge greeting or a claim that the manager answered.
-
-### Exact combined booking-to-manager call
-
-Start a new worker first. Run this once in the browser and once by inbound phone
-on each target. Wait for each response before speaking the next line.
-
-1. “I want to book a haircut tomorrow at three.”
-2. “My number is five five five zero one zero.” Pause, then say: “Eight eight
-   four four.”
-3. After the complete phone readback, say: “Yes, that is correct.”
-4. After the booking task starts: “Actually, my last haircut was uneven. I’d
-   like the salon to fix it.”
-5. Only after customer care says the complaint was saved: “I want to speak to a
-   manager.”
-
-The trace must show this order:
-
-```text
-verify_customer
-find_or_create_customer       exactly once
-to_booking
-manage_booking
-check_availability                no date tool before it: the date was pre-fetched
-to_complaints                 from the active booking task
-record_complaint              exactly once
-to_manager                    exactly once
-```
-
-The final demo state is one customer, zero bookings, and one complaint. There
-is no second verification or booking mutation.
-
-| Target and channel | Test | Pass result |
-|---|---|---|
-| Pipecat browser | Combined | The caller hears that an inbound phone call is required; no carrier action starts. |
-| LiveKit browser | Combined | The caller hears that an inbound phone call is required; no carrier action starts. |
-| Pipecat inbound | Answered | Phone B rings once, two-way human audio works, and the original agent stays ended. `transfer_started` proves carrier acceptance, not that a person answered. |
-| Pipecat inbound | Unavailable | The call ends near the carrier timeout with no new greeting or claim that the manager answered. |
-| Pipecat inbound | Combined | The exact action order and final state above pass before the terminal transfer. |
-| LiveKit inbound | Answered | Phone B rings once, two-way human audio works, and the original agent stays ended. |
-| LiveKit inbound | Unavailable | The call ends under the terminal policy with no new greeting or claim that the manager answered. |
-| LiveKit inbound | Combined | The exact action order and final state above pass before the terminal transfer. |
-
-### Release evidence
-
-Record only sanitized IDs, counts, status, and carrier outcomes. Do not copy
-names, phone numbers, transcripts, tool arguments, credentials, or raw traces.
-
-| Date and revision | Target and case | Trace/session | Ordered evidence | Final state or carrier proof | Result |
-|---|---|---|---|---|---|
-| Pending | Pipecat browser combined | Pending | Pending | Pending | Pending |
-| Pending | LiveKit browser combined | Pending | Pending | Pending | Pending |
-| Pending | Pipecat inbound answered | Pending | Pending | Twilio child-leg status plus observed two-way audio | Pending |
-| Pending | Pipecat inbound unavailable | Pending | Pending | Twilio child-leg final status plus observed terminal timeout | Pending |
-| Pending | Pipecat inbound combined | Pending | Pending | Traced tool-result counts/status plus Twilio child-leg status | Pending |
-| Pending | LiveKit inbound answered | Pending | Pending | SIP/worker status plus observed two-way audio | Pending |
-| Pending | LiveKit inbound unavailable | Pending | Pending | SIP/worker status plus observed terminal timeout | Pending |
-| Pending | LiveKit inbound combined | Pending | Pending | Traced tool-result counts/status plus SIP/worker status | Pending |
-
-For longer real conversations, use the
-[end-to-end harness](../../docs/HARNESS_TEST.md). Feature references:
-[tasks](../../docs-site/build/orchestration/tasks.mdx),
-[handoffs](../../docs-site/build/orchestration/handoffs.mdx),
-[transfers](../../docs-site/transfers/overview.mdx), and
-[telephony](../../docs-site/telephony/overview.mdx).
+For a longer scripted conversation, see the
+[end-to-end harness](../../docs/HARNESS_TEST.md). For the same salon with the
+structural features taken back out, see
+[`salon-concierge-single-prompt`](../salon-concierge-single-prompt/).

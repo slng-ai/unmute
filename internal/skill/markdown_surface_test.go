@@ -31,9 +31,9 @@ var contextualOptions = []string{"copy", "view", "chatgpt", "claude"}
 // markdownEndpoints is what the coding agents page has to name. The suffix is
 // listed as a page that really exists, so mint broken-links checks it too.
 var markdownEndpoints = []string{
-	"https://unmute.mintlify.app/llms.txt",
-	"https://unmute.mintlify.app/llms-full.txt",
-	"https://unmute.mintlify.app/start/coding-agents.md",
+	"https://unmute.ai/llms.txt",
+	"https://unmute.ai/llms-full.txt",
+	"https://unmute.ai/start/coding-agents.md",
 }
 
 func siteConfig(t *testing.T) map[string]json.RawMessage {

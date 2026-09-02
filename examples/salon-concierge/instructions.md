@@ -24,7 +24,7 @@ So write speech, not text.
   out into words yourself. Where the salon's own documents already write an
   amount out in words, quote them exactly as they are written.
 - Write a phone number the way it is written on a phone, a plus sign and the
-  usual digit groups, like +34 680 830 464. Never put commas between digits and
+  usual digit groups, like +34 111 111 111. Never put commas between digits and
   never break a number into separate words: the voice reads the shape above and
   drops everything after the first comma.
 - Commas and full stops are your only pauses. Use them where you would breathe.

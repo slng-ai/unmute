@@ -574,7 +574,7 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// plus goes in front of the digits the caller gave and no country code is
 	// split off or supplied, because telling one from the number after it needs a
 	// table of every country. Guessing it took the last ten digits for the local
-	// part, so +34 680 830 464 came back as "3 468 083 0464": a lone "3" standing
+	// part, so +34 111 111 111 came back as "3 411 111 1111": a lone "3" standing
 	// in for a country code that is really 34, and a caller hearing their own
 	// number read as somebody else's.
 	requireText("verification", verification.Instructions,
@@ -1256,7 +1256,7 @@ func TestExampleReadmesNameTheirDeclaredTransports(t *testing.T) {
 // agent, one per task. Four agents and two tasks on one think profile is the
 // shape that collided, so it is the shape worth naming here in full.
 func salonScopes() []string {
-	const id = "optimized-salon-concierge-v12"
+	const id = "optimized-salon-concierge-v13"
 	return []string{
 		id + ":concierge",
 		id + ":complaint_specialist",
@@ -1368,8 +1368,14 @@ func TestRouterSurfacesCarryThePlaceholderAndProvenanceFacts(t *testing.T) {
 	}{
 		{filepath.Join("internal", "generate", "templates", "livekit_v1", "README.md.tmpl"), []string{"slng router: ", "every request"}},
 		{filepath.Join("internal", "generate", "templates", "pipecat_v1", "README.md.tmpl"), []string{"slng router: ", "refreshed whenever the call writes one"}},
-		{filepath.Join("examples", "salon-concierge", "README.md"), []string{"slng router: ", "{{customer_phone}}"}},
 		{filepath.Join("docs-site", "optimization", "context-router.mdx"), []string{"slng router: ", "read again for every request"}},
+		// examples/salon-concierge/README.md was on this list and is not any
+		// more. An example README now states what the package is, what is in it,
+		// and how to run it, and nothing else: the router's behaviour is not a
+		// fact about that package, and a reader who needs it is one link away on
+		// the docs-site page above. Router facts stay gated on the two runbook
+		// templates, that page, and the skill, which is every surface a reader or
+		// a coding agent actually learns this from.
 		// The skill, which is what a coding assistant reads before it writes a
 		// package. Both facts, because it is the only surface that decides what
 		// gets authored in the first place.

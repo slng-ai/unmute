@@ -117,9 +117,9 @@ Never put full stops between single characters. NATO words, Alpha and Bravo, hel
 where a letter has to be unambiguous.
 
 **A phone number is not one of these.** It is a conventional format, so write it
-the way it is written on a phone and let normalization read it: `+34 680 830 464`,
+the way it is written on a phone and let normalization read it: `+34 111 111 111`,
 `(415) 555-1212`. Delimiting one instead is a live-call failure already paid for
-here. A verification prompt asked for `plus 3 4, 6 8 0, 8 3 0, 4 6 4`; the voice
+here. A verification prompt asked for `plus 3 4, 1 1 1, 1 1 1, 1 1 1`; the voice
 said "plus three four" and never spoke the rest of the number, and the caller
 confirmed digits they had not heard. Commas inside a run of digits are the thing
 that breaks it.
