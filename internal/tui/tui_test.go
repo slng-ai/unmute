@@ -3,6 +3,7 @@ package tui
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"go/parser"
 	"go/token"
 	"io"
@@ -1484,6 +1485,134 @@ func TestConsoleFooterShowsBackHint(t *testing.T) {
 	if view := renderField(t, 80, 24, fieldReq{kind: kindInput, title: "Name", backable: true}); !strings.Contains(strings.ToLower(view), "back") {
 		t.Fatalf("interactive input footer omits Back hint:\n%s", view)
 	}
+}
+
+// footerKey maps the key strings footerHints names to the events the model
+// receives, so the gate drives exactly what the bar advertises.
+func footerKey(s string) tea.KeyMsg {
+	switch s {
+	case "up":
+		return tea.KeyMsg{Type: tea.KeyUp}
+	case "down":
+		return tea.KeyMsg{Type: tea.KeyDown}
+	case "enter":
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	case "esc":
+		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "ctrl+p":
+		return tea.KeyMsg{Type: tea.KeyCtrlP}
+	case "ctrl+c":
+		return tea.KeyMsg{Type: tea.KeyCtrlC}
+	case "ctrl+d":
+		return tea.KeyMsg{Type: tea.KeyCtrlD}
+	default:
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+	}
+}
+
+// TestFooterKeysAreLive is the gate that ties renderFooter to the keymap: every
+// key a screen's footer advertises must actually react in that screen's state.
+// It is the check that keeps the old lies dead — the footer once promised
+// "q quit" that no handler answered, "esc back" on non-backable inputs, and a
+// palette on the hero where it is disabled.
+func TestFooterKeysAreLive(t *testing.T) {
+	reacts := func(m console, key string) bool {
+		before := m.View()
+		next, cmd := m.Update(footerKey(key))
+		return cmd != nil || next.(console).View() != before
+	}
+	cases := []struct {
+		name string
+		m    console
+	}{
+		{"select-backable", selectModel(t, true, false)},
+		{"select-hero", selectModel(t, false, true)},
+		{"input-backable", inputModel(t, true)},
+		{"input-not-backable", inputModel(t, false)},
+		{"text-backable", textModel(t, true)},
+		{"palette", paletteModel(t)},
+		{"notice", noticeModel(t)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, h := range tc.m.footerHints() {
+				if len(h.keys) == 0 {
+					continue // an instructional glyph, not a key
+				}
+				live := false
+				for _, k := range h.keys {
+					if reacts(tc.m, k) {
+						live = true
+						break
+					}
+				}
+				if !live {
+					t.Errorf("footer advertises %q but none of its keys %v react in this state", h.glyph, h.keys)
+				}
+			}
+		})
+	}
+}
+
+// TestSelectQuitsOnQ pins the other half of the fix: q now quits a menu, so the
+// "q quit" hint the footer carries is true.
+func TestSelectQuitsOnQ(t *testing.T) {
+	m := selectModel(t, true, false)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if cmd == nil {
+		t.Fatal("q on a menu returned no command; expected tea.Quit")
+	}
+}
+
+func selectModel(t *testing.T, backable, hero bool) console {
+	t.Helper()
+	m := newConsole(nil)
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: 90, Height: 24})
+	req := fieldReq{
+		kind: kindSelect, title: "Menu", backable: backable,
+		ctx:     viewCtx{hero: hero},
+		choices: []menuChoice{{"One", "1"}, {"Two", "2"}, {"Three", "3"}},
+	}
+	shown, _ := sized.(console).Update(requestMsg{ok: true, request: req})
+	return shown.(console)
+}
+
+func inputModel(t *testing.T, backable bool) console {
+	t.Helper()
+	m := newConsole(nil)
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: 90, Height: 24})
+	req := fieldReq{kind: kindInput, title: "Name", backable: backable}
+	shown, _ := sized.(console).Update(requestMsg{ok: true, request: req})
+	return shown.(console)
+}
+
+func textModel(t *testing.T, backable bool) console {
+	t.Helper()
+	m := newConsole(nil)
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: 90, Height: 24})
+	req := fieldReq{kind: kindText, title: "Instructions", backable: backable}
+	shown, _ := sized.(console).Update(requestMsg{ok: true, request: req})
+	return shown.(console)
+}
+
+func paletteModel(t *testing.T) console {
+	t.Helper()
+	opened, _ := selectModel(t, true, false).Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	return opened.(console)
+}
+
+func noticeModel(t *testing.T) console {
+	t.Helper()
+	m := newConsole(nil)
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: 90, Height: 24})
+	req := noticeRequest{title: "Report", run: func(io.Writer) error { return nil }, done: make(chan error, 1)}
+	shown, _ := sized.(console).Update(requestMsg{ok: true, request: req})
+	var b strings.Builder
+	for i := 0; i < 60; i++ {
+		fmt.Fprintf(&b, "line %d\n", i) // distinct lines so scrolling changes the view
+	}
+	loaded, _ := shown.(console).Update(noticeDoneMsg{text: b.String()})
+	return loaded.(console)
 }
 
 func TestValidateNameRefusesExistingDirectory(t *testing.T) {
