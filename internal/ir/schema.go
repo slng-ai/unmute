@@ -91,14 +91,18 @@ func enumOptions() *jsonschema.ForOptions {
 			VariableSourceConnection, VariableSourceCallID, VariableSourceStreamID,
 			VariableSourceDirection, VariableSourceFromNumber, VariableSourceToNumber,
 		),
-		reflect.TypeFor[ControlKind]():      enum(ControlDelegate, ControlAgentTransfer, ControlHumanTransfer),
-		reflect.TypeFor[History]():          enum(HistoryFull, HistoryMessages, HistoryLastN, HistorySummary, HistoryReset),
-		reflect.TypeFor[ContextScope]():     enum(ContextShared, ContextIsolated),
-		reflect.TypeFor[GroupThen]():        enum(GroupReturn, GroupTransfer, GroupEnd),
-		reflect.TypeFor[GroupMerge]():       enum(GroupMergeResults),
-		reflect.TypeFor[TransferMode]():     enum(TransferCold, TransferWarm),
-		reflect.TypeFor[OnUnavailable]():    enum(OnUnavailableReturn, OnUnavailableHangup),
-		reflect.TypeFor[ToolExecution]():    enum(ToolLocal, ToolClient, ToolWebhook, ToolProviderHosted, ToolBuiltin, ToolMCP),
+		reflect.TypeFor[ControlKind]():   enum(ControlDelegate, ControlAgentTransfer, ControlHumanTransfer),
+		reflect.TypeFor[History]():       enum(HistoryFull, HistoryMessages, HistoryLastN, HistorySummary, HistoryReset),
+		reflect.TypeFor[ContextScope]():  enum(ContextShared, ContextIsolated),
+		reflect.TypeFor[GroupThen]():     enum(GroupReturn, GroupTransfer, GroupEnd),
+		reflect.TypeFor[GroupMerge]():    enum(GroupMergeResults),
+		reflect.TypeFor[TransferMode]():  enum(TransferCold, TransferWarm),
+		reflect.TypeFor[OnUnavailable](): enum(OnUnavailableReturn, OnUnavailableHangup),
+		// All eight kinds. ToolKnowledge was missing here for as long as it has
+		// existed, so the derived debug schema described a value the compiler
+		// produces as illegal. Adding an eighth beside a missing seventh would
+		// have read as deliberate, so both went in at once.
+		reflect.TypeFor[ToolExecution]():    enum(ToolLocal, ToolClient, ToolWebhook, ToolProviderHosted, ToolBuiltin, ToolMCP, ToolKnowledge, ToolSlngHosted),
 		reflect.TypeFor[ToolInterruption](): enum(ToolContinue, ToolCancel, ToolProviderDefault),
 		reflect.TypeFor[ToolEffect]():       enum(ToolReturnsData, ToolEndsConversation),
 		reflect.TypeFor[ToolAuthType]():     enum(ToolAuthBearer, ToolAuthAPIKey),

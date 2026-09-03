@@ -45,7 +45,7 @@ The block near the bottom says how the tool runs. **Every tool file has exactly
 one execution block.** Two is an error, and none is an error whose message is
 also the list of what you could have written.
 
-## The seven execution blocks
+## The eight execution blocks
 
 | Block | The tool is | Reach for it when |
 |---|---|---|
@@ -53,6 +53,7 @@ also the list of what you could have written.
 | `local:` | a Python function in the package | the call needs code of your own: a signature, a transform, a fixture |
 | `mcp:` | a remote MCP server that offers its own tools | the user names a server and wants what it exposes |
 | `builtin:` | a tool the runtime already has, selected by id | you want `end_call`, which is the only one |
+| `slng:` | a tool the SLNG platform already hosts | the user names a tool that exists in their SLNG organisation. See below |
 | `client:` | a tool the caller's own application fulfils | never yet. Gated, see below |
 | `provider_hosted:` | a tool the model provider runs itself | never yet. Gated, see below |
 | `knowledge:` | a search over a folder of the user's own documents | the user has policies, price lists, or manuals the agent should quote instead of guess |
@@ -67,13 +68,15 @@ also the list of what you could have written.
 | `inject` | no | `webhook:` and `local:` only |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` and `knowledge:` |
-| `announce` | no | `webhook:`, `local:` and `knowledge:` only |
+| `announce` | no | `webhook:`, `local:`, `knowledge:` and `slng:` only |
 | `read_only` | no | `webhook:` and `local:` only, and only useful with `prefetch:` |
 
 An `mcp:` file is the block and nothing else, because the server owns each
 tool's contract. A `builtin:` file needs no `description` or `input`, because
 the registry supplies both. A `knowledge:` file takes no `input` or `output`
 either, because the tool owns both: it asks for one string and returns passages.
+An `slng:` file takes no `input` or `output` either, and for the same reason:
+the platform published the schema, so a second copy here could disagree with it.
 
 **`output:` is author-side documentation, not a contract with the model.** The
 compiler checks that it is a JSON Schema object, but no generator sends it to
@@ -93,6 +96,53 @@ Do not write one, and do not offer one as an option. They are listed here so
 that a refusal a user meets reads as a decision rather than a bug.
 If you need to show the refusal, YAML requires `client: {}` or
 `provider_hosted: {}`; a bare empty block is itself invalid.
+
+## SLNG-hosted tools
+
+The user says a tool already exists in their SLNG organisation. Write a
+reference to it, not a copy of it.
+
+```yaml
+# tools/check_order.yaml
+description: Look up an order by its number and return its status and delivery date.
+
+slng:
+  hash: 336a66b9a564f472...
+```
+
+Two rules, and both are things you can get wrong silently:
+
+1. **The file's name is the tool's name.** `tools/check_order.yaml` binds to a
+   tool called `check_order` in the organisation. There is no name field. This
+   is the same rule `builtin:` follows.
+2. **You do not type the hash.** `unmute pull` writes it, along with two files
+   beside the tool file: `tools/<name>.slng.json` and, for a code tool,
+   `tools/<name>.slng.py`. Write `slng: {}` and tell the user to run
+   `unmute pull`, then commit everything it writes.
+
+The `.slng.` files are the platform's copy, mirrored. Never edit one: the change
+reaches nothing, and the next compile refuses because the hash no longer
+matches. Change the tool in the SLNG dashboard and pull again.
+
+### Why this block exists
+
+The SLNG platform owns a tool's code, version and gate pipeline. So on an slng
+target `local:` and `webhook:` are refused: unmute creates no tool there, and a
+brand new tool starts in the SLNG dashboard. `slng:` is how a package reaches
+one that is already there.
+
+It costs no portability. The committed mirror carries the platform's own
+introspected schema and, for a code tool, its module, so the same package
+compiles to livekit and pipecat and runs the same tool inside the generated
+project.
+
+One limit, and state it rather than discovering it: a hosted tool that declares
+Python dependencies compiles to slng, which installs a per-tool environment, and
+is **refused** on livekit and pipecat, which build one dependency list for the
+whole project. A hosted tool with no dependencies works on all three.
+
+`unmute pull` is the only command that needs an SLNG credential. `validate` and
+`compile` read the committed mirror and work offline.
 
 ## Knowledge bases
 

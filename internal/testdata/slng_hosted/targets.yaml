@@ -1,0 +1,10 @@
+# One slng target. Its sibling fixture slng_hosted_code carries the same two
+# hosted tools on livekit and pipecat, and they are two packages rather than one
+# because a code target requires a `turn:` binding and the slng target refuses
+# one: SLNG owns its own turn taking and its create body has no turn section.
+# That is a pre-existing cross-target gap, not something hosted tools introduce.
+
+targets:
+  slng:
+    provider: slng
+    deployment_region: eu-central

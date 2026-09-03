@@ -19,7 +19,7 @@ import (
 // rule nobody rewrites a test for.
 
 // account is a stock set of resources standing in for a provisioned
-// organisation. Modelled on the captured fixtures: six curated tools, a vault
+// organisation. Modelled on the captured fixtures: three curated tools, a vault
 // holding one of each kind, one healthy MCP server and one whose probe failed.
 func account() slngResources {
 	return slngResources{
@@ -221,23 +221,108 @@ func TestPreflightNamesTheCloseMatchItFound(t *testing.T) {
 	}
 }
 
-// GATE. A code or webhook tool is never reported as missing.
+// GATE. A name the account holds at two scopes is named once in a refusal.
 //
-// The push creates those, so their absence is the expected state of a first
-// deploy. Reporting them would put two false problems in front of every new
-// author, and a report that cries wolf on a first run is a report nobody reads
-// on the run that matters.
+// A tool name is unique per *scope*, not per organisation, so an account
+// carrying SLNG's curated `end_call` and a second one somebody made in the
+// dashboard lists that name twice. Relayed verbatim, the refusal reads "this
+// organisation has `end_call`, `end_call`", which looks like a broken tool to
+// the one reader who is already stuck. Live organisation, 2026-09-03: both
+// `end_call` and `transfer_call` existed at global and organisation scope, which
+// is why the captured fixture now carries both pairs.
+func TestPreflightNamesADuplicatedAccountToolOnce(t *testing.T) {
+	resources := account()
+	resources.Tools = append(resources.Tools,
+		slngAccountTool{Name: "end_call", ToolType: "end_call"},
+		slngAccountTool{Name: "transfer_call", ToolType: "transfer_call"},
+	)
+	// A name that near-misses nothing, so the refusal takes the branch that lists
+	// everything the account has.
+	found := onlyFinding(t, generate.Requirements{Builtins: []generate.Requirement{need("hang_up")}}, resources)
+	for _, name := range []string{"`end_call`", "`transfer_call`"} {
+		if count := strings.Count(found.Detail, name); count != 1 {
+			t.Errorf("the detail names %s %d times, want once: %s", name, count, found.Detail)
+		}
+	}
+}
+
+// GATE, inverted deliberately and in the same change as the contract it
+// encodes, which is what the ratchet rule requires of a gate that starts
+// failing for a good reason.
 //
-// This is held at the derivation, so the gate compiles a real package rather
-// than asserting over a hand-built value that could be wrong in the same way.
-func TestPreflightNeverReportsAToolThePushCreates(t *testing.T) {
+// It used to assert the opposite: a code or webhook tool was never reported as
+// missing, because the push created it, so its absence was the expected state
+// of a first deploy. That is no longer true. The slng target creates no tool:
+// the platform CLI's `tool` group is list, get and run, with no create, so a
+// name the organisation does not hold is the end of the road until somebody
+// makes one in the dashboard. Reporting it early costs no compile and saves a
+// refused push.
+//
+// Held at the derivation, so the gate compiles a real package rather than
+// asserting over a hand-built value that could be wrong in the same way twice.
+func TestPreflightReportsAHostedToolTheOrganisationLacks(t *testing.T) {
 	requires := slngToolsRequirements(t)
+	if len(requires.Hosted) != 2 {
+		t.Fatalf("the fixture no longer references two hosted tools, so this gate proves nothing: %+v", requires.Hosted)
+	}
+
+	// An account with the curated capability and neither hosted tool.
 	report := comparePreflight(requires, account())
+	reported := map[string]findingState{}
 	for _, found := range report.Findings {
-		for _, created := range []string{"check_order", "refund"} {
-			if found.Requirement.Name == created {
-				t.Errorf("%q is written by the push and was reported as %v", created, found.State)
-			}
+		reported[found.Requirement.Name] = found.State
+	}
+	for _, name := range []string{"check_order", "refund"} {
+		state, ok := reported[name]
+		if !ok {
+			t.Errorf("%q was not reported at all, and unmute creates no tool, so an absent one is a refusal", name)
+			continue
+		}
+		if state != absent {
+			t.Errorf("%q is %v, want absent", name, state)
+		}
+		if !state.blocks() {
+			t.Errorf("%q is %v, which does not stop the run; the push would refuse it anyway", name, state)
+		}
+	}
+
+	// The other half, and the one that keeps this from crying wolf: an account
+	// that holds them is satisfied, with no warning about a version when the
+	// mirrors match.
+	held := account()
+	held.Tools = append(held.Tools,
+		slngAccountTool{Name: "check_order", ToolType: "code", LatestVersion: 1},
+		slngAccountTool{Name: "refund", ToolType: "api_request", LatestVersion: 2},
+	)
+	for _, found := range comparePreflight(requires, held).Findings {
+		if found.Kind != "hosted tool" {
+			continue
+		}
+		if found.State != satisfied {
+			t.Errorf("%q is %v against an account that holds it at the pinned version, want satisfied: %s",
+				found.Requirement.Name, found.State, found.Detail)
+		}
+	}
+
+	// And a moved one warns rather than blocks, because the agent calls the
+	// platform's copy either way.
+	moved := account()
+	moved.Tools = append(moved.Tools,
+		slngAccountTool{Name: "check_order", ToolType: "code", LatestVersion: 9},
+		slngAccountTool{Name: "refund", ToolType: "api_request", LatestVersion: 2},
+	)
+	for _, found := range comparePreflight(requires, moved).Findings {
+		if found.Requirement.Name != "check_order" || found.Kind != "hosted tool" {
+			continue
+		}
+		if found.State != stale {
+			t.Errorf("a moved hosted tool is %v, want stale", found.State)
+		}
+		if found.State.blocks() {
+			t.Error("a moved hosted tool stops the deploy, and it must not: the agent calls the platform's copy either way")
+		}
+		if !strings.Contains(found.Detail, "version 9") || !strings.Contains(found.Detail, "version 1") {
+			t.Errorf("the drift detail does not name both versions: %s", found.Detail)
 		}
 	}
 }
@@ -631,7 +716,7 @@ func TestDeployWritesNothingButSecrets(t *testing.T) {
 case "$*" in
   *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"n"}}' ;;
   *"agents push"*) printf '{"ok":true,"organisation":{"id":"o","name":"n"},"agent":{"id":"a1","name":"a","action":"create"},"version":"unchanged"}' ;;
-  *"tool list"*) printf '[{"name":"end_call","tool_type":"end_call"}]' ;;
+  *"tool list"*) printf '[{"name":"end_call","tool_type":"end_call"},{"name":"check_order","tool_type":"code","latest_version":1},{"name":"refund","tool_type":"api_request","latest_version":2}]' ;;
   *"secret list"*) printf '[{"name":"REFUND_API_TOKEN","kind":"secret","has_value":true},{"name":"ACME_BRAND","kind":"variable","has_value":true}]' ;;
   *"mcp list"*) printf '[{"name":"internal_docs","capability_status":"healthy"}]' ;;
   *"mcp tools"*) printf '[{"name":"search_docs"},{"name":"read_doc"}]' ;;

@@ -96,6 +96,7 @@ const (
 	FieldToolClient            Field = "tools.execution.client"
 	FieldToolProviderHosted    Field = "tools.execution.provider_hosted"
 	FieldToolBuiltin           Field = "tools.execution.builtin"
+	FieldToolSlngHosted        Field = "tools.execution.slng"
 	FieldToolKnowledge         Field = "tools.execution.knowledge"
 	FieldToolKnowledgeTask     Field = "tasks.tools.execution.knowledge"
 	FieldToolAuth              Field = "tools.auth"
@@ -442,11 +443,24 @@ func Default() Table {
 			// Choosing between implementing enforcement and taking that break is
 			// a maintainer call, so the gap is recorded in SCHEMA.md N22 rather
 			// than encoded here as a redefined tag.
-			// SLNG derives a code tool's result schema by introspecting the Output
-			// class in code_src (tool.py:353, read 2026-08-25), so a declared output
-			// lands somewhere real.
-			FieldToolOutput: field(allow(Slng)),
-			FieldToolLocal:  field(allow(Slng)),
+			// Denied on slng since reference-only. This row was allowed there
+			// *because* SLNG derives a code tool's result schema by
+			// introspecting the Output class in the code_src unmute wrote
+			// (tool.py:353, read 2026-08-25). unmute now writes no code_src, so
+			// there is nothing to introspect and the field reaches nothing.
+			// Refused rather than dropped, and the message says which fact
+			// changed.
+			FieldToolOutput: field(
+				deny(Slng, "slng target derives a tool's result shape from the tool SLNG hosts, not from the package: `output:` reaches nothing here, so remove it, or compile to livekit or pipecat which read it"),
+			),
+			// The refusal that carries reference-only. It has to answer "then
+			// how do I get my tool onto SLNG", because the answer is no longer
+			// "unmute does it for you": the `tool` group of the platform CLI is
+			// list, get and run, with no create, verified at 0.1.16 on
+			// 2026-09-03.
+			FieldToolLocal: field(
+				deny(Slng, "slng target does not create tools: a `local:` handler would have to be uploaded, and SLNG owns a tool's code, version and gate pipeline: create the tool in the SLNG dashboard and reference it with `slng:`, or compile to livekit or pipecat which run your handler themselves"),
+			),
 			// Core since voiceai 0.1.16, verified against a live deploy 2026-09-01.
 			// unmute writes {server, tool} by name; the push resolves the name to
 			// server_id and copies each tool's observed_schema_hash out of the
@@ -490,6 +504,20 @@ func Default() Table {
 				// reference is written by name and needs no tool body.
 				allow(Slng),
 			),
+			// Allowed everywhere, which is the whole point of the block: naming a
+			// tool SLNG hosts must cost no portability.
+			//
+			// It works on the code targets because the mirror `unmute pull`
+			// commits carries the platform's own introspected schema and, for a
+			// code tool, its module. So livekit and pipecat build a real tool out
+			// of a definition they did not have to parse Python to recover, and
+			// slng references the platform's own copy by name.
+			//
+			// The one limit is not here: a hosted tool that declares Python
+			// dependencies is refused on the code targets by FieldToolDependencies
+			// below, in the words that row already uses, because a mirrored pin
+			// and an authored one reach nothing there for the same reason.
+			FieldToolSlngHosted: field(allow(Slng)),
 			// Core on both since 2026-08-25, when the Pipecat lowering landed.
 			// It started denied on Pipecat on purpose: constitution 5.0.0 retired
 			// the vapi and deepgram targets for the inverse, validating and then
@@ -512,12 +540,17 @@ func Default() Table {
 				deny(Slng, slngNoKnowledge("a task-scoped knowledge base")),
 			),
 			FieldToolAuth: field(
-				// The code drivers own the request, so they can send the header. SLNG
-				// takes auth in the tool body instead: ApiRequestConfig.auth is none,
-				// bearer or hmac with a Vault secret_name (api_request.py:138). The old
-				// comment here guessed that a managed target would configure auth
-				// provider-side; the backend says otherwise, so the code wins.
-				allow(Slng),
+				// The code drivers own the request, so they can send the header.
+				// SLNG takes auth in the tool body instead: ApiRequestConfig.auth
+				// is none, bearer or hmac with a Vault secret_name
+				// (api_request.py:138). That was the reason this was allowed on
+				// slng, and reference-only removed it: unmute writes no tool body,
+				// so there is nowhere for the block to land.
+				//
+				// A hosted request tool still authenticates. Its credential is
+				// the platform's, named in the mirror's config.auth.secret_name,
+				// and it reaches the runbook and the deploy preflight from there.
+				deny(Slng, "slng target does not create tools, so there is no tool body for an `auth:` block to land in: a hosted tool keeps its own credential, which SLNG stores, so reference it with `slng:`, or compile to livekit or pipecat which send the header themselves"),
 			),
 			FieldToolInterruption: field(
 				warn(LiveKit, "LiveKit runs tool executions to completion; a per-tool interruption preference is not enforced"),
@@ -589,8 +622,13 @@ func Default() Table {
 			FieldVariableConversation: field(
 				deny(Slng, "slng target declares variables and their defaults but has no slot for one captured during the call: supply the value when the call is dispatched, or compile to livekit or pipecat which capture it mid-call"),
 			),
-			FieldToolInject:  field(allow(Slng)),
-			FieldWebhookPath: field(allow(Slng)),
+			FieldToolInject: field(allow(Slng)),
+			// Same reason as FieldToolAuth: the path was written into a tool
+			// body, or into the attachment's config override when it carried a
+			// template. unmute writes neither now.
+			FieldWebhookPath: field(
+				deny(Slng, "slng target does not create tools, so there is no tool URL for a `path:` to be appended to: SLNG stores a hosted tool's whole URL, so reference it with `slng:`, or compile to livekit or pipecat which build the request themselves"),
+			),
 			// SLNG installs a per-tool environment from an exact pin list, with a
 			// locked snapshot and a verification probe
 			// (app/services/code_dependency_manifest.py). The code drivers build one

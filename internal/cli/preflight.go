@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -38,6 +39,14 @@ const (
 	// A warning and not a refusal: the probe is not a live call, so it is no more
 	// trustworthy as bad news than as good.
 	unhealthy
+	// stale: the organisation holds this tool, and at a version the committed
+	// mirror was not taken from.
+	//
+	// A warning and not a refusal, and blocks() below is what makes that true by
+	// construction rather than by remembering. The agent calls the platform's
+	// copy either way, so the risk is a package whose mirror no longer describes
+	// what runs, not a deploy that will fail.
+	stale
 	// notChecked: the read could not be made. Never counted as satisfied, and
 	// never a refusal. This is the state that keeps an old `voiceai` or a
 	// restricted network from becoming a deploy outage.
@@ -123,6 +132,9 @@ func comparePreflight(requires generate.Requirements, resources slngResources) p
 	for _, requirement := range requires.Builtins {
 		report.Findings = append(report.Findings, compareBuiltin(requirement, accountTools, toolsChecked))
 	}
+	for _, requirement := range requires.Hosted {
+		report.Findings = append(report.Findings, compareHosted(requirement, resources.Tools, toolsChecked))
+	}
 
 	servers := make([]string, 0, len(resources.MCPServer))
 	for _, server := range resources.MCPServer {
@@ -168,6 +180,60 @@ func compareBuiltin(requirement generate.Requirement, accountTools []string, was
 	default:
 		found.Detail = fmt.Sprintf("this organisation has no tool of this name (it has %s). A builtin reference is the tool file's own name, so either rename the file to a capability SLNG offers, or create the tool in the SLNG dashboard",
 			joinNames(accountTools))
+	}
+	return found
+}
+
+// compareHosted checks a `slng:` reference twice over: the organisation has to
+// hold the name at all, and it has to still hold what the mirror was taken
+// from. The two answers are different states with different severities.
+//
+// The absent half reuses the builtin near-miss remedy, because the mistake is
+// the same one: a hosted reference is the tool *file's* own name, so a package
+// that named the file for what it does rather than for the tool it references
+// emits a name the account has never heard of.
+func compareHosted(requirement generate.Requirement, accountTools []slngAccountTool, wasChecked bool) finding {
+	found := finding{Requirement: requirement, Kind: "hosted tool"}
+	if !wasChecked {
+		found.State, found.Detail = notChecked, "the account's tools could not be listed, so hosted tool versions were not checked; the push decides what it would have covered"
+		return found
+	}
+	names := make([]string, 0, len(accountTools))
+	for _, tool := range accountTools {
+		names = append(names, tool.Name)
+	}
+	for _, tool := range accountTools {
+		if tool.Name != requirement.Name {
+			continue
+		}
+		// The version comparison costs nothing extra: this listing carries
+		// latest_version, so one read answers both "does the name exist" and
+		// "has it moved". A read per hosted tool on every deploy was the
+		// alternative.
+		//
+		// The second clause is the important half of the message. The deploy is
+		// going ahead either way, because the agent always calls the platform's
+		// copy, so the risk is not a broken deploy but a package whose mirror no
+		// longer describes what runs.
+		if requirement.Version > 0 && tool.LatestVersion > 0 && tool.LatestVersion != requirement.Version {
+			found.State = stale
+			found.Detail = fmt.Sprintf("this tool is at version %d in this organisation and the committed mirror was taken from version %d: "+
+				"run `unmute pull` to update it, or deploy knowing the agent will call the organisation's version and not the one in this package",
+				tool.LatestVersion, requirement.Version)
+			return found
+		}
+		found.State = satisfied
+		return found
+	}
+	found.State = absent
+	found.NearMiss = nearMiss(requirement.Name, names)
+	switch {
+	case found.NearMiss != "":
+		found.Detail = fmt.Sprintf("this organisation has %q, and a hosted reference is the tool file's own name: rename tools/%s.yaml to tools/%s.yaml",
+			found.NearMiss, requirement.Name, found.NearMiss)
+	default:
+		found.Detail = fmt.Sprintf("this organisation has no tool of this name (it has %s). A hosted reference is the tool file's own name, so either rename the file to a tool the organisation has, or create the tool in the SLNG dashboard",
+			joinNames(names))
 	}
 	return found
 }
@@ -316,13 +382,22 @@ func checked(missed []*unchecked, command target.SlngCommand) bool {
 	return true
 }
 
+// joinNames renders account names for a refusal: sorted, and each named once.
+//
+// The dedupe is load-bearing rather than tidy. A name is unique per *scope*, not
+// per organisation, so an account that has SLNG's curated `end_call` and a
+// second one somebody made in the dashboard lists the name twice. Read back
+// verbatim that says "this organisation has `end_call`, `end_call`", which reads
+// like a broken tool to the one reader who is already stuck. Verified against a
+// live organisation on 2026-09-03, where both `end_call` and `transfer_call`
+// existed at global and organisation scope.
 func joinNames(names []string) string {
 	if len(names) == 0 {
 		return "none"
 	}
 	sorted := append([]string(nil), names...)
 	sort.Strings(sorted)
-	return "`" + strings.Join(sorted, "`, `") + "`"
+	return "`" + strings.Join(slices.Compact(sorted), "`, `") + "`"
 }
 
 // renderPreflight writes the report.
@@ -351,8 +426,11 @@ func renderPreflight(out, errOut io.Writer, name string, report preflightReport)
 	blocked := report.blocked()
 	if len(blocked) == 0 {
 		fmt.Fprintf(out, "%s: %s satisfied\n", name, plural(report.satisfiedCount(), "requirement"))
+		// stale joins unhealthy here rather than getting its own loop: both are
+		// facts about something the account has, neither stops the run, and a
+		// second loop would print them out of the order they were derived in.
 		for _, found := range report.Findings {
-			if found.State == unhealthy {
+			if found.State == unhealthy || found.State == stale {
 				warnf(errOut, "%s: %s %s: %s\n", name, found.Kind, found.Requirement.Name, found.Detail)
 			}
 		}
@@ -379,7 +457,7 @@ func renderPreflight(out, errOut io.Writer, name string, report preflightReport)
 // order runs from what an author fixes in the dashboard to what they can fix
 // from here, so the list ends with the ones `deploy` can offer to close.
 func kindOrder(findings []finding) []string {
-	order := []string{"builtin tool", "mcp server", "mcp tool", "secret", "variable"}
+	order := []string{"builtin tool", "hosted tool", "mcp server", "mcp tool", "secret", "variable"}
 	var present []string
 	for _, kind := range order {
 		if len(findingsOfKind(findings, kind)) > 0 {

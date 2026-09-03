@@ -206,12 +206,17 @@ Every key of every package file is listed under
 | [`compile`](https://unmute.ai/reference/cli/compile) | write the generated project for every target |
 | [`dev`](https://unmute.ai/reference/cli/dev) | compile, run locally, and talk to the agent in your browser |
 | [`deploy`](https://unmute.ai/reference/cli/deploy) | validate, compile and push a package to SLNG |
+| [`pull`](https://unmute.ai/reference/cli/pull) | fetch each SLNG-hosted tool's definition into the package |
 | [`resources`](https://unmute.ai/reference/cli/resources) | list the tools, MCP servers and phone numbers your SLNG organisation offers |
 | [`skill`](https://unmute.ai/reference/cli/skill) | install the Unmute skill so a coding assistant can build packages |
 
-`validate`, `compile`, `dev` and `deploy` take the package directory as an
-optional argument. From inside the package you run them bare; from anywhere else
-you pass the path, as in `unmute dev my-agent`.
+`validate`, `compile`, `dev`, `deploy` and `pull` take the package directory as
+an optional argument. From inside the package you run them bare; from anywhere
+else you pass the path, as in `unmute dev my-agent`.
+
+`pull` is the only command that contacts SLNG on a package's behalf, and only a
+package that references a hosted tool needs it. `validate` and `compile` read
+the committed mirror and work offline.
 
 Warnings go to standard error and still exit 0. Errors exit 1.
 

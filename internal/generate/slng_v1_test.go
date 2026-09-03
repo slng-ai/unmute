@@ -3,7 +3,6 @@ package generate
 import (
 	"encoding/json"
 	"flag"
-	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,22 +93,34 @@ func TestSlngV1ToolsGolden(t *testing.T) {
 	slngGolden(t, artifact, "slng_v1_tools.txt")
 }
 
-func TestSlngV1WritesTheThreeArtifactKinds(t *testing.T) {
+// Two files, and the reason there are two rather than four is the shape of this
+// target now: it references tools SLNG already owns and creates none, so there
+// is no tool body to write beside the agent body.
+func TestSlngV1WritesTheBodyAndTheRunbookAndNothingElse(t *testing.T) {
 	artifact, files := compileSlng(t, "slng_tools")
 	if artifact.Kind != BodyTarget {
 		t.Errorf("artifact kind = %q, want %q", artifact.Kind, BodyTarget)
 	}
-	for _, want := range []string{"agent.json", "README.md", "tools/check_order.json", "tools/refund.json"} {
+	for _, want := range []string{"agent.json", "README.md"} {
 		if _, ok := files[want]; !ok {
 			t.Errorf("no %s was written", want)
 		}
 	}
-	// A runnable project is exactly what this target does not emit. Emitting one
-	// by accident would mean the wrong driver ran.
+	// The half that carries reference-only. A tool body here would try to create
+	// a tool the platform already owns, at whatever version this package
+	// happened to mirror.
 	for path := range files {
+		if strings.HasPrefix(path, "tools/") {
+			t.Errorf("the slng driver wrote %s; it creates no tool, so every tool it names is one the organisation already holds", path)
+		}
+		// A runnable project is exactly what this target does not emit. Emitting
+		// one by accident would mean the wrong driver ran.
 		if strings.HasSuffix(path, ".py") || path == "Dockerfile" || path == "pyproject.toml" {
 			t.Errorf("the slng driver wrote %s; it emits a deployment body, not a project", path)
 		}
+	}
+	if len(files) != 2 {
+		t.Errorf("the slng driver wrote %d files, want 2: %v", len(files), files)
 	}
 }
 
@@ -189,53 +200,29 @@ func TestSlngV1WritesEmptyVariableMapsRatherThanNone(t *testing.T) {
 	}
 }
 
-// A code tool never carries config_overrides, because ToolConfigOverrides is a
-// seven-member union with no code member. A webhook tool with a templated path
-// must carry one, because a tool-level URL may template Vault variables only.
-func TestSlngV1ConfigOverridesFollowTheToolType(t *testing.T) {
+// No tool reference carries config_overrides any more, and this is the test
+// that used to prove one did.
+//
+// It existed for exactly one case: a `webhook:` tool whose path carried a
+// package variable. A tool-level URL on SLNG may template Vault variables only,
+// so the rendered URL had to ride the attachment as an override instead of
+// sitting in the tool's own config. There is no tool config now, and a hosted
+// tool's whole URL is the platform's, so the override has nothing to override.
+//
+// Kept as an assertion rather than deleted, because an override reappearing
+// would mean something started writing a tool body again.
+func TestSlngV1WritesNoConfigOverride(t *testing.T) {
 	_, files := compileSlng(t, "slng_tools")
 	body := slngBodyOf(t, files)
 	refs, _ := body["tool_refs"].([]any)
 	if len(refs) == 0 {
 		t.Fatal("no tool_refs were written")
 	}
-	seen := map[string]map[string]any{}
 	for _, entry := range refs {
 		ref, _ := entry.(map[string]any)
-		name, _ := ref["tool"].(string)
-		seen[name] = ref
-	}
-	if _, present := seen["check_order"]["config_overrides"]; present {
-		t.Error("the code tool carries config_overrides; SLNG has no override shape for a code tool")
-	}
-	override, _ := seen["refund"]["config_overrides"].(map[string]any)
-	if override == nil {
-		t.Fatal("the webhook tool's templated URL is missing from config_overrides")
-	}
-	if override["type"] != "api_request" {
-		t.Errorf("config override type = %v, want api_request", override["type"])
-	}
-	if url, _ := override["url"].(string); !strings.Contains(url, "{{customer_id}}") {
-		t.Errorf("config override url = %q; the input token belongs here, not in the tool body", url)
-	}
-	// And the reverse: the tool's own config carries the base with no token,
-	// because ApiRequestConfig.validate_request refuses a non-Vault token there.
-	var tool map[string]any
-	if err := json.Unmarshal([]byte(files["tools/refund.json"]), &tool); err != nil {
-		t.Fatal(err)
-	}
-	config, _ := tool["config"].(map[string]any)
-	if url, _ := config["url"].(string); strings.Contains(url, "{{") {
-		t.Errorf("the tool body's own url carries a token: %q", url)
-	}
-	// Auth reaches auth:, never a header: authorization is a protected header
-	// name SLNG rejects outright.
-	auth, _ := config["auth"].(map[string]any)
-	if auth["type"] != "bearer" || auth["secret_name"] != "REFUND_API_TOKEN" {
-		t.Errorf("webhook auth = %v, want a bearer secret_name", auth)
-	}
-	if headers, _ := config["headers"].([]any); len(headers) != 0 {
-		t.Errorf("headers = %v; auth never becomes an Authorization header", headers)
+		if _, present := ref["config_overrides"]; present {
+			t.Errorf("tool %v carries config_overrides; the slng target writes no tool config for one to override", ref["tool"])
+		}
 	}
 }
 
@@ -383,82 +370,30 @@ func TestSlngV1RunbookNamesTheTrapsAndTheCredential(t *testing.T) {
 	}
 }
 
-// The generated code_src keeps the author's file byte for byte, which is the
-// rule that lets one handler work on all three targets.
-func TestSlngV1CodeSourceKeepsTheAuthorsFileUnchanged(t *testing.T) {
-	_, files := compileSlng(t, "slng_tools")
-	var tool map[string]any
-	if err := json.Unmarshal([]byte(files["tools/check_order.json"]), &tool); err != nil {
-		t.Fatal(err)
-	}
-	source, _ := tool["code_src"].(string)
-	authored, err := os.ReadFile(filepath.Join("..", "testdata", "slng_tools", "tools", "check_order.py"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(source, strings.TrimRight(string(authored), "\n")) {
-		t.Errorf("code_src does not open with the author's file unchanged:\n%s", source)
-	}
-	for _, want := range []string{
-		"class Input(BaseModel):",
-		"    order_id: str",
-		"class Output(BaseModel):",
-		"def handler(input: Input) -> Output:",
-		"result = check_order(order_id=input.order_id)",
-	} {
-		if !strings.Contains(source, want) {
-			t.Errorf("code_src is missing %q:\n%s", want, source)
-		}
-	}
-	if tool["tool_type"] != "code" {
-		t.Errorf("tool_type = %v, want code", tool["tool_type"])
-	}
-}
+// The generated code_src is gone, with the tool body it lived in.
+//
+// It used to keep the author's handler byte for byte, which was the rule that
+// let one file work on all three targets. The direction has inverted: the
+// platform owns the module and `unmute pull` mirrors it into the package, so
+// the same file still works on all three and the byte-for-byte rule now runs
+// the other way. TestHostedToolLowersOnBothCodeTargets is where it is checked.
 
-// TestSlngV1ToolConfigCarriesItsUnionTag. `config` is a tagged union on the wire
-// and the tag is the tool's own type. A create body gets away without it, because
-// `tool_type` sits beside `config` and the API infers the tag; an update does not,
-// because the push step strips `tool_type` before it PATCHes (a tool's type cannot
-// change after creation).
+// TestSlngV1WritesNoToolBodyToTag replaces TestSlngV1ToolConfigCarriesItsUnionTag.
 //
-// So an untagged body deploys once and fails on every deploy after it. That is the
-// worst shape a bug can have: it passes the first time you try it.
+// That test held a real and expensive fact: `config` is a tagged union on the
+// wire, a create body gets away without the tag because `tool_type` sits beside
+// it, and an update PATCH does not, because the push strips `tool_type` first.
+// An untagged body therefore deployed once and 422d forever after, which is the
+// worst shape a bug can have.
 //
-// Measured against api.agents.slng.ai on 2026-08-27 — the same PATCH is 422
-// without the tag and 200 with it, and SLNG stores the tag on read-back. The
-// union's members, from the API's own 422: code, api_request, end_call,
-// voicemail_detection, transfer_call, send_sms, current_datetime,
-// user_phone_number. The two below are the ones this driver emits.
-func TestSlngV1ToolConfigCarriesItsUnionTag(t *testing.T) {
+// None of it can happen now, because unmute writes no tool body at all. The
+// fact is kept here rather than deleted, because it is the reason to be
+// suspicious of any change that starts writing one again.
+func TestSlngV1WritesNoToolBodyToTag(t *testing.T) {
 	_, files := compileSlng(t, "slng_tools")
-	found := map[string]string{}
-	for path, content := range files {
-		if !strings.HasPrefix(path, "tools/") {
-			continue
+	for path := range files {
+		if strings.HasPrefix(path, "tools/") {
+			t.Errorf("%s was written: a tool body needs its config tagged with its own tool_type, and an untagged one deploys once and 422s forever after", path)
 		}
-		var body struct {
-			Name     string `json:"name"`
-			ToolType string `json:"tool_type"`
-			Config   struct {
-				Type string `json:"type"`
-			} `json:"config"`
-		}
-		if err := json.Unmarshal([]byte(content), &body); err != nil {
-			t.Fatalf("%s: %v", path, err)
-		}
-		if body.ToolType == "" {
-			t.Errorf("%s carries no tool_type", path)
-			continue
-		}
-		if body.Config.Type != body.ToolType {
-			t.Errorf("%s has tool_type %q and config.type %q; the union tag is the tool's own type, and an update PATCH has nothing else to infer it from",
-				path, body.ToolType, body.Config.Type)
-		}
-		found[body.Name] = body.ToolType
-	}
-	// Both shapes this driver emits have to be in the sample, or the assertion
-	// above could pass by covering only one of them.
-	if want := map[string]string{"check_order": "code", "refund": "api_request"}; !maps.Equal(found, want) {
-		t.Errorf("emitted tool bodies = %v, want %v", found, want)
 	}
 }

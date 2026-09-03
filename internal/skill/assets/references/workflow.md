@@ -11,23 +11,55 @@ Write, validate, read the error, fix, repeat. Then run it and listen.
 | `unmute compile [dir]` | validate, then write `build/<target>/` for each code target |
 | `unmute dev [dir]` | compile, run locally, and let you talk to the agent |
 | `unmute deploy [dir]` | validate, compile, and push a slng target to SLNG |
+| `unmute pull [dir]` | fetch each SLNG-hosted tool's definition into the package |
 | `unmute skill install` | write this skill into a project |
 
-`[dir]` is optional on those four. With no directory they use the current one,
+`[dir]` is optional on those five. With no directory they use the current one,
 so you can `cd` into a package and run them with no argument. Passing a
 directory still works and still wins, and it is the right form when you are not
 inside the package.
 
 Four commands take an author from nothing to a voice. `deploy` is how a slng
 package leaves the machine, and it is SLNG only: a livekit or pipecat target
-compiles to a project that platform deploys with its own tool. `skill` is off
-both paths: it writes this bundle into a project and does nothing else.
+compiles to a project that platform deploys with its own tool. `pull` is the
+only command that needs an SLNG credential, and it is needed only by a package
+that references a tool the platform hosts: `validate` and `compile` work
+offline, which is what lets CI build such a package. `skill` is off every path:
+it writes this bundle into a project and does nothing else.
 
 ```sh
 unmute skill install
 unmute skill install --agent claude
 unmute skill install --force
 ```
+
+## When the package references a tool SLNG hosts
+
+A `slng:` tool names a tool the user's SLNG organisation already has. The
+definition is not in the package until somebody fetches it, so the loop gains
+one step at the front:
+
+```sh
+unmute pull        # once, and again when the tool changes on the platform
+unmute validate
+unmute compile
+unmute deploy
+```
+
+`pull` writes two files beside the tool file, `tools/<name>.slng.json` and, for
+a code tool, `tools/<name>.slng.py`, and stamps a `hash:` into the `slng:`
+block. Tell the user to commit all of it: the mirror is how the tool also
+reaches livekit and pipecat, and the hash is how a later compile knows the
+mirror is still the right one.
+
+Never write the hash yourself, and never edit a `.slng.` file. An edit there
+reaches nothing, and the next compile refuses because the hash no longer
+matches. Write `slng: {}` and say to run `unmute pull`.
+
+**`local:` and `webhook:` are refused on an slng target.** unmute creates no
+tool on SLNG: the platform owns a tool's code, version and gate pipeline, so a
+brand new tool starts in the SLNG dashboard and the package references it. Both
+blocks still work exactly as before on livekit and pipecat.
 
 `--agent` narrows which assistants to write for and takes `all`, `claude`,
 `codex`, `copilot`, or `cursor`. `--dir` installs somewhere other than the

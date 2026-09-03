@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/slng-ai/unmute/internal/spec"
 	"github.com/slng-ai/unmute/internal/target"
 )
 
@@ -189,6 +190,12 @@ type slngVaultEntry struct {
 type slngAccountTool struct {
 	Name     string `json:"name"`
 	ToolType string `json:"tool_type"`
+	// LatestVersion is what makes the hosted-tool drift check free. This listing
+	// carries it, so comparing a committed mirror's version against the
+	// organisation costs no extra read: one `tool list` answers both "does the
+	// name exist" and "has it moved". A read per hosted tool would have been the
+	// alternative, on every deploy.
+	LatestVersion int `json:"latest_version"`
 }
 
 // slngMCPServer is one row of `voiceai mcp list`.
@@ -288,6 +295,28 @@ func readResources(runner *voiceaiRunner, servers []string) (slngResources, erro
 
 	resources.Notes = runner.notes
 	return resources, nil
+}
+
+// readTool fetches one tool's whole definition, which is what a hosted
+// reference mirrors.
+//
+// It decodes into spec.Mirror rather than a shape of its own, and that is
+// deliberate: the same struct is the file `unmute pull` writes, so the platform
+// field names have one owner and there is no second place for them to drift.
+// The fields the platform returns and the mirror does not keep are listed on
+// that type, each with why.
+//
+// Going through runner.read means a failure is an *unchecked, so "this
+// organisation has no such tool" and "I could not ask" stay different answers.
+// That difference is the whole safety argument next door in the preflight, and
+// it matters as much here: a pull that wrote an empty mirror because a read
+// failed would commit a lie.
+func readTool(runner *voiceaiRunner, name string) (spec.Mirror, error) {
+	var mirror spec.Mirror
+	if err := runner.read(target.SlngToolGet.With(name), &mirror); err != nil {
+		return spec.Mirror{}, err
+	}
+	return mirror, nil
 }
 
 // readTrunks is deliberately not called by readResources, and no preflight ever

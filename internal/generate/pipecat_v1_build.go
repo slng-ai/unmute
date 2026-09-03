@@ -206,15 +206,23 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		// carries it: a module missing from there is a ModuleNotFoundError at
 		// startup, which is a call that is never answered.
 		for _, entry := range agent.Prefetch {
-			if entry.Tool == "" || agent.Tools[entry.Tool].Execution != ir.ToolLocal {
+			if entry.Tool == "" {
+				continue
+			}
+			prefetched := agent.Tools[entry.Tool]
+			source := prefetched.HandlerSource
+			if prefetched.Execution == ir.ToolSlngHosted && prefetched.Mirror != nil {
+				source = prefetched.Mirror.Code
+			} else if prefetched.Execution != ir.ToolLocal {
+				continue
+			}
+			if source == "" {
 				continue
 			}
 			if slices.ContainsFunc(data.LocalTools, func(t pipecatLocalTool) bool { return t.Name == entry.Tool }) {
 				continue
 			}
-			data.LocalTools = append(data.LocalTools, pipecatLocalTool{
-				Name: entry.Tool, Source: agent.Tools[entry.Tool].HandlerSource,
-			})
+			data.LocalTools = append(data.LocalTools, pipecatLocalTool{Name: entry.Tool, Source: source})
 		}
 		sort.Slice(data.LocalTools, func(i, j int) bool { return data.LocalTools[i].Name < data.LocalTools[j].Name })
 	}
@@ -620,7 +628,10 @@ func setImportNeeds(data *pipecatData) {
 	seenLocal := map[string]bool{}
 	collectLocal := func(tools []pipecatTool) {
 		for _, t := range tools {
-			if !t.Local || seenLocal[t.Name] {
+			// A mirrored SLNG module rides the artifact exactly like a local
+			// handler, and carries its source the same way: buildTool put it in
+			// HandlerSource for both kinds, so the COPY line covers it too.
+			if (!t.Local && !t.HostedCode) || seenLocal[t.Name] {
 				continue
 			}
 			seenLocal[t.Name] = true
@@ -850,7 +861,11 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 				built.MCPSources = append(built.MCPSources, buildMCPSource(ref, tool, env))
 				continue
 			}
-			built.Tools = append(built.Tools, buildTool(ref, tool, agent.Variables, env))
+			lowered, err := buildTool(ref, tool, agent.Variables, env)
+			if err != nil {
+				return pipecatAgent{}, err
+			}
+			built.Tools = append(built.Tools, lowered)
 			continue
 		}
 		control, ok := agent.Controls[ref]
@@ -991,7 +1006,11 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 		if tool.Execution == ir.ToolMCP {
 			return pipecatTask{}, fmt.Errorf("task %q lists the MCP tool source %q: a Flows node advertises only its own function schemas, so list the source on the agent instead", name, ref)
 		}
-		built.Tools = append(built.Tools, buildTool(ref, tool, agent.Variables, env))
+		lowered, err := buildTool(ref, tool, agent.Variables, env)
+		if err != nil {
+			return pipecatTask{}, err
+		}
+		built.Tools = append(built.Tools, lowered)
 	}
 	return built, nil
 }
@@ -1111,7 +1130,25 @@ func buildMCPSource(name string, tool ir.Tool, env *envSet) pipecatMCPSource {
 	return source
 }
 
-func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env *envSet) pipecatTool {
+// pipecatLoweredKinds are the execution kinds buildTool actually has a shape
+// for. Anything else is refused rather than built, because this driver's
+// emitted dispatch treats "none of the flags are set" as a webhook: an
+// unhandled kind does not render to nothing, it renders an HTTP POST to an
+// environment name nobody registered. The two comments at buildTool's call
+// sites already say so about `mcp:`; this is the same hazard, checked once
+// instead of guarded per kind.
+var pipecatLoweredKinds = map[ir.ToolExecution]bool{
+	ir.ToolWebhook:    true,
+	ir.ToolLocal:      true,
+	ir.ToolKnowledge:  true,
+	ir.ToolBuiltin:    true,
+	ir.ToolSlngHosted: true,
+}
+
+func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env *envSet) (pipecatTool, error) {
+	if !pipecatLoweredKinds[tool.Execution] {
+		return pipecatTool{}, fmt.Errorf("tool %q: execution kind %q has no pipecat lowering; ir.Validate should have refused it for this target", name, tool.Execution)
+	}
 	if tool.URLEnv != "" {
 		env.addRead(tool.URLEnv)
 	}
@@ -1131,6 +1168,34 @@ func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env 
 		EndsCall:      tool.Effect == ir.ToolEndsConversation, Interruption: interruptionValue(tool.Interruption),
 		Announce: tool.Announce,
 	}
+	// A hosted tool's definition is the mirror. The args below still come from
+	// Tool.Input, which Build filled from the platform's own introspected
+	// arg_schema, so inputFields needed no change.
+	if tool.Execution == ir.ToolSlngHosted {
+		if tool.Mirror == nil {
+			return pipecatTool{}, fmt.Errorf("tool %q: no mirror is committed, so there is nothing to lower; ir.Validate should have refused it", name)
+		}
+		switch tool.Mirror.ToolType {
+		case "code":
+			built.HostedCode = true
+			built.HandlerSource = tool.Mirror.Code
+		case "api_request":
+			request, refusals := tool.Mirror.Request()
+			if len(refusals) > 0 {
+				return pipecatTool{}, fmt.Errorf("tool %q: %s; ir.Validate should have refused it for this target", name, refusals[0])
+			}
+			built.HostedRequest = true
+			built.URLExpr = pyQuote(request.URL)
+			built.HostedHeaders = hostedHeaderLiteral(request.Headers)
+			if request.SecretName != "" {
+				env.addRead(request.SecretName)
+				built.Auth = &webhookAuth{Kind: "bearer", Expr: fmt.Sprintf("_bearer(%s)", pyQuote(request.SecretName))}
+			}
+		default:
+			return pipecatTool{}, fmt.Errorf("tool %q: the mirror is a %q tool, which has no pipecat lowering; ir.Validate should have refused it", name, tool.Mirror.ToolType)
+		}
+	}
+
 	if tool.Execution == ir.ToolKnowledge {
 		// The tool owns its own schema, so the one parameter is fixed here rather
 		// than derived from an input the author never wrote. Same shape as
@@ -1144,7 +1209,7 @@ func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env 
 			"query": map[string]any{"type": "string", "description": knowledgeQueryDescription},
 		})
 		built.InputRequired = pyLiteral([]any{"query"})
-		return built
+		return built, nil
 	}
 	built.Args = append(built.Args, inputFields(tool.Input)...)
 	argNames := make([]string, 0, len(built.Args))
@@ -1160,7 +1225,7 @@ func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env 
 	built.InputProps = pyLiteral(props)
 	requiredList, _ := tool.Input["required"].([]any)
 	built.InputRequired = pyLiteral(requiredList)
-	return built
+	return built, nil
 }
 
 // pipecatDestinationExpr renders a resolved destination as Python: a quoted

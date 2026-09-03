@@ -1,0 +1,88 @@
+{
+  "id": "22222222-2222-2222-2222-222222222222",
+  "organisation_id": "550fffde-0000-0000-0000-000000000000",
+  "name": "search_places_text",
+  "tool_type": "api_request",
+  "config": {
+    "type": "api_request",
+    "url": "https://tools.example.com/tools/search-text",
+    "http_method": "POST",
+    "auth": {
+      "type": "bearer",
+      "secret_name": "SLNG_TOOL_RENDER"
+    },
+    "headers": [],
+    "parameters": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Query to search for, for example: \"Tapas bar in Madrid\""
+        }
+      },
+      "additionalProperties": false
+    },
+    "strict": true,
+    "webhook_format": "raw",
+    "timeout_seconds": 10,
+    "wait_for_response": true,
+    "response": {
+      "show_to_llm": true,
+      "instructions": null
+    }
+  },
+  "description": "Call this tool to search for places via a simple text query using the places api from google.",
+  "declared_secrets": [],
+  "dependencies": [],
+  "argument_defaults": {},
+  "code_src": null,
+  "last_run_status": "succeeded",
+  "source": "org",
+  "latest_version": 3,
+  "content_hash": "444b1061bb4d875ec97621385621c0cb7285a065e7b3bc3d7f985bde412b7872",
+  "is_current_hash_green": true,
+  "is_current_version": true,
+  "schema_stale": false,
+  "arg_schema": {
+    "type": "object",
+    "required": [
+      "query"
+    ],
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Query to search for, for example: \"Tapas bar in Madrid\""
+      }
+    },
+    "additionalProperties": false
+  },
+  "gate_status": {
+    "static": {
+      "config_valid": {
+        "passed": true,
+        "detail": null
+      },
+      "secrets_exist": {
+        "passed": true,
+        "detail": null
+      },
+      "name_unique": {
+        "passed": true,
+        "detail": null
+      }
+    },
+    "green_run": {
+      "passed": true,
+      "proven_hash": "f3b3301186cc4baba3f3a4eafdffee90ff3f2bd4aaf6a757d23a1263158704f2"
+    },
+    "config_valid": null,
+    "code_environment": null,
+    "content_current": {
+      "passed": true,
+      "detail": null
+    }
+  }
+}

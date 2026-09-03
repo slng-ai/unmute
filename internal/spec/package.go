@@ -20,7 +20,18 @@ type Package struct {
 	// a PDF is binary, and read but never parsed: the compiler has no PDF parser
 	// and needs none, because the emitted project reads the original at startup.
 	Documents map[string][]byte `json:"-" yaml:"-"`
-	files     map[string][]byte
+	// Mirrors holds each SLNG-hosted tool's fetched definition, by tool name,
+	// and MirrorBytes the exact sidecar bytes it was read from, so the offline
+	// pin is checked against what is on disk rather than against a re-encoding.
+	//
+	// Tagged `json:"-" yaml:"-"` like the four fields above, and that tag is
+	// load-bearing rather than cosmetic: it puts these outside the
+	// authoring-surface walk, so their map-typed fields need no entry in
+	// permanentDictionaries and cannot grow dictionaryDebt. The walk skips
+	// exactly this shape and says why (no_dictionaries_test.go).
+	Mirrors     map[string]Mirror `json:"-" yaml:"-"`
+	MirrorBytes map[string][]byte `json:"-" yaml:"-"`
+	files       map[string][]byte
 }
 
 // Location returns the first source line containing token in a package file.
@@ -468,6 +479,14 @@ type Tool struct {
 	Client         *ToolNoFields  `json:"client,omitempty" yaml:"client,omitempty"`
 	ProviderHosted *ToolNoFields  `json:"provider_hosted,omitempty" yaml:"provider_hosted,omitempty"`
 	Knowledge      *ToolKnowledge `json:"knowledge,omitempty" yaml:"knowledge,omitempty"`
+	// Slng is the eighth block, and the only one whose definition is not here:
+	// the tool lives on the SLNG platform and this file names and pins it.
+	//
+	// A pointer, like every other block, because both execution-block agreement
+	// tests read every pointer field on Tool as an execution block. That is the
+	// same reason Announce and ReadOnly below are deliberately plain values, and
+	// here it is what is wanted rather than what has to be worked around.
+	Slng *ToolSlng `json:"slng,omitempty" yaml:"slng,omitempty"`
 
 	Interruption string `json:"interruption,omitempty" yaml:"interruption,omitempty"`
 	Effect       string `json:"effect,omitempty" yaml:"effect,omitempty"`
@@ -534,6 +553,24 @@ type ToolLocal struct {
 	// catalogue and read nothing per tool, so this field is refused there rather
 	// than dropped. FieldToolDependencies is the row that says so.
 	Dependencies []string `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
+}
+
+// ToolSlng is the `slng:` block: a tool the SLNG platform hosts, referenced by
+// this file's own name and pinned by the digest of the mirror committed beside
+// it. One field, because the platform owns everything else about the tool.
+//
+// There is deliberately no tool name here. The file's name resolves against the
+// organisation, which is the rule `builtin:` already follows, so there is never
+// a second name to keep in sync and no way for the two to disagree.
+type ToolSlng struct {
+	// Hash pins the committed mirror: the lowercase hex SHA-256 `unmute pull`
+	// recorded when it wrote it. Checked offline at every compile, which is what
+	// makes a build with no credential trustworthy.
+	//
+	// Empty is legal and is what an author writes before the first pull
+	// (`slng: {}`). ir.Validate refuses it, naming the pull, rather than
+	// emitting a reference to a tool no mirror describes.
+	Hash string `json:"hash,omitempty" yaml:"hash,omitempty"`
 }
 
 // ToolKnowledge is the `knowledge:` block: a lookup over one knowledge base
@@ -615,6 +652,8 @@ func (t Tool) ExecutionKind() string {
 		return "provider_hosted"
 	case t.Knowledge != nil:
 		return "knowledge"
+	case t.Slng != nil:
+		return "slng"
 	}
 	return ""
 }

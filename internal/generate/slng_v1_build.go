@@ -172,14 +172,16 @@ type slngMCP struct {
 	Invocation string `json:"invocation,omitempty"`
 }
 
-// slngArtifacts is everything the driver needs to write: the body, one tool body
-// per tool that needs one, and the facts the runbook prints.
+// slngArtifacts is everything the driver needs to write: the body and the facts
+// the runbook prints.
+//
+// There is no tool body here any more. The slng target creates no tool: every
+// tool it names is one the organisation already holds, referenced by name.
 type slngArtifacts struct {
-	Body      slngBody
-	ToolFiles []slngToolFile
-	Runbook   slngRunbook
-	Notes     []string
-	Warnings  []string
+	Body     slngBody
+	Runbook  slngRunbook
+	Notes    []string
+	Warnings []string
 	// Requires is what the account must already hold. Derived after the body is
 	// built, because two of its five sources exist only after lowering: the vault
 	// tokens in the resolved prompt and greeting, and the references the body
@@ -235,11 +237,11 @@ func buildSlng(agent *ir.Agent, tgt ir.Target) (slngArtifacts, error) {
 	built.Body.Models = slngModelsFor(agent, tgt, entry)
 	built.Body.Language = slngLanguage(tgt)
 
-	refs, mcp, files, err := slngTools(agent, tgt, entry)
+	refs, mcp, err := slngTools(agent, tgt, entry)
 	if err != nil {
 		return slngArtifacts{}, err
 	}
-	built.Body.ToolRefs, built.Body.MCPRefs, built.ToolFiles = refs, mcp, files
+	built.Body.ToolRefs, built.Body.MCPRefs = refs, mcp
 
 	// One rule, no branch: every declared variable is a declaration, and every
 	// one that also has a default is additionally a default. SLNG takes the
@@ -380,10 +382,9 @@ func slngKwargs(params map[string]any) map[string]any {
 
 // slngTools walks the entry agent's tools in the order the package lists them,
 // so the emitted body's order follows the package rather than a map iteration.
-func slngTools(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) ([]slngRef, []slngMCP, []slngToolFile, error) {
+func slngTools(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) ([]slngRef, []slngMCP, error) {
 	refs := []slngRef{}
 	mcpRefs := []slngMCP{}
-	var files []slngToolFile
 	for _, name := range entry.Tools {
 		tool, ok := agent.Tools[name]
 		if !ok {
@@ -409,18 +410,9 @@ func slngTools(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) ([]slngRef, []
 			}}
 		}
 		ref.Arguments = slngArguments(tool.Inject)
-		file, config, err := slngToolBody(name, tool)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		ref.Config = config
-		if file != nil {
-			files = append(files, *file)
-		}
 		refs = append(refs, ref)
 	}
-	slices.SortStableFunc(files, func(a, b slngToolFile) int { return strings.Compare(a.Name, b.Name) })
-	return refs, mcpRefs, files, nil
+	return refs, mcpRefs, nil
 }
 
 // mcpServerName is the platform's name for the server a tool reads.
@@ -447,8 +439,8 @@ func slngNotes(built slngArtifacts) []string {
 	if len(built.Body.MCPRefs) > 0 {
 		notes = append(notes, "slng target: each MCP reference is written by name; the push resolves the server and copies each tool's schema hash from the platform's stored capability snapshot, so nothing connects to the server")
 	}
-	if len(built.ToolFiles) > 0 {
-		notes = append(notes, "slng target: tool bodies are written with names where the platform assigns identifiers; the push step creates each tool and resolves its name")
+	if len(built.Requires.Hosted) > 0 {
+		notes = append(notes, "slng target: every tool is referenced by name and none is created; the push resolves each name against the organisation, and `unmute pull` is what keeps the committed mirror in step with it")
 	}
 	notes = append(notes, "slng target: region "+built.Body.Region+" is written as declared")
 	return notes

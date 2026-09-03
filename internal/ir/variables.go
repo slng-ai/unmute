@@ -263,12 +263,16 @@ func checkInject(pkg *packagespec.Package) error {
 		file := filepath.Join("tools", name+".yaml")
 		if len(raw.Inject) > 0 {
 			switch raw.ExecutionKind() {
-			case "webhook", "local":
+			// A hosted tool joins these two, because all three have a request
+			// unmute assembles: the code targets build the call from the
+			// mirror's schema, and the slng reference carries the values as
+			// argument_overrides on the attachment.
+			case "webhook", "local", "slng":
 			default:
 				// An mcp tool's arguments are assembled by the MCP client from the
 				// server's schema; neither SDK exposes a per-call hook, so an
 				// injected value would be dropped rather than sent.
-				return fmt.Errorf("%s: tool %q is a %s tool; inject is legal on webhook and local tools, the two kinds whose request unmute builds itself",
+				return fmt.Errorf("%s: tool %q is a %s tool; inject is legal on webhook, local and slng tools, the kinds whose call unmute assembles itself",
 					pkg.Location(file, "inject:"), name, raw.ExecutionKind())
 			}
 		}

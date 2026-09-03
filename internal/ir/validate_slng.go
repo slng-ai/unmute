@@ -1,7 +1,6 @@
 package ir
 
 import (
-	"encoding/json"
 	"fmt"
 	"maps"
 	"regexp"
@@ -21,14 +20,6 @@ import (
 // and a router provider in this repository, so an unprefixed message about the
 // target sends the reader to the wrong file (research R13, spec FR-004).
 
-// pythonImport matches an import statement's first module path. Python's own
-// grammar allows more than this, but a network client is imported by one of these
-// two forms in every handler anyone writes, and a parser for the rest would be a
-// dependency and a maintenance surface for no extra catch.
-var pythonImport = regexp.MustCompile(`(?m)^[ \t]*(?:from|import)[ \t]+([A-Za-z_][\w.]*)`)
-
-// templateToken matches any {{ ... }} token. Used to refuse one where SLNG takes
-// a literal.
 var templateToken = regexp.MustCompile(`\{\{[^}]*\}\}`)
 
 // validateSlngTarget is the whole slng-specific pass, called from validateTarget
@@ -115,10 +106,17 @@ func validateSlngTool(name string, tool Tool, row *TargetValidation) {
 		row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
 			"tool %q uses a name SLNG keeps for one of its own capabilities: use %s, or rename this tool", name, instead))
 	}
-	validateSlngToolSchema(name, tool, row)
-	if tool.Execution == ToolWebhook && tool.BaseURL == "" {
+	// `webhook:` has no execution Field constant of its own, so its slng
+	// refusal lives here rather than in the capability table: webhook is the
+	// ungated default there and only FieldWebhookPath and FieldToolAuth gate
+	// parts of it. Adding a constant would mean adding a row for it, which
+	// TestEveryFieldConstantHasARow requires, to say one slng-only thing.
+	//
+	// Same second clause as the `local:` refusal, different first: a webhook's
+	// URL and credential are the part SLNG stores.
+	if tool.Execution == ToolWebhook {
 		row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
-			"tool %q names only url_env, and SLNG stores the URL in the tool body rather than reading it from an environment: add base_url with the literal https host, keeping url_env for the code targets", name))
+			"does not create tools: tool %q is a `webhook:` block, which would have to write the URL and its credential into a tool body, and SLNG owns those: create the tool in the SLNG dashboard and reference it with `slng:`, or compile to livekit or pipecat which call your endpoint themselves", name))
 	}
 	// An MCP server on SLNG becomes one reference per tool: mcp_refs is a list of
 	// attachments, and there is no "the whole server" attachment to write. unmute
@@ -129,110 +127,29 @@ func validateSlngTool(name string, tool Tool, row *TargetValidation) {
 		row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
 			"tool %q exposes every tool on its MCP server, and SLNG attaches one reference per tool: list the tools you want under mcp.tools", name))
 	}
-	if tool.Execution != ToolLocal || tool.HandlerSource == "" {
-		return
-	}
-	// Custom code on SLNG has no internet access at all. CodeConfig.egress reads
-	// like a knob and validates nothing: it is kept for historical compatibility
-	// (tool.py:191). So a handler that imports a network client fails here rather
-	// than raising a connection error inside the sandbox on a live call.
-	for _, match := range pythonImport.FindAllStringSubmatch(tool.HandlerSource, -1) {
-		module := match[1]
-		root := strings.SplitN(module, ".", 2)[0]
-		if !slices.Contains(targetcap.SlngNetworkModules, module) && !slices.Contains(targetcap.SlngNetworkModules, root) {
-			continue
-		}
-		row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
-			"tool %q imports %s, and custom code on SLNG has no internet access: move the request into a webhook: tool, which is the shape that reaches the network", name, module))
-	}
-	// SLNG's handler is synchronous (app/services/tools.py:43-83) while LiveKit
-	// awaits an awaitable result, so the same file cannot be both. Only the entry
-	// point matters: a sync handler that runs its own event loop internally is
-	// fine, which is why this looks for the tool's own function and not for the
-	// word async.
-	entryPoint := regexp.MustCompile(`(?m)^[ \t]*async[ \t]+def[ \t]+` + regexp.QuoteMeta(name) + `[ \t]*\(`)
-	if entryPoint.MatchString(tool.HandlerSource) {
-		row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
-			"tool %q has an `async def %s` handler and SLNG calls a handler synchronously: make %s a plain `def` and run any awaitable inside it with asyncio.run", name, name, name))
-	}
 }
 
-// validateSlngToolSchema checks a tool's declared input against the limits in
-// the published policy manifest, so an oversized schema fails at validate rather
-// than at push. The limits are one owner in internal/target.
-func validateSlngToolSchema(name string, tool Tool, row *TargetValidation) {
-	if len(tool.Input) == 0 {
-		return
-	}
-	limits := targetcap.SlngSchemaLimits
-	encoded, err := json.Marshal(tool.Input)
-	if err != nil {
-		// A schema that will not encode is a bug elsewhere; say so rather than
-		// silently passing it.
-		row.Errors = add(row.Errors, targetcap.SlngDiagnostic("tool %q has an input schema that will not encode as JSON: %v", name, err))
-		return
-	}
-	if len(encoded) > limits.Bytes {
-		row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
-			"tool %q has a %d byte input schema and SLNG accepts %d: describe fewer fields, or take an identifier and look the rest up inside the tool", name, len(encoded), limits.Bytes))
-	}
-	counts := schemaCounts{}
-	countSchema(tool.Input, 1, &counts)
-	for _, check := range []struct {
-		measured int
-		limit    int
-		what     string
-		instead  string
-	}{
-		{counts.depth, limits.Depth, "levels deep", "flatten the nested objects"},
-		{counts.nodes, limits.Nodes, "schema nodes", "describe fewer fields"},
-		{counts.properties, limits.Properties, "properties on one object", "split the object, or take an identifier instead"},
-		{counts.branches, limits.Branches, "branches in one union", "narrow the union to the cases the model actually picks"},
-	} {
-		if check.measured > check.limit {
-			row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
-				"tool %q has an input schema %d %s and SLNG accepts %d: %s", name, check.measured, check.what, check.limit, check.instead))
-		}
-	}
-}
-
-type schemaCounts struct {
-	depth      int
-	nodes      int
-	properties int
-	branches   int
-}
-
-// countSchema walks a decoded JSON Schema and records the four shape measures
-// the policy manifest caps. It counts the worst case per measure rather than a
-// total, because that is what the manifest caps: 256 properties on one object,
-// not 256 in the document.
-func countSchema(node any, depth int, counts *schemaCounts) {
-	counts.nodes++
-	if depth > counts.depth {
-		counts.depth = depth
-	}
-	switch value := node.(type) {
-	case map[string]any:
-		for _, key := range []string{"properties", "patternProperties", "$defs", "definitions"} {
-			if properties, ok := value[key].(map[string]any); ok && len(properties) > counts.properties {
-				counts.properties = len(properties)
-			}
-		}
-		for _, key := range []string{"oneOf", "anyOf", "allOf"} {
-			if branches, ok := value[key].([]any); ok && len(branches) > counts.branches {
-				counts.branches = len(branches)
-			}
-		}
-		for _, key := range slices.Sorted(maps.Keys(value)) {
-			countSchema(value[key], depth+1, counts)
-		}
-	case []any:
-		for _, item := range value {
-			countSchema(item, depth+1, counts)
-		}
-	}
-}
+// What used to live here, and why none of it does any more.
+//
+// validateSlngToolSchema held a tool's declared input against the limits in the
+// published policy manifest, so an oversized schema failed at validate rather
+// than at push. It only ever applied to a schema unmute *sent*, and unmute now
+// sends none: a hosted reference carries a name, and the platform already
+// accepted the schema when the tool was created there. Keeping the check would
+// mean refusing a schema the platform holds and runs.
+//
+// The local-handler checks went with it. One refused a network import, because
+// custom code on SLNG has no internet access; the other refused an
+// `async def` entry point, because SLNG calls a handler synchronously. Both
+// described a handler unmute uploaded. It uploads none, and `local:` is refused
+// on this target by its capability row before either check could run.
+//
+// The base_url requirement went too. It existed because SLNG stored a webhook
+// tool's URL in the body unmute wrote, so url_env alone left the body with no
+// URL. There is no body.
+//
+// All four facts are still true about the platform. They are simply no longer
+// unmute's to enforce, which is what reference-only means.
 
 // refuseSlngProjectValues names the four target settings a bodiless target has
 // no use for. All four passed in silence before this existed, because every

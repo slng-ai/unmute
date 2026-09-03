@@ -1,0 +1,37 @@
+{
+  "id": "33333333-3333-3333-3333-333333333333",
+  "organisation_id": "550fffde-0000-0000-0000-000000000000",
+  "name": "current_datetime",
+  "tool_type": "current_datetime",
+  "config": {
+    "type": "current_datetime",
+    "timezone": "UTC",
+    "prompt": null
+  },
+  "description": "Provide the current date and time to the agent.",
+  "declared_secrets": [],
+  "dependencies": [],
+  "argument_defaults": {},
+  "code_src": null,
+  "last_run_status": "succeeded",
+  "source": "curated",
+  "latest_version": 1,
+  "content_hash": "0720f592f26265db41082bf7e23b2cdba980e83a8861ea5c3333261918a715b1",
+  "is_current_hash_green": false,
+  "is_current_version": true,
+  "schema_stale": false,
+  "arg_schema": {},
+  "gate_status": {
+    "static": null,
+    "green_run": null,
+    "config_valid": {
+      "passed": true,
+      "detail": null
+    },
+    "code_environment": null,
+    "content_current": {
+      "passed": true,
+      "detail": null
+    }
+  }
+}

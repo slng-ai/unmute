@@ -1,0 +1,171 @@
+---
+title: "unmute pull"
+description: "Fetch a hosted tool's definition into your package, so an offline compile can trust it."
+---
+
+```text
+$ unmute pull --help
+Fetch the definition of every tool this package references with `slng:`, and
+write it beside the tool file. Commit what it writes: the mirror is how a
+hosted tool reaches livekit and pipecat, and the pin is how a later compile
+knows the mirror is still the right one.
+
+This is the only command that needs an SLNG credential. `validate` and
+`compile` work offline, which is what lets CI build a package that names a
+hosted tool.
+
+Usage:
+  unmute pull [package-dir] [flags]
+
+Flags:
+      --check   Verify every pin against the organisation without writing; exit 1 on drift
+      --force   Discard hand edits to a mirrored file
+  -h, --help    help for pull
+```
+
+## Usage
+
+```sh
+unmute pull acme-support
+```
+
+One line per file, with what happened to it. `pinned` means the tool file's
+`hash:` was written or updated; `written` and `unchanged` describe the two
+mirror files:
+
+```text expandable
+pull acme-support
+
+  slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
+
+  tools/check_order.yaml                  pinned
+  tools/check_order.slng.json             written
+  tools/check_order.slng.py               written
+  tools/search_places_text.yaml           unchanged
+  tools/search_places_text.slng.json      unchanged
+  agent.yaml                              1 secret added
+```
+
+The organisation line is not decoration. Two organisations can be reachable
+from one checkout, provisioned differently, so a listing from one says
+nothing about the other.
+
+`unchanged` is printed rather than skipped: a pull that fetched and found
+nothing new looks identical to a pull that did not run, and this is the line
+that tells them apart.
+
+## What it writes
+
+Per hosted tool, beside the tool file:
+
+| File | Authored? | Holds |
+|---|---|---|
+| `tools/<name>.yaml` | authored | gains or updates `slng.hash` only. Every other line is left alone |
+| `tools/<name>.slng.json` | generated | the mirrored definition: description, input schema, dependencies, secret names, source, request configuration, the platform's content hash and version, and the date fetched |
+| `tools/<name>.slng.py` | generated | the mirrored module, for a `code` tool only |
+
+And once per package:
+
+| File | Change |
+|---|---|
+| `agent.yaml` | each mirrored tool's declared secret **names** are added to `secrets:`, if absent. Never a value |
+
+The `.slng.` infix marks a file as mirrored rather than authored, which is
+what lets one glance answer whether you may edit it. The answer is no: see
+[Hosted tools](/build/tools/hosted).
+
+### The mirrored module's header
+
+A code tool's module gains three lines before the platform's own first line:
+
+```python
+# ruff: noqa
+# Mirrored from SLNG. Not first-party source: the platform gated this
+# module and owns it. Edit it in the SLNG dashboard, not here.
+```
+
+The platform's own code does not pass Python lint by itself, so without this
+header a pull would turn a clean build red.
+
+## What it never writes
+
+- **A secret value.** Only names, only into `secrets:`. A value never reaches
+  a package file, a generated file, a report, a command line or either output
+  stream.
+- **A tool on the platform.** The pull reads. It creates, changes and deletes
+  nothing in your organisation.
+- **Anything outside the package directory.** No cache, no home directory
+  state, no temporary file that outlives the run.
+- **A partial mirror.** If any tool in the package cannot be fetched, nothing
+  is written at all.
+
+## Refusals
+
+Each names the organisation that was read, because the answer depends on it.
+
+**A name your organisation does not hold.** Unmute creates no tool, so this is
+the end of the road until somebody makes one:
+
+```text wrap
+pull acme-support: this organisation has no tool called `check_orders` (it has `check_order`,
+  `check_order_v2`). A hosted reference is the tool file's own name, so either rename
+  tools/check_orders.yaml to a tool the organisation has, or create the tool in the SLNG
+  dashboard: unmute creates none
+```
+
+**A name that resolves to a curated capability.** There is nothing to mirror,
+and there is already a block that attaches it:
+
+```text wrap
+pull acme-support: `current_datetime` is a capability SLNG curates, not a tool with a
+  definition to mirror: attach it with `builtin: current_datetime` instead, which needs no
+  pull
+```
+
+**A mirrored file edited by hand.** Every offending file is named at once,
+rather than just the first:
+
+```text wrap
+pull acme-support: these mirrored files changed after they were written:
+  tools/check_order.slng.py
+  tools/check_order.slng.json
+a mirror is the platform's copy, so an edit here reaches nothing: run `unmute pull --force`
+  to discard the edits, or make the change in the SLNG dashboard and pull again
+```
+
+**No credential.** The one command that needs one says so plainly:
+
+```text wrap
+pull acme-support: no SLNG credential found: set SLNG_API_KEY, or run `voiceai login`.
+  This is the only command that needs one; `validate` and `compile` work offline
+```
+
+## Flags
+
+**`--force`** discards hand edits to a mirrored file. The refusal above names
+it, so the flag is discoverable from the failure itself rather than from the
+help.
+
+**`--check`** verifies without writing: it compares every pin against the
+organisation and reports drift, exiting 1 when anything is stale. It still
+needs a credential, the same as the rest of the command:
+
+```text
+$ unmute pull acme-support --check
+  tools/check_order.yaml                  stale
+```
+
+There is no `--target` flag. A hosted tool is hosted whatever the package
+compiles to, and this command is about the package rather than about one
+target's output.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Hosted tools" icon="wrench" href="/build/tools/hosted">
+    The block: what it refuses, what it keeps, and the loop it belongs to.
+  </Card>
+  <Card title="unmute compile" icon="package" href="/reference/cli/compile">
+    The next step: writing the compiled projects.
+  </Card>
+</Columns>

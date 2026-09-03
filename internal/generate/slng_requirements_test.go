@@ -136,8 +136,67 @@ func all(r Requirements) []Requirement {
 	out := slices.Clone(r.Builtins)
 	out = append(out, r.MCPServers...)
 	out = append(out, r.MCPTools...)
+	out = append(out, r.Hosted...)
 	out = append(out, r.Secrets...)
 	return append(out, r.Variables...)
+}
+
+// TestSlngHostedRequirementsReachTheRunbookAndThePreflight is the same
+// agreement gate over the source this feature added, and it exists because
+// getting it wrong would have been invisible.
+//
+// The slng driver reads the package's `secrets:` list nowhere: it derives its
+// own vault list from tool authentication blocks and {{$NAME}} tokens. So a
+// hosted tool's declared secret written only into `secrets:` would be visible
+// in the author's diff, printed by nothing and checked by nothing. This holds
+// both readers to the one list.
+func TestSlngHostedRequirementsReachTheRunbookAndThePreflight(t *testing.T) {
+	artifact, files := compileSlng(t, "slng_hosted")
+	runbook := files["README.md"]
+
+	if len(artifact.Requires.Hosted) != 2 {
+		t.Fatalf("want two hosted requirements, got %d: %+v", len(artifact.Requires.Hosted), artifact.Requires.Hosted)
+	}
+	for _, requirement := range artifact.Requires.Hosted {
+		if requirement.Version == 0 {
+			t.Errorf("hosted requirement %q carries no version, so a drift report has nothing to name", requirement.Name)
+		}
+		if requirement.ContentHash == "" {
+			t.Errorf("hosted requirement %q carries no content hash", requirement.Name)
+		}
+	}
+
+	// The credential the hosted request tool reads. The platform leaves
+	// declared_secrets empty on such a tool and names it in
+	// config.auth.secret_name, so this is the assertion that would have failed
+	// if the mirror read only the obvious field.
+	var found bool
+	for _, requirement := range artifact.Requires.Secrets {
+		if requirement.Name != "SLNG_TOOL_RENDER" {
+			continue
+		}
+		found = true
+		if !strings.Contains(runbook, requirement.Name) {
+			t.Errorf("the preflight checks for %q and the runbook never names it", requirement.Name)
+		}
+		if !strings.Contains(runbook, requirement.Where) {
+			t.Errorf("the runbook names %q without saying which line asked for it", requirement.Name)
+		}
+		if !strings.Contains(requirement.Where, ".slng.json") {
+			t.Errorf("the requirement for %q points at %q, which does not name the mirror it came from", requirement.Name, requirement.Where)
+		}
+	}
+	if !found {
+		t.Error("a hosted request tool's credential never reached the vault requirements, so the runbook and the preflight both miss it")
+	}
+
+	// No value, anywhere. This is the command chain most able to break the rule
+	// that a secret value appears in no package, generated file or report.
+	for path, content := range files {
+		if strings.Contains(content, "sk-") || strings.Contains(content, "Bearer ey") {
+			t.Errorf("%s carries something shaped like a credential value", path)
+		}
+	}
 }
 
 // TestSlngMCPServerNameCanDifferFromTheToolName.

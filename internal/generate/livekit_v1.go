@@ -266,18 +266,32 @@ type livekitTask struct {
 }
 
 type livekitTool struct {
-	Method           string
-	Description      string
-	URLEnv           string
-	URLExpr          string          // request URL expression (webhook.path renders into it)
-	Inject           []injectedValue // hidden request values, never advertised to the model
-	Needed           []neededVar     // unset ones refuse the call before it is sent (V4)
-	NeededLiteral    string          // Needed as a Python list of (name, hint) pairs
-	JSONBody         string          // full Python dict literal for the webhook body
-	CallKwargs       string          // full kwargs string for a local handler call
-	Auth             *webhookAuth    // nil = unauthenticated POST
-	Args             []livekitArg
-	Local            bool   // execution: local — call the copied handler module
+	Method        string
+	Description   string
+	URLEnv        string
+	URLExpr       string          // request URL expression (webhook.path renders into it)
+	Inject        []injectedValue // hidden request values, never advertised to the model
+	Needed        []neededVar     // unset ones refuse the call before it is sent (V4)
+	NeededLiteral string          // Needed as a Python list of (name, hint) pairs
+	JSONBody      string          // full Python dict literal for the webhook body
+	CallKwargs    string          // full kwargs string for a local handler call
+	Auth          *webhookAuth    // nil = unauthenticated POST
+	Args          []livekitArg
+	Local         bool // execution: local — call the copied handler module
+	// HostedCode and HostedRequest are execution: slng, split by what the
+	// platform hosts. A code tool becomes a call into the mirrored module,
+	// through SLNG's own handler(Input) contract rather than a bare function; a
+	// request tool becomes the same httpx POST a webhook tool does, at a literal
+	// URL the platform stores.
+	//
+	// Two flags rather than one, because the template dispatches on them and an
+	// unhandled kind there does not render to nothing: it renders a webhook
+	// POST. Both arms are written out for that reason.
+	HostedCode    bool
+	HostedRequest bool
+	// HostedHeaders are the fixed headers the platform stores on a request tool,
+	// rendered as a Python dict literal. Empty when it stores none.
+	HostedHeaders    string
 	Builtin          string // execution: builtin — prebuilt registry id (renders into tools=, not a method)
 	KnowledgeBase    string // execution: knowledge — the base this tool searches
 	Instructions     string // builtin end_call closing message → end_instructions
@@ -300,6 +314,12 @@ type livekitMCPServer struct {
 }
 
 // livekitLocalTool is a copied handler file: tools/<name>.py in the project.
+//
+// A mirrored SLNG module travels the same way and reuses this type. Its Source
+// is the platform's, header and all, and its file name drops the `.slng.`
+// infix the package uses: a dot is not legal in a Python module name, and the
+// infix's job is to tell an author not to edit the file, which is a question
+// about the package rather than about the build directory.
 type livekitLocalTool struct {
 	Name   string
 	Source string
@@ -531,6 +551,7 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolOutput:            true, // tool returns response.json()
 	targetcap.FieldToolLocal:             true, // handler copied + wrapped
 	targetcap.FieldToolBuiltin:           true, // prebuilt end_call → beta EndCallTool
+	targetcap.FieldToolSlngHosted:        true, // mirrored module, or an httpx POST built from the mirror's config
 	targetcap.FieldToolKnowledge:         true, // knowledge.py + one @function_tool per lookup
 	targetcap.FieldToolKnowledgeTask:     true, // the same method on an AgentTask's tools surface
 	targetcap.FieldToolMCP:               true, // mcp.MCPToolset mounts on the tools surface (N40)
@@ -804,6 +825,11 @@ func renderLiveKitV1(name string, data livekitData) ([]byte, error) {
 		"join":       strings.Join,
 		"triple":     pyTriple,
 		"mcpTimeout": func() int { return mcpTimeoutSeconds },
+		// SLNG's contract for a hosted code tool, named once in Go so the
+		// template cannot drift from what internal/generate/hosted_tool.go says
+		// the platform guarantees.
+		"hostedEntry": func() string { return hostedEntryPoint },
+		"hostedInput": func() string { return hostedInputModel },
 	}).Parse(string(raw))
 	if err != nil {
 		return nil, fmt.Errorf("livekit template %s: %w", name, err)

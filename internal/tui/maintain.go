@@ -214,6 +214,8 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 			value.Builtin, value.Instructions = tool.Builtin.ID, tool.Builtin.Instructions
 		case tool.Knowledge != nil:
 			value.KnowledgeBase = tool.Knowledge.Base
+		case tool.Slng != nil:
+			value.SlngHash = tool.Slng.Hash
 		}
 		for agentName, definition := range pkg.Agent.Agents {
 			if slices.Contains(definition.Tools, name) {

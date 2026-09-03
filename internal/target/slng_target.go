@@ -75,9 +75,12 @@ const (
 	// positional, and leaving it off is an error rather than a shorter spelling.
 	// And --file is required in practice: AgentWebSessionCreate has no required
 	// properties, but the endpoint declares requestBody required, and the CLI
-	// sends no body at all when --file is absent. Measured 2026-08-25: without it
-	// the call fails AGENT_VALIDATION_FAILED with an empty field path, which reads
-	// like a problem with the agent and is a problem with the request.
+	// sends no body at all when --file is absent. Measured 2026-08-25 and again on
+	// 0.1.16 on 2026-09-03: without it the call fails AGENT_VALIDATION_FAILED with
+	// an empty field path, which reads like a problem with the agent and is a
+	// problem with the request. `web-sessions create --help` calls --file an
+	// "optional JSON body" as of 0.1.16, so the help is the thing that is wrong
+	// here, and re-reading it is not a way to re-check this.
 	SlngWebSessionCommand = "voiceai agents web-sessions create <agent_id> --file session.json"
 )
 
@@ -85,7 +88,7 @@ const (
 // read out of a released `voiceai` and run against a live organisation. The
 // commands are stable; the *shapes* they return are the part with a shelf life,
 // and internal/cli/testdata/voiceai holds captures from the same session.
-const SlngResourcesVerified = "2026-08-31"
+const SlngResourcesVerified = "2026-09-03"
 
 // SlngCommand is one `voiceai` invocation: the argv after the binary name.
 //
@@ -111,7 +114,7 @@ func (c SlngCommand) With(args ...string) SlngCommand {
 // write. unmute opens no socket to the SLNG API and shells out to this instead.
 const SlngPushBinary = "voiceai"
 
-// The shared-resource commands, read from `voiceai` 0.1.15 on 2026-08-31.
+// The shared-resource commands, read from `voiceai` 0.1.16 on 2026-09-03.
 //
 // Note the singular `tool` and `mcp` against the plural `trunks`: that is the
 // CLI's own spelling, not a typo here, and TestSlngPushCommandsAgree guards the
@@ -138,6 +141,19 @@ var (
 	// Curated capabilities appear here as ordinary tools with ids, so a reference
 	// either resolves or is positively absent.
 	SlngToolList = SlngCommand{"tool", "list"}
+
+	// SlngToolGet takes a tool name with .With() and returns the whole
+	// definition: description, the platform's own introspected `arg_schema`, the
+	// module in `code_src` for a code tool, the request configuration for an
+	// api_request tool, its dependencies, its declared secret names, its
+	// `content_hash` and its `latest_version`. That is everything `unmute pull`
+	// mirrors, so a hosted tool costs one read.
+	//
+	// It reads. There is no `voiceai tool create`: the `tool` group is list, get
+	// and run, verified at 0.1.16 on 2026-09-03, which is the fact that makes a
+	// hosted reference the only way onto the platform and the SLNG dashboard the
+	// only place a tool is born.
+	SlngToolGet = SlngCommand{"tool", "get"}
 
 	// SlngMCPList and SlngMCPTools both read the stored capability probe rather
 	// than calling the server. A server can be listed healthy and be unreachable,

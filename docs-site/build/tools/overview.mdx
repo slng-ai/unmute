@@ -1,6 +1,6 @@
 ---
 title: "Tools"
-description: "What a tool is, the seven ways one can run, how each target treats them, and how you attach one to an agent."
+description: "What a tool is, the eight ways one can run, how each target treats them, and how you attach one to an agent."
 ---
 
 A tool is two things: a contract the model sees, and something that runs when the
@@ -49,7 +49,7 @@ their names look like extra tool inputs in the description.
 The one block near the bottom is the execution: it says how the tool runs. Every
 tool file has exactly one.
 
-## The seven execution blocks
+## The eight execution blocks
 
 | Block | The tool is | Where it is taught |
 |---|---|---|
@@ -57,6 +57,7 @@ tool file has exactly one.
 | `local:` | a Python function in your package | [Python tools](/build/tools/python) |
 | `mcp:` | a remote MCP server that offers its own tools | [MCP servers](/build/tools/mcp) |
 | `builtin:` | a tool the runtime already has, selected by id | [Prebuilt tools](/build/tools/prebuilt) |
+| `slng:` | a tool the SLNG platform already hosts | [Hosted tools](/build/tools/hosted) |
 | `client:` | a tool the caller's own application fulfils | gated, see below |
 | `provider_hosted:` | a tool the model provider runs itself | gated, see below |
 | `knowledge:` | a search over a folder of your own documents | [Knowledge bases](/build/tools/knowledge) |
@@ -72,7 +73,7 @@ None at all, where the message is also the list:
 
 ```text wrap
 tools/check_availability.yaml: no execution block: add one of webhook, local, mcp, builtin,
-  client, provider_hosted, knowledge
+  client, provider_hosted, knowledge, slng
 ```
 
 ### The two gated blocks
@@ -105,14 +106,28 @@ rather than a surprise on a call.
 | Tool kind | LiveKit | Pipecat | SLNG |
 |---|---|---|---|
 | `webhook:` | yes | yes | yes |
-| `local:` | yes | yes | yes |
+| `local:` | yes | yes | **no** |
 | `builtin:` | yes | yes | yes |
 | `mcp:` | yes | yes | yes |
+| `slng:` | yes | yes | yes |
 | `knowledge:` | yes | yes | **no** |
 | `client:` | no | no | no |
 | `provider_hosted:` | no | no | no |
 
-Two of those rows are worth a sentence.
+Three of those rows are worth a sentence.
+
+**`local:` and `webhook:` no longer reach SLNG.** The platform owns a tool's
+code, version and gate pipeline, and unmute creates no tool there. A tool your
+SLNG organisation already has is reached with `slng:`; a brand new one starts in
+the SLNG dashboard. Both blocks work exactly as before on LiveKit and Pipecat.
+
+**`slng:` works everywhere because the definition travels.** `unmute pull` writes
+the platform's own schema, and for a code tool its module, into your package. The
+SLNG target then references the platform's copy by name, and the two code targets
+build a real tool out of the committed mirror with no network. One limit is not in
+this table: a hosted tool that declares Python dependencies is refused on LiveKit
+and Pipecat, which build one dependency list for the whole project. See
+[Hosted tools](/build/tools/hosted).
 
 **`knowledge:` needs a runtime of ours to live in.** LiveKit and Pipecat compile to
 a Python project, so the documents ride in the image and the search runs in the
@@ -169,6 +184,7 @@ Work down this list and stop at the first one that fits.
 | call an API you already have | `webhook:` | no code of yours to deploy, and the URL is an environment variable |
 | run logic, or touch something with no HTTP API | `local:` | it ships inside the image, so it costs no network hop |
 | offer a whole catalogue of tools someone else maintains | `mcp:` | one block instead of a file per tool |
+| run a tool SLNG already hosts | `slng:` | the platform owns its code and version, so there is nothing of yours to keep in step |
 
 **Prefer fewer tools.** Every tool is text in the model's context on every turn,
 and two tools with overlapping descriptions is the most common reason a model calls
@@ -227,13 +243,14 @@ tool asks for one string and returns passages, so there is nothing to describe a
 nothing to merge into. It does take `description` and `announce`, and you should
 write both.
 
-**SLNG is the one exception, and only for `local:`.** There the compiler turns
-`output:` into a pydantic `Output` class, and the generated handler returns
-`Output(**result)`, so a Python handler's return value is checked against it.
-A `webhook:` tool's `output:` stays documentation everywhere, SLNG included:
-SLNG proxies that request rather than running code of its own, so it has
-nothing to check the response against. Full story in
-[Python tools](/build/tools/python#the-rules-the-function-follows).
+**`output:` is refused on an slng target.** It used to be allowed there, and
+allowed for a reason: the compiler turned it into a pydantic `Output` class
+inside the code it uploaded, and SLNG read the tool's result shape off that
+class. unmute uploads no code now, so the field reaches nothing and is refused
+rather than dropped. A tool SLNG hosts carries its own `Output` model, written
+where the tool was written. Full story in
+[Python tools](/build/tools/python#what-the-slng-sandbox-expects) and
+[Hosted tools](/build/tools/hosted).
 
 ## The three behavior fields
 

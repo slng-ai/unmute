@@ -143,36 +143,94 @@ func TestSlngRefusesReservedToolNamesButNotTheBuiltinThatOwnsOne(t *testing.T) {
 	wantSlngError(t, row, `tool "get_current_datetime" uses a name SLNG keeps`, "current_datetime")
 }
 
-func TestSlngRefusesANetworkImportInALocalHandler(t *testing.T) {
-	for _, source := range []string{
-		"import httpx\n\n\ndef check_order(order_id: str) -> dict:\n    return {}\n",
-		"import json\nfrom requests import get\n\n\ndef check_order(order_id: str) -> dict:\n    return {}\n",
-		"import urllib.request\n\n\ndef check_order(order_id: str) -> dict:\n    return {}\n",
+// GATE. The slng target refuses to author a tool, and each refusal says how to
+// get one onto the platform instead.
+//
+// This replaces two tests that are gone with the code they held: one refused a
+// network import in an uploaded handler, because custom code on SLNG has no
+// internet access, and the other refused an `async def` entry point, because
+// SLNG calls a handler synchronously. Both facts are still true about the
+// platform. Neither is unmute's to check any more, because unmute uploads no
+// handler: the platform CLI has no `tool create`, so a tool is born in the SLNG
+// dashboard and a package references it.
+func TestSlngRefusesAuthoredToolBodies(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tool Tool
+		want []string
+	}{
+		{
+			name: "a local handler",
+			tool: Tool{
+				Description: "Look one up.", Execution: ToolLocal,
+				Handler: "tools/check_order.py", HandlerSource: "def check_order() -> dict:\n    return {}\n",
+				Input:        map[string]any{"type": "object", "properties": map[string]any{}},
+				Interruption: ToolProviderDefault, Effect: ToolReturnsData,
+			},
+			want: []string{
+				"does not create tools",
+				"SLNG owns a tool's code, version and gate pipeline",
+				"create the tool in the SLNG dashboard",
+				"reference it with `slng:`",
+				// It has to name the way out that keeps the handler, or the
+				// author reads it as "your handler is unusable".
+				"compile to livekit or pipecat",
+			},
+		},
+		{
+			name: "a webhook block",
+			tool: Tool{
+				Description: "Start a refund.", Execution: ToolWebhook,
+				URLEnv: "REFUND_URL", BaseURL: "https://api.acme.example",
+				Input:        map[string]any{"type": "object", "properties": map[string]any{}},
+				Interruption: ToolProviderDefault, Effect: ToolReturnsData,
+			},
+			want: []string{
+				"does not create tools",
+				"write the URL and its credential into a tool body",
+				"create the tool in the SLNG dashboard",
+				"reference it with `slng:`",
+				"compile to livekit or pipecat",
+			},
+		},
 	} {
-		agent := slngAgent(t)
-		addSlngLocalTool(agent, "check_order", source)
-		row := validateSlng(t, agent)
-		wantSlngError(t, row, "has no internet access", "webhook:")
-	}
-	// The stdlib is fine, and a handler that uses it must not be refused.
-	agent := slngAgent(t)
-	addSlngLocalTool(agent, "check_order", "import json\nimport datetime\n\n\ndef check_order(order_id: str) -> dict:\n    return {\"ok\": True}\n")
-	if row := validateSlng(t, agent); len(row.Errors) > 0 {
-		t.Errorf("a stdlib-only handler was refused: %#v", row.Errors)
+		t.Run(tc.name, func(t *testing.T) {
+			agent := slngAgent(t)
+			agent.Tools["authored"] = tc.tool
+			entry := agent.Agents["support"]
+			entry.Tools = append(entry.Tools, "authored")
+			agent.Agents["support"] = entry
+			wantSlngError(t, validateSlng(t, agent), tc.want...)
+		})
 	}
 }
 
-// SLNG calls a handler synchronously; LiveKit awaits an awaitable. Only the entry
-// point matters, so a sync handler that runs its own loop inside is left alone.
-func TestSlngRefusesAnAsyncEntryPointOnly(t *testing.T) {
-	agent := slngAgent(t)
-	addSlngLocalTool(agent, "check_order", "async def check_order(order_id: str) -> dict:\n    return {}\n")
-	wantSlngError(t, validateSlng(t, agent), "synchronously", "asyncio.run")
+// And the other direction: both still work exactly as before on a code target,
+// which is what makes the refusal above a trade rather than a loss.
+func TestCodeTargetsKeepAuthoredToolBodies(t *testing.T) {
+	for _, provider := range []Provider{ProviderLiveKit, ProviderPipecat} {
+		agent := slngAgent(t)
+		agent.Tools["check_order"] = Tool{
+			Description: "Look one up.", Execution: ToolLocal,
+			Handler: "tools/check_order.py", HandlerSource: "def check_order() -> dict:\n    return {}\n",
+			Input:        map[string]any{"type": "object", "properties": map[string]any{}},
+			Interruption: ToolProviderDefault, Effect: ToolReturnsData,
+		}
+		entry := agent.Agents["support"]
+		entry.Tools = append(entry.Tools, "check_order")
+		agent.Agents["support"] = entry
 
-	agent = slngAgent(t)
-	addSlngLocalTool(agent, "check_order", "import asyncio\n\n\nasync def _fetch(order_id: str) -> dict:\n    return {}\n\n\ndef check_order(order_id: str) -> dict:\n    return asyncio.run(_fetch(order_id))\n")
-	if row := validateSlng(t, agent); len(row.Errors) > 0 {
-		t.Errorf("a sync entry point running its own loop was refused: %#v", row.Errors)
+		resolved := targetFor(agent, ProviderSlng)
+		resolved.Provider, resolved.Name, resolved.Version = provider, string(provider), "1.6.10"
+		if provider == ProviderPipecat {
+			resolved.Version = "1.8.0"
+		}
+		report, _ := Validate(agent, []Target{resolved}, targetcap.Default())
+		for _, err := range reportFor(report, provider).Errors {
+			if strings.Contains(err, "does not create tools") {
+				t.Errorf("%s inherited the slng refusal: %s", provider, err)
+			}
+		}
 	}
 }
 
@@ -213,40 +271,6 @@ func TestSlngRefusesNonStringAndTemplatedVariableDefaults(t *testing.T) {
 	agent = slngAgent(t)
 	agent.Variables["greeting_name"] = Variable{Type: PrimitiveString, Default: "{{customer_name}}"}
 	wantSlngError(t, validateSlng(t, agent), "default containing a template reference")
-}
-
-func TestSlngRefusesAToolSchemaOverThePolicyLimits(t *testing.T) {
-	limits := targetcap.SlngSchemaLimits
-	properties := map[string]any{}
-	for i := 0; i <= limits.Properties; i++ {
-		properties["field_"+strings.Repeat("x", i%8)+string(rune('a'+i%26))+string(rune('a'+i/26))] = map[string]any{"type": "string"}
-	}
-	if len(properties) <= limits.Properties {
-		t.Fatalf("the fixture built %d properties, which is not over the %d limit", len(properties), limits.Properties)
-	}
-	agent := slngAgent(t)
-	agent.Tools["wide"] = Tool{
-		Description: "Takes far too many fields.",
-		Execution:   ToolWebhook,
-		URLEnv:      "WIDE_URL",
-		Input:       map[string]any{"type": "object", "properties": properties},
-	}
-	entry := agent.Agents["support"]
-	entry.Tools = append(entry.Tools, "wide")
-	agent.Agents["support"] = entry
-	wantSlngError(t, validateSlng(t, agent), "properties on one object")
-
-	// Depth, on a schema that is narrow and very deep.
-	agent = slngAgent(t)
-	deep := map[string]any{"type": "string"}
-	for i := 0; i < limits.Depth; i++ {
-		deep = map[string]any{"type": "object", "properties": map[string]any{"next": deep}}
-	}
-	agent.Tools["deep"] = Tool{Description: "Nested far too far.", Execution: ToolWebhook, URLEnv: "DEEP_URL", Input: deep}
-	entry = agent.Agents["support"]
-	entry.Tools = append(entry.Tools, "deep")
-	agent.Agents["support"] = entry
-	wantSlngError(t, validateSlng(t, agent), "levels deep")
 }
 
 // TestSlngRunsTheChannelBranchThatNeverRan covers ir.validateChannels' outbound
@@ -350,26 +374,6 @@ func TestNoSlngFileOpensASocket(t *testing.T) {
 	}
 }
 
-func addSlngLocalTool(agent *Agent, name, source string) {
-	agent.Tools[name] = Tool{
-		Description:   "Look something up.",
-		Execution:     ToolLocal,
-		Handler:       "tools/" + name + ".py",
-		HandlerSource: source,
-		Input:         map[string]any{"type": "object", "properties": map[string]any{"order_id": map[string]any{"type": "string"}}},
-		// Build settles both of these; a tool assembled in a test has to say them
-		// out loud or it fails the shared shape checks instead of the slng ones.
-		Interruption: ToolProviderDefault,
-		Effect:       ToolReturnsData,
-	}
-	entry := agent.Agents["support"]
-	entry.Tools = append(entry.Tools, name)
-	agent.Agents["support"] = entry
-}
-
-// A {{$NAME}} token is a SLNG Vault variable. Before this, it fell through to
-// "which is not a declared variable", which is true and sends the author to
-// declare a variable that must not exist: SLNG holds the value.
 func TestVaultTokenPassesOnSlngAndIsNamedElsewhere(t *testing.T) {
 	agent := slngAgent(t)
 	agent.Conversation.Greeting.Text = "Hi {{customer_name}}, you have reached {{$ACME_BRAND}}."
@@ -423,37 +427,29 @@ func TestInvalidVaultNameIsRefusedWithItsShape(t *testing.T) {
 	}
 }
 
-// A webhook tool needs a base from somewhere, and which shape depends on the
-// target. Both are written on a package that names both kinds of target.
-func TestWebhookBaseURLRulesArePerTarget(t *testing.T) {
+// A webhook tool needs a base from somewhere, and a code target needs the
+// environment-variable form specifically: it emits `os.environ[...]` and reads
+// base_url not at all.
+//
+// This used to check both halves of a per-target question. The slng half is
+// gone with the target's ability to author a webhook tool at all, and
+// TestSlngRefusesAuthoredToolBodies above is what covers it now. base_url stays
+// in the schema, and is still what a hosted platform would store, so the shape
+// rules below still apply to it.
+func TestWebhookNeedsURLEnvOnACodeTarget(t *testing.T) {
 	agent := slngAgent(t)
-	agent.Tools["refund"] = Tool{
-		Description: "Start a refund.", Execution: ToolWebhook,
-		URLEnv: "REFUND_URL", Interruption: ToolProviderDefault, Effect: ToolReturnsData,
-	}
-	entry := agent.Agents["support"]
-	entry.Tools = append(entry.Tools, "refund")
-	agent.Agents["support"] = entry
-	// url_env alone: fine for a code target, refused on slng.
-	wantSlngError(t, validateSlng(t, agent), "names only url_env", "add base_url")
-
-	// base_url alone: fine on slng, refused on a code target, which reads the
-	// base from the environment at run time.
-	agent = slngAgent(t)
 	agent.Tools["refund"] = Tool{
 		Description: "Start a refund.", Execution: ToolWebhook,
 		BaseURL: "https://api.acme.example", Interruption: ToolProviderDefault, Effect: ToolReturnsData,
 		Input: map[string]any{"type": "object", "properties": map[string]any{"reason": map[string]any{"type": "string"}}},
 	}
-	entry = agent.Agents["support"]
+	entry := agent.Agents["support"]
 	entry.Tools = append(entry.Tools, "refund")
 	agent.Agents["support"] = entry
-	if row := validateSlng(t, agent); len(row.Errors) > 0 {
-		t.Errorf("a literal base_url was refused on slng: %#v", row.Errors)
-	}
-	target := targetFor(agent, ProviderSlng)
-	target.Provider, target.Name, target.Version = ProviderPipecat, "pipecat", "1.8.0"
-	report, err := Validate(agent, []Target{target}, targetcap.Default())
+
+	resolved := targetFor(agent, ProviderSlng)
+	resolved.Provider, resolved.Name, resolved.Version = ProviderPipecat, "pipecat", "1.8.0"
+	report, err := Validate(agent, []Target{resolved}, targetcap.Default())
 	if err == nil {
 		t.Fatal("a webhook with no url_env passed on pipecat, which reads the base from the environment")
 	}

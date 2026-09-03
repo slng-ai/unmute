@@ -1,6 +1,6 @@
 ---
 title: "Deploy to SLNG"
-description: "One command from a package to a live agent on SLNG, what you need before you run it, and the one kind of package this target cannot publish yet."
+description: "One command from a package to a live agent on SLNG, what you need before you run it, and what this target refuses to create for you."
 sidebarTitle: "SLNG"
 ---
 
@@ -19,11 +19,10 @@ passes, so a run that reports problems has changed nothing.
 ## What works today
 
 <Warning>
-  **Only agents whose tools are already built work on this target right now.**
-  A tool with a body of its own, a `local:` handler or a `webhook:`, has to be
-  uploaded, run once and published inside SLNG before an agent can attach it,
-  and that path is not usable yet. Keep the package to builtins and it deploys
-  in one command.
+  **SLNG creates no tool from your package.** A `local:` or `webhook:` block
+  is refused here: reference a tool your organisation already has with
+  `slng:` instead, or compile the package to `pipecat` or `livekit`, where
+  your own handler or endpoint runs.
 </Warning>
 
 A builtin names a capability SLNG already owns, so the push has nothing to
@@ -33,9 +32,12 @@ and the caller's phone number, are attached to the agent in the SLNG dashboard
 rather than written in the package.
 
 [`slng-support`](https://github.com/slng-ai/unmute/tree/main/examples/slng-support)
-is the working example and the shape to copy: one agent, one builtin, a greeting
-and a variable. If your agent needs a tool of its own, compile it to `pipecat` or
-`livekit` instead, where the handler runs in the project you host.
+is the working example and the shape to copy: builtins and hosted tools, a
+greeting and a variable. If your agent needs a tool SLNG does not host yet,
+create it in the SLNG dashboard and reference it with `slng:`
+(see [Hosted tools](/build/tools/hosted)), or compile the package to
+`pipecat` or `livekit` instead, where the handler runs in the project you
+host.
 
 ## Before you start
 
@@ -247,7 +249,6 @@ until all of them clear.
 |---|---|
 | `vault missing` | create each name in [the vault](https://app.slng.ai/vault/secrets). A name that exists as a *variable* does not count. |
 | `tool unresolved` | the package names a tool your organisation cannot see. Rename the reference, or create the tool in the dashboard. |
-| `sample missing` | the package ships a tool body, which is the case this target cannot publish yet. Use a builtin, or compile to pipecat or livekit. |
 | `agent ambiguous` | two agents share the package's name. Pass `--agent-id`. |
 
 ## When the agent answers with silence

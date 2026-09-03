@@ -1,0 +1,14 @@
+# A tool SLNG hosts. The file name is what resolves against the organisation,
+# the same rule `builtin:` follows, so there is no second name to keep in sync.
+#
+# `description:` is ours and overrides the platform's. Everything about how the
+# tool runs is the platform's, which is why input:, output:, handler: and
+# dependencies: are unwritable here.
+description: Look up an order by its number and return its status and delivery date.
+
+slng:
+  hash: f169d60d6496768081448551f1a84286a34569063a61c480b0aa12475759a00f
+
+announce: One moment while I look that up.
+interruption: provider_default
+effect: returns_data

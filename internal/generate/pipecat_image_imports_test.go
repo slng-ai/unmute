@@ -35,6 +35,10 @@ func TestPipecatImageCopiesEveryModuleBotImports(t *testing.T) {
 	}{
 		{"nothing configured", plainPipecatAgent},
 		{"tracing, knowledge and a local tool", loadedPipecatAgent},
+		// A mirrored SLNG module is another system's source copied into the
+		// project, so it reaches the container through the same conditional
+		// COPY line, and a missed flag is the same ModuleNotFoundError.
+		{"a mirrored SLNG module", func(t *testing.T) *ir.Agent { return buildHosted(t, hostedCodeFixture) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			agent := tc.agent(t)
@@ -56,6 +60,11 @@ func TestPipecatImageCopiesEveryModuleBotImports(t *testing.T) {
 				}
 			}
 
+			// The blind spot, stated rather than discovered: botImport matches
+			// module-scope imports only, so an import written inside a function
+			// is invisible to this loop. Every emitted import is module-scope
+			// today; a driver that starts writing one inside a handler needs
+			// this parser widened rather than a note.
 			bot := artifactFile(t, artifact, "bot.py")
 			dockerfile := artifactFile(t, artifact, "Dockerfile")
 			imported := 0
@@ -73,6 +82,7 @@ func TestPipecatImageCopiesEveryModuleBotImports(t *testing.T) {
 			if imported == 0 {
 				t.Fatal("found no local imports in bot.py, so this test proves nothing")
 			}
+
 		})
 	}
 }
@@ -137,6 +147,11 @@ func TestPipecatHTTPXImportMatchesItsUseAndItsDependency(t *testing.T) {
 			if err != nil {
 				t.Fatalf("generate: %v", err)
 			}
+			// The blind spot, stated rather than discovered: botImport matches
+			// module-scope imports only, so an import written inside a function
+			// is invisible to this loop. Every emitted import is module-scope
+			// today; a driver that starts writing one inside a handler needs
+			// this parser widened rather than a note.
 			bot := artifactFile(t, artifact, "bot.py")
 			pyproject := artifactFile(t, artifact, "pyproject.toml")
 

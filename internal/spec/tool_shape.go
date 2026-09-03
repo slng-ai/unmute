@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// executionBlocks are the seven execution-keyed block names (SCHEMA §5.2). The
+// executionBlocks are the eight execution-keyed block names (SCHEMA §5.2). The
 // block name is the execution kind; a tool file carries exactly one.
-var executionBlocks = []string{"webhook", "local", "mcp", "builtin", "client", "provider_hosted", "knowledge"}
+var executionBlocks = []string{"webhook", "local", "mcp", "builtin", "client", "provider_hosted", "knowledge", "slng"}
 
 // movedToolKeys are the top-level keys the block shape retired. A package
 // written against the old flat shape must say what to do, not just "unknown
@@ -50,6 +50,22 @@ var knowledgeToolKeys = map[string]string{
 	"effect": "a lookup returns data; ending the call is a `builtin:` tool",
 }
 
+// slngToolKeys are the top-level fields a `slng:` tool cannot carry, mapped to
+// why. A hosted tool's definition is the platform's, so a second copy written
+// here could disagree with it, and the author would have no way to tell which
+// one the agent used.
+//
+// Two entries, not the seven the block refuses, because the other five are
+// already unwritable: `handler`, `url_env` and `auth` are in movedToolKeys and
+// read as migrations, while `base_url`, `path` and `dependencies` only exist
+// inside a `webhook:` or `local:` block, which the exactly-one-block rule
+// refuses beside `slng:`. Repeating them here would produce two messages for
+// one mistake.
+var slngToolKeys = map[string]string{
+	"input":  "the platform published this tool's parameters: run `unmute pull` and read tools/<name>.slng.json",
+	"output": "the platform owns this tool's result shape",
+}
+
 // checkToolShape reports the file's shape errors before decoding, so a wrong
 // shape reads as a migration instruction with a line number rather than a
 // decoder complaint. It returns the one execution block it found, which Load
@@ -79,6 +95,7 @@ func checkToolShape(file string, content []byte) (keyLine, error) {
 		refused := map[string]map[string]string{
 			"mcp":       contractToolKeys,
 			"knowledge": knowledgeToolKeys,
+			"slng":      slngToolKeys,
 		}[blocks[0].Key]
 		if err := checkRefusedKeys(file, blocks[0].Key, refused, keys); err != nil {
 			return keyLine{}, err
@@ -127,7 +144,10 @@ func checkToolBlockBody(file string, block keyLine, tool Tool) error {
 	if tool.ExecutionKind() != "" {
 		return nil
 	}
-	if block.Key == "client" || block.Key == "provider_hosted" {
+	// `slng:` joins these two: its only field is written by `unmute pull`, so a
+	// package authored before the first pull has an empty block, and a bare
+	// `slng:` decodes to a nil pointer indistinguishable from an absent one.
+	if block.Key == "client" || block.Key == "provider_hosted" || block.Key == "slng" {
 		return fmt.Errorf("%s:%d: `%s:` needs an explicit empty body: write `%s: {}`", file, block.Line, block.Key, block.Key)
 	}
 	return fmt.Errorf("%s:%d: `%s:` block is empty: add its fields", file, block.Line, block.Key)

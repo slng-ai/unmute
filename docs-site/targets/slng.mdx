@@ -14,10 +14,11 @@ unmute deploy examples/slng-support
 ```
 
 <Warning>
-  Only agents whose tools are already built work on this target right now. A
-  package shipping a `local:` or `webhook:` body cannot be published yet, so
-  keep the package to builtins or compile it to pipecat or livekit. The rest of
-  this page describes the target in full, including the tool shapes.
+  SLNG creates no tool from your package. A `local:` or `webhook:` block is
+  refused on this target: reference a tool your organisation already has with
+  [`slng:`](/build/tools/hosted) instead, or compile the package to pipecat or
+  livekit, where your own handler or endpoint runs. The rest of this page
+  describes the target in full, including the tool shapes.
 </Warning>
 
 <Card title="Deploy to SLNG" icon="cloud-upload" href="/deploy/slng">
@@ -63,10 +64,10 @@ examples/slng-support/build/slng/
 └── README.md                 # the runbook: what to create, what to run, what to watch
 ```
 
-A package that ships a tool body of its own also gets a `tools/` directory, one
-JSON file per tool that needs creating. A package whose tools are all builtins,
-which is the only shape this target publishes today, gets no `tools/` directory
-at all.
+This target writes no `tools/` directory. Every tool reference in
+`agent.json`, whether a curated capability, a hosted tool, or an MCP server,
+resolves by name against your organisation, so there is never a body of your
+own to write beside it.
 
 Unmute's compiler opens no connection to SLNG, at validate time or compile time.
 It writes files and stops. [`unmute deploy`](/reference/cli/deploy) hands them to
@@ -173,9 +174,8 @@ unmute deploy examples/slng-support
 ```
 
 An agent id comes back, and you need it to open a session. Read
-[the command's own page](/reference/cli/deploy) for the flags; the two that
-matter first are `--dry-run`, which changes nothing, and `--run-samples`, which
-a package shipping a `local:` or `webhook:` tool needs.
+[the command's own page](/reference/cli/deploy) for the flags; the one that
+matters first is `--dry-run`, which changes nothing.
 
 `unmute deploy` reads `SLNG_API_KEY`, then `VOICEAI_API_KEY`, then whatever
 profile `voiceai login` stored. Those are two names for one token: a single SLNG
@@ -192,24 +192,19 @@ To drive the push tool directly:
 voiceai agents push build/slng
 ```
 
-### Your tools live in SLNG
+### Where your tools come from
 
-On pipecat or livekit a `local:` tool is a function in the project you host, and
-it runs in your process. Here there is no process of yours: the handler is
-uploaded and becomes an org-level object in SLNG with a version number. Your
-package names it; SLNG owns it.
+A tool on SLNG runs inside the platform's own sandbox, in the region serving
+the call, one hop from the model rather than a whole internet away. Code
+there has no network access of its own: an `api_request` tool is how SLNG
+itself reaches an outside service.
 
-That is the fast shape as well as the necessary one. A tool sits on the critical
-path of a turn: nobody speaks until it returns, and a handler inside SLNG's
-sandbox, in the region serving the call, answers in a hop. The same logic behind
-a webhook of your own is a round trip out of SLNG's network and back, on every
-call. Two consequences: a tool on SLNG has **no network access at all**, so a
-handler that must reach a service is a `webhook:` tool instead; and its
-dependencies are exact `name==version` pins, because SLNG builds a locked,
-hash-verified environment per tool.
-
-[Deploy to SLNG](/deploy/slng) has the long version, with the publish gate and
-where secrets sit.
+Reference what your organisation already has by name with
+[`slng:`](/build/tools/hosted), for the reason at the top of this page.
+`unmute pull` mirrors the definition into your package, so the same tool also
+runs on livekit and pipecat. [Hosted tools](/build/tools/hosted) has the
+field-by-field version, including the one limit: a hosted tool's Python
+dependencies compile to slng and are refused on the two code targets.
 
 ### Names, not identifiers
 
@@ -226,11 +221,8 @@ Resolving those names is the push step's job. It is also why
 `voiceai agents create --file build/slng/agent.json` is the wrong command: that
 posts the body verbatim, names included, and the API refuses it.
 
-A package with a `local:` or `webhook:` tool needs more: each body is created,
-introspected and published, and neither kind can be published until one
-successful run proves it works. So each needs a sample, one JSON object of
-arguments at `build/slng/samples/<tool>.json`, run with
-`unmute deploy --run-samples`. Samples survive a recompile.
+A `local:` or `webhook:` tool never reaches this step: the block is refused
+before compiling, for the reason at the top of this page.
 
 An MCP reference resolves the same way, and it needs one thing agent.yaml has to
 say up front: which tools you want. Unmute compiles offline, so it cannot expand
@@ -266,29 +258,22 @@ and `llm_router_enabled` defaults the opposite way on the two shapes.
 
 Compile from the package instead.
 
-## Code tool dependencies
+## Hosted tool dependencies
 
-A `local:` tool may pin the packages its handler imports:
+A hosted tool's Python dependencies are the platform's own, mirrored by
+`unmute pull` into `tools/<name>.slng.json` rather than written by you. Each
+is an exact `name==version` pin, because SLNG builds a locked, hash-verified
+environment per tool.
 
-```yaml tools/check_order.yaml
-local:
-  handler: tools/check_order.py
-  dependencies:
-    - orjson==3.11.4
-```
+The sandbox runs Python 3.14 with `pydantic` already installed, so a hosted
+tool using only the standard library and pydantic needs no dependencies
+mirrored at all.
 
-Each entry is an exact `name==version` pin. A range, a URL, an extra or a
-wildcard is refused at validate, because SLNG builds a locked, hash-verified
-environment per tool and none of those can be locked. The emitted body carries
-the list lowercase, dash-separated and sorted, which is how SLNG stores it.
-
-The sandbox runs Python 3.14 with `pydantic` already installed, so a handler
-using only the standard library and pydantic needs no `dependencies:` at all.
-
-This field is slng-only. The code drivers build one dependency list for the
-whole generated project out of the provider catalogue and read nothing per tool,
-so a package that pins here is refused on `livekit` and `pipecat` rather than
-having the pins silently dropped.
+This is slng-only. The code drivers build one dependency list for the whole
+generated project out of the provider catalogue and read nothing per tool, so
+a hosted tool that declares dependencies is refused on `livekit` and
+`pipecat` rather than having the pins silently dropped. See
+[Hosted tools](/build/tools/hosted) for the full story.
 
 ## The Vault
 

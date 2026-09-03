@@ -15,6 +15,12 @@ Reach for a webhook when:
 If the work is logic rather than a request, or there is no API to call, write a
 [Python handler](/build/tools/python) instead.
 
+A `webhook:` tool works on livekit and pipecat. It is refused on an slng
+target: SLNG owns a tool's code, version and gate pipeline, so there is
+nowhere in a package for a URL and its credential to write to there.
+Reference a tool your organisation already has on the platform with
+[`slng:`](/build/tools/hosted) instead.
+
 ```yaml tools/confirm_appointment.yaml expandable wrap
 description: Confirm that the existing appointment stays as booked. Call it when the customer says the time works.
 
@@ -40,11 +46,11 @@ effect: returns_data
 interruption: provider_default
 ```
 
-This is a worked example rather than a quote. For a real one, every field here
-is real: [`examples/slng-support`](https://github.com/slng-ai/unmute/tree/main/examples/slng-support)
-ships `tools/search_places_text.yaml`, a webhook tool that carries both
-`url_env` and `base_url` the same way, so it deploys to slng and would compile
-to a code target too.
+This is a worked example rather than a quote. A webhook tool naming both
+`url_env` and `base_url` this way compiles to livekit and pipecat; an slng
+target refuses it, for the reason in the note above. `examples/slng-support`
+no longer ships one: its places-search tool now reaches SLNG through the
+hosted-tool block instead.
 
 `announce:` is the one line worth knowing about here, because a webhook is the
 tool most likely to keep the caller waiting. The agent speaks that exact sentence
@@ -57,7 +63,7 @@ refused. Full rules in [the behavior fields](/build/tools/overview#the-three-beh
 | Field | Required | What it is |
 |---|---|---|
 | `url_env` | at least one of `url_env`, `base_url` | the UPPER_SNAKE name of an environment variable holding the base URL |
-| `base_url` | at least one of `url_env`, `base_url`; required on SLNG | the literal `https://` base URL |
+| `base_url` | at least one of `url_env`, `base_url` | the literal `https://` base URL |
 | `path` | no | appended to that base URL; when present it starts with `/` and may carry `{{variable}}` tokens |
 | `auth` | no | how the request authenticates |
 
@@ -65,25 +71,17 @@ refused. Full rules in [the behavior fields](/build/tools/overview#the-three-beh
 package one: staging and production run the same package against different APIs.
 Pipecat and LiveKit Agents read it at run time and never look at `base_url`.
 
-## Naming the base URL for SLNG
+## Naming the base URL
 
-SLNG stores the URL in the tool body it pushes, so there is no environment for
-it to read at run time: `url_env` alone is not enough there. Leave `base_url`
-out and SLNG refuses at compile:
+`base_url` exists for a hosted target: that is where SLNG used to store the
+URL in the tool body it pushed, since there was no environment for it to read
+at run time there. An slng target refuses a `webhook:` block outright now,
+for the reason at the top of this page, so there is no longer a target that
+reads `base_url`. Name `url_env` for livekit and pipecat, which read it at
+run time and never look at `base_url`.
 
-```text
-slng: slng target tool "confirm_appointment" names only url_env, and SLNG stores the
-  URL in the tool body rather than reading it from an environment: add base_url with
-  the literal https host, keeping url_env for the code targets
-```
-
-`base_url` has to be a literal address: no `{{variable}}` token in the scheme
-or the host, because a name is not a shape SLNG's URL validator accepts. A
-`path` on the same tool may still carry one, since that part renders per call
-rather than living in the stored body.
-
-Write both fields and each target reads only the one it needs. Drop `url_env`
-and the code targets refuse the mirror way:
+Drop `url_env` and both code targets refuse, and the message still names a
+hosted target as the reason the field exists at all:
 
 ```text
 livekit: livekit target reads a webhook base URL from the environment: tool
@@ -143,11 +141,9 @@ Every name you use here goes in `agent.yaml` under
 required environment names, so leaving one out of `secrets:` warns without
 dropping it from generated environment instructions or checks.
 
-**SLNG has no `api_key` scheme of its own.** It sends the token as a bearer
-token whichever `type` you wrote, and drops a custom `header`. Write
-`type: bearer` if the target is SLNG, so the package says what actually goes
-over the wire; the code targets send `api_key` and its header exactly as
-written.
+`api_key` and its header reach livekit and pipecat exactly as written. An
+slng target never sees this field at all: `webhook:` is refused there, so
+there is no bearer-only rewrite to plan around any more.
 
 ## What the model fills in, and what it cannot
 
@@ -209,15 +205,16 @@ output:
 
 `output` is optional author documentation. The compiler checks that it is a
 JSON Schema object, but no generator sends it to the model or writes it to the
-compile report. Nothing checks the API's response against it either, not even
-SLNG: SLNG proxies this request rather than running code of its own, so it has
-nothing to introspect a response with. The example records the shape the API
-is expected to return; teach the model how to use that data in the tool
-description or prompt.
+compile report, and nothing checks the API's response against it either. The
+example records the shape the API is expected to return; teach the model how
+to use that data in the tool description or prompt.
 
-A [`local:`](/build/tools/python) handler's `output:` is the one exception:
-SLNG runs that handler itself and checks its return value against it. Full
-story in [Python tools](/build/tools/python#the-rules-the-function-follows).
+A [`local:`](/build/tools/python) handler's `output:` was the one exception,
+checked on an slng target because SLNG ran that handler itself. That block is
+refused there now, and the check moved with the code: a hosted `code` tool's
+module carries its own `Output` model, and SLNG reads the result shape off
+that. See [Python tools](/build/tools/python#what-the-slng-sandbox-expects)
+and [Hosted tools](/build/tools/hosted).
 
 ## Where to go next
 

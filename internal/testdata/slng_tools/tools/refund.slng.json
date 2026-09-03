@@ -1,0 +1,50 @@
+{
+  "name": "refund",
+  "tool_type": "api_request",
+  "source": "org",
+  "description": "Start a refund for the caller's order.",
+  "arg_schema": {
+    "properties": {
+      "reason": {
+        "description": "Why the caller wants a refund",
+        "type": "string"
+      }
+    },
+    "required": [
+      "reason"
+    ],
+    "type": "object"
+  },
+  "config": {
+    "auth": {
+      "secret_name": "REFUND_API_TOKEN",
+      "type": "bearer"
+    },
+    "headers": [],
+    "http_method": "POST",
+    "parameters": {
+      "properties": {
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    },
+    "response": {
+      "instructions": null,
+      "show_to_llm": true
+    },
+    "strict": true,
+    "timeout_seconds": 10,
+    "type": "api_request",
+    "url": "https://api.acme.example/refunds",
+    "wait_for_response": true,
+    "webhook_format": "raw"
+  },
+  "content_hash": "13a8c62ff825a15d351ec5a94fbf7ab37d3e87ed1fd8acbc8aa8f6c966fb291e",
+  "latest_version": 2,
+  "fetched": "2026-09-03"
+}

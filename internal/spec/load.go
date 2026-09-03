@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +29,8 @@ func Load(dir string) (*Package, error) {
 		Markdown:    make(map[string]string),
 		Handlers:    make(map[string]string),
 		Documents:   make(map[string][]byte),
+		Mirrors:     make(map[string]Mirror),
+		MirrorBytes: make(map[string][]byte),
 		files:       make(map[string][]byte),
 	}
 	if err := pkg.readYAML("agent.yaml", &pkg.Agent); err != nil {
@@ -69,6 +72,14 @@ func Load(dir string) (*Package, error) {
 				return nil, err
 			}
 			pkg.Handlers[handler] = string(content)
+		}
+		// A hosted tool's definition travels with the package too, for the same
+		// reason: the code targets run the mirrored module, and every target
+		// checks the pin with no network.
+		if tool.Slng != nil {
+			if err := pkg.readMirror(name); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -181,6 +192,46 @@ func (p *Package) readYAML(name string, out any) error {
 }
 
 // readFile reads a package file and records it for Location lookups.
+// readMirror reads one hosted tool's committed mirror: the sidecar and, for a
+// `code` tool, the module beside it.
+//
+// A mirror that is not there is left absent rather than reported here, the way
+// a missing knowledge folder is: ir.Validate owns that message, and it is the
+// first one an author hits, because `slng: {}` before the first pull is exactly
+// this state. Load stopping first would put an authoring rule in the wrong
+// package and produce a worse message.
+//
+// A mirror that IS there and cannot be parsed is a different thing and is
+// reported, because nobody wrote it by hand and a corrupt one is not a
+// migration.
+func (p *Package) readMirror(name string) error {
+	sidecar, module := MirrorPaths(name)
+	content, err := readWithin(p.Root, sidecar)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	var mirror Mirror
+	if err := json.Unmarshal(content, &mirror); err != nil {
+		return fmt.Errorf("%s: %w: it is written by `unmute pull` and not by hand, so run the pull again", sidecar, err)
+	}
+	// The pin covers the sidecar and the module together, so the bytes both were
+	// read from are kept rather than re-encoded. A round trip through the struct
+	// would hash a normalisation of the file instead of the file.
+	pinned := content
+	if code, err := readWithin(p.Root, module); err == nil {
+		mirror.Code = string(code)
+		pinned = append(append([]byte{}, content...), code...)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	p.Mirrors[name] = mirror
+	p.MirrorBytes[name] = pinned
+	return nil
+}
+
 func (p *Package) readFile(name string) ([]byte, error) {
 	content, err := readWithin(p.Root, name)
 	if err != nil {
