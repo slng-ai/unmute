@@ -90,7 +90,6 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 	// The restriction exists because a session-start render of an unset variable
 	// produces a prompt with a hole in it; a router-bound prompt has no
 	// session-start render to produce one.
-	assigned := assignedVariables(agent)
 	allVariables := sortedKeys(agent.Variables)
 	for _, name := range sortedKeys(pkg.Agent.Agents) {
 		raw := pkg.Agent.Agents[name]
@@ -112,10 +111,23 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 	// moment renders empty, never the word "None", so the prompt can say what
 	// empty means (B: multi-task booked nothing because the appointment task
 	// could not see the customer id, 2026-08-15).
+	//
+	// The allowance is the step's own `requires:` list, not every variable any
+	// step assigns anywhere in the package. The global version let a later
+	// prompt name a value with nothing checking that the step which produces it
+	// had run, and the symptom is not a failure: _render substitutes an empty
+	// string, so the model reads a prompt with a hole in it mid-call. Narrowing
+	// it needed no package edit, because every prompt in the tree names only
+	// pre-fetched values, which are session-start values and were never using
+	// the allowance.
+	suppliers := assigners(agent)
 	for _, name := range sortedKeys(pkg.Tasks) {
 		raw := pkg.Tasks[name]
 		site := fmt.Sprintf("task %q instructions", name)
-		if err := checkTemplateSite(pkg, agent, raw.Instructions, "", site, pkg.Markdown[raw.Instructions], true, assigned...); err != nil {
+		if err := checkTaskPromptReads(pkg, agent, raw, name, site, suppliers); err != nil {
+			return err
+		}
+		if err := checkTemplateSite(pkg, agent, raw.Instructions, "", site, pkg.Markdown[raw.Instructions], true, raw.Requires...); err != nil {
 			return err
 		}
 	}
@@ -159,21 +171,76 @@ func routerPrompt(pkg *packagespec.Package, agent *Agent, name string) bool {
 	return pkg.Agent.Models.Think[profile].Provider == ProviderSlngRouter
 }
 
-// assignedVariables lists every variable a delegate control writes from a task
-// result. They hold no value at session start and a value later in the call.
-func assignedVariables(agent *Agent) []string {
-	var names []string
-	for _, control := range agent.Controls {
-		delegate, ok := control.(*Delegate)
+// assigners pairs each variable a step writes from a task result with the steps
+// that write it. They hold no value at session start and a value later in the
+// call, so what matters about one is which step produces it.
+//
+// The list, rather than one name, is what lets a check tell "some other step
+// fills this" from "only this one does", which are different mistakes with
+// different fixes. Keyed on the control name because that is what the model
+// calls and what the emitted guard's _PREREQUISITE_SUPPLIER map carries
+// (internal/generate/guard.go), so a compile refusal and the run-time refusal
+// name the same thing.
+//
+// generate.SupplierIndex builds the same pairing and cannot be shared with this:
+// generate imports ir and not the reverse. It keeps the sorted-first supplier
+// per variable, which is this map's first element.
+func assigners(agent *Agent) map[string][]string {
+	suppliers := map[string][]string{}
+	for _, name := range sortedKeys(agent.Controls) {
+		delegate, ok := agent.Controls[name].(*Delegate)
 		if !ok {
 			continue
 		}
-		for variable := range delegate.Assign {
-			names = append(names, variable)
+		for _, variable := range sortedKeys(delegate.Assign) {
+			suppliers[variable] = append(suppliers[variable], name)
 		}
 	}
-	slices.Sort(names)
-	return slices.Compact(names)
+	return suppliers
+}
+
+// checkTaskPromptReads refuses a task prompt naming a value only some step
+// produces, unless the step that reads it declares the need.
+//
+// The declaration is `requires:`, which already holds the step back until the
+// value exists. One key, so the prompt and the guard cannot disagree: a prompt
+// that reads a value the guard does not wait for renders an empty string in the
+// middle of a call, and nothing fails.
+//
+// Its own walk rather than another argument to checkTemplateSite, because the
+// message has to name the step that supplies the value and the step that reads
+// it, and the shared function knows neither: it has the reader only as a
+// formatted site string. Leaving that function alone also keeps refusal 16
+// provably where it was, which matters because the two decide the same call.
+//
+// Anything not recognised here falls through to checkTemplateSite, which owns
+// the vault token, the undeclared name, and the plain "no value yet".
+func checkTaskPromptReads(pkg *packagespec.Package, agent *Agent, raw packagespec.Task, task, site string, suppliers map[string][]string) error {
+	for _, ref := range TemplateRefs(pkg.Markdown[raw.Instructions]) {
+		if _, vault := VaultToken(ref); vault {
+			continue
+		}
+		variable, declared := agent.Variables[ref]
+		if !declared || hasSessionStartValue(agent, ref, variable) || slices.Contains(raw.Requires, ref) {
+			continue
+		}
+		steps := suppliers[ref]
+		if len(steps) == 0 {
+			continue
+		}
+		where := pkg.Location(raw.Instructions, "{{")
+		others := slices.DeleteFunc(slices.Clone(steps), func(step string) bool { return step == task })
+		if len(others) == 0 {
+			// Adding it to this step's own requires: would be a guard waiting on
+			// the step's own output, so the advice is the opposite one.
+			return fmt.Errorf("%s: %s references {{%s}}, and %q is the only step that assigns it, so the value "+
+				"does not exist while this prompt is being built. Give the variable a default or a source:, or "+
+				"assign it from an earlier step", where, site, ref, task)
+		}
+		return fmt.Errorf("%s: %s references {{%s}}, which only task %q assigns. Add %s to this task's requires: "+
+			"list, so the step waits for the value and its prompt can read it", where, site, ref, others[0], ref)
+	}
+	return nil
 }
 
 // checkTemplateSite resolves one site's tokens. sessionStart marks a site

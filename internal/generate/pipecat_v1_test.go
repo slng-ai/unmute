@@ -2992,3 +2992,275 @@ func TestPipecatV1DelegateRequiresGuard(t *testing.T) {
 
 	assertGuardLogsNamesOnly(t, method, "pipecat")
 }
+
+// pipecatHistoryBot compiles the history fixture and returns its bot.py.
+//
+// The fixture exists because no other package in the tree authors a non-`full`
+// history on Pipecat, so before it there was nothing to compile as proof that
+// the driver reads ir.TaskContext.History at all.
+func pipecatHistoryBot(t *testing.T) string {
+	t.Helper()
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "history_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate history fixture: %v", err)
+	}
+	return artifactFile(t, artifact, "bot.py")
+}
+
+// Each `context.history` value lowers to its own message list at the task
+// entry, and `full` lowers to nothing at all (FR-007, FR-008, FR-009, FR-013).
+//
+// Pipecat keeps one LLMContext for the whole call and hands every worker the
+// same object, so shaping means replacing that object's message list rather
+// than handing over a copy. LLMContext at pipecat-ai 1.8.0 has no copy(), no
+// truncate() and no exclusion filter, so this is plain list work and the
+// framework provides no safety.
+func TestPipecatLowersEveryTaskHistoryValue(t *testing.T) {
+	bot := pipecatHistoryBot(t)
+
+	// reset drives the ContextStrategyConfig line the template already has for
+	// context_scope: isolated. On a node transition RESET replaces the message
+	// list with that node's own task_messages, which is what reset means, so
+	// there is no new emitted code path.
+	if !strings.Contains(bot, "context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET)") {
+		t.Error("history: reset emits no ContextStrategy.RESET on the task node")
+	}
+	// messages keeps what the caller and the agent said out loud. Tool records
+	// go, which is what LiveKit's `messages` does: .messages() returns message
+	// items only, so a tool result carrying a value is not in it either.
+	if !containsCollapsed(bot, `self.context.set_messages([m for m in self.context.get_messages() if m.get("role") in ("user", "assistant")])`) {
+		t.Error("history: messages emits no user/assistant filter at the task entry")
+	}
+	// last_n bounds the window by the authored max_messages, through the helper
+	// that drops a leading orphan.
+	if !containsCollapsed(bot, "self.context.set_messages(_last_n(self.context.get_messages(), 6))") {
+		t.Error("history: last_n does not bound the task entry by the authored max_messages")
+	}
+	// full is the control, and it is in this same package: a value that shapes
+	// nothing must emit nothing even where its neighbours emit something. The
+	// entry is the span from the owner snapshot to the node initialize; the
+	// finish path further down restores and legitimately calls set_messages.
+	entry := pipecatMethodBody(t, bot, "self._take_message_snapshot = (", "await flow.initialize(")
+	if strings.Contains(entry, "set_messages(") {
+		t.Errorf("history: full shapes the context, and the shared LLMContext is already the whole history:\n%s", entry)
+	}
+
+	// The emitted module has to parse. The shaping sites add a helper, two call
+	// sites and an import gated on two conditions, and a missed import is a
+	// NameError at worker start rather than anything a string assertion sees.
+	// Skipped where python3 is absent, so the default suite still needs none.
+	if _, err := exec.LookPath("python3"); err == nil {
+		path := filepath.Join(t.TempDir(), "bot.py")
+		if err := os.WriteFile(path, []byte(bot), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command("python3", "-m", "py_compile", path).CombinedOutput(); err != nil {
+			t.Fatalf("the shaped bot.py is not valid Python:\n%s", out)
+		}
+	}
+}
+
+// The last_n helper cuts at the front and then drops what the cut orphaned
+// (FR-009, SC-005).
+//
+// This is the load-bearing assertion of the story. A `tool` message with no
+// matching `tool_call_id` is not a cosmetic problem: it is a request the
+// provider rejects, mid-call, on a step that worked in every test that did not
+// happen to leave one. The front is the only cut being made, so the tail is
+// intact and the sole orphan possible is a leading tool result whose assistant
+// call fell outside the window. LiveKit gets this free from truncate().
+func TestPipecatLastNLeavesNoOrphanedToolResult(t *testing.T) {
+	bot := pipecatHistoryBot(t)
+	if !strings.Contains(bot, "def _last_n(") {
+		t.Fatal("no _last_n helper is emitted, so nothing bounds a last_n window")
+	}
+	helper := pipecatMethodBody(t, bot, "def _last_n(", "\n\n\n")
+	for _, want := range []string{
+		`messages[-limit:]`,
+		`while window and window[0].get("role") == "tool":`,
+	} {
+		if !containsCollapsed(helper, want) {
+			t.Errorf("the _last_n helper is missing %q:\n%s", want, helper)
+		}
+	}
+	sliceAt := strings.Index(helper, "messages[-limit:]")
+	dropAt := strings.Index(helper, `window[0].get("role") == "tool"`)
+	if sliceAt < 0 || dropAt < sliceAt {
+		t.Errorf("the orphan drop must follow the cut that can create one:\n%s", helper)
+	}
+}
+
+// A non-`full` value on a handoff shapes the receiving worker's context, and
+// does it before the worker is activated (FR-019, FR-020).
+//
+// Not an extra: the capability lookup takes a value and a provider and nothing
+// else, and the same validateContext runs for a task and for a transfer. So
+// the moment `reset` stops being refused on Pipecat it is legal on a Pipecat
+// handoff too. A handoff hands the receiving worker the same shared
+// LLMContext plus one developer message, so leaving this path alone would mean
+// accepting a value and ignoring it, which is the silent downgrade Principle
+// II forbids by name.
+func TestPipecatShapesAHandoffByTheSameValues(t *testing.T) {
+	bot := pipecatHistoryBot(t)
+	handoff := pipecatMethodBody(t, bot, "async def to_billing(self, params: FunctionCallParams):", "\n    @_direct_tool")
+	shapeAt := strings.Index(handoff, "self.context.set_messages([])")
+	activateAt := strings.Index(handoff, "await self.activate_worker(")
+	if shapeAt < 0 {
+		t.Fatalf("history: reset on a handoff shapes nothing, so the receiver gets the whole call:\n%s", handoff)
+	}
+	if activateAt < 0 || shapeAt > activateAt {
+		t.Errorf("the handoff must shape the context before it activates the receiver:\n%s", handoff)
+	}
+}
+
+// The owner's context comes back whatever the step saw (FR-010).
+//
+// The snapshot is taken before the shaping, so the finish path restores the
+// full owner context even from a step that ran on an empty one. Nothing about
+// the finish path changes, and that is the claim: only the typed result crosses
+// back.
+func TestPipecatRestoresTheOwnerContextAtEveryHistoryValue(t *testing.T) {
+	bot := pipecatHistoryBot(t)
+	for _, method := range []string{"_confirm_number", "_read_back", "_sort_invoice", "_take_message"} {
+		snapshot := method + "_snapshot = (copy.deepcopy(self.context.get_messages()), self.context.tools)"
+		if !strings.Contains(bot, "self."+snapshot) {
+			t.Errorf("%s takes no owner snapshot, so its finish has nothing to restore", method)
+		}
+		if !strings.Contains(bot, "messages, tools = self."+method+"_snapshot") {
+			t.Errorf("%s never restores the owner's messages and tools", method)
+		}
+	}
+	// The snapshot has to precede the shaping, or the owner's context is
+	// restored from whatever the step was given rather than from what it had.
+	// read_back is the case that can get this wrong: it is the one whose entry
+	// both snapshots and shapes.
+	entry := pipecatMethodBody(t, bot, "async def read_back(self, params: FunctionCallParams):", "def _read_back_node_read_back")
+	snapshotAt := strings.Index(entry, "self._read_back_snapshot = (")
+	shapeAt := strings.Index(entry, "self.context.set_messages(")
+	if snapshotAt < 0 || shapeAt < 0 || snapshotAt > shapeAt {
+		t.Errorf("the owner snapshot must be taken before the step's context is shaped: snapshot=%d shape=%d\n%s", snapshotAt, shapeAt, entry)
+	}
+}
+
+// containsCollapsed asks whether the emitted module contains a fragment, with
+// every run of whitespace treated as one space.
+//
+// The emitted bot.py goes through a Python formatter, so a one-line template
+// expression can arrive wrapped over five lines. Matching the collapsed form
+// keeps an assertion about behaviour from failing on a change of line width.
+func containsCollapsed(text, want string) bool {
+	return strings.Contains(strings.Join(strings.Fields(text), " "), strings.Join(strings.Fields(want), " "))
+}
+
+// pipecatMethodBody returns the emitted text from one marker up to the next, so
+// an assertion can say "inside this method" rather than "somewhere in the file".
+func pipecatMethodBody(t *testing.T, bot, from, to string) string {
+	t.Helper()
+	start := strings.Index(bot, from)
+	if start < 0 {
+		t.Fatalf("emitted bot.py has no %q", from)
+	}
+	rest := bot[start:]
+	if end := strings.Index(rest[len(from):], to); end >= 0 {
+		return rest[:len(from)+end]
+	}
+	return rest
+}
+
+// A task group's `context_scope` keeps governing its member steps, and a
+// member's own `history:` is not consulted (FR-014).
+//
+// This is behaviour at HEAD that the change must not disturb, and the way it
+// holds is structural: the driver reads a task's context only on a single-task
+// delegate, which is the same split LiveKit makes. A group step reaching for
+// its own `history:` would mean two settings deciding one thing, with the
+// group's the one the author wrote down.
+func TestPipecatTaskGroupStillGovernsItsMembersContext(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addPipecatTaskTransferFixture(agent)
+	// A member asking for the shortest context there is. The group says shared,
+	// so the member is ignored.
+	verify := agent.Tasks["verify"]
+	verify.Context = ir.TaskContext{History: ir.HistoryReset}
+	agent.Tasks["verify"] = verify
+	complete := agent.Tasks["complete"]
+	complete.Context = ir.TaskContext{History: ir.HistoryLastN, MaxMessages: 2}
+	agent.Tasks["complete"] = complete
+
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate task group: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	entry := pipecatMethodBody(t, bot, "self._run_verify_snapshot = (", "await flow.initialize(")
+	if strings.Contains(entry, "set_messages(") {
+		t.Errorf("a group step's own history: shaped the group's entry:\n%s", entry)
+	}
+	if strings.Contains(bot, "_last_n(") {
+		t.Error("a group step's last_n emitted the window helper, so the member's history: was consulted")
+	}
+	if strings.Contains(bot, "ContextStrategy.RESET") {
+		t.Error("a group step's reset emitted the RESET strategy; context_scope: shared has to win")
+	}
+}
+
+// A Pipecat package where every task and handoff authors `history: full` emits
+// nothing new at all (FR-013).
+//
+// This is what makes the change safe to land: `full` on this target is not a
+// setting the driver implements, it is what one shared LLMContext per call
+// already does. So the whole of `full` is the absence of a shaping call, and
+// every existing Pipecat golden in the tree stays where it is. The goldens hold
+// that too; this says it in one place with the reason attached.
+func TestPipecatFullOnlyPackageEmitsNoShaping(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addPipecatTaskTransferFixture(agent)
+	single := &ir.Delegate{Kind: ir.ControlDelegate, Task: "complete", When: "Finish up."}
+	agent.Controls["run_complete"] = single
+	intake := agent.Agents["intake"]
+	intake.Tools = append(intake.Tools, "run_complete")
+	agent.Agents["intake"] = intake
+
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate full-only package: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	if strings.Contains(bot, "def _last_n(") {
+		t.Error("a full-only package emits the _last_n helper, so the gate on it is not working")
+	}
+	if strings.Contains(bot, "ContextStrategy") {
+		t.Error("a full-only package imports or names ContextStrategy")
+	}
+	// The single-task delegate is the site history: full would have shaped.
+	entry := pipecatMethodBody(t, bot, "self._run_complete_snapshot = (", "await flow.initialize(")
+	if strings.Contains(entry, "set_messages(") {
+		t.Errorf("history: full shaped a single-task delegate's entry:\n%s", entry)
+	}
+	handoff := pipecatMethodBody(t, bot, "async def to_billing(self, params: FunctionCallParams):", "\n    @_direct_tool")
+	if strings.Contains(handoff, "set_messages(") {
+		t.Errorf("history: full shaped a handoff:\n%s", handoff)
+	}
+}

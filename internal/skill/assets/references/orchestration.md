@@ -376,6 +376,32 @@ Every name in `requires:` must be a declared variable, or the package fails to
 compile. That is deliberate: a guard on a name nothing sets can never pass, and
 the symptom would be a task that silently never starts.
 
+**`requires:` also decides what a task's own prompt may read.** A task's
+`instructions` may always name a variable that already has a value, such as one
+with a `default` or `source: call_start`. To name a variable another task
+assigns, list it in this task's own `requires:` too. Naming it without
+listing it is a compile error:
+
+```
+agent.yaml:41: task "manage_booking" instructions references {{customer_status}},
+which only task "verify_customer" assigns. Add customer_status to this task's
+requires: list, so the step waits for the value and its prompt can read it
+```
+
+The same list that holds the task back is what makes the value safe to read:
+by the time the guard lets the task start, the value exists. Do not fix the
+refusal by adding the name to the reading task's own `requires:` when that
+same task is the one assigning it. That waits on the task's own output.
+Assign it from an earlier task instead, or give the variable a default or a
+`source:`:
+
+```
+agent.yaml:52: task "verify_customer" instructions references {{customer_status}},
+and "verify_customer" is the only step that assigns it, so the value does not
+exist while this prompt is being built. Assign it from an earlier step, or
+give the variable a default or a source:
+```
+
 **What the caller hears: nothing.** The refusal goes to the model, not to the
 caller. It names the missing variable and the task that supplies it, so the
 model runs `customer_record` and calls the step again on the same turn. The
@@ -459,9 +485,26 @@ LiveKit agents and Pipecat output are unchanged.
 | `include_tool_calls` | `true` or `false` | whether tool calls travel too |
 | `variables` | `all` or a list of names | handoffs only, not tasks |
 
+What each value gives the step:
+
+- `full`: the running transcript, tool records included.
+- `messages`: what the caller and the agent said out loud, tool records
+  dropped.
+- `last_n` with `max_messages: n`: the newest n entries, tool records kept,
+  never a tool result whose call was cut.
+- `reset`: the step's own instructions and its declared values, nothing else.
+- `summary`: one summarizer turn in place of the transcript. LiveKit only;
+  Pipecat refuses it, see the per-target table below.
+
 `history: full` is usually right, because the caller has already said something
 the task needs. `history: reset` is right when the step must not be influenced
-by what came before.
+by what came before, and must be a step whose whole job is described by its
+declared values, since it has no other way to know what the caller is asking
+for.
+
+No `history:` value is a privacy control. Shortening the history does not
+unsay what the caller said out loud; the caller's words are still in the
+call's own record even when a step is not shown them.
 
 ## Task group
 
@@ -613,6 +656,15 @@ Two things the table does not cover, because they trip people up:
   that already exists. With `history: full` the new agent can see what was said,
   but writing `{{customer_name}}` into its prompt for a value the first agent
   collected mid-call is refused. Rely on the history and say so in prose.
+  That holds for `history: full` and `history: messages`. It does not hold for
+  `history: reset`: a reset step gets its own instructions and its declared
+  values, nothing else, so there is no history to rely on and no way to write
+  a prompt that leans on one. A reset step also never sees the caller's
+  triggering utterance, so it cannot work out what was just asked. Give it to
+  a step that is fully described by its declared values, such as confirming a
+  number or taking a payment, never to one that has to interpret what the
+  caller wants. Nothing in the compiler catches the wrong choice, which is why
+  it has to be said here.
 
 ## Where a target refuses a shape
 
@@ -628,11 +680,16 @@ Raise these **before** you write files, not after validate fails.
 
 | Target | Supported task history | Rejected task history |
 |---|---|---|
-| `pipecat` | `full` | `messages`, `last_n`, `summary`, `reset` |
+| `pipecat` | `full`, `messages`, `last_n`, `reset` | `summary` |
 
-Pipecat emits full task history only. Choose another history mode only for a
-target that supports it; validation refuses the unsupported package instead of
-silently widening or dropping context.
+`history: summary` is refused on `pipecat`, on a task and on a handoff, with:
+
+```
+the Pipecat driver does not summarize a context yet: it supports history: full, messages, last_n and reset
+```
+
+Choose `summary` only for a target that supports it; validation refuses the
+unsupported package instead of silently widening or dropping context.
 
 Two things follow from that table.
 

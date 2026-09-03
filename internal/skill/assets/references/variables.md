@@ -162,7 +162,7 @@ difference is the thing people get wrong.
 |---|---|---|
 | `conversation.greeting.text` | once, at session start | a variable that already has a value, and never one awaiting confirmation |
 | an agent's instructions | once, at session start | a variable that already has a value, and never one awaiting confirmation |
-| a task's instructions | when that task starts | a variable that already has a value, or one assigned from a task result; a value awaiting confirmation only in the step that confirms it |
+| a task's instructions | when that task starts | a variable that already has a value, or one listed in this task's own `requires:`; a value awaiting confirmation only in the step that confirms it |
 | a tool's `inject:` value | on every tool call | any declared variable; one awaiting confirmation makes the call refuse itself until it is settled |
 | a webhook tool's `path` | on every tool call | any declared variable, URL encoded |
 
@@ -176,6 +176,24 @@ prompt is built; give it source: call_start, a system source, or a default
 ```
 
 An undeclared name is an error too.
+
+A task's own instructions may name a variable another task assigns only if
+this task's `requires:` lists it too. Naming it without listing it is a
+compile error:
+
+```
+tasks/booking.md: task "manage_booking" instructions references {{customer_status}}, which only task "verify_customer" assigns. Add customer_status to this task's requires: list, so the step waits for the value and its prompt can read it
+```
+
+Listing the name there also holds the task back until the value exists, so the
+prompt never renders it empty. Adding the name to a task's own `requires:`
+does not help when that same task is the one assigning it: that would wait on
+the task's own output, so assign it from an earlier task instead, or give the
+variable a default or a `source:`:
+
+```
+tasks/verify-customer.md: task "verify_customer" instructions references {{customer_status}}, and "verify_customer" is the only step that assigns it, so the value does not exist while this prompt is being built. Give the variable a default or a source:, or assign it from an earlier step
+```
 
 ## Passing a value into a tool without the model seeing it
 

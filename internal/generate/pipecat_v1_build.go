@@ -603,12 +603,29 @@ func setImportNeeds(data *pipecatData) {
 				data.NeedsEndFrame = true
 			}
 		}
+		for _, t := range a.Transfers {
+			// A handoff can carry a last_n window as readily as a task can, and
+			// the helper is emitted once at module scope for both.
+			data.NeedsLastN = data.NeedsLastN || strings.HasPrefix(t.CtxExpr, "_last_n(")
+			// A handoff's own `context.history` is the other site the runbook
+			// section has to cover, not just a task's.
+			data.NeedsHistoryRunbook = data.NeedsHistoryRunbook || t.CtxExpr != ""
+		}
 		for _, d := range a.Delegates {
 			data.HasFlows = true // tasks run as Flows on the owning worker (C8)
 			if d.Isolated {
-				data.HasIsolated = true
+				data.NeedsContextStrategy = true
 			}
 			for _, step := range d.StepTasks {
+				// The two things that render ContextStrategy.RESET on a node, and
+				// the one flag that imports the names they need. Missing this is a
+				// NameError at worker start, not a lint finding.
+				if step.Reset {
+					data.NeedsContextStrategy = true
+					data.NeedsHistoryRunbook = true
+				}
+				data.NeedsLastN = data.NeedsLastN || strings.HasPrefix(step.CtxExpr, "_last_n(")
+				data.NeedsHistoryRunbook = data.NeedsHistoryRunbook || step.CtxExpr != ""
 				for _, t := range step.Tools {
 					if t.Local {
 						data.NeedsInspect = true
@@ -876,10 +893,12 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 		case *ir.AgentTransfer:
 			// The method name is the control name (tools/controls share one
 			// namespace, D8), so the LLM invokes the tool by its spec name.
-			built.Transfers = append(built.Transfers, pipecatTransfer{
+			transfer := pipecatTransfer{
 				MethodName: ref, To: c.To, When: transferReason(c),
 				Announce: c.Announce, Reason: transferReason(c), Requires: c.Requires,
-			})
+			}
+			transfer.CtxExpr, _ = pipecatCtxExpr(c.Context.TaskContext)
+			built.Transfers = append(built.Transfers, transfer)
 		case *ir.HumanTransfer:
 			tool, err := humanTransferTool(ref, name, c, target, env)
 			if err != nil {
@@ -908,6 +927,31 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	}
 	built.FlowFunctionNames = sortedKeys(flowNames)
 	return built, nil
+}
+
+// pipecatCtxExpr lowers a context block's history shaping to the Python list a
+// step or a receiving worker starts with. "" means history: full, which needs
+// no expression: Pipecat creates one LLMContext per call and hands every worker
+// the same object, so the full running history is what a step gets when nothing
+// shapes it. That is what keeps a `full`-only package byte for byte identical.
+//
+// history: summary is refused on this target (the capability table), and
+// include_tool_calls: false is refused too, which is why there is no exclude
+// branch here and why last_n keeps tool records the way LiveKit's does.
+//
+// The livekit twin is livekitCtxExpr. The two cannot share code: one builds a
+// ChatContext and one builds a list of provider-shaped dicts.
+func pipecatCtxExpr(c ir.TaskContext) (expr string, needsLastN bool) {
+	switch c.History {
+	case ir.HistoryReset:
+		return "[]", false
+	case ir.HistoryMessages:
+		return `[m for m in self.context.get_messages() if m.get("role") in ("user", "assistant")]`, false
+	case ir.HistoryLastN:
+		return fmt.Sprintf("_last_n(self.context.get_messages(), %d)", c.MaxMessages), true
+	default: // full
+		return "", false
+	}
 }
 
 // buildDelegate lowers a delegate control to a Flow run on the owning worker
@@ -950,6 +994,20 @@ func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, e
 	for i := range delegate.StepTasks[:len(delegate.StepTasks)-1] {
 		delegate.StepTasks[i].NextName = delegate.StepTasks[i+1].Name
 		delegate.StepTasks[i].SlngNextHeaders = delegate.StepTasks[i+1].SlngHeaders
+	}
+	// The task's own context shapes its entry, and only for a single-task
+	// delegate: a group step takes the group's `context_scope` instead, which is
+	// where Isolated above comes from and which this must not override. Same
+	// split as livekitCtxExpr's two call sites.
+	//
+	// reset takes the RESET strategy rather than an empty list, because that
+	// line already exists on the node and RESET governs the transition itself.
+	if c.Task != "" {
+		if context := agent.Tasks[c.Task].Context; context.History == ir.HistoryReset {
+			delegate.StepTasks[0].Reset = true
+		} else {
+			delegate.StepTasks[0].CtxExpr, _ = pipecatCtxExpr(context)
+		}
 	}
 	return delegate, nil
 }

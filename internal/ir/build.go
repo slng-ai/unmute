@@ -795,6 +795,16 @@ func buildTaskContext(raw packagespec.TaskContext) TaskContext {
 // kinds that accept `requires:` share this, so the two cannot drift, and a name
 // that does not resolve is a typo the author must see at compile rather than a
 // guard that can never pass at runtime.
+//
+// Resolving the name is the whole check, and a stronger one was tried and
+// deleted: "refuse a name no route can ever fill". There is no such name. A
+// variable with no `source:` at all is seeded from the dispatch payload on both
+// code targets (livekit_v1_build.go and pipecat_v1_build.go both read
+// `v.Source == ir.VariableSourceCallStart || v.Source == ""`), optional rather
+// than required, so every declared variable has at least one route to a value
+// and the refusal could never fire. TestBuildAcceptsEveryRequiresARouteCanFill
+// holds that, so the next person to reach for the check finds the answer before
+// writing it.
 func checkRequires(pkg *packagespec.Package, requires []string, agent *Agent) error {
 	for _, name := range requires {
 		if _, ok := agent.Variables[name]; !ok {
@@ -941,7 +951,10 @@ func checkAssignments(taskName string, assign map[string]string, agent *Agent) e
 	for variable, path := range assign {
 		want, ok := agent.Variables[variable]
 		if !ok {
-			return fmt.Errorf("assign variable %q does not resolve", variable)
+			// Same sentence as checkRequires, for the same mistake made in the
+			// other key: name the block the author has to edit, because "does
+			// not resolve" says neither where to look nor what is wrong.
+			return fmt.Errorf("assign writes to %q, and it is not declared under the variables: block", variable)
 		}
 		fieldName, ok := strings.CutPrefix(path, "result.")
 		if !ok {

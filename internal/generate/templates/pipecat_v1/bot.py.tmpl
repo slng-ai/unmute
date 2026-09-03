@@ -62,7 +62,7 @@ from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnal
 {{end}}from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 {{if not .Inline}}from pipecat.bus import BusBridgeProcessor
-{{end}}{{if .HasFlows}}from pipecat.flows import {{if .HasIsolated}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig{{if .HasTaskTransfers}}, NO_RESPONSE{{end}}
+{{end}}{{if .HasFlows}}from pipecat.flows import {{if .NeedsContextStrategy}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig{{if .HasTaskTransfers}}, NO_RESPONSE{{end}}
 {{end}}{{if .FrameImports}}from pipecat.frames.frames import {{join .FrameImports ", "}}
 {{end}}from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -745,6 +745,23 @@ def _mcp_params(url: str, headers: dict[str, str] | None = None):
     params_cls = StreamableHttpParameters if url.rstrip("/").endswith("/mcp") else SseServerParameters
     return params_cls(url=url, headers=headers, timeout={{mcpTimeout}})
 {{end}}
+{{- if .NeedsLastN}}
+# --- context shaping ---------------------------------------------------------
+def _last_n(messages: list[dict], limit: int) -> list[dict]:
+    """history: last_n, the newest `limit` entries with no orphaned tool result.
+
+    LLMContext holds plain provider-shaped dicts and has no truncate() and no
+    exclusion filter, so this is list work. The window is cut at the front, so
+    the tail is whole and the only orphan possible is a tool result whose
+    assistant call fell outside it. A tool message with no matching call is a
+    request the provider rejects, so it goes. An assistant message carrying
+    tool calls is safe at the front: its results follow it.
+    """
+    window = messages[-limit:] if limit > 0 else []
+    while window and window[0].get("role") == "tool":
+        window = window[1:]
+    return window
+{{end}}
 # --- prompts ----------------------------------------------------------------
 # Agent system instructions as module constants: one copy each, referenced by
 # the LLM builder and any Flow restore (V2).
@@ -932,6 +949,9 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             await params.result_callback({"refused": _prerequisite_refusal(_unmet, False)})
             return
 {{end}}{{if .Announce}}        await self._announce_handoff({{pyq .Announce}})
+{{end}}{{if .CtxExpr}}        # context.history on this handoff. One LLMContext is shared for the whole
+        # call, so the receiver is given the shaped list rather than a copy.
+        self.context.set_messages({{.CtxExpr}})
 {{end}}        await self.activate_worker(
             {{pyq .To}},
             args=LLMWorkerActivationArgs(
@@ -1182,6 +1202,9 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(extra={"extra_headers": {{(index $d.StepTasks 0).SlngHeaders}}}),
         ))
+{{end}}{{if (index $d.StepTasks 0).CtxExpr}}        # context.history on this task. Shaped after the snapshot above, so the
+        # finish path restores the owner's own context whatever this step saw.
+        self.context.set_messages({{(index $d.StepTasks 0).CtxExpr}})
 {{end}}        await flow.initialize(self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
 {{range $t := $d.StepTasks}}
     def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:
@@ -1212,7 +1235,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                     handler={{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq $t.FinishName}}, self._{{$d.MethodName}}_finish_{{$t.Name}}){{else}}self._{{$d.MethodName}}_finish_{{$t.Name}}{{end}},
                 ),
             ],
-{{if $d.Isolated}}            context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
+{{if or $d.Isolated $t.Reset}}            context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
 {{end}}        )
 
 {{range $x := $t.Transfers}}    async def _{{$d.MethodName}}_transfer_{{$t.Name}}_{{$x.MethodName}}(self, args, flow_manager):

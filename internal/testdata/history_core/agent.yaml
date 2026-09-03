@@ -1,0 +1,162 @@
+# History fixture: one package that authors every `context.history` value the
+# Pipecat driver shapes, plus one on a handoff.
+#
+# It exists because no other package in the tree authors a non-`full` history on
+# Pipecat, so before this there was nothing to compile as proof that the driver
+# reads the field at all. The four tasks are one per value, and `take_message`
+# is the control: `full` has to emit no shaping call even here, in a package
+# whose other steps do.
+#
+# `to_billing` carries `history: reset` because the capability lookup takes a
+# value and a provider and nothing else, so a value legal on a task is legal on
+# a handoff at the same moment. A handoff that accepted the value and ignored it
+# would be the silent downgrade the constitution forbids by name.
+
+version: 1
+
+name: history-fixture
+
+entry_agent: intake
+
+agents:
+  intake:
+    instructions: instructions.md
+    think: fast_reasoning
+    speak: front_desk
+    tools:
+      - lookup_customer
+    tasks:
+      # reset: the step opens with its instructions and its declared values and
+      # nothing else. It does not receive the turn that triggered it, which is
+      # why a step like this one has to be fully described by what it requires.
+      - name: confirm_number
+        when: Read the caller's number back and get a yes before anything acts on it.
+        instructions: tasks/confirm_number.md
+        requires:
+          - caller_phone
+        assign:
+          - caller_phone: result.caller_phone
+        result:
+          caller_phone: string
+        context:
+          history: reset
+
+      # messages: what the caller and the agent said out loud, with tool records
+      # dropped. The middle setting, and the one to reach for when trimming.
+      - name: read_back
+        when: The caller wants to hear back what has been agreed so far.
+        instructions: tasks/read_back.md
+        result:
+          summary: string
+        context:
+          history: messages
+
+      # last_n: the newest few entries, tool records kept. The window is cut at
+      # the front, so the emitted helper drops a leading tool result whose call
+      # fell outside it: a tool message with no matching call is a request the
+      # provider rejects mid-call.
+      - name: sort_invoice
+        when: The caller is querying a specific invoice.
+        instructions: tasks/sort_invoice.md
+        tools:
+          - get_invoice
+        result:
+          resolved: boolean
+          summary: string
+        context:
+          history: last_n
+          max_messages: 6
+
+      # full: the control. Emits no shaping call, in a package that emits three.
+      - name: take_message
+        when: The caller wants to leave a message for somebody.
+        instructions: tasks/take_message.md
+        result:
+          summary: string
+        context:
+          history: full
+    handoffs:
+      - to_billing
+
+  billing:
+    instructions: agents/billing.md
+    think: careful_reasoning
+    speak: specialist
+    tools:
+      - get_invoice
+
+handoffs:
+  to_billing:
+    to: billing
+    when: Caller asks about billing, an invoice, or a refund.
+    context:
+      history: reset
+      variables: all
+
+variables:
+  caller_phone:
+    type: string
+    default: ""
+  verified:
+    type: boolean
+    default: false
+
+models:
+  think:
+    fast_reasoning:
+      description: cheap and quick, greeting and routing
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.4
+    careful_reasoning:
+      description: slower and careful, billing work
+      provider: openai
+      model: gpt-4o
+  speak:
+    front_desk:
+      description: "warm, concise"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+    specialist:
+      description: "slower, more deliberate"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-orion-en"
+  listen:
+    transcriber:
+      description: default STT; targets that cannot run it override the entry
+      provider: deepgram
+      model: nova-3
+  turn:
+    vad:
+      description: end-of-turn preference; integrated targets warn and ignore it
+      provider: local
+      model: silero
+      semantic_endpointing: preferred
+
+tools:
+  - lookup_customer
+  - get_invoice
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, you have reached Acme Support. How can I help you today?"
+  interruption:
+    enabled: true
+    minimum_words: 2
+  inactivity:
+    nudge_after: 15s
+    end_after: 45s
+  max_duration: 20m
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 40
+  max_sessions: 60
+  peak_starts_per_second: 4
+  avg_session_duration: 6m
