@@ -16,6 +16,16 @@ That validates the package, compiles it, creates the agent in your organisation,
 and returns an agent id you can talk to. Nothing is created unless every check
 passes, so a run that reports problems has changed nothing.
 
+One thing happens before it. If the package references a hosted tool with
+`slng:`, run [`unmute pull`](/reference/cli/pull) once and commit what it
+writes. Deploy compiles from that committed copy and fetches nothing, which is
+what lets a machine with no SLNG key build the package:
+
+```sh
+unmute pull ./my-agent     # once, and again when the tool changes on SLNG
+unmute deploy ./my-agent
+```
+
 ## What works today
 
 <Warning>
@@ -82,6 +92,39 @@ Follow these against `examples/slng-support` from a clone of the repository.
 Each step's output is what you should actually see.
 
 <Steps>
+  <Step title="Mirror the hosted tools">
+    ```sh
+    unmute pull examples/slng-support
+    ```
+
+    ```text
+    pull examples/slng-support
+
+      slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
+
+      tools/check_order.slng.json              unchanged
+      tools/check_order.slng.py                unchanged
+      tools/check_order.yaml                   unchanged
+      tools/search_places_text.slng.json       unchanged
+      tools/search_places_text.yaml            unchanged
+    ```
+
+    Every line reads `unchanged` because the repository already carries the
+    mirrors, which is the point of committing them. In your own package the
+    first pull writes them and you commit them.
+
+    `validate` and `compile` open no connection at all, so they read the
+    committed mirror and nothing else. That is what lets a machine with no SLNG
+    key build the package, and it is why skipping this step does not produce a
+    slow build, it produces a refusal:
+
+    ```text wrap
+    slng: tool "check_order": `slng:` names a tool SLNG hosts and no mirror of it is
+      committed, so there is nothing to compile: run `unmute pull` to fetch it, and commit
+      what it writes
+    ```
+  </Step>
+
   <Step title="Validate">
     ```sh
     unmute validate examples/slng-support
@@ -103,17 +146,34 @@ Each step's output is what you should actually see.
 
     ```text
     ✓ slng (slng)
+    slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
+    slng: 7 requirements satisfied
     slng: credential from SLNG_API_KEY
     slng: compiled examples/slng-support/build/slng (2 files)
-    slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
     slng: agent acme-support-slng — create
+    slng: reference check_order (new attachment)
+    slng: reference search_places_text (new attachment)
     slng: reference end_call (new attachment)
     slng: dry run, nothing was created or changed
     ```
 
-    Two lines carry the whole plan. `create` means no agent of that name exists
-    yet, and `new attachment` means the builtin gets wired to it. Nothing is
-    listed under a tool heading, because this package creates no tool.
+    `create` means no agent of that name exists yet. A `reference` line is
+    something SLNG already holds getting wired to that agent, and `new
+    attachment` means it is not wired to it yet. Two of these three are hosted
+    tools the package only references, the third is a builtin, and nothing is
+    listed under a tool heading because this package creates no tool.
+
+    `7 requirements satisfied` is the account read: every vault entry, hosted
+    tool, builtin and MCP server the package names, checked against your
+    organisation before anything is written. This is where the package's `mcp:`
+    tool is counted, which is why it gets no `reference` line of its own. A
+    requirement the account does not have is reported here instead, and stops
+    the run.
+
+    On a package that already has a live agent, two more lines appear and they
+    are the reason to run this at all: `would detach`, for a reference the
+    package no longer names, and `would overwrite`, for a field that differs
+    from what the agent has now. A push replaces.
   </Step>
 
   <Step title="Deploy">
@@ -123,9 +183,10 @@ Each step's output is what you should actually see.
 
     ```text
     ✓ slng (slng)
+    slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
+    slng: 7 requirements satisfied
     slng: credential from SLNG_API_KEY
     slng: compiled examples/slng-support/build/slng (2 files)
-    slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
     slng: agent created 428006b1-19cf-499f-be00-e12b8dbfad14
     slng: version 1 labelled "slng-support @ 2026-08-27T15:08:39.184Z"
     slng: deployed. Talk to it: voiceai agents web-sessions create 428006b1-19cf-499f-be00-e12b8dbfad14 --file session.json
@@ -225,6 +286,19 @@ An ordinary redeploy moves nothing else. The region is fixed at create and the
 agent id does not change, so a web session or a dashboard attachment holding
 that id keeps working.
 
+What can go out of date between deploys is a hosted tool. Somebody edits it in
+the SLNG dashboard and your committed mirror is now the old definition. Nothing
+breaks on slng, because the agent runs the platform's copy either way, but the
+mirror is what a `pipecat` or `livekit` build of the same package compiles, so
+it is worth checking:
+
+```sh
+unmute pull ./my-agent --check
+```
+
+It writes nothing and exits 1 on drift, which is what makes it usable in CI.
+`unmute pull` then brings the mirror forward.
+
 ## Renaming the agent
 
 A push resolves the agent by name, so a new name pushes a **second** agent and
@@ -248,8 +322,14 @@ until all of them clear.
 | It says | What to do |
 |---|---|
 | `vault missing` | create each name in [the vault](https://app.slng.ai/vault/secrets). A name that exists as a *variable* does not count. |
-| `tool unresolved` | the package names a tool your organisation cannot see. Rename the reference, or create the tool in the dashboard. |
+| `tool unresolved` | the package names a tool your organisation cannot see. Rename the reference, or create the tool in the dashboard. Unmute creates none. |
+| `no mirror of it is committed` | a `slng:` tool with nothing to compile. Run `unmute pull` and commit what it writes. |
+| `does not match the hash` | the committed mirror and the pin disagree, so somebody edited one. Run `unmute pull` and read the diff, or `git checkout` the mirror. |
 | `agent ambiguous` | two agents share the package's name. Pass `--agent-id`. |
+
+The last two come from `validate`, which `deploy` runs first, so they stop the
+deploy before it reads your account. [Hosted tools](/build/tools/hosted) has
+the rest of them.
 
 ## When the agent answers with silence
 
@@ -292,5 +372,11 @@ each call, which is worth trying before you pin one.
   </Card>
   <Card title="The SLNG target" icon="boxes" href="/targets/slng">
     What the compiler writes, and what SLNG refuses.
+  </Card>
+  <Card title="Hosted tools" icon="wrench" href="/build/tools/hosted">
+    The `slng:` block, and the pull loop it belongs to.
+  </Card>
+  <Card title="unmute pull" icon="download" href="/reference/cli/pull">
+    Every file it writes, and every way it refuses.
   </Card>
 </CardGroup>

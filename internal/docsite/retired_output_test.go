@@ -78,6 +78,19 @@ var retiredOutputs = []retiredOutput{
 		needles: []string{"document(s), embed "},
 		instead: "compile-report.json records what each knowledge base carries, under `notes`",
 	},
+	{
+		// A slng push creates no tool. Unmute writes `tool_refs` into
+		// agent.json and no tool definition, so the platform has nothing to
+		// create, sample or publish, and the plan prints `reference <name>`
+		// instead. The print site in deploy.go still exists and is still
+		// right: it renders whatever the push reports, and a push unmute makes
+		// reports no tool. This entry is about the pages, which kept a
+		// hand-copied transcript of the old behaviour on the deploy reference
+		// long after the behaviour went, teaching that slng builds your tool
+		// for you.
+		needles: []string{": tool ", "published v"},
+		instead: "a hosted tool is referenced rather than created: the plan prints `slng: reference <name>`, and /build/tools/hosted covers the block",
+	},
 	// The eight advisory capability warnings, deleted from the table rather than
 	// hidden at the print. Four were driver TODOs addressed to a maintainer and
 	// four stated a fact about a framework, and all eight fired on every run of a
