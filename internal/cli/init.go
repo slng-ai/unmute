@@ -8,6 +8,7 @@ import (
 
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/scaffold"
+	"github.com/slng-ai/unmute/internal/style"
 	"github.com/slng-ai/unmute/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -72,6 +73,8 @@ func consoleAction(action, path string, out io.Writer) error {
 }
 
 func writeScaffold(cmd *cobra.Command, dir string, data scaffold.Data) error {
+	out := cmd.OutOrStdout()
+	printHeader(out, "init "+displayDir(dir))
 	// The scaffold seeds `name:` from the folder when it can, and writes none
 	// when it cannot rather than guessing at a deployed identity. Preflight would
 	// catch the result a moment later, but its message is about a field the
@@ -88,8 +91,9 @@ func writeScaffold(cmd *cobra.Command, dir string, data scaffold.Data) error {
 	if err != nil {
 		return fmt.Errorf("init %s: %w", dir, err)
 	}
+	u := style.For(out)
 	for _, path := range created {
-		fmt.Fprintln(cmd.OutOrStdout(), "created", path)
+		fmt.Fprintln(out, u.Dim("created"), dimPath(u, path))
 	}
 	return nil
 }

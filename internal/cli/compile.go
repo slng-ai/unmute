@@ -14,6 +14,7 @@ import (
 	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/style"
 	"github.com/slng-ai/unmute/internal/target"
 	"github.com/spf13/cobra"
 )
@@ -40,6 +41,8 @@ func newCompileCmd() *cobra.Command {
 }
 
 func runCompile(cmd *cobra.Command, dir string, names []string) error {
+	out := cmd.OutOrStdout()
+	printHeader(out, "compile "+displayDir(dir))
 	agent, targets, err := loadPackage(dir, names)
 	if err != nil {
 		return fmt.Errorf("compile %s: %w", dir, err)
@@ -47,8 +50,8 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 	if len(targets) == 0 {
 		return fmt.Errorf("compile %s: no targets selected", dir)
 	}
-	printHeader(cmd.OutOrStdout(), "compile "+displayDir(dir))
 	caps := target.Default()
+	u := style.For(out)
 	for _, resolved := range targets {
 		artifact, err := generate.Generate(agent, resolved, caps)
 		if err != nil {
@@ -61,7 +64,7 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 		// rest of the artifact, which is where it belongs: it described the
 		// output, and it is now next to the output.
 		for _, warning := range artifact.Notes.Warnings {
-			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s: %s\n", resolved.Name, warning)
+			warnf(cmd.ErrOrStderr(), "%s: %s\n", resolved.Name, warning)
 		}
 		// Both kinds write the same way. They are still two cases, because the
 		// switch had no default arm: an artifact kind nobody handled produced a
@@ -74,7 +77,7 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 				return fmt.Errorf("compile %s: %w", dir, err)
 			}
 			for _, file := range artifact.Files {
-				fmt.Fprintln(cmd.OutOrStdout(), "generated", filepath.Join(outDir, file.Path))
+				fmt.Fprintln(out, u.Dim("generated"), dimPath(u, filepath.Join(outDir, file.Path)))
 			}
 		default:
 			return fmt.Errorf("compile %s: target %q produced artifact kind %q, which this command does not know how to write",
@@ -166,14 +169,14 @@ func writeArtifactFiles(warn io.Writer, outDir string, files []generate.File) (e
 		}
 	}
 	if ruffMissing && warn != nil {
-		fmt.Fprintln(warn, "warning: ruff not found on PATH; emitted Python left unformatted (install ruff for formatted output)")
+		warnf(warn, "ruff not found on PATH; emitted Python left unformatted (install ruff for formatted output)\n")
 	}
 	// ruff ran and could not format, but not because the Python was bad. That is
 	// an environment problem, so it is reported and compile carries on with the
 	// unformatted source: failing here would reject valid output for a reason
 	// that has nothing to do with it.
 	if len(ruffTrouble) > 0 && warn != nil {
-		fmt.Fprintf(warn, "warning: ruff could not format %s; emitted Python left unformatted\n", strings.Join(ruffTrouble, "; "))
+		warnf(warn, "ruff could not format %s; emitted Python left unformatted\n", strings.Join(ruffTrouble, "; "))
 	}
 	// The emitted Python does not parse. compile's whole job is to produce a
 	// runnable project, so reporting success here would be the silent downgrade

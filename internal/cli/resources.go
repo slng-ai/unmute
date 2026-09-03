@@ -61,11 +61,11 @@ func newResourcesCmd() *cobra.Command {
 func runResources(out, errOut io.Writer, runner *voiceaiRunner) error {
 	// No package, so no requirements, so no MCP server to interrogate by name.
 	// The servers are listed and each one's tools are read below instead.
+	printHeader(out, "resources")
 	resources, err := readResources(runner, nil)
 	if err != nil {
 		return fmt.Errorf("resources: %w", err)
 	}
-	printHeader(out, "resources")
 	fmt.Fprintf(out, "organisation %s\n", resources.Account)
 
 	fmt.Fprintf(out, "\ntools (%d)\n", len(resources.Tools))
@@ -87,7 +87,7 @@ func runResources(out, errOut io.Writer, runner *voiceaiRunner) error {
 		fmt.Fprintf(out, "  %-24s %s, last probe %s\n", server.Name, server.Transport, probeStatus(server))
 		var tools []slngMCPTool
 		if err := runner.read(target.SlngMCPTools.With(server.Name), &tools); err != nil {
-			fmt.Fprintf(errOut, "warning: %v\n", err)
+			warnf(errOut, "%v\n", err)
 			continue
 		}
 		for _, tool := range tools {
@@ -102,10 +102,10 @@ func runResources(out, errOut io.Writer, runner *voiceaiRunner) error {
 
 	trunks, notes, err := readTrunks(runner)
 	for _, note := range notes {
-		fmt.Fprintf(errOut, "note: %s\n", note)
+		notef(errOut, "%s\n", note)
 	}
 	if err != nil {
-		fmt.Fprintf(errOut, "warning: %v\n", err)
+		warnf(errOut, "%v\n", err)
 		return nil
 	}
 	fmt.Fprintf(out, "\nphone numbers (%d trunks)\n", len(trunks))
