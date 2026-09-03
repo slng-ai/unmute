@@ -1,0 +1,185 @@
+---
+title: "Hosted tools"
+description: "Reference a tool your SLNG organisation already has: the one field you write, and what unmute pull mirrors for you."
+---
+
+A hosted tool is not defined in your package. It is defined on the SLNG
+platform already, and the block just points at it.
+
+```yaml tools/check_order.yaml
+description: Look up an order by its number and return its status and delivery date.
+
+slng:
+  hash: 336a66b9a564f472...
+```
+
+`hash` is the only field, and you do not write it yourself. `unmute pull`
+writes it, after it fetches the tool's definition and mirrors it beside this
+file. It is the pin that proves the committed mirror is the one this file
+means.
+
+The tool **file's** name is what resolves against your organisation, so
+`tools/check_order.yaml` binds to a tool called `check_order`. There is no
+name field. This is the same rule [`builtin:`](/build/tools/prebuilt) follows,
+and it exists for the same reason: a second name to keep in sync is a second
+name that can drift.
+
+## Before the first pull
+
+Write `slng: {}` for a tool your organisation already has, then run the pull.
+An empty block compiles to nothing, and `unmute compile` says so rather than
+guessing:
+
+```text wrap
+tool "check_order": `slng:` names a tool SLNG hosts and no mirror of it is committed, so
+  there is nothing to compile: run `unmute pull` to fetch it, and commit what it writes
+```
+
+## What the block refuses
+
+A hosted tool owns its own schema, so these fields are unwritable rather than
+silently ignored:
+
+| Field | Because |
+|---|---|
+| `input`, `output` | the platform published the schema; a second copy here could disagree with it |
+| `handler` | the code is the platform's, mirrored, not authored |
+| `url_env`, `base_url`, `path` | the platform stores the URL |
+| `dependencies` | the platform installs them |
+
+## What the block keeps
+
+These describe how your agent uses the tool, not what the tool is, so they
+stay yours to write:
+
+| Field | Effect |
+|---|---|
+| `description` | overrides the platform's own. Omit it to use what the platform already says |
+| `inject` | values merged into every call, never shown to the model |
+| `announce` | one sentence the agent speaks as the tool starts |
+| `effect` | whether the call ends the conversation |
+| `interruption` | whether the caller can interrupt during the call |
+
+Full rules for the last three are on
+[the tools overview](/build/tools/overview#the-three-behavior-fields).
+
+## Attaching one
+
+No different from any other tool. The same two lists:
+
+```yaml agent.yaml
+agents:
+  support:
+    instructions: instructions.md
+    model: reasoning
+    voice: front_desk
+    tools:
+      - check_order
+      - end_call
+
+tools:
+  - check_order
+  - end_call
+```
+
+## The loop
+
+```sh
+unmute pull          # once, and again when the tool changes on the platform
+unmute compile       # offline, from the committed mirror
+unmute deploy
+```
+
+`pull` is the only command that needs a credential. `validate` and `compile`
+read the committed mirror and work with no network at all, which is what lets
+CI build a package that names a hosted tool. Full command reference at
+[`unmute pull`](/reference/cli/pull).
+
+Commit everything `pull` writes. The mirror is how the tool reaches livekit
+and pipecat, and the pin is how a later compile knows the mirror is still the
+right one.
+
+## What each target does with it
+
+| Target | What happens |
+|---|---|
+| SLNG | references the platform's own tool by name. Nothing is created, nothing is uploaded |
+| LiveKit | the mirrored code runs inside the generated project |
+| Pipecat | the same |
+
+It works on all three because the definition travels rather than staying put.
+`unmute pull` writes the platform's own schema, and for a code tool its
+module, into your package, so livekit and pipecat build a real tool out of the
+committed mirror with no network at all.
+
+**One limit, and it is the honest cost of "runs everywhere."** A hosted tool
+that declares Python dependencies compiles to slng, which installs a per-tool
+environment, and is refused on livekit and pipecat, in the same words an
+authored `local:` tool's `dependencies:` already gets there:
+
+```text wrap
+the LiveKit driver builds one dependency list for the whole generated project from the
+  provider catalogue and reads no per-tool pins: add the package to
+  build/<target>/pyproject.toml after compiling, or compile to slng which installs a
+  per-tool environment
+```
+
+A mirrored pin and an authored one reach nothing on those two targets for the
+same reason: each builds one dependency list for the whole project, and reads
+no per-tool pins. A hosted tool with no dependencies works on all three.
+
+## The mirrors are not yours to edit
+
+`tools/<name>.slng.json` and, for a code tool, `tools/<name>.slng.py` are the
+platform's copy, not yours. The `.slng.` infix marks a file as mirrored rather
+than authored, so one glance answers whether you may edit it. The answer is
+no.
+
+Every compile checks the mirror against the pin, with no network at all, so a
+hand edit is caught the next time anybody builds the package:
+
+```text wrap
+tool "check_order": tools/check_order.slng.py does not match the hash tools/check_order.yaml
+  pins, so the committed mirror is not the one this package means: run `unmute pull` and
+  read the diff, or `git checkout` the mirror if the edit was a mistake
+```
+
+`unmute pull` itself refuses the same way, before it overwrites anything,
+naming every changed file at once. `--force` discards the edits; the honest
+fix is to change the tool on the platform and pull again.
+
+## Reference-only
+
+Unmute creates no tool on SLNG. A hosted reference only ever points at a tool
+your organisation already has; a name it does not hold is a refusal, not
+something a deploy creates for you.
+
+That is also why [`local:`](/build/tools/python) and
+[`webhook:`](/build/tools/webhook) are refused on an slng target: SLNG owns a
+tool's code, version and gate pipeline, so there is nowhere in a package for
+either block to write to. Both still work exactly as before on livekit and
+pipecat. A brand new tool starts in the SLNG dashboard; `slng:` is how your
+package reaches it once it exists there.
+
+## Which block for which job
+
+| You want | Write |
+|---|---|
+| a tool SLNG already hosts, with code or a request configuration | `slng:` |
+| a capability SLNG curates, like ending the call | `builtin:` |
+| tools from an MCP server your organisation registered | `mcp:` |
+| your own Python, running inside a livekit or pipecat project | `local:` |
+| an HTTP endpoint you host | `webhook:` |
+
+The last two are the two that no longer reach slng.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="unmute pull" icon="download" href="/reference/cli/pull">
+    The command, its flags, and every refusal.
+  </Card>
+  <Card title="Prebuilt tools" icon="package" href="/build/tools/prebuilt">
+    The other reference-only block: a capability SLNG curates.
+  </Card>
+</Columns>

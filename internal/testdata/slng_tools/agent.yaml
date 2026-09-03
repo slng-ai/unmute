@@ -1,23 +1,27 @@
-# Every tool shape the slng driver can emit, in one package, so the tool-body
+# Every tool shape the slng driver can emit, in one package, so the reference
 # tests have somewhere to read a real one from.
 #
-#   check_order   local:   -> a code body under tools/
-#   refund        webhook: -> an api_request body, with a templated path that
-#                             has to land in config_overrides rather than in the
-#                             tool's own config.url
+# The slng target creates no tool, so every shape here is a reference:
+#
+#   check_order   slng:    -> a hosted code tool, with dependencies, which is
+#                             the combination livekit and pipecat refuse
+#   refund        slng:    -> a hosted api_request tool, whose whole URL and
+#                             credential SLNG stores
 #   internal_docs mcp:     -> no file at all, one mcp_refs entry per listed tool
 #   end_call      builtin: -> no file, a named reference to a curated capability
 #
-# It also carries a Vault token in the greeting and a secret behind the webhook
-# tool, so the runbook has both kinds of Vault name to group.
+# It also carries a Vault token in the greeting and a secret behind the hosted
+# request tool, so the runbook has both kinds of Vault name to group.
 
 version: 1
 name: slng-tools-fixture
 entry_agent: support
 
 secrets:
+  # REFUND_API_TOKEN is the hosted request tool's credential, which the mirror
+  # names. REFUND_URL is gone with the webhook block: SLNG stores a hosted
+  # tool's whole URL, so there is nothing here to read one from.
   - REFUND_API_TOKEN
-  - REFUND_URL
   - INTERNAL_DOCS_MCP_URL
 
 models:

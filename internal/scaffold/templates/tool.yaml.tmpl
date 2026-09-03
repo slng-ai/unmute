@@ -5,6 +5,13 @@
 [[end]][[else if eq .ExecutionKind "knowledge"]]description: [[quote .Description]]
 knowledge:
   base: [[.KnowledgeBase]]
+[[else if eq .ExecutionKind "slng"]][[if .Description]]description: [[quote .Description]]
+[[end]]slng:[[if .SlngHash]]
+  hash: [[.SlngHash]]
+[[else]] {}
+[[end]]
+interruption: provider_default
+effect: returns_data
 [[else if eq .ExecutionKind "mcp"]]mcp:
   url_env: [[.URLEnv]]
 [[if .MCPTransport]]  transport: [[.MCPTransport]]

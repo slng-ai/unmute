@@ -232,6 +232,17 @@ func TestLoadToolShape(t *testing.T) {
 		{"knowledge with effect", "description: Probe.\nknowledge:\n  base: refunds\neffect: returns_data\n", "tools/probe.yaml:4: remove `effect`"},
 		{"knowledge beside webhook", "description: Probe.\ninput: { type: object }\nwebhook:\n  url_env: PROBE_URL\nknowledge:\n  base: refunds\n", "two execution blocks"},
 		{"empty knowledge block", "description: Probe.\nknowledge:\n", "block is empty"},
+		// A hosted tool's definition is the platform's, so a second copy written
+		// here could disagree with it and the author would have no way to tell
+		// which one the agent used. Only input and output can be written beside
+		// the block at all: handler, url_env and auth read as migrations, and
+		// base_url, path and dependencies live inside a block the
+		// exactly-one-block rule already refuses beside this one.
+		{"slng with input", head + "\nslng:\n  hash: abc\n", "tools/probe.yaml:2: remove `input`"},
+		{"slng with output", "description: Probe.\nslng:\n  hash: abc\noutput: { type: object }\n", "tools/probe.yaml:4: remove `output`"},
+		{"slng beside webhook", "description: Probe.\nslng:\n  hash: abc\nwebhook:\n  url_env: PROBE_URL\n", "two execution blocks"},
+		{"slng beside local", "description: Probe.\nslng:\n  hash: abc\nlocal:\n  handler: tools/probe.py\n", "two execution blocks"},
+		{"bare slng block", "description: Probe.\nslng:\n", "needs an explicit empty body"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Load(writeToolPackage(t, tc.body))
@@ -256,6 +267,12 @@ func TestLoadToolShape(t *testing.T) {
 		{"mcp", "mcp:\n  url_env: PROBE_MCP_URL\n", "mcp"},
 		{"knowledge", "description: Probe.\nknowledge:\n  base: refunds\n", "knowledge"},
 		{"knowledge with announce", "description: Probe.\nannounce: Let me check.\ninterruption: cancel\nknowledge:\n  base: refunds\n", "knowledge"},
+		// `slng: {}` is what an author writes before the first pull, so it has
+		// to load. ir.Validate is what refuses it, naming the pull, because that
+		// is the message the author can act on.
+		{"explicit empty slng", "description: Probe.\nslng: {}\n", "slng"},
+		{"slng with a pin", "description: Probe.\nslng:\n  hash: abc\n", "slng"},
+		{"slng keeps announce and effect", "description: Probe.\nannounce: One moment.\neffect: returns_data\nslng:\n  hash: abc\n", "slng"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pkg, err := Load(writeToolPackage(t, tc.body))

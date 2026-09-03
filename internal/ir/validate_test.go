@@ -2024,8 +2024,10 @@ func TestValidatePipecatCloudWebsocketRefusesCallSources(t *testing.T) {
 
 // TestValidateToolAnnounceLegalExecutionOnly: the line needs a body to speak
 // before, so it follows inject's rule. Every other execution kind is refused by
-// tool name, and a webhook, local or knowledge tool passes (FR-002, and FR-029
-// for the third, which reuses this field rather than adding one).
+// tool name, and a webhook, local, knowledge or slng tool passes (FR-002,
+// FR-029 for the third, which reuses this field rather than adding one, and the
+// fourth for the same reason: a hosted tool runs somewhere, and how long it
+// takes is exactly what an author cannot control).
 func TestValidateToolAnnounceLegalExecutionOnly(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -2035,6 +2037,7 @@ func TestValidateToolAnnounceLegalExecutionOnly(t *testing.T) {
 		{"webhook", ToolWebhook, false},
 		{"local", ToolLocal, false},
 		{"knowledge", ToolKnowledge, false},
+		{"slng", ToolSlngHosted, false},
 		{"builtin", ToolBuiltin, true},
 		{"client", ToolClient, true},
 		{"provider_hosted", ToolProviderHosted, true},
@@ -2046,6 +2049,13 @@ func TestValidateToolAnnounceLegalExecutionOnly(t *testing.T) {
 			tool.Execution = tc.execution
 			if tc.execution == ToolLocal {
 				tool.Handler, tool.URLEnv = "tools/lookup_customer.py", ""
+			}
+			if tc.execution == ToolSlngHosted {
+				// A hosted tool with no mirror is refused for that, which is a
+				// different error; this case is about announce alone.
+				tool.URLEnv, tool.Input, tool.Output = "", nil, nil
+				tool.MirrorPin = MirrorDigest(nil)
+				tool.Mirror = &packagespec.Mirror{Name: "lookup_customer", ToolType: "code", Source: "org"}
 			}
 			if tc.execution == ToolKnowledge {
 				tool.URLEnv, tool.Input, tool.Output = "", nil, nil
@@ -2059,7 +2069,7 @@ func TestValidateToolAnnounceLegalExecutionOnly(t *testing.T) {
 			agent.Tools["lookup_customer"] = tool
 			report, _ := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
 			joined := strings.Join(report.PerTarget[0].Errors, "\n")
-			const want = `tool "lookup_customer" announce is legal for webhook, local and knowledge execution only`
+			const want = `tool "lookup_customer" announce is legal for webhook, local, knowledge and slng execution only`
 			if got := strings.Contains(joined, want); got != tc.wantError {
 				t.Errorf("announce refused = %v, want %v: %#v", got, tc.wantError, report.PerTarget[0].Errors)
 			}

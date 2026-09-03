@@ -1,0 +1,53 @@
+{
+  "name": "search_places_text",
+  "tool_type": "api_request",
+  "source": "org",
+  "description": "Call this tool to search for places via a simple text query using the places api from google.",
+  "arg_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "query": {
+        "description": "Query to search for, for example: \"Tapas bar in Madrid\"",
+        "type": "string"
+      }
+    },
+    "required": [
+      "query"
+    ],
+    "type": "object"
+  },
+  "config": {
+    "auth": {
+      "secret_name": "SLNG_TOOL_RENDER",
+      "type": "bearer"
+    },
+    "headers": [],
+    "http_method": "POST",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "description": "Query to search for, for example: \"Tapas bar in Madrid\"",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "response": {
+      "instructions": null,
+      "show_to_llm": true
+    },
+    "strict": true,
+    "timeout_seconds": 10,
+    "type": "api_request",
+    "url": "https://tools.example.com/tools/search-text",
+    "wait_for_response": true,
+    "webhook_format": "raw"
+  },
+  "content_hash": "444b1061bb4d875ec97621385621c0cb7285a065e7b3bc3d7f985bde412b7872",
+  "latest_version": 3,
+  "fetched": "2026-09-03"
+}

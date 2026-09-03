@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/slng-ai/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/target"
 )
 
 // TestWriteArtifactFilesFormatsPython: the write path runs a best-effort
@@ -135,6 +136,52 @@ func runCompileCommand(t *testing.T, args ...string) (string, string, error) {
 	cmd.SetArgs(append([]string{"compile"}, args...))
 	err := cmd.Execute()
 	return stdout.String(), stderr.String(), err
+}
+
+// TestCompileNeedsNoCredential is the requirement the whole hosted-tool design
+// rests on, and it is checked by removing the credential from the environment
+// rather than by unsetting a profile.
+//
+// Nothing in CI has an SLNG credential and nothing ever will, so a package that
+// names a tool the platform hosts still has to compile there. That is why the
+// definition is fetched once by hand, committed, and read off disk from then on.
+//
+// The distinction matters: a stored `voiceai` profile on a developer's machine
+// would satisfy a fetch nobody meant to make, and the test would pass while the
+// property it claims to hold was false.
+func TestCompileNeedsNoCredential(t *testing.T) {
+	for _, tc := range []struct {
+		fixture string
+		target  string
+	}{
+		{"slng_hosted", "slng"},
+		{"slng_hosted_code", "livekit"},
+		{"slng_hosted_code", "pipecat"},
+	} {
+		t.Run(tc.fixture+"/"+tc.target, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", tc.fixture))); err != nil {
+				t.Fatal(err)
+			}
+			// Every name a credential could arrive under, emptied. Setenv with
+			// an empty value beats Unsetenv here: an empty string is what a
+			// caller reads, and it proves the code does not fall back to a
+			// stored profile either.
+			t.Setenv(target.SlngRouterKeyEnv, "")
+			t.Setenv(target.SlngPushCredentialEnv, "")
+			// PATH too, so `voiceai` is not even reachable. If compile grew a
+			// fetch, this is what would catch it.
+			t.Setenv("PATH", t.TempDir())
+
+			out, errOut, err := runCompileCommand(t, dir, "--target", tc.target)
+			if err != nil {
+				t.Fatalf("compile needed a credential: %v\n%s\n%s", err, out, errOut)
+			}
+			if !strings.Contains(out, "agent.json") && !strings.Contains(out, "agent.py") && !strings.Contains(out, "bot.py") {
+				t.Errorf("compile wrote no agent module:\n%s", out)
+			}
+		})
+	}
 }
 
 // Forwarded bindings and derived sizing reach compile-report.json, which is now

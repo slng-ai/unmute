@@ -102,6 +102,7 @@ func TestToolKindTableMatchesCapabilities(t *testing.T) {
 		"client":          target.FieldToolClient,
 		"provider_hosted": target.FieldToolProviderHosted,
 		"knowledge":       target.FieldToolKnowledge,
+		"slng":            target.FieldToolSlngHosted,
 	}
 
 	var rows []toolKindRow
@@ -222,7 +223,7 @@ func TestToolTaskScopeTableMatchesCapabilities(t *testing.T) {
 func TestToolPageCountsTheExecutionBlocks(t *testing.T) {
 	body := readOverview(t)
 	blocks := []string{
-		"webhook", "local", "mcp", "builtin", "client", "provider_hosted", "knowledge",
+		"webhook", "local", "mcp", "builtin", "slng", "client", "provider_hosted", "knowledge",
 	}
 	words := map[int]string{5: "five", 6: "six", 7: "seven", 8: "eight"}
 	want := words[len(blocks)]

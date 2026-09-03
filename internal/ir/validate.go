@@ -379,9 +379,12 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 		}
 		if len(tool.Inject) > 0 {
 			switch tool.Execution {
-			case ToolWebhook, ToolLocal:
+			// slng joins these two for the reason checkInject gives: all three
+			// have a call unmute assembles, so there is somewhere for a hidden
+			// value to go.
+			case ToolWebhook, ToolLocal, ToolSlngHosted:
 			default:
-				errors = add(errors, fmt.Sprintf("tool %q inject is legal for webhook and local execution only", name))
+				errors = add(errors, fmt.Sprintf("tool %q inject is legal for webhook, local and slng execution only", name))
 			}
 		}
 		// announce needs a body to speak before, so it follows inject's rule.
@@ -391,9 +394,12 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			switch tool.Execution {
 			// A knowledge lookup is a body to speak before, the same as a
 			// webhook call, so FR-029 reuses this field rather than adding one.
-			case ToolWebhook, ToolLocal, ToolKnowledge:
+			// A hosted tool has one too: it runs somewhere, and how long it
+			// takes is exactly what an author cannot control, which is the case
+			// this field was added for.
+			case ToolWebhook, ToolLocal, ToolKnowledge, ToolSlngHosted:
 			default:
-				errors = add(errors, fmt.Sprintf("tool %q announce is legal for webhook, local and knowledge execution only", name))
+				errors = add(errors, fmt.Sprintf("tool %q announce is legal for webhook, local, knowledge and slng execution only", name))
 			}
 			// Fixed sentence, same rule as the transfer announcement: a
 			// rendered line would need the variable set to be in scope at the
@@ -516,6 +522,15 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 				seen[selected] = true
 			}
 			validateToolAuth(name, tool.Auth, &errors)
+		case ToolSlngHosted:
+			// spec.Load rejects `input:` and `output:` on this block with a line
+			// number, and the exactly-one-block rule rejects a `handler:` or a
+			// `url_env:` beside it, so reaching either of those here means the IR
+			// was built in code.
+			if tool.Handler != "" || tool.URLEnv != "" {
+				errors = add(errors, fmt.Sprintf("tool %q handler/url_env does not match execution %q: a hosted tool's definition is the platform's", name, tool.Execution))
+			}
+			validateHostedTool(name, tool, &errors)
 		case ToolKnowledge, ToolClient, ToolProviderHosted:
 			if tool.Handler != "" || tool.URLEnv != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler/url_env does not match execution %q", name, tool.Execution))
@@ -1866,6 +1881,20 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 			applyCapability(caps, targetcap.FieldToolBuiltin, provider, row)
 		case ToolKnowledge:
 			applyCapability(caps, targetcap.FieldToolKnowledge, provider, row)
+		case ToolSlngHosted:
+			applyCapability(caps, targetcap.FieldToolSlngHosted, provider, row)
+			// A mirrored request tool can carry a shape no generated project has.
+			// It fires by field name rather than by silence, because a dropped
+			// field is a tool that behaves differently on two targets and says
+			// nothing about it. The slng target is not asked: the platform runs
+			// its own copy, whatever shape it is.
+			if tool.Mirror != nil && tool.Mirror.ToolType == "api_request" && targetcap.EmitsProject(provider) {
+				if _, refusals := tool.Mirror.Request(); len(refusals) > 0 {
+					for _, refusal := range refusals {
+						row.Errors = add(row.Errors, fmt.Sprintf("tool %q: %s: use this tool on slng only, or change the tool on SLNG", name, refusal))
+					}
+				}
+			}
 		}
 		if tool.Auth != nil {
 			applyCapability(caps, targetcap.FieldToolAuth, provider, row)

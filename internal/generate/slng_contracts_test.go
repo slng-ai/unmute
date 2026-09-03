@@ -43,6 +43,14 @@ func readSlngFixture(t *testing.T, path ...string) map[string]any {
 // shape against the published one. The fixture exercises the corners: a
 // system-invoked attachment, a pre-action message, an argument override, a
 // config-override URL carrying an input token, and an MCP row.
+//
+// One of those corners is now the fixture's alone. unmute writes no
+// config_overrides, because the only thing that needed one was a `webhook:`
+// tool whose path carried a package variable, and unmute writes no webhook tool
+// body on this target any more. The fixture is the platform's document and
+// keeps the field; ours is a subset of it, which is what this test has always
+// checked, so the shape is read off the fixture and the absence is asserted on
+// ours.
 func TestSlngMatchesThePublishedPositiveFixture(t *testing.T) {
 	fixture := readSlngFixture(t, "contracts", "v1", "positive", "agent_config_v2.json")
 	_, files := compileSlng(t, "slng_tools")
@@ -80,14 +88,24 @@ func TestSlngMatchesThePublishedPositiveFixture(t *testing.T) {
 		}
 	}
 
-	// A config override for an api_request tool carries a type discriminator and
-	// a URL that may hold an input token. The tool body's own URL may not.
-	override := findAPIRequestOverride(t, body)
+	// The config override, read off the published fixture rather than off our
+	// body. It carries a type discriminator and a URL that may hold an input
+	// token, and this is still worth pinning: it is the shape anything that
+	// starts writing one again would have to produce.
+	override := findAPIRequestOverride(t, fixture)
 	if override["type"] != "api_request" {
 		t.Errorf("config override type = %v, want the api_request discriminator", override["type"])
 	}
 	if url, _ := override["url"].(string); !strings.Contains(url, "{{") {
 		t.Errorf("config override url = %q; the published fixture puts the input token here", url)
+	}
+	// And ours writes none, because it writes no tool config for one to
+	// override.
+	for _, item := range body["tool_refs"].([]any) {
+		ref, _ := item.(map[string]any)
+		if _, present := ref["config_overrides"]; present {
+			t.Errorf("tool %v carries config_overrides; the slng target creates no tool, so there is no config to override", ref["tool"])
+		}
 	}
 
 	// llm_router_enabled is the one field the published body carries and unmute

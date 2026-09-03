@@ -994,6 +994,7 @@ var toolExecutionKinds = []toolExecutionKind{
 	{Value: "mcp", Name: "MCP server", Field: targetcap.FieldToolMCP},
 	{Value: "builtin", Name: "Prebuilt", Field: targetcap.FieldToolBuiltin},
 	{Value: "knowledge", Name: "Knowledge base", Field: targetcap.FieldToolKnowledge},
+	{Value: "slng", Name: "SLNG-hosted", Field: targetcap.FieldToolSlngHosted},
 }
 
 // toolExecutionGate returns the capability row gating kind on target; ok is
@@ -1016,6 +1017,7 @@ func chooseToolExecution(runner *fieldRunner, data *scaffold.Data, tool *scaffol
 			"mcp":       "server address from an environment variable",
 			"builtin":   "provider prebuilt tool (end_call)",
 			"knowledge": knowledgeDetail(data),
+			"slng":      "a tool SLNG already hosts; run `unmute pull` after saving",
 		}
 		options := make([]menuChoice, 0, len(toolExecutionKinds)+1)
 		for _, kind := range toolExecutionKinds {
@@ -1066,6 +1068,13 @@ func chooseToolExecution(runner *fieldRunner, data *scaffold.Data, tool *scaffol
 			}
 		} else {
 			tool.Builtin, tool.Instructions = "", ""
+		}
+		if selected == "slng" {
+			// The platform owns the schema, so input and output have nowhere to
+			// go. The description stays: it is the one thing about a hosted tool
+			// an author may want to say differently from the platform, and an
+			// empty one falls back to the platform's at build.
+			tool.URLEnv, tool.Input, tool.Output = "", "", ""
 		}
 		if selected == "knowledge" {
 			// The tool owns its own schema (one string, the caller's question)

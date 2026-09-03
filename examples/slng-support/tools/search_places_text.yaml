@@ -1,21 +1,9 @@
-description: Call this tool to search for places via a simple text query using the places api from google.
-
-input:
-  type: object
-  properties:
-    query:
-      type: string
-      description: 'Query to search for, for example: "Tapas bar in Madrid"'
-  required:
-    - query
-  additionalProperties: false
-
-webhook:
-  url_env: SEARCH_PLACES_URL
-  base_url: https://tools-agent-infra.onrender.com
-  path: /tools/search-text
-  auth:
-    type: bearer
-    token_env: SLNG_TOOL_RENDER
+# A hosted `api_request` tool. SLNG stores its URL, its method and the name of
+# the credential it reads, so there is no url_env, base_url, path or auth block
+# here: all four described a tool body unmute no longer writes.
+#
+# No description of ours either, so the platform's reaches the model.
+slng:
+  hash: 4852e83e9115ef630d7337f3ad5d6c6238cb8c0385065bf106f55cab82a368f5
 
 effect: returns_data

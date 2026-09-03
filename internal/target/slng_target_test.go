@@ -73,7 +73,7 @@ func TestSlngPushCommandsAgree(t *testing.T) {
 // both singular, next to `trunks`, which is plural. Nothing about that is
 // guessable, so nothing about it should be guessed.
 //
-// Read from `voiceai --help` at 0.1.15 on 2026-08-31.
+// Read from `voiceai --help` at 0.1.16 on 2026-09-03.
 func TestEveryVoiceaiCommandNamedExists(t *testing.T) {
 	groups := map[string]bool{
 		"tts": true, "stt": true, "config": true, "models": true, "voices": true,
@@ -83,7 +83,12 @@ func TestEveryVoiceaiCommandNamedExists(t *testing.T) {
 	// The subcommands under the groups this repository drives. A group not listed
 	// here is not checked past its first word, because unmute does not use it.
 	subcommands := map[string]map[string]bool{
-		"tool": {"list": true, "get": true},
+		// `run` executes one already-published tool against its real dependencies,
+		// and nothing runs without --confirm-side-effects. It is what an author
+		// iterates a code tool with between pushes, so the runbook names it and
+		// this must know it. Arrived in 0.1.16; the `tool` group had list and get
+		// only at 0.1.15.
+		"tool": {"list": true, "get": true, "run": true},
 		// `run` connects to the server and refreshes its stored capability
 		// snapshot. It is the fix unmute points at when a push refuses a snapshot
 		// as stale, so it is a command the surfaces name and this must know.
@@ -108,7 +113,7 @@ func TestEveryVoiceaiCommandNamedExists(t *testing.T) {
 	// every surface at once. This is not circular: the two maps above come from
 	// `voiceai --help`, not from these values.
 	for _, command := range []SlngCommand{
-		SlngWhoami, SlngSecretList, SlngSecretCreate, SlngToolList,
+		SlngWhoami, SlngSecretList, SlngSecretCreate, SlngToolList, SlngToolGet,
 		SlngMCPList, SlngMCPTools, SlngTrunksList, SlngCallDispatch,
 	} {
 		sub := ""

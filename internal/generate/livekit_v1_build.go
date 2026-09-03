@@ -211,13 +211,20 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			if tool.Announce != "" {
 				data.HasToolAnnouncements = true
 			}
-			if !tool.Local || seenLocal[tool.Method] {
+			// A mirrored SLNG module travels exactly like a local handler: it
+			// is package content the generated project imports. The only
+			// difference is where the source came from.
+			source := agent.Tools[tool.Method].HandlerSource
+			if tool.HostedCode {
+				source = agent.Tools[tool.Method].Mirror.Code
+			}
+			if (!tool.Local && !tool.HostedCode) || seenLocal[tool.Method] {
 				continue
 			}
 			seenLocal[tool.Method] = true
 			data.NeedsInspect = true
 			data.LocalTools = append(data.LocalTools, livekitLocalTool{
-				Name: tool.Method, Source: agent.Tools[tool.Method].HandlerSource,
+				Name: tool.Method, Source: source,
 			})
 		}
 	}
@@ -236,12 +243,21 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			continue
 		}
 		tool := agent.Tools[entry.Tool]
-		if tool.Execution != ir.ToolLocal || seenLocal[entry.Tool] {
+		if seenLocal[entry.Tool] {
+			continue
+		}
+		source := tool.HandlerSource
+		if tool.Execution == ir.ToolSlngHosted && tool.Mirror != nil {
+			source = tool.Mirror.Code
+		} else if tool.Execution != ir.ToolLocal {
+			continue
+		}
+		if source == "" {
 			continue
 		}
 		seenLocal[entry.Tool] = true
 		data.NeedsInspect = true
-		data.LocalTools = append(data.LocalTools, livekitLocalTool{Name: entry.Tool, Source: tool.HandlerSource})
+		data.LocalTools = append(data.LocalTools, livekitLocalTool{Name: entry.Tool, Source: source})
 	}
 	sort.Slice(data.LocalTools, func(i, j int) bool { return data.LocalTools[i].Name < data.LocalTools[j].Name })
 	for _, a := range data.Agents {
@@ -1188,8 +1204,55 @@ func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variabl
 			Builtin: tool.Builtin, Instructions: tool.Instructions,
 			EndsConversation: tool.Effect == ir.ToolEndsConversation,
 		}, nil
+	case ir.ToolSlngHosted:
+		// The mirror is the definition. Nothing here parses Python: the args
+		// came from Tool.Input, which Build filled from the platform's own
+		// introspected arg_schema, so livekitToolArgs above needed no change.
+		if tool.Mirror == nil {
+			return livekitTool{}, fmt.Errorf("tool %q: no mirror is committed, so there is nothing to lower; ir.Validate should have refused it", name)
+		}
+		built := livekitTool{
+			Method: name, Description: tool.Description,
+			Inject: inject, Needed: needed, NeededLiteral: neededLiteral(needed),
+			Args:             args,
+			EndsConversation: tool.Effect == ir.ToolEndsConversation,
+			Announce:         tool.Announce,
+		}
+		switch tool.Mirror.ToolType {
+		case "code":
+			built.HostedCode = true
+			built.CallKwargs = callKwargs(argNames, inject)
+			return built, nil
+		case "api_request":
+			request, refusals := tool.Mirror.Request()
+			if len(refusals) > 0 {
+				// ir.Validate refuses these per target with the same sentences,
+				// so this is the backstop for an IR built in code.
+				return livekitTool{}, fmt.Errorf("tool %q: %s; ir.Validate should have refused it for this target", name, refusals[0])
+			}
+			built.HostedRequest = true
+			built.URLExpr = pyQuote(request.URL)
+			built.JSONBody = requestBody(argNames, inject)
+			built.HostedHeaders = hostedHeaderLiteral(request.Headers)
+			if request.SecretName != "" {
+				env.addRead(request.SecretName)
+				built.Auth = &webhookAuth{Kind: "bearer", Expr: fmt.Sprintf("_bearer(%s)", pyQuote(request.SecretName))}
+			}
+			return built, nil
+		}
+		return livekitTool{}, fmt.Errorf("tool %q: the mirror is a %q tool, which has no livekit lowering; ir.Validate should have refused it", name, tool.Mirror.ToolType)
 	default:
-		return livekitTool{}, fmt.Errorf("tool %q: execution %q has no livekit lowering", name, tool.Execution)
+		// Not author-facing: ir.Validate refuses an unlowerable kind per target
+		// before generation, so reaching here means the IR was built in code or
+		// a kind was added without an arm.
+		//
+		// It is a refusal rather than a zero value because this driver's emitted
+		// dispatch ends in `{{else}}{{template "webhook_tool" .}}`. A
+		// livekitTool that sets none of the flags the template branches on does
+		// not render to nothing: it renders an HTTP POST to an environment name
+		// nobody registered, which is worse than an absent tool because it looks
+		// like a working one until somebody reads a call.
+		return livekitTool{}, fmt.Errorf("tool %q: execution kind %q has no livekit lowering; ir.Validate should have refused it for this target", name, tool.Execution)
 	}
 }
 

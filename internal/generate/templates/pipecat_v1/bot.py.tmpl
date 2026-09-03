@@ -810,6 +810,10 @@ async def {{.MethodName}}(params: FunctionCallParams{{range .Args}}, {{.Name}}: 
     if inspect.isawaitable(result):
         result = await result
     await params.result_callback(result)
+{{else if .HostedCode}}    result = tools.{{.Name}}.{{hostedEntry}}(tools.{{.Name}}.{{hostedInput}}({{.CallKwargs}}))
+    if inspect.isawaitable(result):
+        result = await result
+    await params.result_callback(result.model_dump() if hasattr(result, "model_dump") else result)
 {{else}}    async with httpx.AsyncClient() as client:
         response = await client.post(
             {{.URLExpr}},
@@ -1091,6 +1095,15 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         if inspect.isawaitable(result):
             result = await result
         await params.result_callback(result)
+{{else if .HostedCode}}{{if .NeedsState}}        state = self.state
+{{end}}{{if .Needed}}        refusal = _refusal({{pyq .Name}}, state, {{.NeededLiteral}})
+        if refusal:
+            await params.result_callback({"refused": refusal})
+            return
+{{end}}        result = tools.{{.Name}}.{{hostedEntry}}(tools.{{.Name}}.{{hostedInput}}({{.CallKwargs}}))
+        if inspect.isawaitable(result):
+            result = await result
+        await params.result_callback(result.model_dump() if hasattr(result, "model_dump") else result)
 {{else}}{{if .NeedsState}}        state = self.state
 {{end}}{{if .Needed}}        refusal = _refusal({{pyq .Name}}, state, {{.NeededLiteral}})
         if refusal:
@@ -1406,6 +1419,10 @@ async def _flow_tool_{{.Name}}(args, flow_manager{{if .NeedsState}}, state=None{
     if inspect.isawaitable(result):
         result = await result
     return result
+{{else if .HostedCode}}    result = tools.{{.Name}}.{{hostedEntry}}(tools.{{.Name}}.{{hostedInput}}(**dict(args){{range .Inject}}, {{.Key}}={{.Expr}}{{end}}))
+    if inspect.isawaitable(result):
+        result = await result
+    return result.model_dump() if hasattr(result, "model_dump") else result
 {{else}}    async with httpx.AsyncClient() as client:
         response = await client.post({{.URLExpr}}, {{if .Auth}}headers={{.Auth.Expr}}, {{end}}json={**dict(args){{range .Inject}}, {{pyq .Key}}: {{.Expr}}{{end}}}, timeout=30.0)
         response.raise_for_status()

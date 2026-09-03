@@ -4,21 +4,34 @@ import (
 	"strings"
 	"testing"
 
+	packagespec "github.com/slng-ai/unmute/internal/spec"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 // A per-tool dependency list reaches SLNG's code-tool environment and reaches
 // nothing at all on a code target, whose driver builds one project-wide list out
 // of the provider catalogue. Refused there rather than dropped.
+//
+// The tool is a hosted reference rather than a `local:` handler, because the
+// slng target creates no tool: the dependency list a hosted tool declares is
+// the platform's own, mirrored, and it inherits exactly the same verdicts. That
+// is the point of reusing the field rather than adding one.
 func TestToolDependenciesAreSlngOnly(t *testing.T) {
 	withDeps := func(t *testing.T) *Agent {
 		t.Helper()
 		agent := slngAgent(t)
-		agent.Tools["check_order"] = Tool{
-			Description: "Look one up.", Execution: ToolLocal,
-			Handler: "tools/check_order.py", HandlerSource: "def check_order() -> dict:\n    return {}\n",
+		mirror := &packagespec.Mirror{
+			Name: "check_order", ToolType: "code", Source: "org",
+			Description:  "Look one up.",
+			ArgSchema:    map[string]any{"type": "object", "properties": map[string]any{}},
 			Dependencies: []string{"orjson==3.11.4"},
-			Input:        map[string]any{"type": "object", "properties": map[string]any{}},
+			Code:         "def handler(input):\n    return {}\n",
+		}
+		agent.Tools["check_order"] = Tool{
+			Description: "Look one up.", Execution: ToolSlngHosted,
+			Mirror: mirror, MirrorPin: MirrorDigest(nil), MirrorBytes: nil,
+			Dependencies: mirror.Dependencies,
+			Input:        mirror.ArgSchema,
 			Interruption: ToolProviderDefault, Effect: ToolReturnsData,
 		}
 		entry := agent.Agents["support"]

@@ -37,13 +37,18 @@ type slngRunbook struct {
 	VaultSecrets   []Requirement
 	VaultVariables []Requirement
 	NameShape      string
-	// ToolFiles and MCPRefs drive the two "this body is not postable as written"
-	// sections. A package with neither gets neither section.
-	ToolFiles []string
-	MCPRefs   []string
-	Builtins  []string
-	// ToolCount is every tool reference in the body, not only the ones with a
-	// file. A builtin has no file and still needs its tool_id resolved.
+	// HostedRefs and MCPRefs drive the two "this body is not postable as
+	// written" sections. A package with neither gets neither section.
+	//
+	// HostedRefs replaced ToolFiles, which listed the tool bodies the push would
+	// create. It creates none: each entry here is a tool the organisation must
+	// already hold, with the version the committed mirror was taken from, so the
+	// section says what to check rather than what will be made.
+	HostedRefs []string
+	MCPRefs    []string
+	Builtins   []string
+	// ToolCount is every tool reference in the body. A builtin and a hosted tool
+	// both need their tool_id resolved by the push.
 	ToolCount int
 	// ToolRefNames are the tool references in the body, in the order they appear
 	// there, so the worked example in the runbook can name a real one from this
@@ -88,11 +93,16 @@ func slngRunbookFor(agent *ir.Agent, tgt ir.Target, built slngArtifacts) slngRun
 		WebSessionCommand: targetcap.SlngWebSessionCommand,
 		NameShape:         targetcap.SlngVaultNamePattern,
 	}
-	for _, file := range built.ToolFiles {
-		runbook.ToolFiles = append(runbook.ToolFiles, file.Name)
-	}
 	for _, ref := range built.Body.MCPRefs {
 		runbook.MCPRefs = append(runbook.MCPRefs, ref.Server+" · "+ref.Tool)
+	}
+	// Derived from Requires rather than from the body, because Requires is what
+	// the deploy preflight checks: the runbook printing a different list from
+	// the one the deploy reads is the failure the vault table's own agreement
+	// gate exists to prevent, and this list has the same two readers.
+	for _, hosted := range built.Requires.Hosted {
+		runbook.HostedRefs = append(runbook.HostedRefs,
+			fmt.Sprintf("`%s`, mirrored from version %d", hosted.Name, hosted.Version))
 	}
 	runbook.ToolCount = len(built.Body.ToolRefs)
 	for _, ref := range built.Body.ToolRefs {

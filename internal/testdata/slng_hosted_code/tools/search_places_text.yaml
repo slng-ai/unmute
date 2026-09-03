@@ -1,0 +1,8 @@
+# A hosted `api_request` tool. No description of our own, so the platform's
+# reaches the model. No mirrored module either: an api_request tool has no code,
+# and its mirror carries the url, the method and the name of the credential.
+slng:
+  hash: 2d84331797680e945a55d3ca9cf9fc1b0796f7875cea79a0c2eb4256add65eda
+
+interruption: provider_default
+effect: returns_data

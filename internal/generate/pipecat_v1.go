@@ -182,20 +182,31 @@ type pipecatAssign struct {
 // Inside a Flow node the same tool is instead a module-level flows handler; the
 // InputProps/InputRequired literals carry its schema onto the FlowsFunctionSchema.
 type pipecatTool struct {
-	Name            string
-	MethodName      string
-	Description     string
-	URLEnv          string
-	URLExpr         string          // request URL expression (webhook.path renders into it)
-	Inject          []injectedValue // hidden request values, never advertised to the model
-	Needed          []neededVar     // unset ones refuse the call before it is sent (V4)
-	NeededLiteral   string          // Needed as a Python list of (name, hint) pairs
-	NeedsState      bool            // reads the call state: inside a Flow node it must be bound in
-	JSONBody        string          // full Python dict literal for the webhook body
-	CallKwargs      string          // full kwargs string for a local handler call
-	Auth            *webhookAuth    // nil = unauthenticated POST
-	Local           bool            // execution: local — body imports + awaits tools/<name>.py (V13)
-	HandlerSource   string          // local handler file content, copied into the artifact
+	Name          string
+	MethodName    string
+	Description   string
+	URLEnv        string
+	URLExpr       string          // request URL expression (webhook.path renders into it)
+	Inject        []injectedValue // hidden request values, never advertised to the model
+	Needed        []neededVar     // unset ones refuse the call before it is sent (V4)
+	NeededLiteral string          // Needed as a Python list of (name, hint) pairs
+	NeedsState    bool            // reads the call state: inside a Flow node it must be bound in
+	JSONBody      string          // full Python dict literal for the webhook body
+	CallKwargs    string          // full kwargs string for a local handler call
+	Auth          *webhookAuth    // nil = unauthenticated POST
+	Local         bool            // execution: local — body imports + awaits tools/<name>.py (V13)
+	HandlerSource string          // local handler file content, copied into the artifact
+	// HostedCode and HostedRequest are execution: slng, split by what the
+	// platform hosts. A code tool calls the mirrored module through SLNG's own
+	// handler(Input) contract; a request tool posts to a literal URL the
+	// platform stores, reading its bearer token from the environment by name.
+	//
+	// Two flags rather than one, because each of this driver's three emission
+	// sites dispatches on them and each ends in a webhook POST. A kind with no
+	// arm renders a request, not nothing.
+	HostedCode      bool
+	HostedRequest   bool
+	HostedHeaders   string // fixed headers the platform stores, as a Python dict literal
 	Args            []pipecatArg
 	InputProps      string // Python literal: the input schema's properties object
 	InputRequired   string // Python literal: the input schema's required list
@@ -600,6 +611,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolLocal:            true, // @tool awaiting tools/<name>.py (T14, V13)
 	targetcap.FieldToolMCP:              true, // one MCPClient per source, started at setup (N40)
 	targetcap.FieldToolBuiltin:          true, // prebuilt end_call → bodyless end tool
+	targetcap.FieldToolSlngHosted:       true, // mirrored module, or an httpx POST built from the mirror's config
 	targetcap.FieldToolKnowledge:        true, // knowledge.py + one decorated function per lookup
 	targetcap.FieldToolAuth:             true, // _bearer Authorization header off token_env
 	targetcap.FieldToolInterruption:     true, // cancel_on_interruption
@@ -744,7 +756,17 @@ func renderPipecatV1(name string, data pipecatData) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pipecat template %s: %w", name, err)
 	}
-	tmpl, err := template.New(name).Funcs(template.FuncMap{"pyq": pyQuote, "pytriple": pyTriple, "join": strings.Join, "mcpTimeout": func() int { return mcpTimeoutSeconds }}).Parse(string(raw))
+	tmpl, err := template.New(name).Funcs(template.FuncMap{
+		"pyq":        pyQuote,
+		"pytriple":   pyTriple,
+		"join":       strings.Join,
+		"mcpTimeout": func() int { return mcpTimeoutSeconds },
+		// SLNG's contract for a hosted code tool, named once in Go so neither
+		// driver's template can drift from what hosted_tool.go says the
+		// platform guarantees.
+		"hostedEntry": func() string { return hostedEntryPoint },
+		"hostedInput": func() string { return hostedInputModel },
+	}).Parse(string(raw))
 	if err != nil {
 		return nil, fmt.Errorf("pipecat template %s: %w", name, err)
 	}

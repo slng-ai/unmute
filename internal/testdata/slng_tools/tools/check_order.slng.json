@@ -1,0 +1,31 @@
+{
+  "name": "check_order",
+  "tool_type": "code",
+  "source": "org",
+  "description": "Look up an order by its id and return its status and delivery date.",
+  "arg_schema": {
+    "properties": {
+      "order_id": {
+        "description": "The order id the caller read out",
+        "type": "string"
+      }
+    },
+    "required": [
+      "order_id"
+    ],
+    "title": "Input",
+    "type": "object"
+  },
+  "dependencies": [
+    "orjson==3.11.4",
+    "pydantic-core==2.41.5"
+  ],
+  "config": {
+    "egress": {},
+    "import_probes": [],
+    "type": "code"
+  },
+  "content_hash": "ad3b1f92b237b040a940b95c7fa4c56bce617cfedc974959fa07fa6f2d9d4fad",
+  "latest_version": 1,
+  "fetched": "2026-09-03"
+}

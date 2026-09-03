@@ -5,6 +5,7 @@
     "tool_type": "api_request",
     "description": "Call an HTTPS endpoint with typed parameters, auth, and headers.",
     "last_run_status": null,
+    "scope": "organisation",
     "latest_version": 2,
     "config_valid": null,
     "arg_schema": {
@@ -14,10 +15,12 @@
       "additionalProperties": false
     }
   },
-  { "id": "c88c7680-7868-4317-9f61-67f8381e5325", "name": "current_datetime", "tool_type": "current_datetime", "description": "Provide the current date and time to the agent.", "last_run_status": null, "latest_version": 1, "config_valid": true, "arg_schema": null },
-  { "id": "952eb6b1-fa3f-47a5-9ec5-ccee65d5eba3", "name": "end_call", "tool_type": "end_call", "description": "Let the agent hang up, with a goodbye spoken first.", "last_run_status": null, "latest_version": 1, "config_valid": true, "arg_schema": null },
-  { "id": "1f0a4c22-1d3e-4a5b-9c7d-0e1f2a3b4c5d", "name": "send_sms", "tool_type": "send_sms", "description": "Send an SMS from the agent.", "last_run_status": null, "latest_version": 1, "config_valid": true, "arg_schema": null },
-  { "id": "2b3c4d5e-6f70-4812-9345-6789abcdef01", "name": "transfer_call", "tool_type": "transfer_call", "description": "Transfer the call to another destination.", "last_run_status": null, "latest_version": 1, "config_valid": true, "arg_schema": null },
-  { "id": "3c4d5e6f-7081-4923-a456-789abcdef012", "name": "user_phone_number", "tool_type": "user_phone_number", "description": "Give the agent the caller's number.", "last_run_status": null, "latest_version": 1, "config_valid": true, "arg_schema": null },
-  { "id": "4d5e6f70-8192-4a34-b567-89abcdef0123", "name": "voicemail_detection", "tool_type": "voicemail_detection", "description": "Detect an answering machine.", "last_run_status": null, "latest_version": 1, "config_valid": true, "arg_schema": null }
+  { "id": "c88c7680-7868-4317-9f61-67f8381e5325", "name": "current_datetime", "tool_type": "current_datetime", "description": "Provide the current date and time to the agent.", "last_run_status": null, "scope": "global", "latest_version": 1, "config_valid": true, "arg_schema": null },
+  { "id": "952eb6b1-fa3f-47a5-9ec5-ccee65d5eba3", "name": "end_call", "tool_type": "end_call", "description": "Let the agent hang up, with a goodbye spoken first.", "last_run_status": null, "scope": "global", "latest_version": 1, "config_valid": true, "arg_schema": null },
+  { "id": "fd25f5c5-15e7-4662-b11b-62b82beba14c", "name": "end_call", "tool_type": "end_call", "description": "End the call for the user when the user doesn't need anything else.", "last_run_status": null, "scope": "organisation", "latest_version": 3, "config_valid": true, "arg_schema": null },
+  { "id": "1f0a4c22-1d3e-4a5b-9c7d-0e1f2a3b4c5d", "name": "send_sms", "tool_type": "send_sms", "description": "Send an SMS from the agent.", "last_run_status": null, "scope": "organisation", "latest_version": 1, "config_valid": true, "arg_schema": null },
+  { "id": "2b3c4d5e-6f70-4812-9345-6789abcdef01", "name": "transfer_call", "tool_type": "transfer_call", "description": "Transfer the call to another destination.", "last_run_status": null, "scope": "global", "latest_version": 1, "config_valid": true, "arg_schema": null },
+  { "id": "d0254d59-7632-463b-af25-00b325612596", "name": "transfer_call", "tool_type": "transfer_call", "description": "transfer the call to an agent.", "last_run_status": null, "scope": "organisation", "latest_version": 4, "config_valid": true, "arg_schema": null },
+  { "id": "3c4d5e6f-7081-4923-a456-789abcdef012", "name": "user_phone_number", "tool_type": "user_phone_number", "description": "Give the agent the caller's number.", "last_run_status": null, "scope": "global", "latest_version": 1, "config_valid": true, "arg_schema": null },
+  { "id": "4d5e6f70-8192-4a34-b567-89abcdef0123", "name": "voicemail_detection", "tool_type": "voicemail_detection", "description": "Detect an answering machine.", "last_run_status": null, "scope": "global", "latest_version": 1, "config_valid": true, "arg_schema": null }
 ]

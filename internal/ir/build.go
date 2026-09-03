@@ -91,6 +91,21 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	for name, tool := range pkg.Tools {
 		built := buildTool(name, tool)
 		built.HandlerSource = pkg.Handlers[built.Handler]
+		// A hosted tool's definition is the mirror, and it is folded in here
+		// rather than in buildTool because buildTool sees one tool file and the
+		// mirror was read from the package. An absent mirror stays absent:
+		// Validate owns that refusal, and it names the pull.
+		if built.Execution == ToolSlngHosted {
+			if mirror, ok := pkg.Mirrors[name]; ok {
+				built.Mirror = &mirror
+				built.MirrorBytes = pkg.MirrorBytes[name]
+				built.Input = mirror.ArgSchema
+				built.Dependencies = mirror.Dependencies
+				if built.Description == "" {
+					built.Description = mirror.Description
+				}
+			}
+		}
 		out.Tools[name] = built
 	}
 	for name, channel := range pkg.Agent.Channels {
@@ -626,6 +641,11 @@ func buildTool(name string, raw packagespec.Tool) Tool {
 		tool.Instructions = raw.Builtin.Instructions
 	case raw.Knowledge != nil:
 		tool.KnowledgeBase = raw.Knowledge.Base
+	case raw.Slng != nil:
+		// The pin is all the file carries. Everything else about a hosted tool
+		// comes from the mirror, which Build folds in at the call site because
+		// it belongs to the package rather than to this file.
+		tool.MirrorPin = raw.Slng.Hash
 	}
 	tool.Interruption = ToolInterruption(raw.Interruption)
 	if tool.Interruption == "" {

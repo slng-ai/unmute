@@ -197,10 +197,16 @@ type Tool struct {
 	MCPTools     []string
 	// KnowledgeBase names the knowledge: entry a knowledge tool searches.
 	KnowledgeBase string
-	Input         string // JSON Schema object
-	Output        string // optional JSON Schema object
-	AttachTo      []string
-	AttachTasks   []string
+	// SlngHash is a hosted tool's pin, carried verbatim through maintenance for
+	// the same reason as Auth: a key this struct does not hold is a key a
+	// rewrite deletes at exit 0, and losing this one turns a working package
+	// into one that refuses to compile until somebody re-runs the pull. The
+	// console does not edit it; `unmute pull` writes it.
+	SlngHash    string
+	Input       string // JSON Schema object
+	Output      string // optional JSON Schema object
+	AttachTo    []string
+	AttachTasks []string
 }
 
 // KnowledgeBase is one knowledge: entry: a folder of documents and the service

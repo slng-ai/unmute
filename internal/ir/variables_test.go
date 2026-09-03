@@ -79,7 +79,7 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 				tool.Inject = map[string]any{"caller": "{{customer_id}}"}
 				pkg.Tools["lookup_customer"] = tool
 			},
-			want: "inject is legal on webhook and local tools",
+			want: "inject is legal on webhook, local and slng tools",
 		},
 		{
 			name: "a webhook path must start with a slash",

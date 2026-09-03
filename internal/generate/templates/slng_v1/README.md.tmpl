@@ -10,9 +10,6 @@ Everything in this directory is disposable. Edit the package and compile again.
 | File | What it is |
 |---|---|
 | `agent.json` | the agent create body |
-{{- range .ToolFiles}}
-| `tools/{{.}}.json` | a tool create body |
-{{- end}}
 | `README.md` | this file |
 
 The agent deploys to region **{{.Region}}**{{if eq .Region "any"}}, which lets
@@ -143,15 +140,30 @@ does.
 {{if .Builtins}}
 This package's curated references: {{range $i, $name := .Builtins}}{{if $i}}, {{end}}`{{$name}}`{{end}}.
 {{end}}
-{{if .ToolFiles -}}
-These tools get a body created, introspected and published, in that order:
+{{if .HostedRefs -}}
+**This target creates no tool.** Every tool the body names is one your
+organisation already holds, referenced by name, and the push resolves each name
+to its identifier. A name your organisation does not have is a refusal, not
+something the push makes for you: a new tool starts in the SLNG dashboard.
 
-{{range .ToolFiles}}- `tools/{{.}}.json`
+These are the hosted references, with the version each committed mirror was
+taken from:
+
+{{range .HostedRefs}}- {{.}}
 {{end}}
-Each also needs a sample. Write one per tool as
-`samples/<tool>.json`, holding a single set of arguments, and deploy with
-`--run-samples`. A recompile keeps them: `samples/*.json` is preserved in this
-directory the way `.env` is.
+`unmute deploy` checks each of these against your organisation before it writes
+anything, and warns when one has moved on. Run `unmute pull` to bring the
+committed mirror back in step, then commit what it writes.
+
+To try one on its own rather than deploying again:
+
+```
+voiceai tool run <tool> --input samples/<tool>.json --confirm-side-effects
+```
+
+That runs the copy SLNG already has, against your real dependencies, so it
+changes whatever the tool changes.
+
 {{end -}}
 {{if .MCPRefs -}}
 Each MCP reference is written by name. The push resolves the server name to its

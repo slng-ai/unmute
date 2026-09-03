@@ -603,29 +603,31 @@ A tool named `end_call`, `detected_answering_machine`, `get_current_datetime`,
 five names for its own curated capabilities. Writing `builtin: end_call` as the
 tool `end_call` is the correct way to reach one and is not a collision.
 
-A `local:` tool on slng may pin what its handler imports:
+**The slng target creates no tool.** `local:` and `webhook:` are refused
+there: SLNG owns a tool's code, version and gate pipeline, and unmute uploads
+nothing. Every tool an slng package names is one the organisation already
+holds.
 
-```yaml tools/check_order.yaml
-local:
-  handler: tools/check_order.py
-  dependencies:
-    - orjson==3.11.4
-```
+So there are three ways to name a tool on this target, and no fourth:
 
-Exact `name==version` pins only. A range, a URL, an extra or a wildcard is
-refused. The sandbox runs Python 3.14 with `pydantic` present, so a stdlib-only
-handler pins nothing. `dependencies:` is slng-only and is refused on `livekit`
-and `pipecat`, whose drivers read no per-tool pins.
+- `slng:` for a tool the organisation hosts. Write `slng: {}`, tell the user to
+  run `unmute pull`, and commit the mirror it writes. See
+  [tools.md](tools.md).
+- `builtin:` for a capability SLNG curates, such as `end_call`.
+- `mcp:` for a server the organisation registered.
 
-A `local:` handler on slng may not import `requests`, `httpx` or `urllib`:
-custom code there has no internet access. Use a `webhook:` tool. Its entry point
-must be a plain `def`, not `async def`, because SLNG calls a handler
-synchronously.
+If the user wants a tool that does not exist yet, say that it starts in the
+SLNG dashboard, and that unmute cannot create it. Do not write a `local:` or
+`webhook:` block for an slng package and hope: it is refused at validate,
+before anything is written.
 
-A `webhook:` tool needs `base_url` on slng, a literal `https` address with no
-template token, because SLNG stores the URL in the tool body rather than reading
-it from an environment. Keep `url_env` beside it for the code targets; each
-target reads the field it needs and ignores the other.
+A hosted tool's Python dependencies are the platform's own, mirrored rather
+than authored. Each is an exact `name==version` pin, because SLNG builds a
+locked environment per tool. The sandbox runs Python 3.14 with `pydantic`
+present, so a tool using only the standard library and pydantic mirrors none.
+A hosted tool that does declare dependencies is refused on `livekit` and
+`pipecat`, whose drivers build one dependency list for the whole project and
+read nothing per tool.
 
 An `mcp:` tool must list its tools under `mcp.tools`: SLNG attaches one
 reference per tool, and there is no "whole server" attachment to write.

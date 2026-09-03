@@ -134,6 +134,7 @@
               "build/tools/python",
               "build/tools/mcp",
               "build/tools/prebuilt",
+              "build/tools/hosted",
               "build/tools/knowledge"
             ]
           },
@@ -255,6 +256,7 @@
           "reference/cli/overview",
           "reference/cli/init",
           "reference/cli/validate",
+          "reference/cli/pull",
           "reference/cli/compile",
           "reference/cli/deploy",
           "reference/cli/dev",

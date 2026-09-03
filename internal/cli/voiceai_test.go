@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/slng-ai/unmute/internal/spec"
 	"github.com/slng-ai/unmute/internal/target"
 )
 
@@ -97,14 +98,23 @@ func TestVoiceaiDecodesEveryCapturedShape(t *testing.T) {
 	// The fact the whole builtin check rests on: curated capabilities are ordinary
 	// tools in this listing. If that stops being true, the check has to become
 	// inconclusive rather than start reporting every builtin as missing.
-	var sawEndCall bool
+	var sawEndCall int
 	for _, tool := range tools {
 		if tool.Name == "end_call" && tool.ToolType == "end_call" {
-			sawEndCall = true
+			sawEndCall++
 		}
 	}
-	if !sawEndCall {
+	if sawEndCall == 0 {
 		t.Error("tool list no longer carries end_call as a curated tool, so a builtin reference cannot be checked positively")
+	}
+	// The second fact the check rests on, and the surprising one: a name is unique
+	// per scope, not per organisation. A curated capability and a dashboard tool
+	// can share one name, so the listing repeats it and every message built from
+	// the listing has to name it once. joinNames is what does that, and
+	// TestPreflightNamesADuplicatedAccountToolOnce is its gate; this holds the
+	// capture that made it necessary.
+	if sawEndCall < 2 {
+		t.Error("tool list no longer carries end_call twice, so the fixture stopped covering a name held at two scopes")
 	}
 
 	var trunks []slngTrunk
@@ -120,6 +130,63 @@ func TestVoiceaiDecodesEveryCapturedShape(t *testing.T) {
 	}
 	if !sawAttached || !sawUnusable {
 		t.Errorf("the trunk fixture does not cover both an attached and an unusable trunk: %+v", trunks)
+	}
+
+	// The three `tool get` shapes a hosted-tool fetch can meet. Each carries at
+	// least one field a hand-written struct would get wrong, and each of those
+	// is what a mirror would silently lose.
+	var code spec.Mirror
+	fixture(t, "tool_get_code.json", &code)
+	if code.ToolType != "code" || code.Source != "org" {
+		t.Errorf("the code capture decoded to tool_type %q source %q", code.ToolType, code.Source)
+	}
+	if code.Code == "" {
+		t.Error("a code tool's definition is in code_src, and it decoded to nothing: the mirrored module would be empty")
+	}
+	if _, ok := code.ArgSchema["properties"]; !ok {
+		t.Errorf("the code capture's arg_schema has no properties, so no driver could build a signature: %v", code.ArgSchema)
+	}
+	if code.Version == 0 || code.ContentHash == "" {
+		t.Errorf("the code capture lost its version (%d) or content hash (%q), so a drift report would have nothing to name", code.Version, code.ContentHash)
+	}
+
+	var request spec.Mirror
+	fixture(t, "tool_get_api_request.json", &request)
+	if request.ToolType != "api_request" {
+		t.Errorf("the request capture decoded to tool_type %q", request.ToolType)
+	}
+	if request.Code != "" {
+		t.Error("a request tool decoded a code_src, and it has no code")
+	}
+	// The surprising one, and the reason Secrets() reads two places. This tool
+	// plainly needs a token and declared_secrets is empty: the platform names
+	// the credential in config.auth.secret_name instead. A mirror that read
+	// only the obvious field would write nothing, and the emitted call would
+	// 401 on a name nothing declared.
+	if len(request.DeclaredSecrets) != 0 {
+		t.Errorf("the request capture now carries declared_secrets %v; if the platform started filling it, Secrets() may be reading two places for no reason", request.DeclaredSecrets)
+	}
+	if got := request.Secrets(); len(got) != 1 || got[0] != "SLNG_TOOL_RENDER" {
+		t.Errorf("Secrets() = %v, want the name in config.auth.secret_name", got)
+	}
+	lowered, refusals := request.Request()
+	if len(refusals) > 0 {
+		t.Errorf("a real api_request tool was refused on a code target: %v", refusals)
+	}
+	if lowered.URL == "" || lowered.Method != "POST" || lowered.SecretName != "SLNG_TOOL_RENDER" {
+		t.Errorf("the request capture lowered to %+v", lowered)
+	}
+
+	// A curated capability answers with the same keys and is distinguishable
+	// only by `source`. That is the whole reason a curated name is refused at
+	// the fetch rather than mirrored into something empty.
+	var curated spec.Mirror
+	fixture(t, "tool_get_curated.json", &curated)
+	if curated.Source != "curated" {
+		t.Errorf("the curated capture decoded source %q, and `source` is the only field that tells it apart from a real tool", curated.Source)
+	}
+	if curated.Code != "" || len(curated.ArgSchema) != 0 {
+		t.Errorf("the curated capture carries a definition after all: code %d bytes, schema %v", len(curated.Code), curated.ArgSchema)
 	}
 }
 

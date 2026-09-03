@@ -39,8 +39,10 @@ models:
       language: en
 
 secrets:
+  # SLNG_TOOL_RENDER is the credential the hosted request tool reads. The
+  # platform names it in the mirror, so it reaches the runbook's Vault table and
+  # the deploy preflight from there. A name, never a value.
   - SLNG_TOOL_RENDER
-  - SEARCH_PLACES_URL
   - FIRECRAWL_MCP_URL
 
 tools:

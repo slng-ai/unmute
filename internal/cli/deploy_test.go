@@ -430,11 +430,20 @@ func deployWithStub(t *testing.T, script string, args ...string) (dir, out, errO
 // deployWithInput is deployWithStub with a person at the keyboard.
 func deployWithInput(t *testing.T, input, script string, args ...string) (dir, out, errOut string, err error) {
 	t.Helper()
+	return deployFixture(t, "slng_tools", input, script, args...)
+}
+
+// deployFixture is deployWithInput over a named package, for a check that needs
+// a different one. The hosted-tool findings need the hosted fixture, because
+// slng_tools declares no `slng:` tool and so produces no hosted requirement to
+// compare.
+func deployFixture(t *testing.T, fixture, input, script string, args ...string) (dir, out, errOut string, err error) {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("the stub voiceai is a POSIX shell script")
 	}
 	dir = t.TempDir()
-	source := filepath.Join("..", "testdata", "slng_tools")
+	source := filepath.Join("..", "testdata", fixture)
 	if copyErr := os.CopyFS(dir, os.DirFS(source)); copyErr != nil {
 		t.Fatal(copyErr)
 	}
@@ -531,7 +540,7 @@ func TestDeployPreflightDegrades(t *testing.T) {
 	stub := `case "$*" in
   *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"org-1","org_name":"Example"}}' ;;
   *"mcp list"*) printf 'error: insufficient scope\n' >&2; exit 1 ;;
-  *"tool list"*) printf '[{"name":"end_call","tool_type":"end_call"}]' ;;
+  *"tool list"*) printf '[{"name":"end_call","tool_type":"end_call"},{"name":"check_order","tool_type":"code","latest_version":1},{"name":"refund","tool_type":"api_request","latest_version":2}]' ;;
   *"secret list"*) printf '[{"name":"REFUND_API_TOKEN","kind":"secret","has_value":true},{"name":"ACME_BRAND","kind":"variable","has_value":true}]' ;;
   *"agents push"*) printf '{"ok":true,"dry_run":true,"organisation":{"id":"org-1","name":"Example"},"agent":{"name":"a","action":"create"}}' ;;
   *) printf '[]' ;;
@@ -539,6 +548,134 @@ esac`
 	_, out, errOut, err := deployWithStub(t, stub, "--dry-run")
 	if err != nil {
 		t.Fatalf("an unreadable MCP listing failed the deploy: %v\n%s", err, errOut)
+	}
+	if !strings.Contains(errOut, "insufficient scope") {
+		t.Errorf("the skipped read is not reported:\n%s", errOut)
+	}
+	if !strings.Contains(errOut, "the push decides") {
+		t.Errorf("the warning does not say what covers the gap:\n%s", errOut)
+	}
+	if !strings.Contains(out, "dry run") {
+		t.Errorf("the run did not reach the push:\n%s", out)
+	}
+}
+
+// The two hosted-tool checks the deploy makes, and the fact they are two
+// different severities is the whole point.
+//
+// The name has to exist: unmute creates no tool, so a reference the
+// organisation cannot resolve stops the run, because the push would refuse
+// anyway. The version does not: the agent calls the platform's copy either way,
+// so a moved tool is a package whose mirror no longer describes what runs, not a
+// deploy that will fail. Conflating them would either wave through a name that
+// cannot resolve or block a deploy over a stale note.
+
+// hostedAccountStub answers with an organisation that holds both hosted tools
+// and every vault entry the fixture needs. version is a parameter, so one stub
+// serves the matching and the moved cases.
+func hostedAccountStub(version string) string {
+	return `case "$*" in
+  *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"org-1","org_name":"Example"}}' ;;
+  *"tool list"*) printf '[{"name":"end_call","tool_type":"end_call","latest_version":1},{"name":"check_order","tool_type":"code","latest_version":1},{"name":"search_places_text","tool_type":"api_request","latest_version":` + version + `}]' ;;
+  *"secret list"*) printf '[{"name":"SLNG_TOOL_RENDER","kind":"secret","has_value":true},{"name":"OPENAI_API_KEY","kind":"secret","has_value":true},{"name":"DEEPGRAM_API_KEY","kind":"secret","has_value":true},{"name":"SLNG_API_KEY","kind":"secret","has_value":true}]' ;;
+  *"agents push"*) printf '{"ok":true,"dry_run":true,"organisation":{"id":"org-1","name":"Example"},"agent":{"name":"a","action":"create"}}' ;;
+  *) printf '[]' ;;
+esac`
+}
+
+// TestHostedDriftWarnsAndDoesNotBlock: the committed mirror was taken from
+// version 3 and the organisation is at 4.
+func TestHostedDriftWarnsAndDoesNotBlock(t *testing.T) {
+	_, out, errOut, err := deployFixture(t, "slng_hosted", "", hostedAccountStub("4"), "--dry-run")
+	if err != nil {
+		t.Fatalf("a moved hosted tool failed the deploy, and it must not: %v\n%s", err, errOut)
+	}
+	for _, want := range []string{
+		"warning:",
+		// search_places_text is the tool the stub moved: its mirror was taken
+		// from version 3 and the organisation is at 4. check_order is at 1 in
+		// both, which is what the next test checks stays quiet.
+		"search_places_text",
+		"version 4",
+		"version 3",
+		"run `unmute pull`",
+		// The second clause is the important half: the deploy is going ahead,
+		// so the reader needs to know what they are choosing.
+		"the agent will call the organisation's version",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("the drift warning does not say %q:\n%s", want, errOut)
+		}
+	}
+	if !strings.Contains(out, "dry run") {
+		t.Errorf("the run did not reach the push:\n%s", out)
+	}
+}
+
+// TestHostedVersionMatchWarnsAboutNothing is the other half, and it matters as
+// much: a check that warns on a package that is up to date is a check people
+// learn to ignore.
+func TestHostedVersionMatchWarnsAboutNothing(t *testing.T) {
+	_, out, errOut, err := deployFixture(t, "slng_hosted", "", hostedAccountStub("3"), "--dry-run")
+	if err != nil {
+		t.Fatalf("deploy failed on a package whose mirrors match: %v\n%s", err, errOut)
+	}
+	if strings.Contains(errOut, "version") {
+		t.Errorf("a matching mirror still produced a version warning:\n%s", errOut)
+	}
+	if !strings.Contains(out, "satisfied") {
+		t.Errorf("the preflight did not report the hosted references as satisfied:\n%s", out)
+	}
+}
+
+// TestHostedReferenceTheOrganisationLacksBlocks. unmute creates no tool, so this
+// is the case that has to stop rather than warn, and the message has to say the
+// dashboard is where a tool is born.
+func TestHostedReferenceTheOrganisationLacksBlocks(t *testing.T) {
+	stub := `case "$*" in
+  *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"org-1","org_name":"Example"}}' ;;
+  *"tool list"*) printf '[{"name":"end_call","tool_type":"end_call","latest_version":1},{"name":"check_order_v2","tool_type":"code","latest_version":1}]' ;;
+  *) printf '[]' ;;
+esac`
+	dir, _, errOut, err := deployFixture(t, "slng_hosted", "", stub, "--dry-run")
+	if err == nil {
+		t.Fatal("a hosted reference the organisation does not hold reached the push")
+	}
+	for _, want := range []string{
+		"Cannot deploy",
+		"hosted tool",
+		"check_order",
+		"the tool file's own name",
+		"create the tool in the SLNG dashboard",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("the refusal does not say %q:\n%s", want, errOut)
+		}
+	}
+	// The near miss, which is the most common way this goes wrong.
+	if !strings.Contains(errOut, "check_order_v2") {
+		t.Errorf("the refusal does not name the near miss:\n%s", errOut)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "build")); !os.IsNotExist(statErr) {
+		t.Error("a refused preflight still wrote a build directory")
+	}
+}
+
+// TestHostedDriftDegradesWhenToolsCannotBeListed. Same rule as
+// TestDeployPreflightDegrades, applied to the check this feature added: a read
+// that could not be made must leave the version unchecked, never satisfied and
+// never a refusal.
+func TestHostedDriftDegradesWhenToolsCannotBeListed(t *testing.T) {
+	stub := `case "$*" in
+  *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"org-1","org_name":"Example"}}' ;;
+  *"tool list"*) printf 'error: insufficient scope\n' >&2; exit 1 ;;
+  *"secret list"*) printf '[{"name":"SLNG_TOOL_RENDER","kind":"secret","has_value":true},{"name":"OPENAI_API_KEY","kind":"secret","has_value":true},{"name":"DEEPGRAM_API_KEY","kind":"secret","has_value":true},{"name":"SLNG_API_KEY","kind":"secret","has_value":true}]' ;;
+  *"agents push"*) printf '{"ok":true,"dry_run":true,"organisation":{"id":"org-1","name":"Example"},"agent":{"name":"a","action":"create"}}' ;;
+  *) printf '[]' ;;
+esac`
+	_, out, errOut, err := deployFixture(t, "slng_hosted", "", stub, "--dry-run")
+	if err != nil {
+		t.Fatalf("an unreadable tool listing failed the deploy: %v\n%s", err, errOut)
 	}
 	if !strings.Contains(errOut, "insufficient scope") {
 		t.Errorf("the skipped read is not reported:\n%s", errOut)
@@ -598,7 +735,7 @@ func provisionedStub(trunks string) string {
 	return `case "$*" in
   *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"Example"}}' ;;
   *"agents push"*) printf '{"ok":true,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","name":"slng-tools-slng","action":"create"},"version":"unchanged"}' ;;
-  *"tool list"*) printf '[{"name":"end_call","tool_type":"end_call"}]' ;;
+  *"tool list"*) printf '[{"name":"end_call","tool_type":"end_call"},{"name":"check_order","tool_type":"code","latest_version":1},{"name":"refund","tool_type":"api_request","latest_version":2}]' ;;
   *"secret list"*) printf '[{"name":"REFUND_API_TOKEN","kind":"secret","has_value":true},{"name":"ACME_BRAND","kind":"variable","has_value":true}]' ;;
   *"mcp list"*) printf '[{"name":"internal_docs","capability_status":"healthy"}]' ;;
   *"mcp tools"*) printf '[{"name":"search_docs"},{"name":"read_doc"}]' ;;
@@ -1013,7 +1150,7 @@ func TestDeployWarnsWhenThePushLandsElsewhere(t *testing.T) {
 	stub := `case "$*" in
   *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"org-CHECKED","org_name":"Checked"}}' ;;
   *"agents push"*) printf '{"ok":true,"organisation":{"id":"org-WRITTEN","name":"Written"},"agent":{"id":"agent-1","name":"slng-tools-slng","action":"create"},"version":"unchanged"}' ;;
-  *"tool list"*) printf '[{"name":"end_call","tool_type":"end_call"}]' ;;
+  *"tool list"*) printf '[{"name":"end_call","tool_type":"end_call"},{"name":"check_order","tool_type":"code","latest_version":1},{"name":"refund","tool_type":"api_request","latest_version":2}]' ;;
   *"secret list"*) printf '[{"name":"REFUND_API_TOKEN","kind":"secret","has_value":true},{"name":"ACME_BRAND","kind":"variable","has_value":true}]' ;;
   *"mcp list"*) printf '[{"name":"internal_docs","capability_status":"healthy"}]' ;;
   *"mcp tools"*) printf '[{"name":"search_docs"},{"name":"read_doc"}]' ;;

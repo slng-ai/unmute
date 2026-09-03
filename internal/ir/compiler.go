@@ -3,6 +3,7 @@ package ir
 import (
 	"slices"
 
+	packagespec "github.com/slng-ai/unmute/internal/spec"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
@@ -602,6 +603,23 @@ type Tool struct {
 	// KnowledgeBase names the base this tool searches (knowledge only).
 	// Validation has proven the name is declared.
 	KnowledgeBase string `json:"knowledge_base,omitempty" yaml:"knowledge_base,omitempty"`
+	// Mirror is the SLNG platform's own definition of this tool, as
+	// `unmute pull` committed it (slng only). It is what makes a hosted tool
+	// portable: the slng target references the platform's copy by name and the
+	// code targets build a working tool out of this.
+	//
+	// json:"-" because it is content read off disk rather than resolved
+	// authoring, the same reason HandlerSource above carries the tag. The debug
+	// schema describes what somebody wrote plus what the compiler decided, and a
+	// mirrored module inlined into it would bury both.
+	Mirror *packagespec.Mirror `json:"-" yaml:"-"`
+	// MirrorPin is the digest the tool file records, and MirrorBytes what the
+	// mirror was read from, so ir.Validate can compare the two with no network.
+	// Both are the offline half of the honesty check; the platform's own
+	// content_hash on Mirror is the online half, and they answer different
+	// questions.
+	MirrorPin   string `json:"-" yaml:"-"`
+	MirrorBytes []byte `json:"-" yaml:"-"`
 }
 
 type ToolExecution string
@@ -614,6 +632,9 @@ const (
 	ToolBuiltin        ToolExecution = "builtin"
 	ToolMCP            ToolExecution = "mcp"
 	ToolKnowledge      ToolExecution = "knowledge"
+	// ToolSlngHosted is a tool the SLNG platform owns. The only kind whose
+	// definition the package does not hold: it holds a mirror of one.
+	ToolSlngHosted ToolExecution = "slng"
 )
 
 // ToolAuth is a resolved webhook authentication scheme (SCHEMA §5). Defaults

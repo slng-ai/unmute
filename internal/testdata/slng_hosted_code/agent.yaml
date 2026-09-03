@@ -1,0 +1,90 @@
+# The same two SLNG-hosted tools as slng_hosted, compiled to livekit and
+# pipecat. This is the fixture that checks the portability claim: naming a tool
+# the platform hosts must cost nothing on a code target.
+#
+# Its request tool's url is de-identified by hand and re-pinned, same as its
+# sibling's, so `unmute pull --check` calls it stale on purpose. See the note in
+# internal/testdata/slng_hosted/agent.yaml.
+#
+#   check_order        slng: -> a hosted `code` tool. Mirrored module included,
+#                              so livekit and pipecat can run it too.
+#   search_places_text slng: -> a hosted `api_request` tool. No module: its
+#                              mirror carries a url, a method and the name of
+#                              the credential it reads.
+#   end_call           builtin: -> a curated capability, which needs no mirror
+#                                 and is here to prove the two paths coexist.
+#
+# The two mirrors are committed. Nothing here reaches the network, which is the
+# whole point: `make test` has no SLNG credential and never will.
+
+version: 1
+
+name: slng-hosted-code-fixture
+
+entry_agent: support
+
+secrets:
+  # SLNG_TOOL_RENDER is the credential the hosted request tool reads, and the
+  # pull is what put it here: the platform names it in config.auth.secret_name
+  # and leaves declared_secrets empty. A name, never a value.
+  - SLNG_TOOL_RENDER
+  - OPENAI_API_KEY
+  - DEEPGRAM_API_KEY
+  - SLNG_API_KEY
+
+models:
+  think:
+    reasoning:
+      description: answers the caller
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.4
+  speak:
+    front_desk:
+      description: warm, concise
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      description: default STT
+      provider: deepgram
+      model: nova-3
+  turn:
+    vad:
+      description: end-of-turn preference
+      provider: local
+      model: silero
+      semantic_endpointing: preferred
+
+agents:
+  support:
+    instructions: instructions.md
+    model: reasoning
+    voice: front_desk
+    tools:
+      - check_order
+      - search_places_text
+      - end_call
+
+tools:
+  - check_order
+  - search_places_text
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, you have reached Acme Support. How can I help?"
+  interruption:
+    enabled: true
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 10
+  max_sessions: 20
+  peak_starts_per_second: 2
+  avg_session_duration: 4m

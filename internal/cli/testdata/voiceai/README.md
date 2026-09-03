@@ -29,3 +29,20 @@ reports success.
 | `mcp_list.json` | `voiceai mcp list --json` | **synthesised**, because the captured account returns `[]` and the healthy and unhealthy branches both need cover |
 | `mcp_tools.json` | `voiceai mcp tools <server> --json` | **synthesised**, for the same reason |
 | `trunks_list.json` | `voiceai trunks list --json` | reduced from 6. `broken_inbound` is **synthesised**: no captured trunk was unusable, and the unusable branch needs cover |
+| `tool_get_code.json` | `voiceai tool get check_order --json` | a `code` tool. `code_src` really does carry a shim unmute itself wrote on an earlier push, and that shim is why the mirrored module needs a lint header: `from pydantic import BaseModel` sits at line 24, after code, which is `E402` |
+| `tool_get_api_request.json` | `voiceai tool get search_places_text --json` | an `api_request` tool. `declared_secrets` is **empty** while `config.auth.secret_name` names one, which is the field a mirror has to read for this kind |
+| `tool_get_curated.json` | `voiceai tool get current_datetime --json` | a curated capability. `source: curated`, `code_src: null` and `arg_schema: {}`, which is why a curated name cannot be mirrored and is refused with `builtin:` as the answer |
+
+The three `tool_get_*` captures were taken from `voiceai` 0.1.16 on 2026-09-03,
+against the second of the two organisations this checkout can reach. Only `id`,
+`organisation_id` and the `api_request` tool's `url` were changed; every other
+byte is the response. They cover the three answers a hosted-tool fetch can get,
+and each carries one field a hand-written struct would get wrong:
+
+- a `code` tool's definition is in `code_src` and its schema in `arg_schema`,
+  which the platform derived by introspecting the module, so nothing here has to
+  parse Python;
+- an `api_request` tool's credential is `config.auth.secret_name` and **not**
+  `declared_secrets`, which is empty on a tool that plainly needs a token;
+- a curated capability answers with the same 19 keys as a real tool and is
+  distinguishable only by `source`.

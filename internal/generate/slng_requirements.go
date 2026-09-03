@@ -31,6 +31,11 @@ type Requirements struct {
 	// MCPTools is one entry per exposed server tool, with Server naming the
 	// server that must offer it.
 	MCPTools []Requirement
+	// Hosted is one entry per `slng:` tool. Like a builtin, the name must
+	// already exist: unmute creates no tool. Unlike a builtin, the package pins
+	// a version of it, so each entry carries what it was pinned to and the
+	// preflight can say when the organisation has moved on.
+	Hosted []Requirement
 	// Secrets are credentials a tool authenticates with, stored in the vault
 	// under the same name the package uses for the environment variable.
 	Secrets []Requirement
@@ -47,6 +52,13 @@ type Requirement struct {
 	Name string
 	// Server is set on MCPTools alone, naming the server that must offer Name.
 	Server string
+	// Version and ContentHash are set on Hosted alone: what the committed mirror
+	// was taken from. They are compared, never recomputed, because the
+	// platform's hash algorithm is not ours. A mismatch is a warning and not a
+	// refusal, because the agent calls the platform's copy either way, so the
+	// risk is a stale package rather than a broken deploy.
+	Version     int
+	ContentHash string
 	// Where is the line of the package that asked for this. It is mandatory:
 	// "create ACME_TOKEN" is only actionable beside "because check_order
 	// authenticates with it", and a finding an author cannot trace is a finding
@@ -61,7 +73,7 @@ func (r Requirements) Empty() bool { return r.Count() == 0 }
 
 // Count is how many names this package needs the account to hold.
 func (r Requirements) Count() int {
-	return len(r.Builtins) + len(r.MCPServers) + len(r.MCPTools) + len(r.Secrets) + len(r.Variables)
+	return len(r.Builtins) + len(r.MCPServers) + len(r.MCPTools) + len(r.Hosted) + len(r.Secrets) + len(r.Variables)
 }
 
 // ServerNames is the distinct MCP servers, for a caller that has to ask each one
@@ -104,6 +116,22 @@ func slngRequirements(agent *ir.Agent, built slngArtifacts) Requirements {
 		requirements.Builtins = append(requirements.Builtins, Requirement{
 			Name:  ref.Tool,
 			Where: "tools/" + ref.Tool + ".yaml is a builtin, so SLNG must already have a tool of that name",
+		})
+	}
+
+	// Hosted tools, from the same references, for the same reason: the ref
+	// carries the package tool's own name and that is the name the organisation
+	// must hold.
+	for _, ref := range built.Body.ToolRefs {
+		tool := agent.Tools[ref.Tool]
+		if tool.Execution != ir.ToolSlngHosted || tool.Mirror == nil {
+			continue
+		}
+		requirements.Hosted = append(requirements.Hosted, Requirement{
+			Name:        ref.Tool,
+			Version:     tool.Mirror.Version,
+			ContentHash: tool.Mirror.ContentHash,
+			Where:       "tools/" + ref.Tool + ".yaml references a tool SLNG hosts, so SLNG must already have one of that name",
 		})
 	}
 
@@ -171,6 +199,17 @@ func slngVaultRequirements(agent *ir.Agent, built slngArtifacts) (secrets, varia
 		tool := agent.Tools[name]
 		if tool.Auth != nil {
 			addSecret(tool.Auth.TokenEnv, "tools/"+name+".yaml authenticates with it")
+		}
+		// A hosted tool's credentials are the platform's, named in the mirror.
+		// They belong here rather than only in the package's `secrets:` list,
+		// because this function is the whole source of what the runbook prints
+		// and what the deploy preflight checks: the slng driver reads
+		// agent.Secrets nowhere, so a name written only there would be visible
+		// in the diff and checked by nothing.
+		if tool.Mirror != nil {
+			for _, secret := range tool.Mirror.Secrets() {
+				addSecret(secret, "tools/"+name+".slng.json, the hosted tool reads it")
+			}
 		}
 		addVariable(tool.Description, "tools/"+name+".yaml description")
 		addVariable(tool.BaseURL, "tools/"+name+".yaml webhook base_url")

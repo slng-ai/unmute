@@ -1,0 +1,27 @@
+{
+  "name": "check_order",
+  "tool_type": "code",
+  "source": "org",
+  "description": "Look up an order by its number and return its status and delivery date.",
+  "arg_schema": {
+    "properties": {
+      "order_number": {
+        "title": "Order Number",
+        "type": "string"
+      }
+    },
+    "required": [
+      "order_number"
+    ],
+    "title": "Input",
+    "type": "object"
+  },
+  "config": {
+    "egress": {},
+    "import_probes": [],
+    "type": "code"
+  },
+  "content_hash": "0ced0bc3065284384e4f107bba593dd3dd23a254daea186303c2de44bebb938b",
+  "latest_version": 1,
+  "fetched": "2026-09-03"
+}

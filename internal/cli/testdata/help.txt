@@ -12,6 +12,7 @@ Available Commands:
   dev         Compile, run the agent locally, and talk to it in the browser.
   help        Help about any command
   init        Scaffold a new v1 agent package.
+  pull        Fetch each SLNG-hosted tool's definition into the package.
   resources   List the tools, MCP servers and phone numbers your SLNG organisation offers.
   skill       Install the coding-agent skill into a project.
   validate    Validate a v1 agent package against its targets.
@@ -94,6 +95,24 @@ Flags:
       --target string        target instance name (required without a TTY when multiple exist)
       --var stringArray      seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)
       --verbose              follow container/agent logs on stderr (default: write to the log file only)
+
+$ unmute pull --help
+Fetch the definition of every tool this package references with `slng:`, and
+write it beside the tool file. Commit what it writes: the mirror is how a
+hosted tool reaches livekit and pipecat, and the pin is how a later compile
+knows the mirror is still the right one.
+
+This is the only command that needs an SLNG credential. `validate` and
+`compile` work offline, which is what lets CI build a package that names a
+hosted tool.
+
+Usage:
+  unmute pull [package-dir] [flags]
+
+Flags:
+      --check   Verify every pin against the organisation without writing; exit 1 on drift
+      --force   Discard hand edits to a mirrored file
+  -h, --help    help for pull
 
 $ unmute resources --help
 List the tools, MCP servers and phone numbers your SLNG organisation offers.
