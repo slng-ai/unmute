@@ -121,6 +121,23 @@ func (u Writer) Dim(s string) string {
 	return u.r.NewStyle().Foreground(Muted).Render(s)
 }
 
+// Warned paints the prefix an advisory line leads with. Amber, not brand
+// yellow, so a warning never reads as branding (V43) — and coloured at all
+// because the whole argument for keeping stdout short is that the two lines
+// somebody has to act on should be findable. They were the same plain text as
+// everything else.
+func (u Writer) Warned(s string) string { return u.paint(s, Warn) }
+
+// Bold is emphasis with no colour of its own, for the heading over a list of
+// problems. Warn/Success/Error already mean something; a heading is not a
+// fourth severity.
+func (u Writer) Bold(s string) string {
+	if NoColor() {
+		return s
+	}
+	return u.r.NewStyle().Bold(true).Render(s)
+}
+
 // Badge renders the logo chip bound to this writer. Same chip as the
 // package-level Badge, so the console and the commands cannot drift apart.
 func (u Writer) Badge(s string) string {

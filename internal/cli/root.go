@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/slng-ai/unmute/internal/style"
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +38,19 @@ func Execute(version string) int {
 	root := newRootCmd()
 	root.Version = version
 	if err := root.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "unmute:", err)
+		// The prefix carries the colour, not the message: a wall of red is
+		// harder to read than plain text with a red marker on it, and the
+		// message is the part somebody has to act on.
+		//
+		// The prefix itself stays, even though a run header two lines up has
+		// already said `unmute` and named the command. This is the one print
+		// site that cannot know whether that header ran: it never does for a
+		// pipe or a CI log, and there the program name and the wrapped
+		// `<command> <package>:` chain are the only things identifying whose
+		// failure this is. Saying it twice on a terminal is the cheaper half of
+		// that trade. Bound to os.Stderr, so a redirected stream stays plain
+		// even while os.Stdout is still a terminal.
+		fmt.Fprintln(os.Stderr, style.For(os.Stderr).Failed("unmute:"), err)
 		return 1
 	}
 	return 0

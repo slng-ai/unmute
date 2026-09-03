@@ -334,13 +334,13 @@ func renderPreflight(out, errOut io.Writer, name string, report preflightReport)
 	// Advisories the account printed alongside its data. Relayed as prose,
 	// because that is what they are.
 	for _, note := range report.Notes {
-		fmt.Fprintf(errOut, "note: %s: %s\n", name, note)
+		notef(errOut, "%s: %s\n", name, note)
 	}
 	// A read that could not be made is a warning and never a refusal, and it says
 	// which question went unanswered. Silence here would be the report claiming a
 	// check it never made.
 	for _, missed := range report.Unchecked {
-		fmt.Fprintf(errOut, "warning: %s: %s; the push decides what it would have covered\n", name, missed)
+		warnf(errOut, "%s: %s; the push decides what it would have covered\n", name, missed)
 	}
 
 	if len(report.Findings) == 0 {
@@ -353,7 +353,7 @@ func renderPreflight(out, errOut io.Writer, name string, report preflightReport)
 		fmt.Fprintf(out, "%s: %s satisfied\n", name, plural(report.satisfiedCount(), "requirement"))
 		for _, found := range report.Findings {
 			if found.State == unhealthy {
-				fmt.Fprintf(errOut, "warning: %s: %s %s: %s\n", name, found.Kind, found.Requirement.Name, found.Detail)
+				warnf(errOut, "%s: %s %s: %s\n", name, found.Kind, found.Requirement.Name, found.Detail)
 			}
 		}
 		return nil

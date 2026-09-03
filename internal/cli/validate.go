@@ -35,6 +35,8 @@ func newValidateCmd() *cobra.Command {
 }
 
 func runValidate(cmd *cobra.Command, dir string, names []string) error {
+	out := cmd.OutOrStdout()
+	printHeader(out, "validate "+displayDir(dir))
 	pkg, err := spec.Load(dir)
 	if err != nil {
 		return fmt.Errorf("validate %s: load: %w", dir, err)
@@ -48,8 +50,6 @@ func runValidate(cmd *cobra.Command, dir string, names []string) error {
 		return fmt.Errorf("validate %s: %w", dir, err)
 	}
 	report, validateErr := ir.Validate(agent, targets, target.Default())
-	out := cmd.OutOrStdout()
-	printHeader(out, "validate "+displayDir(dir))
 	printValidationReport(out, cmd.ErrOrStderr(), report)
 	if validateErr != nil {
 		return fmt.Errorf("validate %s: %w", dir, validateErr)
@@ -72,13 +72,13 @@ func runValidate(cmd *cobra.Command, dir string, names []string) error {
 // `deploy` validates before it pushes and prints the same report, so the format
 // has one owner rather than two renderers that agree by hand until they do not.
 func printValidationReport(out, errOut io.Writer, report ir.ValidateReport) {
-	u := style.For(out)
+	u, e := style.For(out), style.For(errOut)
 	for _, row := range report.PerTarget {
 		status := u.Ok("✓")
 		if len(row.Errors) > 0 {
 			status = u.Failed("✗")
 		}
-		fmt.Fprintf(out, "%s %s (%s)\n", status, u.Accent(row.Name), row.Provider)
+		fmt.Fprintf(out, "%s %s %s\n", status, u.Accent(row.Name), u.Dim("("+string(row.Provider)+")"))
 	}
 	// Prerequisites first, because they are the thing an author has to go and ask
 	// someone else for, and the lead time is theirs, not ours. Exit code stays 0:
@@ -87,11 +87,11 @@ func printValidationReport(out, errOut io.Writer, report ir.ValidateReport) {
 	for _, row := range report.PerTarget {
 		for _, prerequisite := range row.Prerequisites {
 			if !wrotePrerequisites {
-				fmt.Fprintln(errOut, "\nSetup prerequisites:")
+				fmt.Fprintln(errOut, "\n"+e.Bold("Setup prerequisites:"))
 				wrotePrerequisites = true
 			}
 			fmt.Fprintf(errOut, "  %s: %s: %s\n    %s (verified %s)\n",
-				row.Name, prerequisite.Name, prerequisite.Summary,
+				e.Accent(row.Name), prerequisite.Name, prerequisite.Summary,
 				prerequisite.Docs, prerequisite.Verified)
 		}
 	}
@@ -99,20 +99,20 @@ func printValidationReport(out, errOut io.Writer, report ir.ValidateReport) {
 	for _, row := range report.PerTarget {
 		for _, warning := range row.Warnings {
 			if !wroteWarnings {
-				fmt.Fprintln(errOut, "\nWarnings:")
+				fmt.Fprintln(errOut, "\n"+e.Bold("Warnings:"))
 				wroteWarnings = true
 			}
-			fmt.Fprintf(errOut, "  %s: %s\n", row.Name, warning)
+			fmt.Fprintf(errOut, "  %s: %s\n", e.Accent(row.Name), warning)
 		}
 	}
 	wroteErrors := false
 	for _, row := range report.PerTarget {
 		for _, validationError := range row.Errors {
 			if !wroteErrors {
-				fmt.Fprintln(errOut, "\nErrors:")
+				fmt.Fprintln(errOut, "\n"+e.Bold("Errors:"))
 				wroteErrors = true
 			}
-			fmt.Fprintf(errOut, "  %s: %s\n", row.Name, validationError)
+			fmt.Fprintf(errOut, "  %s: %s\n", e.Accent(row.Name), validationError)
 		}
 	}
 }

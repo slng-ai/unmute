@@ -80,6 +80,8 @@ func newDeployCmd() *cobra.Command {
 }
 
 func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
+	out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
+	printHeader(out, "deploy "+displayDir(dir))
 	agent, selected, err := loadPackage(dir, opts.targets)
 	if err != nil {
 		return fmt.Errorf("deploy %s: %w", dir, err)
@@ -93,9 +95,6 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 	if len(pushable) == 0 {
 		return fmt.Errorf("deploy %s: %s", dir, noSlngTargetGuidance(selected))
 	}
-
-	out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
-	printHeader(out, "deploy "+displayDir(dir))
 
 	// Local refusals first. The slng target refuses things SLNG will not run, and
 	// every one of them is cheaper to hear now than as a rejected push.
@@ -124,7 +123,7 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 	env := packageEnv(dir, errOut)
 	key, keySource := deployCredential(env)
 	if keySource == "" {
-		fmt.Fprintf(errOut, "warning: neither %s nor %s is set, so the push uses whatever profile `%s` stored; "+
+		warnf(errOut, "neither %s nor %s is set, so the push uses whatever profile `%s` stored; "+
 			"check the organisation printed below is the one you meant\n",
 			target.SlngRouterKeyEnv, target.SlngPushCredentialEnv, target.SlngLoginCommand)
 	}
@@ -151,7 +150,7 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 			if reported[resolved.Name+": "+warning] {
 				continue
 			}
-			fmt.Fprintf(errOut, "warning: %s: %s\n", resolved.Name, warning)
+			warnf(errOut, "%s: %s\n", resolved.Name, warning)
 		}
 
 		// Generate wrote nothing: it returns an artifact and writeArtifactFiles
@@ -395,7 +394,7 @@ func printPushResult(out, errOut io.Writer, name, deployName, outDir, keySource 
 	// land in different organisations, every check just performed was about
 	// somewhere else, and that is a warning rather than a duplicate.
 	if org := organisationLine(result); org != "" && !sameOrganisation(named, result) {
-		fmt.Fprintf(errOut, "warning: %s: the checks ran against %s and the push reported %s. "+
+		warnf(errOut, "%s: the checks ran against %s and the push reported %s. "+
 			"Those are different organisations, so what was checked is not what was written\n",
 			name, named, org)
 	}
@@ -405,7 +404,7 @@ func printPushResult(out, errOut io.Writer, name, deployName, outDir, keySource 
 	// the same string until a package started naming its own deployments, and
 	// printing the target here sent an author to rename the wrong thing.
 	if result.Agent.Action == "update" {
-		fmt.Fprintf(errOut, "warning: %s: an agent named %q already exists%s, so this push replaces it rather than adding one; "+
+		warnf(errOut, "%s: an agent named %q already exists%s, so this push replaces it rather than adding one; "+
 			"the name is `name:` in agent.yaml joined to this target, so change `name:` or pass --agent-id to write a different agent\n",
 			name, deployName, parenthesised(result.Agent.ID))
 	}
@@ -647,12 +646,12 @@ func indentLines(text, indent string) string {
 func reportReach(in io.Reader, out, errOut io.Writer, runner *voiceaiRunner, name, agentName, agentID string, interactive bool) {
 	trunks, notes, err := readTrunks(runner)
 	for _, note := range notes {
-		fmt.Fprintf(errOut, "note: %s: %s\n", name, note)
+		notef(errOut, "%s: %s\n", name, note)
 	}
 	if err != nil {
 		// Never a deploy failure. The agent is live either way, and an unreadable
 		// trunk listing says nothing about whether a call would connect.
-		fmt.Fprintf(errOut, "warning: %s: %s, so the numbers that reach this agent could not be read\n", name, err)
+		warnf(errOut, "%s: %s, so the numbers that reach this agent could not be read\n", name, err)
 		return
 	}
 
@@ -748,7 +747,7 @@ func offerTrunk(in io.Reader, out, errOut io.Writer, runner *voiceaiRunner, name
 
 	trunk := candidates[choice-1]
 	if err := runner.attachTrunk(agentID, trunk); err != nil {
-		fmt.Fprintf(errOut, "warning: %s: the agent deployed, but %s was not attached: %v\n", name, trunk.Name, err)
+		warnf(errOut, "%s: the agent deployed, but %s was not attached: %v\n", name, trunk.Name, err)
 		return
 	}
 	fmt.Fprintf(out, "%s: %s attached. Call %s to reach this agent.\n", name, trunk.Name, numbersOf(trunk))
@@ -803,13 +802,13 @@ func numbersOf(trunk slngTrunk) string {
 // it is never a default and never implied by a successful deploy.
 func placeTestCall(out, errOut io.Writer, runner *voiceaiRunner, name, agentID, phone string) {
 	if agentID == "" {
-		fmt.Fprintf(errOut, "warning: %s: the push reported no agent id, so no test call was placed\n", name)
+		warnf(errOut, "%s: the push reported no agent id, so no test call was placed\n", name)
 		return
 	}
 	if err := runner.dispatchCall(agentID, phone); err != nil {
 		// The deploy succeeded. A call that would not connect is worth saying and
 		// is not a reason to report the deploy as failed.
-		fmt.Fprintf(errOut, "warning: %s: the agent deployed, but the test call to %s was not placed: %v\n", name, phone, err)
+		warnf(errOut, "%s: the agent deployed, but the test call to %s was not placed: %v\n", name, phone, err)
 		return
 	}
 	fmt.Fprintf(out, "%s: calling %s from this agent now\n", name, phone)

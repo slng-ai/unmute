@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/slng-ai/unmute/internal/devmetrics"
 	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/style"
@@ -120,7 +119,7 @@ func startSpinner(w io.Writer, msg string) *spinner {
 		close(s.done)
 		return s
 	}
-	accent := lipgloss.NewRenderer(w).NewStyle().Foreground(lipgloss.Color(style.Accent))
+	u := style.For(w)
 	go func() {
 		defer close(s.done)
 		frames := []rune{'⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'}
@@ -133,7 +132,7 @@ func startSpinner(w io.Writer, msg string) *spinner {
 				fmt.Fprint(w, "\r\033[2K")
 				return
 			case <-t.C:
-				fmt.Fprintf(w, "\r\033[2K %s %s", accent.Render(string(frames[i%len(frames)])), msg)
+				fmt.Fprintf(w, "\r\033[2K %s %s", u.Accent(string(frames[i%len(frames)])), msg)
 				i++
 			}
 		}
@@ -224,7 +223,7 @@ func packageEnv(root string, warn io.Writer) []string {
 		vals, err := parseDotenv(file)
 		if err != nil {
 			if !errors.Is(err, fs.ErrNotExist) {
-				fmt.Fprintf(warn, "warning: reading %s: %v\n", file, err)
+				warnf(warn, "reading %s: %v\n", file, err)
 			}
 			continue
 		}

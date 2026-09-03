@@ -22,6 +22,7 @@ import (
 
 	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/style"
 	"github.com/slng-ai/unmute/internal/target"
 	"github.com/slng-ai/unmute/internal/web"
 	"github.com/spf13/cobra"
@@ -60,6 +61,8 @@ func devDispatchName(agent *ir.Agent, resolved ir.Target) string {
 // reach the ephemeral UDP ICE candidates gathered inside Docker Desktop;
 // LiveKit still needs its local server stack in Compose.
 func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noOpen, verbose bool) error {
+	out := cmd.OutOrStdout()
+	printHeader(out, "dev "+displayDir(root))
 	agent, targets, err := loadPackage(root, []string{targetName})
 	if err != nil {
 		return fmt.Errorf("dev %s: %w", root, err)
@@ -77,7 +80,7 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 		return fmt.Errorf("dev %s: %w", root, err)
 	}
 	for _, warning := range artifact.Notes.Warnings {
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
+		warnf(cmd.ErrOrStderr(), "%s\n", warning)
 	}
 	outDir := filepath.Join(root, "build", resolved.Name)
 	if err := writeArtifactFiles(cmd.ErrOrStderr(), outDir, artifact.Files); err != nil {
@@ -87,7 +90,8 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 	if _, err := os.Stat(composeFile); err != nil {
 		return fmt.Errorf("dev %s: generated project has no compose.dev.yaml: %w", root, err)
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "compiled %s\n", outDir)
+	u := style.For(out)
+	fmt.Fprintln(out, u.Dim("compiled"), dimPath(u, outDir))
 
 	childEnv := packageEnv(root, cmd.ErrOrStderr())
 	// compose.dev.yaml publishes the bot on ${UNMUTE_DEV_PORT}; --bot-port sets it.
@@ -237,7 +241,10 @@ func startDevWebServer(cmd *cobra.Command, run devWebRun) (*devWebServer, error)
 	go func() { web.errCh <- srv.Serve(ln) }()
 
 	uiURL := fmt.Sprintf("http://localhost:%s/?agent=%s", run.uiPort, url.QueryEscape(run.agentName))
-	fmt.Fprintf(cmd.OutOrStdout(), "\n  \033[1;32m▸\033[0m %s\n    ctrl-c to stop  ·  logs: %s\n\n", uiURL, run.logPath)
+	out := cmd.OutOrStdout()
+	u := style.For(out)
+	fmt.Fprintf(out, "\n  %s %s\n    %s\n\n",
+		u.Accent("▸"), uiURL, u.Dim("ctrl-c to stop  ·  logs: "+run.logPath))
 	if !run.noOpen {
 		openBrowser(uiURL)
 	}
