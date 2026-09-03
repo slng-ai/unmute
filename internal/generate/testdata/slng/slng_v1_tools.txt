@@ -66,12 +66,13 @@ The organisation the push resolved is printed on every run. That matters because
 an exported key and a stored profile can belong to **different** organisations,
 and nothing else on screen would tell you which one you just wrote to.
 
-Two flags are worth knowing before your first update:
+One flag is worth knowing before your first update: `--dry-run` checks
+everything, reports it, and changes nothing.
 
-- `--dry-run` checks everything, reports it, and changes nothing.
-- `--run-samples` executes each `code` or `api_request` tool's sample against
-  your real dependencies. A tool of either kind cannot be published without one
-  successful run, so a package that ships one needs this.
+`--run-samples` has nothing to act on here. A sample proves a tool works before
+the platform publishes it, and this push creates no tool: it writes references
+to tools your organisation already holds, each published before your package
+named it.
 
 **A push replaces.** A tool reference this package no longer names is detached,
 and a field that differs from the live agent is overwritten. `--dry-run` names

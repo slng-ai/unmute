@@ -55,18 +55,28 @@ Get one at [app.slng.ai/api-keys](https://app.slng.ai/api-keys).
 unmute deploy examples/slng-support
 ```
 
+If the package references a hosted tool with `slng:`, run
+[`unmute pull`](/reference/cli/pull) once first and commit what it writes.
+Deploy compiles from that committed copy, so a package whose mirror is missing
+is refused before the account is read.
+
 A clean run reads:
 
 ```text
 ✓ slng (slng)
+slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
+slng: 7 requirements satisfied
 slng: credential from SLNG_API_KEY
 slng: compiled examples/slng-support/build/slng (2 files)
-slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
-slng: tool check_order created, sample succeeded, published v1
 slng: agent created 01998a7c-4a1b-7f2e-9c33-8d5e1b0f7a62
 slng: version 4 labelled "slng 2026-08-27T09:12:44.010Z"
 slng: deployed. Talk to it: voiceai agents web-sessions create 01998a7c-4a1b-7f2e-9c33-8d5e1b0f7a62 --file session.json
 ```
+
+No line names a tool, because a push creates none. Unmute writes tool
+*references* into the agent, so every tool it names already exists in your
+organisation. The `requirements satisfied` count is where those references
+were checked. See [Hosted tools](/build/tools/hosted).
 
 Only a `slng` target is deployed. A livekit or pipecat target compiles to a
 project that somebody else's platform runs, so it is `unmute compile` plus that
@@ -224,9 +234,10 @@ live agent is **overwritten**.
 
 ```text
 ✓ slng (slng)
+slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
+slng: 7 requirements satisfied
 slng: credential from SLNG_API_KEY
 slng: compiled examples/slng-support/build/slng (2 files)
-slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
 slng: agent acme-orders-slng — update
 slng: reference end_call (existing attachment)
 slng: would detach refund, which this package no longer names
@@ -267,12 +278,23 @@ The problems you will meet most:
 | It says | What to do |
 |---|---|
 | `vault missing` | create each name in [the vault](https://app.slng.ai/vault/secrets). A name that exists as a *variable* does not count. |
-| `sample missing` | write `build/slng/samples/<tool>.json`, then deploy with `--run-samples`. |
-| `samples not enabled` | the sample exists; `--run-samples` is how you consent to running it. |
-| `tool unresolved` | the package references a tool name your organisation cannot see. Rename the reference, or create the tool. |
+| `no mirror of it is committed` | a `slng:` tool with nothing to compile. Run `unmute pull` and commit what it writes. |
+| `does not match the hash` | the committed mirror and the pin disagree. Run `unmute pull` and read the diff, or `git checkout` the mirror. |
+| `tool unresolved` | the package references a tool name your organisation cannot see. Rename the reference, or create the tool in the dashboard. Unmute creates none. |
 | `agent ambiguous` | two agents share the package's name. Pass `--agent-id`. |
+| `sample missing`, `samples not enabled` | see [Tool samples](#tool-samples). Neither reaches a push unmute makes. |
+
+The two mirror refusals come from `validate`, which runs first, so they stop
+the deploy before it reads your account.
 
 ## Tool samples
+
+<Note>
+  A push unmute makes creates no tool, so it never meets this gate. Unmute
+  writes tool references, and a referenced tool was published on SLNG before
+  your package named it. This section is here for a tool created another way,
+  and for reading the blocker above if the platform reports one.
+</Note>
 
 A `code` or `api_request` tool cannot be published until one successful run
 proves it works. That run needs a sample: one JSON object of arguments, named

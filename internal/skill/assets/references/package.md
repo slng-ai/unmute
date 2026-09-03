@@ -493,11 +493,18 @@ files to the `voiceai` CLI, which must be on PATH
 
 ```bash
 export SLNG_API_KEY=...
+unmute pull .                              # only if a tool uses `slng:`; commit what it writes
 unmute deploy .
 unmute deploy . --dry-run                  # check everything, change nothing
-unmute deploy . --run-samples              # also run each tool's sample
 voiceai agents web-sessions create <agent_id> --file session.json
 ```
+
+`unmute pull` is the only command that fetches anything, and it is required
+before the first compile of a package that references a hosted tool: `validate`
+and `compile` read the committed mirror and open no connection, which is what
+lets a machine with no SLNG key build the package. Do not pass `--run-samples`.
+A sample proves a tool before the platform publishes it, and this push creates
+no tool.
 
 The key is read from `SLNG_API_KEY`, then `VOICEAI_API_KEY`, then whatever
 profile `voiceai login` stored. Those are two names for one token: a single SLNG
@@ -532,21 +539,23 @@ That is true of a curated builtin too.
 The push step resolves those names, which is why
 `voiceai agents create --file build/slng/agent.json` is the wrong command: it
 posts the body verbatim and the API refuses it. `unmute deploy` runs
-`voiceai agents push build/slng` instead, and that resolves names, mints
-attachment ids, and creates any tool the package ships a body for.
+`voiceai agents push build/slng` instead, and that resolves names and mints
+attachment ids. It creates no tool: the body carries `tool_refs` only, so every
+tool the agent gets was published on SLNG before the package named it.
 
-A `local:` or `webhook:` tool also needs a **sample** before it can publish: one
-JSON object of arguments at `build/slng/samples/<tool>.json`, run with
-`unmute deploy --run-samples`. It goes in the build directory rather than the
-package because it is operator input, like `.env`: what counts as a safe set of
-arguments depends on the environment and the real dependencies, not on the agent
-definition. Those two are the only things a recompile preserves inside `build/`.
+That is why no sample is involved on this target. A sample proves a tool works
+before the platform publishes it, and a referenced tool is already published.
+`build/slng/samples/` and `.env` are still the two things a recompile preserves
+inside `build/`, and `voiceai tool run <tool> --input samples/<tool>.json` is
+how you exercise a hosted tool by hand.
 
-A tool on slng has **no network access at all**: the handler runs in SLNG's
-sandbox, in the region serving the call, which is why it is fast and why a
-handler that must reach a service has to be a `webhook:` tool. A `local:` or
-`webhook:` tool needs a sample before it can publish, and `examples/slng-support`
-now ships code, webhook and mcp tools and deploys today.
+A `code` tool on slng runs in SLNG's sandbox, in the region serving the call,
+which is why it is fast. Whether it may reach the network is the platform's
+setting on that tool, recorded in the mirror under `config.egress`, and not
+something a package can ask for. A tool that must call a service is an
+`api_request` tool, created in the dashboard the same way. `examples/slng-support`
+ships a hosted `code` tool, a hosted `api_request` tool, a builtin and an mcp
+server, and deploys today.
 
 An MCP reference resolves by name at push time: the push looks up the server's
 `server_id` and copies each tool's `observed_schema_hash` out of the platform's
@@ -555,8 +564,10 @@ is a stale or unhealthy snapshot, which the push refuses; refresh it first with
 `voiceai mcp run <server>`.
 
 A refused deploy has changed nothing, and reports every problem together with the
-dashboard page that fixes each: `vault missing`, `sample missing`,
-`tool unresolved`, `agent ambiguous`.
+dashboard page that fixes each: `vault missing`, `tool unresolved`,
+`agent ambiguous`. Two more are refused earlier, by `validate`, before the
+account is read: a `slng:` tool with no committed mirror, and a mirror that does
+not match the hash its tool file pins. Both say to run `unmute pull`.
 
 The pushed agent is called **`<name>-<target>`**, so a package named
 `acme-support` on the target below pushes `acme-support-slng`. Check the name is
