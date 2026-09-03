@@ -158,9 +158,9 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 	owners := map[string]string{}
 	for _, name := range agentNames {
 		agent := pkg.Agent.Agents[name]
-		// All four lists, because an owner is whoever attached the thing, and that
+		// Every list, because an owner is whoever attached the thing, and that
 		// question does not care which kind it is.
-		for _, list := range [][]string{agent.Tools, agent.Delegates, agent.Handoffs, agent.Escalations} {
+		for _, list := range [][]string{agent.Tools, agent.TaskGroups, agent.Handoffs, agent.Escalations} {
 			for _, attached := range list {
 				if owners[attached] == "" {
 					owners[attached] = name
@@ -176,10 +176,10 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 	for _, name := range agentNames {
 		definition := pkg.Agent.Agents[name]
 		agent := scaffold.Agent{Name: name, Instructions: pkg.Markdown[definition.Instructions]}
-		if def, ok := effectiveModelDef(pkg, tgt, definition.Model); ok {
+		if def, ok := effectiveModelDef(pkg, tgt, definition.Think); ok {
 			agent.Reason = scaffoldBinding(def)
 		}
-		if def, ok := effectiveModelDef(pkg, tgt, definition.Voice); ok {
+		if def, ok := effectiveModelDef(pkg, tgt, definition.Speak); ok {
 			agent.Speak = scaffoldBinding(def)
 		}
 		if name == "assistant" {
@@ -222,7 +222,7 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 				value.AttachTo = append(value.AttachTo, agentName)
 			}
 		}
-		for taskName, task := range pkg.Agent.Tasks {
+		for taskName, task := range pkg.Tasks {
 			if slices.Contains(task.Tools, name) {
 				value.AttachTasks = append(value.AttachTasks, taskName)
 			}
@@ -232,32 +232,36 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		data.Tools = append(data.Tools, value)
 	}
 
-	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.Tasks)) {
-		task := pkg.Agent.Tasks[name]
-		value := scaffold.Task{
+	// A task's agent is where the task is written, so the pairing is a read rather
+	// than a lookup through a naming convention.
+	definers := map[string]string{}
+	for _, agentName := range agentNames {
+		for _, item := range pkg.Agent.Agents[agentName].Tasks {
+			if item.Task != nil {
+				definers[item.Task.Name] = agentName
+			}
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(pkg.Tasks)) {
+		task := pkg.Tasks[name]
+		data.Tasks = append(data.Tasks, scaffold.Task{
 			Name: name, Instructions: pkg.Markdown[task.Instructions], Tools: append([]string(nil), task.Tools...),
 			Handoffs: append([]string(nil), task.Handoffs...),
-			Model:    task.Model, Result: jsonText(task.Result), History: task.Context.History,
+			Model:    task.Think, Result: jsonText(task.Result), History: task.Context.History,
 			MaxMessages: task.Context.MaxMessages, Summarizer: task.Context.Summarizer,
-			IncludeToolCalls: task.Context.IncludeToolCalls, Agent: "assistant",
-		}
-		// A task named X is run by the delegate named run_X. That convention is
-		// what pairs the two back up on the way out; it is unchanged by the
-		// re-spelling and only the catalog it reads from moved.
-		if delegate, ok := pkg.Agent.Delegates["run_"+name]; ok {
-			value.When, value.Assign = delegate.When, jsonText(delegate.Assign)
-			value.Agent = cmp.Or(owners["run_"+name], "assistant")
-		}
-		data.Tasks = append(data.Tasks, value)
+			IncludeToolCalls: task.Context.IncludeToolCalls,
+			Agent:            cmp.Or(definers[name], "assistant"),
+			When:             task.When, Announce: task.Announce,
+			Requires: append([]string(nil), task.Requires...), Assign: pairsText(task.Assign),
+		})
 	}
 	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.TaskGroups)) {
 		group := pkg.Agent.TaskGroups[name]
-		value := scaffold.TaskGroup{Name: name, Steps: append([]string(nil), group.Steps...), ContextScope: group.ContextScope, Then: group.Then, ThenTarget: group.ThenTarget, Agent: "assistant"}
-		if delegate, ok := pkg.Agent.Delegates["run_"+name]; ok {
-			value.When = delegate.When
-			value.Agent = cmp.Or(owners["run_"+name], "assistant")
-		}
-		data.TaskGroups = append(data.TaskGroups, value)
+		data.TaskGroups = append(data.TaskGroups, scaffold.TaskGroup{
+			Name: name, Steps: append([]string(nil), group.Steps...), ContextScope: group.ContextScope,
+			Then: group.Then, ThenTarget: group.ThenTarget, When: group.When, Announce: group.Announce,
+			Agent: cmp.Or(owners[name], "assistant"),
+		})
 	}
 
 	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.Handoffs)) {
@@ -415,6 +419,20 @@ func jsonText(value any) string {
 		return ""
 	}
 	return string(encoded)
+}
+
+// pairsText flattens an authored pair list into the JSON object the console
+// carries it as. Order is the author's, which the console does not preserve
+// anyway: it writes the pairs back sorted by key.
+func pairsText(pairs []packagespec.Pair) string {
+	if len(pairs) == 0 {
+		return ""
+	}
+	out := make(map[string]any, len(pairs))
+	for _, pair := range pairs {
+		out[pair.Key] = pair.Value
+	}
+	return jsonText(out)
 }
 
 func boolValue(value *bool) bool { return value != nil && *value }

@@ -61,8 +61,8 @@ models:
 agents:
   appointment_desk:
     instructions: instructions.md
-    model: reasoning
-    voice: voice
+    think: reasoning
+    speak: voice
 
 conversation:
   greeting:
@@ -96,10 +96,8 @@ That is the shape `unmute init <name>` scaffolds, and it runs in a browser.
 | `variables` | no | per call values |
 | `secrets` | no | environment names the generated project reads |
 | `destinations` | when an escalation is used | symbol to the environment variable holding a number |
-| `agents` | yes | one or more agents |
-| `tasks` | no | delegated steps |
+| `agents` | yes | one or more agents, with their nested tasks |
 | `task_groups` | no | ordered sequences of tasks |
-| `delegates` | no | steps that run and come back |
 | `handoffs` | no | the conversation becomes another agent |
 | `escalations` | no | the caller goes through to a person |
 | `tools` | no | which tool files to load |
@@ -194,8 +192,8 @@ values verified in the provider's own documentation.
 agents:
   appointment_desk:
     instructions: instructions.md
-    model: reasoning
-    voice: voice
+    think: reasoning
+    speak: voice
     tools:
       - check_availability
 ```
@@ -203,10 +201,11 @@ agents:
 | Field | What it is |
 |---|---|
 | `instructions` | path to a Markdown prompt in the package |
-| `model` | a `models.think` entry name |
-| `voice` | a `models.speak` entry name |
+| `think` | a `models.think` entry name |
+| `speak` | a `models.speak` entry name |
 | `tools` | tool files this agent may call, by name |
-| `delegates` | entries under `delegates:` this agent may run |
+| `tasks` | tasks this agent can run: each item is a full definition, or a bare name for a task another agent already defines |
+| `task_groups` | entries under `task_groups:` this agent may run |
 | `handoffs` | entries under `handoffs:` this agent may take |
 | `escalations` | entries under `escalations:` this agent may take |
 

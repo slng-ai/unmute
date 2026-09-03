@@ -31,8 +31,8 @@ Read them with `grep UNMUTE_METRIC` on the run's output. Times are seconds.
 `e2e` is from the caller falling silent to the agent starting to speak, `stages`
 carries the time to first byte for each service, and `tools` carries how long
 each tool took, including tools reached through a remote tool source. Controls
-are not listed there: a delegate or a transfer hands the conversation somewhere
-else rather than doing a unit of work, and a delegate does not return until the
+are not listed there: a task or a transfer hands the conversation somewhere else
+rather than doing a unit of work, and a task does not return until the
 flow it started has finished, so its duration is that flow's, not a tool's.
 
 A measurement Pipecat does not report is left out of the line rather than sent
@@ -185,19 +185,19 @@ end-of-turn analyzer, which it used to.
 ## Task returns
 
 When a task returns, its internal turns stay out of the owner's conversation.
-The completed delegate call stays in that conversation with the typed result,
+The completed task call stays in that conversation with the typed result,
 so the same caller request does not start the task again.
 
 A task may list a handoff in its own `handoffs:`. Calling it ends the active
 task and any remaining task-group steps, then hands the caller directly to the
 receiving agent. It does not return through the task owner. A task definition
-has `tools:` and `handoffs:` and no other list, so a delegate or an escalation
-on a task is unwritable rather than rejected: there is no key to put one in.
+has `tools:` and `handoffs:` and no other list, so a task or an escalation on a
+task is unwritable rather than rejected: there is no key to put one in.
 
 A task that lists no handoff still has a way out. Every node's
 `role_message` here ends with one generated rule: when the caller asks for
 something none of the step's tools can do, and no handoff on the step covers it,
-call that node's `finish_<delegate>_<step>` function right away with the closest
+call that node's `finish_<task>_<step>` function right away with the closest
 result, naming that request in `unserved_request`. Every finish schema here
 declares that field and never requires it, and a filled one rides the results
 handback that tells the owning agent to take the request next. The rule does not

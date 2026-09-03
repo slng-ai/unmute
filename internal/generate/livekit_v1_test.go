@@ -702,13 +702,13 @@ func TestLiveKitV1DelegateThenTransferAndEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// do_reserve -> reserve_group (transfer to the greeter); do_event -> events_group (end).
-	reserve := agent.TaskGroups["reserve_group"]
+	// do_reserve transfers to the greeter; do_event ends the call.
+	reserve := agent.TaskGroups["do_reserve"]
 	reserve.Then, reserve.ThenTarget = ir.GroupTransfer, "greeter"
-	agent.TaskGroups["reserve_group"] = reserve
-	events := agent.TaskGroups["events_group"]
+	agent.TaskGroups["do_reserve"] = reserve
+	events := agent.TaskGroups["do_event"]
 	events.Then, events.ThenTarget = ir.GroupEnd, ""
-	agent.TaskGroups["events_group"] = events
+	agent.TaskGroups["do_event"] = events
 	confirm := agent.Tasks["confirm_booking"]
 	confirm.Tools = append(confirm.Tools, "back_to_greeter")
 	agent.Tasks["confirm_booking"] = confirm
@@ -978,9 +978,9 @@ func TestLiveKitV1IsolatedGroupTaskAgentTransfer(t *testing.T) {
 	task := agent.Tasks["find_slot"]
 	task.Tools = append(task.Tools, "back_to_greeter")
 	agent.Tasks["find_slot"] = task
-	group := agent.TaskGroups["reserve_group"]
+	group := agent.TaskGroups["do_reserve"]
 	group.ContextScope = ir.ContextIsolated
-	agent.TaskGroups["reserve_group"] = group
+	agent.TaskGroups["do_reserve"] = group
 
 	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
 	if err != nil {
@@ -1228,9 +1228,9 @@ func TestLiveKitV1IsolatedGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reserve := agent.TaskGroups["reserve_group"]
+	reserve := agent.TaskGroups["do_reserve"]
 	reserve.ContextScope = ir.ContextIsolated
-	agent.TaskGroups["reserve_group"] = reserve
+	agent.TaskGroups["do_reserve"] = reserve
 
 	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
 	if err != nil {
@@ -1243,7 +1243,7 @@ func TestLiveKitV1IsolatedGroup(t *testing.T) {
 		`task_results["find_slot"] = await FindSlot()`,
 		`task_results["confirm_booking"] = await ConfirmBooking()`,
 		"return task_results",
-		// events_group stays shared, so TaskGroup is still imported and used
+		// do_event stays shared, so TaskGroup is still imported and used
 		"from livekit.agents.beta.workflows import TaskCompletedEvent, TaskGroup",
 	} {
 		if !strings.Contains(botpy, want) {
@@ -1255,9 +1255,9 @@ func TestLiveKitV1IsolatedGroup(t *testing.T) {
 	}
 
 	// With every group isolated, the TaskGroup import must disappear.
-	events := agent.TaskGroups["events_group"]
+	events := agent.TaskGroups["do_event"]
 	events.ContextScope = ir.ContextIsolated
-	agent.TaskGroups["events_group"] = events
+	agent.TaskGroups["do_event"] = events
 	artifact, err = Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
 	if err != nil {
 		t.Fatalf("generate all-isolated: %v", err)
@@ -2683,9 +2683,9 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	def := agent.Agents["greeter"]
 	def.Tools = append(def.Tools, "to_human", "to_human_cold", "fetch_notes", "book_table")
 	agent.Agents["greeter"] = def
-	reserve := agent.TaskGroups["reserve_group"]
+	reserve := agent.TaskGroups["do_reserve"]
 	reserve.ContextScope = ir.ContextIsolated
-	agent.TaskGroups["reserve_group"] = reserve
+	agent.TaskGroups["do_reserve"] = reserve
 	task := agent.Tasks["find_slot"]
 	task.Model = "backup"
 	task.Result["details"] = ir.ResultField{Schema: map[string]any{"type": "object"}}

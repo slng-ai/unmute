@@ -31,15 +31,15 @@ entry_agent: booking_desk
 agents:
   booking_desk:
     instructions: instructions.md
-    model: reasoning
-    voice: voice
+    think: reasoning
+    speak: voice
     handoffs:
       - to_appointment_manager
 
   appointment_manager:
     instructions: agents/appointment-manager.md
-    model: reasoning
-    voice: voice
+    think: reasoning
+    speak: voice
     handoffs:
       - to_booking_desk
 ```
@@ -50,9 +50,11 @@ share models, or not.
 ## The handoff
 
 You declare a handoff once under `handoffs:`, then put its name in the
-`handoffs:` list of the agent or task that may use it. That pairing is the whole
-model: every agent-level list has a same-named top-level catalog, and you attach
-by name.
+`handoffs:` list of the agent or task that may use it. That pairing is the
+model most lists share: a top-level catalog holds the definition, an
+agent-level list holds the name, and you attach by name. Tasks are the one
+exception, defined right where they are first used; see [How a package fits
+together](/build/how-a-package-fits-together).
 
 ```yaml agent.yaml
 handoffs:
@@ -81,7 +83,7 @@ speak. It is spoken once and finishes before the new agent takes over; the
 model does not paraphrase it. Leave it out for a silent handoff. A failed
 `requires` guard is checked first and never makes a false announcement.
 
-`requires` is not handoff-only. It is legal on a delegate too, and that is
+`requires` is not handoff-only. It is legal on a task too, and that is
 usually the better place for it: guard the step that needs the value rather than
 the route to it. See [Guarding a step](/build/orchestration/tasks#guarding-a-step).
 Never guard the way to a person, though. A caller who asks for a manager should
@@ -106,7 +108,7 @@ target only support `all`, and refuse a named subset.
 
 When a task lists the handoff control, invoking it ends that task and any
 remaining task-group steps before the receiving agent takes over. It never
-returns through the agent that delegated the task. This is the direct path for
+returns through the agent that ran the task. This is the direct path for
 a caller who changes intent while a focused task is active.
 
 On LiveKit, a receiving agent's own handoffs are hidden only during its first
@@ -146,7 +148,7 @@ It applies to the opening turn only. Every turn after it, the agent has its full
 list back, including the handoffs. That distinction is load-bearing: an earlier
 version leaned on LiveKit's own on-enter tool flag, whose filter follows the
 context of everything the opening reply starts, so an agent whose opening reply
-ran a delegate never saw its handoffs again, stranding a live caller who asked
+ran a task never saw its handoffs again, stranding a live caller who asked
 for another specialist for ten turns.
 
 ## Try it
@@ -162,5 +164,5 @@ but the agent behind it changes.
 ## Where to go next
 
 <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
-  Delegate a step, get a typed result back, and carry on.
+  Run a step, get a typed result back, and carry on.
 </Card>

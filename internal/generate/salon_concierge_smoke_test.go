@@ -196,7 +196,7 @@ def run_context(userdata, call_id):
 
 async def create_then_cancel(userdata):
     ctx = run_context(userdata, "booking-finish")
-    task = recording_task(agent.Booking)
+    task = recording_task(agent.ManageBooking)
     # The date is pre-fetched now, not asked for: driving the block here is what
     # proves it resolves in the emitted module rather than only in a Go string,
     # and that the value it lands is the one the booking step then works from.
@@ -220,7 +220,7 @@ async def create_then_cancel(userdata):
     await task.finish(ctx, **applied)
     assert task.completions == [applied]
 
-    task = recording_task(agent.Booking)
+    task = recording_task(agent.ManageBooking)
     listed = await task.list_bookings(ctx)
     assert [item["booking_id"] for item in listed["bookings"]] == [
         applied["booking_id"]
@@ -255,7 +255,7 @@ async def split_verification_then_intent_change():
     )
 
     userdata = agent.Userdata()
-    verification = recording_task(agent.CustomerVerification, chat_ctx)
+    verification = recording_task(agent.VerifyCustomer, chat_ctx)
     ctx = run_context(userdata, "verification-finish")
     verified = await verification.find_or_create_customer(ctx, phone="3035550199")
     finish_result = {
@@ -269,7 +269,7 @@ async def split_verification_then_intent_change():
 
     complaint = "Actually, I need to complain about my last visit."
     chat_ctx.add_message(role="user", content=complaint)
-    interrupted = recording_task(agent.Booking, chat_ctx)
+    interrupted = recording_task(agent.ManageBooking, chat_ctx)
     await interrupted.to_complaints(run_context(userdata, "intent-change"))
     assert len(interrupted.completions) == 1
     transfer = interrupted.completions[0]
@@ -413,7 +413,7 @@ async def booking_flow(worker, context, *, action, booking_id=""):
     # just that worker is enough.
     flow_manager = SimpleNamespace(worker=worker)
     worker._manage_booking_results = {}
-    worker._manage_booking_active_step = "booking"
+    worker._manage_booking_active_step = "manage_booking"
     worker._manage_booking_snapshot = (
         [dict(message) for message in context.get_messages()],
         context.tools,
@@ -456,9 +456,9 @@ async def booking_flow(worker, context, *, action, booking_id=""):
         "status": result["status"],
         "summary": result["summary"],
     }
-    finished, next_node = await worker._manage_booking_finish_booking(applied, None)
+    finished, next_node = await worker._manage_booking_finish_manage_booking(applied, None)
     assert finished == {"status": "ok"} and next_node is None
-    assert worker._manage_booking_results == {"booking": applied}
+    assert worker._manage_booking_results == {"manage_booking": applied}
     return booking_id, slot_id
 
 
@@ -483,7 +483,7 @@ async def split_verification_then_intent_change():
     verified = await bot._flow_tool_find_or_create_customer(
         {"phone": "3035550199"}, SimpleNamespace(worker=concierge)
     )
-    finished, next_node = await concierge._verify_customer_finish_customer_verification(
+    finished, next_node = await concierge._verify_customer_finish_verify_customer(
         verified, None
     )
     assert finished == {"status": "ok"} and next_node is None
@@ -511,10 +511,10 @@ async def split_verification_then_intent_change():
 
     specialist.activate_worker = activate
     specialist._manage_booking_results = {}
-    specialist._manage_booking_active_step = "booking"
+    specialist._manage_booking_active_step = "manage_booking"
     specialist._manage_booking_snapshot = (snapshot, context.tools)
     transferred, next_node = (
-        await specialist._manage_booking_transfer_booking_to_complaints({}, None)
+        await specialist._manage_booking_transfer_manage_booking_to_complaints({}, None)
     )
     assert transferred == {"transferred": True} and next_node is NO_RESPONSE
     assert len(activations) == 1

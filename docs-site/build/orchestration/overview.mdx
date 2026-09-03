@@ -13,7 +13,7 @@ start?", and everything below assumes it.
 | Shape | What it is | Where it is taught |
 |---|---|---|
 | **Handoff** | one agent gives the caller to another, and does not get them back | [Handoffs](/build/orchestration/handoffs) |
-| **Task** | a short step the agent delegates, which returns a typed result | [Tasks](/build/orchestration/tasks) |
+| **Task** | a short step the agent runs, which returns a typed result | [Tasks](/build/orchestration/tasks) |
 | **Task group** | several tasks in a fixed order, sharing what they learn | [Task groups](/build/orchestration/task-groups) |
 
 The difference that matters most is whether control comes back. A task returns. A
@@ -22,16 +22,18 @@ handoff does not.
 None of these is how you reach a person: that is an
 [escalation](/transfers/overview), and what it can do depends on the phone route.
 
-## Four lists, four catalogs
+## Five lists, four catalogs
 
-Whichever shape you reach for, you write it the same way. An agent declares what
-it can do in four lists, one per kind, and three of those have a top-level
-catalog of the same name:
+Whichever shape you reach for, you write it the same way. An agent declares
+what it can do in five lists, one per kind. Four of those have a top-level
+catalog of the same name; the fifth, tasks, is nested right inside the agent
+that defines it:
 
 | Agent list | Catalog | What it does |
 |---|---|---|
 | `tools:` | `tools:` | does work and returns a value |
-| `delegates:` | `delegates:` | runs a task or a task group, then control returns |
+| `tasks:` | nested in the agent | runs a focused step, then control returns |
+| `task_groups:` | `task_groups:` | runs several tasks in a fixed order, then control returns |
 | `handoffs:` | `handoffs:` | the conversation becomes another agent, and never returns |
 | `escalations:` | `escalations:` | the caller goes through to a person |
 
@@ -50,7 +52,7 @@ with the shape that fixes it, and states what each shape costs.
     Two agents, two sets of rules.
   </Card>
   <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
-    Delegate a step, keep the answer.
+    Run a step, keep the answer.
   </Card>
   <Card title="Task groups" icon="list-ordered" href="/build/orchestration/task-groups">
     A fixed order, and shared context.

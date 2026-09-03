@@ -1,6 +1,6 @@
 ---
 title: "How a package fits together"
-description: "One rule explains the whole file: every list on an agent has a matching block at the top level."
+description: "One rule explains the whole file: every list on an agent has a matching top-level block."
 ---
 
 You have one agent working. This page is the rule that gets you to several.
@@ -14,26 +14,31 @@ You only need one rule to read or write it:
 > **Every list on an agent has a matching top-level block with the same name.
 > The list holds names. The block holds the definitions.**
 
+Tasks are the one exception: a task is defined right inside the agent that
+uses it first, under that agent's own `tasks:` list. A second agent that runs
+the same task just names it.
+
 That is the whole system. The rest of this page is that rule, applied.
 
-## The four things an agent can do
+## The five things an agent can do
 
-An agent is a person on the phone. It can do four kinds of things, and each
+An agent is a person on the phone. It can do five kinds of things, and each
 kind has its own list:
 
 | List on the agent | What it means | Does the agent get the caller back? |
 |---|---|---|
 | `tools:` | do real work: look something up, call an API | yes, a tool just returns data |
-| `delegates:` | run a focused side job (a task) and use its result | yes, the task finishes and reports back |
+| `tasks:` | run a focused step with its own prompt, and use its typed result | yes, the task finishes and reports back |
+| `task_groups:` | run several tasks in a fixed order, then use the merged result | yes, the group finishes and reports back |
 | `handoffs:` | give the caller to another agent | no, the other agent takes over |
 | `escalations:` | give the caller to a human | no, the call leaves the system |
 
-If you remember one thing, remember the third column. Tools and delegates come
-back. Handoffs and escalations do not.
+If you remember one thing, remember the third column. Tools, tasks and task
+groups come back. Handoffs and escalations do not.
 
 There is no `kind:` field anywhere. The block a thing is written in is its kind.
 
-## Build one in five steps
+## Build one in four steps
 
 Say you want two agents, and each one can run a task.
 
@@ -43,20 +48,39 @@ Say you want two agents, and each one can run a task.
 entry_agent: front_desk
 ```
 
-**Step 2. Write the agents.** Give each one lists of names. You have not
-defined those names yet. That is fine, you will in the next steps.
+**Step 2. Write the agents, with their tasks nested right inside.** A task
+carries both what it is and when to run it, so there is one name and one
+place to read it. You have not defined the handoffs and escalations yet.
+That is fine, you will in the next step.
 
 ```yaml agent.yaml
 agents:
   front_desk:
     instructions: instructions.md
-    model: reasoning
-    voice: voice
+    think: reasoning
+    speak: voice
     tools:
       - look_up_prices
-    delegates:
-      - verify_customer
-      - manage_booking
+    tasks:
+      - name: verify_customer
+        when: Confirm who the caller is before anything personal.
+        instructions: tasks/verify-customer.md
+        assign:
+          - customer_phone: result.customer_phone
+        result:
+          customer_phone: string
+        context:
+          history: full
+      - name: manage_booking
+        when: The caller wants to create, change, or cancel a booking.
+        instructions: tasks/booking.md
+        requires:
+          - customer_phone
+        result:
+          booking_id: string
+          summary: string
+        context:
+          history: full
     handoffs:
       - to_complaints
     escalations:
@@ -64,11 +88,13 @@ agents:
 
   complaint_specialist:
     instructions: agents/complaints.md
-    model: reasoning
-    voice: voice
+    think: reasoning
+    speak: voice
     tools:
       - record_complaint
-    delegates:
+    # front_desk already defines this task. A bare name runs the same one
+    # from here, so there is one definition and both agents can offer it.
+    tasks:
       - verify_customer
     handoffs:
       - to_front_desk
@@ -77,27 +103,9 @@ agents:
 ```
 
 Read `front_desk` top to bottom. You already know everything it can do, and
-which kind of thing each one is. That glance is the point of the four lists.
+which kind of thing each one is. That glance is the point of the five lists.
 
-**Step 3. Define the delegates.** Each one points at a task, or at a task
-group, and says when to use it. The `when:` text is what the model reads to
-decide.
-
-```yaml agent.yaml
-delegates:
-  verify_customer:
-    task: customer_verification
-    when: Confirm who the caller is before anything personal.
-    assign:
-      customer_phone: result.customer_phone
-  manage_booking:
-    task: booking
-    when: The caller wants to create, change, or cancel a booking.
-    requires:
-      - customer_phone
-```
-
-**Step 4. Define the handoffs and escalations.**
+**Step 3. Define the handoffs and escalations.**
 
 ```yaml agent.yaml
 handoffs:
@@ -123,12 +131,9 @@ escalations:
       on_unavailable: hangup
 ```
 
-**Step 5. Define the tasks and tools.** A task is a small agent with a job and
-a typed `result:`, written under `tasks:` the same way as everything above.
-
-Tools are the one place the rule bends. A tool is its own file under
-`tools/<name>.yaml`, so the top-level `tools:` is a plain list of names rather
-than a block of definitions:
+**Step 4. Define the tools.** Tools are the one place the rule bends: a tool
+is its own file under `tools/<name>.yaml`, so the top-level `tools:` is a
+plain list of names rather than a block of definitions:
 
 ```yaml agent.yaml
 tools:
@@ -136,8 +141,9 @@ tools:
   - record_complaint
 ```
 
-Done. Notice you never wrote anything twice. `verify_customer` is defined once
-and both agents list it. Sharing is just naming the same thing.
+Done. Notice you never wrote `verify_customer` twice. It is defined once,
+inside `front_desk`, and `complaint_specialist` just names it. Sharing is
+naming the same thing.
 
 ## Three small words that move data
 
@@ -145,9 +151,9 @@ Three keys touch your `variables:`. They look similar and do different jobs:
 
 | Key | Job | Plain words | Legal on |
 |---|---|---|---|
-| `requires:` | a guard | "do not run this until these variables are set" | delegates, handoffs |
-| `context:` | luggage | "when the caller moves, these values travel along" | handoffs, task definitions |
-| `assign:` | a write-back | "when the task finishes, save its result here" | delegates naming a task |
+| `requires:` | a guard | "do not run this until these variables are set" | tasks, task groups, handoffs |
+| `context:` | luggage | "when the caller moves, these values travel along" | handoffs, tasks |
+| `assign:` | a write-back | "when the task finishes, save its result here" | tasks |
 
 A guard tests a variable. Luggage carries its value. A write-back fills it.
 In the example above, `verify_customer` fills `customer_phone` with `assign:`,
@@ -160,29 +166,31 @@ interviewed first.
 
 ## Tasks attach handoffs, and nothing else
 
-A task has `tools:` and `handoffs:` and no other list. There is no
-`delegates:` and no `escalations:` key on a task, so a task cannot delegate
-further or reach a person. That is not a rule you have to remember. The key
-does not exist, so the file cannot be written.
+A task has `tools:` and `handoffs:` and no other list. There is no `tasks:`,
+no `task_groups:` and no `escalations:` key on a task, so a task cannot run
+another task or task group, or reach a person directly. That is not a rule
+you have to remember. The key does not exist, so the file cannot be written.
 
 ## What the compiler holds for you
 
-- Every name in an agent's list must exist in the matching top-level block.
-  A typo is a build error, not a silent gap.
+- Every name in an agent's list must exist in the matching top-level block,
+  or, for a task, be defined inline by some agent. A typo is a build error,
+  not a silent gap.
 - A name listed under the wrong kind is refused, and the message names the
   list it belongs on.
-- All four blocks share one namespace, because every name becomes a callable
-  function at runtime. Two things cannot share a name.
-- A defined thing that no agent lists is also a build error. There is no dead
-  config to forget about.
+- All five kinds share one namespace, because every name becomes a callable
+  function at runtime. Two things cannot share a name, and two agents
+  defining a task under the same name is refused the same way.
+- A handoff, escalation, task group or tool that no agent reaches is also a
+  build error. There is no dead config to forget about.
 - A task can list `tools:` and `handoffs:` only, enforced by the shape of the
   file.
 
 Two of those errors, as you will actually see them:
 
 ```text
-agent.yaml:31: "verify_customer" is a delegate, so move it out of the tools: list
-  and into the delegates: list
+agent.yaml:31: "verify_customer" is a task, so move it out of the tools: list
+  and into the tasks: list
 ```
 
 ```text
@@ -208,10 +216,8 @@ as control flow.
 ```
 version, name, entry_agent, timezone
 agents
-delegates
 handoffs
 escalations
-tasks
 task_groups
 variables
 prefetch
@@ -229,7 +235,7 @@ the agents first and the plumbing last. `unmute init` writes the shape without
 
 <Columns cols={2}>
   <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
-    Delegates, typed results, and guards.
+    Nested tasks, typed results, and guards.
   </Card>
   <Card title="Handoffs" icon="users" href="/build/orchestration/handoffs">
     When to split into two agents.

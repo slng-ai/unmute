@@ -655,25 +655,28 @@ tools:
 agents:
   appointment_desk:
     instructions: instructions.md
-    model: reasoning
-    voice: voice
+    think: reasoning
+    speak: voice
     tools:
       - check_availability
       - end_call
 ```
 
-For a task-scoped tool, attach the same loaded name to the task instead:
+For a task-scoped tool, attach the same loaded name to the task instead,
+where the task is nested inside its agent:
 
 ```yaml agent.yaml
-tasks:
-  find_slot:
-    instructions: tasks/find-slot.md
-    tools:
-      - check_availability
-    result:
-      summary: string
-    context:
-      history: full
+agents:
+  appointment_desk:
+    tasks:
+      - name: find_slot
+        instructions: tasks/find-slot.md
+        tools:
+          - check_availability
+        result:
+          summary: string
+        context:
+          history: full
 ```
 
 The agent and task lists are visibility scopes. Attach a tool only where it is
@@ -683,9 +686,9 @@ name with an inline mapping of `description`, `input`, `output`, `local`, or
 
 **Task `result:` and tool `output:` are different contracts.** A tool's optional
 `output:` describes one tool call and stays in `tools/<name>.yaml`. A task's
-required `result:` describes what the whole delegated task returns to its caller
-after any tool calls. It may select or combine tool data, so design it for what
-the caller needs instead of copying a tool output schema by default.
+required `result:` describes what the whole task returns to its caller after
+any tool calls. It may select or combine tool data, so design it for what the
+caller needs instead of copying a tool output schema by default.
 
 A file in `tools/` that the package level list does not name is not loaded at
 all, and nothing complains. When a tool is never offered, check that list first.

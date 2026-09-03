@@ -17,7 +17,7 @@ table below to know what shape you are aiming at.
 
 | What the user wants | Package | What it shows |
 |---|---|---|
-| one full release-readiness project | `examples/salon-concierge` | a verification task, a booking task, a guarded delegate, two agents that hand the caller over, in-process tool state, Langfuse tracing, a cold manager transfer, browser audio, and an inbound phone route on each of its two targets; every tool is local, so it starts with no external tool server |
+| one full release-readiness project | `examples/salon-concierge` | a verification task shared across agents by name, a booking task guarded with `requires:`, two agents that hand the caller over, in-process tool state, Langfuse tracing, a cold manager transfer, browser audio, and an inbound phone route on each of its two targets; every tool is local, so it starts with no external tool server |
 | to show what the optimizations are worth | `examples/salon-concierge-single-prompt` | the same salon with none of them: one prompt, every tool on every turn, no variables, no pre-fetch, framework-default turn taking, and the model's own endpoint instead of the router. **A baseline to read against, never a shape to copy.** If a user asks what tasks or pre-fetch actually buy, diff it against `examples/salon-concierge` |
 | an agent SLNG hosts | `examples/slng-support` | every tool is a reference, because the slng target creates none: two `slng:` tools with committed mirrors, one `mcp:` server, one `builtin:`. Emits no runnable project, so there is no `unmute dev`: `unmute deploy` pushes it and a web session talks to it. A `local:` or `webhook:` block is refused there, so send those to pipecat or livekit |
 

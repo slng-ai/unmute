@@ -21,6 +21,11 @@ shape from here rather than looking for a package.
 
 ## Declare the group
 
+The member tasks are nested inside the agent that runs the group, the same
+way any other task is. None of them carries its own `when:`, because a step's
+trigger is the group's, not its own: the group runs them in order once it
+starts.
+
 ```yaml agent.yaml
 tools:
   - lookup_customer
@@ -30,47 +35,47 @@ tools:
 agents:
   appointment_desk:
     instructions: instructions.md
-    model: reasoning
-    voice: voice
-    delegates:
-      - manage_appointment
+    think: reasoning
+    speak: voice
+    tasks:
+      - name: identify_customer
+        instructions: tasks/identify-customer.md
+        tools:
+          - lookup_customer
+        result:
+          customer_id: string
+          summary: string
+        context:
+          history: full
 
-tasks:
-  identify_customer:
-    instructions: tasks/identify-customer.md
-    tools:
-      - lookup_customer
-    result:
-      customer_id: string
-      summary: string
-    context:
-      history: full
+      - name: select_appointment
+        instructions: tasks/select-appointment.md
+        tools:
+          - check_availability
+        result:
+          selected_slot: string
+          summary: string
+        context:
+          history: full
 
-  select_appointment:
-    instructions: tasks/select-appointment.md
-    tools:
-      - check_availability
-    result:
-      selected_slot: string
-      summary: string
-    context:
-      history: full
-
-  finalize_appointment:
-    instructions: tasks/finalize-appointment.md
-    tools:
-      - book_appointment
-    result:
-      booking_status:
-        enum:
-          - booked
-          - cancelled
-      summary: string
-    context:
-      history: full
+      - name: finalize_appointment
+        instructions: tasks/finalize-appointment.md
+        tools:
+          - book_appointment
+        result:
+          booking_status:
+            enum:
+              - booked
+              - cancelled
+          summary: string
+        context:
+          history: full
+    task_groups:
+      - appointment_flow
 
 task_groups:
   appointment_flow:
+    when: The caller wants to book, reschedule, or cancel an appointment.
     steps:
       - identify_customer
       - select_appointment
@@ -78,40 +83,35 @@ task_groups:
     context_scope: shared
     then: return
     merge: results
-
-delegates:
-  manage_appointment:
-    group: appointment_flow
-    when: The caller wants to book, reschedule, or cancel an appointment.
 ```
 
-Each name in `steps` is a task already declared in `tasks:`.
+Each name in `steps` is a task already declared inside the agent's own
+`tasks:` list.
 
 Every task, including a task inside a group, needs a non-empty `result:` and `context.history`.
 
 | Field | Required | Values and constraints |
 |---|---|---|
 | `steps` | yes | one or more declared task names, in order |
+| `when` | for an agent to run the group | the situation the model reads |
 | `context_scope` | yes | `shared` or `isolated` |
 | `then` | yes | `return`, `transfer`, or `end` |
 | `then_target` | with `then: transfer` | declared agent name; illegal for `return` and `end` |
 | `merge` | no | `results`; omitted also means `results` |
 
-## Delegate to the group
+## Attach the group to an agent
 
-A group rides `delegates:` like any other delegate, with `group:` instead of
-`task:`. The agent names it in its own `delegates:` list. Each member task lists
-the tools it may call.
-
-The agent has one delegate and no domain tools at all.
+An agent runs a group by naming it in its own `task_groups:` list, the same
+way it names a handoff or an escalation. The agent above has one group and no
+domain tools at all.
 
 A member task may also list a handoff, under its own `handoffs:` key. Calling it
 ends that task and skips the group's remaining steps, then hands the caller
 directly to the receiving agent.
 
-A task has `tools:` and `handoffs:` and no other list. There is no `delegates:`
-and no `escalations:` key on a task, so the shapes that used to be rejected are
-now unwritable.
+A task has `tools:` and `handoffs:` and no other list. There is no `tasks:`
+and no `escalations:` key on a task, so a task cannot start another task or
+reach a person directly.
 
 ## Shared context is the point
 

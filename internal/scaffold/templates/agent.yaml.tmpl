@@ -22,33 +22,44 @@ entry_agent: [[.EntryAgent]]
 # to say what your agent actually does; the greeting below is separate, and it
 # is spoken word for word without going through the model at all.
 #
-# What an agent can do is four lists, one per kind, and each one names entries
-# in the catalog of the same name further down: tools do work and come back,
-# delegates run a task and come back, handoffs make the conversation somebody
-# else's, and escalations put the caller through to a person.
+# What an agent can do is its own lists: tools do work and come back, tasks are
+# sub-conversations it runs and returns from, task groups are ordered runs of
+# task steps, handoffs make the conversation somebody else's, and escalations put
+# the caller through to a person. A task is written here, inside the agent that
+# defines it, so one block says what the agent can do and when it does it.
 agents:
 [[range .AllAgents]]  [[.Name]]:
     instructions: [[.PromptPath]]
-    model: [[.ModelProfile]]
-    voice: [[.VoiceProfile]]
+    think: [[.ModelProfile]]
+    speak: [[.VoiceProfile]]
 [[$tools := $.AgentTools .Name]][[if $tools]]    tools:
 [[range $tools]]      - [[.]]
-[[end]][[end]][[$delegates := $.AgentDelegates .Name]][[if $delegates]]    delegates:
-[[range $delegates]]      - [[.]]
+[[end]][[end]][[$tasks := $.AgentTasks .Name]][[if $tasks]]    tasks:
+[[range $tasks]]      - name: [[.Name]]
+        when: [[quote .When]]
+        instructions: [[.PromptPath]]
+[[if .Announce]]        announce: [[quote .Announce]]
+[[end]][[if .Requires]]        requires:
+[[range .Requires]]          - [[.]]
+[[end]][[end]][[$taskTools := $.TaskTools .Name]][[if $taskTools]]        tools:
+[[range $taskTools]]          - [[.]]
+[[end]][[end]][[$taskHandoffs := $.TaskHandoffs .Name]][[if $taskHandoffs]]        handoffs:
+[[range $taskHandoffs]]          - [[.]]
+[[end]][[end]][[if .Model]]        think: [[.Model]]
+[[end]][[if .Assign]]        assign:[[yamlBlock 10 .Assign]]
+[[end]]        result:[[yamlBlock 10 .Result]]
+        context:
+          history: [[.History]]
+[[if .MaxMessages]]          max_messages: [[.MaxMessages]]
+[[end]][[if .Summarizer]]          summarizer: [[.Summarizer]]
+[[end]][[if .IncludeToolCalls]]          include_tool_calls: [[boolValue .IncludeToolCalls]]
+[[end]][[end]][[end]][[$groups := $.AgentTaskGroups .Name]][[if $groups]]    task_groups:
+[[range $groups]]      - [[.]]
 [[end]][[end]][[$handoffs := $.AgentHandoffs .Name]][[if $handoffs]]    handoffs:
 [[range $handoffs]]      - [[.]]
 [[end]][[end]][[$escalations := $.AgentEscalations .Name]][[if $escalations]]    escalations:
 [[range $escalations]]      - [[.]]
 [[end]][[end]]
-[[end]][[if or .Tasks .TaskGroups]]delegates:
-[[range .Tasks]]  [[.RunName]]:
-    task: [[.Name]]
-    when: [[quote .When]]
-[[if .Assign]]    assign:[[yamlBlock 6 .Assign]]
-[[end]][[end]][[range .TaskGroups]]  [[.RunName]]:
-    group: [[.Name]]
-    when: [[quote .When]]
-[[end]]
 [[end]][[if .Handoffs]]handoffs:
 [[range .Handoffs]]  [[.Name]]:
     to: [[.To]]
@@ -76,24 +87,11 @@ agents:
 [[end]][[if .RingTimeout]]      ring_timeout: [[.RingTimeout]]
 [[end]][[if .OnUnavailable]]      on_unavailable: [[.OnUnavailable]]
 [[end]][[end]]
-[[end]][[if .Tasks]]tasks:
-[[range .Tasks]]  [[.Name]]:
-    instructions: [[.PromptPath]]
-[[$tools := $.TaskTools .Name]][[if $tools]]    tools:
-[[range $tools]]      - [[.]]
-[[end]][[end]][[$handoffs := $.TaskHandoffs .Name]][[if $handoffs]]    handoffs:
-[[range $handoffs]]      - [[.]]
-[[end]][[end]][[if .Model]]    model: [[.Model]]
-[[end]]    result:[[yamlBlock 6 .Result]]
-    context:
-      history: [[.History]]
-[[if .MaxMessages]]      max_messages: [[.MaxMessages]]
-[[end]][[if .Summarizer]]      summarizer: [[.Summarizer]]
-[[end]][[if .IncludeToolCalls]]      include_tool_calls: [[boolValue .IncludeToolCalls]]
-[[end]][[end]]
 [[end]][[if .TaskGroups]]task_groups:
 [[range .TaskGroups]]  [[.Name]]:
-    steps:
+    when: [[quote .When]]
+[[if .Announce]]    announce: [[quote .Announce]]
+[[end]]    steps:
 [[range .Steps]]      - [[.]]
 [[end]]    context_scope: [[.ContextScope]]
     then: [[.Then]]

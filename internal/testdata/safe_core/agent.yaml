@@ -3,7 +3,7 @@
 # no failures. It follows SCHEMA.md section 7 exactly.
 #
 # What it deliberately avoids, and why:
-#   - tasks / task_groups: delegate-and-return is unverified on Vapi
+#   - tasks / task_groups: running a step and returning is unverified on Vapi
 #   - history other than `full`: fails on Pipecat
 #   - requires:, fallback:, thinking_audio:, human transfer: each fails
 #     on at least one of the four
@@ -18,8 +18,8 @@ entry_agent: intake
 agents:
   intake:
     instructions: instructions.md
-    model: fast_reasoning
-    voice: front_desk
+    think: fast_reasoning
+    speak: front_desk
     tools:
       - lookup_customer
     handoffs:
@@ -27,8 +27,8 @@ agents:
 
   billing:
     instructions: agents/billing.md
-    model: careful_reasoning
-    voice: specialist
+    think: careful_reasoning
+    speak: specialist
     tools:
       - get_invoice
 

@@ -296,13 +296,16 @@ type Task struct {
 	MaxMessages      int
 	Summarizer       string
 	IncludeToolCalls *bool
-	Agent            string
-	When             string
-	Assign           string // optional JSON object mapping variables to result fields
+	// Agent is the agent that defines this task, read from where the task is
+	// written rather than paired back through a naming convention.
+	Agent    string
+	When     string
+	Announce string
+	Requires []string
+	Assign   string // optional JSON object mapping variables to result fields
 }
 
 func (t Task) PromptPath() string { return "tasks/" + t.Name + ".md" }
-func (t Task) RunName() string    { return "run_" + t.Name }
 
 type TaskGroup struct {
 	Name         string
@@ -312,9 +315,8 @@ type TaskGroup struct {
 	ThenTarget   string
 	Agent        string
 	When         string
+	Announce     string
 }
-
-func (g TaskGroup) RunName() string { return "run_" + g.Name }
 
 type Channel struct {
 	Name             string
@@ -595,21 +597,26 @@ func (d Data) AgentTools(name string) []string {
 	return names
 }
 
-// AgentDelegates covers both shapes a delegate can take, a task and a task
-// group, because the block they are written in does not distinguish them.
-func (d Data) AgentDelegates(name string) []string {
-	var names []string
-	seen := map[string]bool{}
+// AgentTasks is the tasks this agent defines, written out in full inside its
+// own block.
+func (d Data) AgentTasks(name string) []Task {
+	var tasks []Task
 	for _, task := range d.Tasks {
-		if task.Agent == name && !seen[task.RunName()] {
-			names = append(names, task.RunName())
-			seen[task.RunName()] = true
+		if task.Agent == name {
+			tasks = append(tasks, task)
 		}
 	}
+	return tasks
+}
+
+// AgentTaskGroups is the task groups this agent runs, named from its block.
+func (d Data) AgentTaskGroups(name string) []string {
+	var names []string
+	seen := map[string]bool{}
 	for _, group := range d.TaskGroups {
-		if group.Agent == name && !seen[group.RunName()] {
-			names = append(names, group.RunName())
-			seen[group.RunName()] = true
+		if group.Agent == name && !seen[group.Name] {
+			names = append(names, group.Name)
+			seen[group.Name] = true
 		}
 	}
 	return names

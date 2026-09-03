@@ -18,7 +18,7 @@ be four prompts at once, and it is all in front of the model on every turn.
 
 | Path | What it holds |
 |---|---|
-| `agent.yaml` | one agent, no tasks, no delegates, no handoffs, no variables, no pre-fetch |
+| `agent.yaml` | one agent, no tasks, no handoffs, no variables, no pre-fetch |
 | `targets.yaml` | the same two targets as the optimized package |
 | `instructions.md` | the one prompt, holding routing, verification, booking and complaints together |
 | `tools/` | the same local Python tools, all offered to the agent on every turn |

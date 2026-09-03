@@ -9,8 +9,8 @@ timezone: Europe/Madrid
 agents:
   concierge:
     instructions: instructions.md
-    model: reasoning
-    voice: voice
+    think: reasoning
+    speak: voice
     tools:
       - get_current_date
       - look_up_salon_info

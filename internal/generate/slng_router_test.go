@@ -49,7 +49,7 @@ func routerFixture(t *testing.T) *ir.Agent {
 	// livekit every router profile has to be the entry agent's, because that is
 	// the only place the call's session id and state are in scope.
 	billing := pkg.Agent.Agents["billing"]
-	billing.Model = "fast_reasoning"
+	billing.Think = "fast_reasoning"
 	pkg.Agent.Agents["billing"] = billing
 	agent, err := ir.Build(pkg)
 	if err != nil {
@@ -656,7 +656,7 @@ func routerFixtureWithUpstream(t *testing.T, upstream *spec.Upstream, secrets []
 	// One router profile, the entry agent's, which is what livekit allows. The
 	// second profile stays where it is and simply goes unused.
 	billing := pkg.Agent.Agents["billing"]
-	billing.Model = "fast_reasoning"
+	billing.Think = "fast_reasoning"
 	pkg.Agent.Agents["billing"] = billing
 	agent, err := ir.Build(pkg)
 	if err != nil {

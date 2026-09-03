@@ -20,8 +20,8 @@ entry_agent: intake
 agents:
   intake:
     instructions: instructions.md
-    model: reasoning
-    voice: front_desk
+    think: reasoning
+    speak: front_desk
     tools:
       - lookup_customer
     handoffs:
@@ -29,8 +29,8 @@ agents:
 
   billing:
     instructions: agents/billing.md
-    model: reasoning
-    voice: specialist
+    think: reasoning
+    speak: specialist
     tools:
       - get_invoice
 

@@ -200,8 +200,8 @@ way out.
 **When the question is latency, do not guess.** A dev run measures every turn
 and shows the numbers under it in the browser: end to end, time to first byte per
 service, how long the reply took to stream out, and how long each tool took.
-Controls are left out of that last one on purpose: a delegate or a transfer hands
-the conversation on rather than doing work, and a delegate's call lasts as long as
+Controls are left out of that last one on purpose: a task or a transfer hands
+the conversation on rather than doing work, and a task's own call lasts as long as
 the whole flow it started. The
 same records are in the run's log, one JSON line per turn, so this answers "which
 part was slow" without reading the whole log:

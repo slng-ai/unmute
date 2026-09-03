@@ -112,8 +112,8 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 	// moment renders empty, never the word "None", so the prompt can say what
 	// empty means (B: multi-task booked nothing because the appointment task
 	// could not see the customer id, 2026-08-15).
-	for _, name := range sortedKeys(pkg.Agent.Tasks) {
-		raw := pkg.Agent.Tasks[name]
+	for _, name := range sortedKeys(pkg.Tasks) {
+		raw := pkg.Tasks[name]
 		site := fmt.Sprintf("task %q instructions", name)
 		if err := checkTemplateSite(pkg, agent, raw.Instructions, "", site, pkg.Markdown[raw.Instructions], true, assigned...); err != nil {
 			return err
@@ -152,9 +152,9 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 // an unset variable there renders empty rather than failing, the same way a task
 // prompt has always behaved.
 func routerPrompt(pkg *packagespec.Package, agent *Agent, name string) bool {
-	profile := pkg.Agent.Agents[name].Model
+	profile := pkg.Agent.Agents[name].Think
 	if profile == "" {
-		profile = pkg.Agent.Agents[agent.EntryAgent].Model
+		profile = pkg.Agent.Agents[agent.EntryAgent].Think
 	}
 	return pkg.Agent.Models.Think[profile].Provider == ProviderSlngRouter
 }

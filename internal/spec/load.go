@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -92,11 +93,15 @@ func Load(dir string) (*Package, error) {
 		return nil, err
 	}
 
+	if err := pkg.flattenTasks(); err != nil {
+		return nil, err
+	}
+
 	paths := make(map[string]bool)
 	for _, agent := range pkg.Agent.Agents {
 		paths[agent.Instructions] = true
 	}
-	for _, task := range pkg.Agent.Tasks {
+	for _, task := range pkg.Tasks {
 		paths[task.Instructions] = true
 	}
 	for path := range paths {
@@ -113,6 +118,55 @@ func Load(dir string) (*Package, error) {
 		return nil, err
 	}
 	return pkg, nil
+}
+
+// flattenTasks fills the two derived maps from the nested shape.
+//
+// The nesting is for the reader: an agent's block says what that agent can do
+// without a jump to a catalog. Every check downstream wants the opposite view, a
+// name resolved to one definition, so the two views are built once here rather
+// than walked from fifteen places.
+//
+// Agent-name order, then authored order within each agent, so a package with a
+// duplicate name always names the same two agents.
+func (p *Package) flattenTasks() error {
+	p.Tasks = make(map[string]Task)
+	p.Callables = make(map[string]Callable)
+	owners := make(map[string]string)
+	for _, agent := range slices.Sorted(maps.Keys(p.Agent.Agents)) {
+		for _, item := range p.Agent.Agents[agent].Tasks {
+			if item.Task == nil {
+				continue // a bare name is a reference, resolved by ir.Build
+			}
+			task := *item.Task
+			if owner, taken := owners[task.Name]; taken {
+				return fmt.Errorf(
+					"%s: task %q is defined by agent %q and again by agent %q. A task name is one name across the package: keep one definition and let the other agent name it, %q",
+					p.Location("agent.yaml", "name: "+task.Name), task.Name, owner, agent, "- "+task.Name)
+			}
+			owners[task.Name] = agent
+			p.Tasks[task.Name] = task
+			if task.When == "" {
+				continue // a definition only, valid solely as a task group step
+			}
+			p.Callables[task.Name] = Callable{
+				Task:     task.Name,
+				When:     task.When,
+				Announce: task.Announce,
+				Requires: task.Requires,
+				Assign:   task.Assign,
+			}
+		}
+	}
+	for _, agent := range slices.Sorted(maps.Keys(p.Agent.Agents)) {
+		for _, name := range p.Agent.Agents[agent].TaskGroups {
+			group := p.Agent.TaskGroups[name]
+			p.Callables[name] = Callable{
+				Group: name, When: group.When, Announce: group.Announce, Requires: group.Requires,
+			}
+		}
+	}
+	return nil
 }
 
 // KnowledgeExtensions are the document types a knowledge base reads. The emitted

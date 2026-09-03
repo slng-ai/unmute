@@ -97,3 +97,96 @@ func TestMaintainKeepsATasksHandoffs(t *testing.T) {
 		t.Error("to_billing is in the task's tools: list; a handoff rides handoffs:")
 	}
 }
+
+// TestMaintainKeepsATasksAnnounce guards the same silent data loss over
+// another key this feature added.
+//
+// A task's announce: is the line it speaks as the step is entered, so the two
+// model requests it takes to enter one are not silence. A scaffold.Task without
+// an Announce field would have made `unmute maintain` delete the salon
+// package's "Let me pull up the diary." on the way out, quietly and at exit 0.
+func TestMaintainKeepsATasksAnnounce(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "pkg")
+	data := scaffold.Data{
+		Name: "pkg", AgentName: "acme-support",
+		Agents: []scaffold.Agent{{Name: "billing", Instructions: "Handle billing."}},
+		Tasks: []scaffold.Task{{
+			Name: "collect", Instructions: "Collect the details.", Agent: "assistant",
+			When: "Collect first.", Announce: "One moment while I check.",
+			Result: `{"done": "boolean"}`, History: "full",
+		}},
+	}
+	data.SetTarget("livekit")
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+
+	agent, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, loss := range agent.losses {
+		if strings.Contains(loss, "announce") {
+			t.Errorf("the console cannot preserve %q, so maintain would delete it", loss)
+		}
+	}
+	var collect *scaffold.Task
+	for i := range agent.data.Tasks {
+		if agent.data.Tasks[i].Name == "collect" {
+			collect = &agent.data.Tasks[i]
+		}
+	}
+	if collect == nil {
+		t.Fatal("the task did not survive the round trip at all")
+	}
+	if collect.Announce != "One moment while I check." {
+		t.Errorf("task announce = %q, want it carried through", collect.Announce)
+	}
+}
+
+// TestMaintainKeepsATasksRequires guards the same silent data loss over the
+// prerequisite guard itself.
+//
+// A task's requires: names the variables that must hold a value before the
+// step may start; the driver refuses the step to the model rather than to the
+// caller. A scaffold.Task without a Requires field would have made `unmute
+// maintain` delete that guard on the way out, quietly and at exit 0, leaving
+// the step free to run on a value nobody has confirmed.
+func TestMaintainKeepsATasksRequires(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "pkg")
+	data := scaffold.Data{
+		Name: "pkg", AgentName: "acme-support",
+		Agents: []scaffold.Agent{{Name: "billing", Instructions: "Handle billing."}},
+		Tasks: []scaffold.Task{{
+			Name: "collect", Instructions: "Collect the details.", Agent: "assistant",
+			When: "Collect first.", Requires: []string{"customer_phone"},
+			Result: `{"done": "boolean"}`, History: "full",
+		}},
+	}
+	data.SetTarget("livekit")
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+
+	agent, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, loss := range agent.losses {
+		if strings.Contains(loss, "requires") {
+			t.Errorf("the console cannot preserve %q, so maintain would delete it", loss)
+		}
+	}
+	var collect *scaffold.Task
+	for i := range agent.data.Tasks {
+		if agent.data.Tasks[i].Name == "collect" {
+			collect = &agent.data.Tasks[i]
+		}
+	}
+	if collect == nil {
+		t.Fatal("the task did not survive the round trip at all")
+	}
+	if !slices.Contains(collect.Requires, "customer_phone") {
+		t.Errorf("task requires = %v, want customer_phone carried through", collect.Requires)
+	}
+}

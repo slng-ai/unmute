@@ -1,13 +1,13 @@
 ---
 title: "Tasks"
-description: "Delegate a step to a focused prompt with its own tools, and get a typed result back."
+description: "Run a focused step with its own prompt and tools, and get a typed result back."
 ---
 
 A task is a step the agent hands off and gets back. The task has its own
-prompt, its own tools, and a declared result. When it finishes, control returns
-to the agent that called it. Its internal turns stay out of the agent's context,
-while the completed delegate call stays there so the same request does not run
-twice.
+prompt, its own tools, and a declared result. When it finishes, control
+returns to the agent that called it. Its internal turns stay out of the
+agent's context, while the completed task call stays there so the same
+request does not run twice.
 
 Use a task instead of the other shapes when:
 
@@ -23,37 +23,61 @@ The YAML on this page is one worked pair of tasks. For a shipped package that
 does it, read `examples/salon-concierge`: a verification task and a booking
 task, one of them behind a `requires:` guard.
 
-## Declare the task
+## Declare the task where it is used
+
+A task is nested inside the agent that defines it, with a `when:` that says
+the situation the model reads to decide it should run:
 
 ```yaml agent.yaml
-tasks:
-  customer_record:
-    instructions: tasks/customer-record.md
-    tools:
-      - lookup_customer
-      - create_customer
-    result:
-      customer_id: string
-      customer_name: string
-      record_status:
-        enum:
-          - existing
-          - created
-          - failed
-      summary: string
-    context:
-      history: full
+agents:
+  appointment_desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tasks:
+      - name: customer_record
+        when: Identify the caller before handling an appointment request.
+        instructions: tasks/customer-record.md
+        tools:
+          - lookup_customer
+          - create_customer
+        assign:
+          - customer_id: result.customer_id
+          - customer_name: result.customer_name
+        result:
+          customer_id: string
+          customer_name: string
+          record_status:
+            enum:
+              - existing
+              - created
+              - failed
+          summary: string
+        context:
+          history: full
 ```
 
 `result` is the contract. The task must come back with those fields, and
 `record_status` can only be one of three values. That is what makes a task
 different from a longer prompt: the outcome has a shape.
 
+`assign` copies fields out of the result into package variables, so the rest
+of the call can use them without asking again. It is a list of one-key
+`variable: result.<field>` pairs, one per line:
+
+```yaml agent.yaml
+variables:
+  customer_id:
+    type: string
+  customer_name:
+    type: string
+```
+
 Every task, including a task inside a group, needs a non-empty `result:` and `context.history`.
 
-A task can also declare its own `model:`, naming a different reasoning
-profile for that one step alone. Leave it out and the task runs on the agent's
-own model.
+A task can also declare its own `think:`, naming a different reasoning
+profile for that one step alone. Leave it out and the task runs on the
+agent's own model.
 
 **Task `result:` and tool `output:` are different contracts.** Tool contracts
 live in `tools/<name>.yaml`; the task's `tools:` list contains names only. The
@@ -66,78 +90,72 @@ usually what you want, because the caller has already said something the task
 needs. `history:` is one of `full`, `messages`, `last_n`, `summary`, or
 `reset`; `last_n` also needs `max_messages` alongside it.
 
-## Delegate to it
+## Announce it
 
-A task is run by a delegate. You declare the delegate under `delegates:` and
-attach it by name from the agent's `delegates:` list.
-
-```yaml agent.yaml
-agents:
-  appointment_desk:
-    delegates:
-      - check_customer
-      - manage_appointment
-
-delegates:
-  check_customer:
-    task: customer_record
-    when: Identify the caller before handling an appointment request.
-    assign:
-      customer_id: result.customer_id
-      customer_name: result.customer_name
-```
-
-`assign` copies fields out of the result into package variables, so the rest of
-the call can use them without asking again:
-
-```yaml agent.yaml
-variables:
-  customer_id:
-    type: string
-  customer_name:
-    type: string
-```
-
-A delegate can also carry `announce:`, one fixed line spoken as the step
-starts, so the two model requests between the caller finishing and the task's
-first word are not silence. It never speaks when the step is held back by
+A task can carry `announce:`, one fixed line spoken as the step starts, so
+the two model requests between the caller finishing and the task's first
+word are not silence. It never speaks when the task is held back by
 `requires:`: a caller who hears "let me pull up the diary" and is then asked
 for a phone number has been told something untrue.
 
 ```yaml agent.yaml
-delegates:
-  manage_booking:
-    task: booking
-    when: The caller wants to create, modify, or cancel a booking.
-    announce: Let me pull up the diary.
-    requires:
-      - customer_phone
+      - name: manage_booking
+        when: The caller wants to create, modify, or cancel a booking.
+        announce: Let me pull up the diary.
+        instructions: tasks/booking.md
+        requires:
+          - customer_phone
 ```
 
 `examples/salon-concierge` declares it exactly this way on `manage_booking`.
 
+## Share a task across agents
+
+A second agent that should offer the same task does not redefine it. It
+names the task by bare string instead:
+
+```yaml agent.yaml
+agents:
+  appointment_desk:
+    tasks:
+      - name: customer_record
+        when: Identify the caller before handling an appointment request.
+        instructions: tasks/customer-record.md
+        result:
+          customer_id: string
+        context:
+          history: full
+
+  billing_desk:
+    # appointment_desk defines this one. A bare name runs the same task from
+    # here, so there is one definition and both agents can offer it.
+    tasks:
+      - customer_record
+```
+
+Task names are unique across the whole package. Two agents defining a task
+under the same name is refused, naming both agents and the fix.
+
 ## Guarding a step
 
-A step that needs a value the conversation has not collected yet declares
+A task that needs a value the conversation has not collected yet declares
 `requires:`:
 
 ```yaml agent.yaml
-delegates:
-  manage_appointment:
-    task: appointment
-    when: The caller wants to make, change, or cancel an appointment.
-    requires:
-      - customer_phone
+      - name: manage_appointment
+        when: The caller wants to make, change, or cancel an appointment.
+        requires:
+          - customer_phone
 ```
 
 Every name must be a declared variable, or the package will not compile. A guard
 on a name nothing sets could never pass, and the symptom would be a step that
 silently never starts.
 
-**The caller hears nothing.** While `customer_phone` is empty the step does not
+**The caller hears nothing.** While `customer_phone` is empty the task does not
 run, and the refusal goes to the model rather than to the caller. It names the
-missing variable and the delegate that supplies it, so the model runs
-`check_customer` and calls the step again in the same turn. The caller just hears
+missing variable and the task that supplies it, so the model runs
+`customer_record` and calls the step again in the same turn. The caller just hears
 the next natural question.
 
 The compiler also appends the requirement to the step's own description, so the
@@ -160,8 +178,8 @@ whose only job is to hold the guard, and the caller has to be spoken through it.
 
 ## What the agent can do shrinks
 
-Look at the agent's tool list. It holds two controls and none of the five
-domain tools. The agent cannot book anything itself; it can only delegate.
+Look at the agent's task list. It holds two tasks and none of the five
+domain tools. The agent cannot book anything itself; it can only run a task.
 Each task holds the tools its own step needs:
 
 | Task | Tools |
@@ -180,11 +198,12 @@ Besides tools, the one thing a task may list is a handoff, under its own
 `handoffs:`. Use it when the caller can change intent during the step and should
 go straight to another agent. Calling it ends the task and any remaining
 task-group steps; the destination takes over without returning through the task
-owner. A task has `tools:` and `handoffs:` and no other list, so a delegate or an
-escalation on a task is unwritable rather than rejected.
+owner. A task has `tools:` and `handoffs:` and no other list, so a second task or
+an escalation on a task is unwritable rather than rejected.
 
-That scoping is the useful half of delegation, and also the part to plan for,
-because anything the task may need must appear in its own list.
+That scoping is the useful half of nesting a task under an agent, and also the
+part to plan for, because anything the task may need must appear in its own
+list.
 
 A task that lists no handoff still has a way out. Every generated task
 prompt ends with one compiler-written rule: when the caller asks for something
@@ -244,7 +263,7 @@ unmute validate examples/salon-concierge
 unmute dev examples/salon-concierge --target pipecat
 ```
 
-Ask to book a haircut. The agent calls the `verify_customer` delegate first,
+Ask to book a haircut. The agent runs the `verify_customer` task first,
 and only then `manage_booking`, which is held back by `requires:
 customer_phone` until the caller is identified.
 

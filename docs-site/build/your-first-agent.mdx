@@ -48,8 +48,8 @@ entry_agent: assistant
 agents:
   assistant:
     instructions: instructions.md
-    model: assistant_model
-    voice: assistant_voice
+    think: assistant_model
+    speak: assistant_voice
     tools:
       - end_call
 
@@ -129,8 +129,8 @@ call. The name has to be a key in the `agents:` map.
 agents:
   assistant:
     instructions: instructions.md
-    model: assistant_model
-    voice: assistant_voice
+    think: assistant_model
+    speak: assistant_voice
 ```
 
 An agent is a prompt plus the models it speaks and thinks with. `instructions`

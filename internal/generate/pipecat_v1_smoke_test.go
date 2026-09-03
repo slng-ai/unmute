@@ -1830,10 +1830,10 @@ func TestSmokePipecatV1TaskGroupsInstantiate(t *testing.T) {
 		aftercare.Instructions = "You are the aftercare agent."
 		aftercare.Tools = nil
 		agent.Agents["aftercare"] = aftercare
-		group := agent.TaskGroups["reserve_group"]
+		group := agent.TaskGroups["do_reserve"]
 		group.Then = ir.GroupTransfer
 		group.ThenTarget = "aftercare"
-		agent.TaskGroups["reserve_group"] = group
+		agent.TaskGroups["do_reserve"] = group
 	}, pipecatTaskRoleSmokeScript)
 }
 

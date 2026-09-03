@@ -62,7 +62,7 @@ This is easy to miss the first time.
 A step that `requires:` a value is already skipped when that value is there. So a
 step whose job is to collect something stops running as soon as something else
 supplies it. Add a `prefetch:` entry and the step you wanted to avoid is skipped,
-with no change to the step, the delegate or the routing.
+with no change to the step or the routing.
 
 That cuts both ways, so check it on purpose. A pre-fetch that fills a value quietly
 removes a step from the call. If that step also greeted the caller, checked who
@@ -114,8 +114,8 @@ controls decide how far each value travels.
   placeholders, two values. The greeting names none, so it gets none, however
   many variables the call has collected by then.
 - **`result:` and `assign:`** do the same for a step's own return. A task can
-  come back with several typed fields, and the delegate that ran it keeps only
-  the ones it assigns to a variable. The rest did their job inside the step and
+  come back with several typed fields, and its own `assign:` keeps only the
+  ones it writes to a variable. The rest did their job inside the step and
   stop there. One line decides whether a value lives for one step or the whole
   call. See [Tasks](/build/orchestration/tasks).
 
@@ -185,14 +185,14 @@ Both make a gap easier to sit through. They are not interchangeable.
 | use it for | a value that was already knowable | a value you really do have to fetch now |
 
 The pause a caller sits through when the agent moves into a step is not a lookup
-at all, so no pre-fetch can help. That one gets an `announce:` on the delegate
+at all, so no pre-fetch can help. That one gets an `announce:` on the task
 instead.
 
 Reach for a pre-fetch first, because a round trip you remove is gone for good.
 Then use an announce for what is left. And never let two things speak for one
 request: two tools in the same turn, or a tool at the end of one step and a
-delegate into the next. The caller hears two cover lines for one thing they
-asked for.
+task at the start of the next. The caller hears two cover lines for one thing
+they asked for.
 
 ## What you see in the log
 
