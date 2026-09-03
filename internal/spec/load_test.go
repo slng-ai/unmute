@@ -146,7 +146,7 @@ func TestLoadRejectsRetiredPipelineBlock(t *testing.T) { // V3, V22 (N15)
 // and the B5 decision must be consciously revisited in SCHEMA.md first.
 func TestV24_AgentRefsAreThinkAndSpeakOnly(t *testing.T) {
 	dir := t.TempDir()
-	yaml := "version: 1\nentry_agent: a\nagents:\n  a:\n    instructions: i.md\n    model: m\n    voice: v\n    listen: transcriber\n"
+	yaml := "version: 1\nentry_agent: a\nagents:\n  a:\n    instructions: i.md\n    think: m\n    speak: v\n    listen: transcriber\n"
 	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func writeToolPackage(t *testing.T, body string) string {
 		"agent.yaml": "version: 1\nentry_agent: intake\n" +
 			"models:\n  think:\n    m: { provider: openai, model: gpt-4o-mini }\n" +
 			"  speak:\n    v: { provider: slng, model: \"slng/deepgram/aura:2-en\", voice: aura-2-thalia-en }\n" +
-			"agents:\n  intake:\n    instructions: instructions.md\n    model: m\n    voice: v\n    tools: [probe]\n" +
+			"agents:\n  intake:\n    instructions: instructions.md\n    think: m\n    speak: v\n    tools: [probe]\n" +
 			"tools: [probe]\nchannels:\n  web: { kind: realtime_audio }\n",
 		"instructions.md":  "Be brief.\n",
 		"targets.yaml":     "targets:\n  livekit:\n    provider: livekit\n    version: \"1.5.2\"\n    sdk_language: python\n",
@@ -358,7 +358,7 @@ func TestLoadKnowledgeDocuments(t *testing.T) {
 			"models:\n  think:\n    m: { provider: openai, model: gpt-4o-mini }\n" +
 			"  speak:\n    v: { provider: slng, model: \"slng/deepgram/aura:2-en\", voice: aura-2-thalia-en }\n" +
 			"knowledge:\n  refunds:\n    documents: kb/refunds\n  absent:\n    documents: kb/nowhere\n" +
-			"agents:\n  intake:\n    instructions: instructions.md\n    model: m\n    voice: v\n    tools: []\n" +
+			"agents:\n  intake:\n    instructions: instructions.md\n    think: m\n    speak: v\n    tools: []\n" +
 			"channels:\n  web: { kind: realtime_audio }\n"),
 		"instructions.md":        []byte("Be brief.\n"),
 		"targets.yaml":           []byte("targets:\n  livekit:\n    provider: livekit\n    version: \"1.5.2\"\n    sdk_language: python\n"),
@@ -402,5 +402,106 @@ func TestLoadKnowledgeDocuments(t *testing.T) {
 	}
 	if got := pkg.Documents["knowledge/refunds/policy.pdf"]; !bytes.Equal(got, binary) {
 		t.Errorf("pdf bytes changed in transit: got %q", got)
+	}
+}
+
+// TestLoadRefusesATaskNameDefinedByTwoAgents holds a task name to being one name
+// across the whole package. Two agents each defining "verify_customer" leaves no
+// way to tell which one owns it, so flattenTasks refuses the second definition
+// it reaches and the message names both agents, not only the one it stopped on.
+func TestLoadRefusesATaskNameDefinedByTwoAgents(t *testing.T) {
+	dir := t.TempDir()
+	yaml := "version: 1\nentry_agent: front_desk\n" +
+		"agents:\n" +
+		"  front_desk:\n    instructions: instructions.md\n    think: m\n    speak: v\n" +
+		"    tasks:\n      - name: verify_customer\n        when: The caller has not been identified.\n        instructions: instructions.md\n" +
+		"  back_office:\n    instructions: instructions.md\n    think: m\n    speak: v\n" +
+		"    tasks:\n      - name: verify_customer\n        when: A back-office check is needed.\n        instructions: instructions.md\n"
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "targets.yaml"), []byte("targets: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	want := `task "verify_customer" is defined by agent "back_office" and again by agent "front_desk". ` +
+		`A task name is one name across the package: keep one definition and let the other agent name it, "- verify_customer"`
+	if err == nil || !strings.Contains(err.Error(), "agent.yaml:9") || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v, want to contain \"agent.yaml:9\" and %q", err, want)
+	}
+}
+
+// TestLoadRejectsRetiredFieldSpellings holds the strict decoder to the renamed
+// surface: the retired top-level delegates: catalog and the retired per-agent
+// model:/voice: fields are all unknown fields now, and each is refused with its
+// own file, line and column, the same way any other unknown field is.
+func TestLoadRejectsRetiredFieldSpellings(t *testing.T) {
+	for _, tc := range []struct {
+		name, yaml, field, position string
+	}{
+		{
+			name:     "top-level delegates",
+			yaml:     "version: 1\nentry_agent: intake\ndelegates: {}\n",
+			field:    "delegates",
+			position: "3:1",
+		},
+		{
+			name:     "agent-level model",
+			yaml:     "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: i.md\n    model: m\n",
+			field:    "model",
+			position: "6:5",
+		},
+		{
+			name:     "agent-level voice",
+			yaml:     "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: i.md\n    voice: v\n",
+			field:    "voice",
+			position: "6:5",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(tc.yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(dir)
+			want := "agent.yaml: [" + tc.position + `] unknown field "` + tc.field + `"`
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("error = %v, want to contain %q", err, want)
+			}
+		})
+	}
+}
+
+// TestLoadTaskItemAcceptsBareNameAndMapping proves TaskItem.UnmarshalYAML runs
+// through the real decode path rather than only in isolation: a bare string
+// under an agent's tasks: is a reference to a task another agent defines, and a
+// mapping defines the task right there.
+func TestLoadTaskItemAcceptsBareNameAndMapping(t *testing.T) {
+	dir := t.TempDir()
+	yaml := "version: 1\nentry_agent: intake\n" +
+		"agents:\n  intake:\n    instructions: instructions.md\n    think: m\n    speak: v\n" +
+		"    tasks:\n      - look_up_order\n      - name: verify_customer\n        when: The caller has not been identified.\n        instructions: instructions.md\n"
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "targets.yaml"), []byte("targets: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "instructions.md"), []byte("Be brief.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	tasks := pkg.Agent.Agents["intake"].Tasks
+	if len(tasks) != 2 {
+		t.Fatalf("got %d task items, want 2: %+v", len(tasks), tasks)
+	}
+	if tasks[0].Ref != "look_up_order" || tasks[0].Task != nil {
+		t.Errorf("bare item = %+v, want Ref %q and no Task", tasks[0], "look_up_order")
+	}
+	if tasks[1].Ref != "" || tasks[1].Task == nil || tasks[1].Task.Name != "verify_customer" {
+		t.Errorf("mapping item = %+v, want Task.Name %q and no Ref", tasks[1], "verify_customer")
 	}
 }

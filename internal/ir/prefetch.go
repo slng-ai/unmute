@@ -313,10 +313,10 @@ func checkConfirmSteps(pkg *packagespec.Package, agent *Agent) error {
 		if step == "" {
 			continue
 		}
-		if !delegatedTask(agent, step) {
-			return fmt.Errorf("%s: variable %q names confirm: %s, and no step by that name runs. Name a task a "+
-				"delegate runs, such as %s", pkg.Location("agent.yaml", name), name, step,
-				firstOr(delegatedTasks(agent), "verify_customer"))
+		if !runnableTask(agent, step) {
+			return fmt.Errorf("%s: variable %q names confirm: %s, and no step by that name runs. Name a task an "+
+				"agent runs, such as %s", pkg.Location("agent.yaml", name), name, step,
+				firstOr(runnableTasks(agent), "verify_customer"))
 		}
 	}
 	return nil
@@ -459,13 +459,13 @@ func callFactNames() []string {
 	return names
 }
 
-// delegatedTask reports whether a name is a task some delegate runs, which is
-// what makes it a step that can confirm anything.
-func delegatedTask(agent *Agent, name string) bool {
-	return slices.Contains(delegatedTasks(agent), name)
+// runnableTask reports whether a name is a task some agent runs, which is what
+// makes it a step that can confirm anything.
+func runnableTask(agent *Agent, name string) bool {
+	return slices.Contains(runnableTasks(agent), name)
 }
 
-func delegatedTasks(agent *Agent) []string {
+func runnableTasks(agent *Agent) []string {
 	var names []string
 	for _, control := range agent.Controls {
 		if delegate, ok := control.(*Delegate); ok && delegate.Task != "" {

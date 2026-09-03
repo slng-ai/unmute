@@ -2,8 +2,8 @@
 # sources, and one variable that has to be confirmed before anything acts on it.
 #
 # It exists because no other fixture has all four pieces a prefetch needs: a
-# declared variable to land in, a read-only tool to run, a task a delegate runs
-# so `confirm:` has a step to name, and a clock with a timezone to read it in.
+# declared variable to land in, a read-only tool to run, a task an agent runs so
+# `confirm:` has a step to name, and a clock with a timezone to read it in.
 #
 # Deliberately kept compiling on both code targets, so the byte-identical and
 # per-target-warning tests have one package to read rather than two.
@@ -21,29 +21,30 @@ timezone: Europe/Madrid
 agents:
   intake:
     instructions: instructions.md
-    model: fast_reasoning
-    voice: front_desk
+    think: fast_reasoning
+    speak: front_desk
     tools:
       - get_invoice
-    delegates:
-      - verify_caller
+    tasks:
+      - name: verify_caller
+        when: Confirm who you are speaking to.
+        announce: One moment while I check.
+        instructions: tasks/verify_caller.md
+        assign:
+          - caller_phone: result.caller_phone
+        result:
+          caller_phone: string
+        context:
+          history: full
     handoffs:
       - to_billing
 
   billing:
     instructions: agents/billing.md
-    model: careful_reasoning
-    voice: specialist
+    think: careful_reasoning
+    speak: specialist
     tools:
       - get_invoice
-
-delegates:
-  verify_caller:
-    task: verify_caller
-    when: Confirm who you are speaking to.
-    announce: One moment while I check.
-    assign:
-      caller_phone: result.caller_phone
 
 handoffs:
   to_billing:
@@ -54,14 +55,6 @@ handoffs:
     context:
       history: full
       variables: all
-
-tasks:
-  verify_caller:
-    instructions: tasks/verify_caller.md
-    result:
-      caller_phone: string
-    context:
-      history: full
 
 variables:
   customer_id:

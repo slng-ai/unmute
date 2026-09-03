@@ -11,7 +11,7 @@ down complaints, and puts a caller through to a manager when they ask for one.
 
 | Path | What it holds |
 |---|---|
-| `agent.yaml` | the package: agents, tasks, delegates, handoffs, escalations, variables, pre-fetch, knowledge and secrets |
+| `agent.yaml` | the package: agents and the tasks they run, handoffs, escalations, variables, pre-fetch, knowledge and secrets |
 | `targets.yaml` | the two targets, one per telephony plane |
 | `instructions.md` | the concierge prompt |
 | `agents/complaint-specialist.md` | the customer care prompt |
@@ -25,8 +25,18 @@ call. Customer care is a second agent because it holds a document set and a
 permission the concierge must not have: the refund policy and the complaint
 record.
 
-**Two tasks.** Verification confirms who is calling. Booking does create, modify
-and cancel in one step.
+**Two tasks, one of them shared.** Verification confirms who is calling. Booking
+does create, modify and cancel in one step. Both are written inside the concierge,
+which is the agent that defines them. Customer care offers verification too, and
+it does that with a bare name in its own `tasks:` list rather than a second copy:
+
+```yaml
+  complaint_specialist:
+    tasks:
+      - verify_customer
+```
+
+so there is one definition, one prompt, and one name in the emitted project.
 
 **A guarded step.** `manage_booking` declares `requires: [customer_phone]`, so
 booking cannot start before the caller is identified. The compiler refuses the

@@ -5,28 +5,40 @@ the brief before you write files, then say what context crosses that boundary.
 
 ## How an agent declares what it can do
 
-One rule carries the whole surface:
+One rule carries most of the surface:
 
-> Every agent-level list has a same-named top-level catalog. Attach by name.
+> Four of the five lists point at a same-named top-level catalog; attach by
+> name. The fifth, `tasks:`, has none — write the task right where it runs.
 
 | Agent list | Catalog | What it does | Does control come back? |
 |---|---|---|---|
 | `tools:` | `tools:` | does one piece of work and returns a value | yes |
-| `delegates:` | `delegates:` | runs a task or a task group | yes |
-| `handoffs:` | `handoffs:` | the conversation becomes another agent | no |
+| `tasks:` | nested in the agent | runs a focused step, then control returns | yes |
+| `task_groups:` | `task_groups:` | runs several tasks in a fixed order, then control returns | yes |
+| `handoffs:` | `handoffs:` | the conversation becomes another agent, and never returns | no |
 | `escalations:` | `escalations:` | the caller goes through to a person | no |
 
 Which block a thing is written in is its kind, so nothing carries a `kind:`
-field. All four become callable function names at runtime, so they share one
+field. All five become callable function names at runtime, so they share one
 namespace and a name belongs to exactly one of them.
 
 `tools:` is the odd one in shape only: the package-level `tools:` is a list of
-names, because each tool is its own file under `tools/<name>.yaml`. The other
-three are maps of definitions written inline in `agent.yaml`.
+names, because each tool is its own file under `tools/<name>.yaml`.
+`task_groups:`, `handoffs:` and `escalations:` are maps of definitions written
+inline in `agent.yaml`. `tasks:` is the one list whose items can be either
+shape: a mapping defines a task and attaches it to this agent in the same
+place; a bare string names a task another agent already defined, so two
+agents can offer one task without either owning a second copy of it.
 
-A task has `tools:` and `handoffs:` and no other list. There is no `delegates:`
-and no `escalations:` key on a task, so those shapes are unwritable rather than
-rejected.
+A task has `tools:` and `handoffs:` and no other list. There is no
+`task_groups:` and no `escalations:` key on a task, so a task cannot start
+another task or reach a person directly — those shapes are unwritable rather
+than rejected.
+
+A task with no `when:` is a definition only, valid solely as a step of a task
+group. An agent naming it by bare name — rather than listing it as a step of a
+`task_groups:` entry — is refused: there is no trigger for the agent to act
+on.
 
 ## Choose the native shape
 
@@ -66,25 +78,29 @@ the server, not the package, owns that order.
 | the prompt keeps growing and starts contradicting itself | split it: tasks if the parts serve one caller goal, a handoff if they are separate roles |
 | the model does things out of order | a task group. The order is declared, not requested |
 | the model calls a tool it should not have yet | move the tool. Lists are per agent and per task, so a tool the current step does not hold cannot be called at all |
-| you need a value out of a step and want to keep it | a task with `result:`, delegated with `assign:` |
+| a step runs before you have the value it needs | `requires:` on that task. The step is held back, and the model is told which control fills the gap |
+| you need a value out of a step and want to keep it | a task with `result:`, saved to a variable with `assign:` |
 | two phases need different tools or different permissions | a handoff |
 | the caller changes intent while a task is active | put the destination's handoff on that task's own `handoffs:` list |
 | the caller needs a person | none of these. That is an escalation, and what it can do depends on the phone route. See `transfers.md` |
 
 A prompt that says "always identify the caller first" is a request. A task group
-is a guarantee. That is the difference you are buying.
+is a guarantee. That is the difference you are buying. Reach for a task group
+when the order must hold, and for `requires:` when one value must exist before
+one step runs. `requires:` is cheaper: no extra step, no extra prompt, and
+nothing the caller is spoken through.
 
 ## What each shape costs
 
 | Shape | Control | Context | Correcting a step | The cost |
 |---|---|---|---|---|
 | one agent and tools | stays with the agent for the whole call | the whole conversation | ask again | the prompt carries everything, and grows |
-| task | returns when the task finishes | what `context:` gives the task | delegate again | one more prompt and one more tool list to keep straight |
+| task | returns when the task finishes | what `context:` gives the task | run it again | one more prompt and one more tool list to keep straight |
 | task group | returns when the group finishes | shared across the steps, or not | steps can be revisited inside the group | an order you have to be sure about |
 | handoff | leaves for good | only what `context:` carries over | another handoff back | nothing returns, so there is no result and no automatic way back |
 
-These are not exclusive. One agent can delegate a task in one phase and hand off
-in another.
+These are not exclusive. One agent can run a task in one phase and hand off in
+another.
 
 ## One agent and tools
 
@@ -94,8 +110,8 @@ entry_agent: appointment_desk
 agents:
   appointment_desk:
     instructions: instructions.md
-    model: reasoning
-    voice: voice
+    think: reasoning
+    speak: voice
     tools:
       - check_availability
       - book_appointment
@@ -112,15 +128,15 @@ entry_agent: booking_desk
 agents:
   booking_desk:
     instructions: instructions.md
-    model: reasoning
-    voice: voice
+    think: reasoning
+    speak: voice
     handoffs:
       - to_appointment_manager
 
   appointment_manager:
     instructions: agents/appointment-manager.md
-    model: reasoning
-    voice: voice
+    think: reasoning
+    speak: voice
     tools:
       - cancel_appointment
     handoffs:
@@ -145,7 +161,7 @@ handoffs:
 ```
 
 `entry_agent` decides who answers. Each agent has its own prompt file and its
-own four lists of what it can do, and keeps the call once it arrives.
+own five lists of what it can do, and keeps the call once it arrives.
 
 `when` is the condition the model reads. Write it as the situation, not as an
 instruction to call a tool.
@@ -164,7 +180,7 @@ the call and never repeats the call-start greeting.
 The same handoff may appear in a task's own `handoffs:` list. Calling it ends
 that task and any remaining task-group steps, then activates the target without
 returning through the owner. A task has `tools:` and `handoffs:` and no other
-list, so a delegate or an escalation on a task is unwritable rather than
+list, so a second task or an escalation on a task is unwritable rather than
 rejected.
 
 On LiveKit, a receiving agent cannot fire another agent transfer during its
@@ -187,44 +203,51 @@ Leave them out and the caller gets asked for their phone number twice. Choose on
 purpose, and tell the user what you chose.
 
 `requires:` is legal on a handoff when variables must exist before the call
-leaves this agent. It is also legal on a delegate, which is
-usually the better place for it: see [Guarding a step](#guarding-a-step) below.
+leaves this agent. It is also legal on a task, which is usually the better
+place for it: see [Guarding a step](#guarding-a-step) below.
 
-## Delegated task
+## Task
 
 ```yaml agent.yaml
-tasks:
-  customer_record:
-    instructions: tasks/customer-record.md
-    tools:
-      - lookup_customer
-      - create_customer
-    result:
-      customer_id: string
-      customer_name: string
-      record_status:
-        enum:
-          - existing
-          - created
-          - failed
-      summary: string
-    context:
-      history: full
-
-delegates:
-  check_customer:
-    task: customer_record
-    when: Identify the caller before handling an appointment request.
-    assign:
-      customer_id: result.customer_id
-      customer_name: result.customer_name
+agents:
+  appointment_desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tasks:
+      - name: customer_record
+        when: Identify the caller before handling an appointment request.
+        instructions: tasks/customer-record.md
+        tools:
+          - lookup_customer
+          - create_customer
+        assign:
+          - customer_id: result.customer_id
+          - customer_name: result.customer_name
+        result:
+          customer_id: string
+          customer_name: string
+          record_status:
+            enum:
+              - existing
+              - created
+              - failed
+          summary: string
+        context:
+          history: full
 ```
 
+A task is nested inside the agent that runs it. The mapping does two things at
+once: it defines the task — `instructions`, `tools`, `result`, `context` — and
+it attaches it, because `when:` is the trigger the model reads to decide to
+run it. There is no separate catalog to keep in step with the agent's own
+list.
+
 `result:` is the contract. The task must come back with those fields, and
-`record_status` can only be one of three values. That shape is what makes a task
-different from a longer prompt. Its internal turns stay out of the agent's
-context, while the completed delegate call stays there so the same request does
-not run twice.
+`record_status` can only be one of three values. That shape is what makes a
+task different from a longer prompt. Its internal turns stay out of the
+agent's context, while the completed call stays there so the same request
+does not run twice.
 
 Every task, including a task inside a group, needs a non-empty `result:` and `context.history`.
 
@@ -234,76 +257,141 @@ task result describes the outcome returned after all of its tool calls. Keep
 only what the calling agent needs instead of copying an attached tool's output
 schema by default.
 
-`assign:` copies fields out of the result into package variables, so the rest of
-the call uses them without asking again. Declare each of those variables at the
-top level.
+`assign:` copies fields out of the result into package variables, so the rest
+of the call uses them without asking again. Declare each of those variables at
+the top level, and write `assign:` as a list of one-key items, one pair per
+line:
+
+```yaml
+assign:
+  - customer_id: result.customer_id
+  - customer_name: result.customer_name
+```
+
+A task can also declare its own `think:`, naming a different reasoning
+profile for that one step alone. Leave it out and the task runs on the
+agent's own model.
+
+### Sharing a task across agents
+
+A second agent that should offer the same task does not redefine it. It names
+the task by bare string instead:
+
+```yaml agent.yaml
+agents:
+  appointment_desk:
+    tasks:
+      - name: customer_record
+        when: Identify the caller before handling an appointment request.
+        instructions: tasks/customer-record.md
+        result:
+          customer_id: string
+        context:
+          history: full
+
+  billing_desk:
+    # appointment_desk defines this one. A bare name runs the same task from
+    # here, so there is one definition and both agents can offer it.
+    tasks:
+      - customer_record
+```
+
+Task names are unique across the whole package. Two agents defining a task
+under the same name is refused, naming both agents:
+
+```
+agent.yaml:17: task "customer_record" is defined by agent "appointment_desk" and again
+  by agent "billing_desk". A task name is one name across the package: keep
+  one definition and let the other agent name it, "- customer_record"
+```
+
+### A definition with no `when:`
+
+A task with no `when:` is a definition only, valid solely as a step of a task
+group. An agent naming it by bare name — rather than listing it as a step in
+some `task_groups:` entry — is refused: there is no trigger for the agent to
+act on. Give it a `when:` to make it something an agent runs on its own, or
+list it as a step in [Task group](#task-group).
 
 ### Covering the entry with `announce:`
 
-Entering a step costs two model requests, and they were silence. A delegate takes
-one fixed sentence, spoken as the step is entered:
+Entering a task costs two model requests, and they were silence. One fixed
+sentence, spoken as the task starts:
 
-```yaml
-delegates:
-  check_customer:
-    task: customer_record
-    when: Identify the caller before handling an appointment request.
-    announce: One moment while I check.
+```yaml agent.yaml
+      - name: manage_booking
+        when: The caller wants to create, modify, or cancel a booking.
+        announce: Let me pull up the diary.
+        instructions: tasks/booking.md
+        requires:
+          - customer_phone
 ```
 
 Same field as a tool's, same rules: one fixed sentence, spoken word for word.
-**Not spoken when the step is refused for unmet prerequisites**, which matters:
-a caller who hears "one moment while I check" and is then asked for a phone number
-has been told something untrue.
+**Not spoken when the task is held back by a `requires:` guard**, which
+matters: a caller who hears "let me pull up the diary" and is then asked for a
+phone number has been told something untrue.
 
-Do not put one on a step whose first tool already announces, and check the tool
-that runs immediately **before** the delegate too: a lookup at the end of one
-step and a delegate into the next cover the same handover, so the caller hears
-two lines for one request. Both cases read as a stutter. The step's line covers
-two model requests and the tool's covers a request body, so the step's is usually
-the one worth keeping.
+Do not put one on a task whose first tool already announces, and check the
+tool that runs immediately **before** the task too: a lookup at the end of one
+task and an `announce:` into the next cover the same handover, so the caller
+hears two lines for one request. Both cases read as a stutter. The task's line
+covers two model requests and the tool's covers a request body, so the task's
+is usually the one worth keeping.
 
 Denied on the `slng` target, which writes one agent with no steps.
 
 ## Guarding a step
 
-A step that needs a value the conversation has not collected yet declares
-`requires:`. Put the guard on the step that needs the value, not on the handoff
-that reaches it:
+A task that needs a value the conversation has not collected yet declares
+`requires:`. Put the guard on the task that needs the value, not on the
+handoff that reaches it:
 
 ```yaml agent.yaml
-delegates:
-  check_customer:
-    task: customer_record
-    when: Identify the caller before handling an appointment request.
-    assign:
-      customer_phone: result.customer_phone
+agents:
+  appointment_desk:
+    tasks:
+      - name: customer_record
+        when: Identify the caller before handling an appointment request.
+        instructions: tasks/customer-record.md
+        assign:
+          - customer_phone: result.customer_phone
+        result:
+          customer_phone: string
+        context:
+          history: full
 
-  manage_appointment:
-    task: appointment
-    when: The caller wants to make, change, or cancel an appointment.
-    requires:
-      - customer_phone
+      - name: manage_appointment
+        when: The caller wants to make, change, or cancel an appointment.
+        requires:
+          - customer_phone
+        instructions: tasks/appointment.md
+        result:
+          status: string
+        context:
+          history: full
 ```
 
 Every name in `requires:` must be a declared variable, or the package fails to
 compile. That is deliberate: a guard on a name nothing sets can never pass, and
-the symptom would be a step that silently never starts.
+the symptom would be a task that silently never starts.
 
 **What the caller hears: nothing.** The refusal goes to the model, not to the
-caller. It names the missing variable and the control that supplies it, so the
-model runs `check_customer` and calls the step again on the same turn. The
-compiler also appends the requirement to the step's own description, so the model
-usually collects the value during the earlier turns and the guard is never
-reached. After five refusals of the same step the agent stops recovering quietly
-and asks the caller for the value out loud, in its own words. That bound lives in
-the emitted code, not in a prompt.
+caller. It names the missing variable and the task that supplies it, so the
+model runs `customer_record` and calls the step again on the same turn. The
+compiler also appends the requirement to the task's own description, so the
+model usually collects the value during the earlier turns and the guard is
+never reached. After five refusals of the same task the agent stops recovering
+quietly and asks the caller for the value out loud, in its own words. That
+bound lives in the emitted code, not in a prompt. Both refusals are logged
+with the variable and task names only — never the value, which matters when
+the name is a phone number.
 
-**Do not put an agent in front of a step to hold a guard.** Before `requires:`
-worked on a delegate, the only machine-checked way to gate a step was to give the
+**Do not put an agent in front of a task to hold a guard.** Before `requires:`
+worked on a task, the only machine-checked way to gate a step was to give the
 step to a second agent and guard the handoff to it. That agent then had to be
 spoken through, which cost the caller a turn and taught a shape nobody needed.
-One agent, one guarded step.
+One agent, one guarded task.
 
 **And do not gate reaching a person.** An escalation takes no `requires:` at
 all, and a handoff to the agent that hears complaints should not carry one.
@@ -312,10 +400,10 @@ Someone who asks for a manager should not be interviewed first.
 **While a task runs, the caller is talking to the task**: its prompt, and only
 what the task's own `tools:` and `handoffs:` lists name. The agent's lists are
 not offered again until the task returns. Put a handoff on the task when a
-caller must be able to change intent mid-step; invoking it exits the task and
-any remaining group steps. That is the useful half of delegation and
-also the part to plan for, because anything the task may need has to appear in
-its own list.
+caller must be able to change intent mid-task; invoking it exits the task and
+any remaining group steps. That is the useful half of nesting a task under an
+agent, and also the part to plan for, because anything the task may need has
+to appear in its own list.
 
 **A task with no handoff still gets an escape, and you do not write it.** Every
 generated task prompt ends with the compiler's own rule: when the caller asks
@@ -386,47 +474,47 @@ tools:
 agents:
   appointment_desk:
     instructions: instructions.md
-    model: reasoning
-    voice: voice
-    delegates:
-      - manage_appointment
+    think: reasoning
+    speak: voice
+    tasks:
+      - name: identify_customer
+        instructions: tasks/identify-customer.md
+        tools:
+          - lookup_customer
+        result:
+          customer_id: string
+          summary: string
+        context:
+          history: full
 
-tasks:
-  identify_customer:
-    instructions: tasks/identify-customer.md
-    tools:
-      - lookup_customer
-    result:
-      customer_id: string
-      summary: string
-    context:
-      history: full
+      - name: select_appointment
+        instructions: tasks/select-appointment.md
+        tools:
+          - check_availability
+        result:
+          selected_slot: string
+          summary: string
+        context:
+          history: full
 
-  select_appointment:
-    instructions: tasks/select-appointment.md
-    tools:
-      - check_availability
-    result:
-      selected_slot: string
-      summary: string
-    context:
-      history: full
-
-  finalize_appointment:
-    instructions: tasks/finalize-appointment.md
-    tools:
-      - book_appointment
-    result:
-      booking_status:
-        enum:
-          - booked
-          - cancelled
-      summary: string
-    context:
-      history: full
+      - name: finalize_appointment
+        instructions: tasks/finalize-appointment.md
+        tools:
+          - book_appointment
+        result:
+          booking_status:
+            enum:
+              - booked
+              - cancelled
+          summary: string
+        context:
+          history: full
+    task_groups:
+      - appointment_flow
 
 task_groups:
   appointment_flow:
+    when: The caller wants to book, reschedule, or cancel an appointment.
     steps:
       - identify_customer
       - select_appointment
@@ -434,19 +522,20 @@ task_groups:
     context_scope: shared
     then: return
     merge: results
-
-delegates:
-  manage_appointment:
-    group: appointment_flow
-    when: The caller wants to book, reschedule, or cancel an appointment.
 ```
 
-Each name in `steps` is a task already declared in `tasks:`. The order is a
-guarantee, not a request in a prompt. A group contains tasks, not other groups.
-The group's `context_scope` governs how the members relate while the group runs.
-It does not replace a member task's `context:` block. Every member still needs
-its own non-empty `result:` and `context.history` so it is a complete task on its
-own.
+The three member tasks are nested inside the agent that runs the group, the
+same way any other task is. None of them carries its own `when:`: a step's
+trigger is the group's, not its own, so the group runs them in order once it
+starts. Each name in `steps` is a task already declared inside some agent's
+own `tasks:` list. The order is a guarantee, not a request in a prompt. A
+group contains tasks, not other groups.
+
+An agent runs a group by naming it in its own `task_groups:` list, the same
+way it names a handoff or an escalation. The group's `context_scope` governs
+how the members relate while the group runs. It does not replace a member
+task's `context:` block. Every member still needs its own non-empty `result:`
+and `context.history` so it is a complete task on its own.
 
 | Field | Values | What it does |
 |---|---|---|
@@ -468,13 +557,17 @@ own.
   for it only when the group is a set of independent assessments that must not
   colour each other. An intake flow that must not ask the same question twice
   needs `shared`, and that is most groups.
-- `then: return` sends control back to the agent that delegated, with `merge:
-  results` returning the final map keyed by task name. `then: transfer` needs
-  `then_target` and hands the call to that agent instead. `then: end` finishes
-  the call.
+- `then: return` sends control back to the agent that named the group, with
+  `merge: results` returning the final map keyed by task name. `then: transfer`
+  needs `then_target` and hands the call to that agent instead. `then: end`
+  finishes the call.
 
 Say which of these you chose and why. All four combinations validate, and only
 one of them is what the user meant.
+
+A member task may also list a handoff, under its own `handoffs:` key. Calling
+it ends that task and skips the group's remaining steps, then hands the caller
+directly to the receiving agent without returning through the group's owner.
 
 ## Every context decision, in one place
 
@@ -486,8 +579,8 @@ answer out loud for each boundary the package actually has.
 | a handoff | how much history does the new agent see? | `context.history` on the handoff entry |
 | a handoff | which variables travel with the caller? | `context.variables`: `all` or a list |
 | a handoff | do tool calls travel too? | `context.include_tool_calls` |
-| a delegated task | what does the task see when it starts? | `context.history` on the task |
-| a delegated task | what comes back, and where does it land? | `result:` on the task, `assign:` on the control |
+| a task | what does the task see when it starts? | `context.history` on the task |
+| a task | what comes back, and where does it land? | `result:` on the task, `assign:` on the same task |
 | a task group | do the steps share context or each start clean? | `context_scope` |
 | a task group | what happens when the last step ends? | `then`, and `then_target` if it transfers |
 | a task group | what reaches later shared steps and returns to the caller? | exact intermediate results enter shared context before the next step; the final `merge: results` map is keyed by task name |
@@ -496,10 +589,11 @@ A boundary with no stated decision is a default nobody chose. Name it.
 
 Two things the table does not cover, because they trip people up:
 
-- **A catalog entry is not a tool file.** Names under `delegates:`, `handoffs:`
-  and `escalations:` go in the agent's or task's list of the same name, never in
-  the package-level `tools:` list, which loads files from `tools/`. A task may
-  name a handoff and nothing else.
+- **A catalog entry is not a tool file.** Names under `task_groups:`,
+  `handoffs:` and `escalations:` go in an agent's list of the same name; a
+  task is nested where it runs rather than named from a catalog. None of the
+  five belong in the package-level `tools:` list, which loads files from
+  `tools/`. A task may name a handoff and nothing else.
 - **Declaring a catalog entry without attaching it is a build error**, not dead
   config. Write both halves in the same edit. The refusal names the file, the
   line, and the agents you could attach it to:
@@ -509,10 +603,11 @@ Two things the table does not cover, because they trip people up:
     handoffs: of one of these agents: front_desk, disputes_specialist
   ```
 
-  The same check covers a task or task group nothing delegates to, an agent no
-  handoff reaches, a `destinations:` entry no escalation resolves to, and
-  a `tools:` entry no agent lists. An unreferenced `models:` entry is the one
-  exception: that map is a palette and unused entries are legal.
+  The same check covers a task group nothing attaches, an agent no handoff
+  reaches, a `destinations:` entry no escalation resolves to, and a `tools:`
+  entry no agent lists. A task with no `when:` that no task group's `steps:`
+  lists is refused too, with its own message. An unreferenced `models:` entry
+  is the one exception: that map is a palette and unused entries are legal.
 - **A second agent's instructions cannot read a `conversation` variable.** An
   instructions file renders once, at session start, so it can only name a value
   that already exists. With `history: full` the new agent can see what was said,
@@ -525,7 +620,7 @@ Raise these **before** you write files, not after validate fails.
 
 | Shape or option | Refused on | What it says |
 |---|---|---|
-| `model:` on a task | Pipecat | the Pipecat driver does not emit per-task model yet |
+| `think:` on a task | Pipecat | the Pipecat driver does not emit per-task model yet |
 | `include_tool_calls: false` on a transfer context | Pipecat | the Pipecat driver does not shape transfer context yet |
 | a variables subset on a transfer context | Pipecat | Pipecat accepts context, not a subset |
 
@@ -541,9 +636,9 @@ silently widening or dropping context.
 
 Two things follow from that table.
 
-**Per-task model does not work on Pipecat.** If a user wants a cheap model for
-one step and an expensive one for another, and the target is Pipecat, say so
-before you write it. On LiveKit it compiles.
+**Per-task `think:` does not work on Pipecat.** If a user wants a cheap model
+for one step and an expensive one for another, and the target is Pipecat, say
+so before you write it. On LiveKit it compiles.
 
 **Task groups stand on a LiveKit beta.** They compile and run, and unmute does
 not warn about it: a note about a framework's own maturity fired on every run of
@@ -551,28 +646,30 @@ a working package and told the author nothing to do. Say it here instead, where
 somebody is choosing the shape, and point them at the LiveKit release notes if
 they are deciding whether to ship.
 
-## Delegate or hand off
+## Task or handoff
 
-The difference is whether control comes back. That is why they are two blocks
-rather than one block with a kind field.
+The difference is whether control comes back. That is why they are two lists
+rather than one list with a kind field.
 
-| | `delegates:` | `handoffs:` |
+| | `tasks:` | `handoffs:` |
 |---|---|---|
 | returns | yes | no |
 | typed result | yes, `result:` | no |
-| targets | a task or a task group | another agent |
+| targets | a task, run in place | another agent |
 | context control | `context:` on the task | `context:` on the handoff entry |
+| `requires:` | yes | yes |
 
 ## The shapes, as packages
 
 One package in the unmute repository shows these shapes working together:
 `examples/salon-concierge` has two agents that hand the caller over, two tasks
-one of them delegates to, and a guarded delegate. It is not in the project you
-are working in; `examples.md` says how to reach it.
+nested in the concierge — one of them guarded with `requires:` — and a bare
+name that lets the complaint specialist run the same verification task without
+a second copy.
 
 The one-agent, one-prompt shape has no package. `unmute init <name>` scaffolds
 it, and `package.md` in this bundle has the same shape inline.
 
 Task groups have no package either. The YAML above is the reference, and the
-LiveKit experimental warning in "Where a target refuses a shape" is the thing to
-repeat before a user ships one.
+LiveKit beta note in "Where a target refuses a shape" is the thing to repeat
+before a user ships one.

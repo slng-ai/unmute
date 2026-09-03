@@ -71,11 +71,14 @@ that section may shrink and never grow.`, len(found), strings.Join(found, "\n  "
 // field and allowlisting it as debt in the same change fails too. Without this,
 // the ratchet has a hole exactly the shape of the fix somebody reaches for first.
 func TestDictionaryDebtNeverGrows(t *testing.T) {
-	// 26, counted by this walk rather than by hand. The design note that
-	// preceded this test said 22, having missed Target.Destinations and
-	// Target.Pins and having counted four `yaml:"-"` fields that nobody authors.
-	// The number this test pins is the one reflection reports.
-	const settled = 26
+	// 20, down from 26. AgentFile.Delegates, AgentFile.Tasks and Delegate.Assign
+	// were deleted by the tasks/delegates refactor: tasks now nest inside the
+	// agent that defines them, so there is no top-level catalog and no Delegate
+	// type left to hold a debt entry. KnowledgeDef.Retrieval, ToolMCP.Headers and
+	// ToolWebhook.Headers were already gone before that refactor; this allowlist
+	// had simply never been swept for them. The number this test pins is still
+	// the one reflection reports, not a hand count.
+	const settled = 20
 	if len(dictionaryDebt) > settled {
 		t.Errorf("dictionaryDebt has %d entries, and it had %d when the rule was written. "+
 			"This section may shrink and never grow: write the new field as a list instead",
@@ -112,11 +115,9 @@ var dictionaryDebt = map[string]string{
 	"AgentFile.Destinations": "name to env var name. Migrate to a pair list; two examples author it.",
 	"AgentFile.Knowledge":    "name-keyed base. Migrate with AgentFile.Variables.",
 	"AgentFile.Agents":       "name-keyed, and the entry_agent: pointer reads the key. Migrate last.",
-	"AgentFile.Delegates":    "name-keyed catalog; every agent's delegates: list names a key.",
 	"AgentFile.Handoffs":     "name-keyed catalog, same reason.",
 	"AgentFile.Escalations":  "name-keyed catalog, same reason.",
-	"AgentFile.Tasks":        "name-keyed catalog, read by delegates and task groups.",
-	"AgentFile.TaskGroups":   "name-keyed catalog, read by delegates.",
+	"AgentFile.TaskGroups":   "name-keyed catalog; an agent's task_groups: list points at a key.",
 	"AgentFile.Channels":     "kind-keyed. Migrate when a channel carries kind: as a field.",
 
 	"ModelSections.Think":  "name-keyed model catalog; listen:/turn: point at a key.",
@@ -124,15 +125,11 @@ var dictionaryDebt = map[string]string{
 	"ModelSections.Listen": "same.",
 	"ModelSections.Turn":   "same.",
 
-	"Delegate.Assign":        "variable to result field. The pair-list shape exists now; migrate when the examples do.",
-	"Tool.Inject":            "request key to scalar. Migrate to a pair list alongside Delegate.Assign.",
+	"Tool.Inject":            "request key to scalar. Migrate to a pair list, the shape Task.Assign already uses.",
 	"Connection.Environment": "route setting to env var name. Migrate to a pair list.",
 	"Target.Models":          "per-target override, keyed like ModelSections. Migrate with them.",
 	"Target.Destinations":    "per-target override of AgentFile.Destinations. Migrate with it, or the two shapes disagree.",
 	"Target.Pins":            "dependency name to version. Migrate to a pair list.",
-	"KnowledgeDef.Retrieval": "provider retrieval settings; closer to passthrough than to a catalog.",
-	"ToolMCP.Headers":        "HTTP headers, which are a mapping everywhere else too.",
-	"ToolWebhook.Headers":    "same.",
 }
 
 // walkAuthoringStructs visits every exported and unexported field of every struct

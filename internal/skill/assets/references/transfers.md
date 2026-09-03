@@ -44,7 +44,7 @@ escalations:
 
 `on_unavailable` is `return_to_caller` or `hangup`.
 
-### The control's name goes in an agent's tool list, and that half is enforced
+### The name goes in an agent's `escalations:` list, and that half is enforced
 
 Declaring an escalation is half the job. Until a reachable agent lists its name
 in its own `escalations:`, no agent can reach it, and the build refuses with the
@@ -59,9 +59,10 @@ agent.yaml:47: escalation "send_to_billing" is declared but no agent reaches it;
 
 The same refusal covers anything else the entry agent cannot reach: a
 `destinations:` entry no escalation resolves to, a top-level `tools:` entry no
-agent lists, a task or task group nothing delegates to, an agent no handoff
-points at. An unreferenced `models:` entry is the one exception and stays legal,
-because that map is a palette.
+agent lists, a task group nothing attaches, and an agent no handoff points at.
+A task with no `when:` that no task group's `steps:` lists is refused too, with
+its own message. An unreferenced `models:` entry is the one exception and stays
+legal, because that map is a palette.
 
 Write the declaration and the attachment in the same edit. Before this was
 enforced, a forgotten attachment compiled at exit 0 and left the control out of

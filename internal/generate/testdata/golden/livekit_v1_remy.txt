@@ -102,9 +102,9 @@ Read them with `grep UNMUTE_METRIC` on the run's output. Times are seconds.
 entry in `stages` carries the time to first byte for that service and, for the
 voice, the total time the reply took to stream out. `tools` carries how long each
 tool took, including tools reached through a remote tool source. Controls are not
-listed there: a delegate or a transfer hands the conversation somewhere else
-rather than doing a unit of work, and a delegate does not return until the flow
-it started has finished, so its duration is that flow's, not a tool's.
+listed there: a task or a transfer hands the conversation somewhere else rather
+than doing a unit of work, and a task does not return until the flow it started
+has finished, so its duration is that flow's, not a tool's.
 
 A measurement LiveKit does not report is left out of the line rather than sent as
 zero, so a field you do not see was not measured, not instant.
@@ -165,16 +165,16 @@ turn has the full list back.
 A task may list a handoff in its own `handoffs:`. Calling it ends the active
 task and any remaining task-group steps, then hands the caller directly to the
 receiving agent. It does not return through the task owner. A task definition
-has `tools:` and `handoffs:` and no other list, so a delegate or an escalation
-on a task is unwritable rather than rejected: there is no key to put one in.
+has `tools:` and `handoffs:` and no other list, so a task or an escalation on a
+task is unwritable rather than rejected: there is no key to put one in.
 
 A task that lists no handoff still has a way out. Every task prompt here
 ends with one generated rule: when the caller asks for something none of the
 step's tools can do, and no handoff on the step covers it, call `finish` right
 away with the closest result, naming that request in `unserved_request`. Every
 `finish` here takes that field, optional and empty by default, and a filled one
-rides the returned result: a `then: return` delegate's docstring tells the owner
-to take that request next. The rule does not excuse skipping the step's own
+rides the returned result: a `then: return` group's docstring tells the owner to
+take that request next. The rule does not excuse skipping the step's own
 work, and a handoff the step declares wins over it.
 
 In a group with `context_scope: shared`, each exact typed result enters the
@@ -184,8 +184,8 @@ results between steps. The final `merge: results` map is keyed by task name.
 
 ## Empty task responses
 
-Before it generates anything, a generated task drops the delegate call that
-started it from its own copy of the conversation. That call is still running
+Before it generates anything, a generated task drops the call that started it
+from its own copy of the conversation. That call is still running
 while the task runs, so LiveKit adds it plus a placeholder result reading "The
 tool call is still in progress." This is right for the agent that made the call:
 it stops the model re-issuing a call already in flight. It is wrong for a task,

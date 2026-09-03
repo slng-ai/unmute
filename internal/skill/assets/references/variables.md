@@ -135,7 +135,7 @@ variables:
   customer_phone:
     type: string
     default: ""
-    confirm: customer_verification   # the task, not the delegate that runs it
+    confirm: verify_customer
 ```
 
 Until that step has heard the caller agree, the value:
@@ -211,15 +211,17 @@ cannot call book_appointment yet: requested_service not set. Ask the caller firs
 ## Getting a value out of a task
 
 ```yaml agent.yaml
-delegates:
-  check_customer:
-    task: customer_record
-    assign:
-      customer_id: result.customer_id
+agents:
+  appointment_desk:
+    tasks:
+      - name: customer_record
+        assign:
+          - customer_id: result.customer_id
 ```
 
-The task's typed result lands in the variable, and the rest of the call uses it
-without asking again. Declare the variable at the top level for it to land in.
+The task's typed result lands in the variable named by `assign:`, and the rest
+of the call uses it without asking again. Declare the variable at the top level
+for it to land in.
 
 ## Carrying variables through a handoff
 

@@ -279,7 +279,7 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 		symbols  []string
 	}{
 		{ir.ProviderLiveKit, "agent.py", []string{
-			"class Userdata:", "class Booking(", "class CustomerVerification(",
+			"class Userdata:", "class ManageBooking(", "class VerifyCustomer(",
 			"class ComplaintSpecialist(", "class _TaskTransfer(",
 			"async def record_complaint(", "async def to_complaints(",
 			// The smoke scripts drive the pre-fetch directly, because that is the
@@ -293,10 +293,10 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 			"def _flow_tool_create_booking(", "def _flow_tool_find_or_create_customer(",
 			"def _flow_tool_list_bookings(", "async def _prefetch(",
 			"_manage_booking_active_step", "_manage_booking_results",
-			"_manage_booking_snapshot", "_manage_booking_finish_booking",
-			"_manage_booking_transfer_booking_to_complaints",
+			"_manage_booking_snapshot", "_manage_booking_finish_manage_booking",
+			"_manage_booking_transfer_manage_booking_to_complaints",
 			"_verify_customer_results", "_verify_customer_snapshot",
-			"_verify_customer_finish_customer_verification",
+			"_verify_customer_finish_verify_customer",
 		}},
 	} {
 		t.Run(string(driver.provider), func(t *testing.T) {

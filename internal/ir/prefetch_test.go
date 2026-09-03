@@ -13,7 +13,7 @@ import (
 // loadPrefetchCore loads the fixture that carries all three prefetch sources
 // plus one value the caller has to confirm. It exists because no other fixture
 // has all four pieces a prefetch needs: a variable to land in, a read-only tool
-// to run, a task a delegate runs so confirm: has a step to name, and a timezone.
+// to run, a task an agent runs so confirm: has a step to name, and a timezone.
 func loadPrefetchCore(t *testing.T) *packagespec.Package {
 	t.Helper()
 	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "prefetch_core"))
@@ -352,7 +352,7 @@ func TestBuildPrefetchRefusesConfirmation(t *testing.T) {
 			t.Fatal("a confirm: naming nothing was accepted")
 		}
 		assertRefusal(t, err, `names confirm: verify_custome`, "no step by that name runs",
-			"Name a task a delegate runs", "verify_caller")
+			"Name a task an agent runs", "verify_caller")
 	})
 
 	// The greeting is the worst case and the clearest one: a stranger ringing from
@@ -412,18 +412,18 @@ func TestBuildPrefetchRefusesConfirmation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// A second confirming step, named by a delegate that also runs, so rule 15
-		// passes and rule 17 is the one that fires.
+		// A second confirming step, reached from intake's own tasks: list, so rule
+		// 15 passes and rule 17 is the one that fires.
 		variable := pkg.Agent.Variables["customer_id"]
 		variable.Confirm = "verify_account"
 		pkg.Agent.Variables["customer_id"] = variable
-		task := pkg.Agent.Tasks["verify_caller"]
-		pkg.Agent.Tasks["verify_account"] = task
-		name := "verify_account"
-		pkg.Agent.Delegates["verify_account"] = packagespec.Delegate{Task: &name, When: "Confirm the account."}
-		def := pkg.Agent.Agents["intake"]
-		def.Delegates = append(def.Delegates, "verify_account")
-		pkg.Agent.Agents["intake"] = def
+		task := pkg.Tasks["verify_caller"]
+		task.Name, task.When = "verify_account", "Confirm the account."
+		pkg.Tasks["verify_account"] = task
+		pkg.Callables["verify_account"] = packagespec.Callable{Task: "verify_account", When: task.When}
+		intake := pkg.Agent.Agents["intake"]
+		intake.Tasks = append(intake.Tasks, packagespec.TaskItem{Task: &task})
+		pkg.Agent.Agents["intake"] = intake
 
 		if _, err := Build(pkg); err == nil {
 			t.Fatal("one entry inherited two different confirming steps")

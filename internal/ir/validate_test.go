@@ -2332,7 +2332,7 @@ func TestValidateSlngRouterOneAgentIDPerPackage(t *testing.T) {
 	pkg.Agent.Models.Think["careful_reasoning"] = router("safe-core-careful-v1")
 	pkg.Agent.Agents["billing"] = func() packagespec.AgentDef {
 		def := pkg.Agent.Agents["billing"]
-		def.Model = "fast_reasoning"
+		def.Think = "fast_reasoning"
 		return def
 	}()
 	unused, err := Build(pkg)

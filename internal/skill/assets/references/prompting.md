@@ -365,7 +365,7 @@ The full structure above. This is the only surface that carries identity,
 personality, and guardrails, and every agent in the package needs its own. Two
 agents sharing one file is a sign they should be one agent.
 
-### A delegated task's instructions
+### A task's instructions
 
 Shorter and narrower. A task has one job, its own tool list, and a typed
 `result:` it has to come back with.

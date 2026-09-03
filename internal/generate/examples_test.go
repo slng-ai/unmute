@@ -313,9 +313,9 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// LLM round trip to finish, which the caller hears as silence, and the
 	// mutation tools already refuse an unconfirmed write, so the split bought
 	// latency and no safety. Held here so it cannot drift back.
-	booking, ok := resolved.Tasks["booking"]
+	booking, ok := resolved.Tasks["manage_booking"]
 	if !ok {
-		t.Fatal("tasks omit booking")
+		t.Fatal("tasks omit manage_booking")
 	}
 	for _, name := range []string{"prepare_booking", "confirm_booking", "apply_booking"} {
 		if _, split := resolved.Tasks[name]; split {
@@ -372,7 +372,7 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		t.Errorf("booking result = %v, want %v", got, wantBookingResult)
 	}
 	bookingDelegate, ok := resolved.Controls["manage_booking"].(*ir.Delegate)
-	if !ok || bookingDelegate.Task != "booking" || bookingDelegate.Group != "" {
+	if !ok || bookingDelegate.Task != "manage_booking" || bookingDelegate.Group != "" {
 		t.Fatalf("manage_booking = %#v, want a delegate to the single booking task", resolved.Controls["manage_booking"])
 	}
 	// The clock tool's input and output schema used to be pinned here. Its
@@ -440,7 +440,7 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// one drifting alone brings the repetition back.
 	requireText("concierge", resolved.Agents["concierge"].Instructions,
 		"confirm it in one short sentence without repeating the service, the day and the time")
-	requireText("booking task", resolved.Tasks["booking"].Instructions,
+	requireText("booking task", resolved.Tasks["manage_booking"].Instructions,
 		"Say the whole thing back in one sentence and ask one yes-or-no question",
 		"does not repeat the details")
 
@@ -544,7 +544,7 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// Verification is one phone number, nothing else. Spelling a name over a
 	// transcriber is the slowest and least reliable thing a caller can be asked
 	// to do, and the number alone identifies the record.
-	verification := resolved.Tasks["customer_verification"]
+	verification := resolved.Tasks["verify_customer"]
 	// The last three are what a real call broke on (2026-08-28, a Spanish
 	// number). The step judged the number short because it did not look like a
 	// NANP one and refused to move; it treated "that sounds about right"
@@ -1260,8 +1260,8 @@ func salonScopes() []string {
 	return []string{
 		id + ":concierge",
 		id + ":complaint_specialist",
-		id + ":task.customer_verification",
-		id + ":task.booking",
+		id + ":task.verify_customer",
+		id + ":task.manage_booking",
 	}
 }
 
@@ -1605,14 +1605,18 @@ func TestAuthoredPackagesAreBlockStyle(t *testing.T) {
 	}
 }
 
-// TestNothingAuthoredSpeaksTheRetiredShape (FR-033). `controls:` and `kind:` on
-// a control are gone, with no alias and no migration message, so the one way
-// they can come back is somebody copying an old file in.
+// TestNothingAuthoredSpeaksTheRetiredShape (FR-033). `controls:`, `delegates:`
+// and `kind:` on a control are gone, with no alias and no migration message, so
+// the one way they can come back is somebody copying an old file in. The same
+// goes for an agent's `model:`/`voice:`, replaced by `think:`/`speak:`.
 //
 // A bare `kind:` stays legal and is not flagged: tools, channels and model
-// sections all use it. Only the three retired control kinds are refused.
+// sections all use it. Only the three retired control kinds are refused. The
+// agent-level check is indented exactly to an agent's own fields (four spaces)
+// with a same-line value, so it does not flag a models: section entry named
+// "voice" or a model's own `model:`/`voice:` fields six spaces deep.
 func TestNothingAuthoredSpeaksTheRetiredShape(t *testing.T) {
-	retired := regexp.MustCompile(`(?m)^controls:|^\s*kind:\s*(delegate|agent_transfer|human_transfer)\s*$`)
+	retired := regexp.MustCompile(`(?m)^controls:|^delegates:|^\s*kind:\s*(delegate|agent_transfer|human_transfer)\s*$|^ {4}(model|voice): *\S`)
 	for path, source := range authoredPackageFiles(t) {
 		if found := retired.FindString(source); found != "" {
 			t.Errorf("%s still speaks the retired shape (%q); an agent declares what it can do in tools:, delegates:, handoffs: and escalations:",

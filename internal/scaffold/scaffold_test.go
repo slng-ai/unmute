@@ -547,7 +547,7 @@ func TestPreflightTaskAndOrderedGroup(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range []string{"tasks:", "run_collect:", "task_groups:", "- collect", "run_triage:"} {
+			for _, want := range []string{"tasks:", "name: collect", "task_groups:", "- collect", "triage:"} {
 				if !strings.Contains(string(agentYAML), want) {
 					t.Errorf("agent.yaml missing %q:\n%s", want, agentYAML)
 				}

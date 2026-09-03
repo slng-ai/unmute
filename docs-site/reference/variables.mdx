@@ -149,7 +149,7 @@ variables:
   customer_phone:
     type: string
     default: ""
-    confirm: customer_verification   # names the task, not the delegate
+    confirm: verify_customer   # names the task itself
 ```
 
 Until that step has heard the caller agree, the value:
@@ -236,8 +236,8 @@ act on a number it never read back. The run would pass a path a real call fails.
 
 Declaring any `source: conversation` variable creates a tool named
 `update_variables` in the generated project. You do not write it, and you do
-not list it. The name is reserved: a package tool, delegate, handoff, or
-escalation cannot also be named `update_variables`. The model calls it when
+not list it. The name is reserved: a package tool, task, task group, handoff,
+or escalation cannot also be named `update_variables`. The model calls it when
 the caller says something worth keeping.
 
 ## Passing a value into a tool
@@ -281,11 +281,17 @@ cannot call book_appointment yet: requested_service not set. Ask the caller firs
 ## Assigning a task result to a variable
 
 ```yaml agent.yaml
-delegates:
-  check_customer:
-    task: customer_record
-    assign:
-      customer_id: result.customer_id
+agents:
+  appointment_desk:
+    tasks:
+      - name: check_customer
+        instructions: tasks/check-customer.md
+        assign:
+          - customer_id: result.customer_id
+        result:
+          customer_id: string
+        context:
+          history: full
 ```
 
 The task's typed result lands in the variable, and the rest of the call can use

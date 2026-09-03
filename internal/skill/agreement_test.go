@@ -683,34 +683,35 @@ func TestOrchestrationGuidanceMatchesCodeOwnedFacts(t *testing.T) {
 		t.Error("references/variables.md must say task instructions render when the task starts")
 	}
 
-	// The single delegate row became a per-block table when `controls:` split into
-	// three catalogs, so the assertion moved with it: the reference must still
-	// name every field a delegate takes, and the shape it names them in is the
-	// page's business rather than this test's.
-	delegateSection := regexp.MustCompile(`(?s)### ` + "`delegates`" + `(.*?)### `).FindStringSubmatch(agentReference)
-	if delegateSection == nil {
-		t.Fatal("docs-site/reference/agent-yaml.mdx has no delegates section")
+	// The single delegate row became a per-agent `tasks:` section once the
+	// `delegates:` catalog was retired: a task is nested inside the agent that
+	// runs it, so the reference now documents every field a task takes under
+	// its own top-level `## `tasks`` heading, and the shape it names them in is
+	// the page's business rather than this test's.
+	tasksSection := regexp.MustCompile(`(?s)## ` + "`tasks`" + `\n(.*?)\n## `).FindStringSubmatch(agentReference)
+	if tasksSection == nil {
+		t.Fatal("docs-site/reference/agent-yaml.mdx has no tasks section")
 	}
-	for _, field := range []string{"`task`", "`group`", "`when`", "`assign`", "`requires`"} {
-		if !strings.Contains(delegateSection[1], field) {
-			t.Errorf("docs-site/reference/agent-yaml.mdx delegates section does not document %s", field)
+	for _, field := range []string{"`when`", "`assign`", "`requires`"} {
+		if !strings.Contains(tasksSection[1], field) {
+			t.Errorf("docs-site/reference/agent-yaml.mdx tasks section does not document %s", field)
 		}
 	}
 
 	// This assertion used to run the other way: it failed when the reference put
 	// `requires:` on a delegate, because the compiler allowed it on an
-	// agent_transfer only. The compiler now allows it on both, so the gate is
-	// inverted rather than deleted. A coding assistant that never sees the
-	// guarded shape will keep writing the agent-in-front-of-a-step workaround
-	// this feature exists to remove.
+	// agent_transfer only. The compiler now allows it on both a task and a
+	// handoff, so the gate is inverted rather than deleted. A coding assistant
+	// that never sees the guarded shape will keep writing the
+	// agent-in-front-of-a-step workaround this feature exists to remove.
 	guarded := false
 	for _, match := range regexp.MustCompile("(?s)```yaml[^\\n]*\\n(.*?)```").FindAllStringSubmatch(orchestration, -1) {
-		if strings.Contains(match[1], "delegates:") && strings.Contains(match[1], "requires:") {
+		if strings.Contains(match[1], "tasks:") && strings.Contains(match[1], "requires:") {
 			guarded = true
 		}
 	}
 	if !guarded {
-		t.Error("references/orchestration.md shows no guarded delegate; code allows requires: on a delegate and the skill must teach it")
+		t.Error("references/orchestration.md shows no guarded task; code allows requires: on a task and the skill must teach it")
 	}
 
 	historyRow := regexp.MustCompile("(?m)^\\| `pipecat` \\| (.*) \\| (.*) \\|$").FindStringSubmatch(orchestration)
@@ -1487,9 +1488,10 @@ func TestCovalCorrelationRoutesStayDocumented(t *testing.T) {
 // `make build` were all green. One of them, in the emitted runbook, was a direct
 // instruction to write a package that no longer decodes.
 //
-// `delegate` is deliberately NOT in the retired set. It was a `kind:` value and
-// it is now the authoring word for an entry under `delegates:`, so flagging it
-// would flag the correct spelling.
+// `delegate` joined the retired set once the `delegates:` catalog was
+// removed: a task is now nested inside the agent that runs it, or named
+// directly in another agent's `tasks:` list, and the word is never an
+// authoring word again.
 //
 // Three exclusions, each with its reason:
 //
@@ -1506,7 +1508,7 @@ func TestCovalCorrelationRoutesStayDocumented(t *testing.T) {
 //     Only the emitted README templates are walked here, because those are the
 //     runbook a human reads.
 func TestNoReaderFacingSurfaceTeachesARetiredKindName(t *testing.T) {
-	retired := regexp.MustCompile(`agent_transfer|human_transfer`)
+	retired := regexp.MustCompile(`agent_transfer|human_transfer|delegat\w*`)
 
 	surfaces := map[string]string{}
 
@@ -1573,7 +1575,7 @@ func TestNoReaderFacingSurfaceTeachesARetiredKindName(t *testing.T) {
 	for name, content := range surfaces {
 		for i, line := range strings.Split(content, "\n") {
 			if found := retired.FindString(line); found != "" {
-				t.Errorf("%s:%d teaches the retired kind name %q: the authoring words are delegates:, handoffs: and escalations:, and which block an entry sits in is its kind\n    %s",
+				t.Errorf("%s:%d teaches the retired kind name %q: the authoring words are tasks:, task_groups:, handoffs: and escalations:, and which block an entry sits in is its kind\n    %s",
 					name, i+1, found, strings.TrimSpace(line))
 			}
 		}
@@ -1655,7 +1657,24 @@ func catalogFences(t *testing.T) map[string][]string {
 // It reads only what a file defines itself, so a fragment naming something
 // declared on another page is left alone rather than guessed at.
 func TestDocumentedExamplesAttachUnderTheRightKey(t *testing.T) {
-	const catalogs = "delegates handoffs escalations"
+	// task_groups replaces delegates as the third top-level catalog: an agent
+	// attaches a task group by name, the same way it attaches a handoff or an
+	// escalation.
+	//
+	// tasks is deliberately not tracked here, even though it is a fifth kind.
+	// A task is nested inside the agent that runs it rather than declared in a
+	// same-named top-level catalog, so there is no separate declaration site to
+	// check an attachment against: the nesting IS the attachment. Tracking task
+	// names the same way as the other three would also misfire on a task
+	// group's own `steps:` list, which legitimately names tasks by bare string
+	// at the same indent a mis-attached catalog entry would sit at.
+	//
+	// The four fixed-width regexes below need no column change for the nested
+	// shape: a task's own fields, and its own `tools:`/`handoffs:` lists, sit
+	// two levels deeper than an agent's, so they fall outside the exact 4- and
+	// 6-space widths these patterns match and are silently skipped rather than
+	// misread.
+	const catalogs = "task_groups handoffs escalations"
 	topLevel := regexp.MustCompile(`^(\w+):\s*$`)
 	entry := regexp.MustCompile(`^ {2}(\w+):\s*$`)
 	listKey := regexp.MustCompile(`^ {4}(\w+):\s*$`)

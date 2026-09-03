@@ -3,12 +3,12 @@
 # groups for guided collection, all on the SLNG Execution Layer.
 #
 # A greeter (Remy) hands off to a reservations agent or an events agent, through
-# an entry under `handoffs:`. Each specialist delegates to a task group that
-# qualifies the request, then runs a shared confirm-booking step. Control returns to the
+# an entry under `handoffs:`. Each specialist runs a task group that qualifies the
+# request, then runs a shared confirm-booking step. Control returns to the
 # specialist (then: return), which closes or hands back to the greeter.
 #
-# Targeted at LiveKit only: task groups and delegate-return are code-target
-# features (they fail on Vapi), and this is the LiveKit first-run example.
+# Targeted at LiveKit only: task groups and task-return are code-target features
+# (they fail on Vapi), and this is the LiveKit first-run example.
 
 version: 1
 
@@ -19,38 +19,60 @@ entry_agent: greeter
 agents:
   greeter:
     instructions: instructions.md
-    model: reasoning
-    voice: host
+    think: reasoning
+    speak: host
     handoffs:
       - to_reservations
       - to_events
 
   reservations:
     instructions: agents/reservations.md
-    model: reasoning
-    voice: desk
-    delegates:
+    think: reasoning
+    speak: desk
+    # Both steps of do_reserve. Neither carries a when:, so neither is something
+    # this agent decides to run on its own: the group runs them in order.
+    tasks:
+      - name: find_slot
+        instructions: tasks/find_slot.md
+        tools:
+          - check_availability
+        result:
+          date: string
+          time: string
+          party_size: integer
+        context:
+          history: full
+
+      - name: confirm_booking
+        instructions: tasks/confirm_booking.md
+        tools:
+          - send_confirmation
+        result:
+          sent: boolean
+        context:
+          history: full
+    task_groups:
       - do_reserve
     handoffs:
       - back_to_greeter
 
   events:
     instructions: agents/events.md
-    model: reasoning
-    voice: desk
-    delegates:
+    think: reasoning
+    speak: desk
+    tasks:
+      - name: qualify_event
+        instructions: tasks/qualify_event.md
+        result:
+          occasion: string
+          headcount: integer
+          date: string
+        context:
+          history: full
+    task_groups:
       - do_event
     handoffs:
       - back_to_greeter
-
-delegates:
-  do_reserve:
-    group: reserve_group
-    when: The caller is ready to book a table; run the reservation flow.
-
-  do_event:
-    group: events_group
-    when: The caller is ready to plan their event; run the events flow.
 
 handoffs:
   to_reservations:
@@ -74,38 +96,9 @@ handoffs:
       history: full
       variables: all
 
-tasks:
-  find_slot:
-    instructions: tasks/find_slot.md
-    tools:
-      - check_availability
-    result:
-      date: string
-      time: string
-      party_size: integer
-    context:
-      history: full
-
-  qualify_event:
-    instructions: tasks/qualify_event.md
-    result:
-      occasion: string
-      headcount: integer
-      date: string
-    context:
-      history: full
-
-  confirm_booking:
-    instructions: tasks/confirm_booking.md
-    tools:
-      - send_confirmation
-    result:
-      sent: boolean
-    context:
-      history: full
-
 task_groups:
-  reserve_group:
+  do_reserve:
+    when: The caller is ready to book a table; run the reservation flow.
     steps:
       - find_slot
       - confirm_booking
@@ -113,7 +106,8 @@ task_groups:
     then: return               # control comes back to the reservations agent
     merge: results
 
-  events_group:
+  do_event:
+    when: The caller is ready to plan their event; run the events flow.
     steps:
       - qualify_event
       - confirm_booking

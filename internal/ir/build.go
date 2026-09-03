@@ -67,9 +67,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		Variables:    make(map[string]Variable, len(pkg.Agent.Variables)),
 		Secrets:      slices.Sorted(slices.Values(pkg.Agent.Secrets)),
 		Agents:       make(map[string]AgentDef, len(pkg.Agent.Agents)),
-		Tasks:        make(map[string]Task, len(pkg.Agent.Tasks)),
+		Tasks:        make(map[string]Task, len(pkg.Tasks)),
 		TaskGroups:   make(map[string]TaskGroup, len(pkg.Agent.TaskGroups)),
-		Controls:     make(map[string]Control, len(pkg.Agent.Delegates)+len(pkg.Agent.Handoffs)+len(pkg.Agent.Escalations)),
+		Controls:     make(map[string]Control, len(pkg.Callables)+len(pkg.Agent.Handoffs)+len(pkg.Agent.Escalations)),
 		Tools:        make(map[string]Tool, len(pkg.Tools)),
 		Conversation: buildConversation(pkg.Agent.Conversation),
 		Channels:     make(map[string]Channel, len(pkg.Agent.Channels)),
@@ -161,12 +161,12 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 
 	for _, name := range sortedKeys(pkg.Agent.Agents) {
 		raw := pkg.Agent.Agents[name]
-		// model/voice references and their kinds are resolved in resolveModelKinds.
+		// think/speak references and their kinds are resolved in resolveModelKinds.
 		for _, list := range []struct {
 			key   string
 			names []string
 		}{
-			{"tools", raw.Tools}, {"delegates", raw.Delegates},
+			{"tools", raw.Tools}, {"tasks", taskRefs(raw)}, {"task_groups", raw.TaskGroups},
 			{"handoffs", raw.Handoffs}, {"escalations", raw.Escalations},
 		} {
 			if err := checkAttachments(pkg, list.key, list.names); err != nil {
@@ -177,18 +177,18 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		if !ok {
 			return nil, missing(pkg, "agent.yaml", "instructions", raw.Instructions)
 		}
-		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg, raw.Model))
+		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg, raw.Think))
 		out.Agents[name] = AgentDef{
-			Instructions: instructions, Model: raw.Model, Voice: raw.Voice,
-			Tools: attached(raw.Tools, raw.Delegates, raw.Handoffs, raw.Escalations),
+			Instructions: instructions, Model: raw.Think, Voice: raw.Speak,
+			Tools: attached(raw.Tools, callables(raw, pkg), raw.Handoffs, raw.Escalations),
 		}
 	}
 
-	for _, name := range sortedKeys(pkg.Agent.Tasks) {
-		raw := pkg.Agent.Tasks[name]
-		if raw.Model != "" {
-			if _, ok := out.Models[raw.Model]; !ok {
-				return nil, missing(pkg, "agent.yaml", "model", raw.Model)
+	for _, name := range sortedKeys(pkg.Tasks) {
+		raw := pkg.Tasks[name]
+		if raw.Think != "" {
+			if _, ok := out.Models[raw.Think]; !ok {
+				return nil, missing(pkg, "agent.yaml", "think", raw.Think)
 			}
 		}
 		if err := checkAttachments(pkg, "tools", raw.Tools); err != nil {
@@ -206,17 +206,19 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		if !ok {
 			return nil, missing(pkg, "agent.yaml", "instructions", raw.Instructions)
 		}
-		// A task with no model of its own runs on the entry agent's think profile,
-		// which is the same rule slngProfileHasTools applies. One rule, read twice,
-		// rather than two spellings that can drift.
+		// A task with no think profile of its own runs on the entry agent's, which
+		// is the same rule slngProfileHasTools applies. One rule, read twice,
+		// rather than two spellings that can drift. Deliberately the entry agent's
+		// and not its defining agent's: a task is reachable from any agent that
+		// names it, so the profile cannot come from where it happens to be written.
 		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg,
-			cmp.Or(raw.Model, pkg.Agent.Agents[pkg.Agent.EntryAgent].Model)))
+			cmp.Or(raw.Think, pkg.Agent.Agents[pkg.Agent.EntryAgent].Think)))
 		result, err := buildResult(raw.Result)
 		if err != nil {
 			return nil, fmt.Errorf("%s: task %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
 		out.Tasks[name] = Task{
-			Instructions: instructions, Tools: attached(raw.Tools, raw.Handoffs), Model: raw.Model, Result: result,
+			Instructions: instructions, Tools: attached(raw.Tools, raw.Handoffs), Model: raw.Think, Result: result,
 			Context: buildTaskContext(raw.Context),
 		}
 	}
@@ -251,13 +253,18 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		}
 		out.Targets[name] = target
 	}
-	// The three catalogs merge into one map keyed by name. Names are one
-	// namespace across all four kinds (checkNames refuses a collision), so the
-	// merge is order-free and the intermediate representation is unchanged.
-	for _, name := range sortedKeys(pkg.Agent.Delegates) {
-		control, err := buildDelegate(pkg, pkg.Agent.Delegates[name], out)
+	// The callables and the two catalogs merge into one map keyed by name. Names
+	// are one namespace across all five kinds (checkNames refuses a collision), so
+	// the merge is order-free and the intermediate representation is unchanged.
+	for _, name := range sortedKeys(pkg.Callables) {
+		raw := pkg.Callables[name]
+		control, err := buildCallable(pkg, raw, out)
 		if err != nil {
-			return nil, fmt.Errorf("%s: delegate %q: %w", pkg.Location("agent.yaml", name), name, err)
+			kind := "task"
+			if raw.Group != "" {
+				kind = "task group"
+			}
+			return nil, fmt.Errorf("%s: %s %q: %w", pkg.Location("agent.yaml", name), kind, name, err)
 		}
 		out.Controls[name] = control
 	}
@@ -307,8 +314,8 @@ func checkNames(pkg *packagespec.Package) error {
 	}{
 		{"model", modelNames},
 		{"variable", sortedKeys(pkg.Agent.Variables)}, {"agent", sortedKeys(pkg.Agent.Agents)},
-		{"task", sortedKeys(pkg.Agent.Tasks)}, {"task group", sortedKeys(pkg.Agent.TaskGroups)},
-		{"delegate", sortedKeys(pkg.Agent.Delegates)}, {"handoff", sortedKeys(pkg.Agent.Handoffs)},
+		{"task", sortedKeys(pkg.Tasks)}, {"task group", sortedKeys(pkg.Agent.TaskGroups)},
+		{"handoff", sortedKeys(pkg.Agent.Handoffs)},
 		{"escalation", sortedKeys(pkg.Agent.Escalations)}, {"tool", sortedKeys(pkg.Tools)},
 	}
 	for _, set := range sets {
@@ -318,10 +325,16 @@ func checkNames(pkg *packagespec.Package) error {
 			}
 		}
 	}
-	// All four kinds become callable function names at runtime, so they share one
+	// All five kinds become callable function names at runtime, so they share one
 	// flat namespace: a name may sit in exactly one catalog, and never on a tool
 	// as well. The capture tool is generated whenever a conversation variable
 	// exists, so its name is reserved across all of them (V7).
+	//
+	// Task groups are the easy half to miss. They were never checked while a
+	// delegate pointed at them, because the delegate carried the name into the
+	// emitted project. An agent names a group directly now, so the group name IS
+	// the emitted method name, and a group colliding with a tool would define one
+	// Python function twice and silently drop the tool.
 	if _, ok := pkg.Tools[CaptureToolName]; ok {
 		return fmt.Errorf("%s: tool name %q is reserved: unmute generates %s for source: conversation variables", pkg.Location("agent.yaml", CaptureToolName), CaptureToolName, CaptureToolName)
 	}
@@ -330,12 +343,13 @@ func checkNames(pkg *packagespec.Package) error {
 		kind  string
 		names []string
 	}{
-		{"delegate", sortedKeys(pkg.Agent.Delegates)}, {"handoff", sortedKeys(pkg.Agent.Handoffs)},
+		{"task", sortedKeys(pkg.Tasks)}, {"task group", sortedKeys(pkg.Agent.TaskGroups)},
+		{"handoff", sortedKeys(pkg.Agent.Handoffs)},
 		{"escalation", sortedKeys(pkg.Agent.Escalations)},
 	} {
 		for _, name := range catalog.names {
 			if prior, ok := declared[name]; ok {
-				return fmt.Errorf("%s: %s and %s name %q collide: all four kinds share one namespace, so a name belongs to exactly one of them", pkg.Location("agent.yaml", name), prior, catalog.kind, name)
+				return fmt.Errorf("%s: %s and %s name %q collide: all five kinds share one namespace, so a name belongs to exactly one of them", pkg.Location("agent.yaml", name), prior, catalog.kind, name)
 			}
 			declared[name] = catalog.kind
 			if _, ok := pkg.Tools[name]; ok {
@@ -418,16 +432,16 @@ func checkModelReferences(pkg *packagespec.Package, models map[string]ModelDef) 
 	}
 	for _, agentName := range sortedKeys(pkg.Agent.Agents) {
 		agent := pkg.Agent.Agents[agentName]
-		if err := check(agent.Model, KindThink, "model"); err != nil {
+		if err := check(agent.Think, KindThink, "think"); err != nil {
 			return err
 		}
-		if err := check(agent.Voice, KindSpeak, "voice"); err != nil {
+		if err := check(agent.Speak, KindSpeak, "speak"); err != nil {
 			return err
 		}
 	}
-	for _, taskName := range sortedKeys(pkg.Agent.Tasks) {
-		task := pkg.Agent.Tasks[taskName]
-		if err := check(task.Model, KindThink, "model"); err != nil {
+	for _, taskName := range sortedKeys(pkg.Tasks) {
+		task := pkg.Tasks[taskName]
+		if err := check(task.Think, KindThink, "think"); err != nil {
 			return err
 		}
 		if err := check(task.Context.Summarizer, KindThink, "summarizer"); err != nil {
@@ -492,11 +506,11 @@ func usedModelNames(pkg *packagespec.Package, models map[string]ModelDef) map[st
 		}
 	}
 	for _, agent := range pkg.Agent.Agents {
-		add(agent.Model)
-		add(agent.Voice)
+		add(agent.Think)
+		add(agent.Speak)
 	}
-	for _, task := range pkg.Agent.Tasks {
-		add(task.Model)
+	for _, task := range pkg.Tasks {
+		add(task.Think)
 		add(task.Context.Summarizer)
 	}
 	for _, handoff := range pkg.Agent.Handoffs {
@@ -793,36 +807,56 @@ func checkRequires(pkg *packagespec.Package, requires []string, agent *Agent) er
 	return nil
 }
 
-func buildDelegate(pkg *packagespec.Package, raw packagespec.Delegate, agent *Agent) (Control, error) {
+// buildCallable resolves one thing an agent can decide to run.
+//
+// Two refusals its predecessor carried are gone rather than moved. "Exactly one
+// of task or group" is unwritable now that a callable is derived from either a
+// nested task or a `task_groups:` entry, and "assign is legal on task delegates
+// only" is unwritable because `assign:` is a key on a task and a group has none.
+func buildCallable(pkg *packagespec.Package, raw packagespec.Callable, agent *Agent) (Control, error) {
 	if err := checkRequires(pkg, raw.Requires, agent); err != nil {
 		return nil, err
 	}
-	task, group := stringValue(raw.Task), stringValue(raw.Group)
-	if (task == "") == (group == "") {
-		return nil, fmt.Errorf("delegate needs exactly one of task or group")
+	if raw.Task != "" {
+		if _, ok := agent.Tasks[raw.Task]; !ok {
+			return nil, missing(pkg, "agent.yaml", "task", raw.Task)
+		}
+	} else if _, ok := agent.TaskGroups[raw.Group]; !ok {
+		return nil, missing(pkg, "agent.yaml", "group", raw.Group)
 	}
-	if task != "" {
-		if _, ok := agent.Tasks[task]; !ok {
-			return nil, missing(pkg, "agent.yaml", "task", task)
-		}
-	} else {
-		if _, ok := agent.TaskGroups[group]; !ok {
-			return nil, missing(pkg, "agent.yaml", "group", group)
-		}
-		if len(raw.Assign) > 0 {
-			return nil, fmt.Errorf("assign is legal on task delegates only")
-		}
+	assign, err := assignments(raw.Assign)
+	if err != nil {
+		return nil, err
 	}
-	if err := checkAssignments(task, raw.Assign, agent); err != nil {
+	if err := checkAssignments(raw.Task, assign, agent); err != nil {
 		return nil, err
 	}
 	// ponytail: one TrimSpace, matching buildTool. A blank line reads as no
 	// announcement, so no driver has to decide what " " means.
 	return &Delegate{
-		Kind: ControlDelegate, When: raw.When, Task: task, Group: group,
-		Requires: raw.Requires, Assign: raw.Assign,
+		Kind: ControlDelegate, When: raw.When, Task: raw.Task, Group: raw.Group,
+		Requires: raw.Requires, Assign: assign,
 		Announce: strings.TrimSpace(raw.Announce),
 	}, nil
+}
+
+// assignments turns the authored pair list into the name-keyed map the resolved
+// representation holds. A pair value is one scalar by the time it decodes, and
+// an assignment is always a `result.<field>` string, so anything else is refused
+// here rather than reaching checkAssignments as something no path can be.
+func assignments(pairs []packagespec.Pair) (map[string]string, error) {
+	if len(pairs) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(pairs))
+	for _, pair := range pairs {
+		text, ok := pair.Value.(string)
+		if !ok {
+			return nil, fmt.Errorf("assign %q must use result.<field>, and %v is not a name", pair.Key, pair.Value)
+		}
+		out[pair.Key] = text
+	}
+	return out, nil
 }
 
 func buildHandoff(pkg *packagespec.Package, raw packagespec.Handoff, agent *Agent) (Control, error) {
@@ -1588,18 +1622,18 @@ func checkReachability(pkg *packagespec.Package) error {
 				switch catalogOf(pkg, name) {
 				case "tools":
 					tools[name] = true
-				case "delegates":
+				case "tasks":
 					if controls[name] {
 						continue
 					}
 					controls[name] = true
-					raw := pkg.Agent.Delegates[name]
-					if task := stringValue(raw.Task); task != "" {
-						visitTask(task)
+					visitTask(name)
+				case "task_groups":
+					if controls[name] {
+						continue
 					}
-					if group := stringValue(raw.Group); group != "" {
-						visitGroup(group)
-					}
+					controls[name] = true
+					visitGroup(name)
 				case "handoffs":
 					if controls[name] {
 						continue
@@ -1619,14 +1653,17 @@ func checkReachability(pkg *packagespec.Package) error {
 		}
 		agents[name] = true
 		def := pkg.Agent.Agents[name]
-		attach(def.Tools, def.Delegates, def.Handoffs, def.Escalations)
+		// callables rather than every task the agent writes: defining a step-only
+		// task does not run it, so a task nothing else reaches is still unreachable
+		// and is still refused by name below.
+		attach(def.Tools, callables(def, pkg), def.Handoffs, def.Escalations)
 	}
 	visitTask = func(name string) {
 		if tasks[name] {
 			return
 		}
 		tasks[name] = true
-		def := pkg.Agent.Tasks[name]
+		def := pkg.Tasks[name]
 		attach(def.Tools, def.Handoffs)
 	}
 	visitGroup = func(name string) {
@@ -1673,9 +1710,9 @@ func checkReachability(pkg *packagespec.Package) error {
 		return fmt.Sprintf("; add it to the %s: of one of these agents: %s", list, strings.Join(names, ", "))
 	}
 
-	// Reported in graph order, nearest declaration first: an unattached delegate
-	// makes its task unreachable too, and naming the delegate is the one edit that
-	// fixes both.
+	// Reported in graph order, nearest declaration first: an unattached handoff
+	// makes the agent behind it unreachable too, and naming the handoff is the one
+	// edit that fixes both.
 	//
 	// ponytail: the first one, not all of them. Build returns a single error and
 	// every other check in this file does the same, so a package with three
@@ -1686,7 +1723,7 @@ func checkReachability(pkg *packagespec.Package) error {
 		list  string
 		names []string
 	}{
-		{"delegates", sortedKeys(pkg.Agent.Delegates)}, {"handoffs", sortedKeys(pkg.Agent.Handoffs)},
+		{"handoffs", sortedKeys(pkg.Agent.Handoffs)},
 		{"escalations", sortedKeys(pkg.Agent.Escalations)},
 	} {
 		for _, name := range catalog.names {
@@ -1707,12 +1744,12 @@ func checkReachability(pkg *packagespec.Package) error {
 	}
 	for _, name := range sortedKeys(pkg.Agent.TaskGroups) {
 		if !groups[name] {
-			return fmt.Errorf("%s: task group %q is declared but nothing reaches it; add an entry under delegates: with group: %s and attach it to an agent", pkg.Location("agent.yaml", name), name, name)
+			return fmt.Errorf("%s: task group %q is declared but no agent reaches it%s", pkg.Location("agent.yaml", name), name, attachable("task_groups"))
 		}
 	}
-	for _, name := range sortedKeys(pkg.Agent.Tasks) {
+	for _, name := range sortedKeys(pkg.Tasks) {
 		if !tasks[name] {
-			return fmt.Errorf("%s: task %q is declared but nothing reaches it; add an entry under delegates: with task: %s and attach it to an agent, or list it in the steps: of a task group that is reached", pkg.Location("agent.yaml", name), name, name)
+			return fmt.Errorf("%s: task %q has no when: and no task group lists it in steps:, so nothing runs it. Give it a when: so its agent can decide to run it, or list it as a step of a task group that is reached", pkg.Location("agent.yaml", name), name)
 		}
 	}
 	for _, name := range sortedKeys(pkg.Agent.Agents) {
@@ -1743,23 +1780,85 @@ func attached(lists ...[]string) []string {
 }
 
 // singular turns a catalog key into the noun an error message uses for one of
-// its entries.
-func singular(list string) string { return strings.TrimSuffix(list, "s") }
+// its entries. A lookup rather than a suffix trim, because `task_groups`
+// singularises to "task group" and no rule about the letter s gets there.
+func singular(list string) string {
+	switch list {
+	case "task_groups":
+		return "task group"
+	default:
+		return strings.TrimSuffix(list, "s")
+	}
+}
 
-// catalogOf reports which of the four lists declares name, or "" when nothing
-// does. All four kinds share one flat namespace, so at most one answers.
+// article is the indefinite article for a kind name, so the one kind that
+// begins with a vowel reads as "an escalation" rather than "a escalation".
+func article(kind string) string {
+	if strings.ContainsRune("aeiou", rune(kind[0])) {
+		return "an"
+	}
+	return "a"
+}
+
+// catalogOf reports which of the five lists declares name, or "" when nothing
+// does. All five kinds share one flat namespace, so at most one answers.
 func catalogOf(pkg *packagespec.Package, name string) string {
 	switch {
 	case has(pkg.Tools, name):
 		return "tools"
-	case has(pkg.Agent.Delegates, name):
-		return "delegates"
+	case has(pkg.Tasks, name):
+		return "tasks"
+	case has(pkg.Agent.TaskGroups, name):
+		return "task_groups"
 	case has(pkg.Agent.Handoffs, name):
 		return "handoffs"
 	case has(pkg.Agent.Escalations, name):
 		return "escalations"
 	}
 	return ""
+}
+
+// taskNames is the names an agent's `tasks:` list holds, whether each item
+// defines a task or names one another agent defines.
+func taskNames(raw packagespec.AgentDef) []string {
+	out := make([]string, 0, len(raw.Tasks))
+	for _, item := range raw.Tasks {
+		if item.Task != nil {
+			out = append(out, item.Task.Name)
+			continue
+		}
+		out = append(out, item.Ref)
+	}
+	return out
+}
+
+// taskRefs is only the bare names, the items that have to resolve to something
+// written elsewhere. A definition resolves to itself, and it is where a step-only
+// task is legitimately written, so putting one through checkAttachments would
+// refuse the very shape task groups are authored in.
+func taskRefs(raw packagespec.AgentDef) []string {
+	var out []string
+	for _, item := range raw.Tasks {
+		if item.Task == nil {
+			out = append(out, item.Ref)
+		}
+	}
+	return out
+}
+
+// callables is what an agent can decide to run beyond its tools, handoffs and
+// escalations: the tasks it runs, in authored order, then the task groups.
+//
+// A task with no `when:` contributes nothing, because there is no trigger for
+// the agent to act on. checkAttachments refuses one written in an agent's list.
+func callables(raw packagespec.AgentDef, pkg *packagespec.Package) []string {
+	out := make([]string, 0, len(raw.Tasks)+len(raw.TaskGroups))
+	for _, name := range taskNames(raw) {
+		if _, ok := pkg.Callables[name]; ok {
+			out = append(out, name)
+		}
+	}
+	return append(out, raw.TaskGroups...)
 }
 
 func has[V any](m map[string]V, name string) bool {
@@ -1770,19 +1869,31 @@ func has[V any](m map[string]V, name string) bool {
 // checkAttachments resolves the names an agent or a task lists under one key
 // against the catalog of the same name.
 //
-// Kind-aware, which the single mixed list could not be. With four lists the
+// Kind-aware, which the single mixed list could not be. With five lists the
 // mistake worth naming is a name written in the wrong one, so when the name does
 // resolve, just not here, the message says where it IS declared and which list
 // it belongs on.
+//
+// A task is the one kind that can resolve in the right list and still be wrong:
+// a task with no `when:` is a definition only, so an agent has no trigger to act
+// on and naming it does nothing. That is refused here rather than ignored.
 func checkAttachments(pkg *packagespec.Package, list string, names []string) error {
 	for _, name := range names {
 		switch found := catalogOf(pkg, name); found {
 		case list:
+			if list != "tasks" {
+				continue
+			}
+			if _, ok := pkg.Callables[name]; !ok {
+				return fmt.Errorf("%s: task %q has no when:, so it is a task group's step rather than something an agent can decide to run. Give it a when: to make it a task this agent runs, or name the group that runs it",
+					pkg.Location("agent.yaml", name), name)
+			}
 		case "":
 			return missing(pkg, "agent.yaml", singular(list), name)
 		default:
-			return fmt.Errorf("%s: %q is a %s, so move it out of the %s: list and into the %s: list",
-				pkg.Location("agent.yaml", name), name, singular(found), list, found)
+			kind := singular(found)
+			return fmt.Errorf("%s: %q is %s %s, so move it out of the %s: list and into the %s: list",
+				pkg.Location("agent.yaml", name), name, article(kind), kind, list, found)
 		}
 	}
 	return nil

@@ -2942,7 +2942,7 @@ func validateDestination(value string) error {
 	return nil
 }
 
-// validateControlName refuses a name any of the four kinds already uses. They
+// validateControlName refuses a name any of the five kinds already uses. They
 // all become callable function names at runtime, so they share one namespace and
 // the check has to see all of them.
 func validateControlName(data *scaffold.Data, name string) error {
@@ -2957,13 +2957,13 @@ func validateControlName(data *scaffold.Data, name string) error {
 		}
 	}
 	for _, task := range data.Tasks {
-		if task.RunName() == name {
-			return errors.New("name already used by a delegate that runs a task")
+		if task.Name == name {
+			return errors.New("name already used by a task")
 		}
 	}
 	for _, group := range data.TaskGroups {
-		if group.RunName() == name {
-			return errors.New("name already used by a delegate that runs a task group")
+		if group.Name == name {
+			return errors.New("name already used by a task group")
 		}
 	}
 	for _, transfer := range data.HumanTransfers {

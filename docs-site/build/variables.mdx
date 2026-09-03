@@ -168,7 +168,7 @@ unmute dev my-agent --var customer_id=cus_2002
 ```
 
 Seeding `customer_id` is the same thing a production call does when it already
-knows who is calling. Put `requires: customer_id` on a delegate and the step
+knows who is calling. Put `requires: customer_id` on a task and the step
 goes straight through with a value already set, while without the flag the agent
 has to ask first. That difference is the variable doing its job.
 
