@@ -85,7 +85,8 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | a clock with no `timezone:` is refused, and the message says a container clock is UTC | `internal/ir/prefetch_test.go`, and the zone resolving in the emitted image is `TestSmokePrefetchZoneResolves` |
 | `--source` seeds a call fact and reaches the container; `--var` keeps its exact refusal | `internal/cli/dev_vars_test.go`, `internal/generate/prefetch_test.go` (`TestPrefetchSeedReachesTheContainer`) |
 | `--var` accepts exactly what the dispatch payload fills, which is `source: call_start` **and** a variable declaring no `source:`, because both drivers hydrate that pair and both runbooks print a `--var` line for each; a runtime-owned or `conversation` source is still refused, and no refusal can render an empty source | `internal/cli/dev_vars_test.go` (`TestCallStartPayload`) |
-| `salon-concierge-v2` keeps the four context choices it exists to show, carries every variable across both handoffs because a subset is refused on pipecat, declares `customer_status` with no default, and shares neither `name:` nor `agent_id` with `salon-concierge` | `internal/generate/examples_test.go` (`TestSalonConciergeV2ScopesEveryStep`) |
+| every package under `internal/voice-agents-tests/` validates clean on every target it declares and generates, and the directory is never empty | `internal/generate/examples_test.go` (`TestVoiceAgentTestPackagesValidateAndGenerate`) |
+| `internal/voice-agents-tests/salon-concierge-v2` keeps the four context choices it exists to show, carries every variable across both handoffs because a subset is refused on pipecat, declares `customer_status` with no default, and shares neither `name:` nor `agent_id` with `salon-concierge` | `internal/generate/examples_test.go` (`TestSalonConciergeV2ScopesEveryStep`) |
 | every prompt naming a pre-fetched value reads as a whole sentence when that value is empty | `internal/generate/prefetch_test.go` (`TestPrefetchedPromptsReadWholeWithEveryValueEmpty`) |
 | a delegate `announce:` is spoken after the guard, so a refused step stays silent, and a delegate with none emits nothing | `internal/generate/delegate_announce_test.go` |
 | every direct dependency is on the allowlist | `internal/cli/deps_test.go` |
@@ -190,6 +191,18 @@ A fact that is only true in generated output is a fact the reader never sees, an
 
 ## Layout
 `internal/` not `pkg/`. One file per command in `internal/cli/`. Hand-write cobra commands — **no `cobra-cli` generator**.
+
+### Three places hold a package, for three different reasons
+`examples/` is what a reader is sent to, so it carries every example gate: a
+README naming its transports, resolving links, the model and framework pins, and
+a hardcoded set in `internal/generate/examples_test.go` that a new one has to
+join deliberately. `internal/testdata/` is the smallest package that makes one
+unit assertion possible. `internal/voice-agents-tests/` is a whole agent we
+compile, deploy and talk to, to find what only a real call finds: not shipped,
+nobody pointed at it, and held to one bar (validates clean and generates on every
+target it declares) so a test agent that stops running fails the suite. Putting a
+test agent in `examples/` is what this split exists to stop, because it makes the
+public set grow with work nobody outside is meant to read.
 
 ## Subagent-driven development
 For complex or long-running tasks, use subagents by default when the work can be split into independent, bounded subtasks.

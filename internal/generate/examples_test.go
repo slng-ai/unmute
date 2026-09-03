@@ -53,6 +53,10 @@ func examplePackagePath(name string) string {
 	switch name {
 	case "remy", "safe_core", "daily_carrier", "simple-prompt":
 		return filepath.Join("..", "testdata", name)
+	case "salon-concierge-v2":
+		// Not a shipped example. It is a package we run against real providers,
+		// so it lives with the other voice-agent test packages.
+		return filepath.Join("..", voiceAgentTestsDir, name)
 	}
 	return filepath.Join("..", "..", "examples", name)
 }
@@ -1025,7 +1029,7 @@ func TestPublicExamplePackages(t *testing.T) {
 	// 2026-08-28, and a reader who wants a package to run scaffolds one with
 	// `unmute init`. simple-prompt lives on as internal/testdata/simple-prompt,
 	// because it is the minimal single-agent shape a dozen tests compile.
-	want := []string{"salon-concierge", "salon-concierge-single-prompt", "salon-concierge-v2", "slng-support"}
+	want := []string{"salon-concierge", "salon-concierge-single-prompt", "slng-support"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
@@ -1059,6 +1063,63 @@ func TestRepositoryKeepsSpecsPrivateAndDocsFocused(t *testing.T) {
 	}
 	if err := exec.Command("git", "-C", repo, "check-ignore", "-q", "--", "specs/.unmute-ignore-probe/spec.md").Run(); err != nil {
 		t.Errorf("specs/ is not ignored: %v", err)
+	}
+}
+
+// voiceAgentTestsDir holds whole packages we compile and talk to against real
+// providers, as opposed to internal/testdata, which holds the smallest package
+// that makes a unit assertion possible. They are not shipped, so they are not
+// in examples/ and no reader is pointed at them, but they are deployed and
+// dialled, so they are held to the same bar: validate clean on every target
+// they declare, and generate.
+const voiceAgentTestsDir = "voice-agents-tests"
+
+func TestVoiceAgentTestPackagesValidateAndGenerate(t *testing.T) {
+	root := filepath.Join("..", voiceAgentTestsDir)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packages := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, entry.Name(), "agent.yaml")); err != nil {
+			continue
+		}
+		packages++
+		t.Run(entry.Name(), func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join(root, entry.Name()))
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatalf("build: %v", err)
+			}
+			if len(agent.Targets) == 0 {
+				t.Fatal("declares no target, so there is nothing to run it on")
+			}
+			for _, name := range slices.Sorted(maps.Keys(agent.Targets)) {
+				resolved := agent.Targets[name]
+				report, err := ir.Validate(agent, []ir.Target{resolved}, target.Default())
+				if err != nil {
+					t.Fatalf("validate %s: %v", name, err)
+				}
+				for _, row := range report.PerTarget {
+					if len(row.Errors) > 0 {
+						t.Errorf("%s: %v", name, row.Errors)
+					}
+				}
+				if _, err := Generate(agent, resolved, target.Default()); err != nil {
+					t.Errorf("generate %s: %v", name, err)
+				}
+			}
+		})
+	}
+	if packages == 0 {
+		t.Fatalf("%s holds no package, so this test asserts nothing; delete it or the directory", root)
 	}
 }
 
@@ -1257,6 +1318,7 @@ func TestExampleAndDocLinksIntoExamplesResolve(t *testing.T) {
 		onlyExamples    bool
 	}{
 		{filepath.Join("..", "..", "examples"), ".md", false},
+		{filepath.Join("..", voiceAgentTestsDir), ".md", false},
 		{filepath.Join("..", "..", "docs"), ".md", true},
 		{filepath.Join("..", "..", "docs-site"), ".mdx", true},
 	} {

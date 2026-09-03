@@ -113,11 +113,10 @@ unsay what the caller said out loud. A phone number the caller read aloud is
 in the transcript whether a variable holds it or not. `reset` plus a short
 `requires:` list gives a step a smaller request, not a redacted one.
 
-`examples/salon-concierge-v2` is the worked version of all of this: the same
-salon as `examples/salon-concierge`, with `reset` on the step that only reads a
-number back, `messages` on the booking step and both handoffs, and one more
-value assigned by one step and declared in the next step's `requires:`. Its
-`README.md` says why it uses neither `summary` nor `last_n`.
+[Scoping a step's context](/optimization/context-scope) is the worked version
+of all of this: which value to give which step, what has to travel as a variable
+once a step cannot see the conversation, and the two values a package running on
+both code targets cannot use.
 
 ## Announce it
 

@@ -1,6 +1,11 @@
 # salon-concierge-v2
 
-The same Sage and Stone salon as [`salon-concierge`](../salon-concierge/), with
+A test package, not a shipped example. It lives here because we compile it,
+deploy it and talk to it; nobody is pointed at it as a starting shape. The
+public write-up of what it does is
+[Scoping a step's context](../../../docs-site/optimization/context-scope.mdx).
+
+The same Sage and Stone salon as [`salon-concierge`](../../../examples/salon-concierge/), with
 one thing changed: every step now gets the smallest context that still does its
 job, and what it no longer reads off the transcript travels as a declared
 variable instead.
@@ -14,8 +19,8 @@ There are three salons now, and they are a ladder:
 
 | Package | Every turn carries | Every step carries |
 |---|---|---|
-| [`salon-concierge-single-prompt`](../salon-concierge-single-prompt/) | one prompt holding four jobs, every tool | there are no steps |
-| [`salon-concierge`](../salon-concierge/) | the concierge prompt, the tools it holds | the whole transcript, tool records included |
+| [`salon-concierge-single-prompt`](../../../examples/salon-concierge-single-prompt/) | one prompt holding four jobs, every tool | there are no steps |
+| [`salon-concierge`](../../../examples/salon-concierge/) | the concierge prompt, the tools it holds | the whole transcript, tool records included |
 | `salon-concierge-v2` | the same | its instructions, its declared values, and only the turns it needs |
 
 ## What changed
@@ -159,8 +164,8 @@ session.
 ## How to run it
 
 ```sh
-unmute validate examples/salon-concierge-v2
-unmute compile examples/salon-concierge-v2
+unmute validate internal/voice-agents-tests/salon-concierge-v2
+unmute compile internal/voice-agents-tests/salon-concierge-v2
 ```
 
 The generated projects land in `build/livekit/` and `build/pipecat/`. Each one
@@ -170,8 +175,8 @@ commit `build/`, it is disposable.
 Talk to it in the browser:
 
 ```sh
-cp examples/salon-concierge-v2/build/pipecat/.env.example examples/salon-concierge-v2/.env
-unmute dev examples/salon-concierge-v2 --target pipecat
+cp internal/voice-agents-tests/salon-concierge-v2/build/pipecat/.env.example internal/voice-agents-tests/salon-concierge-v2/.env
+unmute dev internal/voice-agents-tests/salon-concierge-v2 --target pipecat
 ```
 
 Use `--target livekit` for the same conversation on the other target. Use
@@ -181,19 +186,19 @@ A browser session has no carrier, so nothing supplies a caller number. Seed one
 to exercise the pre-fetch and the readback:
 
 ```sh
-unmute dev examples/salon-concierge-v2 --source from_number=<E.164 number>
+unmute dev internal/voice-agents-tests/salon-concierge-v2 --source from_number=<E.164 number>
 ```
 
 ## Seeing the difference
 
 Run the same conversation through this package and through
-[`salon-concierge`](../salon-concierge/), then read both calls back. Both trace
+[`salon-concierge`](../../../examples/salon-concierge/), then read both calls back. Both trace
 to Langfuse, and the per-request messages are in the spans:
 
 ```sh
 unmute dev examples/salon-concierge --target livekit --source from_number=<E.164 number>
-unmute dev examples/salon-concierge-v2 --target livekit --source from_number=<E.164 number>
-python3 scripts/read_langfuse_trace.py --env examples/salon-concierge-v2/.env
+unmute dev internal/voice-agents-tests/salon-concierge-v2 --target livekit --source from_number=<E.164 number>
+python3 scripts/read_langfuse_trace.py --env internal/voice-agents-tests/salon-concierge-v2/.env
 ```
 
 The emitted code says it without a call, too. On livekit, the verification step
@@ -217,10 +222,10 @@ On pipecat the same step's node carries
 Run the tools' own check on its own:
 
 ```sh
-python3 examples/salon-concierge-v2/tools/salon.py
+python3 internal/voice-agents-tests/salon-concierge-v2/tools/salon.py
 ```
 
 For a longer scripted conversation, see the
-[end-to-end harness](../../docs/HARNESS_TEST.md). The values `context.history`
+[end-to-end harness](../../../docs/HARNESS_TEST.md). The values `context.history`
 takes and what each one sends the model are in
-[the tasks page](../../docs-site/build/orchestration/tasks.mdx).
+[the tasks page](../../../docs-site/build/orchestration/tasks.mdx).

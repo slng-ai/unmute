@@ -1,0 +1,176 @@
+---
+title: "Scoping a step's context"
+description: "How to choose what each task and handoff receives, and what has to travel as a declared variable once a step stops reading the transcript."
+sidebarTitle: "Context scope"
+---
+
+Every model request in a call carries three things: the prompt for whatever is
+speaking, the conversation so far, and the values substituted into that prompt.
+The first is fixed by what you wrote. The third is small. The second grows for
+the whole call, and by the end of a long one it is most of the request.
+
+A structured package gives you a place to cut it. Each task and each handoff
+declares its own `context.history`, so a step that does not need the
+conversation does not get it. This page is how to decide that per step, and what
+you have to declare once you have.
+
+## Start from what the step actually reads
+
+The question is not how much history to send. It is what the step's own
+instructions refer to.
+
+Read a task prompt and mark every sentence that points outward. "Confirm the
+service the caller asked for" points at the conversation. "Read the number back
+and get a yes" points at a value. A step whose every sentence points at values
+needs no conversation at all, and a step with one sentence pointing outward
+needs the part of the conversation that sentence means.
+
+| The step | Give it | Because |
+|---|---|---|
+| reads a value back, takes a payment, writes down a decision already made | `reset` | its instructions and its declared values are the whole story |
+| has to know what the caller asked for | `messages` | both sides of the conversation, without the tool records nobody re-reads |
+| only the recent turns matter, on a call that runs long | `last_n` with `max_messages` | the newest entries, and never a tool result whose call was cut |
+| has to interpret anything, including its own earlier work | `full` | the running transcript, tool records included |
+| a long call handed to a new specialist | `summary` | one summarizer turn in place of the transcript |
+
+`messages` is the one to reach for first. Tool records are the bulk of a long
+context and almost nothing reads them back: an availability list, a row of
+bookings, a chunk of a document. The step that needs one calls the tool itself.
+
+## Trimming makes a value into a declaration
+
+This is the part that catches people. Once a step cannot see the conversation, a
+value its prompt names has to come from somewhere, and "the model will have read
+it earlier" stops being true.
+
+So one step assigns the value and the next step declares it:
+
+```yaml agent.yaml
+      - name: verify_customer
+        when: Confirm who the caller is before any specialist work.
+        instructions: tasks/verify-customer.md
+        assign:
+          - customer_phone: result.customer_phone
+          - customer_status: result.status
+        result:
+          customer_phone: string
+          status:
+            enum:
+              - existing
+              - created
+              - invalid
+          summary: string
+        context:
+          history: reset
+
+      - name: manage_booking
+        when: The caller wants to create, modify, or cancel a booking.
+        instructions: tasks/booking.md
+        requires:
+          - customer_phone
+          - customer_status
+        result:
+          action:
+            enum:
+              - create
+              - modify
+              - cancel
+              - none
+          summary: string
+        context:
+          history: messages
+```
+
+`assign:` writes one field of a step's own result into a declared variable.
+`requires:` on the next step then does three things at once, and they are worth
+separating:
+
+1. It holds the step back until the value exists, and tells the model which step
+   supplies it. The caller never hears the guard.
+2. It makes the value legal to read in that step's prompt. Without the entry,
+   `{{customer_status}}` in `tasks/booking.md` is refused at compile time.
+3. It is the list a reader can check the prompt against.
+
+The refusal names both steps and what to do:
+
+```text wrap
+tasks/booking.md: task "manage_booking" instructions references {{customer_status}}, which only task "verify_customer" assigns. Add customer_status to this task's requires: list, so the step waits for the value and its prompt can read it
+```
+
+<Warning>
+A variable with a `default:` is not waited for. A default is a value the
+variable holds before the first word, so a defaulted variable satisfies the
+guard on an empty string and the step starts on nothing. Give a value that must
+be produced during the call no default, and the guard becomes real.
+</Warning>
+
+## Two things a step loses with `reset`
+
+Both are worth knowing before you choose it, because no compiler error catches
+either.
+
+**It does not receive the caller's triggering utterance.** It opens without
+knowing what was just asked. For a step that reads a number back that costs
+nothing, which is the test for choosing `reset` at all.
+
+**It cannot tell that it already ran.** A prompt saying "if verification already
+succeeded, reuse it" only worked because the step could see the history. Move
+that judgment to the agent that runs the step: a finished task's call and its
+result stay in the owner's own context, so the owner is the one that can
+actually make it. This is a better place for it anyway. The step decides how to
+do its job; the agent decides whether the job needs doing.
+
+## A handoff is not a task
+
+They take the same `context.history` values and they are not the same decision.
+
+A task's context is restored when the task returns, so a short window inside one
+costs nothing beyond that step. A handoff replaces what the receiving agent has
+for the rest of the call. Two truncations on top of each other is how an agent
+forgets a booking it made twenty turns ago, and no error is raised when it does.
+
+So on a handoff, prefer `messages`: it drops the tool records, which is most of
+the saving, and keeps the whole spoken thread. Reach for `last_n` on a handoff
+only when you have decided the earlier turns are genuinely finished business.
+
+## What a package on both code targets cannot use
+
+Two of these values, and one companion field, compile on livekit only. A package
+that has to run on livekit and pipecat has three fewer options.
+
+| Field | livekit | pipecat |
+|---|---|---|
+| `history: full`, `messages`, `last_n`, `reset` | shapes | shapes |
+| `history: summary` | shapes | refused |
+| `include_tool_calls: false` | shapes | refused |
+| a `variables:` list on a handoff, rather than `all` | shapes | refused |
+
+None of them fails quietly. Each is a validation error naming the field, and the
+`summary` one lists the four values pipecat does shape. The practical
+consequence is that a two-target package narrows on the task side, through
+`requires:`, which works on both, and writes `variables: all` on its handoffs.
+
+## Two things this is not
+
+**It is not a privacy control.** Shortening a step's history does not unsay what
+the caller said out loud. A phone number read back aloud is in the transcript
+whether a variable holds it or not. `reset` plus a short `requires:` list gives a
+step a smaller request, not a redacted one.
+
+**It is not a reason to seed a value locally.** A variable that gets its value
+from a step declares no `source:`, and a variable with no `source:` can be filled
+from the dispatch payload, so the generated runbook lists it under input
+variables with a `--var` line. That line works. Using it hands the guarded step
+its value before anything produced it, which is the opposite of what the
+`requires:` list is for. Seed the fact a real call carries instead:
+
+```sh
+unmute dev ./my-agent --source from_number=<a number in E.164>
+```
+
+## Where to look next
+
+[Tasks](/build/orchestration/tasks) is the reference for `context.history` and
+`requires:`, [Variables](/reference/variables) for `assign:`, `confirm:` and
+every `source:`, and [Handoffs](/build/orchestration/handoffs) for what crosses
+an agent change.
