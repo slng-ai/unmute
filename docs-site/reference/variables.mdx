@@ -218,8 +218,10 @@ unmute dev ./agent --var customer_name=Ada --var customer_id=cus_2002
 
 Repeatable. Each value is parsed against the declared type, so an `integer`
 variable receives a number and not a quoted string. `--var` is the local stand
-in for the dispatch payload production sends, so it accepts `call_start`
-variables only:
+in for the dispatch payload production sends, so it accepts the two kinds of
+variable that payload fills: `source: call_start`, and a variable that declares
+no `source:` at all. It refuses a runtime owned source and a `conversation`
+source, because neither one arrives with the dispatch:
 
 ```text wrap
 unmute: dev my-agent: --var requested_service=haircut: "requested_service" has source conversation, so the model saves it mid-call through update_variables, not you

@@ -27,6 +27,7 @@ variables:
 | Source | Who supplies it | Availability |
 |---|---|---|
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
+| omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so a prompt reads it only through `requires:` or a `default:` |
 | `conversation` | the model, through `update_variables` | during the call |
 | `session_id`, `call_id`, `direction`, `from_number`, `to_number`, `carrier`, `connection` | the phone adapter | LiveKit `sip` or `connector` only |
 | `stream_id` | the phone adapter | LiveKit `connector` only, not `sip` |
@@ -259,9 +260,11 @@ which you chose.
 unmute dev ./my-agent --var customer_name=Ada --var customer_id=cus_2002
 ```
 
-Repeatable, and each value is parsed against the declared type. `--var` accepts
-`call_start` variables only, because it is the local stand-in for the dispatch
-payload:
+Repeatable, and each value is parsed against the declared type. `--var` is the
+local stand-in for the dispatch payload, so it accepts the two kinds of variable
+that payload fills: `source: call_start`, and a variable that declares no
+`source:` at all. It refuses a runtime-owned source and a `conversation`
+source, because neither arrives that way:
 
 ```
 unmute: dev my-agent: --var requested_service=haircut: "requested_service"

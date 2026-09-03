@@ -77,8 +77,9 @@ unmute dev my-agent \
 Leave the flags out and the declared defaults are used, so the agent always has
 something to say.
 
-`--var` only seeds `call_start` variables, and it refuses anything else instead
-of accepting it and dropping it:
+`--var` seeds the variables the dispatch payload fills: `source: call_start`,
+and a variable that declares no `source:` at all. It refuses anything else
+instead of accepting it and dropping it:
 
 ```text wrap
 unmute: dev my-agent: --var requested_service=haircut: "requested_service" has source conversation, so the model saves it mid-call through update_variables, not you

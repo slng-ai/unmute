@@ -328,7 +328,7 @@ func TestSecretsCrossCheckNeverAsksForDriverSuppliedNames(t *testing.T) {
 // SC-008, asserted directly. The underlying check only warns, and a warning is
 // easy to stop reading, so the shipped examples are held to zero.
 func TestTelephonyExamplesDeclareEveryNameTheyWrite(t *testing.T) {
-	for _, example := range []string{"salon-concierge"} {
+	for _, example := range []string{"salon-concierge", "salon-concierge-v2"} {
 		t.Run(example, func(t *testing.T) {
 			pkg, err := packagespec.Load(filepath.Join("..", "..", "examples", example))
 			if err != nil {

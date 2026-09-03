@@ -693,6 +693,87 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 // agent that holds only controls is a routing table the caller has to be spoken
 // through, and this package shipped two of them for months, purely because the
 // compiler could not put a prerequisite on a step.
+// salon-concierge-v2 exists to be the scoped reading of the same salon, and an
+// example whose authored shape nobody holds is an example that quietly becomes a
+// second copy of the package it was meant to be read against. So this pins the
+// four choices that are the whole point of it, and the two that keep it from
+// landing on the other salon's deployment.
+//
+// It deliberately does not pin the prompts, the tools, the models or the routes.
+// Those are meant to stay identical to salon-concierge: the comparison only says
+// anything if the context wiring is the only difference.
+func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
+	resolved := loadExample(t, "salon-concierge-v2")
+
+	// The step that only reads a number back runs on nothing. This is the value
+	// the package is for, and the one with a floor: a `reset` step never receives
+	// the caller's triggering utterance, so moving another step onto it is a
+	// decision to make on purpose rather than by copying this line.
+	if got := resolved.Tasks["verify_customer"].Context.History; got != ir.HistoryReset {
+		t.Errorf("verify_customer runs on history %q; this package's point is that a step reading a number back needs no conversation, so it is %q", got, ir.HistoryReset)
+	}
+
+	// Everywhere else: the spoken turns, without the tool records. Both handoffs
+	// included, because a handoff is where a trimmed context is permanent.
+	for name, got := range map[string]ir.History{
+		"manage_booking": resolved.Tasks["manage_booking"].Context.History,
+		"to_complaints":  resolved.Controls["to_complaints"].(*ir.AgentTransfer).Context.History,
+		"to_concierge":   resolved.Controls["to_concierge"].(*ir.AgentTransfer).Context.History,
+	} {
+		if got != ir.HistoryMessages {
+			t.Errorf("%s carries history %q, want %q: a tool record crossing this seam is what the package removes", name, got, ir.HistoryMessages)
+		}
+	}
+
+	// Both handoffs carry every variable. Not a preference: a `variables:` subset
+	// is refused on pipecat (FieldContextVariableSubset), and this package has to
+	// compile on both targets, so the narrowing happens on the task side through
+	// `requires:`, which works on both.
+	for _, name := range []string{"to_complaints", "to_concierge"} {
+		if !resolved.Controls[name].(*ir.AgentTransfer).Context.Variables.All {
+			t.Errorf("handoff %q narrows context.variables, which the pipecat driver refuses; narrow with requires: on the receiving step instead", name)
+		}
+	}
+
+	// The booking step declares the value its prompt reads. ir.Build refuses the
+	// prompt without this, so the assertion is not what keeps the package
+	// compiling; it is what stops the pair being "simplified" by deleting the
+	// declaration and the read together, which compiles and demonstrates nothing.
+	booking, ok := resolved.Controls["manage_booking"].(*ir.Delegate)
+	if !ok {
+		t.Fatalf("manage_booking = %#v, want a delegate", resolved.Controls["manage_booking"])
+	}
+	if !slices.Contains(booking.Requires, "customer_status") {
+		t.Errorf("manage_booking requires %v; tasks/booking.md reads {{customer_status}}, and the requires: entry is what makes that legal and what holds the step back until the value exists", booking.Requires)
+	}
+	verify, ok := resolved.Controls["verify_customer"].(*ir.Delegate)
+	if !ok {
+		t.Fatalf("verify_customer = %#v, want a delegate", resolved.Controls["verify_customer"])
+	}
+	if verify.Assign["customer_status"] != "result.status" {
+		t.Errorf("verify_customer assigns customer_status from %q, want result.status: nothing else in the package supplies it", verify.Assign["customer_status"])
+	}
+
+	// No default, and this is the load-bearing one. A default is a value the
+	// variable holds before the first word, so a defaulted customer_status
+	// satisfies the booking guard on an empty string and the step starts on a
+	// caller nobody looked up.
+	if def := resolved.Variables["customer_status"].Default; def != nil {
+		t.Errorf("customer_status declares default %#v; the booking guard would then be satisfied before verification ran", def)
+	}
+
+	// Its own deployment and its own router scope. Sharing either with
+	// salon-concierge means one deploy landing on the other, or one package being
+	// served the other's prompt.
+	other := loadExample(t, "salon-concierge")
+	if resolved.Name == other.Name {
+		t.Errorf("both salon packages state name %q, so their deploys land on top of each other", resolved.Name)
+	}
+	if resolved.Models["reasoning"].AgentID == other.Models["reasoning"].AgentID {
+		t.Errorf("both salon packages state agent_id %q, and the router key carries neither the system prompt nor the substituted values, so one is served the other's prompt", resolved.Models["reasoning"].AgentID)
+	}
+}
+
 func TestSalonConciergeHasNoRoutingOnlyAgent(t *testing.T) {
 	resolved := loadExample(t, "salon-concierge")
 
@@ -944,7 +1025,7 @@ func TestPublicExamplePackages(t *testing.T) {
 	// 2026-08-28, and a reader who wants a package to run scaffolds one with
 	// `unmute init`. simple-prompt lives on as internal/testdata/simple-prompt,
 	// because it is the minimal single-agent shape a dozen tests compile.
-	want := []string{"salon-concierge", "salon-concierge-single-prompt", "slng-support"}
+	want := []string{"salon-concierge", "salon-concierge-single-prompt", "salon-concierge-v2", "slng-support"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}

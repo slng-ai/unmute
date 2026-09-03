@@ -233,15 +233,19 @@ time by adding `.md` to its URL. See
 
 ## Examples
 
-[`examples/`](examples/) holds three packages.
+[`examples/`](examples/) holds four packages.
 
 - [`salon-concierge`](examples/salon-concierge/) is the one to read: two agents,
   two tasks, one of them shared by both agents from a single definition, handoffs,
   a guarded task, a cold manager transfer, tracing, and inbound phone on both code
   targets. Every tool is local Python, so nothing remote has to be up before the
   greeting.
+- [`salon-concierge-v2`](examples/salon-concierge-v2/) is that salon with each
+  step scoped: `context.history` chosen per step instead of `full` everywhere,
+  and one more value carried as a declared variable rather than read off the
+  transcript.
 - [`salon-concierge-single-prompt`](examples/salon-concierge-single-prompt/) is
-  the same salon with the structural features taken back out, so the one above
+  the same salon with the structural features taken back out, so the ones above
   can be read against something.
 - [`slng-support`](examples/slng-support/) is the hosted target in its smallest
   form. It produces no runnable project: `unmute deploy` compiles a deployment

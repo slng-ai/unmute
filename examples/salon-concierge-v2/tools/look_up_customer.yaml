@@ -1,0 +1,30 @@
+description: >-
+  Look up a customer by phone number. Reads only: it never creates a record and
+  never touches one. Returns an empty name when the number is not on file.
+
+read_only: true
+
+input:
+  type: object
+  properties:
+    phone:
+      type: string
+      description: The caller's phone number, in any shape
+  required:
+    - phone
+
+output:
+  type: object
+  properties:
+    name:
+      type: string
+      description: The name on the record, or empty when the number is not on file
+    status:
+      type: string
+      description: existing or unknown
+
+local:
+  handler: tools/salon.py
+
+interruption: provider_default
+effect: returns_data

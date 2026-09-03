@@ -75,6 +75,60 @@ func TestCallFactsPayload(t *testing.T) {
 	}
 }
 
+// --var seeds the dispatch payload, and the set it accepts is the set the two
+// drivers hydrate from it: `source: call_start`, and a variable declaring no
+// source at all. Both emitted runbooks print a `--var <name>=...` line for
+// every one of them, so a name the runbook prints and the flag refuses is a
+// runbook teaching a command that does not work. The refusal for a sourceless
+// variable also named `update_variables`, which is generated over
+// `source: conversation` only, so it described a mechanism that could not have
+// written the value either.
+func TestCallStartPayload(t *testing.T) {
+	agent := &ir.Agent{Variables: map[string]ir.Variable{
+		"dispatched":     {Type: ir.PrimitiveString, Source: ir.VariableSourceCallStart},
+		"sourceless":     {Type: ir.PrimitiveString},
+		"mid_call":       {Type: ir.PrimitiveString, Source: ir.VariableSourceConversation},
+		"from_the_route": {Type: ir.PrimitiveString, Source: ir.VariableSourceFromNumber},
+	}}
+
+	for _, name := range []string{"dispatched", "sourceless"} {
+		got, err := callStartPayload(agent, []string{name + "=Ada"})
+		if err != nil {
+			t.Errorf("--var %s: %v; both drivers hydrate this variable off the dispatch payload and both runbooks print the flag for it", name, err)
+			continue
+		}
+		if got != `{"`+name+`":"Ada"}` {
+			t.Errorf("--var %s payload = %s", name, got)
+		}
+	}
+
+	for _, tc := range []struct {
+		name string
+		flag string
+		want string
+	}{
+		{"not name=value", "dispatched", "must be name=value"},
+		{"undeclared", "nobody=Ada", "no variable"},
+		{"the model's own", "mid_call=Ada", ir.CaptureToolName},
+		{"the route's own", "from_the_route=Ada", "the runtime supplies it"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := callStartPayload(agent, []string{tc.flag})
+			if err == nil {
+				t.Fatalf("--var %s was accepted", tc.flag)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("the refusal does not say %q: %v", tc.want, err)
+			}
+			// A refusal that reaches this point has a source to name, so it can
+			// never render the empty one the sourceless branch used to print.
+			if strings.Contains(err.Error(), "has source ,") {
+				t.Errorf("the refusal names an empty source: %v", err)
+			}
+		})
+	}
+}
+
 // Every fact --source accepts is one the compiler agrees is a call fact. Two
 // lists of the same eight names is two lists that drift.
 func TestCallFactNamesMatchTheCompiler(t *testing.T) {
