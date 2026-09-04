@@ -73,7 +73,10 @@ or cancelled.
   conversation info already shows, action and all. Leave it out for anything
   else, including an older visit this call never recorded.
 - `resolution`: what has been offered or done on this call. `noted` is for when
-  nothing more specific was offered, not for when recording failed.
+  nothing more specific was offered, not for when recording failed. The other
+  three are offers, so record the offer you actually made: `rebooking_offered`
+  when you said a redo can be arranged, never when you told the caller a
+  booking they already hold is now that redo. Nothing here approves anything.
 
 **The reason they rang.** `complain`, always.
 

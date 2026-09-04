@@ -207,7 +207,12 @@ shapes:
           complaint about the salon in general has none.
       - name: resolution
         type: Literal["refund_offered", "rebooking_offered", "escalated", "noted"]
-        description: What was offered or done about it on this call.
+        description: >-
+          What was offered or done about it on this call. Three of these are
+          offers and not outcomes: a refund offered is not a refund approved, a
+          rebooking offered is not a rebooking confirmed, and escalated means
+          somebody will look, not that they agreed. Only what a tool did is
+          done. Say this value out loud in the tense it is written in.
 
 variables:
   booking_date:
