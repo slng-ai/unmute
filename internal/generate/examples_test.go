@@ -1727,6 +1727,16 @@ func authoredPackageFiles(t *testing.T) map[string]string {
 // list of exceptions.
 var placeholders = regexp.MustCompile(`\{\{[^}]*\}\}|\[\[[^\]]*\]\]`)
 
+// typeExpressions strips the other thing that looks like flow style and is not:
+// a declared type.
+//
+// `type: list[Literal["haircut", "dry_cut"]]` is one scalar written in
+// Pydantic's own vocabulary, and its brackets are the type's, not YAML's. A
+// reader copying it gets something that compiles, which is the whole point of
+// the block-style rule. Matched by the key so the strip is narrow: a `[` on any
+// other line is still flow style and still fails.
+var typeExpressions = regexp.MustCompile(`(?m)^\s*(-\s+)?[a-z_]+: (list|Literal)\[.*$`)
+
 // TestAuthoredPackagesAreBlockStyle (FR-028, FR-031). Every shipped package and
 // the scaffold template are written in block style, because block style is what
 // makes the four lists readable at a glance, and a reader copies what they see.
@@ -1737,7 +1747,8 @@ var placeholders = regexp.MustCompile(`\{\{[^}]*\}\}|\[\[[^\]]*\]\]`)
 // declares what an agent can do.
 func TestAuthoredPackagesAreBlockStyle(t *testing.T) {
 	for path, source := range authoredPackageFiles(t) {
-		for i, line := range strings.Split(placeholders.ReplaceAllString(source, ""), "\n") {
+		stripped := typeExpressions.ReplaceAllString(placeholders.ReplaceAllString(source, ""), "")
+		for i, line := range strings.Split(stripped, "\n") {
 			if strings.Contains(line, "#") {
 				line = line[:strings.Index(line, "#")]
 			}

@@ -80,9 +80,20 @@ agents:
 
 models:
   think:
+    # Through the SLNG Context Router, because that is the path the declared
+    # state travels on a real call: the block's placeholders are substituted by
+    # the router from a snapshot it is given per request, and whether that
+    # snapshot is fresh is the one thing the two targets used to differ on.
     reasoning:
-      provider: openai
-      model: gpt-4o-mini
+      provider: slng
+      model: openai/gpt-4o-mini
+      agent_id: typed-state-v1
+      upstream:
+        provider: openai
+        key_env: OPENAI_API_KEY
+      params:
+        world_part_override: eu
+        reasoning_effort: "none"
   speak:
     voice:
       provider: slng

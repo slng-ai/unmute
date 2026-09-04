@@ -93,7 +93,7 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 	allVariables := sortedKeys(agent.Variables)
 	for _, name := range sortedKeys(pkg.Agent.Agents) {
 		raw := pkg.Agent.Agents[name]
-		site := fmt.Sprintf("agent %q instructions", name)
+		site := AgentPromptSite(name)
 		var lateBound []string
 		if routerPrompt(pkg, agent, name) {
 			lateBound = allVariables
@@ -123,7 +123,7 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 	suppliers := assigners(agent)
 	for _, name := range sortedKeys(pkg.Tasks) {
 		raw := pkg.Tasks[name]
-		site := fmt.Sprintf("task %q instructions", name)
+		site := TaskPromptSite(name)
 		if err := checkTaskPromptReads(pkg, agent, raw, name, site, suppliers); err != nil {
 			return err
 		}
@@ -292,7 +292,7 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 		// refusal helper, which treats an unconfirmed name as unset wherever the
 		// tool is attached. Refusing it here instead would have made the value
 		// unusable by any tool, which is most of what a confirmed number is for.
-		if step := variable.Confirm; sessionStart && step != "" && site != fmt.Sprintf("task %q instructions", step) {
+		if step := variable.Confirm; sessionStart && step != "" && site != confirmingSite(step) {
 			return fmt.Errorf("%s: %s references {{%s}}, which the caller has not confirmed yet. It renders only in "+
 				"task %q, the step that confirms it. Read it back there, and name it here only after that step has "+
 				"assigned it", where, site, ref, step)

@@ -3,6 +3,7 @@ package generate
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/slng-ai/unmute/internal/ir"
@@ -18,15 +19,6 @@ import (
 // Everything here is rendered once and inserted into both modules verbatim, so
 // "the same on both targets" (FR-006) is a property of this file rather than of
 // two templates kept in step by hand.
-
-// StateEmpty is what a declared value with no contents renders as, everywhere
-// it renders: in the composed state block, in an authored prompt, and in the
-// snapshot the router is given.
-//
-// Words rather than `[]` or `null`, because a step reading an empty structure
-// cannot tell "not yet known" from "known to be nothing", and the second is a
-// decision the caller never made (FR-005a).
-const StateEmpty = "none recorded yet"
 
 // shapedPattern is the check each text type carries, and the sentence a refusal
 // prints. The pattern lives in an AfterValidator in the emitted code and never
@@ -244,7 +236,11 @@ _STATE_STRUCTURED = {`)
 		b.WriteString(pyQuote(name))
 	}
 	b.WriteString(`}
-_STATE_EMPTY = ` + pyQuote(StateEmpty+".") + `
+_STATE_EMPTY = ` + pyQuote(ir.StateEmptyText()) + `
+# The bound on one rendered value, in characters. The same number the router
+# bounds a template variable by, because this is the same value travelling the
+# same way, and one number cannot be two.
+_STATE_VALUE_MAX = ` + strconv.Itoa(slngVariableLimit) + `
 
 
 def _state_text(name, value):
@@ -262,8 +258,21 @@ def _state_text(name, value):
         if value is None or value == "" or value == [] or value == {}:
             return _STATE_EMPTY
         if not isinstance(value, str):
-            return json.dumps(_plain(value), separators=(",", ":"), ensure_ascii=False)
-    return "" if value is None else str(value)
+            value = json.dumps(_plain(value), separators=(",", ":"), ensure_ascii=False)
+    text = "" if value is None else str(value)
+    if len(text) > _STATE_VALUE_MAX:
+        # The length is only knowable here, at run time, so this cannot be a
+        # compile-time refusal. What it must not be is silent: a shortened value
+        # is a value the model reads as complete. An f-string rather than a
+        # placeholder, because this line is emitted into two modules that log
+        # through two different libraries and either style prints literally on
+        # the other one.
+        logger.warning(
+            f"declared state: {name} rendered {len(text)} characters and is shortened to "
+            f"{_STATE_VALUE_MAX}; a value this long also stops the prompt being cached"
+        )
+        text = text[:_STATE_VALUE_MAX]
+    return text
 `)
 	block.Source = b.String()
 	return block, nil

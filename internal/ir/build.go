@@ -206,6 +206,11 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 			return nil, missing(pkg, "agent.yaml", "instructions", raw.Instructions)
 		}
 		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg, raw.Think))
+		// The composed state block, after the authored suffix, because the suffix
+		// is a directive about how to answer and this is the record it answers
+		// from. Composed per site: an unconfirmed value belongs in one prompt
+		// only, and no agent prompt is that prompt.
+		instructions = appendPromptSuffix(instructions, out.StateBlock(AgentPromptSite(name)))
 		out.Agents[name] = AgentDef{
 			Instructions: instructions, Model: raw.Think, Voice: raw.Speak,
 			Tools: attached(raw.Tools, callables(raw, pkg), raw.Handoffs, raw.Escalations),
@@ -241,6 +246,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		// names it, so the profile cannot come from where it happens to be written.
 		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg,
 			cmp.Or(raw.Think, pkg.Agent.Agents[pkg.Agent.EntryAgent].Think)))
+		instructions = appendPromptSuffix(instructions, out.StateBlock(TaskPromptSite(name)))
 		result, err := buildResult(raw.Result, declared)
 		if err != nil {
 			return nil, fmt.Errorf("%s: task %q: %w", pkg.Location("agent.yaml", name), name, err)

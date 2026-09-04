@@ -655,7 +655,15 @@ def _slng_template_variables(state, names) -> dict:
     values = {}
     for name in names:
         value = getattr(state, name, None) if state is not None else None
+{{- if .TypedState}}
+        # The bound is measured on the JSON rendering, not on the repr of the
+        # object: they are different lengths, and the one the router receives is
+        # the one that has to fit. _state_text carries its own bound and its own
+        # warning, so a declared value is already shortened by here.
+        text = _state_text(name, value)
+{{- else}}
         text = "" if value is None else str(value)
+{{- end}}
         if len(text) > _SLNG_VARIABLE_LIMIT:
             logger.warning(
                 "template variable %s is %d characters; truncating to %d for the router",
@@ -697,7 +705,14 @@ def _render(text: str, userdata, *, quote_values: bool = False) -> str:
 
     def _one(match: re.Match[str]) -> str:
         value = getattr(userdata, match.group(1), None)
+{{- if .TypedState}}
+        # Through _state_text, so a declared value renders as compact JSON and
+        # an empty one as words. Anything not declared structured comes back
+        # exactly as str() gave it.
+        value = _state_text(match.group(1), value)
+{{- else}}
         value = "" if value is None else str(value)
+{{- end}}
         return quote(value, safe="") if quote_values else value
 
     return _TEMPLATE.sub(_one, text)
