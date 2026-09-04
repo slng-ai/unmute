@@ -206,6 +206,45 @@ def print_tools(spans: list[dict]) -> None:
             print(f"  {(start or '')[11:19]}  result  {output[:160]}")
 
 
+def print_usage(spans: list[dict]) -> None:
+    """Per-span usage, which is where a context change shows up.
+
+    This is the number to read a `context.history` or a `requires:` change
+    against: trimming a step's context moves its input tokens and nothing
+    else. Langfuse reports what the provider reported, so on the SLNG router
+    `output` comes back 0 rather than absent, and a total that equals the
+    input is that, not a request with no reply. TTS reports characters instead
+    of tokens, so its row says so and is never added to a token figure.
+    """
+    buckets: dict[str, dict] = defaultdict(
+        lambda: {"n": 0, "input": 0, "output": 0, "total": 0, "max": 0, "unit": "tokens"}
+    )
+    for span in spans:
+        details = span.get("usageDetails") or {}
+        if span.get("type") != "GENERATION" or not details:
+            continue
+        row = buckets[span.get("name") or "?"]
+        total = int(details.get("total") or 0)
+        row["n"] += 1
+        row["input"] += int(details.get("input") or 0)
+        row["output"] += int(details.get("output") or 0)
+        row["total"] += total
+        row["max"] = max(row["max"], total)
+        if "characters" in details:
+            row["unit"] = "characters"
+
+    print("\n=== usage ===")
+    if not buckets:
+        print("  (no span reported any usage)")
+        return
+    print(f"  {'span':<8} {'n':>3} {'input':>8} {'output':>7} {'total':>8} {'mean':>7} {'max':>7}  unit")
+    for name, row in sorted(buckets.items(), key=lambda kv: -kv[1]["total"]):
+        print(
+            f"  {name:<8} {row['n']:>3} {row['input']:>8} {row['output']:>7} "
+            f"{row['total']:>8} {row['total'] // row['n']:>7} {row['max']:>7}  {row['unit']}"
+        )
+
+
 def print_latency(spans: list[dict]) -> None:
     """Per-span-name latency, worst first.
 
@@ -307,6 +346,7 @@ def main() -> int:
     print_transcript(spans)
     print_tools(spans)
     print_latency(spans)
+    print_usage(spans)
     return 0
 
 
