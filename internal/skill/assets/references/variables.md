@@ -263,7 +263,7 @@ difference is the thing people get wrong.
 | Site | Renders | Can name |
 |---|---|---|
 | `conversation.greeting.text` | once, at session start | a variable that already has a value, and never one awaiting confirmation |
-| an agent's instructions | once, at session start | a variable that already has a value, and never one awaiting confirmation |
+| an agent's instructions | on entry, and again once one of its own steps records a value | a variable that already has a value, or one a step it owns records, and never one awaiting confirmation |
 | a task's instructions | when that task starts | a variable that already has a value, or one listed in this task's own `requires:`; a value awaiting confirmation only in the step that confirms it |
 | a tool's `inject:` value | on every tool call | any declared variable; one awaiting confirmation makes the call refuse itself until it is settled |
 | a webhook tool's `path` | on every tool call | any declared variable, URL encoded |

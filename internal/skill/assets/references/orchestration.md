@@ -652,8 +652,9 @@ Two things the table does not cover, because they trip people up:
   lists is refused too, with its own message. An unreferenced `models:` entry
   is the one exception: that map is a palette and unused entries are legal.
 - **A second agent's instructions cannot read a `conversation` variable.** An
-  instructions file renders once, at session start, so it can only name a value
-  that already exists. With `history: full` the new agent can see what was said,
+  instructions file renders on entry and again after one of its own steps
+  records a value, and a `conversation` variable is written by neither, so it
+  can only name a value that already exists. With `history: full` the new agent can see what was said,
   but writing `{{customer_name}}` into its prompt for a value the first agent
   collected mid-call is refused. Rely on the history and say so in prose.
   That holds for `history: full` and `history: messages`. It does not hold for

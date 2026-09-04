@@ -1089,10 +1089,21 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- end}}
         )
 
-    async def on_enter(self) -> None:
+{{if .RefreshPrompt}}    async def _refresh_prompt(self) -> None:
+        """Render this agent's prompt again, after a step wrote declared state.
+
+        on_enter runs once per entry and this agent is entered once per call, so
+        without this the conversation state block keeps whatever it held before
+        the first step finished. Its own steps looked right the whole time,
+        because a step is entered per visit and renders on the way in.
+        """
+        await self.update_instructions({{.PromptExpr}})
+
+{{end}}    async def on_enter(self) -> None:
 {{- if .PromptExpr}}
-        # The prompt names call variables, so it is rendered once the session
-        # state exists (C11: rendered at session start, never re-rendered).
+        # Rendered on the way in, and again by _refresh_prompt whenever a step
+        # writes declared state: a call variable never changes, a declared value
+        # does, and both reach this prompt through the same placeholders.
         await self.update_instructions({{.PromptExpr}})
 {{- end}}
 {{- if and .IsEntry (not $.SingleAgentMinimal)}}
@@ -1402,6 +1413,11 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
         # finish handler, which is a call that dies mid-step.
         getattr(ctx.userdata, "_unconfirmed", set()).discard({{pyq .Var}})
 {{- end}}
+{{- end}}
+{{- if .RefreshOwnerPrompt}}
+        # The values above are in this agent's own prompt, which was rendered on
+        # entry and would otherwise still read as it did before this step ran.
+        await self._refresh_prompt()
 {{- end}}
         # C4/N13: the task's turns are not propagated back; the typed result is
         # the only return.

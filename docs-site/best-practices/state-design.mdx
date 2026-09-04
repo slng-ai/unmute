@@ -150,6 +150,28 @@ Read the conversation info below. Once it names a booking, that booking is
 already saved and you never make it again.
 ```
 
+## A value reaches the prompt when a step records it
+
+Declared state is not pushed to the model the moment it changes. It reaches a
+prompt when that prompt is rendered, and the two render at different times:
+
+- A **step's** prompt renders on the way in, every visit, so a step always sees
+  the current values.
+- An **agent's** prompt renders when the agent is entered, and again once one of
+  its own steps records a value.
+
+The case that is still not covered is a value the model saves mid-turn by
+itself, through a `conversation` source. No step recorded it, so nothing
+re-renders, and the agent's own prompt will not name it until something else
+does. Rely on the conversation for those, and say so in prose.
+
+<Note>
+A prompt bound to a SLNG Context Router think profile is different again: it
+ships with its placeholders intact and the router substitutes them per request,
+so it is never stale. Moving a package off the router moves it onto local
+rendering, which is worth knowing when behaviour changes after a model swap.
+</Note>
+
 ## Where the mechanics live
 
 <CardGroup cols={2}>

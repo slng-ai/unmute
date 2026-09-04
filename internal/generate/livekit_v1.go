@@ -52,10 +52,22 @@ func (l livekitChain) services() []livekitService {
 }
 
 type livekitAgent struct {
-	Name           string
-	Class          string
-	PromptConst    string
-	PromptExpr     string // render call when the prompt is templated, else ""
+	Name        string
+	Class       string
+	PromptConst string
+	PromptExpr  string // render call when the prompt is templated, else ""
+	// RefreshPrompt emits _refresh_prompt() on this class, which one of its own
+	// steps calls after writing declared state.
+	//
+	// C11 ("rendered at session start, never re-rendered") was written when a
+	// prompt could only name a call variable, and a call variable does not
+	// change. Declared session state does, and an agent is entered once per
+	// call, so on_enter alone froze the block at "none recorded yet" for the
+	// whole call while its own steps saw the real values: a step is entered per
+	// visit and renders fresh. Pipecat never inherited the assumption, because
+	// it rebuilds a node's prompt per request, so this is also what keeps the
+	// two targets refreshing at the same rate.
+	RefreshPrompt  bool
 	IsEntry        bool
 	LLM            *livekitChain   // set only when it differs from the session default
 	TTS            *livekitService // set only when it differs from the session default
@@ -193,6 +205,10 @@ type livekitDelegate struct {
 	// Announce is one sentence spoken as the step is entered, rendered after the
 	// guard so a refused step stays silent.
 	Announce string
+	// RefreshOwnerPrompt re-renders the owning agent's prompt after this step's
+	// `assign:` writes, because the owner's prompt is rendered in on_enter and
+	// the owner is entered once per call. See livekitAgent.RefreshPrompt.
+	RefreshOwnerPrompt bool
 }
 
 // livekitSingleTask is the task side of a single-task delegate: the AgentTask

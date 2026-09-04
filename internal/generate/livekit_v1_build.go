@@ -928,6 +928,20 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 			built.Delegates = append(built.Delegates, delegate)
 		}
 	}
+	// A step that writes declared state has to leave the owner's prompt holding
+	// the value it just wrote. Wired here rather than in buildLiveKitDelegate
+	// because only the owner knows whether its own prompt is templated, and a
+	// package whose steps assign nothing emits exactly what it did before.
+	if built.PromptExpr != "" {
+		for i := range built.Delegates {
+			task := built.Delegates[i].Task
+			if task == nil || len(task.Assign) == 0 {
+				continue
+			}
+			built.Delegates[i].RefreshOwnerPrompt = true
+			built.RefreshPrompt = true
+		}
+	}
 	return built, nil
 }
 

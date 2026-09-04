@@ -214,8 +214,10 @@ agent's name, and opening hours that never change go inline as text. Every
 template is a chance for a misconfigured deployment to say "customer_name" out
 loud.
 
-A prompt renders once at session start, so it can only name a variable that
-already has a value. See `variables.md`.
+An agent's prompt renders on entry and again once one of its own steps records
+a value, so it can name a variable that already has a value or one a step it
+owns writes. It cannot name a value the model saves mid-turn on its own. See
+`variables.md`.
 
 ## Making it sound human
 
