@@ -289,18 +289,26 @@ func (a Agent) PromptPath() string {
 }
 
 type Handoff struct {
-	Name             string
-	Source           string
-	To               string
-	When             string
-	Announce         string
-	Requires         []string
+	Name     string
+	Source   string
+	To       string
+	When     string
+	Announce string
+	Requires []string
+	// Input is the brief the receiving agent is handed; carried for the reason
+	// Task.Input is.
+	Input            []ShapeField
 	History          string
 	MaxMessages      int
 	Summarizer       string
 	IncludeToolCalls *bool
-	AllVariables     bool
-	Variables        []string
+	// VariablesAuthored says the package wrote a `variables:` line at all. Left
+	// out means all, and the console has to write back what it read: writing
+	// `variables: all` into a package that left it out would undo the author's
+	// choice on every maintain, quietly and at exit 0.
+	VariablesAuthored bool
+	AllVariables      bool
+	Variables         []string
 }
 
 type Task struct {
@@ -310,8 +318,13 @@ type Task struct {
 	// Handoffs is the one other kind a task may attach. It has no Delegates and
 	// no Escalations for the same reason spec.Task does not: the illegal thing
 	// has nowhere to be written.
-	Handoffs         []string
-	Model            string
+	Handoffs []string
+	Model    string
+	// Input is what the step is handed, one typed field each, written back the
+	// way a shape's fields are. Carried because the console rewrites agent.yaml
+	// from this struct, and a field it does not carry is a field `unmute
+	// maintain` deletes at exit 0.
+	Input            []ShapeField
 	Result           string // flat typed result as a JSON object
 	History          string
 	MaxMessages      int

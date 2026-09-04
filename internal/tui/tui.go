@@ -1766,6 +1766,9 @@ func editHandoffContextDetails(runner *fieldRunner, data *scaffold.Data, handoff
 			}
 			if !back {
 				handoff.AllVariables = selected == "all"
+				// A list has to be written; all is what an omitted line means, so
+				// choosing it removes the line rather than writing it out.
+				handoff.VariablesAuthored = selected != "all"
 				if selected == "selected" && len(handoff.Variables) == 0 {
 					handoff.Variables = []string{data.Variables[0].Name}
 				} else if selected != "selected" {

@@ -171,13 +171,9 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 	// Shapes first, in the order the author wrote them: it is a list, so the
 	// order is the author's and nothing here sorts it.
 	for _, shape := range pkg.Agent.Shapes {
-		carried := scaffold.Shape{Name: shape.Name, Description: shape.Description}
-		for _, field := range shape.Fields {
-			carried.Fields = append(carried.Fields, scaffold.ShapeField{
-				Name: field.Name, Type: field.Type, Description: field.Description,
-			})
-		}
-		data.Shapes = append(data.Shapes, carried)
+		data.Shapes = append(data.Shapes, scaffold.Shape{
+			Name: shape.Name, Description: shape.Description, Fields: shapeFields(shape.Fields),
+		})
 	}
 	for name, variable := range pkg.Agent.Variables {
 		data.Variables = append(data.Variables, scaffold.Variable{Name: name, Type: variable.Type, Default: jsonText(variable.Default), Source: variable.Source})
@@ -258,6 +254,7 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		data.Tasks = append(data.Tasks, scaffold.Task{
 			Name: name, Instructions: pkg.Markdown[task.Instructions], Tools: append([]string(nil), task.Tools...),
 			Handoffs: append([]string(nil), task.Handoffs...),
+			Input:    shapeFields(task.Input),
 			Model:    task.Think, Result: jsonText(task.Result), History: task.Context.History,
 			MaxMessages: task.Context.MaxMessages, Summarizer: task.Context.Summarizer,
 			IncludeToolCalls: task.Context.IncludeToolCalls,
@@ -282,9 +279,14 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 			value.Announce = *handoff.Announce
 		}
 		value.Requires = append([]string(nil), handoff.Requires...)
+		value.Input = shapeFields(handoff.Input)
 		if handoff.Context != nil {
 			value.History, value.MaxMessages, value.Summarizer = handoff.Context.History, handoff.Context.MaxMessages, handoff.Context.Summarizer
 			value.IncludeToolCalls = handoff.Context.IncludeToolCalls
+			// Written back only when it was written: an omitted line means all
+			// and stays omitted.
+			value.VariablesAuthored = handoff.Context.Variables != nil
+			value.AllVariables = handoff.Context.Variables == nil
 			switch variables := handoff.Context.Variables.(type) {
 			case string:
 				value.AllVariables = variables == "all"
@@ -435,6 +437,17 @@ func jsonText(value any) string {
 // pairsText flattens an authored pair list into the JSON object the console
 // carries it as. Order is the author's, which the console does not preserve
 // anyway: it writes the pairs back sorted by key.
+// shapeFields carries an authored field list, a shape's or an input list,
+// into the console's own shape of it: the same three keys, so both authored
+// forms are written back the way they were read.
+func shapeFields(fields []packagespec.Field) []scaffold.ShapeField {
+	out := make([]scaffold.ShapeField, 0, len(fields))
+	for _, field := range fields {
+		out = append(out, scaffold.ShapeField{Name: field.Name, Type: field.Type, Description: field.Description})
+	}
+	return out
+}
+
 func pairsText(pairs []packagespec.Pair) string {
 	if len(pairs) == 0 {
 		return ""

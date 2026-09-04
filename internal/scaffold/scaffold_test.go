@@ -512,10 +512,15 @@ func TestPreflightAdditionalAgentAndHandoff(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range []string{"billing:", "to_billing:", `announce: "I’ll connect you to billing now."`, "history: full", "variables: all"} {
+			for _, want := range []string{"billing:", "to_billing:", `announce: "I’ll connect you to billing now."`, "history: full"} {
 				if !strings.Contains(string(agentYAML), want) {
 					t.Errorf("agent.yaml missing %q:\n%s", want, agentYAML)
 				}
+			}
+			// An omitted `variables:` means all, so a handoff that authored none
+			// is written back without the line rather than normalised to it.
+			if strings.Contains(string(agentYAML), "variables:") {
+				t.Errorf("agent.yaml writes a variables: line the package never authored:\n%s", agentYAML)
 			}
 			if _, err := os.Stat(filepath.Join(dir, "agents", "billing.md")); err != nil {
 				t.Fatal(err)
