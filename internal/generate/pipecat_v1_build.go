@@ -881,7 +881,6 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 		PromptConst: promptConst, PromptExpr: prompt,
 		RuntimePromptExpr: promptExpr(promptConst, def.Instructions, "self.state", router),
 		SlngHeaders:       pipecatRuntimeHeaders(target, profile, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name}),
-		SlngBody:          pipecatRuntimeBody(agent, target, profile),
 		LLM:               llm, TTS: tts,
 	}
 
@@ -1698,40 +1697,15 @@ func pipecatSlngSite(agent *ir.Agent, tgt ir.Target, profile string, site target
 		Names:       slngTemplateNames(agent, tgt, profile),
 		ConfigFunc:  slngConfigFunc(profile),
 		Scope:       targetcap.SlngScope(tgt.Models.Reason[profile].AgentID, site),
+		// The framework offers a per-request seam after all:
+		// build_chat_completion_params is public, its docstring invites the
+		// override, it returns the dict that is splatted into the SDK call, and
+		// its two call sites are the streaming and the one-shot paths. So the
+		// variables are read live here, exactly as they are on the other target,
+		// and the three settings-frame refreshes this used to need are gone.
+		VariablesPerRequest: true,
 	}
 }
-
-// pipecatRuntimeBody is one prompt site's router body extension as a Python
-// literal, spelled for an agent method body, so a settings delta can refresh the
-// variable snapshot where the call writes a variable.
-//
-// Empty for a site that references no variable: there would be nothing in the
-// dict but the model configuration, which never changes, and a delta that
-// rewrites an unchanged value is a frame for nothing.
-//
-// The body only, never the headers. A settings update merges `extra` key by key,
-// so `extra_headers` is replaced wholesale, and a refresh that carried it would
-// hand whichever site is speaking the owner's scope.
-func pipecatRuntimeBody(agent *ir.Agent, tgt ir.Target, profile string) string {
-	if profile == "" {
-		return ""
-	}
-	names := slngTemplateNames(agent, tgt, profile)
-	if len(names) == 0 {
-		return ""
-	}
-	site := slngSite{
-		StateExpr:  pipecatRuntimeStateExpr,
-		Names:      names,
-		ConfigFunc: slngConfigFunc(profile),
-	}
-	return pyLiteral(slngRequestBody(site, tgt.Models.Reason[profile]))
-}
-
-// pipecatRuntimeStateExpr is the call state inside an agent method, where the
-// constructor's parameter is out of scope. The same split RuntimePromptExpr and
-// pipecatRuntimeSessionIDExpr already make: one value, two spellings.
-const pipecatRuntimeStateExpr = "self.state"
 
 // pipecatRuntimeHeaders is one prompt site's identity header dict as a Python
 // literal, spelled for an agent method body rather than for a builder call.

@@ -1002,7 +1002,7 @@ async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
     rather than at construction, for one reason read out of the plugin: it copies
     the per-request extra_kwargs first and then overwrites extra_body and
     extra_headers from its own constructor options (livekit-plugins-openai
-    llm.py:956-962, read at the pinned version). So a constructor value does not
+    llm.py:961-968, read at the pinned version). So a constructor value does not
     merely win, it wins in silence. That is why no router model here is built
     with either field.
 
@@ -1025,7 +1025,7 @@ async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
     """
     session = agent.session
     # The activity resolves a per-class override against the session default the
-    # same way (agent_activity.py:4627). isinstance covers both the not-given and
+    # same way (agent_activity.py:4628-4630). isinstance covers both the not-given and
     # the None case without reaching for a private helper.
     activity_llm = agent.llm if isinstance(agent.llm, llm.LLM) else session.llm
     tool_choice = model_settings.tool_choice if model_settings else NOT_GIVEN

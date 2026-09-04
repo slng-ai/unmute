@@ -239,17 +239,42 @@ async def _slng_log_provenance(response) -> None:
 {{if .Slng.RouterClass}}
 
 class {{.Slng.RouterClass}}(OpenAILLMService):
-    """The router's LLM service, plus a response hook on the client it builds.
+    """The router's LLM service: a response hook, and per-request variables.
 
-    Overriding create_client is the only seam this framework offers for it: the
-    service builds its own AsyncOpenAI and hands us neither the raw response nor
-    its headers, and the router states where an answer came from only in headers.
+    Two overrides, two different seams, and the second one is why this class
+    holds any state.
 
+    create_client is the only seam for reading the response headers: the service
+    builds its own AsyncOpenAI and hands us neither the raw response nor its
+    headers, and the router states where an answer came from only in a header.
     The connection limits restate the base class's own (pipecat
     services/openai/base_llm.py create_client at the pinned version). Restating
     them is deliberate. Anything different here would change connection reuse,
     which is a latency change nobody asked for and nothing would report.
+
+    build_chat_completion_params is the seam for the request body. The base
+    class's last statement before returning is params.update(self._settings.extra),
+    which reads a settings snapshot mutated only by an explicit update: nothing
+    re-evaluates the expression that filled it, so a value written part way
+    through a step reached the model one turn late. This override reads the live
+    state instead, on the streaming path and the one-shot path both, which is
+    what makes the two targets refresh at the same point.
     """
+
+    def __init__(self, *args, slng_state=None, slng_variable_names=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self._slng_state = slng_state
+        self._slng_variable_names = slng_variable_names
+
+    def build_chat_completion_params(self, params_from_context) -> dict:
+        params = super().build_chat_completion_params(params_from_context)
+        if self._slng_variable_names:
+            body = dict(params.get("extra_body") or {})
+            body["template_variables"] = _slng_template_variables(
+                self._slng_state, self._slng_variable_names
+            )
+            params["extra_body"] = body
+        return params
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         return AsyncOpenAI(
@@ -974,16 +999,14 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{range $.Capture.Fields}}        if {{.}} is not None:
             self.state.{{.}} = {{.}}
             saved.append({{pyq .}})
-{{end}}{{if .SlngBody}}        if saved:
-            # The third place this call writes a variable, and the one that made
-            # the other two insufficient: a value the caller offers arrives here,
-            # not at a task result. The router substitutes these into the prompt's
-            # placeholders, so the value has to reach it before the next turn
-            # asks. Body only, so the speaking site's cache scope stays put.
-            await self.queue_frame(LLMUpdateSettingsFrame(
-                delta=LLMSettings(extra={"extra_body": {{.SlngBody}}}),
-            ))
-{{end}}        await params.result_callback({"saved": saved})
+{{end}}        # No settings refresh here, and none in the two assignment paths
+        # either. The router reads its template variables from live state on
+        # every request now, through the service's own
+        # build_chat_completion_params, so a value this call just wrote is in
+        # the next request whether or not a turn follows it. That closed the one
+        # gap the three refreshes left: a tool writing state mid-turn carried the
+        # previous value for that turn.
+        await params.result_callback({"saved": saved})
 {{end}}
 {{range .Transfers}}
     @_direct_tool(cancel_on_interruption=False)
@@ -1189,7 +1212,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             response.raise_for_status()
             await params.result_callback(response.json())
 {{end}}{{if and .EndsCall (not .ColdDestination)}}        await params.llm.push_frame(EndFrame())
-{{end}}{{end}}{{$agentPromptExpr := .RuntimePromptExpr}}{{$agentSlngHeaders := .SlngHeaders}}{{$agentSlngBody := .SlngBody}}{{range $d := .Delegates}}
+{{end}}{{end}}{{$agentPromptExpr := .RuntimePromptExpr}}{{$agentSlngHeaders := .SlngHeaders}}{{range $d := .Delegates}}
     @_direct_tool
     async def {{$d.MethodName}}(self, params: FunctionCallParams):
         """{{$d.When}}"""
@@ -1415,19 +1438,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         # can be reached on a path where the pre-fetch never ran, and a bare read
         # there is an AttributeError inside a finish handler.
         getattr(self.state, "_unconfirmed", set()).discard({{pyq .Var}})
-{{end}}{{end}}{{if and $d.Assign $agentSlngBody}}        # The router substitutes these into the prompt's placeholders, so the value
-        # this step just learned has to reach it before the next turn asks. A
-        # settings delta merges `extra` key by key, so this body-only one leaves
-        # the speaking site's cache scope exactly where it is.
-        #
-        # Here rather than per request because this framework offers no
-        # per-request seam, and here is enough: the only writes are at call start
-        # and at a step finishing, and each is followed by a turn. A tool that
-        # wrote state mid-turn would carry the previous value for that one turn.
-        await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(extra={"extra_body": {{$agentSlngBody}}}),
-        ))
-{{end}}{{end}}{{if eq $d.Then "end"}}{{if $agentSlngHeaders}}        # The terminal node's goodbye is spoken by this agent, not by the step,
+{{end}}{{end}}{{end}}{{if eq $d.Then "end"}}{{if $agentSlngHeaders}}        # The terminal node's goodbye is spoken by this agent, not by the step,
         # so the owner's cache scope goes back first.
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(extra={"extra_headers": {{$agentSlngHeaders}}}),
@@ -1472,12 +1483,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         # can be reached on a path where the pre-fetch never ran, and a bare read
         # there is an AttributeError inside a finish handler.
         getattr(self.state, "_unconfirmed", set()).discard({{pyq .Var}})
-{{end}}{{end}}{{if and $d.Assign $agentSlngBody}}        # Same refresh as the other assignment path: the value reaches the router
-        # before the next turn asks under it.
-        await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(extra={"extra_body": {{$agentSlngBody}}}),
-        ))
-{{end}}{{end}}        return {"status": "ok"}, None
+{{end}}{{end}}{{end}}        return {"status": "ok"}, None
 {{end}}{{end}}{{end}}{{if eq $d.Then "end"}}
     def _{{$d.MethodName}}_end_node(self) -> NodeConfig:
         # Terminal node: speak a brief closing line, then end_conversation ends

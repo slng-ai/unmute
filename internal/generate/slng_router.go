@@ -83,7 +83,7 @@ type slngSite struct {
 	// True on LiveKit, and the mechanism is the same trap as the header one
 	// field over: the plugin copies the per-request extra_kwargs first and then
 	// overwrites extra_body from its own options (livekit-plugins-openai
-	// llm.py:956-959, read at the pinned version). So a constructor body does
+	// llm.py:961-968, read at the pinned version). So a constructor body does
 	// not merely win, it wins in silence while the emitted per-request source
 	// still reads correctly.
 	//
@@ -96,6 +96,17 @@ type slngSite struct {
 	// built inside an agent method at handoff time, so its construction is the
 	// moment of its request and its snapshot is current already.
 	BodyPerRequest bool
+	// VariablesPerRequest says the template variables are read from live state
+	// on every request rather than snapshotted into the construction.
+	//
+	// Narrower than BodyPerRequest on purpose. The rest of the body never
+	// changes during a call, so snapshotting it costs nothing and keeps the
+	// construction readable; the variables are the one part that does change,
+	// and a snapshot of them is a value written part way through a step that
+	// reaches the model one turn late. Set on both targets, reached two ways:
+	// LiveKit renders the whole body inside its llm node, Pipecat overrides the
+	// framework's own per-request parameter seam.
+	VariablesPerRequest bool
 }
 
 // slngConfigFunc names the emitted configuration helper for one think profile.
@@ -413,7 +424,10 @@ func slngRequestBody(site slngSite, binding ir.Binding) map[string]any {
 	if slngPureProxy(binding) {
 		body[slngPureProxyParam] = true
 	}
-	if len(site.Names) > 0 {
+	// Omitted when the variables travel per request: two spellings of the same
+	// dict is how one of them comes to send a stale snapshot, and a snapshot
+	// beside the live read is a reader's question with no answer.
+	if len(site.Names) > 0 && !site.VariablesPerRequest {
 		body["template_variables"] = pyExpr(fmt.Sprintf("_slng_template_variables(%s, (%s))",
 			slngStateExpr(site.StateExpr), pyTuple(site.Names)))
 	}

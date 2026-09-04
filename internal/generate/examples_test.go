@@ -51,7 +51,7 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 // single-agent shape the compiler tests need.
 func examplePackagePath(name string) string {
 	switch name {
-	case "remy", "safe_core", "daily_carrier", "simple-prompt":
+	case "remy", "safe_core", "daily_carrier", "simple-prompt", "typed_state":
 		return filepath.Join("..", "testdata", name)
 	case "salon-concierge-v2":
 		// Not a shipped example. It is a package we run against real providers,

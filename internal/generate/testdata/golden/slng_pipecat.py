@@ -157,17 +157,42 @@ async def _slng_log_provenance(response) -> None:
 
 
 class _SlngRouterLLMService(OpenAILLMService):
-    """The router's LLM service, plus a response hook on the client it builds.
+    """The router's LLM service: a response hook, and per-request variables.
 
-    Overriding create_client is the only seam this framework offers for it: the
-    service builds its own AsyncOpenAI and hands us neither the raw response nor
-    its headers, and the router states where an answer came from only in headers.
+    Two overrides, two different seams, and the second one is why this class
+    holds any state.
 
+    create_client is the only seam for reading the response headers: the service
+    builds its own AsyncOpenAI and hands us neither the raw response nor its
+    headers, and the router states where an answer came from only in a header.
     The connection limits restate the base class's own (pipecat
     services/openai/base_llm.py create_client at the pinned version). Restating
     them is deliberate. Anything different here would change connection reuse,
     which is a latency change nobody asked for and nothing would report.
+
+    build_chat_completion_params is the seam for the request body. The base
+    class's last statement before returning is params.update(self._settings.extra),
+    which reads a settings snapshot mutated only by an explicit update: nothing
+    re-evaluates the expression that filled it, so a value written part way
+    through a step reached the model one turn late. This override reads the live
+    state instead, on the streaming path and the one-shot path both, which is
+    what makes the two targets refresh at the same point.
     """
+
+    def __init__(self, *args, slng_state=None, slng_variable_names=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self._slng_state = slng_state
+        self._slng_variable_names = slng_variable_names
+
+    def build_chat_completion_params(self, params_from_context) -> dict:
+        params = super().build_chat_completion_params(params_from_context)
+        if self._slng_variable_names:
+            body = dict(params.get("extra_body") or {})
+            body["template_variables"] = _slng_template_variables(
+                self._slng_state, self._slng_variable_names
+            )
+            params["extra_body"] = body
+        return params
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         return AsyncOpenAI(
@@ -383,10 +408,12 @@ def build_billing_llm(state=None, *, slng_session_id):
     return _SlngRouterLLMService(
         api_key=os.environ["SLNG_API_KEY"],
         base_url="https://eu.context-router.slng.ai/v1",
+        slng_state=state,
+        slng_variable_names=("caller_alias", "customer_id"),
         settings=OpenAILLMService.Settings(
             model="gpt-5.6-luna",
             system_instruction=BILLING_PROMPT,
-            extra={"extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(state, ("caller_alias", "customer_id"))}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:billing", "X-Slng-Session-Id": slng_session_id}},
+            extra={"extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning()}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:billing", "X-Slng-Session-Id": slng_session_id}},
         ),
     )
 
@@ -425,15 +452,13 @@ class BillingAgent(LLMWorker):
         if caller_alias is not None:
             self.state.caller_alias = caller_alias
             saved.append("caller_alias")
-        if saved:
-            # The third place this call writes a variable, and the one that made
-            # the other two insufficient: a value the caller offers arrives here,
-            # not at a task result. The router substitutes these into the prompt's
-            # placeholders, so the value has to reach it before the next turn
-            # asks. Body only, so the speaking site's cache scope stays put.
-            await self.queue_frame(LLMUpdateSettingsFrame(
-                delta=LLMSettings(extra={"extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(self.state, ("caller_alias", "customer_id"))}}),
-            ))
+        # No settings refresh here, and none in the two assignment paths
+        # either. The router reads its template variables from live state on
+        # every request now, through the service's own
+        # build_chat_completion_params, so a value this call just wrote is in
+        # the next request whether or not a turn follows it. That closed the one
+        # gap the three refreshes left: a tool writing state mid-turn carried the
+        # previous value for that turn.
         await params.result_callback({"saved": saved})
 
 
@@ -459,10 +484,12 @@ def build_intake_llm(state=None, *, slng_session_id):
     return _SlngRouterLLMService(
         api_key=os.environ["SLNG_API_KEY"],
         base_url="https://eu.context-router.slng.ai/v1",
+        slng_state=state,
+        slng_variable_names=("caller_alias", "customer_id"),
         settings=OpenAILLMService.Settings(
             model="gpt-5.6-luna",
             system_instruction=INTAKE_PROMPT,
-            extra={"extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(state, ("caller_alias", "customer_id"))}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": slng_session_id}},
+            extra={"extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning()}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": slng_session_id}},
         ),
     )
 
@@ -518,15 +545,13 @@ class IntakeAgent(LLMWorker):
         if caller_alias is not None:
             self.state.caller_alias = caller_alias
             saved.append("caller_alias")
-        if saved:
-            # The third place this call writes a variable, and the one that made
-            # the other two insufficient: a value the caller offers arrives here,
-            # not at a task result. The router substitutes these into the prompt's
-            # placeholders, so the value has to reach it before the next turn
-            # asks. Body only, so the speaking site's cache scope stays put.
-            await self.queue_frame(LLMUpdateSettingsFrame(
-                delta=LLMSettings(extra={"extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(self.state, ("caller_alias", "customer_id"))}}),
-            ))
+        # No settings refresh here, and none in the two assignment paths
+        # either. The router reads its template variables from live state on
+        # every request now, through the service's own
+        # build_chat_completion_params, so a value this call just wrote is in
+        # the next request whether or not a turn follows it. That closed the one
+        # gap the three refreshes left: a tool writing state mid-turn carried the
+        # previous value for that turn.
         await params.result_callback({"saved": saved})
 
 

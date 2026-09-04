@@ -2,6 +2,8 @@ package generate
 
 import (
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -382,3 +384,68 @@ func recordIndex(t *testing.T, module string, provider ir.Provider) int {
 	}
 	return at
 }
+
+// TestComposedStateBlockIsIdenticalOnBothTargets is FR-006 over the thing an
+// author actually reads: the block inside each prompt.
+//
+// One composer above both drivers is what makes this true, and it is the
+// property a second composer in a driver would break. The block is per site, so
+// the comparison is per site too: a step whose block differs between targets is
+// a step reading a different state on each.
+func TestComposedStateBlockIsIdenticalOnBothTargets(t *testing.T) {
+	agent := loadTypedState(t)
+	livekit := stateBlocksIn(t, emitted(t, agent, ir.ProviderLiveKit))
+	pipecat := stateBlocksIn(t, emitted(t, agent, ir.ProviderPipecat))
+	if len(livekit) == 0 {
+		t.Fatal("no composed block found in the emitted module, so this gate proves nothing")
+	}
+	// Compared as sets, because the two drivers write their prompt constants in
+	// different orders and one of them escapes the newlines. Neither is a
+	// difference in the block: what has to match is which blocks exist and what
+	// each one says.
+	slices.Sort(livekit)
+	slices.Sort(pipecat)
+	if !slices.Equal(livekit, pipecat) {
+		t.Errorf("the composed blocks differ between the targets:\nlivekit: %q\npipecat: %q", livekit, pipecat)
+	}
+	// Every block also carries the heading and the note, so a reader of either
+	// module finds the same thing in the same words.
+	for _, block := range append(livekit, pipecat...) {
+		if !strings.Contains(block, ir.StateBlockNote) {
+			t.Errorf("a composed block carries no note saying what it is for: %q", block)
+		}
+	}
+}
+
+// stateBlocksIn is every composed block in an emitted module, in the order the
+// module writes them.
+func stateBlocksIn(t *testing.T, module string) []string {
+	t.Helper()
+	// One driver writes a prompt as a triple-quoted literal and the other as a
+	// single-quoted one with escaped newlines. Unescaping first is what lets one
+	// extractor read both.
+	module = strings.ReplaceAll(module, `\n`, "\n")
+	var blocks []string
+	rest := module
+	for {
+		at := strings.Index(rest, ir.StateBlockHeading)
+		if at < 0 {
+			return blocks
+		}
+		rest = rest[at:]
+		var lines []string
+		for _, line := range strings.Split(rest, "\n") {
+			// A block ends at the first line that is neither its heading, its
+			// note nor one of its numbered values.
+			if len(lines) > 0 && !strings.HasPrefix(line, ir.StateBlockNote) && !numberedStateLine.MatchString(line) {
+				break
+			}
+			lines = append(lines, line)
+		}
+		blocks = append(blocks, strings.Join(lines, "\n"))
+		rest = rest[len(ir.StateBlockHeading):]
+	}
+}
+
+// numberedStateLine matches one value's line in a composed block.
+var numberedStateLine = regexp.MustCompile(`^\d+\. .*\{\{[a-z_]+\}\}`)
