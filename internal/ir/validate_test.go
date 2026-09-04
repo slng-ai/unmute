@@ -252,13 +252,24 @@ func TestValidateTaskGroupOverridesMemberContext(t *testing.T) {
 // below, against a real route. Do not reintroduce a synthetic field to "restore
 // coverage" that was never missing.
 
+// A history value its target cannot shape is refused, and the refusal names
+// what that target does shape (V8).
+//
+// `summary` rather than `messages`, because Pipecat shapes `messages` now. The
+// pair is the whole of the check: the value refused, and the value accepted
+// next to it, so a table that refuses everything would not pass either.
 func TestValidateContextPolicy(t *testing.T) { // V8
 	agent := safeAgent(t)
 	transfer := agent.Controls["to_billing"].(*AgentTransfer)
-	transfer.Context.History = HistoryMessages
+	transfer.Context.History = HistorySummary
 	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
-	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "history: full only") {
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "does not summarize a context yet") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+	transfer.Context.History = HistoryMessages
+	report, err = Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	if err != nil {
+		t.Fatalf("history: messages is shaped on pipecat and must validate: err=%v report=%#v", err, report.PerTarget)
 	}
 }
 
@@ -969,9 +980,11 @@ func TestValidatePipecatMaturityGates(t *testing.T) { // driver-pipecat T1, C9
 			// else; other errors from the bare task are not what is asserted.
 			a.Tasks["confirm_booking"] = Task{Tools: []string{"lookup_customer"}}
 		}, "cannot scope an MCP tool source to a task"},
+		// summary, because it is the last history value Pipecat refuses: the
+		// driver shapes messages, last_n and reset now.
 		{"transfer_history", func(a *Agent) {
-			a.Controls["to_billing"].(*AgentTransfer).Context.History = HistoryMessages
-		}, "history: full only"},
+			a.Controls["to_billing"].(*AgentTransfer).Context.History = HistorySummary
+		}, "does not summarize a context yet"},
 		{"transfer_variable_subset", func(a *Agent) {
 			a.Controls["to_billing"].(*AgentTransfer).Context.Variables = VariableSelection{Names: []string{"customer_id"}}
 		}, "variables subset"},

@@ -27,6 +27,7 @@ variables:
 | Source | Who supplies it | Availability |
 |---|---|---|
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
+| omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so a prompt reads it only through `requires:` or a `default:` |
 | `conversation` | the model, through `update_variables` | during the call |
 | `session_id`, `call_id`, `direction`, `from_number`, `to_number`, `carrier`, `connection` | the phone adapter | LiveKit `sip` or `connector` only |
 | `stream_id` | the phone adapter | LiveKit `connector` only, not `sip` |
@@ -162,7 +163,7 @@ difference is the thing people get wrong.
 |---|---|---|
 | `conversation.greeting.text` | once, at session start | a variable that already has a value, and never one awaiting confirmation |
 | an agent's instructions | once, at session start | a variable that already has a value, and never one awaiting confirmation |
-| a task's instructions | when that task starts | a variable that already has a value, or one assigned from a task result; a value awaiting confirmation only in the step that confirms it |
+| a task's instructions | when that task starts | a variable that already has a value, or one listed in this task's own `requires:`; a value awaiting confirmation only in the step that confirms it |
 | a tool's `inject:` value | on every tool call | any declared variable; one awaiting confirmation makes the call refuse itself until it is settled |
 | a webhook tool's `path` | on every tool call | any declared variable, URL encoded |
 
@@ -176,6 +177,24 @@ prompt is built; give it source: call_start, a system source, or a default
 ```
 
 An undeclared name is an error too.
+
+A task's own instructions may name a variable another task assigns only if
+this task's `requires:` lists it too. Naming it without listing it is a
+compile error:
+
+```
+tasks/booking.md: task "manage_booking" instructions references {{customer_status}}, which only task "verify_customer" assigns. Add customer_status to this task's requires: list, so the step waits for the value and its prompt can read it
+```
+
+Listing the name there also holds the task back until the value exists, so the
+prompt never renders it empty. Adding the name to a task's own `requires:`
+does not help when that same task is the one assigning it: that would wait on
+the task's own output, so assign it from an earlier task instead, or give the
+variable a default or a `source:`:
+
+```
+tasks/verify-customer.md: task "verify_customer" instructions references {{customer_status}}, and "verify_customer" is the only step that assigns it, so the value does not exist while this prompt is being built. Give the variable a default or a source:, or assign it from an earlier step
+```
 
 ## Passing a value into a tool without the model seeing it
 
@@ -241,9 +260,11 @@ which you chose.
 unmute dev ./my-agent --var customer_name=Ada --var customer_id=cus_2002
 ```
 
-Repeatable, and each value is parsed against the declared type. `--var` accepts
-`call_start` variables only, because it is the local stand-in for the dispatch
-payload:
+Repeatable, and each value is parsed against the declared type. `--var` is the
+local stand-in for the dispatch payload, so it accepts the two kinds of variable
+that payload fills: `source: call_start`, and a variable that declares no
+`source:` at all. It refuses a runtime-owned source and a `conversation`
+source, because neither arrives that way:
 
 ```
 unmute: dev my-agent: --var requested_service=haircut: "requested_service"

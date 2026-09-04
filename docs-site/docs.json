@@ -170,6 +170,7 @@
           "optimization/overview",
           "optimization/latency",
           "optimization/prefetch",
+          "optimization/context-scope",
           "optimization/turn-taking",
           "optimization/execution-layer",
           "optimization/context-router",

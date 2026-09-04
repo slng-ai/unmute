@@ -11,11 +11,12 @@ pipecat (pipecat): PASS
   warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml, connections/twilio_sip.yaml
   warning: environment variables referenced but not declared in secrets: DEEPGRAM_API_KEY (agent.yaml models listen transcriber), ELEVEN_API_KEY (agent.yaml models speak front_desk), GET_INVOICE_URL (tools/get_invoice.yaml webhook.url_env), LOOKUP_CUSTOMER_URL (tools/lookup_customer.yaml webhook.url_env), OPENAI_API_KEY (agent.yaml models think careful_reasoning), SIP_AUTH_PASSWORD (connections/twilio_sip.yaml environment sip_password), SIP_AUTH_USERNAME (connections/twilio_sip.yaml environment sip_username), SIP_FROM_NUMBER (connections/twilio_sip.yaml environment from_number), SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address), SLNG_API_KEY (agent.yaml models speak front_desk), TWILIO_ACCOUNT_SID (connections/primary_phone.yaml environment account_sid), TWILIO_AUTH_TOKEN (connections/primary_phone.yaml environment auth_token), TWILIO_PHONE_NUMBER (connections/primary_phone.yaml environment from_number)
 
-CASE history_messages
+CASE history_summary
 pipecat (pipecat): FAIL
   warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml, connections/twilio_sip.yaml
   warning: environment variables referenced but not declared in secrets: DEEPGRAM_API_KEY (agent.yaml models listen transcriber), ELEVEN_API_KEY (agent.yaml models speak front_desk), GET_INVOICE_URL (tools/get_invoice.yaml webhook.url_env), LOOKUP_CUSTOMER_URL (tools/lookup_customer.yaml webhook.url_env), OPENAI_API_KEY (agent.yaml models think careful_reasoning), SIP_AUTH_PASSWORD (connections/twilio_sip.yaml environment sip_password), SIP_AUTH_USERNAME (connections/twilio_sip.yaml environment sip_username), SIP_FROM_NUMBER (connections/twilio_sip.yaml environment from_number), SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address), SLNG_API_KEY (agent.yaml models speak front_desk), TWILIO_ACCOUNT_SID (connections/primary_phone.yaml environment account_sid), TWILIO_AUTH_TOKEN (connections/primary_phone.yaml environment auth_token), TWILIO_PHONE_NUMBER (connections/primary_phone.yaml environment from_number)
-  error: the Pipecat driver emits history: full only; other values are not shaped yet
+  error: context history summary requires a summarizer profile
+  error: the Pipecat driver does not summarize a context yet: it supports history: full, messages, last_n and reset
 
 CASE local_listen
 pipecat (pipecat): FAIL

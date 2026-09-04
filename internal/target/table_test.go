@@ -722,3 +722,55 @@ func TestEmbeddingServiceTable(t *testing.T) {
 		t.Error("an unsupported service resolved")
 	}
 }
+
+// The Pipecat history row, per value, and the one refusal left on it.
+//
+// Pinned per value rather than left to the completeness loop above, because
+// the loop only asks that a cell holds something. Which cell holds what is the
+// whole of what an author can express: before the driver read
+// ir.TaskContext.History at all, four of the five values failed here as a
+// maturity gate, and that gate is what this row stops being.
+//
+// `summary` still fails, and its note has to name what Pipecat does support.
+// The old note covered four failing values with "emits history: full only",
+// which stopped being true the moment three of them started working.
+func TestPipecatHistoryRowIsPerValue(t *testing.T) {
+	table := Default()
+	for history, want := range map[History]HistoryKind{
+		HistoryFull:     HistoryOK,
+		HistoryMessages: HistoryOK,
+		HistoryLastN:    HistoryOK,
+		HistoryReset:    HistoryOK,
+		HistorySummary:  HistoryFail,
+	} {
+		if got := table.HistorySupport(history, Pipecat).Kind; got != want {
+			t.Errorf("history %s on pipecat = %s, want %s", history, got, want)
+		}
+	}
+	// Every livekit value keeps working, because Story 2 is Pipecat catching up
+	// and a table edit is one place to break both.
+	for history, want := range map[History]HistoryKind{
+		HistoryFull:     HistoryOK,
+		HistoryMessages: HistoryOK,
+		HistoryLastN:    HistoryOK,
+		HistoryReset:    HistoryOK,
+		HistorySummary:  HistoryGenerated,
+	} {
+		if got := table.HistorySupport(history, LiveKit).Kind; got != want {
+			t.Errorf("history %s on livekit = %s, want %s", history, got, want)
+		}
+	}
+	note := table.HistorySupport(HistorySummary, Pipecat).Note
+	for _, want := range []string{"messages", "last_n", "reset", "full"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("the pipecat summary refusal does not name %q, so it says what fails and not what works: %q", want, note)
+		}
+	}
+	// A value that passes carries no note: a note on a passing row reads as a
+	// warning the author cannot act on.
+	for _, history := range []History{HistoryFull, HistoryMessages, HistoryLastN, HistoryReset} {
+		if note := table.HistorySupport(history, Pipecat).Note; note != "" {
+			t.Errorf("history %s passes on pipecat and still carries a note: %q", history, note)
+		}
+	}
+}

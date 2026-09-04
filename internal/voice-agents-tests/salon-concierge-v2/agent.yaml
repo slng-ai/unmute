@@ -1,0 +1,288 @@
+version: 1
+
+name: salon-concierge-v2
+
+entry_agent: concierge
+
+timezone: Europe/Madrid
+
+agents:
+  concierge:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tools:
+      - look_up_salon_info
+    tasks:
+      - name: verify_customer
+        when: >-
+          Confirm who the caller is before any specialist handoff. The task reads
+          the phone number back and needs a yes before it looks anyone up.
+        instructions: tasks/verify-customer.md
+        tools:
+          - find_or_create_customer
+        assign:
+          - customer_phone: result.customer_phone
+          - customer_status: result.status
+        result:
+          customer_phone: string
+          status:
+            enum:
+              - existing
+              - created
+              - invalid
+          summary: string
+        context:
+          history: reset
+
+      - name: manage_booking
+        when: The caller wants to create, modify, or cancel a booking.
+        announce: Let me pull up the diary.
+        instructions: tasks/booking.md
+        requires:
+          - customer_phone
+          - customer_status
+        tools:
+          - list_bookings
+          - check_availability
+          - create_booking
+          - modify_booking
+          - cancel_booking
+        handoffs:
+          - to_complaints
+        result:
+          action:
+            enum:
+              - create
+              - modify
+              - cancel
+              - none
+          booking_id: string
+          status: string
+          summary: string
+        context:
+          history: messages
+    handoffs:
+      - to_complaints
+    escalations:
+      - to_manager
+
+  complaint_specialist:
+    instructions: agents/complaint-specialist.md
+    think: reasoning
+    speak: voice
+    tools:
+      - look_up_refund_policy
+      - record_complaint
+    # The concierge defines this one. A bare name runs the same task from here,
+    # so there is one definition and both agents can offer it.
+    tasks:
+      - verify_customer
+    handoffs:
+      - to_concierge
+    escalations:
+      - to_manager
+
+handoffs:
+  to_complaints:
+    to: complaint_specialist
+    when: The verified caller has a complaint or service problem.
+    context:
+      history: messages
+      variables: all
+
+  to_concierge:
+    to: concierge
+    when: The caller changes to a request owned by another specialist.
+    context:
+      history: messages
+      variables: all
+
+escalations:
+  to_manager:
+    when: The caller explicitly asks for a manager or is clearly and strongly frustrated.
+    cold:
+      destination: manager_line
+      ring_timeout: 30s
+      on_unavailable: hangup
+
+variables:
+  booking_date:
+    type: string
+    default: ""
+    description: >-
+      Today's date in the salon's own timezone, YYYY-MM-DD. Read once from the
+      clock before the greeting, so a caller saying "tomorrow" costs one model
+      request instead of two chained tool calls. A call that crosses midnight
+      keeps the day it started on, which is deliberate: a date changing
+      underneath a conversation would leave the caller and the agent disagreeing
+      about what "tomorrow" means halfway through.
+
+  customer_phone:
+    type: string
+    default: ""
+    confirm: verify_customer
+    description: >-
+      The caller's phone number in E.164: a plus sign, then digits, with no
+      spaces, brackets or dashes. One shape for every phone number in this
+      package, the MANAGER_PHONE_NUMBER transfer destination included, so no
+      prompt and no tool has to guess which shape it is holding.
+
+      No `source:` here on purpose. The prefetch block below reads the carrier's
+      fact and this variable receives it, which leaves the per-route refusal for
+      a variable naming a source its target cannot supply exactly as strict as it
+      is: on a route with no caller ID the entry skips and this holds its default.
+
+      Offered to the caller for a yes, never acted on unasked. Somebody may be
+      ringing from a friend's phone, or may hold a second account, so until the
+      verification step has heard them agree this value satisfies no `requires:`
+      guard and appears in no prompt but that step's own.
+
+      An earlier version of this note said no prompt ever reads the number back.
+      That is now false rather than merely out of date: reading it back is the
+      whole saving, and it replaced twelve spoken digits with one yes. The
+      read-back turn does not cache, and that trade was made deliberately.
+
+  customer_status:
+    type: string
+    description: >-
+      What the lookup found for the confirmed number: `existing` for a record
+      that was already there, `created` for one written during this call, and
+      `invalid` for a number the lookup could not use. The verification step
+      assigns it and the booking step declares it, which is the whole reason the
+      booking prompt is allowed to read it.
+
+      No `default:` here, and that is the load-bearing part. A default is a value
+      the variable holds before the first word, so a defaulted variable satisfies
+      the booking step's guard on an empty string and the step starts on a caller
+      nobody has looked up. With no default the guard waits for the verification
+      step, and the compiler refuses the booking prompt if that step ever stops
+      declaring it.
+
+  customer_name:
+    type: string
+    default: ""
+    description: >-
+      The name on the record the caller's number belongs to, looked up before the
+      greeting. Inherits `customer_phone`'s confirming step, because a name found
+      from a number nobody has agreed to is exactly as unconfirmed as that number
+      was: greeting a stranger by the account holder's name is the worst thing
+      this feature could do, and the compiler refuses the prompt that would.
+
+prefetch:
+  - name: today
+    clock: date
+    assign:
+      - booking_date: result.date
+
+  - name: caller
+    source: from_number
+    assign:
+      - customer_phone: result.value
+
+  - name: profile
+    tool: look_up_customer
+    args:
+      - phone: "{{customer_phone}}"
+    assign:
+      - customer_name: result.name
+
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+  - LANGFUSE_SECRET_KEY
+  - LANGFUSE_PUBLIC_KEY
+  - LANGFUSE_BASE_URL
+  - MANAGER_PHONE_NUMBER
+  - TWILIO_ACCOUNT_SID
+  - TWILIO_AUTH_TOKEN
+  - TWILIO_PHONE_NUMBER
+  - SIP_TRUNK_HOSTNAME
+  - SIP_AUTH_USERNAME
+  - SIP_AUTH_PASSWORD
+  - SIP_FROM_NUMBER
+
+destinations:
+  manager_line: MANAGER_PHONE_NUMBER
+
+knowledge:
+  refunds:
+    documents: knowledge/refunds
+  services:
+    documents: knowledge/services
+    chunk_size: 220
+    chunk_overlap: 40
+
+models:
+  think:
+    reasoning:
+      provider: slng
+      model: gpt-5.6-luna
+      agent_id: salon-concierge-v2-v1
+      upstream:
+        provider: openai
+      params:
+        world_part_override: eu
+        reasoning_effort: "none"
+  speak:
+    voice:
+      provider: slng
+      model: "cartesia/sonic:3.5"
+      voice: "62ae83ad-4f6a-430b-af41-a9bede9286ca"
+      language: en
+      params:
+        world_part_override: eu
+        warm_standby_enabled: true
+  listen:
+    transcriber:
+      provider: slng
+      model: "soniox/speech-ai:rt-v5"
+      language: en
+      params:
+        world_part_override: eu
+  turn:
+    detector:
+      provider: local
+      model: silero
+      pace: balanced
+      endpointing_delay: 400ms
+
+tools:
+  - find_or_create_customer
+  - look_up_customer
+  - look_up_refund_policy
+  - look_up_salon_info
+  - list_bookings
+  - check_availability
+  - create_booking
+  - modify_booking
+  - cancel_booking
+  - record_complaint
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, you've reached Sage and Stone. Robin speaking, what can I do for you?"
+  interruption:
+    enabled: true
+  inactivity:
+    nudge_after: 15s
+    end_after: 45s
+  max_duration: 15m
+
+tracing:
+  provider: langfuse
+
+channels:
+  web:
+    kind: realtime_audio
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: false
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  peak_starts_per_second: 1
+  avg_session_duration: 5m

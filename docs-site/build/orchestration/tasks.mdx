@@ -85,10 +85,38 @@ task result describes the outcome returned after all of its tool calls. Keep
 only what the calling agent needs instead of copying an attached tool's output
 schema by default.
 
-`context: history: full` gives the task the conversation so far, which is
-usually what you want, because the caller has already said something the task
-needs. `history:` is one of `full`, `messages`, `last_n`, `summary`, or
-`reset`; `last_n` also needs `max_messages` alongside it.
+`history:` is required, and it shapes what the step gets. `full` gives the
+task the conversation so far, which is usually what you want because the
+caller has already said something the task needs.
+
+| `history:` | The step receives | Fits |
+|---|---|---|
+| `full` | the running transcript, tool records included | a step that has to interpret anything |
+| `messages` | what the caller and the agent said out loud, no tool records | most steps, and the default choice when trimming |
+| `last_n` | the newest n entries, tool records included, never a tool result whose call was cut | a long call where only the recent turns matter |
+| `reset` | its own instructions and its declared values, nothing else | a step fully described by its variables: confirm a number, take a payment |
+| `summary` | one summarizer turn in place of the transcript, livekit only | a long call handed to a new specialist |
+
+`last_n` also needs `max_messages` alongside it. `summary` needs its own
+`summarizer:` model entry, and it compiles on livekit only: the Pipecat driver
+refuses it and names the four values it does shape instead.
+
+**The reset floor.** A `reset` step does not receive the caller's triggering
+utterance, so it opens without knowing what was just asked. It fits a step
+fully described by its own declared values, such as confirming a number or
+taking a payment. It does not fit a step that has to interpret what the
+caller just said. There is no compiler error for choosing wrong, so pick it
+only when the step's instructions and `requires:` values are the whole story.
+
+**No value here is a privacy control.** Shortening the history does not
+unsay what the caller said out loud. A phone number the caller read aloud is
+in the transcript whether a variable holds it or not. `reset` plus a short
+`requires:` list gives a step a smaller request, not a redacted one.
+
+[Scoping a step's context](/optimization/context-scope) is the worked version
+of all of this: which value to give which step, what has to travel as a variable
+once a step cannot see the conversation, and the two values a package running on
+both code targets cannot use.
 
 ## Announce it
 

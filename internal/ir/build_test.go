@@ -1804,3 +1804,155 @@ func TestBuildRefusesUnattachedAndCollidingCatalogEntries(t *testing.T) {
 		}
 	})
 }
+
+// Every route a `requires:` name can reach a value by, and there is no route
+// missing from this list.
+//
+// This test is the shape it is because the check it was written for does not
+// exist. The plan called for refusing a `requires:` naming a variable that "can
+// never hold a value": no session-start value, no `source: conversation`, and no
+// step that assigns it. No such variable can be authored. A variable declaring
+// no `source:` at all is seeded from the dispatch payload on both code targets,
+// optional rather than required:
+//
+//	// internal/generate/livekit_v1_build.go and pipecat_v1_build.go, both:
+//	if v.Source == ir.VariableSourceCallStart || v.Source == "" {
+//
+// so the refusal would have had no case to fire on, and the two fixtures that
+// declare a bare `type: string` variable would have been refused for using a
+// documented feature. The check was written, run, and deleted.
+//
+// What is left is worth pinning: each of these compiles, and a table that starts
+// failing means somebody added the refusal back. The last case is the one that
+// looks most like a mistake and is not, which is exactly why it cannot be
+// refused: the dispatch can fill it.
+func TestBuildAcceptsEveryRequiresARouteCanFill(t *testing.T) {
+	load := func(t *testing.T, requires []string, assign []packagespec.Pair, mutate func(*packagespec.Package)) *packagespec.Package {
+		t.Helper()
+		pkg := loadSafeCore(t)
+		if mutate != nil {
+			mutate(pkg)
+		}
+		attachStep(pkg, "intake", packagespec.Task{
+			Name: "route_billing", Instructions: "tasks/billing.md",
+			When:     "The caller needs billing.",
+			Requires: requires,
+			Assign:   assign,
+			Result:   map[string]any{"summary": "string"},
+			Context:  packagespec.TaskContext{History: "full"},
+		}, "Sort the invoice out.")
+		return pkg
+	}
+
+	cases := []struct {
+		name     string
+		requires []string
+		assign   []packagespec.Pair
+		mutate   func(*packagespec.Package)
+	}{
+		{
+			name:     "a default",
+			requires: []string{"verified"},
+		},
+		{
+			name:     "a dispatched value",
+			requires: []string{"customer_id"},
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Variables["customer_id"] = packagespec.Variable{Type: "string", Source: "call_start"}
+			},
+		},
+		{
+			name:     "a runtime-owned value",
+			requires: []string{"customer_id"},
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Variables["customer_id"] = packagespec.Variable{Type: "string", Source: "from_number"}
+			},
+		},
+		{
+			name:     "a value the model saves mid-call",
+			requires: []string{"reschedule_to"},
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Variables["reschedule_to"] = packagespec.Variable{Type: "string", Source: "conversation"}
+			},
+		},
+		{
+			name:     "a pre-fetched value",
+			requires: []string{"caller_phone"},
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Variables["caller_phone"] = packagespec.Variable{Type: "string"}
+				pkg.Agent.Prefetch = append(pkg.Agent.Prefetch, packagespec.Prefetch{
+					Name: "caller", Source: "from_number",
+					Assign: []packagespec.Pair{{Key: "caller_phone", Value: "result.value"}},
+				})
+			},
+		},
+		{
+			name:     "a value an earlier step assigns",
+			requires: []string{"customer_status"},
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Variables["customer_status"] = packagespec.Variable{Type: "string"}
+				attachStep(pkg, "intake", packagespec.Task{
+					Name: "verify_customer", Instructions: "tasks/verify.md",
+					When:    "Confirm who the caller is.",
+					Assign:  []packagespec.Pair{{Key: "customer_status", Value: "result.status"}},
+					Result:  map[string]any{"status": "string"},
+					Context: packagespec.TaskContext{History: "full"},
+				}, "Read the number back.")
+			},
+		},
+		// A step waiting for the value it produces. It reads as a deadlock and
+		// it is legal: the variable declares no source, so the dispatch payload
+		// can arrive holding it and the guard opens on the first turn.
+		{
+			name:     "a value only this step assigns",
+			requires: []string{"customer_status"},
+			assign:   []packagespec.Pair{{Key: "customer_status", Value: "result.summary"}},
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Variables["customer_status"] = packagespec.Variable{Type: "string"}
+			},
+		},
+		// The bare declaration two fixtures in this tree use, and the case that
+		// killed the refusal.
+		{
+			name:     "a variable declaring nothing at all",
+			requires: []string{"customer_id"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Build(load(t, tc.requires, tc.assign, tc.mutate)); err != nil {
+				t.Fatalf("Build failed, and every route here can fill the value: %v", err)
+			}
+		})
+	}
+}
+
+// An `assign:` naming a variable that is not declared says so, and says where
+// to declare it (FR-015).
+//
+// It used to say `assign variable "x" does not resolve`, which names neither
+// the block to edit nor what "resolve" means. checkRequires has said the useful
+// version for the same mistake all along, so the two now read alike: one
+// mistake, one sentence, whichever key the author made it in.
+func TestBuildAssignRefusalNamesTheVariablesBlock(t *testing.T) {
+	pkg := loadSafeCore(t)
+	attachStep(pkg, "intake", packagespec.Task{
+		Name: "verify_customer", Instructions: "tasks/verify.md",
+		When:    "Confirm who the caller is.",
+		Assign:  []packagespec.Pair{{Key: "customer_status", Value: "result.status"}},
+		Result:  map[string]any{"status": "string"},
+		Context: packagespec.TaskContext{History: "full"},
+	}, "Read the number back.")
+
+	_, err := Build(pkg)
+	if err == nil {
+		t.Fatal("an assign to an undeclared variable must fail at compile")
+	}
+	for _, want := range []string{
+		"customer_status", "not declared under the variables: block", "agent.yaml",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal is missing %q:\n%v", want, err)
+		}
+	}
+}

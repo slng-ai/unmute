@@ -63,10 +63,12 @@ var sweepIgnored = []string{".env", "livekit.toml", "livekit-sip.toml"}
 
 // sweepVars seeds input variables the sweep would otherwise leave to their
 // defaults, which would exercise the fallback instead of the dispatch path
-// (research.md R5, closed). Empty since 2026-08-28: `--var` only accepts a
-// variable with `source: call_start`, and no shipped example declares one, so
-// every entry here would be refused by the flag rather than seeded. Add the row
-// back with the example that reintroduces one.
+// (research.md R5, closed). Still empty, but for a narrower reason than it used
+// to carry: `--var` now also accepts a variable declaring no `source:`, so
+// salon-concierge-v2's `customer_status` is seedable. Seeding it here would
+// satisfy the booking step's guard before the verification step ran, which is
+// the opposite of what that package is for, so the sweep leaves it unset. Add a
+// row for a package whose dispatch path a sweep should actually exercise.
 var sweepVars = map[string][]string{}
 
 type sweepSession struct {

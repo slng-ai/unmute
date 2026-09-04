@@ -208,6 +208,42 @@ In a group with `context_scope: shared`, each exact typed result enters the
 shared context before the next task starts. An isolated group carries no
 results between steps. The final `merge: results` map is keyed by task name.
 {{- end}}
+{{- if .NeedsHistoryRunbook}}
+
+## Context a step or handoff starts with
+
+A task or a handoff can set `context.history` to something other than
+`full`. That changes what the step, or the agent taking the handoff, starts
+with.
+
+`history: full` needs no line here: one `LLMContext` is shared for the whole
+call, so a step with nothing authored already has the running transcript,
+tool records included.
+
+`history: messages` keeps what the caller and the agent said out loud. Every
+tool record is dropped, and a call leaves with its result: on this target the
+call is a field on an assistant message and only the reply is its own entry, so
+keeping one without the other is a request the provider rejects mid-call. A turn
+that both spoke and called a tool keeps what it said.
+
+`history: last_n` keeps the newest `max_messages` entries, tool records
+kept. The cut lands at the front, so a leading tool result whose matching
+call fell outside the window is dropped with it: a tool message with no
+matching call is a request the provider rejects mid-call.
+
+`history: reset` gives the step only its own instructions and its declared
+variables. That is the floor: a reset step does not receive the call that
+triggered it, the caller's own words included. Write a reset step to be
+fully described by its declared values, like confirming a number or taking a
+payment. A step that has to interpret what was just asked does not fit
+`reset`, and there is no compiler error for getting this wrong.
+
+`history: summary` is refused on this target. It exists only on LiveKit.
+
+The ceiling is the same at every value: no `history:` setting is a privacy
+control. Shortening what a step sees does not unsay what the caller already
+said out loud.
+{{- end}}
 
 `uv` installs the pinned dependencies on first run. The Pipecat dev runner
 serves a WebRTC test client you can open in the browser.

@@ -78,12 +78,17 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | a pair-list item holding two keys or none is refused at decode, with its line, because that is what a dropped indent produces and what a `map[string]string` swallowed | `internal/spec/pair_test.go` |
 | a package declaring no `prefetch:`, no `confirm:` and no delegate `announce:` emits byte-identical output; the emitted block, its constants and the unconfirmed set appear only when authored | `internal/generate/prefetch_test.go` (`TestPrefetchEmitsNothingForAPackageThatDeclaresNone`) |
 | a pre-fetch runs at the seam on both targets, in **authored order**, and never past its budget or into a raise | `internal/generate/prefetch_test.go`, proven at L4 by `TestSmokePrefetchOutcomes` driving resolved, skipped, timed-out and raised through one module |
+| `history: messages` drops a tool call together with its reply, because Pipecat's context holds the call as a field on an assistant message and only the reply as its own entry, so a role filter alone leaves a request the provider refuses | `internal/generate/pipecat_v1_test.go` (`TestPipecatMessagesLeavesNoOrphanedToolCall`), which runs the emitted helper over the context a live call 400d on |
+| every LiveKit tool span is named after the tool that ran, because the framework names all of them `function_tool` and carries the real name in an attribute, and the private write that renames it is guarded so an upstream rename is a generic name rather than a crash mid-call | `internal/generate/livekit_v1_test.go` (`TestLiveKitNamesAToolSpanAfterItsTool`) |
 | a shared emitted log line carries no `%s` and no `.format()`: LiveKit logs through stdlib `logging` and Pipecat through loguru, so either style prints literally on the other target | `internal/generate/prefetch_test.go` (`TestPrefetchLogsCarryNoLibrarySpecificPlaceholder`) |
 | an entry reading a value only a later entry assigns is refused, naming both entries and which to move | `internal/ir/prefetch_test.go` (`TestBuildPrefetchRefusesABackwardsOrder`) |
 | a value carrying `confirm:` satisfies no gate and renders in no prompt but its confirming step's; the mark is cleared through `getattr` so a path that skipped the pre-fetch cannot raise | `internal/ir/prefetch_test.go`, `internal/generate/prefetch_test.go`, `internal/generate/guard_test.go` |
 | a `prefetch:` tool must declare `read_only: true`, and the refusal says a pre-fetch would write on every call including wrong numbers | `internal/ir/prefetch_test.go` (`TestBuildPrefetchRefusesTheSource`) |
 | a clock with no `timezone:` is refused, and the message says a container clock is UTC | `internal/ir/prefetch_test.go`, and the zone resolving in the emitted image is `TestSmokePrefetchZoneResolves` |
 | `--source` seeds a call fact and reaches the container; `--var` keeps its exact refusal | `internal/cli/dev_vars_test.go`, `internal/generate/prefetch_test.go` (`TestPrefetchSeedReachesTheContainer`) |
+| `--var` accepts exactly what the dispatch payload fills, which is `source: call_start` **and** a variable declaring no `source:`, because both drivers hydrate that pair and both runbooks print a `--var` line for each; a runtime-owned or `conversation` source is still refused, and no refusal can render an empty source | `internal/cli/dev_vars_test.go` (`TestCallStartPayload`) |
+| every package under `internal/voice-agents-tests/` validates clean on every target it declares and generates, and the directory is never empty | `internal/generate/examples_test.go` (`TestVoiceAgentTestPackagesValidateAndGenerate`) |
+| `internal/voice-agents-tests/salon-concierge-v2` keeps the four context choices it exists to show, carries every variable across both handoffs because a subset is refused on pipecat, declares `customer_status` with no default, and shares neither `name:` nor `agent_id` with `salon-concierge` | `internal/generate/examples_test.go` (`TestSalonConciergeV2ScopesEveryStep`) |
 | every prompt naming a pre-fetched value reads as a whole sentence when that value is empty | `internal/generate/prefetch_test.go` (`TestPrefetchedPromptsReadWholeWithEveryValueEmpty`) |
 | a delegate `announce:` is spoken after the guard, so a refused step stays silent, and a delegate with none emits nothing | `internal/generate/delegate_announce_test.go` |
 | every direct dependency is on the allowlist | `internal/cli/deps_test.go` |
@@ -188,6 +193,18 @@ A fact that is only true in generated output is a fact the reader never sees, an
 
 ## Layout
 `internal/` not `pkg/`. One file per command in `internal/cli/`. Hand-write cobra commands — **no `cobra-cli` generator**.
+
+### Three places hold a package, for three different reasons
+`examples/` is what a reader is sent to, so it carries every example gate: a
+README naming its transports, resolving links, the model and framework pins, and
+a hardcoded set in `internal/generate/examples_test.go` that a new one has to
+join deliberately. `internal/testdata/` is the smallest package that makes one
+unit assertion possible. `internal/voice-agents-tests/` is a whole agent we
+compile, deploy and talk to, to find what only a real call finds: not shipped,
+nobody pointed at it, and held to one bar (validates clean and generates on every
+target it declares) so a test agent that stops running fails the suite. Putting a
+test agent in `examples/` is what this split exists to stop, because it makes the
+public set grow with work nobody outside is meant to read.
 
 ## Subagent-driven development
 For complex or long-running tasks, use subagents by default when the work can be split into independent, bounded subtasks.

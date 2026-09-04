@@ -695,16 +695,17 @@ func Default() Table {
 			Reason: role(Open, Open, Open),
 		},
 		History: map[History]map[Provider]HistorySupport{
-			// Pipecat driver v1 emits history: full only; other values are a
-			// maturity gate (the workers handoff carries the running context and
-			// fine-grained shaping is not emitted yet, C9). Every slng value fails,
-			// because a context history shapes a crossing and slng writes one agent;
-			// the note lives in history() rather than five times over.
+			// The Pipecat driver shapes four of the five. `summary` needs an awaited
+			// model turn and a summarizer prompt of its own, which is its own change
+			// with its own verification; LiveKit's lives as a literal in the LiveKit
+			// template. Every slng value fails, because a context history shapes a
+			// crossing and slng writes one agent; both notes live in history()
+			// rather than five times over.
 			HistoryFull:     history(HistoryOK, HistoryOK, HistoryFail),
-			HistoryMessages: history(HistoryOK, HistoryFail, HistoryFail),
-			HistoryLastN:    history(HistoryOK, HistoryFail, HistoryFail),
+			HistoryMessages: history(HistoryOK, HistoryOK, HistoryFail),
+			HistoryLastN:    history(HistoryOK, HistoryOK, HistoryFail),
 			HistorySummary:  history(HistoryGenerated, HistoryFail, HistoryFail),
-			HistoryReset:    history(HistoryOK, HistoryFail, HistoryFail),
+			HistoryReset:    history(HistoryOK, HistoryOK, HistoryFail),
 		},
 		// Read unconditionally at the top of every target validation
 		// (ir.validateFallbacks), so a missing key breaks every package on that
@@ -831,9 +832,12 @@ func history(livekit, pipecat, slng HistoryKind) map[Provider]HistorySupport {
 	values := map[Provider]HistorySupport{
 		LiveKit: {Kind: livekit}, Pipecat: {Kind: pipecat}, Slng: {Kind: slng},
 	}
+	// One value fails on Pipecat now rather than four, so the note names what
+	// the target does support. A refusal that only says what is missing leaves
+	// the author guessing at the nearest thing that works.
 	if pipecat == HistoryFail {
 		value := values[Pipecat]
-		value.Note = "the Pipecat driver emits history: full only; other values are not shaped yet"
+		value.Note = "the Pipecat driver does not summarize a context yet: it supports history: full, messages, last_n and reset"
 		values[Pipecat] = value
 	}
 	// Every slng history value fails, and for one reason rather than five, so the

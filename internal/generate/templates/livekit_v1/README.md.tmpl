@@ -921,6 +921,12 @@ Complete at least one user turn before reviewing the trace. A traced request
 contains `llm_node` and `llm_request` generation observations in addition to
 the session and agent spans.
 
+Each tool call is its own span, named `tool:<name>` after the tool that ran. The
+framework names all of them `function_tool` and carries the real name in an
+attribute, which makes every tool call in a trace look the same, so the name is
+put back on the way out. A task's structured result is the arguments of its
+`finish` call, on that call's span.
+
 Traces can contain caller speech, model input and output, and tool arguments and results.
 Use only fake identities and fake customer data for release tests. Use a separate
 Langfuse project for those tests, and do not send real customer data until its

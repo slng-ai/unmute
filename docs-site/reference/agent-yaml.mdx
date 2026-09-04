@@ -434,7 +434,7 @@ agents:
 | `instructions` | the task's own prompt file |
 | `when` | the situation the model reads to decide whether to run the task. Absent makes the task a definition only, valid solely as a step of a task group; an agent naming such a task by bare name is refused |
 | `announce` | optional exact spoken text, said as the task is entered; not spoken when a `requires:` guard holds the task back |
-| `requires` | guard: declared variable names that must be set before the task runs |
+| `requires` | guard: declared variable names that must be set before the task runs. Also the only variables this task's own `instructions` may read beyond one that already has a value: naming a variable another task assigns without listing it here is a compile error |
 | `assign` | write-back: a list of one-key `variable: result.<field>` pairs, copying fields from the task's result into declared variables |
 | `tools` | tool files this task may call; definitions never go here |
 | `handoffs` | entries under [`handoffs:`](#handoffs-escalations) this task may trigger |
@@ -473,7 +473,7 @@ Used by tasks and by handoffs.
 
 | Field | Values | Notes |
 |---|---|---|
-| `history` | `full`, `messages`, `last_n`, `summary`, `reset` | required |
+| `history` | `full`, `messages`, `last_n`, `summary`, `reset` | required. `summary` compiles on livekit only; slng refuses every value, see [tasks](/build/orchestration/tasks) |
 | `max_messages` | a positive number | legal with `last_n` only |
 | `summarizer` | a model entry name | legal with `summary` only |
 | `include_tool_calls` | `true` or `false` | whether tool calls travel too |
