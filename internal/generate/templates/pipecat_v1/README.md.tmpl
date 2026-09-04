@@ -221,7 +221,10 @@ call, so a step with nothing authored already has the running transcript,
 tool records included.
 
 `history: messages` keeps what the caller and the agent said out loud. Every
-tool record is dropped.
+tool record is dropped, and a call leaves with its result: on this target the
+call is a field on an assistant message and only the reply is its own entry, so
+keeping one without the other is a request the provider rejects mid-call. A turn
+that both spoke and called a tool keeps what it said.
 
 `history: last_n` keeps the newest `max_messages` entries, tool records
 kept. The cut lands at the front, so a leading tool result whose matching

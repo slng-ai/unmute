@@ -607,6 +607,7 @@ func setImportNeeds(data *pipecatData) {
 			// A handoff can carry a last_n window as readily as a task can, and
 			// the helper is emitted once at module scope for both.
 			data.NeedsLastN = data.NeedsLastN || strings.HasPrefix(t.CtxExpr, "_last_n(")
+			data.NeedsSpeechOnly = data.NeedsSpeechOnly || strings.HasPrefix(t.CtxExpr, "_speech_only(")
 			// A handoff's own `context.history` is the other site the runbook
 			// section has to cover, not just a task's.
 			data.NeedsHistoryRunbook = data.NeedsHistoryRunbook || t.CtxExpr != ""
@@ -625,6 +626,7 @@ func setImportNeeds(data *pipecatData) {
 					data.NeedsHistoryRunbook = true
 				}
 				data.NeedsLastN = data.NeedsLastN || strings.HasPrefix(step.CtxExpr, "_last_n(")
+				data.NeedsSpeechOnly = data.NeedsSpeechOnly || strings.HasPrefix(step.CtxExpr, "_speech_only(")
 				data.NeedsHistoryRunbook = data.NeedsHistoryRunbook || step.CtxExpr != ""
 				for _, t := range step.Tools {
 					if t.Local {
@@ -939,6 +941,14 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 // include_tool_calls: false is refused too, which is why there is no exclude
 // branch here and why last_n keeps tool records the way LiveKit's does.
 //
+// messages goes through a helper rather than an inline filter because a tool
+// record cannot be half-dropped. On LiveKit `messages` is a filter over
+// .messages(), which holds no function-call items at all, so the call and its
+// result leave together. Pipecat holds provider-shaped dicts, where the call
+// is a key on an assistant message and only the reply has role "tool", so
+// filtering by role keeps the call and drops what answers it. A live call 400d
+// on exactly that: "tool_call_ids did not have response messages".
+//
 // The livekit twin is livekitCtxExpr. The two cannot share code: one builds a
 // ChatContext and one builds a list of provider-shaped dicts.
 func pipecatCtxExpr(c ir.TaskContext) (expr string, needsLastN bool) {
@@ -946,7 +956,7 @@ func pipecatCtxExpr(c ir.TaskContext) (expr string, needsLastN bool) {
 	case ir.HistoryReset:
 		return "[]", false
 	case ir.HistoryMessages:
-		return `[m for m in self.context.get_messages() if m.get("role") in ("user", "assistant")]`, false
+		return "_speech_only(self.context.get_messages())", false
 	case ir.HistoryLastN:
 		return fmt.Sprintf("_last_n(self.context.get_messages(), %d)", c.MaxMessages), true
 	default: // full

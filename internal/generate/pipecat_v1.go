@@ -536,6 +536,11 @@ type pipecatData struct {
 	// NeedsLastN gates the emitted _last_n helper, so a package that authors no
 	// last_n window emits nothing new. Same pattern as LiveKit's own NeedsLastN.
 	NeedsLastN bool
+	// NeedsSpeechOnly gates the emitted _speech_only helper, which is what
+	// `history: messages` lowers to. Same gating as NeedsLastN, and for the same
+	// reason: a package that authors no `messages` emits neither the helper nor
+	// the section header they share.
+	NeedsSpeechOnly bool
 	// NeedsHistoryRunbook gates the README section explaining a non-`full`
 	// `context.history` value. True the moment any task or handoff's CtxExpr is
 	// non-empty or its Reset is set, so a package authoring only `full` gets the

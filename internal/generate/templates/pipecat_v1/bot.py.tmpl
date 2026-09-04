@@ -745,8 +745,39 @@ def _mcp_params(url: str, headers: dict[str, str] | None = None):
     params_cls = StreamableHttpParameters if url.rstrip("/").endswith("/mcp") else SseServerParameters
     return params_cls(url=url, headers=headers, timeout={{mcpTimeout}})
 {{end}}
-{{- if .NeedsLastN}}
+{{- if or .NeedsLastN .NeedsSpeechOnly}}
 # --- context shaping ---------------------------------------------------------
+{{end}}
+{{- if .NeedsSpeechOnly}}
+def _speech_only(messages: list[dict]) -> list[dict]:
+    """history: messages, what was said out loud and no tool record.
+
+    A tool record cannot be half-dropped. LLMContext holds provider-shaped
+    dicts, so a tool call is a `tool_calls` key on an assistant message while
+    only its reply carries role "tool". Filtering by role alone therefore keeps
+    every call and drops everything answering it, and the provider rejects that
+    request: "An assistant message with 'tool_calls' must be followed by tool
+    messages responding to each 'tool_call_id'". Measured on a live call, mid
+    step, on a package whose every unit test passed.
+
+    So the call goes with its reply. An assistant turn that both spoke and
+    called a tool keeps what it said, because that half is what this value is
+    for. LiveKit needs none of this: .messages() holds no function-call items,
+    so its filter drops both halves already.
+    """
+    kept: list[dict] = []
+    for message in messages:
+        if message.get("role") not in ("user", "assistant"):
+            continue
+        if not message.get("tool_calls"):
+            kept.append(message)
+            continue
+        spoken = {key: value for key, value in message.items() if key != "tool_calls"}
+        if spoken.get("content"):
+            kept.append(spoken)
+    return kept
+{{end}}
+{{- if .NeedsLastN}}
 def _last_n(messages: list[dict], limit: int) -> list[dict]:
     """history: last_n, the newest `limit` entries with no orphaned tool result.
 

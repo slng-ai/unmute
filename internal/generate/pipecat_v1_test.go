@@ -3035,9 +3035,11 @@ func TestPipecatLowersEveryTaskHistoryValue(t *testing.T) {
 	}
 	// messages keeps what the caller and the agent said out loud. Tool records
 	// go, which is what LiveKit's `messages` does: .messages() returns message
-	// items only, so a tool result carrying a value is not in it either.
-	if !containsCollapsed(bot, `self.context.set_messages([m for m in self.context.get_messages() if m.get("role") in ("user", "assistant")])`) {
-		t.Error("history: messages emits no user/assistant filter at the task entry")
+	// items only, so a tool result carrying a value is not in it either. On this
+	// target that takes a helper rather than a role filter, for the reason
+	// TestPipecatMessagesLeavesNoOrphanedToolCall holds.
+	if !containsCollapsed(bot, "self.context.set_messages(_speech_only(self.context.get_messages()))") {
+		t.Error("history: messages does not shape the task entry through _speech_only")
 	}
 	// last_n bounds the window by the authored max_messages, through the helper
 	// that drops a leading orphan.
@@ -3095,6 +3097,81 @@ func TestPipecatLastNLeavesNoOrphanedToolResult(t *testing.T) {
 	dropAt := strings.Index(helper, `window[0].get("role") == "tool"`)
 	if sliceAt < 0 || dropAt < sliceAt {
 		t.Errorf("the orphan drop must follow the cut that can create one:\n%s", helper)
+	}
+}
+
+// `messages` drops a tool call together with its reply, because half of one is
+// a request the provider refuses.
+//
+// This is the live-call defect the value shipped with, and it is worth being
+// exact about why every test passed anyway. `messages` was a role filter:
+// keep "user" and "assistant", drop the rest. On LiveKit that is complete,
+// because .messages() holds no function-call items, so a call and its result
+// are both already outside it. On Pipecat the context is provider-shaped
+// dicts, where a call is a `tool_calls` key on a message whose role is
+// "assistant" and only the reply carries role "tool". So the filter kept every
+// call and dropped everything answering it, and the step's first request came
+// back 400: "An assistant message with 'tool_calls' must be followed by tool
+// messages responding to each 'tool_call_id'". A string assertion about a role
+// filter cannot see that; running the filter can.
+func TestPipecatMessagesLeavesNoOrphanedToolCall(t *testing.T) {
+	bot := pipecatHistoryBot(t)
+	if !strings.Contains(bot, "def _speech_only(") {
+		t.Fatal("no _speech_only helper is emitted, so history: messages shapes nothing")
+	}
+	helper := pipecatMethodBody(t, bot, "def _speech_only(", "\n\n\n")
+	for _, want := range []string{
+		`message.get("role") not in ("user", "assistant")`,
+		`if not message.get("tool_calls"):`,
+		`if key != "tool_calls"`,
+		`if spoken.get("content"):`,
+	} {
+		if !containsCollapsed(helper, want) {
+			t.Errorf("the _speech_only helper is missing %q:\n%s", want, helper)
+		}
+	}
+
+	// What the provider checks, checked by running the emitted helper over the
+	// context that failed. Skipped where python3 is absent, so the default
+	// suite still needs none.
+	if _, err := exec.LookPath("python3"); err != nil {
+		return
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "helper.py"), []byte(helper), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The live context, in order: the greeting, the caller, the delegate call,
+	// its running marker, the task result, and the second delegate call.
+	if err := os.WriteFile(filepath.Join(dir, "check.py"), []byte(`
+from helper import _speech_only
+
+live = [
+    {"role": "assistant", "content": "greeting"},
+    {"role": "user", "content": "I want to book a haircut."},
+    {"role": "assistant", "tool_calls": [{"id": "call_a", "function": {"name": "verify_customer"}}]},
+    {"role": "tool", "content": "{\"status\": \"running\"}", "tool_call_id": "call_a"},
+    {"role": "developer", "content": "Task results: ..."},
+    {"role": "assistant", "tool_calls": [{"id": "call_b", "function": {"name": "manage_booking"}}]},
+]
+kept = _speech_only(live)
+
+orphans = [c["id"] for m in kept for c in m.get("tool_calls", [])]
+assert not orphans, f"a tool call survives with nothing answering it: {orphans}"
+assert not [m for m in kept if m.get("role") == "tool"], "a tool reply survives with no call"
+assert [m.get("content") for m in kept] == ["greeting", "I want to book a haircut."], kept
+
+# An assistant turn that spoke and called a tool keeps what it said: the words
+# are the half this value exists to carry.
+mixed = _speech_only([{"role": "assistant", "content": "Let me look.", "tool_calls": [{"id": "x"}]}])
+assert mixed == [{"role": "assistant", "content": "Let me look."}], mixed
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("python3", "check.py")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("the emitted _speech_only leaves a request the provider refuses:\n%s", out)
 	}
 }
 
