@@ -2,7 +2,12 @@ description: >-
   Look up a customer by phone number. Reads only: it never creates a record and
   never touches one. Returns an empty name when the number is not on file.
 
-read_only: true
+  This is the twin of find_or_create_customer, and the split is deliberate.
+  A pre-fetch runs unasked on every inbound call, so the entry that runs one
+  before the greeting declares `writes: false`, and only a tool that really
+  writes nothing can honestly carry that. Creating a customer record for every
+  wrong number that ever rang is exactly the outcome the declaration exists to
+  make somebody think about, so the shipped example does not model it.
 
 input:
   type: object

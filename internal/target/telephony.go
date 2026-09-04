@@ -31,6 +31,57 @@ type TelephonyEvidence struct {
 	Docs     string           `json:"docs,omitempty"`
 	Verified string           `json:"verified,omitempty"`
 	Smoke    bool             `json:"smoke"`
+	// Directions limits a feature to calls going one way. Empty means both, which
+	// is what every row meant before one existed that supplied a fact one way
+	// only.
+	//
+	// It exists because a Twilio caller number is one-way by construction rather
+	// than by omission: a TwiML Bin is attached to one number, so the number being
+	// called is a constant there and the caller's is the fact worth carrying; an
+	// outbound call is placed from the environment's own caller ID, so it is the
+	// destination that unmute does not already know. Each direction carries the
+	// number the carrier knows and this compiler does not.
+	//
+	// Read by the skip warning and by the docs table, both of which have the
+	// package in hand and so know which directions it declares.
+	// ResolveTelephonyFeature deliberately does not read it: a feature absent from
+	// a route is still flatly Gated, and that path keeps its wording.
+	Directions []TelephonyFeature `json:"directions,omitempty"`
+}
+
+// limitDirection marks one feature of one route as supplied on calls going one
+// way only. A no-op on a route that does not grant the feature at all, because
+// an absent feature is already the flatter answer: the route supplies it in
+// neither direction.
+func limitDirection(route TelephonyRoute, feature TelephonyFeature, direction TelephonyFeature) {
+	evidence, ok := route.Features[feature]
+	if !ok {
+		return
+	}
+	evidence.Directions = []TelephonyFeature{direction}
+	route.Features[feature] = evidence
+}
+
+// RoutesGranting names every route whose map holds this feature, as
+// "(provider, transport)" strings, sorted and deduplicated.
+//
+// It exists so a refusal or a warning can say where a fact does come from
+// without a second hand-written list going stale beside the table. The list that
+// used to be hand-written said call sources compile on the LiveKit routes only,
+// which was true when nothing else filled one.
+func RoutesGranting(feature TelephonyFeature) []string {
+	var names []string
+	for key, route := range TelephonyRoutes() {
+		if _, ok := route.Features[feature]; !ok {
+			continue
+		}
+		name := fmt.Sprintf("(%s, %s)", key.Provider, key.Transport)
+		if !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names
 }
 
 type TelephonyRoute struct {
@@ -87,6 +138,15 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	sourcesWithStream := []TelephonyFeature{
 		"source.session_id", "source.carrier", "source.connection", "source.call_id",
 		"source.stream_id", "source.direction", "source.from_number", "source.to_number",
+	}
+	// What the two Pipecat Twilio routes carry. Listed here beside the LiveKit
+	// pair so a reader comparing routes reads one place.
+	dailyCarrierSources := []TelephonyFeature{
+		"source.call_id", "source.direction", "source.from_number",
+	}
+	cloudWebsocketSources := []TelephonyFeature{
+		"source.call_id", "source.stream_id", "source.direction",
+		"source.from_number", "source.to_number",
 	}
 	sourcesWithoutStream := []TelephonyFeature{
 		"source.session_id", "source.carrier", "source.connection", "source.call_id",
@@ -171,15 +231,30 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	// the number and forwards the call over SIP into a per-call Daily room, so the
 	// agent and the transfer primitive share the existing SIP phone leg.
 	//
-	// No `source.*` features. The generated bot reads call sources out of a
-	// context table that only the carrier-websocket adapters fill, and this route
-	// emits no adapter, so granting them would let a package validate green and
-	// receive empty values on a live call (research D11/R14, 2026-08-12).
+	// Three `source.*` features, and the reason the other five are absent is a
+	// scope decision rather than a capability limit.
+	//
+	// The helper answers the carrier's webhook, so it holds the whole POST form:
+	// `From` and `CallSid` are in its hand and it already spends `From` as a Daily
+	// room display name. They ride the body it posts, and the bot lifts them into
+	// the call context the pre-fetch reads. `direction` was already in that body.
+	//
+	// No `to_number`: the outbound body carries `dialout.sip_uri`, which is a URI
+	// and not a number, and turning one into the other is parsing this feature
+	// does not do. No `session_id`, `carrier` or `connection`: on LiveKit those
+	// are compile-time literals and the same two lines would work here, but
+	// nobody asked for them and each costs a table row, an emitter entry and a
+	// docs row.
 	dailyCarrier := TelephonyKey{Provider: Pipecat, Transport: "daily-sip", Carrier: "twilio"}
 	add(Pipecat, "daily-sip", "twilio", "https://docs.pipecat.ai/pipecat/telephony/daily-sip",
-		TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound,
-		TelephonyFeature(ColdTransfer), TelephonyFeature(Hangup))
+		append([]TelephonyFeature{
+			TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound,
+			TelephonyFeature(ColdTransfer), TelephonyFeature(Hangup),
+		}, dailyCarrierSources...)...)
 	route = routes[dailyCarrier]
+	// The caller's number comes off the carrier's inbound webhook, so it exists
+	// only on a call coming in. Nothing here supplies it outbound.
+	limitDirection(route, "source.from_number", TelephonyInbound)
 	for feature, evidence := range route.Features {
 		evidence.Verified = "2026-08-12"
 		// Every feature here is built and offline-proven and none has had a live
@@ -235,15 +310,32 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	// where a reader should expect both to be empty, and validate has a matching
 	// branch so an empty process list is a valid plan here and nowhere else.
 	//
-	// No `source.*` features, same reason as the Daily carrier row: the call-source
-	// table is filled by the carrier-websocket adapters, and this route emits no
-	// adapter at all. The Bin's from_number/to_number parameters reach the bot's
-	// call_data, which is a different thing from a bound spec variable.
+	// Five `source.*` features. `parse_telephony_websocket` hands the Twilio
+	// branch a call id, a stream id and the `<Parameter>` set the Bin dictated,
+	// and the bot lifts all three into the call context the pre-fetch reads.
+	//
+	// The two numbers arrive as markup an operator pastes, one per direction: the
+	// Bin carries the caller's number on an inbound call, and the outbound command
+	// carries the number being dialled. An earlier version of this comment said
+	// those parameters "reach the bot's call_data, which is a different thing from
+	// a bound spec variable", and that was true only because nothing lifted them.
+	// Something does now.
+	//
+	// No `session_id`, `carrier` or `connection` here either, for the same scope
+	// reason as the row above.
 	cloudWebsocket := TelephonyKey{Provider: Pipecat, Transport: "cloud-websocket", Carrier: "twilio"}
 	add(Pipecat, "cloud-websocket", "twilio", "https://docs.pipecat.ai/pipecat-cloud/guides/telephony/twilio-websocket",
-		TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound,
-		TelephonyFeature(ColdTransfer), TelephonyFeature(Hangup))
+		append([]TelephonyFeature{
+			TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound,
+			TelephonyFeature(ColdTransfer), TelephonyFeature(Hangup),
+		}, cloudWebsocketSources...)...)
 	route = routes[cloudWebsocket]
+	// One number per direction, and which one is not arbitrary. A Bin is attached
+	// to one number, so the number being called is a constant there; an outbound
+	// call goes out from the environment's own caller ID, so the destination is
+	// the fact worth carrying.
+	limitDirection(route, "source.from_number", TelephonyInbound)
+	limitDirection(route, "source.to_number", TelephonyOutbound)
 	for feature, evidence := range route.Features {
 		evidence.Verified = "2026-08-13"
 		// The tag stays provisional and the note stopped being generic on the same
@@ -484,12 +576,16 @@ func ResolveTelephonyFeature(key TelephonyKey, feature TelephonyFeature) Telepho
 			}
 			note += "; warm transfer compiles on (livekit, sip) trunks today"
 		case strings.HasPrefix(string(feature), TelephonySourcePrefix):
-			// A call source is filled by an emitted adapter reading the carrier's
-			// own payload. The routes that emit one are the routes that grant it,
-			// so the refusal names them: an author who wants the caller's number
-			// has a route to move to, not just a no. No Pipecat route emits such
-			// an adapter, so the answer on a Pipecat target is always LiveKit.
-			note += "; telephony call sources are filled by the emitted carrier adapter, which only the LiveKit routes emit, so they compile on (livekit, sip) trunks and on (livekit, connector)"
+			// A call source is filled by emitted code reading the carrier's own
+			// payload, so the routes that read it are the routes that grant it. The
+			// list is read off the table rather than written here, because it was
+			// written here once, said only the LiveKit routes could supply a call
+			// source, and stayed that way after two Pipecat routes could.
+			if granting := RoutesGranting(feature); len(granting) > 0 {
+				note += fmt.Sprintf("; %s is supplied on %s", feature, strings.Join(granting, " and "))
+			} else {
+				note += "; no route supplies " + string(feature)
+			}
 		}
 		return TelephonyEvidence{Feature: feature, Tag: Gated, Note: note}
 	}

@@ -1054,8 +1054,11 @@ async def main() -> None:
     # over the same form reaches the start exactly once.
     starts = []
 
-    async def fake_start_agent(_request, *, caller, call_sid):
-        starts.append((caller, call_sid))
+    async def fake_start_agent(_request, *, caller, from_number, call_sid):
+        # from_number is the raw form value and caller is the room display name,
+        # which substitutes the word "caller" when the number was withheld. Both
+        # are recorded so a future change that collapses them fails here.
+        starts.append((caller, from_number, call_sid))
         return {"sessionId": "session-smoke"}
 
     helper._start_agent = fake_start_agent
@@ -1072,7 +1075,7 @@ async def main() -> None:
     )
     accepted = await helper.inbound_call(HelperRequest(form, signature))
     assert accepted.status_code == 200
-    assert starts == [("+14155550100", "CA-smoke")]
+    assert starts == [("+14155550100", "+14155550100", "CA-smoke")]
 
     # The supported SDK itself requires an existing phone session. This exact
     # return is the premise behind rejecting browser and removed carrierless

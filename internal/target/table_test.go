@@ -370,21 +370,31 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 	if len(runtime.LocallySuppliedEnvironment) != 0 {
 		t.Fatalf("nothing is supplied locally on this route: %v", runtime.LocallySuppliedEnvironment)
 	}
-	// The Daily carrier leg (SCHEMA N37): five provisional features, no call
-	// sources, and every granted feature carries its docs and its date.
+	// The Daily carrier leg (SCHEMA N37): eight provisional features, and every
+	// granted one carries its docs and its date.
+	//
+	// Three of those eight are call sources, and they are the three the helper
+	// answering the carrier's inbound webhook actually holds. What is still gated
+	// is to_number, because the outbound body carries a SIP URI and not a number.
 	dailyCarrier := TelephonyKey{Provider: Pipecat, Transport: "daily-sip", Carrier: "twilio"}
 	for _, feature := range []TelephonyFeature{
 		TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound,
 		TelephonyFeature(ColdTransfer), TelephonyFeature(Hangup),
+		"source.call_id", "source.direction", "source.from_number",
 	} {
 		got := ResolveTelephonyFeature(dailyCarrier, feature)
 		if got.Tag != Provisional || got.Docs == "" || got.Verified == "" || got.Smoke {
 			t.Fatalf("daily carrier feature %s = %#v, want provisional with docs and a date", feature, got)
 		}
 	}
+	if got := ResolveTelephonyFeature(dailyCarrier, "source.from_number"); len(got.Directions) != 1 ||
+		got.Directions[0] != TelephonyInbound {
+		t.Fatalf("source.from_number directions = %v, want inbound only: it comes off the inbound webhook", got.Directions)
+	}
 	for _, feature := range []TelephonyFeature{
 		TelephonyFeature(WarmTransfer), TelephonyFeature(VoicemailDetection),
-		"source.from_number", "source.to_number", "source.call_id", "source.direction",
+		"source.to_number", "source.stream_id", "source.session_id",
+		"source.carrier", "source.connection",
 	} {
 		if got := ResolveTelephonyFeature(dailyCarrier, feature); got.Tag != Gated {
 			t.Fatalf("daily carrier feature %s = %#v, want gated", feature, got)

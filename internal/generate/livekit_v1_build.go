@@ -396,7 +396,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		data.NeedsPrefetchClock, data.NeedsPrefetchAsync = block.NeedsClock, block.NeedsAsync
 		data.NeedsPrefetchLocal, data.NeedsPrefetchSeed = block.NeedsLocal, block.NeedsSeed
 		data.NeedsHTTPX = data.NeedsHTTPX || prefetchNeedsHTTPX(agent)
-		data.PrefetchRunbook, _ = PrefetchRunbook(agent)
+		data.PrefetchRunbook, _ = PrefetchRunbook(agent, tgt)
 	}
 	// Prompt constants, ordered agents-then-tasks for a stable file.
 	for _, a := range data.Agents {

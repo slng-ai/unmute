@@ -134,8 +134,8 @@ def look_up_customer(phone):
     This is the whole difference from find_or_create_customer, and the reason both
     exist: a prefetch runs unasked on every inbound call, so a tool that writes
     would create a customer record for every wrong number that ever rang. Nothing
-    below mutates _state, and that is what `read_only: true` in the tool file is
-    promising.
+    below mutates _state, and that is what `writes: false` on the prefetch entry
+    that runs it is promising.
 
     An unknown number is not an error. It returns an empty name, the prefetch
     assigns that empty value, and the verification step asks for a number exactly

@@ -35,8 +35,9 @@ def _booking_today() -> date:
 
     Not `date.today()`, which reads the container clock. That clock is UTC, so a
     booking taken at 23:30 in Madrid landed on the following day and every date
-    check here disagreed with the caller by one. The zone matches `timezone:` in
-    agent.yaml, which is also what the pre-fetched {{booking_date}} is read in, so
+    check here disagreed with the caller by one. The zone matches the `timezone:`
+    on the `today` prefetch entry in agent.yaml, which is what the pre-fetched
+    {{booking_date}} is read in, so
     the prompt and the validation agree about what day it is.
     """
     return datetime.now(ZoneInfo(_SALON_TIMEZONE)).date()
@@ -134,8 +135,8 @@ def look_up_customer(phone):
     This is the whole difference from find_or_create_customer, and the reason both
     exist: a prefetch runs unasked on every inbound call, so a tool that writes
     would create a customer record for every wrong number that ever rang. Nothing
-    below mutates _state, and that is what `read_only: true` in the tool file is
-    promising.
+    below mutates _state, and that is what the `writes: false` on the prefetch
+    entry running it is promising.
 
     An unknown number is not an error. It returns an empty name, the prefetch
     assigns that empty value, and the verification step asks for a number exactly

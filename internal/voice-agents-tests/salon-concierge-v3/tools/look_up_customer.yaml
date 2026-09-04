@@ -2,8 +2,6 @@ description: >-
   Look up a customer by phone number. Reads only: it never creates a record and
   never touches one. Returns an empty name when the number is not on file.
 
-read_only: true
-
 input:
   type: object
   properties:

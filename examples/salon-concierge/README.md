@@ -42,10 +42,11 @@ so there is one definition, one prompt, and one name in the emitted project.
 but not because the compiler holds it back: the concierge's own instructions
 say to run verification first and never start booking until it has succeeded.
 
-**Facts resolved before the greeting.** The `prefetch:` block reads today's date
-off the clock and the caller's number off the call, then looks up the name on
-that record. Nothing in the block can fail a call: an entry whose inputs are
-empty is skipped and the values keep their defaults.
+**Facts resolved before the greeting.** The `prefetch:` block reads the date,
+the weekday and the salon's local time off one clock reading, and the caller's
+number off the call, then looks up the caller's name and whether they are on
+file, both from that one lookup. Nothing in the block can fail a call: an
+entry whose inputs are empty is skipped and the values keep their defaults.
 
 **A cold manager transfer.** Both agents hold it. Asking for a person is never
 gated on identifying yourself first.

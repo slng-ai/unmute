@@ -144,6 +144,53 @@ func TestLiveKitSIPProcessUsesSupportedWorkerCommand(t *testing.T) {
 // operator hosts nothing (spec FR-001, data-model section 1). A future edit that
 // gives this route a process has changed what the route *is*, and that is worth
 // failing a test over.
+// Directions is a limit, never a grant. An empty one means both, which is what
+// every row meant before one existed that supplied a fact one way only, so the
+// field has to be invisible on every route that does not set it.
+//
+// ResolveTelephonyFeature deliberately does not read it: a feature absent from a
+// route is flatly Gated, and that path keeps its wording. Direction is read by
+// the skip warning and the docs table, both of which have the package in hand
+// and so know which directions it declares.
+func TestTelephonyDirectionsLimitAndNeverGrant(t *testing.T) {
+	oneWay := map[TelephonyKey]map[TelephonyFeature]TelephonyFeature{
+		{Provider: Pipecat, Transport: "daily-sip", Carrier: "twilio"}: {
+			"source.from_number": TelephonyInbound,
+		},
+		{Provider: Pipecat, Transport: "cloud-websocket", Carrier: "twilio"}: {
+			"source.from_number": TelephonyInbound,
+			"source.to_number":   TelephonyOutbound,
+		},
+	}
+	var limited int
+	for key, route := range TelephonyRoutes() {
+		for feature, evidence := range route.Features {
+			want, expected := oneWay[key][feature]
+			if !expected {
+				if len(evidence.Directions) != 0 {
+					t.Errorf("(%s, %s, %s) limits %s to %v, and no row but the two Pipecat Twilio numbers does",
+						key.Provider, key.Transport, key.Carrier, feature, evidence.Directions)
+				}
+				continue
+			}
+			limited++
+			if len(evidence.Directions) != 1 || evidence.Directions[0] != want {
+				t.Errorf("(%s, %s, %s) %s directions = %v, want [%s]",
+					key.Provider, key.Transport, key.Carrier, feature, evidence.Directions, want)
+			}
+			// Still granted, and granted in the ordinary way: a direction limit is
+			// not a second kind of gate.
+			if got := ResolveTelephonyFeature(key, feature); got.Tag == Gated {
+				t.Errorf("(%s, %s, %s) %s reads as gated, and a direction limit is not a gate",
+					key.Provider, key.Transport, key.Carrier, feature)
+			}
+		}
+	}
+	if limited != 3 {
+		t.Errorf("found %d direction-limited features, want the 3 the two Pipecat Twilio rows set", limited)
+	}
+}
+
 func TestPipecatCloudWebsocketRouteRow(t *testing.T) {
 	key := TelephonyKey{Provider: Pipecat, Transport: "cloud-websocket", Carrier: "twilio"}
 	route, ok := TelephonyRoutes()[key]
@@ -153,6 +200,11 @@ func TestPipecatCloudWebsocketRouteRow(t *testing.T) {
 	want := []TelephonyFeature{
 		TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound,
 		TelephonyFeature(ColdTransfer), TelephonyFeature(Hangup),
+		// The five call sources. Two come out of the carrier's own handshake and
+		// three out of the TwiML markup the runbook dictates, which is why the
+		// runbook has to say what each parameter is for.
+		"source.call_id", "source.stream_id", "source.direction",
+		"source.from_number", "source.to_number",
 	}
 	if len(route.Features) != len(want) {
 		t.Errorf("route grants %d features, want exactly %d: %v", len(route.Features), len(want), route.Features)
@@ -223,11 +275,25 @@ func TestPipecatCloudWebsocketRefusesWarmTransferByNamingTheCost(t *testing.T) {
 	if strings.Contains(evidence.Note, "cannot") {
 		t.Errorf("warm refusal %q blames the platform; it is this project that has not built it", evidence.Note)
 	}
-	// A call source is refused too, and its refusal already names the routes that
-	// fill one, so an author who wants the caller's number has somewhere to go.
-	source := ResolveTelephonyFeature(key, "source.from_number")
-	if source.Tag != Gated || !strings.Contains(source.Note, "livekit, connector") {
-		t.Errorf("call-source refusal = %q (%s), want gated and naming where sources work", source.Note, source.Tag)
+	// The caller's number is granted here now, on an inbound call: a TwiML Bin is
+	// attached to one number, so the number being called is a constant there and
+	// the caller's is the fact worth carrying.
+	caller := ResolveTelephonyFeature(key, "source.from_number")
+	if caller.Tag == Gated {
+		t.Errorf("this route supplies the caller's number now: %q", caller.Note)
+	}
+	if len(caller.Directions) != 1 || caller.Directions[0] != TelephonyInbound {
+		t.Errorf("source.from_number directions = %v, want inbound only", caller.Directions)
+	}
+	if dest := ResolveTelephonyFeature(key, "source.to_number"); len(dest.Directions) != 1 ||
+		dest.Directions[0] != TelephonyOutbound {
+		t.Errorf("source.to_number directions = %v, want outbound only", dest.Directions)
+	}
+	// A source nobody asked for is still refused, and its refusal still names the
+	// routes that do fill one, so an author has somewhere to go.
+	session := ResolveTelephonyFeature(key, "source.session_id")
+	if session.Tag != Gated || !strings.Contains(session.Note, "is supplied on ") {
+		t.Errorf("call-source refusal = %q (%s), want gated and naming where sources work", session.Note, session.Tag)
 	}
 }
 
