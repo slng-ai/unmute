@@ -7,19 +7,25 @@ public write-up of what it does is
 
 ## What it is
 
-[`salon-concierge-v2`](../salon-concierge-v2/) as it stood when typed session
-state was verified, under its own name. That package stays frozen at the state
-that closed the feature, so a regression can be measured against something known
-to work, and this one is the package the next feature rewrites: typed inputs at
-every seam, so a step or a specialist is handed what the caller asked for as
-declared values and every seam can run on `history: reset`. Until that ships the
-two packages differ only in name, and the diff between them is the feature. The
-local spec is `specs/004-typed-inputs/`.
+The typed-inputs verification package. It is
+[`salon-concierge-v2`](../salon-concierge-v2/) with one thing added and one
+thing taken away. Added: every task and every handoff declares `input:`, the
+values it needs in order to start, in the same type words a result field uses.
+The agent that heard the caller fills them when it runs the step or hands the
+caller over, and the receiving prompt ends with a `Request:` block the compiler
+wrote. Taken away: the conversation. Every step and every handoff runs on
+`history: reset`, so nothing here reads the transcript, and a step that is
+entered late in a long call costs what it cost at the start.
+
+v2 stays frozen at the state that closed typed session state, so a regression
+here can be measured against a package known to work. The local spec is
+`specs/004-typed-inputs/`.
 
 Both are the same Sage and Stone salon as
 [`salon-concierge`](../../../examples/salon-concierge/), with one thing changed:
 every step gets the smallest context that still does its job, and what it no
-longer reads off the transcript travels as declared state instead.
+longer reads off the transcript travels as declared state and as a typed
+request instead.
 
 Declared state is typed. The facts a call accumulates are groups of named
 fields, written in Pydantic's own words, and the compiler puts a block naming
@@ -38,14 +44,38 @@ Robin works the front desk, confirms who is calling, runs the booking step and
 answers what it can. Customer care takes complaints and refunds. A control
 cold-transfers to a manager on a phone call.
 
-Two tasks sit under the concierge and one under customer care.
-`verify_customer` reads a phone number back and waits for a yes, and it runs
-with `history: reset`, so it gets its own prompt and its declared values and no
-part of the conversation. `manage_booking` takes one booking change from start
-to finish, and `handle_complaint` records one thing the caller is unhappy about.
-Both run with `history: messages`, so they get both sides of the conversation
-without the tool records nobody re-reads. Both handoffs carry the spoken turns
-for the same reason.
+Two tasks sit under the concierge and one under customer care, and all three
+run with `history: reset`: each gets its own prompt, the declared values, and
+what it was handed, and no part of the conversation. `verify_customer` reads a
+phone number back and waits for a yes, and declares no `input:`, because
+reading a number back needs nothing from the request. `manage_booking` takes
+one booking change from start to finish and is handed the request: `action`
+(create, modify or cancel) is required, because the step cannot start without
+knowing what to do, and `service`, `requested_day` and `requested_time` are
+optional, in the caller's own words, because a caller cancelling names no day
+and a caller who says "a haircut" has named no time. Marking them optional is
+what stops the model inventing a value it was told it must fill.
+`handle_complaint` records one thing the caller is unhappy about and is handed
+`problem` (required, the caller's words with what the specialist offered) and
+`about` (optional, the appointment it concerns, copied from the ones already
+recorded so nothing is invented).
+
+Both handoffs run on `history: reset` too and carry a typed brief instead of
+the conversation. `to_complaints` hands customer care the same `problem` and
+`about`; `to_concierge` hands the front desk `outcome` (what was done) and
+`next_request` (what the caller now wants), both required because a handoff
+back is always for something. Neither writes `variables:`, because leaving it
+out means every declared value travels.
+
+The block each seam receives is in the emitted module, after the conversation
+info, and it is the same text on both targets:
+
+```sh
+grep -A6 'Request:' internal/voice-agents-tests/salon-concierge-v3/build/livekit/agent.py
+```
+
+The concierge's own block lists `outcome` and `next_request` only. No prompt
+reads another seam's inputs, and the compiler refuses one that tries.
 
 Three shapes hold what the call learns. `Customer` is who the caller is once the
 verification step has looked them up, and it is two fields rather than four: the
@@ -76,12 +106,12 @@ lose the other. And a step that is re-entered and finishes at once re-reports
 what it already recorded, which is why the emitted append drops a structured
 entry the list already holds rather than trusting the prompt not to send one.
 
-`caller_reason` is a list drawn from a closed set, because one call can do more
-than one thing, and both of the steps that act append to it: the booking step
-and the complaint step each record the reason they ran, so a caller who books
-and then complains ends with two. The verification step records none, because
-it runs on a reset history and cannot see why the caller rang; a reason
-recorded there could only be asked for. `customer_phone` is text with a
+There is no list of reasons the caller rang and no per-step `reason` result.
+v2 had both, and they were the cost of `reset` before inputs existed: a step
+that saw the conversation recorded why it ran, and a step that did not could
+only ask. Here each appointment records its `action` and each complaint its
+`reason`, so what the call did is already on the state, and the request each
+step was handed says why it was entered. `customer_phone` is text with a
 validated shape, and it carries `confirm:`, so it renders in the verification
 step's own prompt and nowhere else until the caller has agreed to it.
 
@@ -103,8 +133,9 @@ The files:
 - `targets.yaml` holds the targets, one per telephony plane.
 - `instructions.md` is the concierge prompt, `agents/complaint-specialist.md`
   the customer care prompt, and `tasks/` the three task prompts. None of them
-  contains the conversation info block: the compiler appends that, so adding a
-  field to a shape reaches every prompt with no prompt file edited.
+  contains the conversation info block or the request block: the compiler
+  appends both, so adding a field to a shape or an input to a step reaches the
+  prompt with no prompt file edited.
 - `tools/` is one file per tool, all local Python over one in-memory store.
 - `knowledge/refunds/` and `knowledge/services/` are two document sets, each
   with its own index.

@@ -12,8 +12,9 @@ input:
       type: string
       enum:
         - haircut
-        - hair-color
-        - blowout
+        - haircolor
+        - haircut_and_haircolor
+        - dry_cut
     slot_id:
       type: string
       description: Exact slot ID returned by check_availability

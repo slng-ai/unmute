@@ -7,8 +7,9 @@ input:
       type: string
       enum:
         - haircut
-        - hair-color
-        - blowout
+        - haircolor
+        - haircut_and_haircolor
+        - dry_cut
     date:
       type: string
       description: Preferred date in YYYY-MM-DD form

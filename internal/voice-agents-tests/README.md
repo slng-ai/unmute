@@ -29,10 +29,10 @@ finding out about.
 value carried as a declared variable, so the two can be run against each other
 on a real call. It is frozen at the state that closed typed session state.
 
-[`salon-concierge-v3`](salon-concierge-v3/) is that package under its own name,
-and the one the next feature rewrites: typed inputs on every task and handoff,
-so every seam can run on `history: reset`. Until that ships the two differ only
-in name.
+[`salon-concierge-v3`](salon-concierge-v3/) is the typed-inputs package: every
+task and handoff declares `input:`, so the agent that heard the caller hands
+each seam what was asked for, and every seam runs on `history: reset`. v2 is
+the control it is measured against.
 
 ## Running one
 

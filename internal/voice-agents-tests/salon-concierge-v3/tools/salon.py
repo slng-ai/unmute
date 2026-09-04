@@ -21,7 +21,7 @@ _fresh.complaints = {}
 _fresh.lock = threading.Lock()
 _state = sys.modules.setdefault("unmute_salon_state", _fresh)
 
-_SERVICES = {"haircut", "hair-color", "blowout"}
+_SERVICES = {"haircut", "haircolor", "haircut_and_haircolor", "dry_cut"}
 _TIMES = ("09:00", "11:30", "15:00")
 _SALON_TIMEZONE = "Europe/Madrid"
 

@@ -24,12 +24,12 @@ agents:
         assign:
           - customer_phone: result.customer_phone
           - customer: result.customer
-        # This step records no reason, and that is what `history: reset` costs.
-        # A reset step never receives the caller's triggering utterance, so a
-        # `reason` field here could only be filled by asking, and it asked on
-        # every call: the caller said "a booking for a haircut tomorrow", the
-        # step read the number back, and then asked what they were calling
-        # about. The steps that act read the conversation and record it instead.
+        # This step declares no `input:`, because reading a number back needs
+        # nothing from the caller's request: the number is already on the state
+        # and the step's whole job is to hear a yes. The steps that act are
+        # handed what the caller asked for through `input:` below, so every
+        # step in this package runs on `history: reset` and none of them asks
+        # for something the caller said before it was entered.
         result:
           customer_phone: Phone
           customer: Customer
@@ -40,6 +40,24 @@ agents:
       - name: manage_booking
         when: The caller wants to create, modify, or cancel a booking.
         instructions: tasks/booking.md
+        # What the concierge hands in when it runs the step: the request in the
+        # caller's own words. Only the action is required, because a caller
+        # cancelling names no day and a caller who says "I'd like a haircut"
+        # has named no time. Marking the rest optional is what stops the model
+        # inventing a value it was told it must fill.
+        input:
+          - name: action
+            type: Literal["create", "modify", "cancel"]
+            description: What the caller wants done to a booking. Only what they said.
+          - name: service
+            type: Literal["haircut", "haircolor", "haircut_and_haircolor", "dry_cut"] | None
+            description: The service, in the salon's own words, only if the caller named one. Leave it out otherwise.
+          - name: requested_day
+            type: str | None
+            description: The day in the caller's own words, like tomorrow or Friday, only if they said one.
+          - name: requested_time
+            type: str | None
+            description: The time or part of the day in the caller's own words, like 3 PM or afternoon, only if they said one.
         requires:
           - customer_phone
           - customer.status
@@ -53,25 +71,16 @@ agents:
           - to_complaints
         assign:
           - appointments+: result.appointment
-          # The step that did the thing records why the caller rang. This one
-          # runs on `history: messages`, so the caller's own words are in front
-          # of it and it never has to ask.
-          - caller_reason+: result.reason
         result:
           # Absent when the caller decided against a change, which is a real
           # outcome and not a failure: the append adds nothing that turn rather
           # than the step inventing an appointment to have something to hand
-          # back.
+          # back. The appointment's own `action` records what was done, so no
+          # separate reason field is needed.
           appointment: Appointment | None
-          # All five values, the same set the list declares, though this step
-          # only ever returns one of the three booking ones. A caller who only
-          # asks a question is answered by the concierge itself and runs no
-          # step, so `request_informations` reaches the list from nowhere: the
-          # list holds what a step did, not everything that was said.
-          reason: Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]
           summary: string
         context:
-          history: messages
+          history: reset
     handoffs:
       - to_complaints
     escalations:
@@ -96,6 +105,20 @@ agents:
       - name: handle_complaint
         when: The verified caller is unhappy about something and wants it recorded.
         instructions: tasks/complaint.md
+        # The specialist hands in what the caller is unhappy about and, when the
+        # caller named one, the appointment it concerns, copied from the
+        # appointments already on the state so nothing is invented.
+        input:
+          - name: problem
+            type: str
+            description: What the caller is unhappy about, in their own words.
+          - name: about
+            type: Appointment | None
+            description: >-
+              The appointment the complaint concerns, copied from the
+              appointments already recorded, only when the caller means a
+              booking this call made. A complaint about an earlier visit has
+              none, so leave it out.
         requires:
           - customer.status
         # The policy lookup stays on the agent rather than on this step: the
@@ -106,36 +129,49 @@ agents:
           - record_complaint
         assign:
           - complaints+: result.complaint
-          # The second entry on the same list, written by a different step. A
-          # caller who books and also complains rang for two reasons, and the
-          # state holds both: this is the case the spec separates from a change
-          # of mind, where one step replaces its own value instead.
-          - caller_reason+: result.reason
         result:
           complaint: Complaint
-          reason: Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]
           summary: string
         context:
-          history: messages
+          history: reset
     handoffs:
       - to_concierge
     escalations:
       - to_manager
 
+# Both handoffs run on `history: reset` and carry a typed brief instead of the
+# conversation. Neither writes `variables:`, because leaving it out means every
+# declared value travels, which is the only spelling that compiles on both
+# targets anyway.
 handoffs:
   to_complaints:
     to: complaint_specialist
     when: The verified caller has a complaint or service problem.
+    input:
+      - name: problem
+        type: str
+        description: What the caller is unhappy about, in their own words.
+      - name: about
+        type: Appointment | None
+        description: >-
+          The appointment the complaint concerns, copied from the appointments
+          already recorded, only when the caller means a booking this call
+          made. A complaint about an earlier visit has none, so leave it out.
     context:
-      history: messages
-      variables: all
+      history: reset
 
   to_concierge:
     to: concierge
     when: The caller changes to a request owned by another specialist.
+    input:
+      - name: outcome
+        type: str
+        description: What was done for the caller, in one sentence.
+      - name: next_request
+        type: str
+        description: What the caller now wants from the front desk, in their own words.
     context:
-      history: messages
-      variables: all
+      history: reset
 
 escalations:
   to_manager:
@@ -225,13 +261,6 @@ variables:
       keeps the day it started on, which is deliberate: a date changing
       underneath a conversation would leave the caller and the agent disagreeing
       about what "tomorrow" means halfway through.
-
-  caller_reason:
-    type: list[Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]]
-    description: >-
-      Why the caller rang. A list, because one call can do more than one thing:
-      somebody who books and also complains has two reasons, and each step
-      appends the one it heard rather than replacing what the last step recorded.
 
   customer:
     type: Customer | None
