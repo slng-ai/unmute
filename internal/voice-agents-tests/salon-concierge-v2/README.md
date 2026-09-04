@@ -39,9 +39,20 @@ without the tool records nobody re-reads. Both handoffs carry the spoken turns
 for the same reason.
 
 Three shapes hold what the call learns. `Customer` is who the caller is once the
-verification step has looked them up. `Appointment` is one thing booked, moved
+verification step has looked them up, and it is two fields rather than four: the
+phone number is the identity here, so the record carries no id and no name. Both
+were tried and both failed the same way, because neither has a tool that fills
+it. The id left the model inventing one or sending empty, and the name is absent
+for every caller not already on file, so it rendered as an empty string in every
+prompt for the rest of the call. `Appointment` is one thing booked, moved
 or cancelled. `Complaint` is one thing the caller is unhappy about, and it can
 name the appointment it is about, which is a shape inside a shape.
+
+`record_complaint` sits on the complaint step and deliberately not on the
+specialist that owns it. With the tool on both, the specialist recorded the
+complaint itself and never entered the step, so `complaints` stayed empty on a
+call that recorded one. Its prompt already said to run the step. A tool within
+reach beat the prompt, and `unmute validate` now warns on the shape.
 
 Five values are declared with those shapes. `customer` holds the record and may
 be absent. `appointments` and `complaints` are lists, and the steps that fill

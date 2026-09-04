@@ -87,11 +87,10 @@ up, do not drop the plus. This value is data, not something to say out loud; the
 readback in step 3 is the only place a number is spoken, and it is spoken in the
 spaced shape.
 
-**The customer record.** From what the lookup returned plus what you already
-had: the name on the record, the confirmed number, and the status the lookup
-gave you, existing, created, or invalid. Never invent a name; a number that is
-not on file has no name and the field is empty. On an invalid number still
-return a record, with an empty name and the invalid status.
+**The customer record.** The confirmed number and the status the lookup gave
+you, existing, created, or invalid. The number is the identity here, so the
+record carries no name and no id: never add either. On an invalid number still
+return a record, with the invalid status.
 
 **The summary.** One short line for whoever reads this next: confirmed and
 looked up, confirmed but invalid, or not confirmed. Plain words, not something

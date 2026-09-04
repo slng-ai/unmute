@@ -81,9 +81,13 @@ agents:
     instructions: agents/complaint-specialist.md
     think: reasoning
     speak: voice
+    # `record_complaint` is deliberately NOT here. A tool on the agent as well
+    # as on its step is a step the model never enters: it took the short route,
+    # recorded the complaint itself, and `complaints` stayed empty on a call
+    # that recorded one (trace 9aa92e09, 2026-09-04). The prompt already said
+    # to run the step; the tool being in reach beat the prompt.
     tools:
       - look_up_refund_policy
-      - record_complaint
     # The concierge defines verify_customer. A bare name runs the same task from
     # here, so there is one definition and both agents can offer it.
     tasks:
@@ -158,7 +162,12 @@ shapes:
     # shape; `Complaint.complaint_id` and `Appointment.booking_id` are the two
     # ids that have a supplier.
     fields:
-      - customer_name: str
+      # No name field either, for the reason the id has none twice over. The
+      # phone number is the identity here, which is why the verification result
+      # is gated against returning a name. A new caller has none, so the field
+      # rendered as `"customer_name":""` in every prompt for the rest of the
+      # call, and the prefetched `customer_name` variable already holds the one
+      # the record has.
       - phone_number: Phone
       - name: status
         type: Literal["existing", "created", "invalid"]

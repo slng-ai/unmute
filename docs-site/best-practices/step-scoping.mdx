@@ -1,0 +1,141 @@
+---
+title: "Making a step actually run"
+description: "A step the model can skip is a step that never writes state. What to give a step so it gets entered, and what to take away from the agent above it."
+---
+
+A step is worth having when it does something the agent above it cannot do as
+well: a narrower prompt, a smaller context, a typed result that lands in
+declared state. None of that happens if the model never enters it.
+
+The model does not read your intent. It sees one list containing the agent's own
+tools and the step's entry function, and it picks. These are the rules that
+decide which way it picks.
+
+## Give the step a tool the agent does not have
+
+If the agent already holds every tool the step holds, the agent can finish the
+job without entering the step. It usually will, and then the step's `assign:`
+never runs and declared state never records what happened.
+
+This is the failure it produces. A complaint specialist declared:
+
+```yaml agent.yaml
+complaint_specialist:
+  tools:
+    - look_up_refund_policy
+    - record_complaint          # also the step's only tool
+  tasks:
+    - name: handle_complaint
+      tools:
+        - record_complaint
+      assign:
+        - complaints+: result.complaint
+```
+
+On a live call it recorded the complaint correctly, gave the caller a sensible
+next step, and the state block still read `Complaints: none recorded yet` at the
+end of the call. The specialist had the tool in reach, so it never entered the
+step, so nothing appended to `complaints`.
+
+The prompt was not the problem. Its workflow said "then run the complaint step
+in the same turn, silently", in those words. A tool within reach beat the prompt.
+
+The fix is to take the tool off the agent and leave it on the step:
+
+```yaml agent.yaml
+complaint_specialist:
+  tools:
+    - look_up_refund_policy
+  tasks:
+    - name: handle_complaint
+      tools:
+        - record_complaint
+```
+
+<Note>
+`unmute validate` warns when an agent holds every tool of one of its steps, and
+names the tool to move. It is a warning and not a refusal because whether the
+model takes the short route depends on your prompt and your `when:`, neither of
+which the compiler reads. Read the warning and decide.
+</Note>
+
+A step that declares no tools at all is fine. Its prompt, its context scope and
+its typed result are reasons to enter it that have nothing to do with tools.
+
+## Keep a read on the agent, keep the write on the step
+
+The rule above has a natural shape once you apply it. Lookups that answer
+questions belong on the agent, because the caller can ask at any time and
+entering a step to answer a price question is slow. Anything that records,
+saves, or changes something belongs on the step, alone, because that is the
+action whose result you want in declared state.
+
+Split that way, the model has a real reason to enter: the step holds the only
+route to the thing the caller is asking for.
+
+## Scope history down and let state carry the facts
+
+Once a step reads declared state, it does not need the transcript, and sending
+the transcript costs both money and accuracy.
+
+| Scope | What the step sees | Use it when |
+| --- | --- | --- |
+| `full` | The whole conversation | The step needs the caller's exact wording, or you have not declared state yet |
+| `messages` | What was said, without tool traffic | The step acts on what the caller asked for and records why |
+| `reset` | Nothing but its own prompt and declared values | The step is fully described by what it requires |
+
+`reset` is the strongest and the most demanding. A reset step never receives the
+turn that triggered it, so it cannot know why the caller rang. One agent gave a
+verification step a "reason" field to fill under `reset`, and the step asked the
+caller what they were calling about on every call, immediately after they had
+just said. Steps that act record why. A reset step records only what it is
+handed.
+
+## Give every step an escape, and read it
+
+A step advertises its own tools plus its finish, and nothing else. When the
+caller asks for something none of those cover, a step with no way out refuses,
+the caller presses, and it refuses again.
+
+Every generated step carries a reserved `unserved_request` field for this. The
+step does its own work, then names the request it could not serve in its own
+words, and finishes.
+
+The half people forget is the other side. The agent that owns the step has to
+act on that field. Say so once in the owning agent's prompt, and say it as a
+job:
+
+```md
+A step handing back an unserved request has given you a job, not an excuse, so
+act on it in the same turn and never apologise for it.
+```
+
+Left implicit, an agent will read the field, say something sympathetic, and end
+the turn. On one call it apologised to the caller for a booking it was fully
+able to make.
+
+## Do not let two prompts disagree
+
+A step's prompt and its owning agent's prompt are written at different times and
+read together. When they conflict, the model picks one and you cannot predict
+which.
+
+The pairing that bites most often is "do not run the same flow again for a
+request that just finished" on one side and "act on the unserved request" on the
+other. A second booking is a new request, not a repeat of the last one, but
+nothing says so unless you write it. Until it did, one call resolved the
+contradiction by apologising to the caller instead of booking.
+
+When you add a rule to a step, read the owning agent's prompt in the same
+sitting and check it still agrees.
+
+## Where the mechanics live
+
+<CardGroup cols={2}>
+  <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
+    Declaring a step, its result, and the reserved finish contract.
+  </Card>
+  <Card title="Choosing a context scope" icon="scissors" href="/optimization/context-scope">
+    What each scope costs, and what has to travel as declared state.
+  </Card>
+</CardGroup>

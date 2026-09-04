@@ -152,6 +152,17 @@
         ]
       },
       {
+        "group": "Best practices",
+        "public": true,
+        "icon": "award",
+        "pages": [
+          "best-practices/state-design",
+          "best-practices/step-scoping",
+          "best-practices/prompt-writing",
+          "best-practices/verifying-behaviour"
+        ]
+      },
+      {
         "group": "Run and observe",
         "public": true,
         "icon": "terminal",

@@ -4,8 +4,11 @@ Every instructions file, greeting, task prompt, and tool description in a
 package is read out loud or acted on mid-call. A prompt written for chat fails
 in voice, in three specific ways.
 
-No documentation page owns this content yet, so this file has no pointer line.
-When a page lands, this file points at it and stops being the authority.
+The public page is <https://unmute.mintlify.app/best-practices/prompt-writing>,
+which is what a reader lands on. That page is the authority on the rules; this
+file is the longer version a coding agent reads before it writes a package, so
+the two must agree. A rule added here that changes emitted behaviour goes on
+that page in the same commit.
 
 ## Why voice prompts are different
 

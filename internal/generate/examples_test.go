@@ -776,18 +776,46 @@ func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
 	// The declared shapes, and the four values they back. This package is what
 	// the feature is verified with, so a package that stops exercising a part of
 	// it fails here rather than passing quietly.
+	//
+	// The field floor is per shape rather than one number, because a shape is
+	// only as wide as the tools that fill it. `Customer` carries two: the
+	// lookup returns a number and a status and nothing else, so a third field
+	// would be one the model could only invent, which is the defect the shape's
+	// own `no id` comment records and the one the missing name recreated. Two
+	// still exercises what this shape is here for, a shaped text beside a
+	// Literal, and that pair is asserted rather than the count.
+	floors := map[string]int{"Customer": 2, "Appointment": 3, "Complaint": 3}
 	for _, name := range []string{"Customer", "Appointment", "Complaint"} {
 		shape, declared := resolved.Shapes[name]
 		if !declared {
 			t.Errorf("shape %q is no longer declared, so nothing in the tree exercises it", name)
 			continue
 		}
-		if len(shape.Fields) < 3 {
-			t.Errorf("shape %q declares %d fields; it is the verification package's own shape and it is meant to be a group", name, len(shape.Fields))
+		if len(shape.Fields) < floors[name] {
+			t.Errorf("shape %q declares %d fields, want at least %d; it is the verification package's own shape and it is meant to be a group",
+				name, len(shape.Fields), floors[name])
 		}
 		if shape.Description == "" {
 			t.Errorf("shape %q has no description, so the model is never told what the class is for", name)
 		}
+	}
+	// What `Customer` is for, now that its floor is two: the shaped text and the
+	// Literal are the two kinds a step has to hand back correctly, and a live
+	// call refused both before they were right.
+	var shaped, literal bool
+	for _, field := range resolved.Shapes["Customer"].Fields {
+		if field.Type == nil {
+			continue
+		}
+		if field.Type.Shaped != "" {
+			shaped = true
+		}
+		if len(field.Type.Literal) > 0 {
+			literal = true
+		}
+	}
+	if !shaped || !literal {
+		t.Errorf("Customer carries shaped text %v and a Literal %v; it needs both, because those are the two kinds a step hands back", shaped, literal)
 	}
 	// A shape inside a shape, which is the one thing no unit test settles: the
 	// generated schema emits $defs and $ref for it, and whether the provider

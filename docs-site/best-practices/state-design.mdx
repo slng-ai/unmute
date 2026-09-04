@@ -1,0 +1,162 @@
+---
+title: "Designing declared state"
+description: "What to declare, what to leave out, and why a record that duplicates another one reads worse than no record at all."
+---
+
+Declared state is the answer to "what has this call established". It reaches
+every prompt, so every field you add is a field the model reads on every turn
+for the rest of the call. That makes the design question less about what you
+*could* record and more about what somebody reading the block still needs.
+
+These are the rules that survived real calls. Each one is here because a call
+went wrong without it.
+
+## Declare what the call established, not what was said
+
+A variable holds a fact somebody can act on later: the confirmed number, the
+booking that was saved, the complaint that was recorded. The transcript already
+holds what was said.
+
+The distinction matters because the two go stale differently. A caller who says
+"tomorrow at three" and then changes to nine has said both, and only one is
+true. A step that reads declared state sees the one that is true. A step that
+re-reads the conversation has to work out which, on every turn, and it gets it
+wrong when the call is long.
+
+## Do not declare what another record already answers
+
+This is the rule that is easiest to break, because each record looks reasonable
+on its own.
+
+A salon agent declared `caller_reason` as a list of why the caller rang, and
+`appointments` as a list of what was booked. Both filled correctly. Here is what
+the block looked like near the end of a two booking call:
+
+```text
+2. Caller reason: ["create_booking","create_booking"]
+4. Appointments: [{"scheduled_date":"2026-09-05","scheduled_time":"15:00",
+     "appointment_type":"haircut","action":"create","booking_id":"bkg_383b2e4a2569"},
+   {"scheduled_date":"2026-09-06","scheduled_time":"09:00",
+     "appointment_type":"haircolor","action":"create","booking_id":"bkg_086c17a48979"}]
+```
+
+`Caller reason` says less than the line under it. Each appointment already
+carries its own `action`, so the reason list repeats it with the detail removed.
+The model now reads two records where one would do, and the shorter one is the
+misleading one.
+
+Before you declare a value, check whether a record you already keep can answer
+it. If it can, drop the new one. If it can answer it for most cases but not all,
+declare only the cases it cannot: a "why did they ring" value earns its place
+for the reasons that leave no other trace, such as a caller who only wanted a
+price, and not for the ones that produce a booking.
+
+## A shape is only as wide as the tools that fill it
+
+Give a shape a field and the model must produce it. If no tool in the package
+returns that field, the model has two options and both are bad: invent a value,
+or send an empty one and hope.
+
+A `Customer` shape once declared an `id`. Nothing in the package returned a
+customer id, and the prompt forbade inventing one, so the model sent an empty
+string and the step's finish was refused on every call. The same shape later
+declared a name. New callers have no name on file, so the field rendered as
+`"customer_name":""` in every prompt for the rest of the call, which is a field
+that costs tokens on every turn and tells the model nothing.
+
+<Warning>
+Work backwards from your tools. For each field in a shape, name the tool whose
+result fills it. A field with no such tool comes out of the shape.
+</Warning>
+
+If a value is genuinely optional, say so in the type rather than leaving the
+model to guess: `Id | None` tells it that absent is a legal answer, and the
+description says when.
+
+## One step, one record
+
+A step hands back one result. If the caller asks for two things, the step saves
+one, says it landed, finishes, and the agent sends it back in for the next one.
+
+Trying to do both in one visit loses the second. The step returns a single
+`appointment`, so a visit that books twice can only report one, and the other is
+saved in your system with nothing in declared state pointing at it.
+
+Write this into the step's prompt as its own job rather than as a restriction.
+"A second booking is yours: save one, say it landed, finish, and you will be
+sent straight back in" reads as an instruction. "Do not save two" reads as a
+reason to give up, and a step told only what not to do will finish having done
+nothing.
+
+## Append, and let the compiler drop the duplicate
+
+Use `+` on the key when a value can happen more than once in a call:
+
+```yaml agent.yaml
+assign:
+  - appointments+: result.appointment
+```
+
+A step re-entered mid-call reads the current value out of its own state block,
+and models hand it straight back. One call entered a booking step four times,
+finished three of them at once with the appointment the first visit had saved,
+and the caller's recap listed one booking four times.
+
+The generated append helper drops a structured entry already on the list, so
+that failure does not reach the caller. Plain values still append every time,
+because two bookings really are two separate reasons.
+
+You do not have to write a prompt rule for this. A rule in prose is advice the
+model may ignore under load. The guard is code and runs every time.
+
+## Mark a value that needs the caller's agreement
+
+A value the caller has not confirmed should not reach any prompt except the one
+asking them to confirm it:
+
+```yaml agent.yaml
+customer_phone:
+  type: Phone
+  default: ""
+  confirm: verify_customer
+```
+
+The compiler then keeps it out of every other prompt, satisfies no `requires:`
+guard with it, and refuses a prompt that names it. On a live call the front desk
+agent, asked "what number am I calling from", said it could not check. It was
+not being careful. It genuinely did not have the value.
+
+<Note>
+`confirm:` protects the placeholder, not the idea. A number typed into a prompt
+as an example walks straight past it, and the model reads the example out as if
+it were the caller's. See [Writing prompts for a voice](/best-practices/prompt-writing).
+</Note>
+
+## Every prompt has to read whole with the value empty
+
+A declared value is empty before the step that fills it runs, and a prompt is
+written once for both states. So this is wrong:
+
+```md
+The caller's bookings are {{appointments}}.
+```
+
+Empty, that reads "The caller's bookings are ." An empty value renders as words
+rather than as `[]` for exactly this reason, but the sentence still has to work
+around it. Write the prompt so the empty case is a complete thought:
+
+```md
+Read the conversation info below. Once it names a booking, that booking is
+already saved and you never make it again.
+```
+
+## Where the mechanics live
+
+<CardGroup cols={2}>
+  <Card title="Variables and shapes" icon="brackets-curly" href="/build/variables">
+    Declaring a variable, grouping fields into a shape, and the types available.
+  </Card>
+  <Card title="Pre-fetch and confirm" icon="clock" href="/build/prefetch">
+    Reading a value before the greeting, and gating one on the caller's yes.
+  </Card>
+</CardGroup>

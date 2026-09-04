@@ -1,0 +1,103 @@
+---
+title: "Checking what the agent did"
+description: "A transcript tells you what the caller heard. It does not tell you what the agent recorded, and the two disagree more often than you would expect."
+---
+
+An agent can hold a good conversation and record nothing. It can also record
+correctly and sound broken. The transcript only shows you one of those, so
+reading it is not checking.
+
+## Read the trace, not the transcript
+
+A call that reads well can still have written nothing to declared state. The
+case that shows why: an agent booked two appointments, and when the caller asked
+for a recap it named both correctly. That looked like proof the state was right.
+It was not. The agent could have read either the state block or the
+conversation, and from the transcript alone there is no way to tell which.
+
+What settles it is the rendered prompt. With tracing enabled, each model request
+carries the prompt it was sent, including the conversation state block:
+
+```text
+Conversation info:
+1. Booking date: 2026-09-04
+2. Caller reason: ["create_booking","create_booking"]
+3. Customer: {"phone_number":"+34600111222","status":"created"}
+4. Appointments: [{"scheduled_date":"2026-09-05","scheduled_time":"15:00", ...},
+                  {"scheduled_date":"2026-09-06","scheduled_time":"09:00", ...}]
+5. Complaints: none recorded yet.
+```
+
+Now you know. Two appointments, distinct, and nothing recorded against
+complaints on a call where a complaint was discussed, which is a defect the
+transcript hid completely.
+
+## Check scoping by reading the prompt that was sent
+
+The same technique is the only real check on context scoping and on `confirm:`.
+Both are promises about what a given prompt does not contain, and the only place
+to verify a negative is the prompt itself.
+
+Pull the state block from each step's request and compare. A value marked
+`confirm:` should appear in exactly one of them, the confirming step's. If it
+shows up in the agent's block, or in a later step's, the mark is not doing what
+you think.
+
+## Count tool spans, not call rows
+
+A trace shows both what the model asked for and what ran, and they are not the
+same number. A model can emit the same tool call twice in one turn, and the
+framework may execute it once.
+
+Count the spans named after the tool. Two call rows and one tool span is one
+execution. Two of each is two, and if both wrote something you have a duplicate
+to explain.
+
+The step's finish is the useful one. A step that never reaches its finish never
+wrote to declared state, whatever else it did, so a missing finish span explains
+an empty variable immediately.
+
+## Find the layer the defect lives in
+
+Reproduce a defect in the smallest layer that shows it. A provider rejecting a
+schema is one HTTP request, so it needs no audio, no tunnel and no caller. A
+prompt that reads badly needs a conversation. A carrier problem needs a real
+phone.
+
+Working in the wrong layer is what makes debugging slow. Half an hour of calls
+to diagnose something a single request would have shown in seconds is a common
+way to spend an afternoon.
+
+## Do not conclude from one call
+
+Two identical builds produce noticeably different calls. Timing, wording, and
+which of several valid routes the model takes all vary run to run.
+
+For anything about latency or about how often a behaviour happens, run three
+calls before you believe a number. For a defect that is a hard failure, such as
+a refused schema or a step that never runs, one call is enough, because the
+mechanism is the evidence and not the frequency.
+
+## Read the call back yourself
+
+After somebody talks to the agent, read the call back rather than working from
+what they tell you. What was said, which tools ran, which steps finished, and
+where the time went are all in the trace, and a description of a call leaves out
+the parts nobody heard.
+
+<Tip>
+The two questions worth asking of every call: did every step that should have
+run reach its finish, and does the final state block match what the caller was
+told. A gap in either one is a defect the conversation did not reveal.
+</Tip>
+
+## Where the mechanics live
+
+<CardGroup cols={2}>
+  <Card title="Talking to the agent locally" icon="microphone" href="/dev/overview">
+    Running a package in the browser, and seeding a call source.
+  </Card>
+  <Card title="Tracing" icon="chart-line" href="/tracing/overview">
+    Turning on tracing, and what each provider gives you.
+  </Card>
+</CardGroup>
