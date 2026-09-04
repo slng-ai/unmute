@@ -90,22 +90,17 @@ agents:
 ```
 
 `assign:` writes one field of a step's own result into a declared variable.
-`requires:` on the next step then does three things at once, and they are worth
-separating:
+`requires:` on the next step holds it back until the value exists, and tells
+the model which step supplies it. The caller never hears the guard. It is
+also the list a reader can check the prompt against, so keep using it
+whenever a step's own work genuinely depends on the value existing first.
 
-1. It holds the step back until the value exists, and tells the model which step
-   supplies it. The caller never hears the guard.
-2. It makes the value legal to read in that step's prompt. Without the entry,
-   `{{customer}}` in `tasks/booking.md` is refused at compile time.
-3. It is the list a reader can check the prompt against.
-
-The refusal names both steps and what to do. It is about a `{{name}}` an
-author wrote: a value with a declared shape is in the block already, so a
-prompt naming it by hand is a second copy rather than the only one.
-
-```text wrap
-tasks/booking.md: task "manage_booking" instructions references {{customer}}, which only task "verify_customer" assigns. Add customer to this task's requires: list, so the step waits for the value and its prompt can read it
-```
+What `requires:` no longer decides is whether `tasks/booking.md` may write
+`{{customer}}` by hand. Any task's or agent's prompt may already name any
+declared variable, listed in `requires:` or not, and an unset one renders as
+nothing rather than as a compile error. A value with a declared shape, like
+`customer` here, is already in the block above, so naming it again by hand is
+a second copy of the same thing rather than the only way to show it.
 
 <Warning>
 A variable with a `default:` is not waited for. A default is a value the
@@ -116,9 +111,11 @@ be produced during the call no default, and the guard becomes real.
 
 ## Declared state does not wait for `context.history`
 
-`requires:` still holds a step back, and still makes a plain `{{name}}`
-reference legal in that step's own prompt. What a declared shape changes is
-what a step gets without any `{{...}}` at all.
+`requires:` still holds a step back. It has nothing to do with whether a
+plain `{{name}}` reference is legal in a prompt any more: any task's or
+agent's prompt may already write `{{name}}` for any declared variable, this
+one included. What a declared shape changes is what a step gets without
+writing any `{{...}}` at all.
 
 Give a variable a type that is more than a bare `string`, one built from
 [the type grammar](/reference/variables#the-type-grammar) such as `Phone`, a
@@ -133,10 +130,11 @@ conversation, and never ask for something already recorded here.
 1. Customer: {"customer_name":"Robin","customer_id":"c-4192","phone_number":"+34600111222","status":"existing"}
 ```
 
-This does not go through `history:`. `manage_booking` reads `customer` in
+This does not go through `history:`. `manage_booking` gets `customer` in
 that block even with `history: reset`, and `tasks/booking.md` names it
-nowhere. `requires:` is still the reason the step waits for it; it stops
-being the reason the step can see it.
+nowhere. `requires:` is still the reason the step waits for the value; the
+block above is why the step can see it without writing `{{customer}}` at
+all.
 
 `customer_phone` carries `confirm: verify_customer`, so it renders only in
 `verify_customer`'s own block, the same rule its own guard already follows: a

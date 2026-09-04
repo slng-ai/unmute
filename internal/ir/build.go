@@ -1031,12 +1031,42 @@ func checkAssignments(taskName string, assign []AssignTo, agent *Agent) error {
 			// not resolve" says neither where to look nor what is wrong.
 			return fmt.Errorf("assign writes to %q, and it is not declared under the variables: block", entry.Var)
 		}
-		field, ok := task.Result[entry.Field]
+		// The first segment indexes the task's own result; anything after the
+		// first dot is a path into that field's declared shape, walked the same
+		// way a `requires:` path is (FieldPath, also used by checkRequires).
+		root, rest, _ := strings.Cut(entry.Field, ".")
+		field, ok := task.Result[root]
 		if !ok {
 			return fmt.Errorf("assign result field %q does not resolve", entry.Field)
 		}
-		target := want.Shape
 		source := field
+		if rest != "" {
+			if field.Shape == nil {
+				// A raw JSON Schema field, an enum field and a bare primitive
+				// field all have no declared shape, so none has fields a path
+				// can walk into. FieldPath says this the same way for a shape
+				// field with no such name; this is the same refusal for a field
+				// that never had fields to begin with.
+				kind := pythonSpelling(field.Type)
+				switch {
+				case field.Schema != nil:
+					kind = "a raw JSON Schema object"
+				case len(field.Enum) > 0:
+					kind = "an enum"
+				}
+				return fmt.Errorf("assign result %q: %q is %s, which has no fields to name", entry.Field, root, kind)
+			}
+			picked, err := FieldPath(agent.Shapes, field.Shape, strings.Split(rest, "."))
+			if err != nil {
+				return fmt.Errorf("assign result %q: %w", entry.Field, err)
+			}
+			if picked.Structured() {
+				source = ResultField{Type: PrimitiveString, Shape: picked}
+			} else {
+				source = ResultField{Type: picked.Primitive}
+			}
+		}
+		target := want.Shape
 		if entry.Append {
 			if !target.IsList() {
 				return fmt.Errorf("assign appends to %q with %q, and %q is declared %s rather than a list. "+

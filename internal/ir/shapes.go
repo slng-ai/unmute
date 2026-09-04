@@ -450,6 +450,12 @@ func (t *TypeRef) Equal(other *TypeRef) bool {
 // say which entry it meant.
 func FieldPath(shapes map[string]Shape, root *TypeRef, path []string) (*TypeRef, error) {
 	at := root
+	// A link partway down the path may itself be absent, which makes whatever
+	// the path finds past it absent along with it: the field named at the end
+	// exists only when every field carrying it does. requires: discards the
+	// returned type and never sees this; an assign: needs it, because the
+	// variable it writes into has to be declared to match.
+	optional := false
 	walked := make([]string, 0, len(path))
 	for _, segment := range path {
 		if at.IsList() {
@@ -469,8 +475,16 @@ func FieldPath(shapes map[string]Shape, root *TypeRef, path []string) (*TypeRef,
 			return nil, fmt.Errorf("shape %q declares no field %q. It declares %s",
 				shape.Name, segment, strings.Join(names, ", "))
 		}
+		if at.Optional {
+			optional = true
+		}
 		at = shape.Fields[index].Type
 		walked = append(walked, segment)
+	}
+	if optional && at != nil && !at.Optional {
+		picked := *at
+		picked.Optional = true
+		return &picked, nil
 	}
 	return at, nil
 }

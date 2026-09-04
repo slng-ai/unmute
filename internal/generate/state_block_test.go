@@ -50,6 +50,34 @@ func TestStateBlockRendersJSONAndNotARepr(t *testing.T) {
 	}
 }
 
+// TestStateTextRendersEmptyNotNoneForABarePrimitive is what checkTemplates'
+// deleted read restriction used to make moot: once an agent prompt or a task
+// prompt may name any declared variable (gaps 2 and 3 of the scoped variables
+// feature), a plain str/int/bool/float variable with nothing in it yet is a
+// realistic render, not only a structured one. _state_text's own fallback
+// already covers it unconditionally, for a name outside _STATE_STRUCTURED as
+// much as for one inside it: `text = "" if value is None else str(value)` runs
+// last regardless, so a bare primitive holding Python None renders as an empty
+// string and never the word "None". This holds it so a future change to the
+// structured branch cannot silently reintroduce a repr for the bare case.
+func TestStateTextRendersEmptyNotNoneForABarePrimitive(t *testing.T) {
+	agent := loadTypedState(t)
+	block, err := TypedState(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := functionBody(t, block.Source, "def _state_text(name, value):")
+	if body == "" {
+		t.Fatal("no _state_text emitted, so this gate proves nothing")
+	}
+	// At the function's own indent, not nested inside `if name in
+	// _STATE_STRUCTURED:`, so it runs whether or not the name is declared
+	// structured.
+	if !strings.Contains(body, "\n    text = \"\" if value is None else str(value)\n") {
+		t.Errorf("_state_text does not unconditionally fall back to an empty string for None:\n%s", body)
+	}
+}
+
 // TestStateBlockWarningCarriesNoLibrarySpecificPlaceholder is the same rule the
 // pre-fetch log lines carry, for the same reason: this warning is emitted into
 // both modules from one place, LiveKit logs through stdlib `logging` and Pipecat

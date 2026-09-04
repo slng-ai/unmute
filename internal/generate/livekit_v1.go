@@ -863,6 +863,7 @@ func renderLiveKitV1(name string, data livekitData) ([]byte, error) {
 	}
 	tmpl, err := template.New(name).Funcs(template.FuncMap{
 		"pyq":               pyQuote,
+		"resultAccess":      resultAccess,
 		"join":              strings.Join,
 		"inputBlockPreview": inputBlockPreview,
 		"triple":            pyTriple,

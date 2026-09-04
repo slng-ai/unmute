@@ -276,6 +276,54 @@ func TestLiveKitFinishParameterIsTheGeneratedClass(t *testing.T) {
 	}
 }
 
+// TestDottedAssignWalksIntoAShapedResultAtEmission is gap 1 of the scoped
+// variables feature, proven at the emitted seam: a step's result is a plain
+// dict by the time either driver assigns from it, because _typed_result's
+// _plain (shapes.go) has already dumped every declared shape out of its
+// Pydantic model, nested shapes included. So a dotted assign field walks a
+// chain of dict .get() calls rather than a single subscript, every link but the
+// last wrapped in `or {}` so an absent or null parent reads as None rather than
+// raising.
+//
+// A bare (undotted) field keeps the single subscript this always rendered:
+// TestLiveKitV1SingleTaskDelegate already holds that byte for byte, so this
+// only adds the dotted case.
+func TestDottedAssignWalksIntoAShapedResultAtEmission(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Controls["do_find"] = &ir.Delegate{
+		Kind: ir.ControlDelegate, Task: "find_slot",
+		When:   "The caller only wants to check for a slot, not book yet.",
+		Assign: []ir.AssignTo{{Var: "caller_phone", Field: "appointment.scheduled_date"}},
+	}
+	def := agent.Agents["reservations"]
+	def.Tools = append(def.Tools, "do_find")
+	agent.Agents["reservations"] = def
+
+	const want = `.get("appointment") or {}).get("scheduled_date")`
+	livekit, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate livekit: %v", err)
+	}
+	if got := artifactFile(t, livekit, "agent.py"); !strings.Contains(got, `ctx.userdata.caller_phone = (result`+want) {
+		t.Errorf("livekit does not walk the dotted assign path:\n%s", got)
+	}
+
+	pipecat, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatalf("generate pipecat: %v", err)
+	}
+	if got := artifactFile(t, pipecat, "bot.py"); !strings.Contains(got, want) {
+		t.Errorf("pipecat does not walk the dotted assign path:\n%s", got)
+	}
+}
+
 // TestTwoAppendedEntriesAreBothRecorded is FR-009a and SC-006 at the emitted
 // seam: an append adds an entry, and the list it adds to starts empty, so a
 // second call of the same step cannot overwrite the first.

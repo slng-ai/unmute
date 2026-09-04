@@ -78,6 +78,12 @@ variables:
     type: string
 ```
 
+The right side of a pair can also be a dotted path into a declared shape,
+`result.<field>.<subfield>`, to pick one part of it rather than the whole
+thing. See [Assigning a task result to a
+variable](/reference/variables#assigning-a-task-result-to-a-variable) for the
+full rule, including what happens when the picked part is optional.
+
 Every task, including a task inside a group, needs a non-empty `result:` and `context.history`.
 
 A task can also declare its own `think:`, naming a different reasoning
@@ -264,6 +270,13 @@ A task that needs a value the conversation has not collected yet declares
 Every name must be a declared variable, or the package will not compile. A guard
 on a name nothing sets could never pass, and the symptom would be a step that
 silently never starts.
+
+`requires:` has one job: it holds the step back until the value exists. It is
+not what decides whether a prompt may read the value. Any task's or agent's
+instructions may already write `{{name}}` for any declared variable, listed
+in `requires:` or not; write the sentence so it reads whole when the value is
+still empty. Add a name to `requires:` when the step's own work cannot start
+without it, not in order to make it readable.
 
 **The caller hears nothing.** While `customer_phone` is empty the task does not
 run, and the refusal goes to the model rather than to the caller. It names the

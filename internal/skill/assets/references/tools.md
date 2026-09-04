@@ -64,7 +64,7 @@ also the list of what you could have written.
 |---|---|---|
 | `description` | yes, except on `builtin:` and `mcp:` | everywhere else |
 | `input` | yes, except on `builtin:`, `mcp:` and `knowledge:` | everywhere else |
-| `output` | no | everywhere except `builtin:`, `mcp:` and `knowledge:` — but see below |
+| `output` | no | everywhere except `builtin:`, `mcp:` and `knowledge:`, but see below |
 | `inject` | no | `webhook:` and `local:` only |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` and `knowledge:` |
@@ -173,15 +173,15 @@ knowledge:
 
 | Field | Required | Default | Rule |
 |---|---|---|---|
-| map key in `knowledge:` | yes | — | 3 to 64 characters of `[a-z0-9_]` |
-| `documents` | yes | — | folder path relative to the package root, holding `.txt`, `.md` or `.pdf` files |
+| map key in `knowledge:` | yes | none | 3 to 64 characters of `[a-z0-9_]` |
+| `documents` | yes | none | folder path relative to the package root, holding `.txt`, `.md` or `.pdf` files |
 | `embed` | no | `openai` | one of the supported services below |
 | `mode` | no | `hybrid` | `meaning`, `keyword`, or `hybrid` |
 | `chunk_size` | no | `90` | passage size in **tokens**, 1 to 2048 |
 | `chunk_overlap` | no | `20` | tokens two neighbouring passages share; never larger than `chunk_size` |
 | `top_k` | no | `3` | passages a lookup returns, 1 to 20 |
 | `min_score` | no | none | drop results below this score, 0 to 1. See the warning below |
-| `base` on the tool | yes | — | names a base declared in `knowledge:` |
+| `base` on the tool | yes | none | names a base declared in `knowledge:` |
 
 ### Which mode to write
 
@@ -331,7 +331,7 @@ interruption: provider_default
 That is what lets staging and production run the same package against different
 APIs.
 
-Both names — the `url_env` and any `auth.token_env` — also go in the package's
+Both names (the `url_env` and any `auth.token_env`) also go in the package's
 top-level `secrets:` list. That is a separate file from this one, and forgetting
 it is a warning at exit 0 rather than an error, so it is easy to miss. See
 `package.md`.
@@ -437,7 +437,7 @@ The rules the function follows:
 
 **An optional `input` property is always passed, as an empty string.** The
 generated call is by keyword every time, so a Python default in your handler is
-dead code — it receives `""`, not `None` and not your default. Write
+dead code: it receives `""`, not `None` and not your default. Write
 `def check(date, part_of_day="")` and treat `""` as "not given". A handler that
 tests `if part_of_day is None:` compiles clean and misbehaves on the first call,
 and neither `validate` nor `compile` will say a word about it.

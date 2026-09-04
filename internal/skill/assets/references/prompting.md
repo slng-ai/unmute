@@ -215,8 +215,9 @@ template is a chance for a misconfigured deployment to say "customer_name" out
 loud.
 
 An agent's prompt renders on entry and again once one of its own steps records
-a value, so it can name a variable that already has a value or one a step it
-owns writes. See `variables.md`.
+a value. It may already name any declared variable, whether or not anything
+has assigned it yet: an unset one renders as nothing, so write the sentence to
+read whole either way. See `variables.md`.
 
 ## Making it sound human
 

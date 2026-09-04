@@ -8,7 +8,7 @@ the brief before you write files, then say what context crosses that boundary.
 One rule carries most of the surface:
 
 > Four of the five lists point at a same-named top-level catalog; attach by
-> name. The fifth, `tasks:`, has none — write the task right where it runs.
+> name. The fifth, `tasks:`, has none: write the task right where it runs.
 
 | Agent list | Catalog | What it does | Does control come back? |
 |---|---|---|---|
@@ -32,12 +32,12 @@ agents can offer one task without either owning a second copy of it.
 
 A task has `tools:` and `handoffs:` and no other list. There is no
 `task_groups:` and no `escalations:` key on a task, so a task cannot start
-another task or reach a person directly — those shapes are unwritable rather
+another task or reach a person directly: those shapes are unwritable rather
 than rejected.
 
 A task with no `when:` is a definition only, valid solely as a step of a task
-group. An agent naming it by bare name — rather than listing it as a step of a
-`task_groups:` entry — is refused: there is no trigger for the agent to act
+group. An agent naming it by bare name (rather than listing it as a step of a
+`task_groups:` entry) is refused: there is no trigger for the agent to act
 on.
 
 ## Choose the native shape
@@ -238,7 +238,7 @@ agents:
 ```
 
 A task is nested inside the agent that runs it. The mapping does two things at
-once: it defines the task — `instructions`, `tools`, `result`, `context` — and
+once: it defines the task (`instructions`, `tools`, `result`, `context`) and
 it attaches it, because `when:` is the trigger the model reads to decide to
 run it. There is no separate catalog to keep in step with the agent's own
 list.
@@ -267,6 +267,11 @@ assign:
   - customer_id: result.customer_id
   - customer_name: result.customer_name
 ```
+
+The right side of a pair can also be a dotted path into a declared shape,
+`result.<field>.<subfield>`, to pick one part of it instead of the whole
+result; see "Picking one part of a structured result" in
+`references/variables.md`.
 
 **Hand the step what the caller asked for.** A step on `history: reset` never
 receives the turn that triggered it. `expect:` is a list of typed fields the step
@@ -344,8 +349,8 @@ agent.yaml:17: task "customer_record" is defined by agent "appointment_desk" and
 ### A definition with no `when:`
 
 A task with no `when:` is a definition only, valid solely as a step of a task
-group. An agent naming it by bare name — rather than listing it as a step in
-some `task_groups:` entry — is refused: there is no trigger for the agent to
+group. An agent naming it by bare name (rather than listing it as a step in
+some `task_groups:` entry) is refused: there is no trigger for the agent to
 act on. Give it a `when:` to make it something an agent runs on its own, or
 list it as a step in [Task group](#task-group).
 
@@ -412,31 +417,14 @@ Every name in `requires:` must be a declared variable, or the package fails to
 compile. That is deliberate: a guard on a name nothing sets can never pass, and
 the symptom would be a task that silently never starts.
 
-**`requires:` also decides what a task's own prompt may read.** A task's
-`instructions` may always name a variable that already has a value, such as one
-with a `default` or `source: call_start`. To name a variable another task
-assigns, list it in this task's own `requires:` too. Naming it without
-listing it is a compile error:
-
-```
-agent.yaml:41: task "manage_booking" instructions references {{customer_status}},
-which only task "verify_customer" assigns. Add customer_status to this task's
-requires: list, so the step waits for the value and its prompt can read it
-```
-
-The same list that holds the task back is what makes the value safe to read:
-by the time the guard lets the task start, the value exists. Do not fix the
-refusal by adding the name to the reading task's own `requires:` when that
-same task is the one assigning it. That waits on the task's own output.
-Assign it from an earlier task instead, or give the variable a default or a
-`source:`:
-
-```
-agent.yaml:52: task "verify_customer" instructions references {{customer_status}},
-and "verify_customer" is the only step that assigns it, so the value does not
-exist while this prompt is being built. Assign it from an earlier step, or
-give the variable a default or a source:
-```
+**`requires:` has one job: it holds the step back until the value exists.**
+It does not decide what a task's own prompt may read. Any task's or agent's
+`instructions` may already name any declared variable, listed in `requires:`
+or not, and an unset one renders as nothing rather than failing to compile;
+write the sentence so it reads whole either way. Keep using `requires:` when
+the step's own work genuinely cannot start without the value: the guard is
+still what stops the step running early, and it is still the list a reader
+can check the prompt against.
 
 **What the caller hears: nothing.** The refusal goes to the model, not to the
 caller. It names the missing variable and the task that supplies it, so the
@@ -446,7 +434,7 @@ model usually collects the value during the earlier turns and the guard is
 never reached. After five refusals of the same task the agent stops recovering
 quietly and asks the caller for the value out loud, in its own words. That
 bound lives in the emitted code, not in a prompt. Both refusals are logged
-with the variable and task names only — never the value, which matters when
+with the variable and task names only, never the value, which matters when
 the name is a phone number.
 
 **Do not put an agent in front of a task to hold a guard.** Before `requires:`
@@ -479,7 +467,7 @@ the caller's original reason for being in the step is not an unserved request,
 and a handoff the step declares wins over it.
 
 The request itself travels in `unserved_request`, a reserved optional string on
-every generated finish. **Never declare it in a task's `result:`** — validation
+every generated finish. **Never declare it in a task's `result:`.** Validation
 rejects a task result that claims the name. It arrives inside the returned
 result, and the owning agent is told to take that request next, so the caller
 does not repeat it. Only `then: return` hands the result to an owner on both
@@ -744,7 +732,7 @@ rather than one list with a kind field.
 
 One package in the unmute repository shows these shapes working together:
 `examples/salon-concierge` has two agents that hand the caller over, two tasks
-nested in the concierge — one of them guarded with `requires:` — and a bare
+nested in the concierge (one of them guarded with `requires:`) and a bare
 name that lets the complaint specialist run the same verification task without
 a second copy.
 

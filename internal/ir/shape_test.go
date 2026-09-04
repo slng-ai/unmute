@@ -624,6 +624,174 @@ variables:
 	}
 }
 
+// TestBuildAssignAcceptsASubFieldOfAShapedResult is gap 1 of the scoped
+// variables feature: a step's result can hand back a whole shape, and an
+// assign: may now name one field inside it rather than only the shape as a
+// whole. The walk is FieldPath, the same one requires: uses above, reached
+// from assign: instead of from a guard.
+func TestBuildAssignAcceptsASubFieldOfAShapedResult(t *testing.T) {
+	pkg := typedPackageWithTasks(t, `shapes:
+  - name: Appointment
+    fields:
+      - scheduled_date: Date
+variables:
+  last_booking_day:
+    type: Date
+`, `    tasks:
+      - name: book
+        when: The caller wants an appointment.
+        instructions: instructions.md
+        assign:
+          - last_booking_day: result.appointment.scheduled_date
+        result:
+          appointment: Appointment
+`)
+	if _, err := Build(pkg); err != nil {
+		t.Fatalf("assign into a sub-field of a shaped result was refused: %v", err)
+	}
+}
+
+// TestBuildRefusesAnAssignPathIntoAList is the same refusal
+// TestBuildAcceptsARequiresPathThatResolves's sibling proves for requires:,
+// reached from assign: instead: a path cannot say which entry of a list it
+// means, so it is refused rather than left as a write nothing can ever satisfy.
+func TestBuildRefusesAnAssignPathIntoAList(t *testing.T) {
+	pkg := typedPackageWithTasks(t, `shapes:
+  - name: Appointment
+    fields:
+      - scheduled_date: Date
+      - name: services
+        type: list[str]
+variables:
+  last_booking_day:
+    type: Date
+`, `    tasks:
+      - name: book
+        when: The caller wants an appointment.
+        instructions: instructions.md
+        assign:
+          - last_booking_day: result.appointment.services.name
+        result:
+          appointment: Appointment
+`)
+	_, err := Build(pkg)
+	if err == nil {
+		t.Fatal("an assign path through a list built, and nothing says which entry it meant")
+	}
+	for _, phrase := range []string{"services", "is a list", "cannot name a field inside one"} {
+		if !strings.Contains(err.Error(), phrase) {
+			t.Errorf("refusal %q does not say %q", err.Error(), phrase)
+		}
+	}
+}
+
+// TestBuildRefusesAnAssignPathToAnUnknownField is the misspelled-field half:
+// without the resolution this is a write that can never be right, and nothing
+// says so until a real call sits waiting on it.
+func TestBuildRefusesAnAssignPathToAnUnknownField(t *testing.T) {
+	pkg := typedPackageWithTasks(t, `shapes:
+  - name: Appointment
+    fields:
+      - scheduled_date: Date
+variables:
+  last_booking_day:
+    type: Date
+`, `    tasks:
+      - name: book
+        when: The caller wants an appointment.
+        instructions: instructions.md
+        assign:
+          - last_booking_day: result.appointment.appointment_time
+        result:
+          appointment: Appointment
+`)
+	_, err := Build(pkg)
+	if err == nil {
+		t.Fatal("an assign path naming no field built")
+	}
+	for _, phrase := range []string{`shape "Appointment" declares no field "appointment_time"`, "scheduled_date"} {
+		if !strings.Contains(err.Error(), phrase) {
+			t.Errorf("refusal %q does not say %q", err.Error(), phrase)
+		}
+	}
+}
+
+// TestBuildRefusesAnAssignPathThroughAnEnumField is the third way a dotted
+// assign path can fail to resolve: an enum result field, like a raw JSON
+// Schema field, has no declared shape, so it has no fields for a path to name.
+func TestBuildRefusesAnAssignPathThroughAnEnumField(t *testing.T) {
+	pkg := typedPackageWithTasks(t, `variables:
+  last_booking_day:
+    type: Date
+`, `    tasks:
+      - name: book
+        when: The caller wants an appointment.
+        instructions: instructions.md
+        assign:
+          - last_booking_day: result.status.label
+        result:
+          status:
+            enum:
+              - pending
+              - confirmed
+`)
+	_, err := Build(pkg)
+	if err == nil {
+		t.Fatal("an assign path through an enum field built, and it has no fields to walk into")
+	}
+	for _, phrase := range []string{`"status" is an enum`, "has no fields to name"} {
+		if !strings.Contains(err.Error(), phrase) {
+			t.Errorf("refusal %q does not say %q", err.Error(), phrase)
+		}
+	}
+}
+
+// TestBuildAssignPropagatesOptionalAlongAPath is the rest of gap 1: a shape
+// field the step may not have produced yet makes every field inside it
+// equally absent, so a path walked through one comes back Optional even where
+// the field at the end of it is declared plainly, and that has to reach the
+// variable it is written into.
+func TestBuildAssignPropagatesOptionalAlongAPath(t *testing.T) {
+	shapes := `shapes:
+  - name: Appointment
+    fields:
+      - scheduled_date: Date
+`
+	tasks := `    tasks:
+      - name: book
+        when: The caller wants an appointment.
+        instructions: instructions.md
+        assign:
+          - last_booking_day: result.appointment.scheduled_date
+        result:
+          appointment: Appointment | None
+`
+	t.Run("refused into a variable declared without | None", func(t *testing.T) {
+		pkg := typedPackageWithTasks(t, shapes+`variables:
+  last_booking_day:
+    type: Date
+`, tasks)
+		_, err := Build(pkg)
+		if err == nil {
+			t.Fatal("a path through an optional field assigned into a non-optional variable built")
+		}
+		for _, phrase := range []string{"Date | None", "the variable is Date"} {
+			if !strings.Contains(err.Error(), phrase) {
+				t.Errorf("refusal %q does not say %q", err.Error(), phrase)
+			}
+		}
+	})
+	t.Run("accepted once the variable is declared | None", func(t *testing.T) {
+		pkg := typedPackageWithTasks(t, shapes+`variables:
+  last_booking_day:
+    type: Date | None
+`, tasks)
+		if _, err := Build(pkg); err != nil {
+			t.Fatalf("a path through an optional field into an equally optional variable was refused: %v", err)
+		}
+	})
+}
+
 // TestTypeRefSchemaPublishesEveryField is the drift guard the hand-wired
 // definition in schema.go needs: reflection cannot follow TypeRef into itself,
 // so its schema is written by hand, and a field added to the struct without a

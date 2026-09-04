@@ -236,7 +236,7 @@ own. The compiler refuses it first.
 **`unmute validate` checks that the list is complete**, and warns at exit 0
 naming every environment name the package references and this block does not
 declare, with the file and field that named it. It warns whether or not the
-block exists, so deleting it does not buy silence — a package that declares
+block exists, so deleting it does not buy silence: a package that declares
 nothing and references eight names is the case most worth reporting.
 
 The generated agent's own startup check is derived the same way: from what the
@@ -463,7 +463,7 @@ so there is nothing to run locally and `unmute dev` does not apply to it. See
 
 `vapi` and `deepgram` used to be accepted as validation-only targets and were
 retired on 2026-08-24. Naming either as a target is refused. Note that
-`deepgram` is still a **model vendor** — `deepgram/nova:3` and similar
+`deepgram` is still a **model vendor**: `deepgram/nova:3` and similar
 are unaffected. A target and a model vendor are different things that can share
 a word.
 
@@ -506,7 +506,7 @@ itself reads.
 
 **A push replaces.** A tool reference the package no longer names is detached and
 a differing field is overwritten, and the agent's name is its target instance
-name — so two packages that both call their slng target `slng` write the same
+name, so two packages that both call their slng target `slng` write the same
 live agent. `--dry-run` names what would go; `--agent-id` picks a different
 agent.
 

@@ -840,6 +840,7 @@ func renderPipecatV1(name string, data pipecatData) ([]byte, error) {
 	}
 	tmpl, err := template.New(name).Funcs(template.FuncMap{
 		"pyq":               pyQuote,
+		"resultAccess":      resultAccess,
 		"pytriple":          pyTriple,
 		"join":              strings.Join,
 		"inputBlockPreview": inputBlockPreview,
@@ -862,6 +863,31 @@ func renderPipecatV1(name string, data pipecatData) ([]byte, error) {
 
 // pyQuote renders a Go string as a Python string literal.
 func pyQuote(s string) string { return strconv.Quote(s) }
+
+// resultAccess is how an assign: reads one of its own step's result fields, at
+// the point that result exists on both targets: a plain dict, because
+// _typed_result's _plain (shapes.go) has already dumped every declared shape
+// out of its Pydantic model before either driver ever assigns from it. A bare
+// field name renders the subscript this always rendered, byte for byte, so a
+// package with no dotted assign emits exactly what it emitted before this. A
+// dotted path chains dict .get() calls instead, wrapping every link but the last
+// in `or {}` so an absent or null parent reads as None rather than raising, which
+// is what an Optional link on the path means (FieldPath, internal/ir/shapes.go).
+func resultAccess(base, field string) string {
+	parts := strings.Split(field, ".")
+	if len(parts) == 1 {
+		return base + "[" + pyQuote(field) + "]"
+	}
+	expr := base
+	for i, part := range parts {
+		if i == len(parts)-1 {
+			expr += ".get(" + pyQuote(part) + ")"
+		} else {
+			expr = "(" + expr + ".get(" + pyQuote(part) + ") or {})"
+		}
+	}
+	return expr
+}
 
 // promptConstName is the module constant that holds an agent's system prompt
 // (referenced by its LLM builder and its Flow restore handler, dedup per V2).

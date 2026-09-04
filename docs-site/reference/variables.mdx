@@ -18,7 +18,7 @@ full, and [Tasks](/build/orchestration/tasks) does the same for `expect:`.
 | `variables:` | the call's state | the whole call | every prompt, through the block the compiler adds or `{{name}}` |
 | `prefetch:` + `assign:` | state filled before the first word | the whole call | the same |
 | `expect:` | what a step or a receiving agent is handed, filled by the calling model from the caller's words | one visit (a task), until the next handoff (an agent) | that prompt only, in its `Request:` block |
-| `result:` + `assign:` | what a step hands back, written into state at `finish` | the whole call from then on | every prompt |
+| `result:` + `assign:` | what a step hands back, or one part of it, written into state at `finish` | the whole call from then on | every prompt |
 
 State is written only at a seam: before the call, by `prefetch:`, and at
 `finish`, by a step's `result:` and `assign:`. The caller's own words enter a
@@ -289,8 +289,8 @@ as a webhook path. The five sites render at different times:
 | Site | Renders | Can name |
 |---|---|---|
 | `conversation.greeting.text` | once, at session start | a variable that already has a value |
-| an agent's instructions | on entry, and again once one of its own steps records a value | a variable that already has a value, or one a step it owns records |
-| a task's instructions | when that task starts | a variable that already has a value, or one listed in this task's own `requires:` |
+| an agent's instructions | on entry, and again once one of its own steps records a value | any declared variable |
+| a task's instructions | when that task starts | any declared variable |
 | a tool's `inject:` value | on every tool call | any declared variable |
 | a webhook tool's `path` | on every tool call | any declared variable, URL encoded |
 
@@ -298,34 +298,25 @@ None of the five may name or render a value still awaiting the caller's
 agreement: see [`confirm:`](#confirm-marks-a-value-the-caller-has-to-agree-to)
 above for what each site does instead.
 
-"Already has a value" means `source: call_start`, a system source, a `default`, or
-a `prefetch:` entry that assigns it. Naming anything else in a session-start site
-is an error:
+Write the sentence so it reads whole when the named value is empty: at every
+site but one, an unset variable renders as nothing, never as the word `None`.
+
+The greeting is that one exception. It renders once, before the first word,
+with no later turn to catch up on a value that arrives after, so it may only
+name a variable that already has a value: `source: call_start`, a system
+source, a `default`, or a `prefetch:` entry that assigns it. Naming anything
+else there is an error, not a silent empty string:
 
 ```text wrap
 conversation.greeting.text references {{requested_service}}, which has no value when the prompt is built; give it source: call_start, a system source, or a default
 ```
 
-Task instructions render live call state when the task begins, but a task
-prompt may still only name a variable that already has a value or one listed
-in its own `requires:`. Naming a variable only another task assigns, without
-listing it here, is a compile error:
-
-```text wrap
-tasks/booking.md: task "manage_booking" instructions references {{customer_status}}, which only task "verify_customer" assigns. Add customer_status to this task's requires: list, so the step waits for the value and its prompt can read it
-```
-
-Listing the name in `requires:` also holds the task back until the value
-exists, so the prompt never renders it empty. A task naming a value only it
-assigns itself cannot fix this by adding the name to its own `requires:`,
-because that would wait on the task's own output:
-
-```text wrap
-tasks/verify-customer.md: task "verify_customer" instructions references {{customer_status}}, and "verify_customer" is the only step that assigns it, so the value does not exist while this prompt is being built. Give the variable a default or a source:, or assign it from an earlier step
-```
-
-An undeclared name is an error too. Invalid session-start and undeclared names
-are never silent empty strings.
+An agent's instructions and a task's instructions may name any declared
+variable, whether or not anything has assigned it yet, and whether or not a
+task's own `requires:` lists it. `requires:` still holds a step back until
+the value exists; it no longer decides what the step's prompt may read. An
+undeclared name is an error everywhere, greeting included, and never a silent
+empty string.
 
 ## Seeding values locally
 
@@ -438,6 +429,41 @@ assign appends to "customer_phone" with "customer_phone+:", and "customer_phone"
 
 Without the `+`, an assignment replaces the value, which is what `assign:`
 has always done.
+
+### Picking one part of a structured result
+
+The right side of an `assign:` pair does not have to be the whole result. It
+can be `result.<field>`, or a dotted path into a declared shape,
+`result.<field>.<subfield>`, as deep as the shape goes:
+
+```yaml agent.yaml
+tasks:
+  - name: manage_booking
+    result:
+      appointment: Appointment | None
+    assign:
+      - appointments+: result.appointment
+      - last_booking_day: result.appointment.scheduled_date
+```
+
+with `last_booking_day` declared `type: Date | None`.
+
+The picked part's type has to fit the variable it lands in: a `Date` field
+into a `Date` variable, a `Literal` into the same `Literal`, a whole shape
+into a variable declared with that shape.
+
+Two paths are refused rather than silently accepted:
+
+- **a path through a list.** Nothing says which entry to take, so
+  `result.appointments.scheduled_date` is refused.
+- **a path into a field with no declared shape.** Once the path reaches a
+  scalar, going one level deeper has nothing left to read.
+
+If a field on the way is optional, `Appointment | None` above, the picked
+value may be absent for a visit where the task left it out. Give the variable
+the same option, `Date | None`, so an absent pick is a legal value, or use an
+appending assign, `name+:`, which already skips an absent entry instead of
+writing one into the list.
 
 ## Requiring a field inside a shape
 

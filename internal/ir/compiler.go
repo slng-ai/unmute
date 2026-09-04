@@ -595,8 +595,11 @@ type Delegate struct {
 func (*Delegate) control() {}
 
 // AssignTo is one resolved assignment from a step's result into a declared
-// variable. Field is the part after `result.`, which is one dict key and not a
-// path: nothing tokenises on a dot on either side of an assignment.
+// variable. Field is the part after `result.`: one dict key naming a top-level
+// result field, or a dotted path into that field's declared shape (checked by
+// FieldPath, internal/ir/shapes.go). Left as the authored string rather than
+// pre-split, because both checkAssignments and the template lowering that
+// reads a step's result at run time split it the same way, on ".".
 type AssignTo struct {
 	Var   string `json:"var" yaml:"var"`
 	Field string `json:"field" yaml:"field"`

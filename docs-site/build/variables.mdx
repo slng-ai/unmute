@@ -58,9 +58,11 @@ conversation:
     text: "Hi {{customer_name}}, thanks for calling Sage and Stone Salon. What can I do for you?"
 ```
 
-`{{name}}` renders the variable's value. The greeting and the prompt render
-once, at the start of the call, so they can only name a variable that already
-has a value: a `call_start` variable, or one with a `default`.
+`{{name}}` renders the variable's value. The greeting renders once, at the
+start of the call, so it can only name a variable that already has a value: a
+`call_start` variable, or one with a `default`. A prompt elsewhere in the
+package is less restricted: see the [Variables
+reference](/reference/variables#how-a-variable-reaches-a-prompt).
 
 ## Seed a value locally
 

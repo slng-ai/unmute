@@ -1484,8 +1484,8 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         # empty so this never has to create it. The helper drops an absent entry
         # and a structured one already on the list, so neither a step that
         # concluded nothing nor a step re-entered mid-call grows it.
-        _append_entry(self.state.{{.Var}}, self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}])
-{{else}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
+        _append_entry(self.state.{{.Var}}, {{resultAccess (printf "self._%s_results[%s]" $d.MethodName (pyq $d.Task)) .Field}})
+{{else}}        self.state.{{.Var}} = {{resultAccess (printf "self._%s_results[%s]" $d.MethodName (pyq $d.Task)) .Field}}
 {{end}}{{if .Confirms}}        # The step that confirms this value has just assigned it, so it is settled
         # now and the guard stops holding it back. Discarded here rather than in the
         # step's prompt: a model can be talked out of an instruction, not out of a
@@ -1536,8 +1536,8 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         # empty so this never has to create it. The helper drops an absent entry
         # and a structured one already on the list, so neither a step that
         # concluded nothing nor a step re-entered mid-call grows it.
-        _append_entry(self.state.{{.Var}}, self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}])
-{{else}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
+        _append_entry(self.state.{{.Var}}, {{resultAccess (printf "self._%s_results[%s]" $d.MethodName (pyq $d.Task)) .Field}})
+{{else}}        self.state.{{.Var}} = {{resultAccess (printf "self._%s_results[%s]" $d.MethodName (pyq $d.Task)) .Field}}
 {{end}}{{if .Confirms}}        # The step that confirms this value has just assigned it, so it is settled
         # now and the guard stops holding it back. Discarded here rather than in the
         # step's prompt: a model can be talked out of an instruction, not out of a

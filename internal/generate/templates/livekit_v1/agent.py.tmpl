@@ -1429,9 +1429,9 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
         # starts empty so this never has to create it. The helper drops an
         # absent entry and a structured one already on the list, so neither a
         # step that concluded nothing nor a step re-entered mid-call grows it.
-        _append_entry(ctx.userdata.{{.Var}}, result[{{pyq .Field}}])
+        _append_entry(ctx.userdata.{{.Var}}, {{resultAccess "result" .Field}})
 {{- else}}
-        ctx.userdata.{{.Var}} = result[{{pyq .Field}}]
+        ctx.userdata.{{.Var}} = {{resultAccess "result" .Field}}
 {{- end}}
 {{- if .Confirms}}
         # The step that confirms this value has just assigned it, so it is settled

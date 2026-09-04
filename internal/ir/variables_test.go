@@ -102,38 +102,15 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			redacts: "sk-live-pretend-key-value",
 		},
 		{
-			// A direct-provider agent prompt is a session-start site: it is
-			// rendered once, before the call, so a variable with no value yet
-			// leaves a hole in it. This is the refusal the router case below is
-			// an exception to, and it is here so the pair reads as a pair.
-			name: "an agent prompt may not name a variable that has no value yet",
+			// An agent prompt is not a session-start site: it renders on entry,
+			// mid-call, and again after one of its own steps writes state (gap 3
+			// of the scoped variables feature). So it may name a variable with no
+			// value yet, the same as a task prompt below: the value renders as
+			// words rather than a hole (_state_text/_render's plain fallback),
+			// and requires: is the separate question of whether a step waits for
+			// it before it may run.
+			name: "an agent prompt may name a variable that has no value yet",
 			mutet: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["caller_alias"] = packagespec.Variable{Type: "string"}
-				intake := pkg.Agent.Agents["intake"]
-				pkg.Markdown[intake.Instructions] += "\n\nThe caller goes by {{caller_alias}}."
-			},
-			want: "has no value when the prompt is built",
-		},
-		{
-			// The exception, and the reason this feature is authorable at all. A
-			// router-bound prompt is never rendered here: it travels to the SLNG
-			// Context Router with its placeholders intact and the router
-			// substitutes them per request, from the values sent beside it. So
-			// there is no session-start render to leave a hole in, and a value the
-			// call learns later is exactly what belongs there.
-			//
-			// Late-bound because a task can assign it on finishing, no earlier
-			// than that.
-			name: "a router-bound agent prompt may name a late-bound variable",
-			mutet: func(pkg *packagespec.Package) {
-				think := pkg.Agent.Models.Think["fast_reasoning"]
-				think.Provider = ProviderSlngRouter
-				think.Model = "gpt-5.6-luna"
-				think.AgentID = "converge-router-v1"
-				think.Upstream = &packagespec.Upstream{Provider: "openai"}
-				think.Params = map[string]any{"world_part_override": "eu", "reasoning_effort": "none"}
-				pkg.Agent.Models.Think["fast_reasoning"] = think
-				pkg.Agent.Secrets = append(pkg.Agent.Secrets, "SLNG_API_KEY")
 				pkg.Agent.Variables["caller_alias"] = packagespec.Variable{Type: "string"}
 				intake := pkg.Agent.Agents["intake"]
 				pkg.Markdown[intake.Instructions] += "\n\nThe caller goes by {{caller_alias}}."
@@ -422,134 +399,31 @@ func attachStep(pkg *packagespec.Package, agent string, task packagespec.Task, b
 	pkg.Markdown[task.Instructions] = body
 }
 
-// A task prompt reads a task-assigned value only when its own step declares the
-// need (FR-001, FR-002, FR-003).
-//
-// checkTemplates used to hand every task prompt the *global* set of everything
-// any task assigns anywhere in the package, so a later step could name a value
-// with nothing checking that the step which produces it had run. The run-time
-// symptom is not a failure, which is what makes it worth a compile refusal:
-// `_render` does getattr(state, name, None) and substitutes an empty string, so
-// the model reads a prompt with a hole in it in the middle of a call.
-//
-// `requires:` is the declaration, and it is deliberately the same key that
-// already holds the step back until the value exists, so the prompt and the
-// guard cannot disagree about what the step needs.
-func TestTaskPromptReadsOnlyWhatTheStepDeclares(t *testing.T) {
-	// verify_customer assigns customer_status and manage_booking's prompt reads
-	// it. No package in the tree has this shape, which is the point: the
-	// allowance being narrowed is an open door nothing walks through.
-	load := func(t *testing.T, prompt string, requires []string, mutate func(*packagespec.Package)) *packagespec.Package {
-		t.Helper()
-		pkg := loadSafeCore(t)
-		pkg.Agent.Variables["customer_status"] = packagespec.Variable{Type: "string"}
-		if mutate != nil {
-			mutate(pkg)
-		}
-		attachStep(pkg, "intake", packagespec.Task{
-			Name: "verify_customer", Instructions: "tasks/verify.md",
-			When:    "Confirm who the caller is.",
-			Assign:  []packagespec.Pair{{Key: "customer_status", Value: "result.status"}},
-			Result:  map[string]any{"status": "string"},
-			Context: packagespec.TaskContext{History: "full"},
-		}, "Read the number back and wait for a yes.")
-		attachStep(pkg, "intake", packagespec.Task{
-			Name: "manage_booking", Instructions: "tasks/booking.md",
-			When:     "The caller wants a booking.",
-			Requires: requires,
-			Result:   map[string]any{"summary": "string"},
-			Context:  packagespec.TaskContext{History: "full"},
-		}, prompt)
-		return pkg
-	}
-
-	cases := []struct {
-		name     string
-		prompt   string
-		requires []string
-		mutate   func(*packagespec.Package)
-		// wants are all required in the one message. The refusal has to name the
-		// prompt, the value and the step that supplies it, because those three
-		// are the whole edit the author has to make.
-		wants []string
-	}{
-		{
-			name:   "a value only another step assigns needs this step's requires",
-			prompt: "Serve the {{customer_status}} customer.",
-			wants: []string{
-				`task "manage_booking" instructions`, "{{customer_status}}",
-				`"verify_customer"`, "requires",
-			},
-		},
-		{
-			name:     "the same prompt passes once the step declares it",
-			prompt:   "Serve the {{customer_status}} customer.",
-			requires: []string{"customer_status"},
-		},
-		// FR-001, all four routes to a session-start value. A value that exists
-		// before any step runs needs no declaration, because there is no earlier
-		// step to wait for and nothing an ordering rule would buy.
-		{
-			name:   "a default needs no requires",
-			prompt: "You are in {{salon_city}}.",
-			mutate: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["salon_city"] = packagespec.Variable{Type: "string", Default: "Madrid"}
-			},
-		},
-		{
-			name:   "a dispatched value needs no requires",
-			prompt: "You are in {{salon_city}}.",
-			mutate: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["salon_city"] = packagespec.Variable{Type: "string", Source: "call_start"}
-			},
-		},
-		{
-			name:   "a runtime-owned value needs no requires",
-			prompt: "The caller is on {{caller_phone}}.",
-			mutate: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["caller_phone"] = packagespec.Variable{Type: "string", Source: "from_number"}
-			},
-		},
-		{
-			name:   "a pre-fetched value needs no requires",
-			prompt: "The caller is on {{caller_phone}}.",
-			mutate: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["caller_phone"] = packagespec.Variable{Type: "string"}
-				pkg.Agent.Prefetch = append(pkg.Agent.Prefetch, packagespec.Prefetch{
-					Name: "caller", Source: "from_number",
-					Assign: []packagespec.Pair{{Key: "caller_phone", Value: "result.value"}},
-				})
-			},
-		},
-		// The refusal that was already there stays there. A name nothing can
-		// ever fill is a different mistake from a name filled too late, and the
-		// advice differs: declare an order, versus give the value a source.
-		{
-			name:   "a value nothing supplies keeps the older refusal",
-			prompt: "Serve the {{requested_service}} customer.",
-			mutate: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["requested_service"] = packagespec.Variable{Type: "string"}
-			},
-			wants: []string{"has no value when the prompt is built", "source: call_start"},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := Build(load(t, tc.prompt, tc.requires, tc.mutate))
-			if len(tc.wants) == 0 {
-				if err != nil {
-					t.Fatalf("Build failed, want success: %v", err)
-				}
-				return
-			}
-			if err == nil {
-				t.Fatalf("Build succeeded, want a refusal naming %v", tc.wants)
-			}
-			for _, want := range tc.wants {
-				if !strings.Contains(err.Error(), want) {
-					t.Errorf("refusal is missing %q:\n%v", want, err)
-				}
-			}
-		})
+// TestTaskPromptMayNameAVariableOnlyAnotherStepAssigns is gap 2 of the scoped
+// variables feature. checkTaskPromptReads used to refuse a task prompt naming
+// a value only some other step assigns unless this step's own requires: named
+// it too, so a value nobody had to wait for could still never be read once
+// some other step happened to assign it as well. The owner's decision deletes
+// that restriction: requires: still holds a step back until a value exists,
+// but reading one and waiting for one are different questions, and only the
+// second is a guard. manage_booking here declares no requires: at all.
+func TestTaskPromptMayNameAVariableOnlyAnotherStepAssigns(t *testing.T) {
+	pkg := loadSafeCore(t)
+	pkg.Agent.Variables["customer_status"] = packagespec.Variable{Type: "string"}
+	attachStep(pkg, "intake", packagespec.Task{
+		Name: "verify_customer", Instructions: "tasks/verify.md",
+		When:    "Confirm who the caller is.",
+		Assign:  []packagespec.Pair{{Key: "customer_status", Value: "result.status"}},
+		Result:  map[string]any{"status": "string"},
+		Context: packagespec.TaskContext{History: "full"},
+	}, "Read the number back and wait for a yes.")
+	attachStep(pkg, "intake", packagespec.Task{
+		Name: "manage_booking", Instructions: "tasks/booking.md",
+		When:    "The caller wants a booking.",
+		Result:  map[string]any{"summary": "string"},
+		Context: packagespec.TaskContext{History: "full"},
+	}, "Serve the {{customer_status}} customer.")
+	if _, err := Build(pkg); err != nil {
+		t.Fatalf("a task prompt naming a variable only another step assigns was refused: %v", err)
 	}
 }
