@@ -4,8 +4,6 @@ name: salon-concierge
 
 entry_agent: concierge
 
-timezone: Europe/Madrid
-
 agents:
   concierge:
     instructions: instructions.md
@@ -116,6 +114,24 @@ variables:
       underneath a conversation would leave the caller and the agent disagreeing
       about what "tomorrow" means halfway through.
 
+  booking_weekday:
+    type: string
+    default: ""
+    description: >-
+      The weekday today falls on, spelled out in English: Monday to Sunday. From
+      the same clock reading as `booking_date`, so the two cannot disagree about
+      which day it is. It is what lets the agent answer "next Friday" without a
+      second turn working out what day today is first.
+
+  salon_local_time:
+    type: string
+    default: ""
+    description: >-
+      The salon's own wall clock when the call began, HH:MM on a 24 hour clock.
+      From the same reading as the two above. It is what lets the agent know that
+      a caller asking for "this afternoon" at 17:40 is asking for something that
+      has nearly passed, rather than offering them a slot that is already gone.
+
   customer_phone:
     type: string
     default: ""
@@ -151,11 +167,32 @@ variables:
       was: greeting a stranger by the account holder's name is the worst thing
       this feature could do, and the compiler refuses the prompt that would.
 
+  customer_on_file:
+    type: string
+    default: ""
+    description: >-
+      Whether the caller's number was already on file: `existing` or `unknown`.
+      From the same lookup as `customer_name`, in the same call. It is here to
+      show that one entry fills as many variables as the result has fields, and
+      it earns its place: the agent greets a returning customer differently from
+      somebody ringing for the first time, and asking would waste a turn.
+
+      Inherits `customer_phone`'s confirming step, exactly as `customer_name`
+      does, because a status found from a number nobody agreed to is as
+      unconfirmed as that number was.
+
 prefetch:
   - name: today
-    clock: date
+    clock: now
+    # The zone this entry reads its clock in, and the reason it sits here rather
+    # than on the package: the key belongs beside the reading it governs, and two
+    # entries could honestly want two zones. Not the container's clock, which is
+    # UTC and would name the wrong day for anybody who is not on it.
+    timezone: Europe/Madrid
     assign:
       - booking_date: result.date
+      - booking_weekday: result.day_of_week
+      - salon_local_time: result.time
 
   - name: caller
     source: from_number
@@ -164,10 +201,17 @@ prefetch:
 
   - name: profile
     tool: look_up_customer
+    # Does running this unasked, on every call including wrong numbers, change
+    # anything? No: look_up_customer reads. Its twin find_or_create_customer
+    # would answer true, which is why this entry points at this one.
+    writes: false
     args:
       - phone: "{{customer_phone}}"
     assign:
+      # Two variables, one call. The lookup returns both, so a second line costs
+      # nothing: not a second request, not a second turn, not a second second.
       - customer_name: result.name
+      - customer_on_file: result.status
 
 secrets:
   - OPENAI_API_KEY

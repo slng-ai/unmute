@@ -83,7 +83,6 @@ split this page and [targets.yaml](/reference/targets-yaml) hold between them.
 | `listen` | string | with 2 or more listen chain heads | sole chain head | declared `models.listen` name | listen entry to use |
 | `turn` | string | with 2 or more turn entries | sole entry | declared `models.turn` name | turn entry to use |
 | `variables` | map | no |  | lower snake case names | per-call values |
-| `timezone` | string | before a `prefetch:` entry reads the clock |  | an IANA zone name, such as `Europe/Madrid` | the zone every clock reading in this package is taken in |
 | `prefetch` | **list** | no |  | one entry per fact, each with a `name:` | facts resolved once per call, before the greeting, in the order written |
 | `secrets` | list of strings | no |  | UPPER_SNAKE names | environment values the generated project reads |
 | `destinations` | map of strings | when an escalation is used |  | lower snake case names to UPPER_SNAKE env names | phone destinations an escalation may use |
@@ -252,31 +251,37 @@ variables:
 
 Full detail on [variables](/reference/variables).
 
-## `timezone`
-
-```yaml
-timezone: Europe/Madrid
-```
-
-An IANA zone name. Required before a [`prefetch:`](#prefetch) entry reads the
-clock: a container's own clock is UTC, so a business elsewhere needs this to
-date a call correctly. Package level, because it is a fact about the business
-rather than about one target.
-
 ## `prefetch`
 
 ```yaml
 prefetch:
   - name: today
-    clock: date
+    clock: now
+    timezone: Europe/Madrid
     assign:
       - booking_date: result.date
+      - booking_weekday: result.day_of_week
 ```
 
+One reading of the clock fills both variables above, at no extra cost: an
+entry assigns as many variables as the result has fields, from one call.
+
 An ordered list of facts resolved once per call, before the greeting: the
-date, a fact the call itself carries, or the result of one already-declared
-read-only tool. Entries resolve top to bottom, and one that cannot resolve is
-skipped rather than failing the call. Full field reference, the ordering rule,
+clock, a fact the call itself carries, or the result of one already-declared
+tool with `writes:` declared on the entry. Entries resolve top to bottom, and
+one that cannot resolve is skipped rather than failing the call.
+
+A `clock:` entry also carries its own `timezone:`, an IANA zone name. It is
+required there, never defaulted, because a container's own clock is UTC, so a
+business elsewhere needs it to date a call correctly. It sits on the entry
+rather than on the package, because two entries may honestly want two zones.
+
+A `tool:` entry needs `writes: true` or `writes: false`. There is no default,
+because a pre-fetch runs unasked on every call. `writes: true` compiles: it is
+named in `compile-report.json` and the runbook, rather than printing a
+warning.
+
+Full field reference, the ordering rule, every result field a clock gives you,
 and what an empty value does to a prompt:
 [variables](/reference/variables#prefetch-resolves-a-value-before-the-call-starts).
 
@@ -610,7 +615,6 @@ exactly one execution block says how it runs.
 | `interruption` | `provider_default`, `continue`, `cancel` |
 | `effect` | `returns_data`, `ends_conversation` |
 | `announce` | one fixed sentence spoken as the tool starts; no `{{variables}}`; legal on `webhook`, `local` and `knowledge`; absent means nothing is spoken |
-| `read_only` | `true` declares that this tool writes nothing, which [`prefetch:`](/reference/variables#prefetch-resolves-a-value-before-the-call-starts) requires before it may run the tool. **A promise, not a guarantee: the compiler cannot check it.** Legal on `webhook` and `local`; declaring it where no pre-fetch names the tool is a warning |
 
 | Execution block | Fields |
 |---|---|

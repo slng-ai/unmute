@@ -81,7 +81,6 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	globalWarnings = add(globalWarnings, unusedKnowledgeWarning(agent))
 	globalWarnings = add(globalWarnings, knowledgeBudgetWarning(agent))
 	globalWarnings = add(globalWarnings, knowledgeCutoffWarning(agent))
-	globalWarnings = append(globalWarnings, orphanReadOnlyWarnings(agent)...)
 	report := ValidateReport{PerTarget: make([]TargetValidation, 0, len(targets))}
 	failed := 0
 	for _, resolved := range targets {

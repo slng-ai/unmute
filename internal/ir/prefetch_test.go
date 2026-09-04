@@ -62,8 +62,16 @@ func TestBuildPrefetchResolvesEachSource(t *testing.T) {
 		byName[entry.Name] = entry
 	}
 
-	if got := byName["today"]; got.Clock != PrefetchClockDate || got.Source != "" || got.Tool != "" {
+	if got := byName["today"]; got.Clock != PrefetchClockNow || got.Source != "" || got.Tool != "" {
 		t.Errorf("clock entry = %+v", got)
+	}
+	// The zone rides the entry, not the package. Three assignments, one reading.
+	if got := byName["today"]; got.Timezone != "Europe/Madrid" {
+		t.Errorf("clock entry timezone = %q, want the zone the entry itself names", got.Timezone)
+	}
+	if got := len(byName["today"].Assign); got != 3 {
+		t.Errorf("the clock entry assigns %d variables, want the 3 the fixture writes: a "+
+			"one-assignment fixture cannot show that one reading fills several", got)
 	}
 	if got := byName["caller"]; got.Source != VariableSourceFromNumber || got.Clock != "" {
 		t.Errorf("source entry = %+v", got)
@@ -75,8 +83,79 @@ func TestBuildPrefetchResolvesEachSource(t *testing.T) {
 	if strings.Join(profile.Inputs, ",") != "caller_phone" {
 		t.Errorf("inputs = %v, want [caller_phone] parsed out of the args template", profile.Inputs)
 	}
-	if agent.Timezone != "Europe/Madrid" {
-		t.Errorf("timezone = %q", agent.Timezone)
+	// A source or tool entry carries no zone at all: only a clock reads one.
+	if got := byName["caller"].Timezone; got != "" {
+		t.Errorf("the call-fact entry carries a timezone (%q), and only a clock reads one", got)
+	}
+}
+
+// FR-005. Two entries, two zones, both resolved. This is the thing one
+// package-level key could not express, and the reason the zone moved onto the
+// entry rather than merely being renamed.
+func TestBuildPrefetchReadsTwoZones(t *testing.T) {
+	dir := writePatchedPrefetchCore(t,
+		"  - name: caller\n    source: from_number\n",
+		"  - name: opening\n    clock: now\n    timezone: America/New_York\n    assign:\n"+
+			"      - customer_id: result.date\n\n  - name: caller\n    source: from_number\n")
+	pkg, err := packagespec.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatalf("two entries reading two zones were refused: %v", err)
+	}
+	zones := map[string]string{}
+	for _, entry := range agent.Prefetch {
+		if entry.Clock != "" {
+			zones[entry.Name] = entry.Timezone
+		}
+	}
+	if zones["today"] != "Europe/Madrid" || zones["opening"] != "America/New_York" {
+		t.Errorf("zones = %v, want each entry to keep the one it named", zones)
+	}
+}
+
+// FR-009. Both answers compile. `writes: true` is a declaration, not a request
+// for permission: the compiler cannot check either answer, so what it can do is
+// make the author state one, and then say which entries said yes.
+func TestBuildPrefetchTakesEitherAnswerToWrites(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		to   string
+		want bool
+	}{
+		// The fixture already declares false, so that case is the fixture itself:
+		// patching a value to the value it already has replaces nothing.
+		{name: "writes: false", to: "    writes: false\n", want: false},
+		{name: "writes: true", to: "    writes: true\n", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := filepath.Join("..", "testdata", "prefetch_core")
+			if tc.want {
+				dir = writePatchedPrefetchCore(t, "    writes: false\n", tc.to)
+			}
+			pkg, err := packagespec.Load(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			agent, err := Build(pkg)
+			if err != nil {
+				t.Fatalf("%s was refused: %v", tc.name, err)
+			}
+			for _, entry := range agent.Prefetch {
+				if entry.Name != "profile" {
+					// Nothing that runs no tool ever carries the answer.
+					if entry.Writes {
+						t.Errorf("prefetch %q runs no tool and carries writes: true", entry.Name)
+					}
+					continue
+				}
+				if entry.Writes != tc.want {
+					t.Errorf("profile writes = %v, want %v", entry.Writes, tc.want)
+				}
+			}
+		})
 	}
 }
 
@@ -162,20 +241,20 @@ func TestBuildPrefetchRefusesTheShape(t *testing.T) {
 	}{
 		{
 			name: "rule 1: no source key",
-			from: "  - name: today\n    clock: date\n",
-			to:   "  - name: today\n",
-			want: []string{"agent.yaml:", `prefetch "today" names none of clock:, source: and tool:`, "clock: date for the current date"},
+			from: "    clock: now\n",
+			to:   "",
+			want: []string{"agent.yaml:", `prefetch "today" names none of clock:, source: and tool:`, "clock: now for the date and time"},
 		},
 		{
 			name: "rule 1: two source keys",
-			from: "  - name: today\n    clock: date\n",
-			to:   "  - name: today\n    clock: date\n    tool: lookup_customer\n",
+			from: "    clock: now\n",
+			to:   "    clock: now\n    tool: lookup_customer\n",
 			want: []string{`names both clock: and tool:`, "split it"},
 		},
 		{
 			name: "rule 2: args on a clock entry",
-			from: "  - name: today\n    clock: date\n",
-			to:   "  - name: today\n    clock: date\n    args:\n      - phone: \"x\"\n",
+			from: "    clock: now\n",
+			to:   "    clock: now\n    args:\n      - phone: \"x\"\n",
 			want: []string{"reads the clock, which takes no arguments", "args: belongs to a tool: entry"},
 		},
 		{
@@ -186,8 +265,8 @@ func TestBuildPrefetchRefusesTheShape(t *testing.T) {
 		},
 		{
 			name: "rule 3: empty assign",
-			from: "  - name: today\n    clock: date\n    assign:\n      - booking_date: result.date\n",
-			to:   "  - name: today\n    clock: date\n",
+			from: "    assign:\n      - booking_date: result.date\n      - booking_weekday: result.day_of_week\n      - booking_year: result.year\n",
+			to:   "",
 			want: []string{"assigns nothing", "nowhere to put it"},
 		},
 		{
@@ -203,6 +282,15 @@ func TestBuildPrefetchRefusesTheShape(t *testing.T) {
 			want: []string{"result.nmae", `lookup_customer's output declares no field "nmae"`, "customer_id, name"},
 		},
 		{
+			// The six fields are one reading of one clock, so the refusal lists all
+			// six rather than sending the author to a doc page to find the names.
+			name: "rule 5: assign names a field the clock has no",
+			from: "      - booking_date: result.date",
+			to:   "      - booking_date: result.dat",
+			want: []string{`the clock declares no field "dat"`,
+				"date, time, datetime, day_of_week, year, timezone"},
+		},
+		{
 			name: "rule 5: a right-hand side that is not result.<field>",
 			from: "      - booking_date: result.date",
 			to:   "      - booking_date: today",
@@ -215,9 +303,19 @@ func TestBuildPrefetchRefusesTheShape(t *testing.T) {
 			want: []string{"both assign booking_date", "One value has one source"},
 		},
 		{
+			// One entry naming one variable twice is the same mistake as two
+			// entries doing it, but the message for two entries reads "prefetch
+			// today and prefetch today both assign booking_date", which sends the
+			// reader looking for a second entry that is not there.
+			name: "rule 6: one entry assigns one variable twice",
+			from: "      - booking_date: result.date\n",
+			to:   "      - booking_date: result.date\n      - booking_date: result.date\n",
+			want: []string{`prefetch "today" assigns booking_date twice`, "One value has one source", "drop one of the two lines"},
+		},
+		{
 			name: "D2: an entry with no name",
-			from: "  - name: today\n    clock: date\n",
-			to:   "  - clock: date\n",
+			from: "  - name: caller\n    source: from_number\n",
+			to:   "  - source: from_number\n",
 			want: []string{"a prefetch entry has no name:", "which entry they mean"},
 		},
 		{
@@ -248,22 +346,43 @@ func TestBuildPrefetchRefusesTheSource(t *testing.T) {
 		want []string
 	}{
 		{
-			name: "rule 7: a clock with no timezone",
-			from: "timezone: Europe/Madrid\n",
+			name: "rule 7: a clock entry with no timezone",
+			from: "    timezone: Europe/Madrid\n",
 			to:   "",
-			want: []string{"reads the clock", "declares no timezone:", "container clock is UTC", "wrong day", "timezone: Europe/Madrid"},
+			want: []string{`prefetch "today" reads the clock and declares no timezone:`, "container clock is UTC",
+				"wrong day", "Add timezone: to this entry", "timezone: Europe/Madrid"},
 		},
 		{
 			name: "rule 8: a zone that is not a zone",
-			from: "timezone: Europe/Madrid",
-			to:   "timezone: Europe/Barcelona",
-			want: []string{`timezone "Europe/Barcelona" is not an IANA zone name`, "Europe/Madrid or America/New_York"},
+			from: "    timezone: Europe/Madrid",
+			to:   "    timezone: Europe/Barcelona",
+			want: []string{"sets timezone: Europe/Barcelona", "not an IANA zone name",
+				"Europe/Madrid or America/New_York"},
 		},
 		{
-			name: "rule 9: a clock value that is not date",
-			from: "    clock: date",
-			to:   "    clock: time",
-			want: []string{"reads clock: time", "the clock reads date", "Use clock: date"},
+			// The zone belongs to the reading. On any other entry it reaches
+			// nothing, and an author who wrote one meant something by it.
+			name: "rule 8: a timezone on an entry that reads no clock",
+			from: "  - name: caller\n    source: from_number\n",
+			to:   "  - name: caller\n    source: from_number\n    timezone: Europe/Madrid\n",
+			want: []string{`prefetch "caller" sets timezone:`, "only a clock entry reads a zone",
+				"clock: now", "drop the zone"},
+		},
+		{
+			name: "rule 9: a clock value that is not now",
+			from: "    clock: now",
+			to:   "    clock: date",
+			want: []string{"reads clock: date", "the clock reads now", "Use clock: now",
+				"date, time, datetime, day_of_week, year, timezone"},
+		},
+		{
+			// The package-level key is retired. Refused with a sentence naming
+			// where it moved, rather than by the decoder saying "unknown field".
+			name: "the retired package-level timezone",
+			from: "name: prefetch-fixture\n",
+			to:   "name: prefetch-fixture\n\ntimezone: Europe/Madrid\n",
+			want: []string{"timezone: is no longer a package-level key", "belongs on the clock entry that reads it",
+				"clock: now", "timezone: Europe/Madrid"},
 		},
 		{
 			name: "rule 9: a source that is not a call fact",
@@ -291,11 +410,28 @@ func TestBuildPrefetchRefusesTheSource(t *testing.T) {
 			want: []string{`names tool "lookup_custommer"`, "does not declare", "get_invoice, lookup_customer"},
 		},
 		{
-			name: "rule 11: a tool that has not declared read_only",
-			from: "    tool: lookup_customer",
-			to:   "    tool: get_invoice",
-			want: []string{`names tool "get_invoice"`, "has not declared read_only: true",
-				"would write on every call, wrong numbers included", "tools/get_invoice.yaml"},
+			// The question is about this use of the tool, not about the tool, so
+			// the refusal names the entry and asks the author to answer it there.
+			name: "rule 11: a tool entry that does not say whether it writes",
+			from: "    writes: false\n",
+			to:   "",
+			want: []string{`prefetch "profile" runs tool "lookup_customer" and does not say whether it writes`,
+				"runs unasked on every call, wrong numbers and hang-ups included",
+				"Read tools/lookup_customer.yaml", "add writes: false", "writes: true if it does"},
+		},
+		{
+			name: "rule 11: writes: on a clock entry",
+			from: "    clock: now\n",
+			to:   "    clock: now\n    writes: false\n",
+			want: []string{`prefetch "today" reads the clock, which runs no tool`,
+				"writes: answers nothing here", "writes: belongs to a tool: entry"},
+		},
+		{
+			name: "rule 11: writes: on a source entry",
+			from: "    source: from_number\n",
+			to:   "    source: from_number\n    writes: true\n",
+			want: []string{`prefetch "caller" reads a fact the call carries, which runs no tool`,
+				"writes: answers nothing here"},
 		},
 		{
 			name: "rule 13: args name an undeclared variable",
@@ -331,7 +467,7 @@ func TestBuildPrefetchRefusesABackwardsOrder(t *testing.T) {
 
 	t.Run("caller below profile is refused", func(t *testing.T) {
 		caller := "  - name: caller\n    source: from_number\n    assign:\n      - caller_phone: result.value\n\n"
-		profile := "  - name: profile\n    tool: lookup_customer\n    args:\n      - phone: \"{{caller_phone}}\"\n    assign:\n      - caller_name: result.name\n"
+		profile := "  - name: profile\n    tool: lookup_customer\n    # This lookup reads. The key is required either way: the compiler cannot\n    # check either answer, so it makes the author state one.\n    writes: false\n    args:\n      - phone: \"{{caller_phone}}\"\n    assign:\n      - caller_name: result.name\n"
 		err := patchPrefetchCore(t, caller+profile, profile+"\n"+caller)
 		if err == nil {
 			t.Fatal("a backwards list was accepted, so the file's visible order is not the agent's")
@@ -455,7 +591,15 @@ func TestBuildPrefetchAllowsTheConfirmingStepsOwnPrompt(t *testing.T) {
 // silence, so the message names the target, the route, the entry, and the later
 // entry that reads what this one would have assigned.
 func TestValidatePrefetchWarnsOnARouteThatSuppliesNoCallFact(t *testing.T) {
-	pkg := loadPrefetchCore(t)
+	// session_id, not from_number: the Pipecat Twilio routes supply a caller
+	// number now, and this test is about a fact a route supplies in no direction
+	// at all. session_id is a compile-time literal on LiveKit and is deliberately
+	// not granted on either Pipecat route, so it is the honest subject today.
+	dir := writePatchedPrefetchCore(t, "    source: from_number\n", "    source: session_id\n")
+	pkg, err := packagespec.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	enableTelephony(pkg)
 	// Both targets need a route once the package has a phone channel. The pipecat
 	// one is the subject; the livekit one exists so Build gets that far.
@@ -471,16 +615,99 @@ func TestValidatePrefetchWarnsOnARouteThatSuppliesNoCallFact(t *testing.T) {
 	}
 	joined := strings.Join(report.PerTarget[0].Warnings, "\n")
 	for _, want := range []string{
-		`prefetch "caller" reads source: from_number`,
+		`prefetch "caller" reads source: session_id`,
 		"does not supply",
 		"skipped on every call there",
 		"caller_phone holds its default",
 		`prefetch "profile" reads it, so that entry is skipped too`,
-		"Call sources compile on (livekit, sip) trunks and on (livekit, connector)",
+		// The routes that do supply it, read off the table rather than from a
+		// hand-written list. The hand-written one said the LiveKit routes and
+		// would have gone on saying so after two Pipecat routes joined.
+		"source.session_id is supplied on (livekit, connector) and (livekit, sip)",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("W1 is missing %q, got:\n%s", want, joined)
 		}
+	}
+}
+
+// The direction half of W1, which is new. A route may supply a fact one way
+// only, and on the Pipecat Twilio routes the caller's number is exactly that: a
+// TwiML Bin is attached to one number, so the number being called is a constant
+// there and only the caller's is worth carrying.
+//
+// Three outcomes, and two of them are silence. A grant with no direction limit
+// says nothing, as it always did. A grant limited to a direction the package
+// declares says nothing, because the fact arrives. A grant limited to the other
+// direction warns, because there the grant is real and still reaches no call
+// this package will ever take.
+func TestValidatePrefetchWarnsWhenTheFactIsSuppliedTheOtherWay(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		source   string
+		outbound bool
+		want     []string
+	}{
+		{
+			name:   "inbound package, fact supplied inbound: silent",
+			source: "from_number",
+		},
+		{
+			name:     "outbound package, fact supplied inbound only: warns",
+			source:   "from_number",
+			outbound: true,
+			want: []string{
+				`prefetch "caller" reads source: from_number`,
+				"supplies on an inbound call only",
+				"this package declares outbound",
+				"caller_phone holds its default",
+				`prefetch "profile" reads it, so that entry is skipped too`,
+			},
+		},
+		{
+			name:   "inbound package, fact granted with no direction limit: silent",
+			source: "call_id",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The fixture already reads from_number, and patching a value to the
+			// value it already has replaces nothing.
+			dir := filepath.Join("..", "testdata", "prefetch_core")
+			if tc.source != "from_number" {
+				dir = writePatchedPrefetchCore(t, "    source: from_number\n", "    source: "+tc.source+"\n")
+			}
+			pkg, err := packagespec.Load(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inbound, outbound := !tc.outbound, tc.outbound
+			pkg.Agent.Channels["phone"] = packagespec.Channel{
+				Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
+				RequiredControls: []string{"cold_transfer", "hangup"},
+			}
+			setTargetField(pkg, "pipecat", func(target *packagespec.Target) { target.Connection = "primary_phone" })
+			setTargetField(pkg, "livekit", func(target *packagespec.Target) { target.Connection = "twilio_sip" })
+			agent, err := Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report, err := Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
+			if err != nil {
+				t.Fatalf("a one-way fact must warn, not refuse: %v\n%v", err, report.PerTarget[0].Errors)
+			}
+			joined := strings.Join(report.PerTarget[0].Warnings, "\n")
+			if len(tc.want) == 0 {
+				if strings.Contains(joined, "prefetch \"caller\"") {
+					t.Errorf("the fact arrives on every call this package takes and it warned anyway:\n%s", joined)
+				}
+				return
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(joined, want) {
+					t.Errorf("the direction warning is missing %q, got:\n%s", want, joined)
+				}
+			}
+		})
 	}
 }
 
@@ -507,35 +734,6 @@ func TestValidatePrefetchLeavesTheSystemSourceRefusalAlone(t *testing.T) {
 	for _, row := range report.PerTarget {
 		if len(row.Errors) > 0 {
 			t.Errorf("target %s refused the package: %v", row.Name, row.Errors)
-		}
-	}
-}
-
-// W3. The author has told the truth about the tool, they have just not pointed a
-// prefetch at it yet, so this warns rather than refusing. Same shape as the
-// existing warning for a turn binding carrying a field no target reads.
-func TestValidateWarnsOnAReadOnlyToolNoPrefetchNames(t *testing.T) {
-	pkg := loadPrefetchCore(t)
-	// get_invoice is attached to two agents and named by no prefetch, so the
-	// declaration reaches nothing while the tool itself stays perfectly reachable.
-	// Dropping the entry that names lookup_customer would not do: a prefetch is
-	// the only thing reaching that tool, so it would be refused as unreachable
-	// before any warning fired.
-	tool := pkg.Tools["get_invoice"]
-	tool.ReadOnly = true
-	pkg.Tools["get_invoice"] = tool
-	agent, err := Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	report, err := Validate(agent, allTargets(agent), targetcap.Default())
-	if err != nil {
-		t.Fatalf("an unused read_only: must warn, not refuse: %v", err)
-	}
-	joined := strings.Join(report.PerTarget[0].Warnings, "\n")
-	for _, want := range []string{`tool "get_invoice" declares read_only: true`, "no prefetch names it", "reaches nothing"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("W3 is missing %q, got:\n%s", want, joined)
 		}
 	}
 }

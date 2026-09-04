@@ -110,18 +110,20 @@ block it adds.
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
 | `conversation` | the model, through the generated `update_variables` tool | during the call |
 | `session_id` | the phone adapter | LiveKit `sip` or `connector` |
-| `call_id` | the phone adapter | LiveKit `sip` or `connector` |
-| `stream_id` | the phone adapter | LiveKit `connector` only, not LiveKit `sip` |
-| `direction` | the phone adapter | LiveKit `sip` or `connector` |
-| `from_number` | the phone adapter | LiveKit `sip` or `connector` |
-| `to_number` | the phone adapter | LiveKit `sip` or `connector` |
+| `call_id` | the phone adapter | LiveKit `sip` or `connector`, and both Pipecat Twilio routes |
+| `stream_id` | the phone adapter | LiveKit `connector`, and Pipecat `cloud-websocket` |
+| `direction` | the phone adapter | LiveKit `sip` or `connector`, and both Pipecat Twilio routes |
+| `from_number` | the phone adapter | LiveKit `sip` or `connector`, both directions; both Pipecat Twilio routes, inbound calls only |
+| `to_number` | the phone adapter | LiveKit `sip` or `connector`, both directions; Pipecat `cloud-websocket`, outbound calls only |
 | `carrier` | the phone adapter | LiveKit `sip` or `connector` |
 | `connection` | the phone adapter | LiveKit `sip` or `connector` |
 
-The last eight are system sources. You declare them and the selected phone route
-must prove it can supply them. **No Pipecat route binds a system source**, so
-declaring one on a Pipecat target is a validation error: neither `daily-sip` nor
-`cloud-websocket` emits an adapter that fills the table these read from.
+The last eight are system sources. You declare them, and the selected route
+must be able to supply the fact: a route that grants nothing for it refuses
+the declaration at validation. A `prefetch:` entry reads the same route table
+as a variable's own `source:`, so the same fact hydrates either way, on
+whichever route grants it. [The full grid](/build/prefetch#where-it-works) has
+exactly what each route grants, fact by fact and direction by direction.
 
 For an inbound LiveKit or Pipecat telephony channel, every `call_start` variable
 needs a default. There is no dispatch payload to supply an unsolicited incoming
@@ -137,13 +139,13 @@ discovering them.
 **It is an ordered list. Entries resolve top to bottom.**
 
 ```yaml agent.yaml
-timezone: Europe/Madrid          # required before any entry reads the clock
-
 prefetch:
   - name: today
-    clock: date
+    clock: now
+    timezone: Europe/Madrid
     assign:
       - booking_date: result.date
+      - booking_weekday: result.day_of_week
 
   - name: caller
     source: from_number
@@ -152,19 +154,29 @@ prefetch:
 
   - name: profile
     tool: look_up_customer
+    writes: false
     args:
       - phone: "{{customer_phone}}"
     assign:
       - customer_name: result.name
+      - customer_on_file: result.status
 ```
+
+`profile` assigns two variables from one lookup. An entry can `assign:` as
+many variables as the result has fields, from the one call.
 
 Every entry carries a `name:` and exactly one source key.
 
 | Key | Reads | Result fields |
 |---|---|---|
-| `clock: date` | the package clock, in the declared `timezone:` | `result.date` |
+| `clock: now` | the clock, in the entry's own `timezone:` | `result.date`, `result.time`, `result.datetime`, `result.day_of_week`, `result.year`, `result.timezone` |
 | `source: <name>` | one of the eight facts a call carries | `result.value` |
-| `tool: <name>` | one already-declared read-only tool | `result.<field>`, from the tool's `output:` |
+| `tool: <name>` | one already-declared tool, with `writes:` declared on this entry | `result.<field>`, from the tool's `output:` |
+
+A `clock: now` entry reads the clock once and may `assign:` as many of the six
+fields as you want. All six come from that one reading, so an entry assigning
+`result.date` and `result.time` cannot straddle a second, and one assigning
+`result.date` and `result.day_of_week` cannot straddle midnight.
 
 `args:` belongs to a `tool:` entry only, and takes the same value grammar as a
 tool's `inject:`.
@@ -180,31 +192,47 @@ with its line number.
 - **The order you write is the order it runs.** An entry reading a value that a
   later entry assigns is refused, naming both entries and which one to move up.
   Reading a value an earlier entry assigned is the intended shape.
-- **`tool:` requires `read_only: true`** on the tool, and webhook or local
-  execution. A pre-fetch runs unasked on every call.
+- **`tool:` requires `writes: true` or `writes: false`** on the entry, and
+  webhook or local execution on the tool. There is no default: a pre-fetch
+  runs unasked on every call, so the build makes you say whether that is
+  safe. `writes:` is refused on a `clock:` or `source:` entry, which run no
+  tool.
 - **The variable receiving a call fact declares no `source:` of its own.** That is
   what keeps the package compiling on a route that supplies no caller ID.
-- **`timezone:` is required for a clock, never defaulted.** A container clock is
-  UTC, so a business in Spain taking a booking for "tomorrow" at 23:30 local would
-  name the wrong day, and nothing would report it.
+- **A `clock:` entry requires its own `timezone:`, never defaulted.** A container
+  clock is UTC, so a business in Spain taking a booking for "tomorrow" at 23:30
+  local would name the wrong day, and nothing would report it. The zone lives on
+  the entry, not on the package, so two entries may read two zones.
+- **`clock: now` is the only value `clock:` accepts.** `assign:` then names any of
+  the six result fields; naming anything else is refused, listing all six.
 
 ### What happens when it cannot resolve
 
 An entry whose inputs are empty is **skipped**, and so is every later entry that
 reads what it would have assigned. The values keep their declared defaults and the
-call carries on. That is the specified behaviour, not a failure: no Pipecat route
-supplies a caller number, a caller can withhold theirs, and the browser loop has
-no carrier at all.
+call carries on. That is the specified behaviour, not a failure: a caller can
+withhold their number, the browser loop has no carrier at all, and some facts
+are absent on some routes, or on one direction of a route, by design.
 
-`unmute validate` warns per target, naming the route, the entry, and the knock-on
-entry:
+`unmute validate` warns per target, naming the route, the entry, and the
+knock-on entry. A fact the route never supplies reads like this:
 
 ```
-warning: target "pipecat": prefetch "caller" reads source: from_number, which route
+warning: pipecat: prefetch "caller" reads source: session_id, which route
   (pipecat, cloud-websocket) does not supply, so this entry is skipped on every call
   there and customer_phone holds its default. prefetch "profile" reads it, so that
-  entry is skipped too. Call sources compile on (livekit, sip) trunks and on
-  (livekit, connector)
+  entry is skipped too. source.session_id is supplied on (livekit, connector) and
+  (livekit, sip)
+```
+
+A fact the route supplies on the other direction only reads like this, naming
+the direction the route grants and the one the package declares:
+
+```
+warning: pipecat: prefetch "caller" reads source: from_number, which route
+  (pipecat, daily-sip) supplies on an inbound call only, and this package declares
+  outbound. The entry is skipped on every call there and customer_phone holds its
+  default. prefetch "profile" reads it, so that entry is skipped too
 ```
 
 So **every prompt naming a pre-fetched value has to read as a whole sentence when
@@ -214,6 +242,34 @@ that value is empty.** An unset variable renders as nothing, never as the word
 The whole block has a two second budget, and it cannot fail a call: a lookup that
 times out or raises is logged and stepped over. Every outcome is one log line
 naming the entry.
+
+### A caller's number is best effort
+
+`from_number` and `to_number` resolve less often than the other system
+sources, on every route that grants them. A caller can withhold their own
+number, and withholding does not arrive as nothing:
+
+- Twilio's own policy is to set it to the word `anonymous`.
+- Where an upstream carrier sends a word such as ANONYMOUS or RESTRICTED
+  instead, Twilio converts it to keypad digits, which look exactly like a real
+  number.
+- Some calls simply arrive with the field empty.
+
+unmute treats all three as absent. A number-valued fact resolves only when it
+looks like a plausible E.164 number, a `+` followed by 8 to 15 digits, and a
+short list of known digit placeholders is rejected on top of that check.
+Either way the entry is skipped, and the log names which entry and why.
+
+On LiveKit `sip`, the number is also absent when the dispatch rule sets
+`HidePhoneNumber`. On `pipecat cloud-websocket` it can be missing for a
+configuration reason instead: the number rides a `<Parameter>` in the TwiML
+Bin you made, so a Bin created before this existed does not carry it. Nothing
+warns about that at compile time, because checking would need carrier
+credentials the compiler never asks for.
+
+Treat the caller's number as best effort on every route that grants it, not
+only on Pipecat. A route granting the fact is not a promise that any one call
+will carry it.
 
 Denied on the `slng` target: that platform owns session start, so there is no seam
 to resolve a fact in.

@@ -139,6 +139,15 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 				Name: name, Type: string(v.Type), Required: v.Default == nil && v.Source == ir.VariableSourceCallStart,
 			})
 		}
+		// A fact the call itself carries, lifted into call_context by whichever
+		// route this is. Without this arm the route table's grant would be a
+		// promise only the pre-fetch kept: `variables: source:` resolves through
+		// the same table and would compile green holding an empty string.
+		if ir.IsSystemSource(v.Source) {
+			data.SystemSourceVars = append(data.SystemSourceVars, pipecatSystemSourceVar{
+				Name: name, Source: string(v.Source),
+			})
+		}
 	}
 	data.Capture = buildPipecatCapture(agent)
 	data.HandoffControls = handoffControls(agent)
@@ -213,7 +222,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		data.NeedsPrefetchLocal, data.NeedsPrefetchSeed = block.NeedsLocal, block.NeedsSeed
 		data.NeedsHTTPX = data.NeedsHTTPX || prefetchNeedsHTTPX(agent)
 		data.NeedsInspect = data.NeedsInspect || block.NeedsLocal
-		data.PrefetchRunbook, _ = PrefetchRunbook(agent)
+		data.PrefetchRunbook, _ = PrefetchRunbook(agent, target)
 		// A pre-fetched tool reaches no agent's tools: list by design (FR-003),
 		// so setImportNeeds never sees it. Its handler still has to ride the
 		// artifact, and pipecat_image_imports_test.go holds the COPY line that

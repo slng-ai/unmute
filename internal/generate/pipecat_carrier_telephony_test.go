@@ -369,7 +369,11 @@ func TestCarrierInboundJoinsThePlatformsRoom(t *testing.T) {
 		`"dailyRoomProperties": _room_properties(caller)`,
 		`"sip_mode": "dial-in"`,
 		`"provider": "daily"`, // the carrier interconnect, not a Daily-bought number
-		`"body": {"direction": "inbound", "call_sid": call_sid}`,
+		`"direction": "inbound",`,
+		`"call_sid": call_sid,`,
+		// The caller's number, which only this process ever sees: the agent is
+		// started by the platform and never touches the carrier's form.
+		`"from_number": from_number,`,
 	} {
 		if !strings.Contains(helper, want) {
 			t.Errorf("the helper's start request is missing %q", want)

@@ -178,6 +178,43 @@ grep -A7 'Conversation info:' internal/voice-agents-tests/salon-concierge-v2/bui
 It is the same text on both targets, and the generated classes beside it are
 what the steps validate their results against.
 
+## Testing the pre-fetch on a call
+
+This is the package we ring, so its `prefetch:` block is what a call has to
+show: a clock entry filling three variables off one reading, the caller's number
+off the call itself, and one lookup filling both the name and whether the caller
+is on file. On the browser loop only the clock resolves, which is why the
+`--source` line above exists.
+
+Do one thing before the first Pipecat call, or the test proves nothing. On the
+`cloud-websocket` route the caller's number rides a `<Parameter>` in the TwiML
+Bin, so a Bin made before this existed carries none. The entry then skips, the
+log says so, and the code is working perfectly. The emitted
+`build/pipecat/README.md` dictates the markup, and the line to add is
+`<Parameter name="from_number" value="{{From}}"/>`. Nothing warns about this at
+compile time, because reading your Bin back would need carrier credentials the
+compiler never asks for.
+
+Three log lines say it worked, one per entry:
+
+```text
+prefetch today: resolved booking_date=..., booking_weekday=..., salon_local_time=...
+prefetch caller: resolved customer_phone, awaiting confirmation
+prefetch profile: resolved customer_name, customer_on_file, awaiting confirmation
+```
+
+The third line naming two variables is the point of that entry: one call to
+`look_up_customer` fills both, so a second fact costs a line rather than a turn.
+On the call itself, verification reads the number back instead of asking for
+twelve digits, and only after the caller says yes may it greet a returning
+customer as one. The booking step then knows the weekday and the salon's own
+clock without calling anything.
+
+Withhold the caller ID on a call of its own. Every entry has to skip and the
+agent has to ask for a number exactly as it always did. A withheld number does
+not arrive as nothing: it arrives as the word `anonymous`, or as keypad digits
+shaped like a real number, and both are treated as absent.
+
 Run the tools' own check on its own:
 
 ```sh

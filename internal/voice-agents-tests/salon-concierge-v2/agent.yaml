@@ -4,8 +4,6 @@ name: salon-concierge-v2
 
 entry_agent: concierge
 
-timezone: Europe/Madrid
-
 agents:
   concierge:
     instructions: instructions.md
@@ -291,9 +289,15 @@ variables:
       was: greeting a stranger by the account holder's name is the worst thing
       this feature could do, and the compiler refuses the prompt that would.
 
+
 prefetch:
   - name: today
-    clock: date
+    clock: now
+    # The zone this entry reads its clock in, and the reason it sits here rather
+    # than on the package: the key belongs beside the reading it governs, and two
+    # entries could honestly want two zones. Not the container's clock, which is
+    # UTC and would name the wrong day for anybody who is not on it.
+    timezone: Europe/Madrid
     assign:
       - booking_date: result.date
 
@@ -304,6 +308,10 @@ prefetch:
 
   - name: profile
     tool: look_up_customer
+    # Does running this unasked, on every call including wrong numbers, change
+    # anything? No: look_up_customer reads. Its twin find_or_create_customer
+    # would answer true, which is why this entry points at this one.
+    writes: false
     args:
       - phone: "{{customer_phone}}"
     assign:

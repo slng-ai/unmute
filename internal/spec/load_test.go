@@ -211,6 +211,10 @@ func TestLoadToolShape(t *testing.T) {
 		{"flat execution", head + "\nexecution: webhook\nurl_env: PROBE_URL\n", "no longer a top-level field"},
 		{"flat url_env", head + "\nwebhook:\n  url_env: PROBE_URL\nurl_env: PROBE_URL\n", "move url_env inside"},
 		{"flat token_env", head + "\nwebhook:\n  url_env: PROBE_URL\ntoken_env: PROBE_TOKEN\n", "move token_env under"},
+		// read_only retired the other way round from the rest: it did not move
+		// inside a block, it moved onto the caller. The refusal has to say that,
+		// because "unknown field" sends the author looking for a typo.
+		{"retired read_only", head + "\nwebhook:\n  url_env: PROBE_URL\nread_only: true\n", "`writes: true` or `writes: false` on the prefetch entry that runs this one"},
 		{"scalar builtin", "description: Probe.\n\nbuiltin: end_call\n", "`builtin:` is a block now"},
 		{"no block", head, "no execution block"},
 		{"two blocks", head + "\nwebhook:\n  url_env: PROBE_URL\nlocal:\n  handler: tools/probe.py\n", "two execution blocks"},

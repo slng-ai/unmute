@@ -704,7 +704,19 @@ def build_state(call_context: dict | None = None) -> State:
         setattr(state, {{pyq .Name}}, call_start[{{pyq .Name}}])
 {{if .Required}}    else:
         missing.append({{pyq .Name}})
-{{end}}{{end}}{{end}}    if missing:
+{{end}}{{end}}{{end}}{{if .SystemSourceVars}}    # A variable declaring `source: <call fact>` reads the fact the route lifted
+    # into call_context above. Shaped like the call_start loop, and separate from
+    # it for the reason the two doors are separate: the dispatch payload and the
+    # carrier's own facts are different things arriving from different places.
+    #
+    # This exists because the route table grants a fact to two readers, not one:
+    # `variables: source:` and `prefetch: source:` both resolve through it, so a
+    # grant made for the pre-fetch alone would let a variable compile green here
+    # and hold an empty string on every live call.
+{{range .SystemSourceVars}}    _value = (call_context or {}).get({{pyq .Source}})
+    if _value:
+        setattr(state, {{pyq .Name}}, _value)
+{{end}}{{end}}    if missing:
         raise RuntimeError(f"Missing call context fields: {', '.join(missing)}")
     return state
 {{end}}{{if .NeedsRender}}
@@ -1691,12 +1703,30 @@ def build_stt():
     # name rather than mid-call. None means this is not a phone session.
     carrier_call = _carrier_session(runner_args)
     call_context["_daily_sip_session"] = carrier_call is not None
+    # The call's own facts, under the flat names a `source:` reads. The helper
+    # answering the carrier's webhook is the only process that sees the POST
+    # form, so what it put in the body is all there is.
+    if carrier_call is not None:
+        call_context["call_id"] = carrier_call.get("call_sid") or ""
+        call_context["direction"] = carrier_call.get("direction") or "inbound"
+        call_context["from_number"] = carrier_call.get("from_number") or ""
 {{end}}{{if .CloudWebsocket}}    # Decided once, right after the transport exists: is this a phone call at all?
     # Everything a call needs is checked here, before the caller hears anything.
     # None means browser or console, which behave exactly as they do on a package
     # with no telephony.
     phone_call = _phone_session(runner_args)
     call_context["_phone_call"] = phone_call
+    # The call's own facts, under the flat names a `source:` reads. The call id
+    # and stream id are parsed out of the carrier's handshake; the rest are the
+    # <Parameter> set the TwiML markup dictated, which is why the runbook says
+    # what each one is for and what happens when an existing Bin lacks it.
+    if phone_call is not None:
+        _markup = phone_call.get("body") or {}
+        call_context["call_id"] = phone_call.get("call_id") or ""
+        call_context["stream_id"] = phone_call.get("stream_id") or ""
+        call_context["direction"] = _markup.get("direction") or "inbound"
+        call_context["from_number"] = _markup.get("from_number") or ""
+        call_context["to_number"] = _markup.get("to_number") or ""
 {{end}}{{if .Tracing}}{{if eq .TracingProvider "coval"}}
     trace_provider = setup_coval_tracing()
     trace_attributes = {"agent.name": TRACE_NAME}

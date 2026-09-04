@@ -130,13 +130,22 @@ declared secret never renders at all.
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
 | omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so a prompt reads it only through `requires:` or a `default:` |
 | `conversation` | the model, through `update_variables` | during the call |
-| `session_id`, `call_id`, `direction`, `from_number`, `to_number`, `carrier`, `connection` | the phone adapter | LiveKit `sip` or `connector` only |
-| `stream_id` | the phone adapter | LiveKit `connector` only, not `sip` |
+| `session_id`, `carrier`, `connection` | the phone adapter | LiveKit `sip` or `connector` only |
+| `call_id`, `direction` | the phone adapter | LiveKit `sip` or `connector`, and both Pipecat Twilio routes |
+| `stream_id` | the phone adapter | LiveKit `connector`, and Pipecat `cloud-websocket` |
+| `from_number` | the phone adapter | LiveKit `sip` or `connector`, both directions; both Pipecat Twilio routes, inbound calls only |
+| `to_number` | the phone adapter | LiveKit `sip` or `connector`, both directions; Pipecat `cloud-websocket`, outbound calls only |
 
-The selected route must prove it supplies a system source. **No Pipecat route
-grants a call-source variable today**, `daily-sip` and `cloud-websocket` alike:
-naming one on a Pipecat target is refused at validation. An inbound code-target
-phone channel also requires a default for every `call_start` variable.
+The selected route must prove it supplies a system source: a route that
+grants nothing for a fact refuses the variable at validation. This is no
+longer one blanket LiveKit-versus-Pipecat rule. `pipecat daily-sip` grants
+`call_id`, `direction` and `from_number` (inbound calls only); `pipecat
+cloud-websocket` grants those plus `stream_id` and `to_number` (outbound calls
+only). Both LiveKit routes grant every fact, in both directions, except that
+only `connector` grants `stream_id`. A variable's own `source:` and a
+`prefetch: source:` entry read this same grid, so the same fact hydrates
+either way on a route that grants it. An inbound code-target phone channel
+also requires a default for every `call_start` variable.
 
 Declaring any `source: conversation` variable creates a tool called
 `update_variables` in the generated project. You do not write it and you do not
@@ -151,15 +160,16 @@ ordered list. Entries resolve top to bottom, and the file's order is the agent's
 order.**
 
 ```yaml agent.yaml
-# Required before any entry can read the clock. A container clock is UTC, so
-# without this the agent names the wrong day for anybody who is not on it.
-timezone: Europe/Madrid
-
 prefetch:
   - name: today
-    clock: date
+    clock: now
+    # Required on a clock entry, never on the package. A container clock is
+    # UTC, so without this the agent names the wrong day for anybody who is
+    # not on it.
+    timezone: Europe/Madrid
     assign:
       - booking_date: result.date
+      - booking_weekday: result.day_of_week
 
   - name: caller
     source: from_number
@@ -168,19 +178,31 @@ prefetch:
 
   - name: profile
     tool: look_up_customer
+    # Required on a tool: entry, never defaulted. Answers "does running this
+    # unasked, on every call including wrong numbers, change anything".
+    writes: false
     args:
       - phone: "{{customer_phone}}"
     assign:
       - customer_name: result.name
+      - customer_on_file: result.status
 ```
+
+`profile` assigns two variables from one lookup. An entry can `assign:` as
+many variables as the result has fields, from the one call: no second
+request, no second turn.
 
 Every entry carries a `name:` and exactly one source key.
 
 | Source key | Reads | Produces |
 |---|---|---|
-| `clock: date` | the package clock, in `timezone:` | `result.date` |
+| `clock: now` | the clock, in the entry's own `timezone:` | `result.date`, `result.time`, `result.datetime`, `result.day_of_week`, `result.year`, `result.timezone` |
 | `source: <name>` | a fact the call itself carries | `result.value` |
-| `tool: <name>` | one already-declared read-only tool | `result.<field>` from its `output:` |
+| `tool: <name>` | one already-declared tool, with `writes:` declared on this entry | `result.<field>` from its `output:` |
+
+`clock: now` is the only value `clock:` accepts. One reading of the clock
+produces all six fields above, and `assign:` may name as many of them as the
+entry wants.
 
 `tool:` is the general case. Any read-only tool qualifies when every argument is
 something the package already holds: a fixed value, a call fact, the clock, or a
@@ -206,16 +228,18 @@ Three rules that catch most first attempts:
 - **Order matters and is not fixed for you.** An entry reading a value that a
   *later* entry assigns is refused, naming both entries and telling you which one
   to move up. Reading a value an *earlier* entry assigned is the intended shape.
-- **`tool:` needs `read_only: true` on the tool.** A pre-fetch runs unasked on
-  every call, so a tool that writes would write on every call, wrong numbers
-  included. Webhook and local tools only.
+- **`tool:` needs `writes: true` or `writes: false` on the entry.** There is no
+  default: a pre-fetch runs unasked on every call, so the build makes you say
+  whether that is safe. Webhook and local tools only. `writes:` is refused on
+  a `clock:` or `source:` entry, which run no tool.
 - **`source:` on the entry, not on the variable.** The variable that receives a
   call fact declares no `source:` of its own. That is what keeps a package
   compiling on a route that supplies no caller ID: the entry skips there, the
   variable keeps its default, and validation warns naming the target and the
-  route. A call fact resolves on LiveKit `sip` and `connector` and nowhere else.
-  Declaring the same fact as a variable's own `source:` is a hard error on a
-  Pipecat target rather than a warning, which is the whole reason for this rule.
+  route. Which routes resolve which fact is per fact, not per target: see
+  "Where values come from" above. A route that grants nothing for a fact
+  refuses it as a variable's own `source:` too, which is the whole reason for
+  this rule.
 
 **An entry that resolves nothing is normal.** Skipping is the specified behaviour,
 not a failure. The whole block has a two second budget and cannot fail a call: a
@@ -225,6 +249,75 @@ whole sentence when that value is empty.**
 
 Denied on the `slng` target: that platform owns session start, so there is no seam
 to resolve a fact in.
+
+### `writes:` is a promise, not a guarantee
+
+**The compiler cannot check it.** It checks that you made it. Nothing reads
+your handler or your endpoint to see whether it writes; `writes: false` is a
+claim about this one use of the tool, and a wrong claim compiles.
+
+It sits on the prefetch entry rather than on the tool because the question is
+about this use, not about the tool in general: the same lookup might be safe
+to run before a greeting and unsafe to run twice elsewhere. It is required
+before `prefetch:` may run a tool, because a pre-fetch runs unasked on every
+call: a tool that writes would write on every call, wrong numbers included. So
+a lookup that creates a record when it finds none is exactly the tool this
+entry must not point at, however convenient. Write a reading tool beside it
+and pre-fetch that one instead.
+
+`writes: true` compiles too. It is a declaration, not a request for
+permission, and it prints no warning: the entry is named in
+`compile-report.json` and in the generated runbook instead.
+
+### A caller's number is best effort
+
+`from_number` and `to_number` resolve less often than the other system
+sources, on every route that grants them. A caller can withhold their own
+number, and withholding does not arrive as nothing:
+
+- Twilio's own policy is to set it to the word `anonymous`.
+- Where an upstream carrier sends a word such as ANONYMOUS or RESTRICTED
+  instead, Twilio converts it to keypad digits, which look exactly like a real
+  number.
+- Some calls simply arrive with the field empty.
+
+Unmute treats all three as absent. A number-valued fact resolves only when it
+looks like a plausible E.164 number, a `+` followed by 8 to 15 digits, and a
+short list of known digit placeholders is rejected on top of that check.
+Either way the entry is skipped, and the log names which entry and why.
+
+On LiveKit `sip`, the number is also absent when the dispatch rule sets
+`HidePhoneNumber`. On `pipecat cloud-websocket` it can be missing for a
+configuration reason instead: the number rides a `<Parameter>` in the TwiML
+Bin the user made, so a Bin created before this existed does not carry it.
+Nothing warns about that at compile time, because checking would need carrier
+credentials the compiler never asks for.
+
+The same is true in the other direction. An outbound call has no caller, so
+the fact worth reading is `to_number`, and on `pipecat cloud-websocket` it has
+to be put into the request that places the call:
+
+```yaml agent.yaml
+prefetch:
+  - name: dialing
+    source: to_number
+    assign:
+      - customer_phone: result.value
+```
+
+```xml
+<Parameter name="to_number" value="$DEST"/>
+```
+
+The number goes into that request twice, once as the number Twilio dials and
+once as this parameter, because Twilio substitutes nothing inside an inline
+`Twiml=`. Both LiveKit routes need none of this: the worker places the call,
+so it already holds the number. Point the user at the generated
+`build/<target>/README.md`, which prints the whole request for their own route.
+
+Tell the user to treat the caller's number as best effort on every route that
+grants it, not only on Pipecat, and to mark it `confirm:` rather than act on
+it unasked.
 
 ## A value the caller has to confirm
 

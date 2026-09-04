@@ -350,26 +350,48 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if _, declared := resolved.Tools["get_current_date"]; declared {
 		t.Error("get_current_date is still declared; the prefetch replaced it")
 	}
-	if resolved.Timezone == "" {
-		t.Error("the package declares no timezone:, so the pre-fetched date would be read in UTC")
-	}
 	var clock, caller, profile bool
 	for _, entry := range resolved.Prefetch {
-		clock = clock || entry.Clock == ir.PrefetchClockDate
+		if entry.Clock == ir.PrefetchClockNow {
+			clock = true
+			// The zone rides the entry that reads it. Without one the date would
+			// be read on the container clock, which is UTC.
+			if entry.Timezone == "" {
+				t.Errorf("prefetch %q reads the clock and names no zone, so the date is read in UTC", entry.Name)
+			}
+			// One reading, three facts. This is the saving the whole entry exists
+			// for: a second clock fact costs a line, not a turn.
+			if got := len(entry.Assign); got < 3 {
+				t.Errorf("the clock entry assigns %d variables, want at least 3: one reading fills as many "+
+					"facts as the prompt needs, and an example showing one teaches that it does not", got)
+			}
+		}
 		caller = caller || entry.Source == ir.VariableSourceFromNumber
 		profile = profile || entry.Tool == "look_up_customer"
 	}
 	if !clock || !caller || !profile {
 		t.Errorf("prefetch = %+v, want a clock entry, a from_number entry and a look_up_customer entry", resolved.Prefetch)
 	}
-	// The lookup a prefetch runs has to be the read-only one. Pre-fetching
-	// find_or_create_customer would create a customer record on every inbound
-	// call, wrong numbers included, which is the reason both tools exist.
-	if !resolved.Tools["look_up_customer"].ReadOnly {
-		t.Error("look_up_customer does not declare read_only: true, so no prefetch could run it")
+	// The lookup a prefetch runs has to be the one that writes nothing, and the
+	// entry running it has to say so. Pre-fetching find_or_create_customer would
+	// create a customer record on every inbound call, wrong numbers included,
+	// which is the reason both tools exist and why the split survived `writes:`
+	// arriving: the shipped example an author copies should not model it.
+	var declared bool
+	for _, entry := range resolved.Prefetch {
+		if entry.Tool != "look_up_customer" {
+			continue
+		}
+		declared = true
+		if entry.Writes {
+			t.Error("the salon pre-fetches look_up_customer and declares writes: true; that entry reads")
+		}
 	}
-	if resolved.Tools["find_or_create_customer"].ReadOnly {
-		t.Error("find_or_create_customer claims read_only: true, and it writes")
+	if !declared {
+		t.Error("no prefetch entry runs look_up_customer, so nothing declares whether the lookup writes")
+	}
+	if _, ok := resolved.Tools["find_or_create_customer"]; !ok {
+		t.Error("find_or_create_customer is gone; it is the writing twin the pre-fetched lookup exists to avoid")
 	}
 	wantBookingResult := []string{"action", "booking_id", "status", "summary"}
 	if got := slices.Sorted(maps.Keys(booking.Result)); !slices.Equal(got, wantBookingResult) {
@@ -634,7 +656,9 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		// tool to call for it, and it says out loud not to call one. A model handed
 		// a date and still told to "call get_current_date first" would call a tool
 		// that no longer exists.
-		"Today is `{{booking_date}}`", "Do not call a tool to ask what day it is",
+		"Today is `{{booking_weekday}}` `{{booking_date}}`",
+		"the salon clock reads\n   `{{salon_local_time}}`",
+		"Do not\n   call a tool to ask what day or time it is",
 		"Never say a booking is saved, moved, or cancelled unless the matching tool ran in this turn")
 	// Open chat is the entry agent's job now, and it holds exactly one lookup:
 	// the salon's own documents. The prompt's job is the same as the deleted chat

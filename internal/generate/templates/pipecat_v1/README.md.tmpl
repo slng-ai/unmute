@@ -1109,12 +1109,13 @@ Do these in the [Twilio Console](https://console.twilio.com), in this order.
      <Connect>
        <Stream url="{{.CloudWebsocket.StreamURL}}">
          <Parameter name="_pipecatCloudServiceHost" value="{{.AgentName}}.YOUR_ORGANIZATION"/>
+         <Parameter name="from_number" value="{{`{{From}}`}}"/>
        </Stream>
      </Connect>
    </Response>
    ```
 
-   Four things in there are deliberate:
+   Five things in there are deliberate:
 
    - **The spoken line comes first.** Starting this agent takes a few seconds
      from cold, and a caller who hears nothing hangs up. Delete the `<Say>` line
@@ -1124,10 +1125,27 @@ Do these in the [Twilio Console](https://console.twilio.com), in this order.
      one from a guide.
    - **The agent name is already filled in.** `YOUR_ORGANIZATION` is the only
      substitution you make.
+   - **`{{`{{From}}`}}` is the caller's number**, and Twilio substitutes it as it
+     builds the Bin's response. That is the only place this agent can learn it:
+     the platform terminates the carrier's stream itself, so nothing else in this
+     package ever sees the call's own details. It is what `source: from_number`
+     reads.
    - **There is nothing else in it.** A `<Parameter>` reaches this agent only if
-     the emitted code reads one by that name, and on an inbound call that is the
-     service host alone. Adding the caller's number here is a common suggestion
-     and it does nothing: no module in this package reads it.
+     the emitted code reads one by that name, and a parameter nothing reads is
+     markup you paste and then trust. Only the two above are read here.
+
+   **If you already have a Bin, add the `from_number` line to it.** An older Bin
+   without it is not an error and does not fail the build: nothing checks your
+   Bin, because reading it back would need carrier credentials this command does
+   not ask for. What happens instead is that the number arrives empty, every
+   entry reading it is skipped, and the agent's log says so by name:
+
+   ```text
+   prefetch caller: skipped, the call carries no from_number
+   ```
+
+   That is also what a caller who withholds their number produces, which is the
+   point: the agent behaves the same either way, and asks.
 
 4. **Point the number at that Bin.** Phone Numbers, Manage, Active Numbers,
    your number, Voice Configuration, "A call comes in", choose TwiML Bin, pick
@@ -1209,12 +1227,23 @@ create in the console and nothing of yours for the call to come back to:
 ```sh
 curl -X POST "https://api.twilio.com/2010-04-01/Accounts/$TWILIO_ACCOUNT_SID/Calls.json" \
   -u "$TWILIO_ACCOUNT_SID:$TWILIO_AUTH_TOKEN" \
-  --data-urlencode "To=+15551230000" \
+  --data-urlencode "To=$DEST" \
   --data-urlencode "From=${{.CloudWebsocket.FromNumberEnv}}" \
-  --data-urlencode 'Twiml=<Response><Connect><Stream url="{{.CloudWebsocket.StreamURL}}"><Parameter name="_pipecatCloudServiceHost" value="{{.AgentName}}.'"$PIPECAT_CLOUD_ORGANIZATION"'"/><Parameter name="direction" value="outbound"/></Stream></Connect></Response>'
+  --data-urlencode 'Twiml=<Response><Connect><Stream url="{{.CloudWebsocket.StreamURL}}"><Parameter name="_pipecatCloudServiceHost" value="{{.AgentName}}.'"$PIPECAT_CLOUD_ORGANIZATION"'"/><Parameter name="direction" value="outbound"/><Parameter name="to_number" value="'"$DEST"'"/></Stream></Connect></Response>'
 ```
 
-Change `To`; everything else is read from your environment. Expected: the phone
+Set `DEST` first, to the number you are calling:
+
+```sh
+export DEST=+15551230000
+```
+
+It goes in twice on purpose. `To` is what Twilio dials; the `to_number`
+parameter is what this agent reads as `source: to_number`, and Twilio
+substitutes nothing inside an inline `Twiml=`. A Bin gets `{{`{{To}}`}}` filled
+in for it; a command like this one does not, so the shell fills it instead.
+
+Change `DEST`; everything else is read from your environment. Expected: the phone
 rings showing your own number, and this agent speaks when it is answered. There
 is no `<Say>` before the stream here on purpose, because a person is already
 listening by then and the agent's greeting should be the first thing they hear.

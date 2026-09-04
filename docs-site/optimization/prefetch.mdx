@@ -131,8 +131,8 @@ A `prefetch:` entry itself is not held to that bar. An entry whose input is
 empty for this call is skipped with a warning, and the call carries on with the
 variable's default. What an entry does enforce is on
 [Rules that will stop the build](/build/prefetch#rules-that-will-stop-the-build):
-a tool needs `read_only: true`, and `assign:` and `args:` are lists, one pair
-per line, never a mapping.
+a `tool:` entry needs `writes: true` or `writes: false`, and `assign:` and
+`args:` are lists, one pair per line, never a mapping.
 
 Behind all of it is one plain fact. The model remembers nothing between turns,
 so every token in the prompt is paid again on every turn. Routing a value to
@@ -159,8 +159,10 @@ caller has already heard a voice.
 ## Design for empty, because empty is the common case
 
 Every input a pre-fetch needs can be missing, and on some routes it always is.
-Your machine has no phone network. **No Pipecat route supplies call facts**, so a
-`source: from_number` entry never gets a value there. Callers hide their number.
+Your machine has no phone network. Some facts are absent on some routes by
+design, for example `source.carrier` on either Pipecat route, or a phone
+number on the direction a route does not grant. Callers hide their number too,
+so even a route that grants a fact can still supply nothing on a given call.
 Your lookup will not know a first-time customer.
 
 So the empty call is not an edge case to handle later. It is the one to write

@@ -35,10 +35,6 @@ type Agent struct {
 	// carried here rather than re-derived by anything that renders.
 	VariableOrder []string            `json:"variable_order,omitempty" yaml:"variable_order,omitempty"`
 	Variables     map[string]Variable `json:"variables,omitempty" yaml:"variables,omitempty"`
-	// Timezone is the validated IANA zone every clock reading in this package is
-	// taken in. Empty when the package declares none, which only a clock prefetch
-	// refuses.
-	Timezone string `json:"timezone,omitempty" yaml:"timezone,omitempty"`
 	// Prefetch is the resolved prefetch list, **in the order the author wrote
 	// it**, which is the order the emitted agent resolves them in. Nothing sorts
 	// this slice: an entry reading a value a later entry assigns was refused at
@@ -377,12 +373,20 @@ type Pair struct {
 // Prefetch is one resolved prefetch entry. Exactly one of Clock, Source and Tool
 // is set; Build refuses zero or more than one.
 type Prefetch struct {
-	Name   string         `json:"name" yaml:"name"`
-	Clock  string         `json:"clock,omitempty" yaml:"clock,omitempty"`
-	Source VariableSource `json:"source,omitempty" yaml:"source,omitempty"`
-	Tool   string         `json:"tool,omitempty" yaml:"tool,omitempty"`
-	Args   []Pair         `json:"args,omitempty" yaml:"args,omitempty"`
-	Assign []Pair         `json:"assign,omitempty" yaml:"assign,omitempty"`
+	Name  string `json:"name" yaml:"name"`
+	Clock string `json:"clock,omitempty" yaml:"clock,omitempty"`
+	// Timezone is the validated IANA zone this entry reads its clock in, empty on
+	// every entry that reads no clock. Per entry, not per package: two entries may
+	// honestly read two zones, and the key belongs beside the reading it governs.
+	Timezone string         `json:"timezone,omitempty" yaml:"timezone,omitempty"`
+	Source   VariableSource `json:"source,omitempty" yaml:"source,omitempty"`
+	Tool     string         `json:"tool,omitempty" yaml:"tool,omitempty"`
+	// Writes is the author's answer for this entry, false on every entry that
+	// runs no tool. Nothing branches on it: it is carried so the compile report
+	// and the emitted runbook can name the entries that write.
+	Writes bool   `json:"writes,omitempty" yaml:"writes,omitempty"`
+	Args   []Pair `json:"args,omitempty" yaml:"args,omitempty"`
+	Assign []Pair `json:"assign,omitempty" yaml:"assign,omitempty"`
 	// Inputs are the declared variables Args reads, sorted. Resolved here so the
 	// emitted skip check and the per-target warning both read one list rather
 	// than each re-parsing the templates.
@@ -699,10 +703,6 @@ type Tool struct {
 	// is not silence. Webhook, local and knowledge only; blank means no
 	// announcement, so no driver has to interpret whitespace.
 	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
-	// ReadOnly is the author's promise that this tool writes nothing, required
-	// before a prefetch entry may run it. A declaration, not a guarantee: the
-	// compiler cannot check it.
-	ReadOnly bool `json:"read_only,omitempty" yaml:"read_only,omitempty"`
 	// KnowledgeBase names the base this tool searches (knowledge only).
 	// Validation has proven the name is declared.
 	KnowledgeBase string `json:"knowledge_base,omitempty" yaml:"knowledge_base,omitempty"`

@@ -886,9 +886,13 @@ type livekitReportJSON struct {
 	RequiredEnv []string              `json:"required_env"`
 	Bindings    []ir.ForwardedBinding `json:"bindings,omitempty"`
 	Sizing      []ir.Sizing           `json:"sizing,omitempty"`
-	Variables   []reportVariable      `json:"variables,omitempty"`
-	Secrets     []reportSecret        `json:"secrets,omitempty"`
-	Notes       []string              `json:"notes,omitempty"`
+	// PrefetchWrites is every prefetch entry the author declared as writing. Here
+	// rather than on stdout: the key is required, so a warning would fire forever
+	// on every package that legitimately writes.
+	PrefetchWrites []PrefetchWrite  `json:"prefetch_writes,omitempty"`
+	Variables      []reportVariable `json:"variables,omitempty"`
+	Secrets        []reportSecret   `json:"secrets,omitempty"`
+	Notes          []string         `json:"notes,omitempty"`
 }
 
 func livekitReport(agent *ir.Agent, data livekitData, files []File, bindings []ir.ForwardedBinding, sizing []ir.Sizing) ([]byte, error) {
@@ -912,7 +916,7 @@ func livekitReport(agent *ir.Agent, data livekitData, files []File, bindings []i
 		Agents: agents, Tasks: tasks, Files: generated,
 		// Forwarded without checking, so it must be readable back (constitution).
 		Regions: data.DeploymentRegions, RequiredEnv: data.RequiredEnv,
-		Bindings: bindings, Sizing: sizing,
+		Bindings: bindings, Sizing: sizing, PrefetchWrites: PrefetchWrites(agent),
 		Variables: reportVariables(agent), Secrets: reportSecrets(agent),
 		Notes: data.Notes,
 	}, "", "  ")

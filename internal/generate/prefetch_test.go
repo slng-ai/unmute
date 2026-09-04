@@ -119,7 +119,11 @@ func TestPrefetchLogsEveryOutcomeByName(t *testing.T) {
 	py := prefetchEmitted(t, ir.ProviderLiveKit, "agent.py")
 	for _, want := range []string{
 		// resolved, one per source kind
-		`logger.info(f"prefetch today: resolved booking_date={state.booking_date}")`,
+		// Every variable the entry assigned, not just the first. A three-field
+		// entry logging one of them is a trace that cannot answer whether the
+		// other two landed.
+		`logger.info(f"prefetch today: resolved booking_date={state.booking_date}, ` +
+			`booking_weekday={state.booking_weekday}, booking_year={state.booking_year}")`,
 		`logger.info("prefetch caller: resolved caller_phone, awaiting confirmation")`,
 		`logger.info("prefetch profile: resolved caller_name, awaiting confirmation")`,
 		// skipped, for both reasons an entry can skip
@@ -267,8 +271,10 @@ func TestPrefetchBoundsARouterValueAndSaysSo(t *testing.T) {
 		t.Error("shortening a value is not logged with what it costs")
 	}
 	// Every assigned value goes through it, so a new source kind cannot skip the
-	// bound by accident. The clock is the exception and is exempt on purpose: an
-	// ISO date is ten characters.
+	// bound by accident. The clock is no longer an exception: an ISO date is ten
+	// characters, but `result.timezone` is whatever the author typed, and a field
+	// exempted "because it is short" is one nobody re-checks when a longer one
+	// joins it.
 	block := prefetchBlockOf(t, py)
 	if !strings.Contains(block, `state.caller_phone = _prefetch_bounded("caller_phone", _value)`) {
 		t.Error("the call fact is written unbounded")
@@ -388,9 +394,9 @@ func TestPrefetchResolvesAllThreeSourcesOnBothTargets(t *testing.T) {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			block := prefetchBlockOf(t, prefetchEmitted(t, tc.provider, tc.file))
 			for _, want := range []string{
-				// clock
-				`state.booking_date = datetime.now(_PREFETCH_TZ).date().isoformat()`,
-				`_PREFETCH_TZ`,
+				// clock: one reading into a local, every field derived from it
+				`_now = datetime.now(ZoneInfo("Europe/Madrid"))`,
+				`state.booking_date = _prefetch_bounded("booking_date", _now.date().isoformat())`,
 				// call fact
 				`(call_context or {}).get("from_number")`,
 				// lookup
@@ -402,6 +408,206 @@ func TestPrefetchResolvesAllThreeSourcesOnBothTargets(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// FR-005 and FR-006. One entry, one reading, and every field of that entry taken
+// off it.
+//
+// Read per field instead, an entry assigning date and time could straddle a
+// second, and one assigning date and day_of_week could straddle a midnight and
+// disagree with itself about which day it is. The fixture assigns three fields,
+// so a single `_now` is the thing being asserted, not an implementation detail.
+func TestPrefetchClockReadsOncePerEntry(t *testing.T) {
+	for _, tc := range []struct {
+		provider ir.Provider
+		file     string
+	}{
+		{ir.ProviderLiveKit, "agent.py"},
+		{ir.ProviderPipecat, "bot.py"},
+	} {
+		t.Run(string(tc.provider), func(t *testing.T) {
+			block := prefetchBlockOf(t, prefetchEmitted(t, tc.provider, tc.file))
+			if got := strings.Count(block, "datetime.now("); got != 1 {
+				t.Errorf("the block reads the clock %d times for one entry, want 1: three fields off "+
+					"three readings can straddle a second or a midnight", got)
+			}
+			for _, want := range []string{
+				`_now.date().isoformat()`,
+				`_PREFETCH_DAYS[_now.weekday()]`,
+				`str(_now.year)`,
+			} {
+				if !strings.Contains(block, want) {
+					t.Errorf("the block is missing the clock expression %q", want)
+				}
+			}
+			// The weekday is a spelled-out tuple, never strftime. strftime("%A")
+			// reads the container's locale, so the same image on a differently
+			// configured host would say "viernes" into an English prompt.
+			if strings.Contains(block, `strftime("%A")`) {
+				t.Error(`the weekday is read with strftime("%A"), which follows the container's locale`)
+			}
+			// And every clock value goes through the bound, so a new field cannot
+			// skip it by accident.
+			for _, name := range []string{"booking_date", "booking_weekday", "booking_year"} {
+				if !strings.Contains(block, `state.`+name+` = _prefetch_bounded("`+name+`", `) {
+					t.Errorf("the clock writes %s unbounded", name)
+				}
+			}
+		})
+	}
+}
+
+// Every field ir declares has an arm in the emitter. A field with none would
+// emit `state.x = _prefetch_bounded("x", )`, which is a syntax error rather than
+// a wrong answer, but only for a package that happens to assign that field.
+func TestPrefetchEmitsEveryClockField(t *testing.T) {
+	for _, field := range ir.PrefetchClockFields {
+		if prefetchClockExpr(field, "Europe/Madrid") == "" {
+			t.Errorf("clock field %q is declared in ir.PrefetchClockFields and has no emitted expression", field)
+		}
+	}
+	if prefetchClockExpr("nonsense", "Europe/Madrid") != "" {
+		t.Error("an undeclared field got an expression, so the two lists are not actually held together")
+	}
+}
+
+// FR-017, the Daily carrier half. The helper answering the carrier's inbound
+// webhook is the only process that sees the POST form, so what it puts in the
+// body is all there is, and the bot lifts it under the flat names a `source:`
+// reads.
+func TestDailyCarrierLiftsTheCallsFactsIntoTheContext(t *testing.T) {
+	bot := artifactFile(t, dailyCarrierArtifact(t, "twilio", true), "bot.py")
+	for _, want := range []string{
+		`call_context["call_id"] = carrier_call.get("call_sid") or ""`,
+		`call_context["direction"] = carrier_call.get("direction") or "inbound"`,
+		`call_context["from_number"] = carrier_call.get("from_number") or ""`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py does not lift the call fact: %s", want)
+		}
+	}
+}
+
+// A route table grant is a promise to two readers, not one: `variables: source:`
+// and `prefetch: source:` both resolve through the same table.
+//
+// This is the arm that keeps the second promise. Without it a grant made for the
+// pre-fetch alone would let `variables: source: from_number` compile green on a
+// Pipecat route and hold an empty string on every live call, which is exactly
+// the failure the route table's own comment used to warn about.
+func TestPipecatHydratesASystemSourceVariable(t *testing.T) {
+	agent, resolved := cloudWebsocketTarget(t, cloudWebsocketOptions{inbound: true, connection: true})
+	agent.Variables["caller_fact"] = ir.Variable{
+		Type: "string", Source: ir.VariableSourceFromNumber, Default: "",
+	}
+	artifact, err := Generate(agent, resolved, target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		`_value = (call_context or {}).get("from_number")`,
+		`setattr(state, "caller_fact", _value)`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("build_state does not hydrate a system-source variable: %s", want)
+		}
+	}
+}
+
+// FR-007. Two variables, one call. The result already has both fields, so a
+// second assign line costs no second request, no second turn and no second
+// second.
+//
+// This compiled before this feature and nothing in the repository showed it, so
+// an author had no reason to believe a second line was legal. The gate is here
+// because the example that shows it can be tidied away.
+func TestPrefetchFillsTwoVariablesFromOneCall(t *testing.T) {
+	for _, tc := range []struct {
+		provider ir.Provider
+		file     string
+	}{
+		{ir.ProviderLiveKit, "agent.py"},
+		{ir.ProviderPipecat, "bot.py"},
+	} {
+		t.Run(string(tc.provider), func(t *testing.T) {
+			agent := salonAgent(t)
+			artifact, err := Generate(agent, targetByProvider(t, agent, tc.provider), target.Default())
+			if err != nil {
+				t.Fatal(err)
+			}
+			block := prefetchBlockOf(t, artifactFile(t, artifact, tc.file))
+			// One call. The salon's lookup is a local handler, so the invocation is
+			// `tools.<name>.<name>(...)`: counting the bare name would count the
+			// module, the function and the entry's own comment.
+			if got := strings.Count(block, "tools.look_up_customer.look_up_customer("); got != 1 {
+				t.Errorf("the block invokes look_up_customer %d times, want 1", got)
+			}
+			// Two variables written from it.
+			for _, name := range []string{"customer_name", "customer_on_file"} {
+				if !strings.Contains(block, "state."+name+" = _prefetch_bounded(") {
+					t.Errorf("%s is not written by the lookup entry", name)
+				}
+			}
+			// And both are named in the one log line, so a trace can answer
+			// whether the second landed.
+			if !strings.Contains(block, "prefetch profile: resolved customer_name, customer_on_file") {
+				t.Error("the entry's log line does not name both variables it assigned")
+			}
+		})
+	}
+}
+
+// FR-021. A withheld caller ID does not arrive as nothing.
+//
+// Twilio's own policy is that a call whose caller ID was withheld arrives with
+// `From` set to the word `anonymous`; where an upstream carrier sends a word
+// such as ANONYMOUS or RESTRICTED, Twilio converts it to keypad digits, which
+// arrive looking exactly like a real number. And some calls simply arrive empty.
+//
+// All three mean the same thing and all three must skip the entry. Only the
+// first was handled, so the other two reached a prompt and the agent read
+// "anonymous" back to the caller as their own phone number.
+func TestPrefetchTreatsAWithheldNumberAsAbsent(t *testing.T) {
+	block := prefetchBlockOf(t, prefetchEmitted(t, ir.ProviderLiveKit, "agent.py"))
+	// The number goes through the shape check before the skip arm sees it, so all
+	// three shapes reach `if not _value` as the empty string.
+	if !strings.Contains(block, `_value = _prefetch_number("from_number", _value)`) {
+		t.Error("the caller's number is written straight into the skip check, so only an empty one skips")
+	}
+	py := prefetchEmitted(t, ir.ProviderLiveKit, "agent.py")
+	for _, want := range []string{
+		// The shape, which is the rule: a plus and 8 to 15 ASCII digits. This is
+		// what catches "anonymous", "restricted" and "" alike.
+		`text.startswith("+")`,
+		`digits.isascii() and digits.isdigit()`,
+		`8 <= len(digits) <= 15`,
+		// And the digit form the shape check cannot see, spelled out from the
+		// words rather than hardcoded: nobody has verified what digits the
+		// carrier actually sends, and the keypad map is the part that is a fact.
+		"_PREFETCH_WITHHELD = (",
+		`"266696687",  # anonymous`,
+		`"7378742833",  # restricted`,
+	} {
+		if !strings.Contains(py, want) {
+			t.Errorf("the emitted block is missing %q", want)
+		}
+	}
+	// The match runs one way only, and that is a fixed bug rather than a style
+	// choice. Matching a value that *begins* with a spelling would throw away real
+	// numbers: "unknown" spells 8656696, and +86 5669 6xxx is an ordinary Chinese
+	// mobile that would have been read as a withheld caller ID.
+	if strings.Contains(py, "digits.startswith(spelled)") {
+		t.Error("the withheld check matches a value beginning with a spelling, which discards real numbers")
+	}
+	if !strings.Contains(py, "spelled.startswith(digits)") {
+		t.Error("the withheld check no longer catches a truncated spelling")
+	}
+	// A call id of "unknown" is a real call id. The shape check applies to the
+	// two numbers only, so nothing else is silently thrown away.
+	if strings.Contains(block, `_prefetch_number("call_id"`) {
+		t.Error("a non-number call fact goes through the phone-number shape check")
 	}
 }
 

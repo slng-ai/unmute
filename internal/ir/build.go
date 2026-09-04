@@ -719,7 +719,6 @@ func buildTool(name string, raw packagespec.Tool) Tool {
 	// whitespace-only line reads as no announcement, so every driver sees a
 	// settled value and none has to decide what " " means.
 	tool.Announce = strings.TrimSpace(raw.Announce)
-	tool.ReadOnly = raw.ReadOnly
 	return tool
 }
 

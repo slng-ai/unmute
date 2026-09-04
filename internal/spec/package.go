@@ -88,13 +88,13 @@ type AgentFile struct {
 	// and struct order is what the derived schema publishes.
 	Shapes    []Shape             `json:"shapes,omitempty" yaml:"shapes,omitempty"`
 	Variables map[string]Variable `json:"variables,omitempty" yaml:"variables,omitempty"`
-	// Timezone is the IANA zone every clock reading in this package is taken in.
-	// Required before a clock can be pre-fetched, and required rather than
-	// defaulted because the wrong answer here is silent: a container clock is
-	// UTC, so a salon in Spain taking a booking for "tomorrow" at 23:30 local
-	// would confidently name the wrong day. Package-level, beside Variables,
-	// because it is a fact about the business rather than about one target.
-	Timezone string `json:"timezone,omitempty" yaml:"timezone,omitempty"`
+	// Timezone is retired. The zone lives on the clock entry that reads it, so
+	// two entries can read two zones and so the key sits beside the thing it
+	// governs. This field survives only so a file still carrying the old key is
+	// refused with a sentence naming where to move it, rather than with a strict
+	// decoder complaining about an unknown field. `json:"-"` keeps it out of the
+	// derived authoring schema, so nothing offers it to a new author.
+	Timezone string `json:"-" yaml:"timezone,omitempty"`
 	// Prefetch names the facts resolved once per call, before the greeting, and
 	// where each one lands. An ordered list: entries resolve top to bottom, so
 	// the order the file shows is the order the agent uses, and an entry reading
@@ -324,10 +324,31 @@ type Prefetch struct {
 	// an order a reader can see. It is also what makes a per-entry comment land
 	// somewhere a reader will find it, and what lets a refusal or a log line say
 	// which entry it means.
-	Name   string `json:"name" yaml:"name"`
-	Clock  string `json:"clock,omitempty" yaml:"clock,omitempty"`
-	Source string `json:"source,omitempty" yaml:"source,omitempty"`
-	Tool   string `json:"tool,omitempty" yaml:"tool,omitempty"`
+	Name  string `json:"name" yaml:"name"`
+	Clock string `json:"clock,omitempty" yaml:"clock,omitempty"`
+	// Timezone is the IANA zone this clock entry is read in, and it sits on the
+	// entry rather than on the package for two reasons. A zone beside the reading
+	// it governs is a zone a reader finds; and two entries may honestly want two
+	// zones, which one package-level key cannot express. Required rather than
+	// defaulted because the wrong answer is silent: a container clock is UTC, so
+	// a salon in Spain taking a booking for "tomorrow" at 23:30 local would
+	// confidently name the wrong day.
+	Timezone string `json:"timezone,omitempty" yaml:"timezone,omitempty"`
+	Source   string `json:"source,omitempty" yaml:"source,omitempty"`
+	Tool     string `json:"tool,omitempty" yaml:"tool,omitempty"`
+	// Writes is the author's answer to "does running this unasked, on every call
+	// including wrong numbers, change anything". Required on a tool entry.
+	//
+	// It sits on the entry rather than on the tool because it is a fact about
+	// this use of the tool, not about the tool. The same backend operation may be
+	// safe to run before a greeting and unsafe to run twice, and asking the
+	// question at the call site is what stopped one operation needing two tool
+	// declarations to answer it.
+	//
+	// A pointer so an absent key is distinguishable from `writes: false`. The
+	// refusal for an absent one is the whole feature: the compiler cannot check
+	// either answer, so it makes the author state one rather than inferring it.
+	Writes *bool  `json:"writes,omitempty" yaml:"writes,omitempty"`
 	Args   []Pair `json:"args,omitempty" yaml:"args,omitempty"`
 	Assign []Pair `json:"assign,omitempty" yaml:"assign,omitempty"`
 }
@@ -534,27 +555,12 @@ type Tool struct {
 	//
 	// A pointer, like every other block, because both execution-block agreement
 	// tests read every pointer field on Tool as an execution block. That is the
-	// same reason Announce and ReadOnly below are deliberately plain values, and
-	// here it is what is wanted rather than what has to be worked around.
+	// same reason Announce below is deliberately a plain value, and here it is
+	// what is wanted rather than what has to be worked around.
 	Slng *ToolSlng `json:"slng,omitempty" yaml:"slng,omitempty"`
 
 	Interruption string `json:"interruption,omitempty" yaml:"interruption,omitempty"`
 	Effect       string `json:"effect,omitempty" yaml:"effect,omitempty"`
-
-	// ReadOnly is the author's promise that this tool writes nothing. Required
-	// before a prefetch entry may run it, because a prefetch runs unasked on
-	// every call: a tool that writes would write on every call, wrong numbers
-	// included.
-	//
-	// Deliberately distinct from Effect, which describes what the tool does to
-	// the conversation rather than what it does to data. The compiler cannot
-	// check either claim, so this is a declaration and not a guarantee, and both
-	// the docs and the skill say so in those words.
-	//
-	// ponytail: a plain bool, not a pointer, for the same reason Announce is a
-	// plain string: both execution-block agreement tests read every pointer field
-	// on Tool as an execution block.
-	ReadOnly bool `json:"read_only,omitempty" yaml:"read_only,omitempty"`
 
 	// Announce is one fixed sentence the agent speaks as the tool starts, so a
 	// slow call is not silence. Legal on webhook and local only: every other

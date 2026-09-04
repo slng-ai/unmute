@@ -227,6 +227,11 @@ exercises the pre-fetch, the confirmation marking, and the read back. On a
 real call the carrier's own value wins: a seed only fills in what the route
 gave nothing for.
 
+Which facts a real call actually carries depends on the route: LiveKit's two
+routes grant the most, and Pipecat's two Twilio routes grant a smaller set,
+one direction only for a phone number. Seed whichever your target's route
+grants; [Where it works](/build/prefetch#where-it-works) has the full grid.
+
 Do not use `--var` to seed a caller's number. `--var` writes the variable
 directly, so it skips the pre-fetch, marks nothing as awaiting confirmation,
 and lets a local run act on a number it never read back. That is a path a

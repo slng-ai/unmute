@@ -19,10 +19,18 @@ import (
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
-// PrefetchClockDate is the one clock reading there is. A time-of-day value has
-// no reader anywhere in the spec, so adding one now would be a field nobody
-// fills (plan.md, Complexity Tracking).
-const PrefetchClockDate = "date"
+// PrefetchClockNow is the one clock reading there is. The entry reads `now` and
+// the fields below are what that one reading yields, which is why an entry
+// naming three of them cannot straddle a second or a midnight.
+const PrefetchClockNow = "now"
+
+// PrefetchClockFields is the clock's result grammar, in the order a refusal
+// lists them: the two most people want first, then the rest.
+//
+// Exported because the emitter has to render one expression per field, and a
+// field here with no expression there would emit an entry that assigns nothing.
+// `TestPrefetchEmitsEveryClockField` is what holds the two lists together.
+var PrefetchClockFields = []string{"date", "time", "datetime", "day_of_week", "year", "timezone"}
 
 // prefetchResultValue is the single field a call fact produces. A call fact is
 // one string, so `{value}` is its whole shape.
@@ -36,7 +44,7 @@ const prefetchResultValue = "value"
 // prefetch-assigned variable is one that has a session-start value and the
 // template check has to know that.
 func buildPrefetch(pkg *packagespec.Package, agent *Agent) error {
-	if err := buildTimezone(pkg, agent); err != nil {
+	if err := refuseRetiredTimezone(pkg); err != nil {
 		return err
 	}
 	if len(pkg.Agent.Prefetch) == 0 {
@@ -75,29 +83,23 @@ func buildPrefetch(pkg *packagespec.Package, agent *Agent) error {
 		if err := deriveConfirmation(pkg, agent, &entry, where); err != nil {
 			return err
 		}
-		for _, pair := range entry.Assign {
-			assigned[pair.Key] = entry.Name
-		}
 		agent.Prefetch = append(agent.Prefetch, entry)
 	}
 	return checkConfirmSteps(pkg, agent)
 }
 
-// buildTimezone validates `timezone:` (rule 8). Validated whether or not a clock
-// is pre-fetched: a zone that is not a zone is a typo either way, and refusing it
-// only when something reads it would let one sit in a file until the day somebody
-// adds a clock entry.
-func buildTimezone(pkg *packagespec.Package, agent *Agent) error {
-	zone := strings.TrimSpace(pkg.Agent.Timezone)
-	if zone == "" {
+// refuseRetiredTimezone catches a package still carrying the old package-level
+// key. The field survives on the spec struct only for this: a strict decoder
+// would otherwise refuse it with "unknown field", which tells an author their
+// file is wrong but not what replaced it.
+func refuseRetiredTimezone(pkg *packagespec.Package) error {
+	if strings.TrimSpace(pkg.Agent.Timezone) == "" {
 		return nil
 	}
-	if _, err := time.LoadLocation(zone); err != nil {
-		return fmt.Errorf("%s: timezone %q is not an IANA zone name. Use the zone for the place the agent books in, "+
-			"for example Europe/Madrid or America/New_York", pkg.Location("agent.yaml", "timezone:"), zone)
-	}
-	agent.Timezone = zone
-	return nil
+	return fmt.Errorf("%s: timezone: is no longer a package-level key. The zone belongs on the clock entry that "+
+		"reads it, so two entries can read two zones and so the key sits beside the reading it governs. Move it "+
+		"under the prefetch entry: - name: today / clock: %s / timezone: %s",
+		pkg.Location("agent.yaml", "timezone:"), PrefetchClockNow, strings.TrimSpace(pkg.Agent.Timezone))
 }
 
 // checkPrefetchName is refusal D2. A list has no duplicate-key protection of its
@@ -131,8 +133,8 @@ func buildPrefetchEntry(pkg *packagespec.Package, agent *Agent, raw packagespec.
 	case 1:
 	case 0:
 		return entry, fmt.Errorf("%s: prefetch %q names none of clock:, source: and tool:. An entry reads exactly one: "+
-			"clock: date for the current date, source: <name> for a fact the call carries, or tool: <name> for a "+
-			"read-only lookup", where, raw.Name)
+			"clock: "+PrefetchClockNow+" for the date and time, source: <name> for a fact the call carries, or "+
+			"tool: <name> for a lookup", where, raw.Name)
 	default:
 		return entry, fmt.Errorf("%s: prefetch %q names both %s: and %s:. An entry reads exactly one source; split it "+
 			"into two entries", where, raw.Name, present[0], present[1])
@@ -147,18 +149,45 @@ func buildPrefetchEntry(pkg *packagespec.Package, agent *Agent, raw packagespec.
 			where, raw.Name, reads)
 	}
 
+	// writes: answers "does running this unasked change anything". A clock and a
+	// call fact run nothing, so the question has no meaning there and an author
+	// who wrote it has misunderstood which entry they are looking at.
+	if raw.Writes != nil && raw.Tool == "" {
+		reads := "reads the clock"
+		if raw.Source != "" {
+			reads = "reads a fact the call carries"
+		}
+		return entry, fmt.Errorf("%s: prefetch %q %s, which runs no tool, so writes: answers nothing here. "+
+			"writes: belongs to a tool: entry", where, raw.Name, reads)
+	}
+
+	// A zone on an entry that reads no clock reaches nothing, and an author who
+	// wrote one meant it, so this is a refusal rather than a warning.
+	zone := strings.TrimSpace(raw.Timezone)
+	if zone != "" && raw.Clock == "" {
+		return entry, fmt.Errorf("%s: prefetch %q sets timezone:, and only a clock entry reads a zone. Either give "+
+			"this entry a clock: %s, or drop the zone", where, raw.Name, PrefetchClockNow)
+	}
+
 	switch {
 	case raw.Clock != "":
-		if raw.Clock != PrefetchClockDate {
-			return entry, fmt.Errorf("%s: prefetch %q reads clock: %s, and the clock reads %s. Use clock: %s",
-				where, raw.Name, raw.Clock, PrefetchClockDate, PrefetchClockDate)
+		if raw.Clock != PrefetchClockNow {
+			return entry, fmt.Errorf("%s: prefetch %q reads clock: %s, and the clock reads %s. Use clock: %s, and "+
+				"name the part you want in assign:, one of: %s",
+				where, raw.Name, raw.Clock, PrefetchClockNow, PrefetchClockNow, strings.Join(PrefetchClockFields, ", "))
 		}
-		if agent.Timezone == "" {
-			return entry, fmt.Errorf("%s: prefetch %q reads the clock, and this package declares no timezone:. A "+
-				"container clock is UTC, so the agent would name the wrong day for anybody who is not on it. Add "+
-				"timezone: to agent.yaml, for example timezone: Europe/Madrid", where, raw.Name)
+		if zone == "" {
+			return entry, fmt.Errorf("%s: prefetch %q reads the clock and declares no timezone:. A container clock "+
+				"is UTC, so the agent would name the wrong day for anybody who is not on it. Add timezone: to this "+
+				"entry, for example timezone: Europe/Madrid", where, raw.Name)
+		}
+		if _, err := time.LoadLocation(zone); err != nil {
+			return entry, fmt.Errorf("%s: prefetch %q sets timezone: %s, which is not an IANA zone name. Use the "+
+				"zone for the place the agent books in, for example Europe/Madrid or America/New_York",
+				where, raw.Name, zone)
 		}
 		entry.Clock = raw.Clock
+		entry.Timezone = zone
 	case raw.Source != "":
 		source := VariableSource(raw.Source)
 		switch {
@@ -180,12 +209,14 @@ func buildPrefetchEntry(pkg *packagespec.Package, agent *Agent, raw packagespec.
 			return entry, fmt.Errorf("%s: prefetch %q names tool %q, which this package does not declare. Declared "+
 				"tools are: %s", where, raw.Name, raw.Tool, strings.Join(sortedKeys(agent.Tools), ", "))
 		}
-		if !tool.ReadOnly {
-			return entry, fmt.Errorf("%s: prefetch %q names tool %q, which has not declared read_only: true. A "+
-				"prefetch runs unasked on every call, so a tool that writes would write on every call, wrong numbers "+
-				"included. Add read_only: true to %s if it writes nothing, or point this entry at a tool that reads",
+		if raw.Writes == nil {
+			return entry, fmt.Errorf("%s: prefetch %q runs tool %q and does not say whether it writes. A prefetch "+
+				"runs unasked on every call, wrong numbers and hang-ups included, so running it before the greeting "+
+				"is a decision somebody has to make on purpose. Read %s, then add writes: false to this entry if it "+
+				"changes nothing, or writes: true if it does",
 				where, raw.Name, raw.Tool, filepath.ToSlash(filepath.Join("tools", raw.Tool+".yaml")))
 		}
+		entry.Writes = *raw.Writes
 		switch tool.Execution {
 		case ToolWebhook, ToolLocal:
 		default:
@@ -244,10 +275,20 @@ func checkPrefetchAssign(pkg *packagespec.Package, agent *Agent, raw packagespec
 			return fmt.Errorf("%s: prefetch %q assigns %s, which is not a declared variable. Declare it in the "+
 				"variables: block of agent.yaml", where, raw.Name, pair.Key)
 		}
+		// Written inside the walk rather than after it, so one entry naming one
+		// variable on two lines is caught too. Written after it, the map only
+		// grew between entries, and the message for two entries reads "prefetch
+		// today and prefetch today both assign booking_date", which sends the
+		// reader looking for a second entry that does not exist.
 		if owner, taken := assigned[pair.Key]; taken {
+			if owner == raw.Name {
+				return fmt.Errorf("%s: prefetch %q assigns %s twice. One value has one source: drop one of the two "+
+					"lines", where, raw.Name, pair.Key)
+			}
 			return fmt.Errorf("%s: prefetch %q and prefetch %q both assign %s. One value has one source: drop it from "+
 				"one of them", where, raw.Name, owner, pair.Key)
 		}
+		assigned[pair.Key] = raw.Name
 		text, _ := pair.Value.(string)
 		field, ok := strings.CutPrefix(text, "result.")
 		if !ok || field == "" {
@@ -322,30 +363,6 @@ func checkConfirmSteps(pkg *packagespec.Package, agent *Agent) error {
 	return nil
 }
 
-// orphanReadOnlyWarnings is warning W3. A declaration that reaches nothing is
-// the existing pattern for a turn binding carrying a field no target reads, so
-// this warns rather than refusing: the author has told the truth about the tool,
-// they have just not pointed a prefetch at it yet.
-//
-// Lives here rather than in Build because Build has no warning channel: it
-// returns an agent or an error, and a warning is neither.
-func orphanReadOnlyWarnings(agent *Agent) []string {
-	used := map[string]bool{}
-	for _, entry := range agent.Prefetch {
-		if entry.Tool != "" {
-			used[entry.Tool] = true
-		}
-	}
-	var warnings []string
-	for _, name := range sortedKeys(agent.Tools) {
-		if agent.Tools[name].ReadOnly && !used[name] {
-			warnings = append(warnings, fmt.Sprintf(
-				"tool %q declares read_only: true, and no prefetch names it, so the declaration reaches nothing", name))
-		}
-	}
-	return warnings
-}
-
 // prefetchSkipWarnings is warning W1: an entry reading a call fact the target's
 // own route does not supply will skip on every call there, so the values it
 // assigns keep their defaults.
@@ -364,32 +381,98 @@ func prefetchSkipWarnings(agent *Agent, resolved Target, row *TargetValidation) 
 	key := targetcap.TelephonyKey{
 		Provider: targetcap.Provider(resolved.Provider), Transport: resolved.Transport, Carrier: resolved.Carrier,
 	}
+	declared := packageDirections(resolved)
 	for _, entry := range agent.Prefetch {
 		if entry.Source == "" {
 			continue
 		}
 		feature := targetcap.TelephonyFeature(targetcap.TelephonySourcePrefix + string(entry.Source))
+		evidence := targetcap.ResolveTelephonyFeature(key, feature)
+		assigned := make([]string, 0, len(entry.Assign))
+		for _, pair := range entry.Assign {
+			assigned = append(assigned, pair.Key)
+		}
+
 		// Gated is the one tag that means the route does not supply this at all:
 		// ResolveTelephonyFeature returns it for a feature absent from the route's
 		// map. Every feature a route *does* grant starts Provisional, pending a
 		// credentialed smoke, so testing for Core here warned on every route
 		// including the ones that supply the fact perfectly well.
-		if targetcap.ResolveTelephonyFeature(key, feature).Tag != targetcap.Gated {
+		if evidence.Tag == targetcap.Gated {
+			warning := fmt.Sprintf("prefetch %q reads source: %s, which route (%s, %s) does not supply, so this "+
+				"entry is skipped on every call there and %s holds its default",
+				entry.Name, entry.Source, resolved.Provider, resolved.Transport, strings.Join(assigned, ", "))
+			row.Warnings = add(row.Warnings, warning+prefetchKnockOn(agent, assigned)+prefetchElsewhere(feature))
 			continue
 		}
-		assigned := make([]string, 0, len(entry.Assign))
-		for _, pair := range entry.Assign {
-			assigned = append(assigned, pair.Key)
+
+		// Granted, and granted in every direction, which is what an empty
+		// Directions has always meant. Nothing to say.
+		if len(evidence.Directions) == 0 {
+			continue
 		}
-		warning := fmt.Sprintf("prefetch %q reads source: %s, which route (%s, %s) does not supply, so this entry is "+
-			"skipped on every call there and %s holds its default",
-			entry.Name, entry.Source, resolved.Provider, resolved.Transport, strings.Join(assigned, ", "))
-		if knock := prefetchReaders(agent, assigned); len(knock) > 0 {
-			warning += fmt.Sprintf(". prefetch %s reads it, so that entry is skipped too", strings.Join(knock, " and "))
+		// Granted one way only. Silence when the package declares that way, or
+		// declares both; a warning when it declares only the other, because there
+		// the grant is real and still reaches no call this package will ever take.
+		var unmet []string
+		for _, direction := range declared {
+			if !slices.Contains(evidence.Directions, targetcap.TelephonyFeature(direction)) {
+				unmet = append(unmet, direction)
+			}
 		}
-		warning += ". Call sources compile on (livekit, sip) trunks and on (livekit, connector)"
-		row.Warnings = add(row.Warnings, warning)
+		if len(unmet) == 0 || len(unmet) < len(declared) {
+			continue
+		}
+		supplies := make([]string, 0, len(evidence.Directions))
+		for _, direction := range evidence.Directions {
+			supplies = append(supplies, string(direction))
+		}
+		warning := fmt.Sprintf("prefetch %q reads source: %s, which route (%s, %s) supplies on an %s call only, "+
+			"and this package declares %s. The entry is skipped on every call there and %s holds its default",
+			entry.Name, entry.Source, resolved.Provider, resolved.Transport,
+			strings.Join(supplies, " or "), strings.Join(unmet, " and "), strings.Join(assigned, ", "))
+		row.Warnings = add(row.Warnings, warning+prefetchKnockOn(agent, assigned)+prefetchElsewhere(feature))
 	}
+}
+
+// packageDirections names the call directions this package declares, read off
+// the resolved plan's own evidence rows the way both emitters read them.
+func packageDirections(resolved Target) []string {
+	if resolved.Telephony == nil {
+		return nil
+	}
+	var directions []string
+	for _, evidence := range resolved.Telephony.Evidence {
+		if evidence.Feature == "inbound" || evidence.Feature == "outbound" {
+			directions = append(directions, evidence.Feature)
+		}
+	}
+	slices.Sort(directions)
+	return directions
+}
+
+// prefetchKnockOn is the second half of one warning: reading "the caller lookup
+// does nothing here" off two separate warnings is worse than reading it off one.
+func prefetchKnockOn(agent *Agent, assigned []string) string {
+	knock := prefetchReaders(agent, assigned)
+	if len(knock) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(". prefetch %s reads it, so that entry is skipped too", strings.Join(knock, " and "))
+}
+
+// prefetchElsewhere names the routes that do supply this fact, so an author has
+// somewhere to go rather than only a no.
+//
+// Read off the table rather than written here. It was written here once, said
+// call sources compile on the LiveKit routes, and would have gone on saying so
+// after two Pipecat routes started supplying them.
+func prefetchElsewhere(feature targetcap.TelephonyFeature) string {
+	granting := targetcap.RoutesGranting(feature)
+	if len(granting) == 0 {
+		return ". No route supplies it today"
+	}
+	return fmt.Sprintf(". %s is supplied on %s", feature, strings.Join(granting, " and "))
 }
 
 // prefetchReaders names the entries whose inputs include any of these variables,
@@ -412,7 +495,7 @@ func prefetchReaders(agent *Agent, assigned []string) []string {
 func prefetchResultFields(agent *Agent, entry Prefetch) []string {
 	switch {
 	case entry.Clock != "":
-		return []string{PrefetchClockDate}
+		return PrefetchClockFields
 	case entry.Source != "":
 		return []string{prefetchResultValue}
 	default:
