@@ -164,9 +164,6 @@ func buildPrefetchEntry(pkg *packagespec.Package, agent *Agent, raw packagespec.
 		switch {
 		case IsSystemSource(source):
 			entry.Source = source
-		case source == VariableSourceConversation:
-			return entry, fmt.Errorf("%s: prefetch %q reads source: conversation, and a conversation value is one the "+
-				"model saves mid-call, so nothing holds it before the greeting", where, raw.Name)
 		case source == VariableSourceCallStart:
 			return entry, fmt.Errorf("%s: prefetch %q reads source: call_start, which arrives with the dispatch, so "+
 				"declare it as source: call_start on the variable and it is already there", where, raw.Name)

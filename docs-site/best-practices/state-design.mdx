@@ -160,12 +160,8 @@ prompt when that prompt is rendered, and the two render at different times:
 - An **agent's** prompt renders when the agent is entered, and again once one of
   its own steps records a value.
 
-One narrow case is not covered: a `conversation` variable, which the model saves
-itself mid-turn, carrying a `default:`. No step recorded it, so nothing
-re-renders, and the agent's prompt keeps showing the default. Without a
-`default:` the compiler refuses that prompt outright, saying the value has none
-when the prompt is built, so this only arises when you gave it one. Rely on the
-conversation for those values and say so in prose.
+Between those two renders, nothing pushes a new value out. A step that just
+wrote one is the only thing that makes an agent's prompt catch up.
 
 <Note>
 A prompt bound to a SLNG Context Router think profile is different again: it

@@ -345,6 +345,8 @@ def build_state(call_context: dict | None = None) -> State:
     state = State()
     missing = []
     call_start = _dispatched_call_start(call_context)
+    if "caller_alias" in call_start:
+        setattr(state, "caller_alias", call_start["caller_alias"])
     if "customer_id" in call_start:
         setattr(state, "customer_id", call_start["customer_id"])
     if "verified" in call_start:
@@ -441,26 +443,6 @@ class BillingAgent(LLMWorker):
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
 
 
-    @_direct_tool(cancel_on_interruption=False)
-    async def update_variables(self, params: FunctionCallParams, caller_alias: str | None = None):
-        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them.
-
-        Args:
-            caller_alias (str | None): What the caller says to call them.
-        """
-        saved = []
-        if caller_alias is not None:
-            self.state.caller_alias = caller_alias
-            saved.append("caller_alias")
-        # No settings refresh here, and none in the two assignment paths
-        # either. The router reads its template variables from live state on
-        # every request now, through the service's own
-        # build_chat_completion_params, so a value this call just wrote is in
-        # the next request whether or not a turn follows it. That closed the one
-        # gap the three refreshes left: a tool writing state mid-turn carried the
-        # previous value for that turn.
-        await params.result_callback({"saved": saved})
-
 
     @_direct_tool
     async def get_invoice(self, params: FunctionCallParams, customer_id: str):
@@ -533,26 +515,6 @@ class IntakeAgent(LLMWorker):
         ))
         await super().on_activated(args)
 
-
-    @_direct_tool(cancel_on_interruption=False)
-    async def update_variables(self, params: FunctionCallParams, caller_alias: str | None = None):
-        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them.
-
-        Args:
-            caller_alias (str | None): What the caller says to call them.
-        """
-        saved = []
-        if caller_alias is not None:
-            self.state.caller_alias = caller_alias
-            saved.append("caller_alias")
-        # No settings refresh here, and none in the two assignment paths
-        # either. The router reads its template variables from live state on
-        # every request now, through the service's own
-        # build_chat_completion_params, so a value this call just wrote is in
-        # the next request whether or not a turn follows it. That closed the one
-        # gap the three refreshes left: a tool writing state mid-turn carried the
-        # previous value for that turn.
-        await params.result_callback({"saved": saved})
 
 
     @_direct_tool(cancel_on_interruption=False)

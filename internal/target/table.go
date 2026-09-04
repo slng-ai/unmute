@@ -78,7 +78,6 @@ const (
 	FieldTransferRequires      Field = "controls.agent_transfer.requires"
 	FieldDelegateRequires      Field = "controls.delegate.requires"
 	FieldContextNoToolCalls    Field = "context.include_tool_calls.false"
-	FieldContextVariableSubset Field = "context.variables.list"
 	FieldInput                 Field = "expect"
 	FieldTransferBriefing      Field = "controls.human_transfer.warm.briefing"
 	FieldGreetingUserFirst     Field = "conversation.greeting.user"
@@ -110,7 +109,6 @@ const (
 	FieldWarmInstances         Field = "warm_instances"
 	FieldTracingLangfuse       Field = "tracing.provider.langfuse"
 	FieldTracingCoval          Field = "tracing.provider.coval"
-	FieldVariableConversation  Field = "variables.source.conversation"
 	FieldPrefetch              Field = "prefetch"
 	FieldVariableConfirm       Field = "variables.confirm"
 	FieldDelegateAnnounce      Field = "controls.delegate.announce"
@@ -392,10 +390,6 @@ func Default() Table {
 				deny(Pipecat, "the Pipecat driver does not shape transfer context (include_tool_calls) yet"),
 				deny(Slng, slngNoHandoff("include_tool_calls: false")),
 			),
-			FieldContextVariableSubset: field(
-				deny(Pipecat, "the Pipecat driver does not shape transfer context (variables subset) yet"),
-				deny(Slng, slngNoHandoff("a variables subset")),
-			),
 			// SCHEMA N25: `briefing` is free text, so there is no per-value row
 			// to resolve. It rides the warm_transfer control row, which already
 			// says which routes can carry a private consultation leg at all.
@@ -630,14 +624,11 @@ func Default() Table {
 				deny(Slng, "slng target deploys a hosted agent and exposes no instance pool of yours to keep warm: drop warm_instances, or compile to pipecat which writes the number into pcc-deploy.toml"),
 			),
 			// Variables and secrets (variable_secrets_specs.md V5). The code
-			// drivers own the session state and the request, so they can capture
-			// a value mid-call and merge hidden parameters; a managed target can
-			// only do what its own API exposes, and the Deepgram driver is
-			// unwritten. Each row lifts when its provider mechanism is
-			// doc-verified (the verify table in that spec).
-			FieldVariableConversation: field(
-				deny(Slng, "slng target declares variables and their defaults but has no slot for one captured during the call: supply the value when the call is dispatched, or compile to livekit or pipecat which capture it mid-call"),
-			),
+			// drivers own the session state and the request, so they can merge
+			// hidden parameters into it; a managed target can only do what its
+			// own API exposes, and the Deepgram driver is unwritten. Each row
+			// lifts when its provider mechanism is doc-verified (the verify
+			// table in that spec).
 			FieldToolInject: field(allow(Slng)),
 			// Same reason as FieldToolAuth: the path was written into a tool
 			// body, or into the attachment's config override when it carried a

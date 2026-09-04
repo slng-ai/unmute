@@ -467,9 +467,6 @@ const (
 	VariableSourceDirection  VariableSource = "direction"
 	VariableSourceFromNumber VariableSource = "from_number"
 	VariableSourceToNumber   VariableSource = "to_number"
-	// VariableSourceConversation marks a value the model saves mid-call through
-	// the generated update_variables tool (variable_secrets_specs.md N23).
-	VariableSourceConversation VariableSource = "conversation"
 )
 
 type AgentDef struct {
@@ -556,12 +553,6 @@ type TaskContext struct {
 
 type TransferContext struct {
 	TaskContext
-	Variables VariableSelection `json:"variables" yaml:"variables"`
-}
-
-type VariableSelection struct {
-	All   bool     `json:"all,omitempty" yaml:"all,omitempty"`
-	Names []string `json:"names,omitempty" yaml:"names,omitempty"`
 }
 
 type History string

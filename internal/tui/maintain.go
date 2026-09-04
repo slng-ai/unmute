@@ -283,20 +283,6 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		if handoff.Context != nil {
 			value.History, value.MaxMessages, value.Summarizer = handoff.Context.History, handoff.Context.MaxMessages, handoff.Context.Summarizer
 			value.IncludeToolCalls = handoff.Context.IncludeToolCalls
-			// Written back only when it was written: an omitted line means all
-			// and stays omitted.
-			value.VariablesAuthored = handoff.Context.Variables != nil
-			value.AllVariables = handoff.Context.Variables == nil
-			switch variables := handoff.Context.Variables.(type) {
-			case string:
-				value.AllVariables = variables == "all"
-			case []any:
-				for _, item := range variables {
-					if text, ok := item.(string); ok {
-						value.Variables = append(value.Variables, text)
-					}
-				}
-			}
 		}
 		data.Handoffs = append(data.Handoffs, value)
 	}

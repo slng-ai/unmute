@@ -64,7 +64,6 @@ handoffs:
     announce: "I’m connecting you with our appointment manager now."
     context:
       history: full
-      variables: all
 
   to_booking_desk:
     to: booking_desk
@@ -72,7 +71,6 @@ handoffs:
     announce: "I’m connecting you back to the booking desk for your new appointment."
     context:
       history: full
-      variables: all
 ```
 
 `when` is the condition the model reads. Write it as the situation, not as an
@@ -93,17 +91,15 @@ Prefer a silent handoff when agents are internal roles behind one service. The
 caller can keep talking to the same salon, clinic, or support desk without
 hearing implementation details such as “I’m connecting you to another agent.”
 
-`context` decides what the new agent knows. It is the whole of what travels:
+`context` decides how much of the conversation the new agent sees:
 
 | Field | What it does |
 |---|---|
 | `history: full` | the new agent sees the conversation so far |
-| `variables` | optional. Left out means `all`: every declared value travels with the caller |
 
-`variables:` also accepts a list of names, to carry over only those values and
-reset every other one to its default on the way across. That list form works on
-LiveKit only: Pipecat and the SLNG target only support `all`, and refuse a
-named subset. An empty list is refused.
+Every declared value travels with the caller regardless, on every target,
+with nothing to write: see
+[Variables](/reference/variables#a-handoff-keeps-every-declared-value).
 
 When a task lists the handoff control, invoking it ends that task and any
 remaining task-group steps before the receiving agent takes over. It never
@@ -160,9 +156,6 @@ the same agent, its block lists what both expect, and a handoff that carries
 no value for one of them leaves it reading `not given.`. A value outside its
 type is refused before anyone is handed over, and the message reaches the agent
 that supplied it.
-
-`variables:` may be left out of the `context:` block. Every declared value is
-already shared by every agent, so an omitted line means `all`.
 
 ## A handoff does not come back
 

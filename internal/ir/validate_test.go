@@ -985,9 +985,6 @@ func TestValidatePipecatMaturityGates(t *testing.T) { // driver-pipecat T1, C9
 		{"transfer_history", func(a *Agent) {
 			a.Controls["to_billing"].(*AgentTransfer).Context.History = HistorySummary
 		}, "does not summarize a context yet"},
-		{"transfer_variable_subset", func(a *Agent) {
-			a.Controls["to_billing"].(*AgentTransfer).Context.Variables = VariableSelection{Names: []string{"customer_id"}}
-		}, "variables subset"},
 		{"transfer_no_tool_calls", func(a *Agent) {
 			no := false
 			a.Controls["to_billing"].(*AgentTransfer).Context.IncludeToolCalls = &no
@@ -1110,6 +1107,20 @@ func TestValueChecksFailAtValidate(t *testing.T) {
 				pkg.Targets["livekit"].Models["front_desk"] = override
 			},
 			want: `livekit speak binding provider "deepgram": voice has no slot here`,
+		},
+		{
+			// A structured variable's Type is always the primitive it renders as
+			// in a prompt (compiler.go), never its declared shape, so the old
+			// message ("default does not match type \"string\"") named a type the
+			// author never wrote. The fix names the shape instead and says there
+			// is no fix but removal: a structured value starts empty and a
+			// default is not a thing it can hold.
+			name:     "structured variable with a default",
+			provider: "livekit",
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Variables["reasons"] = packagespec.Variable{Type: "list[string]", Default: []any{}}
+			},
+			want: `variable "reasons" is list[str], which starts empty and takes no default: remove default:`,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

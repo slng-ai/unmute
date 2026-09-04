@@ -502,7 +502,7 @@ func TestPreflightAdditionalAgentAndHandoff(t *testing.T) {
 				Name: "billing", Instructions: "You are the billing specialist.", Reason: data.Reason, Speak: data.Speak,
 			}}
 			data.Handoffs = []Handoff{{
-				Name: "to_billing", Source: "assistant", To: "billing", When: "The caller needs billing help.", Announce: "I’ll connect you to billing now.", History: "full", AllVariables: true,
+				Name: "to_billing", Source: "assistant", To: "billing", When: "The caller needs billing help.", Announce: "I’ll connect you to billing now.", History: "full",
 			}}
 			dir := filepath.Join(t.TempDir(), "agent")
 			if _, err := Write(dir, data); err != nil {
@@ -516,11 +516,6 @@ func TestPreflightAdditionalAgentAndHandoff(t *testing.T) {
 				if !strings.Contains(string(agentYAML), want) {
 					t.Errorf("agent.yaml missing %q:\n%s", want, agentYAML)
 				}
-			}
-			// An omitted `variables:` means all, so a handoff that authored none
-			// is written back without the line rather than normalised to it.
-			if strings.Contains(string(agentYAML), "variables:") {
-				t.Errorf("agent.yaml writes a variables: line the package never authored:\n%s", agentYAML)
 			}
 			if _, err := os.Stat(filepath.Join(dir, "agents", "billing.md")); err != nil {
 				t.Fatal(err)

@@ -128,14 +128,12 @@ handoffs:
     when: The verified caller has a complaint or service problem.
     context:
       history: messages
-      variables: all
 
   to_concierge:
     to: concierge
     when: The caller changes to a request owned by another specialist.
     context:
       history: messages
-      variables: all
 
 escalations:
   to_manager:

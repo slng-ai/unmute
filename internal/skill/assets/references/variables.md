@@ -3,6 +3,28 @@
 A variable is a named value that lives for one call. A secret is never a
 variable, and the two never mix.
 
+## How a value moves
+
+Four keys write or read state, and it is easy to blur them together. This
+page works through `variables:` and `prefetch:` in full; `references/orchestration.md`
+does the same for `expect:`.
+
+| Key | Think of it as | Lives | Read by |
+|---|---|---|---|
+| `variables:` | the call's state | the whole call | every prompt, through the block the compiler adds or `{{name}}` |
+| `prefetch:` + `assign:` | state filled before the first word | the whole call | the same |
+| `expect:` | what a step or a receiving agent is handed, filled by the calling model from the caller's words | one visit (a task), until the next handoff (an agent) | that prompt only, in its `Request:` block |
+| `result:` + `assign:` | what a step hands back, written into state at `finish` | the whole call from then on | every prompt |
+
+State is written only at a seam: before the call, by `prefetch:`, and at
+`finish`, by a step's `result:` and `assign:`. The caller's own words enter a
+step through `expect:`. A step keeps what matters for later by putting it in
+its result.
+
+`variables:` and `prefetch:` are below. So is "Getting a value out of a
+task", which covers `result:` and `assign:`. `expect:` belongs to a task or a
+handoff, not to a variable: see `references/orchestration.md`.
+
 ## Declaring a variable
 
 ```yaml agent.yaml
@@ -20,7 +42,7 @@ variables:
 | `source` | no | where the value comes from |
 | `default` | no | the value to use when nothing supplies one |
 | `confirm` | no | the step that must hear the caller agree before anything acts on this |
-| `description` | no | a note; for `conversation` variables the model reads it |
+| `description` | no | a note for readers of the file; not sent to the model |
 
 ## `shapes:` groups fields into a named type
 
@@ -89,6 +111,11 @@ args  := arg ("," arg)*
 arg   := type | string
 ```
 
+A result field also still takes the older JSON Schema spellings: `string`
+`number` `integer` `boolean` in place of `str` `int` `float` `bool`, and an
+`{enum: [...]}` block in place of `Literal[...]`. Both mean the same thing;
+reach for the grammar first.
+
 | Written | Accepted | Write instead |
 |---|---|---|
 | `str` `int` `float` `bool` | yes | `string` `number` `integer` `boolean` still work, same meaning |
@@ -119,9 +146,8 @@ Once a variable's type is anything in this table other than a bare `str`
 `int` `float` `bool`, its value is appended automatically to every agent
 prompt and every task prompt, as a numbered block after the authored text.
 Do not template it into a prompt; the compiler already does. An empty value
-renders as the words `none recorded yet.`, never `[]` or `null`. A value
-carrying `confirm:` renders only in its confirming step's own prompt, and a
-declared secret never renders at all.
+renders as the words `none recorded yet.`, never `[]` or `null`. See "How a
+variable reaches a prompt" below for what `confirm:` does to this.
 
 ## Where values come from
 
@@ -129,7 +155,6 @@ declared secret never renders at all.
 |---|---|---|
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
 | omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so a prompt reads it only through `requires:` or a `default:` |
-| `conversation` | the model, through `update_variables` | during the call |
 | `session_id`, `call_id`, `direction`, `from_number`, `to_number`, `carrier`, `connection` | the phone adapter | LiveKit `sip` or `connector` only |
 | `stream_id` | the phone adapter | LiveKit `connector` only, not `sip` |
 
@@ -137,11 +162,6 @@ The selected route must prove it supplies a system source. **No Pipecat route
 grants a call-source variable today**, `daily-sip` and `cloud-websocket` alike:
 naming one on a Pipecat target is refused at validation. An inbound code-target
 phone channel also requires a default for every `call_start` variable.
-
-Declaring any `source: conversation` variable creates a tool called
-`update_variables` in the generated project. You do not write it and you do not
-list it. The name is reserved for that generated tool. The model calls it when
-the caller says something worth keeping.
 
 ## Resolving a value before the call starts
 
@@ -255,18 +275,24 @@ unconfirmed as that number was.
 Write the confirming step's prompt to **read the value back and ask for a yes**,
 and to ask from scratch when the value is empty. Both paths, in one prompt.
 
-## Where a variable can be used
+## How a variable reaches a prompt
 
-`{{name}}` renders a variable. Two kinds of site, with different timing, and the
-difference is the thing people get wrong.
+Two ways, and the difference is the thing people get wrong.
+
+**Automatically**, for anything typed past a bare scalar: see the type grammar
+section above. **By hand**, with `{{name}}`, at five sites, with different
+timing:
 
 | Site | Renders | Can name |
 |---|---|---|
-| `conversation.greeting.text` | once, at session start | a variable that already has a value, and never one awaiting confirmation |
-| an agent's instructions | on entry, and again once one of its own steps records a value | a variable that already has a value, or one a step it owns records, and never one awaiting confirmation |
-| a task's instructions | when that task starts | a variable that already has a value, or one listed in this task's own `requires:`; a value awaiting confirmation only in the step that confirms it |
-| a tool's `inject:` value | on every tool call | any declared variable; one awaiting confirmation makes the call refuse itself until it is settled |
+| `conversation.greeting.text` | once, at session start | a variable that already has a value |
+| an agent's instructions | on entry, and again once one of its own steps records a value | a variable that already has a value, or one a step it owns records |
+| a task's instructions | when that task starts | a variable that already has a value, or one listed in this task's own `requires:` |
+| a tool's `inject:` value | on every tool call | any declared variable |
 | a webhook tool's `path` | on every tool call | any declared variable, URL encoded |
+
+None of the five may name or render a value still awaiting confirmation: see
+"A value the caller has to confirm" above for what each site does instead.
 
 "Already has a value" means `source: call_start`, a system source, a `default`, or
 a `prefetch:` entry that assigns it. Naming anything else in a session start site
@@ -384,21 +410,20 @@ A path through a `list[...]` is refused too: nothing says which entry it
 means. A value awaiting confirmation satisfies no guard through any path
 into it, the same as it satisfies none as a whole value.
 
-## Carrying variables through a handoff
+## A handoff keeps every declared value
 
-Every declared value is shared by every agent in the call, so a handoff needs
-no `variables:` line to carry them. Left out, every value travels.
+Every declared value is shared by every agent in the call, on both targets,
+with nothing to write and no field to set: a handoff carries all of them,
+always.
 
 ```yaml
     context:
       history: full
 ```
 
-`variables: all` written out means the same. A list of names keeps those
-values and resets every other one to its default on the way across; the list
-form compiles on livekit only, and an empty list is refused. What the caller
-just asked for is not a declared value: hand it over with `expect:` on the
-handoff, see `references/orchestration.md`.
+What the caller just asked for is not a declared value, so this does not
+cover it: hand it over with `expect:` on the handoff instead, see
+`references/orchestration.md`.
 
 ## Seeding values locally
 
@@ -409,12 +434,12 @@ unmute dev ./my-agent --var customer_name=Ada --var customer_id=cus_2002
 Repeatable, and each value is parsed against the declared type. `--var` is the
 local stand-in for the dispatch payload, so it accepts the two kinds of variable
 that payload fills: `source: call_start`, and a variable that declares no
-`source:` at all. It refuses a runtime-owned source and a `conversation`
-source, because neither arrives that way:
+`source:` at all. It refuses a runtime-owned source, because that one arrives
+from the carrier, not the dispatch:
 
 ```
-unmute: dev my-agent: --var requested_service=haircut: "requested_service"
-  has source conversation, so the model saves it mid-call through update_variables, not you
+unmute: dev my-agent: --var call_id=abc123: "call_id" has source call_id, so the
+  runtime supplies it, not you
 ```
 
 To stand in for a **caller ID**, use `--source`, not `--var`:

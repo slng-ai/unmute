@@ -91,7 +91,6 @@ handoffs:
     when: Caller asks about billing, an invoice, or a refund.
     context:
       history: reset
-      variables: all
 
 variables:
   caller_phone:

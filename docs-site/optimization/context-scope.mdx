@@ -179,21 +179,20 @@ only when you have decided the earlier turns are genuinely finished business.
 
 ## What a package on both code targets cannot use
 
-Two of these values, and one companion field, compile on livekit only. A package
-that has to run on livekit and pipecat has three fewer options.
+One of these values, and one companion field, compile on livekit only. A package
+that has to run on livekit and pipecat has two fewer options.
 
 | Field | livekit | pipecat |
 |---|---|---|
 | `history: full`, `messages`, `last_n`, `reset` | shapes | shapes |
 | `history: summary` | shapes | refused |
 | `include_tool_calls: false` | shapes | refused |
-| a `variables:` list on a handoff, rather than `all` | shapes | refused |
 
 None of them fails quietly. Each is a validation error naming the field, and the
 `summary` one lists the four values pipecat does shape. The practical
 consequence is that a two-target package narrows on the task side, through
-`requires:`, which works on both, and leaves `variables:` out of its handoffs,
-which means `all`.
+`requires:`, which works on both. A handoff carries every declared value on
+both targets regardless, so there is nothing to narrow there.
 
 ## Two things this is not
 

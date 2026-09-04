@@ -1010,26 +1010,6 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             return await handler(args, flow_manager, state=self.state)
 
         return _bound
-{{end}}{{if $.Capture}}
-    @_direct_tool(cancel_on_interruption=False)
-    async def {{$.Capture.Name}}(self, params: FunctionCallParams{{range $.Capture.Args}}, {{.Name}}: {{.PyType}} = {{.PyDefault}}{{end}}):
-        """{{$.Capture.Description}}
-
-        Args:
-{{range $.Capture.Args}}            {{.Name}} ({{.PyType}}):{{if .Description}} {{.Description}}{{end}}
-{{end}}        """
-        saved = []
-{{range $.Capture.Fields}}        if {{.}} is not None:
-            self.state.{{.}} = {{.}}
-            saved.append({{pyq .}})
-{{end}}        # No settings refresh here, and none in the two assignment paths
-        # either. The router reads its template variables from live state on
-        # every request now, through the service's own
-        # build_chat_completion_params, so a value this call just wrote is in
-        # the next request whether or not a turn follows it. That closed the one
-        # gap the three refreshes left: a tool writing state mid-turn carried the
-        # previous value for that turn.
-        await params.result_callback({"saved": saved})
 {{end}}
 {{range .Transfers}}
     @_direct_tool(cancel_on_interruption=False)

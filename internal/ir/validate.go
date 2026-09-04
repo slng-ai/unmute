@@ -287,7 +287,11 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			errors = add(errors, fmt.Sprintf("variable %q has invalid source %q", name, variable.Source))
 		}
 		if variable.Default != nil && !defaultMatches(variable.Type, variable.Default) {
-			errors = add(errors, fmt.Sprintf("variable %q default does not match type %q", name, variable.Type))
+			if variable.Shape != nil {
+				errors = add(errors, fmt.Sprintf("variable %q is %s, which starts empty and takes no default: remove default:", name, variable.Shape.String()))
+			} else {
+				errors = add(errors, fmt.Sprintf("variable %q default does not match type %q", name, variable.Type))
+			}
 		}
 	}
 	for name, task := range agent.Tasks {
@@ -918,9 +922,6 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 				applyCapability(caps, targetcap.FieldInput, provider, row)
 			}
 			validateContext(control.Context.TaskContext, provider, caps, row)
-			if !control.Context.Variables.All {
-				applyCapability(caps, targetcap.FieldContextVariableSubset, provider, row)
-			}
 		case *HumanTransfer:
 			validateHumanTransfer(control, resolved, provider, caps, row)
 		}
@@ -2001,16 +2002,9 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 	}
 }
 
-// validateVariables gates the two per-target variable features: capturing a
-// value mid-call, and rendering a template into a prompt or greeting before the
-// call starts (V5).
+// validateVariables gates rendering a template into a prompt or greeting
+// before the call starts (V5).
 func validateVariables(agent *Agent, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
-	for _, variable := range agent.Variables {
-		if variable.Source == VariableSourceConversation {
-			applyCapability(caps, targetcap.FieldVariableConversation, provider, row)
-			break
-		}
-	}
 	for _, name := range sortedKeys(agent.Variables) {
 		if agent.Variables[name].Confirm != "" {
 			applyCapability(caps, targetcap.FieldVariableConfirm, provider, row)
@@ -2994,8 +2988,7 @@ func validVariableSource(value VariableSource) bool {
 	switch value {
 	case VariableSourceCallStart, VariableSourceSessionID, VariableSourceCarrier,
 		VariableSourceConnection, VariableSourceCallID, VariableSourceStreamID,
-		VariableSourceDirection, VariableSourceFromNumber, VariableSourceToNumber,
-		VariableSourceConversation:
+		VariableSourceDirection, VariableSourceFromNumber, VariableSourceToNumber:
 		return true
 	default:
 		return false

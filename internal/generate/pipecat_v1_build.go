@@ -140,7 +140,6 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 			})
 		}
 	}
-	data.Capture = buildPipecatCapture(agent)
 	data.HandoffControls = handoffControls(agent)
 	data.DevOptionalEnv = []string{"UNMUTE_LOG_LEVEL", devmetrics.Env}
 	if len(data.CallStartVars) > 0 {
@@ -340,29 +339,6 @@ func agentToolLists(agents []pipecatAgent) [][]pipecatTool {
 	return lists
 }
 
-// buildPipecatCapture builds the generated update_variables tool: one optional
-// argument per conversation variable, each carrying its declared type and
-// description so the model knows what it is saving (V6).
-func buildPipecatCapture(agent *ir.Agent) *pipecatCapture {
-	fields := captureFields(agent)
-	if len(fields) == 0 {
-		return nil
-	}
-	capture := &pipecatCapture{
-		Name: ir.CaptureToolName, Description: captureDescription(agent, fields), Fields: fields,
-	}
-	for _, name := range fields {
-		variable := agent.Variables[name]
-		// Every field is optional: the model saves what it has learned so far,
-		// one call or several, never all of them at once.
-		capture.Args = append(capture.Args, pipecatArg{
-			Name: name, PyType: pyType(variable.Type) + " | None", PyDefault: "None",
-			Description: variable.Description,
-		})
-	}
-	return capture
-}
-
 // pipecatConnectionVocabulary checks the Connection's key set against the route
 // row in both directions — a missing required key and an unaccepted key each
 // fail naming the route — and registers every required name so it reaches
@@ -559,9 +535,6 @@ func setImportNeeds(data *pipecatData) {
 	data.NeedsTurnStrategies = data.Interrupt != nil && data.Interrupt.MinWords > 0
 	data.NeedsAppendFrame = data.Inactivity != nil
 	data.NeedsEndFrame = data.NeedsEndAfter
-	if data.Capture != nil {
-		data.NeedsFunctionCalls = true // the generated capture tool is a @tool too
-	}
 	paramsClasses := map[string]bool{}
 	for _, a := range data.Agents {
 		if len(a.Tools)+len(a.Transfers)+len(a.Delegates) > 0 {

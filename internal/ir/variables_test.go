@@ -37,9 +37,9 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			want: "secrets never flow through templates",
 		},
 		{
-			name: "a conversation variable has no value when the prompt is built",
+			name: "a sourceless variable has no value when the prompt is built",
 			mutet: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["reschedule_to"] = packagespec.Variable{Type: "string", Source: "conversation"}
+				pkg.Agent.Variables["reschedule_to"] = packagespec.Variable{Type: "string"}
 				pkg.Agent.Conversation.Greeting.Text = "Hi {{reschedule_to}}"
 			},
 			want: "has no value when the prompt is built",
@@ -47,15 +47,15 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 		{
 			name: "the same variable is fine once it has a default",
 			mutet: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["reschedule_to"] = packagespec.Variable{Type: "string", Source: "conversation", Default: "later"}
+				pkg.Agent.Variables["reschedule_to"] = packagespec.Variable{Type: "string", Default: "later"}
 				pkg.Agent.Conversation.Greeting.Text = "Hi {{reschedule_to}}"
 			},
 			want: "",
 		},
 		{
-			name: "a call-time site may name a conversation variable with no default",
+			name: "a call-time site may name a sourceless variable with no default",
 			mutet: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["reschedule_to"] = packagespec.Variable{Type: "string", Source: "conversation"}
+				pkg.Agent.Variables["reschedule_to"] = packagespec.Variable{Type: "string"}
 				tool := pkg.Tools["lookup_customer"]
 				tool.Inject = map[string]any{"slot": "{{reschedule_to}}"}
 				pkg.Tools["lookup_customer"] = tool
@@ -108,7 +108,7 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			// an exception to, and it is here so the pair reads as a pair.
 			name: "an agent prompt may not name a variable that has no value yet",
 			mutet: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["caller_alias"] = packagespec.Variable{Type: "string", Source: "conversation"}
+				pkg.Agent.Variables["caller_alias"] = packagespec.Variable{Type: "string"}
 				intake := pkg.Agent.Agents["intake"]
 				pkg.Markdown[intake.Instructions] += "\n\nThe caller goes by {{caller_alias}}."
 			},
@@ -122,8 +122,8 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			// there is no session-start render to leave a hole in, and a value the
 			// call learns later is exactly what belongs there.
 			//
-			// Both variable kinds, because they arrive by different routes: one
-			// the caller offers mid-conversation, one a task assigns on finishing.
+			// Late-bound because a task can assign it on finishing, no earlier
+			// than that.
 			name: "a router-bound agent prompt may name a late-bound variable",
 			mutet: func(pkg *packagespec.Package) {
 				think := pkg.Agent.Models.Think["fast_reasoning"]
@@ -134,19 +134,11 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 				think.Params = map[string]any{"world_part_override": "eu", "reasoning_effort": "none"}
 				pkg.Agent.Models.Think["fast_reasoning"] = think
 				pkg.Agent.Secrets = append(pkg.Agent.Secrets, "SLNG_API_KEY")
-				pkg.Agent.Variables["caller_alias"] = packagespec.Variable{Type: "string", Source: "conversation"}
+				pkg.Agent.Variables["caller_alias"] = packagespec.Variable{Type: "string"}
 				intake := pkg.Agent.Agents["intake"]
 				pkg.Markdown[intake.Instructions] += "\n\nThe caller goes by {{caller_alias}}."
 			},
 			want: "",
-		},
-		{
-			name: "the capture tool name is reserved",
-			mutet: func(pkg *packagespec.Package) {
-				pkg.Agent.Tools = append(pkg.Agent.Tools, CaptureToolName)
-				pkg.Tools[CaptureToolName] = pkg.Tools["lookup_customer"]
-			},
-			want: "is reserved",
 		},
 	}
 	for _, tc := range cases {
@@ -174,40 +166,6 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			}
 			if tc.redacts != "" && err != nil && strings.Contains(err.Error(), tc.redacts) {
 				t.Errorf("the refusal repeats %q back; a field that takes a name must never print what was written there instead:\n%v", tc.redacts, err)
-			}
-		})
-	}
-}
-
-// A source: conversation variable and a template are gated on the two targets
-// whose drivers cannot honor them (V5).
-func TestValidateGatesVariableFeatures(t *testing.T) {
-	pkg := loadSafeCore(t)
-	pkg.Agent.Variables["reschedule_to"] = packagespec.Variable{Type: "string", Source: "conversation"}
-	agent, err := Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		provider Provider
-		wantErr  bool
-	}{
-		{ProviderLiveKit, false},
-		{ProviderPipecat, false},
-	} {
-		t.Run(string(tc.provider), func(t *testing.T) {
-			target := targetFor(agent, tc.provider)
-			report, _ := Validate(agent, []Target{target}, targetcap.Default())
-			gated := false
-			for _, row := range report.PerTarget {
-				for _, message := range row.Errors {
-					if strings.Contains(message, "variable") || strings.Contains(message, "capture") {
-						gated = true
-					}
-				}
-			}
-			if gated != tc.wantErr {
-				t.Fatalf("%s gated = %v, want %v (errors %v)", tc.provider, gated, tc.wantErr, report.PerTarget[0].Errors)
 			}
 		})
 	}
@@ -570,7 +528,7 @@ func TestTaskPromptReadsOnlyWhatTheStepDeclares(t *testing.T) {
 			name:   "a value nothing supplies keeps the older refusal",
 			prompt: "Serve the {{requested_service}} customer.",
 			mutate: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["requested_service"] = packagespec.Variable{Type: "string", Source: "conversation"}
+				pkg.Agent.Variables["requested_service"] = packagespec.Variable{Type: "string"}
 			},
 			wants: []string{"has no value when the prompt is built", "source: call_start"},
 		},

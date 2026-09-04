@@ -1,6 +1,6 @@
 ---
 title: "Variables"
-description: "Personalize a call, let the model save what it hears, and pass values into a tool without showing them to the model."
+description: "Personalize a call, group values into a shape, and pass values into a tool without showing them to the model."
 ---
 
 A variable is a named value that lives for one call. Use it to greet someone by
@@ -31,8 +31,8 @@ variables:
     description: CRM id of the caller. The booking tool receives it directly; never say it out loud.
   requested_service:
     type: string
-    source: conversation
-    description: The service the caller wants, for example a haircut or a colour. Save it as soon as they say it.
+    default: ""
+    description: The service the caller wants, for example a haircut or a colour.
 ```
 
 `type` is one of `string`, `number`, `integer`, `boolean`. `source` says where
@@ -41,8 +41,13 @@ the value comes from, and it changes what you can do with the variable.
 | Source | Who sets it | When |
 |---|---|---|
 | `call_start` | whatever starts the call | before the first word |
-| `conversation` | the model, during the call | whenever the caller says it |
+| left out | nothing yet; a task's own `result:` and `assign:` can fill it later | once a step records it |
 | system sources such as `from_number`, `direction`, `call_id` | the phone adapter | on a LiveKit phone call; no Pipecat route supplies one |
+
+`requested_service` above declares no `source:`, so it starts at its default
+and stays there until a task records it. A task hears the caller, and its own
+`result:` and `assign:` write the value; see
+[Tasks](/build/orchestration/tasks) for how a step does that.
 
 ## Use one in the greeting
 
@@ -82,19 +87,10 @@ and a variable that declares no `source:` at all. It refuses anything else
 instead of accepting it and dropping it:
 
 ```text wrap
-unmute: dev my-agent: --var requested_service=haircut: "requested_service" has source conversation, so the model saves it mid-call through update_variables, not you
+unmute: dev my-agent: --var from_number=+15551234567: "from_number" has source from_number, so the runtime supplies it, not you
 ```
 
 An undeclared name is refused the same way.
-
-## Let the model save one
-
-Declaring a variable with `source: conversation` creates a tool called
-`update_variables` in the generated project. You do not write it. The model
-calls it when the caller says something worth keeping.
-
-Say "I'd like a haircut" and `requested_service` is stored for the rest of the
-call.
 
 ## Hand a value to a tool
 

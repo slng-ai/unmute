@@ -9,11 +9,6 @@ import (
 	packagespec "github.com/slng-ai/unmute/internal/spec"
 )
 
-// CaptureToolName is the generated tool the drivers emit when a package declares
-// any source: conversation variable. The name is reserved: a package tool or
-// control claiming it would shadow the generated one (V7).
-const CaptureToolName = "update_variables"
-
 // UnservedResultField is the one result field the drivers add themselves. Every
 // generated task finish takes it, optional and empty by default, so a step can
 // name the request it could not serve on its way out instead of refusing in

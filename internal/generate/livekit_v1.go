@@ -101,8 +101,7 @@ type livekitGreeting struct {
 
 // livekitTransfer carries the shaped context of an agent_transfer (V5): a
 // prebuilt Python expression for the handed-over ChatContext ("" = history:
-// reset, the target starts fresh), an optional generated summarizer, and the
-// userdata fields the transfer does not carry (context.variables subset).
+// reset, the target starts fresh), and an optional generated summarizer.
 type livekitTransfer struct {
 	Method      string
 	When        string
@@ -111,7 +110,6 @@ type livekitTransfer struct {
 	Requires    []string      // guard: refuse until these userdata fields are set (V7)
 	CtxExpr     string        // Python expr for chat_ctx=; "" = reset
 	Summary     *livekitChain // set for history: summary — _summarize before handoff
-	ResetVars   []livekitVar
 	// Inputs is the brief this handoff carries, one typed parameter each,
 	// validated before the receiver is built.
 	Inputs []livekitArg
@@ -258,15 +256,6 @@ type livekitVar struct {
 	PyType      string
 	Default     string // Python literal; "None" when the spec declares none
 	Description string
-}
-
-// livekitCapture is the generated update_variables tool (V6): one optional
-// argument per conversation variable, writing the session userdata.
-type livekitCapture struct {
-	Name        string
-	Description string
-	Args        []livekitArg
-	Fields      []string
 }
 
 // livekitCallStartVar is one dispatched input variable, hydrated from the job
@@ -438,7 +427,6 @@ type livekitData struct {
 	Tasks           []livekitTask
 	Vars            []livekitVar
 	CallStartVars   []livekitCallStartVar // dispatched input variables (I.dispatch)
-	Capture         *livekitCapture       // generated update_variables tool; nil without conversation variables
 	Secrets         []string              // declared secrets, for .env.example (V11)
 	ExtraEnv        []string              // env the route needs that the package never declared
 	RequiredSecrets []string              // required secrets: a startup check refuses to run without them (V12)
@@ -590,7 +578,6 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldPrefetch:              true, // _prefetch between hydration and session.start (prefetch.go)
 	targetcap.FieldVariableConfirm:       true, // state._unconfirmed, which the guard reads
 	targetcap.FieldContextNoToolCalls:    true, // copy(exclude_function_call=True)
-	targetcap.FieldContextVariableSubset: true, // uncarried userdata fields reset (D7)
 	targetcap.FieldTransferBriefing:      true, // WarmTransferTask instructions extra (N25)
 	targetcap.FieldGreetingUserFirst:     true,
 	targetcap.FieldGreetingModelWritten:  true,
@@ -617,7 +604,6 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTracingLangfuse:       true,
 	targetcap.FieldTracingCoval:          true, // tracing.py exports to Coval off the SIP simulation ID
 	targetcap.FieldDeploymentMultiRegion: true, // one README deploy row per declared region, own config file
-	targetcap.FieldVariableConversation:  true, // generated update_variables @function_tool writing userdata
 	targetcap.FieldToolInject:            true, // hidden request values merged from userdata
 	targetcap.FieldWebhookPath:           true, // rendered, URL-encoded path on the base URL
 	targetcap.FieldTemplates:             true, // update_instructions/_render at session start

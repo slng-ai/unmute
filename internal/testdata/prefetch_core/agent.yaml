@@ -54,7 +54,6 @@ handoffs:
       - caller_phone
     context:
       history: full
-      variables: all
 
 variables:
   customer_id:

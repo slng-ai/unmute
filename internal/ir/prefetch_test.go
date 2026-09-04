@@ -237,7 +237,7 @@ func TestBuildPrefetchRefusesTheShape(t *testing.T) {
 	}
 }
 
-// The source refusals, rules 7 to 12 and rule 9's four messages. Rule 9 is the
+// The source refusals, rules 7 to 12 and rule 9's three messages. Rule 9 is the
 // one an author reaches by guessing a name, so each wrong guess gets its own
 // answer rather than one list to search.
 func TestBuildPrefetchRefusesTheSource(t *testing.T) {
@@ -273,10 +273,11 @@ func TestBuildPrefetchRefusesTheSource(t *testing.T) {
 				"call_id, carrier, connection, direction, from_number, session_id, stream_id, to_number"},
 		},
 		{
-			name: "rule 9: conversation gets its own reason",
+			name: "rule 9: conversation is not a call fact either",
 			from: "    source: from_number",
 			to:   "    source: conversation",
-			want: []string{"source: conversation", "the model saves mid-call", "nothing holds it before the greeting"},
+			want: []string{"reads source: conversation", "not a fact a call carries",
+				"call_id, carrier, connection, direction, from_number, session_id, stream_id, to_number"},
 		},
 		{
 			name: "rule 9: call_start gets its own reason",

@@ -953,11 +953,9 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 	}
 
 	// The task path reuses the complete agent-transfer contract, including
-	// summary history and variable selection.
+	// summary history.
 	transfer.Context.History = ir.HistorySummary
 	transfer.Context.Summarizer = "reasoning"
-	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
-	transfer.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}}
 	summaryArtifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
 	if err != nil {
 		t.Fatalf("generate summary transfer: %v", err)
@@ -965,7 +963,6 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 	summaryBot := artifactFile(t, summaryArtifact, "agent.py")
 	for _, want := range []string{
 		"async def _summarize(source: llm.ChatContext",
-		"ctx.userdata.visit_count = None  # context.variables: not carried on this transfer",
 		"self.complete(_TaskTransfer(Greeter(chat_ctx=summary_ctx)))",
 	} {
 		if !strings.Contains(summaryBot, want) {
@@ -1364,8 +1361,8 @@ func TestLiveKitV1PerTaskModel(t *testing.T) {
 }
 
 // TestLiveKitV1HistoryShapingAndFallback covers the T5 lowerings (V4/V5):
-// every history value compiles, include_tool_calls and variables subsets
-// shape the handoff, and a fallback chain lowers to llm.FallbackAdapter.
+// every history value compiles, include_tool_calls shapes the handoff, and a
+// fallback chain lowers to llm.FallbackAdapter.
 func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
@@ -1381,10 +1378,8 @@ func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
 	agent.Models["reasoning"] = profile
 	agent.Models["backup"] = ir.ModelDef{Kind: ir.KindThink, Placement: ir.PlacementAPI}
 	// Shape each transfer differently.
-	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
 	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
 	toRes.Context.History = ir.HistoryMessages
-	toRes.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}} // visit_count not carried
 	toEvents := agent.Controls["to_events"].(*ir.AgentTransfer)
 	toEvents.Context.History = ir.HistoryLastN
 	toEvents.Context.MaxMessages = 6
@@ -1410,8 +1405,6 @@ func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
 		`summary_ctx = await _summarize(self.chat_ctx, openai.LLM(api_key=os.environ["OPENAI_API_KEY"], model="gpt-4o"))`,
 		"return Greeter(chat_ctx=summary_ctx)",
 		"async def _summarize(source: llm.ChatContext",
-		// D7: an uncarried variable resets on the transfer.
-		"ctx.userdata.visit_count = None  # context.variables: not carried on this transfer",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -1466,8 +1459,6 @@ func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
 	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
 	toRes.Announce = "I’ll connect you to reservations now."
 	toRes.Requires = []string{"caller_phone"}
-	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
-	toRes.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}}
 	back := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
 	back.Context.History = ir.HistoryReset
 
@@ -1487,11 +1478,10 @@ func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
 	method := botpy[start : start+1+end]
 	guardAt := strings.Index(method, "        if _unmet:")
 	announceAt := strings.Index(method, `        await ctx.session.say("I’ll connect you to reservations now.", allow_interruptions=False)`)
-	resetAt := strings.Index(method, "        ctx.userdata.visit_count = None")
 	returnAt := strings.Index(method, "        return Reservations(")
-	if guardAt < 0 || announceAt < 0 || resetAt < 0 || returnAt < 0 ||
-		guardAt >= announceAt || announceAt >= resetAt || resetAt >= returnAt {
-		t.Errorf("transfer must guard, finish its announcement, shape context, then hand off:\n%s", method)
+	if guardAt < 0 || announceAt < 0 || returnAt < 0 ||
+		guardAt >= announceAt || announceAt >= returnAt {
+		t.Errorf("transfer must guard, finish its announcement, then hand off:\n%s", method)
 	}
 	if strings.Contains(method, "generate_reply(instructions=") {
 		t.Errorf("the exact announcement must not start another LLM turn:\n%s", method)
@@ -2693,7 +2683,6 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	enabled, noCalls := true, false
 	agent.Conversation.Interruption = &ir.Interruption{Enabled: &enabled, MinimumWords: 2, IgnorePhrases: []string{"uh-huh"}}
 	agent.Conversation.ThinkingAudio = ir.ThinkingSubtle
-	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
 	agent.Models["backup"] = ir.ModelDef{Kind: ir.KindThink, Placement: ir.PlacementAPI}
 	profile := agent.Models["reasoning"]
 	profile.Fallback = []string{"backup"}
@@ -2703,7 +2692,6 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	toRes.Context.History = ir.HistoryLastN
 	toRes.Context.MaxMessages = 6
 	toRes.Context.IncludeToolCalls = &noCalls
-	toRes.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}}
 	back := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
 	back.Context.History = ir.HistorySummary
 	back.Context.Summarizer = "backup"

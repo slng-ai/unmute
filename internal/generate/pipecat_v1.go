@@ -345,15 +345,6 @@ type pipecatVariable struct {
 	Description string
 }
 
-// pipecatCapture is the generated update_variables tool (V6): one optional
-// argument per conversation variable, writing the shared State.
-type pipecatCapture struct {
-	Name        string
-	Description string
-	Args        []pipecatArg
-	Fields      []string // conversation variable names, in schema order
-}
-
 // pipecatCallStartVar is one dispatched input variable, hydrated from the call
 // context or the dev UNMUTE_CALL_START payload before the greeting.
 type pipecatCallStartVar struct {
@@ -477,7 +468,6 @@ type pipecatData struct {
 	LocalTools          []pipecatLocalTool // copied handler files (tools/<name>.py, V13)
 	Variables           []pipecatVariable
 	CallStartVars       []pipecatCallStartVar // dispatched input variables (I.dispatch)
-	Capture             *pipecatCapture       // generated update_variables tool; nil without conversation variables
 	Secrets             []string              // declared secrets, for .env.example (V11)
 	ExtraEnv            []string              // env the route needs that the package never declared
 	GreetingExpr        string                // Python expression for the fixed greeting line
@@ -709,7 +699,6 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolAnnounceTask:     true, // same frame, queued via FlowManager.worker
 	targetcap.FieldTracingLangfuse:      true,
 	targetcap.FieldTracingCoval:         true, // tracing.py routes Pipecat's own spans to Coval
-	targetcap.FieldVariableConversation: true, // generated update_variables @tool writing State
 	targetcap.FieldToolInject:           true, // hidden request values merged from State
 	targetcap.FieldWebhookPath:          true, // rendered, URL-encoded path on the base URL
 	targetcap.FieldTemplates:            true, // _render over prompts and the greeting at session start

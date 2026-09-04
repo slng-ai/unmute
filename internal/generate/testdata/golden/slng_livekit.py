@@ -297,6 +297,10 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
         for name, value in supplied.items():
             values.setdefault(name, value)
     missing = []
+    if "caller_alias" in values:
+        value = values["caller_alias"]
+        if not (isinstance(value, str)):
+            raise RuntimeError("call_start.caller_alias must be string")
     if "customer_id" in values:
         value = values["customer_id"]
         if not (isinstance(value, str)):
@@ -311,6 +315,8 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
 
 
 def _hydrate_call_start(userdata, values: dict) -> None:
+    if "caller_alias" in values:
+        userdata.caller_alias = values["caller_alias"]
     if "customer_id" in values:
         userdata.customer_id = values["customer_id"]
     if "verified" in values:
@@ -442,15 +448,6 @@ class Billing(_SlngScoped, IgnorePhrasesMixin, Agent):
             resp.raise_for_status()
             return resp.json()
 
-    @function_tool
-    async def update_variables(self, ctx: RunContext, caller_alias: str | None = None) -> str:
-        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them."""
-        saved = []
-        if caller_alias is not None:
-            ctx.userdata.caller_alias = caller_alias
-            saved.append("caller_alias")
-        return "Saved: " + ", ".join(saved) if saved else "Nothing new to save."
-
 
 
 class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
@@ -485,15 +482,6 @@ class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
             )
             resp.raise_for_status()
             return resp.json()
-
-    @function_tool
-    async def update_variables(self, ctx: RunContext, caller_alias: str | None = None) -> str:
-        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them."""
-        saved = []
-        if caller_alias is not None:
-            ctx.userdata.caller_alias = caller_alias
-            saved.append("caller_alias")
-        return "Saved: " + ", ".join(saved) if saved else "Nothing new to save."
 
 
     @function_tool
@@ -738,15 +726,6 @@ class Collect(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict])
             return resp.json()
 
     @function_tool
-    async def update_variables(self, ctx: RunContext, caller_alias: str | None = None) -> str:
-        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them."""
-        saved = []
-        if caller_alias is not None:
-            ctx.userdata.caller_alias = caller_alias
-            saved.append("caller_alias")
-        return "Saved: " + ", ".join(saved) if saved else "Nothing new to save."
-
-    @function_tool
     async def finish(self, ctx: RunContext, tier: str, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> None:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
@@ -764,15 +743,6 @@ class Confirm(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict])
     async def on_enter(self) -> None:
         # The task's own instructions describe this step; let them drive the opening.
         self.session.generate_reply()
-
-    @function_tool
-    async def update_variables(self, ctx: RunContext, caller_alias: str | None = None) -> str:
-        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them."""
-        saved = []
-        if caller_alias is not None:
-            ctx.userdata.caller_alias = caller_alias
-            saved.append("caller_alias")
-        return "Saved: " + ", ".join(saved) if saved else "Nothing new to save."
 
     @function_tool
     async def finish(self, ctx: RunContext, confirmed: bool, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> None:

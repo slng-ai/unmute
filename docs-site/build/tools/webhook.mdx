@@ -96,8 +96,8 @@ livekit: livekit target reads a webhook base URL from the environment: tool
 
 `{{customer_id}}` is a [variable](/build/variables), rendered when the tool is
 called, and the rendered value is URL-encoded for you. Because it renders per
-call rather than once at session start, a variable the conversation itself filled
-in is fine here.
+call rather than once at session start, a variable that only gets its value
+once a task assigns it partway through the call is fine here.
 
 If the variable has no value when the model calls the tool, the call is refused
 and the model is told what to ask the caller for, rather than sending a

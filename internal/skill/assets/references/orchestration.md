@@ -149,7 +149,6 @@ handoffs:
     announce: "I’m connecting you with our appointment manager now."
     context:
       history: full
-      variables: all
 
   to_booking_desk:
     to: booking_desk
@@ -157,7 +156,6 @@ handoffs:
     announce: "I’m connecting you back to the booking desk for your new appointment."
     context:
       history: full
-      variables: all
 ```
 
 `entry_agent` decides who answers. Each agent has its own prompt file and its
@@ -197,11 +195,12 @@ cancellation.
 | Field | What it does |
 |---|---|
 | `history: full` | the new agent sees the conversation so far |
-| `variables` | optional. Left out means `all`: every declared value travels. A list keeps those names and resets the rest, livekit only |
 
 `history` is required. Choose it on purpose, and tell the user what you chose.
-What the caller just asked for is not a declared value: hand it over with
-`expect:` on the handoff, the same list a task takes, see below.
+Every declared value travels with the caller already, on every target, with
+nothing to write: see `variables.md`. What the caller just asked for is not a
+declared value: hand it over with `expect:` on the handoff, the same list a
+task takes, see below.
 
 `requires:` is legal on a handoff when variables must exist before the call
 leaves this agent. It is also legal on a task, which is usually the better
@@ -657,7 +656,6 @@ answer out loud for each boundary the package actually has.
 | Boundary | The question | Where it is answered |
 |---|---|---|
 | a handoff | how much history does the new agent see? | `context.history` on the handoff entry |
-| a handoff | which variables travel with the caller? | `context.variables`, optional: left out means `all`, or a list |
 | a handoff | do tool calls travel too? | `context.include_tool_calls` |
 | a task or a handoff | what is the step or the new agent handed for this visit? | `expect:` on the task or the handoff |
 | a task | what does the task see when it starts? | `context.history` on the task |
@@ -686,24 +684,12 @@ Two things the table does not cover, because they trip people up:
 
   The same check covers a task group nothing attaches, an agent no handoff
   reaches, a `destinations:` entry no escalation resolves to, and a `tools:`
-  entry no agent lists. A task with no `when:` that no task group's `steps:`
-  lists is refused too, with its own message. An unreferenced `models:` entry
-  is the one exception: that map is a palette and unused entries are legal.
-- **A second agent's instructions cannot read a `conversation` variable.** An
-  instructions file renders on entry and again after one of its own steps
-  records a value, and a `conversation` variable is written by neither, so it
-  can only name a value that already exists. With `history: full` the new agent can see what was said,
-  but writing `{{customer_name}}` into its prompt for a value the first agent
-  collected mid-call is refused. Rely on the history and say so in prose.
-  That holds for `history: full` and `history: messages`. It does not hold for
-  `history: reset`: a reset step gets its own instructions and its declared
-  values, nothing else, so there is no history to rely on and no way to write
-  a prompt that leans on one. A reset step also never sees the caller's
-  triggering utterance, so it cannot work out what was just asked. Give it to
-  a step that is fully described by its declared values, such as confirming a
-  number or taking a payment, never to one that has to interpret what the
-  caller wants. Nothing in the compiler catches the wrong choice, which is why
-  it has to be said here.
+  entry no agent lists. A tool named only by a `prefetch:` entry's
+  `tool:` field passes: the reachability walk marks it reachable on its own,
+  because it never reaches an agent's `tools:` list. A
+  task with no `when:` that no task group's `steps:` lists is refused too,
+  with its own message. An unreferenced `models:` entry is the one exception:
+  that map is a palette and unused entries are legal.
 
 ## Where a target refuses a shape
 
@@ -713,7 +699,6 @@ Raise these **before** you write files, not after validate fails.
 |---|---|---|
 | `think:` on a task | Pipecat | the Pipecat driver does not emit per-task model yet |
 | `include_tool_calls: false` on a transfer context | Pipecat | the Pipecat driver does not shape transfer context yet |
-| a variables subset on a transfer context | Pipecat | Pipecat accepts context, not a subset |
 
 ### Task history by target
 

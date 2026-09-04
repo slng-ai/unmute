@@ -337,9 +337,9 @@ it is a warning at exit 0 rather than an error, so it is easy to miss. See
 `package.md`.
 
 `path` renders per call and the rendered value is URL encoded for you. Because
-it renders per call rather than at session start, a variable the conversation
-itself filled in is fine here. A token naming nothing at all fails at compile
-time.
+it renders per call rather than at session start, a variable that only gets
+its value once a task assigns it partway through the call is fine here. A
+token naming nothing at all fails at compile time.
 
 **`path` templates a declared variable, never an `input` property.** These are
 two different things and mixing them up is the most common webhook mistake:

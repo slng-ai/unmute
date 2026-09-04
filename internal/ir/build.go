@@ -374,17 +374,13 @@ func checkNames(pkg *packagespec.Package) error {
 	}
 	// All five kinds become callable function names at runtime, so they share one
 	// flat namespace: a name may sit in exactly one catalog, and never on a tool
-	// as well. The capture tool is generated whenever a conversation variable
-	// exists, so its name is reserved across all of them (V7).
+	// as well.
 	//
 	// Task groups are the easy half to miss. They were never checked while a
 	// delegate pointed at them, because the delegate carried the name into the
 	// emitted project. An agent names a group directly now, so the group name IS
 	// the emitted method name, and a group colliding with a tool would define one
 	// Python function twice and silently drop the tool.
-	if _, ok := pkg.Tools[CaptureToolName]; ok {
-		return fmt.Errorf("%s: tool name %q is reserved: unmute generates %s for source: conversation variables", pkg.Location("agent.yaml", CaptureToolName), CaptureToolName, CaptureToolName)
-	}
 	declared := map[string]string{}
 	for _, catalog := range []struct {
 		kind  string
@@ -401,9 +397,6 @@ func checkNames(pkg *packagespec.Package) error {
 			declared[name] = catalog.kind
 			if _, ok := pkg.Tools[name]; ok {
 				return fmt.Errorf("%s: tool and %s name %q collide", pkg.Location("agent.yaml", name), catalog.kind, name)
-			}
-			if name == CaptureToolName {
-				return fmt.Errorf("%s: %s name %q is reserved: unmute generates %s for source: conversation variables", pkg.Location("agent.yaml", name), catalog.kind, name, CaptureToolName)
 			}
 		}
 	}
@@ -1119,7 +1112,7 @@ func assignableInto(target *TypeRef, targetPrimitive PrimitiveType, field Result
 			if sameSet(target.Literal, field.Enum) {
 				return nil
 			}
-			return fmt.Errorf("the result field allows %s and the variable allows %s. One set, written once",
+			return fmt.Errorf("the result field allows %s and the variable allows %s. Give both the same words",
 				strings.Join(field.Enum, ", "), strings.Join(target.Literal, ", "))
 		}
 		return fmt.Errorf("the result field is %s and the variable is %s. Declare the result field with the "+
@@ -1166,43 +1159,12 @@ func buildTransferContext(pkg *packagespec.Package, raw *packagespec.TransferCon
 			return TransferContext{}, missing(pkg, "agent.yaml", "summarizer", raw.Summarizer)
 		}
 	}
-	selection, err := buildVariableSelection(raw.Variables)
-	if err != nil {
-		return TransferContext{}, err
-	}
-	for _, name := range selection.Names {
-		if _, ok := agent.Variables[name]; !ok {
-			return TransferContext{}, missing(pkg, "agent.yaml", "variable", name)
-		}
-	}
 	return TransferContext{
 		TaskContext: TaskContext{
 			History: History(raw.History), MaxMessages: raw.MaxMessages, Summarizer: raw.Summarizer,
 			IncludeToolCalls: raw.IncludeToolCalls,
 		},
-		Variables: selection,
 	}, nil
-}
-
-// buildVariableSelection resolves a handoff's `variables:`. Left out means
-// all: every declared value is shared by every agent already, so `all` changes
-// nothing, and a line that changes nothing should not be required. A list
-// keeps its meaning, the names it holds travel and every other value is reset
-// to its default on the way across, and an empty list is refused because it
-// would reset everything while reading as if it kept something.
-func buildVariableSelection(value any) (VariableSelection, error) {
-	if value == nil || value == "all" {
-		return VariableSelection{All: true}, nil
-	}
-	values, err := stringSlice(value)
-	if err != nil {
-		return VariableSelection{}, fmt.Errorf("context variables must be all or a list of names")
-	}
-	if len(values) == 0 {
-		return VariableSelection{}, fmt.Errorf("context variables is an empty list. Leave the field out to carry every " +
-			"declared value across, which is what all means, or list the names to keep")
-	}
-	return VariableSelection{Names: values}, nil
 }
 
 func stringSlice(value any) ([]string, error) {

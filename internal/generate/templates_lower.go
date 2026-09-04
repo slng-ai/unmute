@@ -210,31 +210,6 @@ func renderNeeds(agent *ir.Agent) bool {
 	return false
 }
 
-// captureFields returns the conversation variables, in name order: the schema of
-// the generated update_variables tool (V6).
-func captureFields(agent *ir.Agent) []string {
-	var names []string
-	for name, variable := range agent.Variables {
-		if variable.Source == ir.VariableSourceConversation {
-			names = append(names, name)
-		}
-	}
-	slices.Sort(names)
-	return names
-}
-
-// captureDescription is the generated tool's description: one fixed line plus
-// each variable's own description, so the model knows what to listen for.
-func captureDescription(agent *ir.Agent, names []string) string {
-	text := "Save details the caller gives you, as soon as you learn them."
-	for _, name := range names {
-		if description := agent.Variables[name].Description; description != "" {
-			text += " " + name + ": " + description
-		}
-	}
-	return text
-}
-
 // requiredSecretEnv lists the declared secrets a generated runtime refuses to
 // start without, in name order (V12). Every declared secret is required.
 // requiredSecretEnv is the declared list, minus the names that belong to a

@@ -143,20 +143,6 @@ webhook_tool, so a kind with no arm renders an HTTP POST to an environment name
 nobody registered rather than rendering nothing. buildLiveKitTool refuses an
 unlowerable kind for the same reason. */ -}}
 {{define "method_tool"}}{{if .KnowledgeBase}}{{template "knowledge_tool" .}}{{else if .Local}}{{template "local_tool" .}}{{else if .HostedCode}}{{template "hosted_tool" .}}{{else if .HostedRequest}}{{template "webhook_tool" .}}{{else}}{{template "webhook_tool" .}}{{end}}{{end -}}
-{{- /* capture_tool is the generated update_variables tool: the model saves what
-it learns mid-call into the session userdata (variable_secrets_specs.md V6). */ -}}
-{{define "capture_tool"}}
-    @function_tool
-    async def {{.Name}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}} = None{{end}}) -> str:
-        {{triple .Description}}
-        saved = []
-{{- range .Fields}}
-        if {{.}} is not None:
-            ctx.userdata.{{.}} = {{.}}
-            saved.append({{pyq .}})
-{{- end}}
-        return "Saved: " + ", ".join(saved) if saved else "Nothing new to save."
-{{end -}}
 {{- /* prebuilt_list renders execution: builtin tools as SDK helper instances
 spread into the tools= kwarg. */ -}}
 {{define "prebuilt_list"}}{{range $i, $p := .}}{{if $i}}, {{end}}{{if eq $p.Builtin "end_call"}}*EndCallTool(extra_description={{pyq $p.Description}}{{if $p.Instructions}}, end_instructions={{pyq $p.Instructions}}{{end}}).tools{{end}}{{end}}{{end -}}
@@ -1137,7 +1123,6 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- end}}
 {{- end}}
 {{- range .Tools}}{{template "method_tool" .}}{{end}}
-{{- if $.Capture}}{{template "capture_tool" $.Capture}}{{end}}
 {{range .Transfers}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext{{range .Inputs}}, {{.Name}}: {{.Anno}}{{if not .Required}} = None{{end}}{{end}}):
@@ -1166,9 +1151,6 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- end}}
 {{- if .Announce}}
         await ctx.session.say({{pyq .Announce}}, allow_interruptions=False)
-{{- end}}
-{{- range .ResetVars}}
-        ctx.userdata.{{.Name}} = {{.Default}}  # context.variables: not carried on this transfer
 {{- end}}
 {{- if .ReceiverInputs}}
         # The receiver's brief: every name its prompt reads is reset, then this
@@ -1784,7 +1766,6 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
         self.session.generate_reply()
 {{- end}}
 {{range .Tools}}{{template "method_tool" .}}{{end}}
-{{- if $.Capture}}{{template "capture_tool" $.Capture}}{{end}}
 {{range .Transfers}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext{{range .Inputs}}, {{.Name}}: {{.Anno}}{{if not .Required}} = None{{end}}{{end}}):
@@ -1815,9 +1796,6 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
         try:
 {{- if .Announce}}
             await ctx.session.say({{pyq .Announce}}, allow_interruptions=False)
-{{- end}}
-{{- range .ResetVars}}
-            ctx.userdata.{{.Name}} = {{.Default}}  # context.variables: not carried on this transfer
 {{- end}}
 {{- if .ReceiverInputs}}
             # The receiver's brief: reset, then written, before the receiver

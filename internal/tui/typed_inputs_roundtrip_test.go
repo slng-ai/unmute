@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -71,7 +70,7 @@ func TestMaintainKeepsAHandoffsInputs(t *testing.T) {
 				{Name: "problem", Type: "str"},
 				{Name: "about", Type: "str | None", Description: "Which booking, if the caller named one."},
 			},
-			History: "reset", AllVariables: true,
+			History: "reset",
 		}},
 	}
 	data.SetTarget("livekit")
@@ -93,42 +92,5 @@ func TestMaintainKeepsAHandoffsInputs(t *testing.T) {
 	got := agent.data.Handoffs[0].Input
 	if len(got) != 2 || got[0] != data.Handoffs[0].Input[0] || got[1] != data.Handoffs[0].Input[1] {
 		t.Errorf("handoff inputs = %+v, want %+v", got, data.Handoffs[0].Input)
-	}
-}
-
-// TestMaintainKeepsAnOmittedVariablesOmitted is US4's console half: a package
-// that left `variables:` out is written back without it, and one that wrote
-// `variables: all` keeps its line. Without the tri-state the console would
-// normalise every omitted line to `variables: all` on every maintain.
-func TestMaintainKeepsAnOmittedVariablesOmitted(t *testing.T) {
-	for _, authored := range []bool{false, true} {
-		root := filepath.Join(t.TempDir(), "pkg")
-		data := scaffold.Data{
-			Name: "pkg", AgentName: "acme-salon",
-			Agents: []scaffold.Agent{{Name: "specialist", Instructions: "Handle complaints."}},
-			Handoffs: []scaffold.Handoff{{
-				Name: "to_specialist", Source: "assistant", To: "specialist", When: "A complaint.",
-				History: "reset", AllVariables: true, VariablesAuthored: authored,
-			}},
-		}
-		data.SetTarget("livekit")
-		if _, err := scaffold.Write(root, data); err != nil {
-			t.Fatal(err)
-		}
-		written, err := os.ReadFile(filepath.Join(root, "agent.yaml"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(written), "variables: all") != authored {
-			t.Errorf("authored=%v: agent.yaml has a variables: all line = %v", authored, !authored)
-		}
-		agent, err := loadMaintained(root)
-		if err != nil {
-			t.Fatal(err)
-		}
-		back := agent.data.Handoffs[0]
-		if back.VariablesAuthored != authored || !back.AllVariables {
-			t.Errorf("authored=%v: read back as authored=%v all=%v", authored, back.VariablesAuthored, back.AllVariables)
-		}
 	}
 }

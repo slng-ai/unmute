@@ -1810,8 +1810,8 @@ func TestBuildRefusesUnattachedAndCollidingCatalogEntries(t *testing.T) {
 //
 // This test is the shape it is because the check it was written for does not
 // exist. The plan called for refusing a `requires:` naming a variable that "can
-// never hold a value": no session-start value, no `source: conversation`, and no
-// step that assigns it. No such variable can be authored. A variable declaring
+// never hold a value": no session-start value and no step that assigns it. No
+// such variable can be authored. A variable declaring
 // no `source:` at all is seeded from the dispatch payload on both code targets,
 // optional rather than required:
 //

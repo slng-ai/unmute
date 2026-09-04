@@ -59,7 +59,7 @@ func TestMaintainKeepsATasksHandoffs(t *testing.T) {
 	data := scaffold.Data{
 		Name: "pkg", AgentName: "acme-support",
 		Agents:   []scaffold.Agent{{Name: "billing", Instructions: "Handle billing."}},
-		Handoffs: []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing", When: "Billing.", History: "full", AllVariables: true}},
+		Handoffs: []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing", When: "Billing.", History: "full"}},
 		Tasks: []scaffold.Task{{
 			Name: "collect", Instructions: "Collect the details.", Agent: "assistant",
 			When: "Collect first.", Handoffs: []string{"to_billing"},

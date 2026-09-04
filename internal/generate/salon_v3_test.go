@@ -1,8 +1,6 @@
 package generate
 
 import (
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -93,20 +91,6 @@ func TestSalonConciergeV3HandsEverySeamItsRequest(t *testing.T) {
 		}
 	}
 
-	// Both handoffs leave variables: out and resolve to all, so the omitted
-	// default is exercised by a package that is actually called.
-	raw, err := os.ReadFile(filepath.Join(examplePackagePath("salon-concierge-v3"), "agent.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), "variables:") && !strings.Contains(string(raw), "\nvariables:\n") {
-		t.Error("a handoff still writes a variables: line; leaving it out is what this package proves")
-	}
-	for _, name := range []string{"to_complaints", "to_concierge"} {
-		if !resolved.Controls[name].(*ir.AgentTransfer).Context.Variables.All {
-			t.Errorf("handoff %q does not resolve to all", name)
-		}
-	}
 	// The specialist's brief is the union of what reaches it, and the
 	// concierge's is what comes back.
 	if got := inputNamesOf(resolved.Agents["complaint_specialist"].Inputs); !slices.Equal(got, []string{"problem", "about"}) {

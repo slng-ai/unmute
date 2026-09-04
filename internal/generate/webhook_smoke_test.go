@@ -92,7 +92,7 @@ assert captured["body"] == {
 }, captured["body"]
 assert params.result["ok"] is True, params.result
 
-# 2. A tool injecting an unset conversation variable: refused, nothing sent.
+# 2. A tool injecting an unset variable: refused, nothing sent.
 assert state.reschedule_to is None
 refused = _Params()
 asyncio.run(agent.reschedule_appointment(refused))
@@ -100,8 +100,8 @@ assert captured["count"] == 1, "a refused call must not reach the network"
 assert "refused" in refused.result, refused.result
 assert "reschedule_to" in refused.result["refused"], refused.result
 
-# 3. Once the model saves it, the same tool sends it in the body.
-asyncio.run(agent.update_variables(_Params(), reschedule_to="Friday at 4"))
+# 3. Once the value is set, the same tool sends it in the body.
+state.reschedule_to = "Friday at 4"
 allowed = _Params()
 asyncio.run(agent.reschedule_appointment(allowed))
 assert captured["count"] == 2, captured
@@ -144,16 +144,15 @@ assert captured["body"] == {
 }, captured["body"]
 assert result["ok"] is True, result
 
-# 2. An unset conversation variable refuses before any request is made.
+# 2. An unset variable refuses before any request is made.
 assert userdata.reschedule_to is None
 refused = asyncio.run(desk.reschedule_appointment(ctx))
 assert captured["count"] == 1, "a refused call must not reach the network"
 assert "refused" in refused, refused
 assert "reschedule_to" in refused["refused"], refused
 
-# 3. The capture tool sets it, then the body carries it.
-asyncio.run(desk.update_variables(ctx, reschedule_to="Friday at 4"))
-assert userdata.reschedule_to == "Friday at 4", userdata.reschedule_to
+# 3. Once the value is set, the same tool sends it in the body.
+userdata.reschedule_to = "Friday at 4"
 allowed = asyncio.run(desk.reschedule_appointment(ctx))
 assert captured["count"] == 2, captured
 assert captured["body"] == {

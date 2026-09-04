@@ -354,7 +354,6 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		})
 	}
 	data.HasVars = len(data.Vars) > 0
-	data.Capture = buildLiveKitCapture(agent)
 	// A bare name in a compose environment block is forwarded when the host sets
 	// it and absent otherwise, which is exactly what the dev loop's measurement
 	// switch needs: the worker runs in a container, so inheriting the parent's
@@ -400,10 +399,6 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		data.NeedsHTTPX = data.NeedsHTTPX || prefetchNeedsHTTPX(agent)
 		data.PrefetchRunbook, _ = PrefetchRunbook(agent)
 	}
-	if data.Capture != nil {
-		data.NeedsFunctionTools = true // the generated capture tool is a @function_tool too
-	}
-
 	// Prompt constants, ordered agents-then-tasks for a stable file.
 	for _, a := range data.Agents {
 		data.Prompts = append(data.Prompts, livekitPrompt{Const: a.PromptConst, Body: agent.Agents[a.Name].Instructions})
@@ -553,28 +548,6 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	}
 	data.AuthorEnv = authorEnv(data.RequiredEnv, supplied)
 	return data, nil
-}
-
-// buildLiveKitCapture builds the generated update_variables tool: one optional
-// argument per conversation variable, writing the session userdata (V6).
-func buildLiveKitCapture(agent *ir.Agent) *livekitCapture {
-	fields := captureFields(agent)
-	if len(fields) == 0 {
-		return nil
-	}
-	capture := &livekitCapture{
-		Name: ir.CaptureToolName, Description: captureDescription(agent, fields), Fields: fields,
-	}
-	for _, name := range fields {
-		variable := agent.Variables[name]
-		// Every field is optional: the model saves what it has learned so far,
-		// one call or several, never all of them at once.
-		anno := pyType(variable.Type) + " | None"
-		capture.Args = append(capture.Args, livekitArg{
-			Name: name, PyType: pyType(variable.Type), Desc: variable.Description, Anno: anno,
-		})
-	}
-	return capture
 }
 
 func buildLiveKitTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*livekitTelephony, error) {
@@ -970,27 +943,6 @@ func buildLiveKitTransfer(agent *ir.Agent, tgt ir.Target, ref string, control *i
 		transfer.Summary = &summarizer
 	} else {
 		transfer.CtxExpr, _ = livekitCtxExpr(control.Context.TaskContext)
-	}
-	// context.variables (D7): a subset resets the fields the transfer does not
-	// carry; `all` leaves the shared session userdata untouched.
-	if !control.Context.Variables.All {
-		carried := map[string]bool{}
-		for _, name := range control.Context.Variables.Names {
-			carried[name] = true
-		}
-		for _, name := range sortedVarNames(agent) {
-			if carried[name] {
-				continue
-			}
-			variable := agent.Variables[name]
-			def := "None"
-			if variable.Default != nil {
-				def = pyLiteral(variable.Default)
-			}
-			transfer.ResetVars = append(transfer.ResetVars, livekitVar{
-				Name: name, PyType: pyType(variable.Type), Default: def,
-			})
-		}
 	}
 	return transfer, nil
 }

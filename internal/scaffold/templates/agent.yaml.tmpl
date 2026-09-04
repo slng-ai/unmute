@@ -83,10 +83,7 @@ agents:
 [[if .MaxMessages]]      max_messages: [[.MaxMessages]]
 [[end]][[if .Summarizer]]      summarizer: [[.Summarizer]]
 [[end]][[if .IncludeToolCalls]]      include_tool_calls: [[boolValue .IncludeToolCalls]]
-[[end]][[if .VariablesAuthored]][[if .AllVariables]]      variables: all
-[[else]]      variables:
-[[range .Variables]]        - [[.]]
-[[end]][[end]][[end]]
+[[end]]
 [[end]]
 [[end]][[if .HumanTransfers]]escalations:
 [[range .HumanTransfers]]  [[.Name]]:

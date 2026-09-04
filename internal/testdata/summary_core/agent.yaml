@@ -43,7 +43,6 @@ handoffs:
       # transcript, and that turn's prompt is the site Build cannot reach.
       history: summary
       summarizer: reasoning
-      variables: all
 
 variables:
   customer_id:

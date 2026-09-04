@@ -61,6 +61,11 @@ agents:
 `record_status` can only be one of three values. That is what makes a task
 different from a longer prompt: the outcome has a shape.
 
+Each field's type is the same one-line grammar a variable's `type:` takes;
+`string` and an `{enum: [...]}` block are its older spellings for a scalar and
+a closed set, and both still work. See [the type
+grammar](/reference/variables#the-type-grammar).
+
 `assign` copies fields out of the result into package variables, so the rest
 of the call can use them without asking again. It is a list of one-key
 `variable: result.<field>` pairs, one per line:

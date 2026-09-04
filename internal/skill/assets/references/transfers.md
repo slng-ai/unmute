@@ -254,7 +254,6 @@ the tool result is `transfer_started`.
 |---|---|---|
 | `briefing` | Pipecat, Deepgram | Pipecat has no warm transfer, so there is no briefing to lower |
 | `include_tool_calls: false` on transfer context | Pipecat | the Pipecat driver does not shape transfer context yet |
-| a variables subset on transfer context | Pipecat | Pipecat accepts context, not a subset |
 
 ## The working packages
 

@@ -210,9 +210,8 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if transfer.Announce != "" || transfer.Context.History != ir.HistoryFull ||
-			!transfer.Context.Variables.All {
-			t.Errorf("internal handoff %q must stay silent and carry full history and every variable: %#v", name, transfer)
+		if transfer.Announce != "" || transfer.Context.History != ir.HistoryFull {
+			t.Errorf("internal handoff %q must stay silent and carry full history: %#v", name, transfer)
 		}
 	}
 
@@ -726,16 +725,6 @@ func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
 	} {
 		if got != ir.HistoryMessages {
 			t.Errorf("%s carries history %q, want %q: a tool record crossing this seam is what the package removes", name, got, ir.HistoryMessages)
-		}
-	}
-
-	// Both handoffs carry every variable. Not a preference: a `variables:` subset
-	// is refused on pipecat (FieldContextVariableSubset), and this package has to
-	// compile on both targets, so the narrowing happens on the task side through
-	// `requires:`, which works on both.
-	for _, name := range []string{"to_complaints", "to_concierge"} {
-		if !resolved.Controls[name].(*ir.AgentTransfer).Context.Variables.All {
-			t.Errorf("handoff %q narrows context.variables, which the pipecat driver refuses; narrow with requires: on the receiving step instead", name)
 		}
 	}
 

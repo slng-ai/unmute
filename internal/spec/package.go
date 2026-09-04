@@ -418,11 +418,6 @@ type TransferContext struct {
 	MaxMessages      int    `json:"max_messages,omitempty" yaml:"max_messages,omitempty"`
 	Summarizer       string `json:"summarizer,omitempty" yaml:"summarizer,omitempty"`
 	IncludeToolCalls *bool  `json:"include_tool_calls,omitempty" yaml:"include_tool_calls,omitempty"`
-	// Variables is `all`, or the list of declared values to keep on the way
-	// across, every other one being reset to its default. Optional: left out
-	// means all, because every declared value is already shared by every agent
-	// and a required line that changed nothing was the only portable spelling.
-	Variables any `json:"variables,omitempty" yaml:"variables,omitempty"`
 }
 
 // Callable is one thing an agent can decide to run: a task carrying a `when:`,

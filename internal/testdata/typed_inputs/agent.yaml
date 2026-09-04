@@ -101,7 +101,6 @@ handoffs:
         description: The thing the problem is about, if the caller named one.
     context:
       history: reset
-      variables: all
 
   to_front:
     to: front
@@ -110,7 +109,6 @@ handoffs:
       - outcome: str
     context:
       history: reset
-      variables: all
 
 tools:
   - note_thing

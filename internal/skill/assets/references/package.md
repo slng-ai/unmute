@@ -594,7 +594,6 @@ validate, by name, with what to do instead:
 | a missing greeting, or `speaks_first: user` | SLNG requires a greeting and speaks the string it is given |
 | `tracing:` | unmute instruments no process here |
 | more than one `deployment_region` | SLNG takes exactly one |
-| `variables` with `source: conversation` | nothing captures a value mid-call |
 | outbound calling, `on_voicemail`, a warm human transfer | a package declares no carrier state on SLNG; `unmute deploy` attaches an existing trunk after a push |
 
 A tool named `end_call`, `detected_answering_machine`, `get_current_datetime`,

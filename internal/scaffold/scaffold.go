@@ -302,13 +302,6 @@ type Handoff struct {
 	MaxMessages      int
 	Summarizer       string
 	IncludeToolCalls *bool
-	// VariablesAuthored says the package wrote a `variables:` line at all. Left
-	// out means all, and the console has to write back what it read: writing
-	// `variables: all` into a package that left it out would undo the author's
-	// choice on every maintain, quietly and at exit 0.
-	VariablesAuthored bool
-	AllVariables      bool
-	Variables         []string
 }
 
 type Task struct {

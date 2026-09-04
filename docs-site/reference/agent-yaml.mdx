@@ -83,6 +83,7 @@ split this page and [targets.yaml](/reference/targets-yaml) hold between them.
 | `listen` | string | with 2 or more listen chain heads | sole chain head | declared `models.listen` name | listen entry to use |
 | `turn` | string | with 2 or more turn entries | sole entry | declared `models.turn` name | turn entry to use |
 | `variables` | map | no |  | lower snake case names | per-call values |
+| `shapes` | list | no |  | one or more named field groups, `CapWords` names | field groups a variable's, a result's, or an expected value's `type:` can refer to |
 | `timezone` | string | before a `prefetch:` entry reads the clock |  | an IANA zone name, such as `Europe/Madrid` | the zone every clock reading in this package is taken in |
 | `prefetch` | **list** | no |  | one entry per fact, each with a `name:` | facts resolved once per call, before the greeting, in the order written |
 | `secrets` | list of strings | no |  | UPPER_SNAKE names | environment values the generated project reads |
@@ -245,12 +246,29 @@ variables:
 | Field | Values |
 |---|---|
 | `type` | `string`, `number`, `integer`, `boolean` |
-| `source` | `call_start`, `conversation`, or a system source |
+| `source` | `call_start`, a system source, or left out |
 | `default` | any value of the declared type |
 | `confirm` | the step that must hear the caller agree before anything acts on this value |
-| `description` | a note, also read by the model for `conversation` variables |
+| `description` | a note for readers of the file; not sent to the model |
 
 Full detail on [variables](/reference/variables).
+
+## `shapes`
+
+```yaml
+shapes:
+  - name: Appointment
+    description: One thing being booked, moved or cancelled.
+    fields:
+      - scheduled_date: Date
+      - scheduled_time: Time
+```
+
+A top-level list. Each item names one group of fields a variable's, a task's
+`result:`, or an `expect:` field can then use as its `type:`. Full field
+reference, the type grammar it shares with `result:` and `expect:`, and what
+it takes to reach the model as structured data:
+[variables](/reference/variables#shapes-groups-fields-into-a-named-type).
 
 ## `timezone`
 
@@ -451,11 +469,11 @@ agent.yaml:17: task "verify_customer" is defined by agent "concierge" and again 
   one definition and let the other agent name it, "- verify_customer"
 ```
 
-Every task needs a non-empty `result:`. Each result field is one of:
-
-- a primitive name: `string`, `number`, `integer`, or `boolean`,
-- an `{enum: [...]}` block with at least one string, or
-- a JSON Schema object for a nested shape.
+Every task needs a non-empty `result:`. Each field's type is the same
+one-line [type grammar](/reference/variables#the-type-grammar) a variable's
+`type:` takes: a scalar, `Literal["a", "b"]`, `list[...]`, or a shape declared
+under [`shapes:`](#shapes). `string`, `number`, `integer`, `boolean`, and an
+`{enum: [...]}` block still work, and mean what they always did.
 
 `unserved_request` is reserved and a result declaring it is a validation error.
 Every generated task finish already takes it, optional and empty by default, for
@@ -478,7 +496,6 @@ Used by tasks and by handoffs.
 | `max_messages` | a positive number | legal with `last_n` only |
 | `summarizer` | a model entry name | legal with `summary` only |
 | `include_tool_calls` | `true` or `false` | whether tool calls travel too |
-| `variables` | `all` or a list of names | handoffs only |
 
 ## `task_groups`
 
@@ -534,12 +551,11 @@ The conversation becomes another agent, and never comes back.
 | `announce` | optional exact spoken text |
 | `requires` | guard: declared variable names |
 | `expect` | optional list of typed fields the receiving agent expects, the same shape a task's `expect` takes; its prompt ends with a block naming each |
-| `context` | payload: `history`, and an optional `variables` selection |
+| `context` | payload: `history` |
 
-A `context:` block needs `history`. `variables` is optional: left out means
-`all`, and every declared value travels with the caller. A non-empty list of
-declared variable names keeps those and resets every other value to its default
-on the way across, and that list form compiles on livekit only.
+A `context:` block needs `history`. Every declared variable travels with the
+caller already, with nothing to write: see
+[variables](/reference/variables#a-handoff-keeps-every-declared-value).
 
 `announce` is exact spoken text, not a model instruction: write the short
 sentence the caller should hear. Omit it for a silent handoff.

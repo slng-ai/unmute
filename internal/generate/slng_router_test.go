@@ -59,12 +59,11 @@ func routerFixture(t *testing.T) *ir.Agent {
 	// files. It is what makes this fixture exercise the raw-prompt seam too.
 	//
 	// Two variables, and the second one is here because its absence hid a defect.
-	// customer_id is written when a task finishes; caller_alias is written by the
-	// generated capture tool when the caller offers it. Those are different write
-	// sites, and a fixture with only the first let a refresh that covered only the
-	// first look complete.
+	// customer_id is written when a task finishes; caller_alias carries no source
+	// at all, so a fixture with only the first let a name tuple that was
+	// accidentally scoped to variables a task assigns look complete.
 	agent.Variables["caller_alias"] = ir.Variable{
-		Type: ir.PrimitiveString, Source: ir.VariableSourceConversation,
+		Type:        ir.PrimitiveString,
 		Description: "What the caller says to call them.",
 	}
 	for _, name := range []string{"intake", "billing"} {
@@ -406,22 +405,24 @@ func TestSlngRouterPipecatReadsTheVariablesPerRequest(t *testing.T) {
 	agent := routerFixture(t)
 	// The fixture's delegates assign nothing, so give one an assignment: that is
 	// the only way a call writes a variable mid-conversation, and it is the whole
-	// case this gate is about. The pairing is arbitrary because the compiler does
-	// not care which field feeds which variable, only that a write is followed by
-	// a refresh.
+	// case this gate is about. Two fields, both off the one task result: the
+	// pairing is arbitrary because the compiler does not care which field feeds
+	// which variable, only that a write is followed by a refresh, and one write
+	// proves nothing about counting.
+	collect := agent.Tasks["collect"]
+	collect.Result["alias"] = ir.ResultField{Type: ir.PrimitiveString}
+	agent.Tasks["collect"] = collect
 	agent.Controls["run_collect"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "collect", When: "Collect the caller's account details.",
-		Assign: []ir.AssignTo{{Var: "customer_id", Field: "tier"}},
+		Assign: []ir.AssignTo{{Var: "customer_id", Field: "tier"}, {Var: "caller_alias", Field: "alias"}},
 	}
 	source, _ := emitAgentSource(t, agent, ir.ProviderPipecat, "bot.py")
 	// Every place the emitted module assigns into the call state, not just the
-	// ones this test remembered to think of. A task result is one; the generated
-	// capture tool is another, and it is the one a caller-offered name arrives
-	// through. Counting the writes rather than naming them is what makes a fourth
-	// write site fail here instead of shipping.
+	// ones this test remembered to think of. Counting the writes rather than
+	// naming them is what makes a third write site fail here instead of shipping.
 	writes := regexp.MustCompile(`self\.state\.[a-z_]+ = `).FindAllString(source, -1)
 	if len(writes) < 2 {
-		t.Fatalf("the fixture exercises %d state write sites, want at least the task result and the capture tool: %v", len(writes), writes)
+		t.Fatalf("the fixture exercises %d state write sites, want at least two: %v", len(writes), writes)
 	}
 	// The refresh count that stood here is gone, and so are the refreshes it
 	// counted. Three settings frames used to carry the body after a write, one

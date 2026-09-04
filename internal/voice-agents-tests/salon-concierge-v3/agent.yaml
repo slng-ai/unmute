@@ -140,9 +140,8 @@ agents:
       - to_manager
 
 # Both handoffs run on `history: reset` and carry a typed brief instead of the
-# conversation. Neither writes `variables:`, because leaving it out means every
-# declared value travels, which is the only spelling that compiles on both
-# targets anyway.
+# conversation. Every declared value still travels across regardless: a
+# handoff carries no separate variable subset.
 handoffs:
   to_complaints:
     to: complaint_specialist
