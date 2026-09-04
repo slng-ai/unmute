@@ -397,7 +397,7 @@ no `variables:` line to carry them. Left out, every value travels.
 `variables: all` written out means the same. A list of names keeps those
 values and resets every other one to its default on the way across; the list
 form compiles on livekit only, and an empty list is refused. What the caller
-just asked for is not a declared value: hand it over with `input:` on the
+just asked for is not a declared value: hand it over with `expect:` on the
 handoff, see `references/orchestration.md`.
 
 ## Seeding values locally

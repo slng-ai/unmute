@@ -79,7 +79,7 @@ const (
 	FieldDelegateRequires      Field = "controls.delegate.requires"
 	FieldContextNoToolCalls    Field = "context.include_tool_calls.false"
 	FieldContextVariableSubset Field = "context.variables.list"
-	FieldInput                 Field = "input"
+	FieldInput                 Field = "expect"
 	FieldTransferBriefing      Field = "controls.human_transfer.warm.briefing"
 	FieldGreetingUserFirst     Field = "conversation.greeting.user"
 	FieldGreetingModelWritten  Field = "conversation.greeting.model_written"
@@ -381,12 +381,12 @@ func Default() Table {
 			// composed state block to be.
 			FieldTypedState: field(deny(Slng, slngNoModule("a value with a declared shape"))),
 			FieldShapedText: field(deny(Slng, slngNoModule("a value whose text has a validated shape"))),
-			// An input is validated where it enters and written into the
+			// An expected value is validated where it enters and written into the
 			// receiving prompt for one visit, and both happen inside the module
 			// the two code drivers write. This target writes none, so there is
 			// nothing to hand a value to.
-			FieldInput: field(deny(Slng, "slng target pushes a spec and emits no module of its own, so an input: list "+
-				"has nowhere to be handed in, checked or written into a prompt: remove the input: lists, or compile to "+
+			FieldInput: field(deny(Slng, "slng target pushes a spec and emits no module of its own, so an expect: list "+
+				"has nowhere to be handed in, checked or written into a prompt: remove the expect: lists, or compile to "+
 				"livekit or pipecat, which validate each value where it enters and hand it to the receiving prompt")),
 			FieldContextNoToolCalls: field(
 				deny(Pipecat, "the Pipecat driver does not shape transfer context (include_tool_calls) yet"),

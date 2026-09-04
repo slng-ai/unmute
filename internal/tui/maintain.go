@@ -437,7 +437,7 @@ func jsonText(value any) string {
 // pairsText flattens an authored pair list into the JSON object the console
 // carries it as. Order is the author's, which the console does not preserve
 // anyway: it writes the pairs back sorted by key.
-// shapeFields carries an authored field list, a shape's or an input list,
+// shapeFields carries an authored field list, a shape's or an expect: list,
 // into the console's own shape of it: the same three keys, so both authored
 // forms are written back the way they were read.
 func shapeFields(fields []packagespec.Field) []scaffold.ShapeField {

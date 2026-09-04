@@ -119,14 +119,14 @@ func TestBuildRefusesEveryCollidingInputName(t *testing.T) {
 		edit func(string) string
 		want []string
 	}{
-		{"a declared variable", replaceOnce(t, kind, "- notes: str"), []string{`task "do_thing" input "notes"`, "a declared variable", "rename the input"}},
-		{"a word of the type grammar", replaceOnce(t, kind, "- str: str"), []string{`input "str"`, "a word of the type grammar"}},
-		{"the reserved result field", replaceOnce(t, kind, "- unserved_request: str"), []string{`input "unserved_request"`, "reserved result field"}},
-		{"not a placeholder name", replaceOnce(t, kind, "- Kind: str"), []string{`input "Kind"`, "lowercase words joined by underscores"}},
-		{"declared twice on one site", replaceOnce(t, kind, kind+"\n          - kind: str"), []string{`declares input "kind" twice`}},
+		{"a declared variable", replaceOnce(t, kind, "- notes: str"), []string{`task "do_thing" expects "notes"`, "a declared variable", "rename it"}},
+		{"a word of the type grammar", replaceOnce(t, kind, "- str: str"), []string{`expects "str"`, "a word of the type grammar"}},
+		{"the reserved result field", replaceOnce(t, kind, "- unserved_request: str"), []string{`expects "unserved_request"`, "reserved result field"}},
+		{"not a placeholder name", replaceOnce(t, kind, "- Kind: str"), []string{`expects "Kind"`, "lowercase words joined by underscores"}},
+		{"declared twice on one site", replaceOnce(t, kind, kind+"\n          - kind: str"), []string{`expects "kind" twice`}},
 		// Tasks resolve before handoffs, so the handoff is where the second
 		// spelling is found and refused, naming the task that spelled it first.
-		{"one name, two types across the package", replaceOnce(t, kind, kind+"\n          - problem: int"), []string{`handoff "to_specialist" input "problem" is declared as str`, `task "do_thing" declares it as int`, "one name has one type"}},
+		{"one name, two types across the package", replaceOnce(t, kind, kind+"\n          - problem: int"), []string{`handoff "to_specialist" expects "problem" as str`, `task "do_thing" expects it as int`, "one name has one type"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pkg := inputsPackage(t, tc.edit)
@@ -157,7 +157,7 @@ func TestBuildRefusesInputOnAGroupedTask(t *testing.T) {
 	if err == nil {
 		t.Fatal("built, want a refusal")
 	}
-	for _, fragment := range []string{`task "do_thing" declares input:`, `task group "both"`, "a grouped task takes no inputs"} {
+	for _, fragment := range []string{`task "do_thing" declares expect:`, `task group "both"`, "a grouped task expects nothing"} {
 		if !strings.Contains(err.Error(), fragment) {
 			t.Errorf("refusal does not say %q:\n%v", fragment, err)
 		}
@@ -174,7 +174,7 @@ func TestBuildRefusesAnInputTypeOutsideTheGrammarWithItsColumn(t *testing.T) {
 		t.Fatal("built, want a refusal")
 	}
 	line := lineOf(t, pkg, `Nothing`)
-	for _, fragment := range []string{"agent.yaml:" + strconv.Itoa(line), `task "do_thing" input "kind"`, "column"} {
+	for _, fragment := range []string{"agent.yaml:" + strconv.Itoa(line), `task "do_thing" expects "kind"`, "column"} {
 		if !strings.Contains(err.Error(), fragment) {
 			t.Errorf("refusal does not say %q:\n%v", fragment, err)
 		}
@@ -294,7 +294,7 @@ func TestCheckTemplatesRefusesAPromptNamingAnInputItWasNotHanded(t *testing.T) {
 	if err == nil {
 		t.Fatal("built with the front desk reading the step's input")
 	}
-	for _, fragment := range []string{`agent "front" instructions references {{kind}}`, `handed to task "do_thing" instructions`, "Only the prompt that receives an input may read it"} {
+	for _, fragment := range []string{`agent "front" instructions references {{kind}}`, `task "do_thing" instructions expects to be handed`, "Only the prompt that expects it may read it"} {
 		if !strings.Contains(err.Error(), fragment) {
 			t.Errorf("refusal does not say %q:\n%v", fragment, err)
 		}
@@ -328,7 +328,7 @@ func TestToolInjectMayReadARequiredInputOfEverySiteItIsAttachedTo(t *testing.T) 
 				yaml = strings.Replace(yaml, "- kind: Literal[\"a\", \"b\"]", "- name: kind\n            type: Literal[\"a\", \"b\"] | None\n            description: Which kind, if said.", 1)
 				return yaml
 			},
-			[]string{`tool "note_thing" injects {{kind}}`, `task "do_thing" declares as optional`, "make the input required"},
+			[]string{`tool "note_thing" injects {{kind}}`, `task "do_thing" declares as optional`, "make the value required"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -356,7 +356,7 @@ func TestSlngRefusesAnInput(t *testing.T) {
 	report, _ := Validate(agent, []Target{hosted}, targetcap.Default())
 	row := reportFor(report, ProviderSlng)
 	joined := strings.Join(row.Errors, "\n")
-	for _, fragment := range []string{"slng target", "input: list", "compile to livekit or pipecat"} {
+	for _, fragment := range []string{"slng target", "expect: list", "compile to livekit or pipecat"} {
 		if !strings.Contains(joined, fragment) {
 			t.Errorf("no slng error says %q; got:\n%s", fragment, joined)
 		}

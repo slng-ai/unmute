@@ -27,7 +27,7 @@ needs the part of the conversation that sentence means.
 
 | The step | Give it | Because |
 |---|---|---|
-| reads a value back, takes a payment, or is handed what the caller asked for through `input:` | `reset` | its instructions, its declared values and its inputs are the whole story |
+| reads a value back, takes a payment, or is handed what the caller asked for through `expect:` | `reset` | its instructions, its declared values and the values it expects are the whole story |
 | has to know what the caller asked for | `messages` | both sides of the conversation, without the tool records nobody re-reads |
 | only the recent turns matter, on a call that runs long | `last_n` with `max_messages` | the newest entries, and never a tool result whose call was cut |
 | has to interpret anything, including its own earlier work | `full` | the running transcript, tool records included |
@@ -152,10 +152,10 @@ Both are worth knowing before you choose it, because no compiler error catches
 either. Declared state is not one of them: see above.
 
 **It does not receive the caller's triggering utterance.** It opens without
-knowing what was just asked. Give the step `input:` for what the caller asked
+knowing what was just asked. Give the step `expect:` for what the caller asked
 for, and the agent that heard the caller hands it in: the step then asks
 nothing it was handed. For a step that reads a number back nothing is lost
-either way, which is the test for choosing `reset` with no inputs at all.
+either way, which is the test for choosing `reset` with no `expect:` list at all.
 
 **It cannot tell that it already ran.** A prompt saying "if verification already
 succeeded, reuse it" only worked because the step could see the history. Move

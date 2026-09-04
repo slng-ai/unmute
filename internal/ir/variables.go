@@ -274,7 +274,7 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 		}
 		variable, ok := agent.Variables[ref]
 		if !ok {
-			// An input is read by the prompt it was handed to and nowhere else.
+			// An expected value is read by the prompt it was handed to and nowhere else.
 			// At run time the value sits on the shared call state for its visit,
 			// so this refusal is the only thing keeping a step's request out of
 			// its parent's prompt. A tool's inject may read one when
@@ -283,8 +283,8 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 				if slices.Contains(sites, site) || slices.Contains(alsoAllowed, ref) {
 					continue
 				}
-				return fmt.Errorf("%s: %s references {{%s}}, which is an input handed to %s. Only the prompt that "+
-					"receives an input may read it: name it there, and here ask the caller or read a declared variable",
+				return fmt.Errorf("%s: %s references {{%s}}, which is a value %s expects to be handed. Only the prompt that "+
+					"expects it may read it: name it there, and here ask the caller or read a declared variable",
 					where, site, ref, strings.Join(sites, " and "))
 			}
 			if slices.Contains(agent.Secrets, ref) || envNamePattern.MatchString(ref) {

@@ -11,7 +11,7 @@ import (
 // Typed inputs, and the one place their resolution and their prompt block are
 // written.
 //
-// A task or a handoff declares `input:`, a list of typed fields. The agent that
+// A task or a handoff declares `expect:`, a list of typed fields. The agent that
 // runs the step or hands the caller over fills them from the conversation it
 // heard, and the receiving prompt ends with a block naming each one. An input
 // is not declared state: it is written to the call-state object for one visit,
@@ -110,7 +110,7 @@ func buildInputs(pkg *packagespec.Package, agent *Agent, shapes map[string]bool)
 			name := field.Name
 			at := locateInput(pkg, field)
 			if !namePattern.MatchString(name) {
-				return nil, fmt.Errorf("%s: %s input %q is not a name a prompt can read: write lowercase words joined by underscores, "+
+				return nil, fmt.Errorf("%s: %s expects %q, which is not a name a prompt can read: write lowercase words joined by underscores, "+
 					"because a {{placeholder}} is matched that way and nothing else", at, site, name)
 			}
 			clash := ""
@@ -127,21 +127,21 @@ func buildInputs(pkg *packagespec.Package, agent *Agent, shapes map[string]bool)
 				clash = "the reserved result field every finish takes"
 			}
 			if clash != "" {
-				return nil, fmt.Errorf("%s: %s input %q is also %s. A prompt placeholder could not tell the two apart, and the "+
-					"input would overwrite the other's value for the visit: rename the input", at, site, name, clash)
+				return nil, fmt.Errorf("%s: %s expects %q, which is also %s. A prompt placeholder could not tell the two apart, and the "+
+					"value would overwrite the other's for the visit: rename it", at, site, name, clash)
 			}
 			for _, earlier := range inputs {
 				if earlier.Name == name {
-					return nil, fmt.Errorf("%s: %s declares input %q twice, at %s and here. One entry per name",
+					return nil, fmt.Errorf("%s: %s expects %q twice, at %s and here. One entry per name",
 						at, site, name, locateInput(pkg, packagespec.Field{Name: name, Type: earlier.Type.String()}))
 				}
 			}
 			ref, err := resolveType(field.Type, shapes)
 			if err != nil {
-				return nil, fmt.Errorf("%s: %s input %q: %w", locateType(pkg, field.Type, "input:"), site, name, err)
+				return nil, fmt.Errorf("%s: %s expects %q: %w", locateType(pkg, field.Type, "expect:"), site, name, err)
 			}
 			if first, seen := typesSeen[name]; seen && !first.ref.Equal(ref) {
-				return nil, fmt.Errorf("%s: %s input %q is declared as %s, and %s declares it as %s. An input is one field on "+
+				return nil, fmt.Errorf("%s: %s expects %q as %s, and %s expects it as %s. An expected value is one field on "+
 					"the call state for the whole package, so one name has one type: give the two the same type, or "+
 					"different names", at, site, name, ref.String(), first.site, first.ref.String())
 			}
@@ -167,9 +167,9 @@ func buildInputs(pkg *packagespec.Package, agent *Agent, shapes map[string]bool)
 	for _, group := range sortedKeys(pkg.Agent.TaskGroups) {
 		for _, step := range pkg.Agent.TaskGroups[group].Steps {
 			if len(out.tasks[step]) > 0 {
-				return resolvedInputs{}, fmt.Errorf("%s: task %q declares input: and is a step of task group %q. A group is "+
-					"entered by one call that cannot say which step a value is for, so a grouped task takes no inputs: "+
-					"remove the input: list, or run the task on its own", pkg.Location("agent.yaml", "- "+step), step, group)
+				return resolvedInputs{}, fmt.Errorf("%s: task %q declares expect: and is a step of task group %q. A group is "+
+					"entered by one call that cannot say which step a value is for, so a grouped task expects nothing: "+
+					"remove the expect: list, or run the task on its own", pkg.Location("agent.yaml", "- "+step), step, group)
 			}
 		}
 	}
@@ -198,7 +198,7 @@ func buildInputs(pkg *packagespec.Package, agent *Agent, shapes map[string]bool)
 // locateInput is the line an input field sits on: the short form first, then
 // the long form's name line, then the list itself.
 func locateInput(pkg *packagespec.Package, field packagespec.Field) string {
-	for _, needle := range []string{"- " + field.Name + ": " + field.Type, "name: " + field.Name, "input:"} {
+	for _, needle := range []string{"- " + field.Name + ": " + field.Type, "name: " + field.Name, "expect:"} {
 		if at := pkg.Location("agent.yaml", needle); at != "agent.yaml" {
 			return at
 		}
@@ -277,13 +277,13 @@ func inputReadable(inputs []InputField, name, site string) error {
 	at := slices.IndexFunc(inputs, func(f InputField) bool { return f.Name == name })
 	if at < 0 {
 		return fmt.Errorf("and the tool is attached to %s, which is handed no %s. An injected value is read from the "+
-			"call state when the tool runs, so every place the tool is attached has to be handed the input: declare "+
+			"call state when the tool runs, so every place the tool is attached has to expect the value: declare "+
 			"it there, or attach the tool only where it is", site, name)
 	}
 	if inputs[at].Optional {
-		return fmt.Errorf("which %s declares as optional. An optional input may be absent for the whole visit, and an "+
+		return fmt.Errorf("which %s declares as optional. An optional value may be absent for the whole visit, and an "+
 			"injected value cannot be asked for, so the request would carry the words a prompt shows for a missing "+
-			"one: make the input required, or let the model pass the value as a tool argument", site)
+			"one: make the value required, or let the model pass it as a tool argument", site)
 	}
 	return nil
 }

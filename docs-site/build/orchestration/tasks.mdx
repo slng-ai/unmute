@@ -94,7 +94,7 @@ caller has already said something the task needs.
 | `full` | the running transcript, tool records included | a step that has to interpret anything |
 | `messages` | what the caller and the agent said out loud, no tool records | most steps, and the default choice when trimming |
 | `last_n` | the newest n entries, tool records included, never a tool result whose call was cut | a long call where only the recent turns matter |
-| `reset` | its own instructions, its declared values and what it was handed through `input:`, nothing else | a step described by its inputs and its variables: confirm a number, take a booking request |
+| `reset` | its own instructions, its declared values and what it was handed through `expect:`, nothing else | a step described by the values it expects and its variables: confirm a number, take a booking request |
 | `summary` | one summarizer turn in place of the transcript, livekit only | a long call handed to a new specialist |
 
 `last_n` also needs `max_messages` alongside it. `summary` needs its own
@@ -102,11 +102,11 @@ caller has already said something the task needs.
 refuses it and names the four values it does shape instead.
 
 **The reset floor.** A `reset` step does not receive the caller's triggering
-utterance, so it opens without knowing what was just asked. Give it `input:`
+utterance, so it opens without knowing what was just asked. Give it `expect:`
 for what the caller asked for, see the next section, and it asks nothing it
-was handed. Without inputs it fits only a step fully described by its own
+was handed. Without an `expect:` list it fits only a step fully described by its own
 declared values, such as confirming a number or taking a payment. There is no
-compiler error for choosing wrong, so pick it only when the step's inputs, its
+compiler error for choosing wrong, so pick it only when the values the step expects, its
 instructions and its `requires:` values are the whole story.
 
 **No value here is a privacy control.** Shortening the history does not
@@ -122,7 +122,7 @@ both code targets cannot use.
 ## Hand the step what the caller asked for
 
 A step on `history: reset` never receives the turn that triggered it. Without
-help it opens by asking for what the caller just said. `input:` is that help:
+help it opens by asking for what the caller just said. `expect:` is that help:
 a list of typed fields the step is handed when the agent runs it. The agent,
 which heard the caller, fills them. The step reads them from its own prompt.
 
@@ -136,7 +136,7 @@ agents:
       - name: manage_booking
         when: The caller wants to create, modify, or cancel a booking.
         instructions: tasks/booking.md
-        input:
+        expect:
           - action: Literal["create", "modify", "cancel"]
           - name: service
             type: Literal["haircut", "haircolor", "dry_cut"] | None
@@ -174,7 +174,7 @@ What you were handed for this visit. It does not change while you run.
 A value left out reads as `not given.`, which is the one thing the step may
 ask for. A value with a declared shape renders as compact JSON. The task's own
 prompt may also name a field inline as `{{service}}`. No other prompt may: a
-placeholder naming another step's input is refused when the package is loaded,
+placeholder naming a value another step expects is refused when the package is loaded,
 and the refusal names the one prompt that may read it.
 
 A value outside its type is refused where it enters, before the step starts.
@@ -185,16 +185,16 @@ field, and ends by asking it to run the step again with a value that fits.
 
 The values are fixed for the visit and gone after it. A step entered twice is
 handed fresh values each time and never sees the earlier ones. Nothing about an
-input is recorded unless the step's result carries it, which is what `assign:`
+expected value is recorded unless the step's result carries it, which is what `assign:`
 is for.
 
-Three rules keep the names clean. An input may not share a name with a
+Three rules keep the names clean. An expected value may not share a name with a
 declared variable, a secret, a shape, a word of the type grammar, or
 `unserved_request`. One name has one type across the whole package. And a task
-that is a step of a task group takes no `input:`, because a group is entered by
+that is a step of a task group takes no `expect:`, because a group is entered by
 one call that cannot say which step a value is for.
 
-`input:` compiles the same on livekit and pipecat. The slng target refuses it
+`expect:` compiles the same on livekit and pipecat. The slng target refuses it
 and says to compile to a code target. A handoff takes the same list; see
 [Handoffs](/build/orchestration/handoffs#hand-the-receiving-agent-a-brief).
 

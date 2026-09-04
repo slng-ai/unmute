@@ -1161,7 +1161,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
         try:
             _inputs = _typed_inputs({{pyq .Method}}, {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}}{{"}"}})
         except _StateRefused as refused:
-            logger.warning("input %s: %s", {{pyq .Method}}, refused.message)
+            logger.warning("%s expects: %s", {{pyq .Method}}, refused.message)
             return {"refused": f"Not started: {refused.message}. Ask the caller, then hand over again with a value that fits."}
 {{- end}}
 {{- if .Announce}}
@@ -1398,7 +1398,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
         try:
             _inputs = _typed_inputs({{pyq .Task.ID}}, {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}}{{"}"}})
         except _StateRefused as refused:
-            logger.warning("input %s: %s", {{pyq .Task.ID}}, refused.message)
+            logger.warning("%s expects: %s", {{pyq .Task.ID}}, refused.message)
             return {"refused": f"Not started: {refused.message}. Ask the caller, then run the step again with a value that fits."}
         # Written to the shared state for this visit and put back after it. The
         # step's prompt and the router's template variables both read the state
@@ -1809,7 +1809,7 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
             _inputs = _typed_inputs({{pyq .Method}}, {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}}{{"}"}})
         except _StateRefused as refused:
             self._terminal_claimed = False
-            logger.warning("input %s: %s", {{pyq .Method}}, refused.message)
+            logger.warning("%s expects: %s", {{pyq .Method}}, refused.message)
             return {"refused": f"Not started: {refused.message}. Ask the caller, then hand over again with a value that fits."}
 {{- end}}
         try:

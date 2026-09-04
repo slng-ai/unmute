@@ -1051,7 +1051,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         try:
             _inputs = _typed_inputs({{pyq .MethodName}}, params.arguments)
         except _StateRefused as refused:
-            logger.warning("input {}: {}", {{pyq .MethodName}}, refused.message)
+            logger.warning("{} expects: {}", {{pyq .MethodName}}, refused.message)
             await params.result_callback({"refused": f"Not started: {refused.message}. Ask the caller, then hand over again with a value that fits."})
             return
 {{end}}{{if .Announce}}        await self._announce_handoff({{pyq .Announce}})
@@ -1292,7 +1292,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         try:
             _inputs = _typed_inputs({{pyq $d.Task}}, params.arguments)
         except _StateRefused as refused:
-            logger.warning("input {}: {}", {{pyq $d.Task}}, refused.message)
+            logger.warning("{} expects: {}", {{pyq $d.Task}}, refused.message)
             await params.result_callback({"refused": f"Not started: {refused.message}. Ask the caller, then run the step again with a value that fits."})
             return
         # Written to the shared state for this visit and put back when the step
@@ -1386,7 +1386,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         try:
             _inputs = _typed_inputs({{pyq $x.MethodName}}, dict(args))
         except _StateRefused as refused:
-            logger.warning("input {}: {}", {{pyq $x.MethodName}}, refused.message)
+            logger.warning("{} expects: {}", {{pyq $x.MethodName}}, refused.message)
             return {"refused": f"Not started: {refused.message}. Ask the caller, then hand over again with a value that fits."}, None
 {{end}}        self._{{$d.MethodName}}_active_step = None
         flow_messages = None

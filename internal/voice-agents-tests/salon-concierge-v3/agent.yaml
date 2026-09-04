@@ -24,10 +24,10 @@ agents:
         assign:
           - customer_phone: result.customer_phone
           - customer: result.customer
-        # This step declares no `input:`, because reading a number back needs
+        # This step declares no `expect:`, because reading a number back needs
         # nothing from the caller's request: the number is already on the state
         # and the step's whole job is to hear a yes. The steps that act are
-        # handed what the caller asked for through `input:` below, so every
+        # handed what the caller asked for through `expect:` below, so every
         # step in this package runs on `history: reset` and none of them asks
         # for something the caller said before it was entered.
         result:
@@ -45,7 +45,7 @@ agents:
         # cancelling names no day and a caller who says "I'd like a haircut"
         # has named no time. Marking the rest optional is what stops the model
         # inventing a value it was told it must fill.
-        input:
+        expect:
           - name: action
             type: Literal["create", "modify", "cancel"]
             description: What the caller wants done to a booking. Only what they said.
@@ -108,7 +108,7 @@ agents:
         # The specialist hands in what the caller is unhappy about and, when the
         # caller named one, the appointment it concerns, copied from the
         # appointments already on the state so nothing is invented.
-        input:
+        expect:
           - name: problem
             type: str
             description: What the caller is unhappy about, in their own words.
@@ -147,7 +147,7 @@ handoffs:
   to_complaints:
     to: complaint_specialist
     when: The verified caller has a complaint or service problem.
-    input:
+    expect:
       - name: problem
         type: str
         description: What the caller is unhappy about, in their own words.
@@ -163,7 +163,7 @@ handoffs:
   to_concierge:
     to: concierge
     when: The caller changes to a request owned by another specialist.
-    input:
+    expect:
       - name: outcome
         type: str
         description: What was done for the caller, in one sentence.

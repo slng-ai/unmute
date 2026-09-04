@@ -364,7 +364,7 @@ and the provider rejects it, so the shape is checked here instead.
 
 ## Request block
 
-A step or a receiving agent that declares `input:` is handed those values by
+A step or a receiving agent that declares `expect:` is handed those values by
 the agent that ran it or handed the caller over, and its prompt ends with a
 second block the compiler wrote, after the conversation state:
 
@@ -381,8 +381,8 @@ may ask for that one thing.
 
 The values live on the shared state for one visit. A step's are put back when
 it finishes, and a receiving agent's stay until the next handoff, so a brief
-survives the receiver's own steps. Nothing about an input is recorded unless the
-step's result carries it.
+survives the receiver's own steps. Nothing about an expected value is recorded
+unless the step's result carries it.
 
 What each seam is handed:
 

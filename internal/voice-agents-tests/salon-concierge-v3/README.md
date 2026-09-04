@@ -7,10 +7,10 @@ public write-up of what it does is
 
 ## What it is
 
-The typed-inputs verification package. It is
+The `expect:` verification package. It is
 [`salon-concierge-v2`](../salon-concierge-v2/) with one thing added and one
-thing taken away. Added: every task and every handoff declares `input:`, the
-values it needs in order to start, in the same type words a result field uses.
+thing taken away. Added: every task and every handoff declares `expect:`, the
+values it expects in order to start, in the same type words a result field uses.
 The agent that heard the caller fills them when it runs the step or hands the
 caller over, and the receiving prompt ends with a `Request:` block the compiler
 wrote. Taken away: the conversation. Every step and every handoff runs on
@@ -47,7 +47,7 @@ cold-transfers to a manager on a phone call.
 Two tasks sit under the concierge and one under customer care, and all three
 run with `history: reset`: each gets its own prompt, the declared values, and
 what it was handed, and no part of the conversation. `verify_customer` reads a
-phone number back and waits for a yes, and declares no `input:`, because
+phone number back and waits for a yes, and declares no `expect:`, because
 reading a number back needs nothing from the request. `manage_booking` takes
 one booking change from start to finish and is handed the request: `action`
 (create, modify or cancel) is required, because the step cannot start without
@@ -75,7 +75,7 @@ grep -A6 'Request:' internal/voice-agents-tests/salon-concierge-v3/build/livekit
 ```
 
 The concierge's own block lists `outcome` and `next_request` only. No prompt
-reads another seam's inputs, and the compiler refuses one that tries.
+reads what another seam expects, and the compiler refuses one that tries.
 
 Three shapes hold what the call learns. `Customer` is who the caller is once the
 verification step has looked them up, and it is two fields rather than four: the
@@ -107,7 +107,7 @@ what it already recorded, which is why the emitted append drops a structured
 entry the list already holds rather than trusting the prompt not to send one.
 
 There is no list of reasons the caller rang and no per-step `reason` result.
-v2 had both, and they were the cost of `reset` before inputs existed: a step
+v2 had both, and they were the cost of `reset` before `expect:` existed: a step
 that saw the conversation recorded why it ran, and a step that did not could
 only ask. Here each appointment records its `action` and each complaint its
 `reason`, so what the call did is already on the state, and the request each
@@ -134,7 +134,7 @@ The files:
 - `instructions.md` is the concierge prompt, `agents/complaint-specialist.md`
   the customer care prompt, and `tasks/` the three task prompts. None of them
   contains the conversation info block or the request block: the compiler
-  appends both, so adding a field to a shape or an input to a step reaches the
+  appends both, so adding a field to a shape or an expected value to a step reaches the
   prompt with no prompt file edited.
 - `tools/` is one file per tool, all local Python over one in-memory store.
 - `knowledge/refunds/` and `knowledge/services/` are two document sets, each

@@ -82,13 +82,13 @@ the transcript costs both money and accuracy.
 | --- | --- | --- |
 | `full` | The whole conversation | The step needs the caller's exact wording, or you have not declared state yet |
 | `messages` | What was said, without tool traffic | The step acts on what the caller asked for and records why |
-| `reset` | Nothing but its own prompt, declared values and what it was handed | The step is described by its `input:` and what it requires |
+| `reset` | Nothing but its own prompt, declared values and what it was handed | The step is described by its `expect:` list and what it requires |
 
 `reset` is the strongest scope. A reset step never receives the turn that
 triggered it, so on its own it cannot know why the caller rang. One agent gave a
 verification step a "reason" field to fill under `reset`, and the step asked the
 caller what they were calling about on every call, immediately after they had
-just said. That is what `input:` is for. Declare on the step what the caller
+just said. That is what `expect:` is for. Declare on the step what the caller
 asked for, and the agent that heard the caller hands it in when it runs the
 step. The step asks nothing it was handed. Mark a value the caller might not
 have given with `| None`, so nobody invents one. A reset step records only what

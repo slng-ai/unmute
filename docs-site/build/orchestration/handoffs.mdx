@@ -121,7 +121,7 @@ say anything new.
 
 A handoff on `history: reset` gives the new agent nothing but its own prompt,
 so it would open at the start of a conversation that is already in the middle.
-`input:` on the handoff is the brief: typed fields the agent handing over fills
+`expect:` on the handoff is the brief: typed fields the agent handing over fills
 from what it heard, and the receiving agent reads from the end of its prompt.
 
 ```yaml agent.yaml
@@ -129,7 +129,7 @@ handoffs:
   to_complaints:
     to: complaint_specialist
     when: The verified caller has a complaint or service problem.
-    input:
+    expect:
       - problem: str
       - name: about
         type: Appointment | None
@@ -138,7 +138,7 @@ handoffs:
       history: reset
 ```
 
-The fields take the same two forms and the same types as a task's `input:`;
+The fields take the same two forms and the same types as a task's `expect:`;
 see [Hand the step what the caller asked for](/build/orchestration/tasks#hand-the-step-what-the-caller-asked-for).
 `| None` marks a field the agent may leave out. A required field the agent has
 no value for stops the handoff, so the agent that heard the caller asks before
@@ -156,7 +156,7 @@ What you were handed for this visit. It does not change while you run.
 
 The brief stays with the receiving agent until the next handoff, so it is still
 in the prompt after that agent has run its own steps. When two handoffs target
-the same agent, its block lists the inputs of both, and a handoff that carries
+the same agent, its block lists what both expect, and a handoff that carries
 no value for one of them leaves it reading `not given.`. A value outside its
 type is refused before anyone is handed over, and the message reaches the agent
 that supplied it.

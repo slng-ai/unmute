@@ -382,12 +382,12 @@ type Task struct {
 	// Think names an entry of `models.think`, overriding the profile the task
 	// would otherwise inherit. Spelled the way every other think pointer is.
 	Think string `json:"think,omitempty" yaml:"think,omitempty"`
-	// Input is what the step is handed when the agent runs it: one typed field
+	// Input, authored as `expect:`, is what the step expects to be handed when the agent runs it: one typed field
 	// per value, in the words a result field uses, filled by the agent from the
 	// conversation it heard. Fixed for the visit and gone after it. A list and
 	// not a map, because the order written is the order the step's prompt shows
 	// them in, and because the Field decoder already reads both authored forms.
-	Input   []Field        `json:"input,omitempty" yaml:"input,omitempty"`
+	Input   []Field        `json:"expect,omitempty" yaml:"expect,omitempty"`
 	Result  map[string]any `json:"result" yaml:"result"`
 	Context TaskContext    `json:"context" yaml:"context"`
 }
@@ -454,10 +454,10 @@ type Handoff struct {
 	When     string   `json:"when,omitempty" yaml:"when,omitempty"`
 	Announce *string  `json:"announce,omitempty" yaml:"announce,omitempty"`
 	Requires []string `json:"requires,omitempty" yaml:"requires,omitempty"`
-	// Input is the brief the receiving agent is handed: the same list a task
+	// Input, authored as `expect:`, is the brief the receiving agent is handed: the same list a task
 	// takes, filled by the agent handing over. It stays with the receiver until
 	// the next handoff.
-	Input   []Field          `json:"input,omitempty" yaml:"input,omitempty"`
+	Input   []Field          `json:"expect,omitempty" yaml:"expect,omitempty"`
 	Context *TransferContext `json:"context,omitempty" yaml:"context,omitempty"`
 }
 

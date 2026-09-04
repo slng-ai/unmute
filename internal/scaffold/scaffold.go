@@ -295,7 +295,7 @@ type Handoff struct {
 	When     string
 	Announce string
 	Requires []string
-	// Input is the brief the receiving agent is handed; carried for the reason
+	// Input is the handoff's expect: list, the brief the receiving agent is handed; carried for the reason
 	// Task.Input is.
 	Input            []ShapeField
 	History          string
@@ -320,7 +320,7 @@ type Task struct {
 	// has nowhere to be written.
 	Handoffs []string
 	Model    string
-	// Input is what the step is handed, one typed field each, written back the
+	// Input is the step's expect: list, one typed field each, written back the
 	// way a shape's fields are. Carried because the console rewrites agent.yaml
 	// from this struct, and a field it does not carry is a field `unmute
 	// maintain` deletes at exit 0.

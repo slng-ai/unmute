@@ -41,7 +41,7 @@ agents:
 [[if .Announce]]        announce: [[quote .Announce]]
 [[end]][[if .Requires]]        requires:
 [[range .Requires]]          - [[.]]
-[[end]][[end]][[if .Input]]        input:
+[[end]][[end]][[if .Input]]        expect:
 [[range .Input]][[if .Description]]          - name: [[.Name]]
             type: [[yaml .Type]]
             description: [[yaml .Description]]
@@ -73,7 +73,7 @@ agents:
 [[end]]
 [[if .Requires]]    requires:
 [[range .Requires]]      - [[.]]
-[[end]][[end]][[if .Input]]    input:
+[[end]][[end]][[if .Input]]    expect:
 [[range .Input]][[if .Description]]      - name: [[.Name]]
         type: [[yaml .Type]]
         description: [[yaml .Description]]

@@ -10,7 +10,7 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
-// decodeTaskInput decodes a task carrying `input:` the way Load decodes
+// decodeTaskInput decodes a task carrying `expect:` the way Load decodes
 // agent.yaml: strict, so a test cannot pass by being decoded more loosely than
 // the compiler decodes.
 func decodeTaskInput(t *testing.T, source string) (Task, error) {
@@ -21,13 +21,13 @@ func decodeTaskInput(t *testing.T, source string) (Task, error) {
 }
 
 // TestInputDecodesBothFormsAndRefusesAMalformedItem is FR-001 and FR-002 at the
-// decoder: `input:` on a task and on a handoff takes the two forms a shape's
+// decoder: `expect:` on a task and on a handoff takes the two forms a shape's
 // `fields:` take, through the one decoder that exists, so every refusal that
 // decoder carries reaches the new key with no new code.
 func TestInputDecodesBothFormsAndRefusesAMalformedItem(t *testing.T) {
 	task, err := decodeTaskInput(t, `name: manage_booking
 instructions: tasks/booking.md
-input:
+expect:
   - action: Literal["create", "modify", "cancel"]
   - name: service
     type: Literal["haircut", "haircolor"] | None
@@ -52,7 +52,7 @@ result:
 	}
 
 	var handoff Handoff
-	if err := yaml.UnmarshalWithOptions([]byte("to: specialist\ninput:\n  - problem: str\n"), &handoff, yaml.Strict()); err != nil {
+	if err := yaml.UnmarshalWithOptions([]byte("to: specialist\nexpect:\n  - problem: str\n"), &handoff, yaml.Strict()); err != nil {
 		t.Fatal(err)
 	}
 	if len(handoff.Input) != 1 || handoff.Input[0] != (Field{Name: "problem", Type: "str"}) {
@@ -65,17 +65,17 @@ result:
 	}{
 		{
 			name:   "two keys and no name is a dropped indent",
-			source: "name: t\ninstructions: t.md\ninput:\n  - action: str\n    service: str\nresult:\n  summary: string\n",
+			source: "name: t\ninstructions: t.md\nexpect:\n  - action: str\n    service: str\nresult:\n  summary: string\n",
 			want:   "holding 2 keys", line: 4,
 		},
 		{
 			name:   "an empty item",
-			source: "name: t\ninstructions: t.md\ninput:\n  - {}\nresult:\n  summary: string\n",
+			source: "name: t\ninstructions: t.md\nexpect:\n  - {}\nresult:\n  summary: string\n",
 			want:   "an empty field", line: 4,
 		},
 		{
 			name:   "confirm belongs to a variable",
-			source: "name: t\ninstructions: t.md\ninput:\n  - name: phone\n    type: Phone\n    confirm: verify\nresult:\n  summary: string\n",
+			source: "name: t\ninstructions: t.md\nexpect:\n  - name: phone\n    type: Phone\n    confirm: verify\nresult:\n  summary: string\n",
 			want:   `declares "confirm:"`, line: 6,
 		},
 	} {
@@ -98,10 +98,10 @@ result:
 	}
 }
 
-// TestInputIsOptionalInTheDerivedSchema holds the schema side: `input` is
+// TestInputIsOptionalInTheDerivedSchema holds the schema side: `expect` is
 // published on a task and on a handoff, in the two forms fieldSchema
 // publishes, and neither struct requires it, because a step or a handoff with
-// no input is the common case.
+// expecting nothing is the common case.
 func TestInputIsOptionalInTheDerivedSchema(t *testing.T) {
 	schema, err := Schema()
 	if err != nil {
@@ -117,8 +117,8 @@ func TestInputIsOptionalInTheDerivedSchema(t *testing.T) {
 	}
 	// The two structs are found by the keys only they carry, wherever the
 	// deriver placed them, so this does not depend on how definitions are laid
-	// out. A task is the object with `result` and `input`; a handoff the one
-	// with `to` and `input`.
+	// out. A task is the object with `result` and `expect`; a handoff the one
+	// with `to` and `expect`.
 	found := map[string]bool{}
 	var walk func(node any)
 	walk = func(node any) {
@@ -129,7 +129,7 @@ func TestInputIsOptionalInTheDerivedSchema(t *testing.T) {
 			}
 		case map[string]any:
 			properties, _ := node["properties"].(map[string]any)
-			if _, input := properties["input"]; input {
+			if _, input := properties["expect"]; input {
 				kind := ""
 				if _, ok := properties["result"]; ok {
 					kind = "Task"
@@ -138,8 +138,8 @@ func TestInputIsOptionalInTheDerivedSchema(t *testing.T) {
 				}
 				if kind != "" {
 					found[kind] = true
-					if required, _ := node["required"].([]any); slices.Contains(required, any("input")) {
-						t.Errorf("%s requires input, and a step with none is the common case", kind)
+					if required, _ := node["required"].([]any); slices.Contains(required, any("expect")) {
+						t.Errorf("%s requires expect, and a step with none is the common case", kind)
 					}
 				}
 			}
@@ -151,7 +151,7 @@ func TestInputIsOptionalInTheDerivedSchema(t *testing.T) {
 	walk(decoded)
 	for _, kind := range []string{"Task", "Handoff"} {
 		if !found[kind] {
-			t.Errorf("the derived schema publishes no input on %s", kind)
+			t.Errorf("the derived schema publishes no expect on %s", kind)
 		}
 	}
 }
