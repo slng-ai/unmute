@@ -1380,7 +1380,14 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- end}}
         await self.update_chat_ctx(owner_ctx)
 {{- range .Task.Assign}}
+{{- if .Append}}
+        # An entry added, not the value replaced: only the step producing it
+        # knows whether the caller added an intent or swapped one, and the list
+        # starts empty so this never has to create it.
+        ctx.userdata.{{.Var}}.append(result[{{pyq .Field}}])
+{{- else}}
         ctx.userdata.{{.Var}} = result[{{pyq .Field}}]
+{{- end}}
 {{- if .Confirms}}
         # The step that confirms this value has just assigned it, so it is settled
         # now and the guard stops holding it back. Discarding here rather than in
@@ -1746,34 +1753,46 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
             self._terminal_claimed = False
             raise
 {{end}}    @function_tool
-    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.Anno}}{{end}}, {{$.Unserved.Name}}: {{$.Unserved.Anno}} = "") -> None:
+    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.Anno}}{{end}}, {{$.Unserved.Name}}: {{$.Unserved.Anno}} = ""){{if .Typed}} -> str | None{{else}} -> None{{end}}:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
+{{- if .Typed}}
+        # Validated before anything is recorded, and before the terminal claim:
+        # a value that does not fit its declared type never enters the state,
+        # the previous contents stand, and the message goes back to the model so
+        # it can correct itself on the next turn instead of the step recording
+        # something wrong.
+        try:
+            _values = _typed_result({{pyq .Name}}, {{"{"}}{{range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end}}{{"}"}})
+        except _StateRefused as refused:
+            logger.warning("finish %s: %s", {{pyq .Name}}, refused.message)
+            return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
+{{- end}}
 {{- if .Transfers}}
         if not self._claim_terminal():
             return
         try:
 {{- if $.NeedsTaskGroups}}
-            result = _task_result({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }, {{$.Unserved.Name}})
+            result = _task_result({{.ResultExpr}}, {{$.Unserved.Name}})
             self.complete(result)
             # Record only after complete() succeeds: a rejected duplicate cannot
             # replace the winner, and there is no await for the callback to race.
             self._finish_call_id = ctx.function_call.call_id
 {{- else}}
-            self.complete(_task_result({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }, {{$.Unserved.Name}}))
+            self.complete(_task_result({{.ResultExpr}}, {{$.Unserved.Name}}))
 {{- end}}
         except BaseException:
             self._terminal_claimed = False
             raise
 {{- else}}
 {{- if $.NeedsTaskGroups}}
-        result = _task_result({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }, {{$.Unserved.Name}})
+        result = _task_result({{.ResultExpr}}, {{$.Unserved.Name}})
         self.complete(result)
         # Record only after complete() succeeds: a rejected duplicate cannot
         # replace the winner, and there is no await for the callback to race.
         self._finish_call_id = ctx.function_call.call_id
 {{- else}}
-        self.complete(_task_result({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }, {{$.Unserved.Name}}))
+        self.complete(_task_result({{.ResultExpr}}, {{$.Unserved.Name}}))
 {{- end}}
 {{- end}}
 {{end}}

@@ -1058,7 +1058,8 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 		// prompt site: the flow node's role_message goes to the router as the
 		// system message, through the owning agent's LLM.
 		PromptExpr:     promptExpr(pyQuote(prompt), prompt, "self.state", taskRouter),
-		ResultProps:    pyLiteral(resultProperties(task.Result)),
+		ResultProps:    resultPropsExpr(name, task.Result),
+		Typed:          resultDeclaresShape(task.Result),
 		ResultRequired: pyLiteral(anyStrings(sortedResultNames(task.Result))),
 		// A task's prompt is not its owner's, so its cache scope is not its
 		// owner's either. This is the value the emitted handlers swap in on the
@@ -1127,6 +1128,43 @@ func resultProperties(result map[string]ir.ResultField) map[string]any {
 		}
 	}
 	return properties
+}
+
+// resultDeclaresShape reports whether a step hands back anything with a
+// declared shape, which is what decides whether its finish validates.
+func resultDeclaresShape(result map[string]ir.ResultField) bool {
+	for _, field := range result {
+		if field.Shape != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// resultPropsExpr is the Python expression for one step's finish properties.
+//
+// A declared shape's entry is the generated class's own schema, read through
+// the TypeAdapter the finish table already holds, rather than a second copy
+// rendered here in Go. One owner for the shape: the class, its validator and
+// the schema the model is sent cannot drift, because there is only one of each.
+//
+// A step declaring no shape gets the literal it always got, byte for byte.
+func resultPropsExpr(task string, result map[string]ir.ResultField) string {
+	if !resultDeclaresShape(result) {
+		return pyLiteral(resultProperties(result))
+	}
+	plain := map[string]ir.ResultField{}
+	var entries []string
+	for _, name := range sortedResultNames(result) {
+		field := result[name]
+		if field.Shape == nil {
+			plain[name] = field
+			continue
+		}
+		entries = append(entries, fmt.Sprintf("%s: _FINISH_TYPES[%s][%s].json_schema()",
+			pyQuote(name), pyQuote(task), pyQuote(name)))
+	}
+	return "{**" + pyLiteral(resultProperties(plain)) + ", " + strings.Join(entries, ", ") + "}"
 }
 
 // anyStrings widens a string slice for pyLiteral rendering.

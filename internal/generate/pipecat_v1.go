@@ -127,14 +127,20 @@ func (s pipecatMCPSource) ParamsClass() string {
 // its instructions, tools, and a uniquely named finish function derived from the
 // result schema (V1). Nodes are emitted inline in the owning delegate's methods.
 type pipecatTask struct {
-	Name           string // node id (the task's snake_case id)
-	FinishName     string // LLM-visible "finish_<delegate>_<task>" — unique so a sticky handler registration can never run a stale step (V1)
-	NextName       string // next step's node in this delegate's chain; "" on the last step
-	Prompt         string
-	PromptExpr     string // the node's role_message: the quoted prompt, or a render call when it names a variable
-	Tools          []pipecatTool
-	Transfers      []pipecatTransfer
-	ResultProps    string // Python literal: JSON-schema properties for finish args
+	Name        string // node id (the task's snake_case id)
+	FinishName  string // LLM-visible "finish_<delegate>_<task>" — unique so a sticky handler registration can never run a stale step (V1)
+	NextName    string // next step's node in this delegate's chain; "" on the last step
+	Prompt      string
+	PromptExpr  string // the node's role_message: the quoted prompt, or a render call when it names a variable
+	Tools       []pipecatTool
+	Transfers   []pipecatTransfer
+	ResultProps string // Python literal: JSON-schema properties for finish args
+	// Typed marks a step whose result declares a shape. This framework
+	// validates nothing itself: it splats the model's raw JSON into the handler,
+	// so a wrong-typed argument is a TypeError inside the handler rather than a
+	// schema error the model can correct. The emitted validation is what makes
+	// the two targets behave the same.
+	Typed          bool
 	ResultRequired string // Python literal: list of required finish arg names
 	// SlngHeaders is this task's own identity header dict, as a Python literal
 	// spelled for a method body. Empty unless the task's think profile is a

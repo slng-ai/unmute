@@ -1353,8 +1353,20 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{if $d.HasTransfers}}        if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
             return {"status": "already handled"}, NO_RESPONSE
         self._{{$d.MethodName}}_active_step = {{if $t.NextName}}{{pyq $t.NextName}}{{else}}None{{end}}
-{{end}}        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
-{{if $t.NextName}}{{if $t.SlngNextHeaders}}        # The next step is a different prompt site, so it asks under a different
+{{end}}{{if $t.Typed}}        # Validated before anything is recorded: a value that does not fit its
+        # declared type never enters the state, the previous contents stand, and
+        # the message goes back to the model so it can correct itself on the next
+        # turn instead of the step recording something wrong. This framework
+        # validates no tool argument itself, so without this the two targets
+        # would behave differently on the same package.
+        try:
+            _values = _typed_result({{pyq $t.Name}}, dict(args))
+        except _StateRefused as refused:
+            logger.warning("finish {}: {}", {{pyq $t.Name}}, refused.message)
+            return {"refused": f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."}, None
+        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = _values
+{{else}}        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
+{{end}}{{if $t.NextName}}{{if $t.SlngNextHeaders}}        # The next step is a different prompt site, so it asks under a different
         # cache scope. Queued before the node is handed back, for the same reason
         # the first step's was.
         await self.queue_frame(LLMUpdateSettingsFrame(
@@ -1391,8 +1403,12 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             raise
 
     async def _{{$d.MethodName}}_complete_{{$t.Name}}(self):
-{{end}}{{if not (and $d.HasTransfers (ne $d.Then "end"))}}{{range $d.Assign}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
-{{if .Confirms}}        # The step that confirms this value has just assigned it, so it is settled
+{{end}}{{if not (and $d.HasTransfers (ne $d.Then "end"))}}{{range $d.Assign}}{{if .Append}}        # An entry added, not the value replaced: only the step producing it knows
+        # whether the caller added an intent or swapped one, and the list starts
+        # empty so this never has to create it.
+        self.state.{{.Var}}.append(self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}])
+{{else}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
+{{end}}{{if .Confirms}}        # The step that confirms this value has just assigned it, so it is settled
         # now and the guard stops holding it back. Discarded here rather than in the
         # step's prompt: a model can be talked out of an instruction, not out of a
         # set membership test. getattr with a default, matching the guard: this step
@@ -1444,8 +1460,12 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             "content": "Task results: " + json.dumps(self._{{$d.MethodName}}_results) + {{pyq $.ResultsHint}},
         }])
         self.context.set_tools(tools)
-{{end}}{{if and $d.HasTransfers (ne $d.Then "end")}}{{range $d.Assign}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
-{{if .Confirms}}        # The step that confirms this value has just assigned it, so it is settled
+{{end}}{{if and $d.HasTransfers (ne $d.Then "end")}}{{range $d.Assign}}{{if .Append}}        # An entry added, not the value replaced: only the step producing it knows
+        # whether the caller added an intent or swapped one, and the list starts
+        # empty so this never has to create it.
+        self.state.{{.Var}}.append(self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}])
+{{else}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
+{{end}}{{if .Confirms}}        # The step that confirms this value has just assigned it, so it is settled
         # now and the guard stops holding it back. Discarded here rather than in the
         # step's prompt: a model can be talked out of an instruction, not out of a
         # set membership test. getattr with a default, matching the guard: this step

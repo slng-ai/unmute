@@ -269,6 +269,14 @@ type livekitTask struct {
 	// profile is a router binding. A task's prompt is not its owner's, so its
 	// scope is not its owner's either.
 	SlngScope string
+	// Typed marks a step whose result declares a shape, so its finish validates
+	// the arguments where they enter the state before anything is recorded.
+	Typed bool
+	// ResultExpr is the dict the finish hands back: the validated values when
+	// Typed, and the inline literal built from the arguments otherwise. One
+	// expression rather than four inline copies, so the typed case is one branch
+	// and the other emits exactly what it emitted before.
+	ResultExpr string
 }
 
 type livekitTool struct {

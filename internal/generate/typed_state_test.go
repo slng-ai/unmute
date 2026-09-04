@@ -241,3 +241,144 @@ func withoutComments(module string) string {
 	}
 	return strings.Join(kept, "\n")
 }
+
+// TestLiveKitFinishParameterIsTheGeneratedClass is research section 13, and it
+// is the silent gap this closes.
+//
+// resultPyType returned "dict" for anything nested, and a bare dict annotation
+// carries no field names, no types and no descriptions, so the pydantic
+// conversion had nothing to turn into properties: the model was asked for an
+// object and told nothing about what belongs in it. Nothing failed. It just did
+// not work.
+func TestLiveKitFinishParameterIsTheGeneratedClass(t *testing.T) {
+	agent := loadTypedState(t)
+	module := emitted(t, agent, ir.ProviderLiveKit)
+	finish := functionBody(t, module, "    async def finish(")
+	if finish == "" {
+		t.Fatal("no finish handler emitted")
+	}
+	if !strings.Contains(module, "appointment: Appointment,") {
+		t.Errorf("the finish parameter for a shaped result is not the generated class:\n%s", finish)
+	}
+	// And no bare dict anywhere a shaped result is annotated.
+	for _, forbidden := range []string{"appointment: dict", "appointment: Any", "appointment: object"} {
+		if strings.Contains(module, forbidden) {
+			t.Errorf("livekit annotates a shaped result as %q, which tells the model nothing", forbidden)
+		}
+	}
+	// A Literal result field keeps its closed set on the parameter too, so the
+	// model is told what it may hand back.
+	if !strings.Contains(module, `reason: Literal["create_booking", "cancel_booking"],`) {
+		t.Errorf("the finish parameter for a Literal result is not the closed set:\n%s", finish)
+	}
+}
+
+// TestTwoAppendedEntriesAreBothRecorded is FR-009a and SC-006 at the emitted
+// seam: an append adds an entry, and the list it adds to starts empty, so a
+// second call of the same step cannot overwrite the first.
+//
+// One overwriting the other is what a replace would do, and it is what the
+// authored `+` exists to prevent. Driven for real, over a whole conversation,
+// by the smoke test.
+func TestTwoAppendedEntriesAreBothRecorded(t *testing.T) {
+	agent := loadTypedState(t)
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		module := emitted(t, agent, provider)
+		for _, want := range []string{
+			// An entry added, never the value replaced.
+			".appointments.append(",
+			".caller_reason.append(",
+			// And the list is there to append to before the first step runs.
+			"appointments: list[Appointment] = field(default_factory=list)",
+		} {
+			if !strings.Contains(module, want) {
+				t.Errorf("%s does not emit %q, so the second entry replaces the first", provider, want)
+			}
+		}
+		// The replace form must be gone for the appended values: one line of
+		// each, and neither is an assignment.
+		for _, forbidden := range []string{".appointments = result[", ".appointments = self._"} {
+			if strings.Contains(module, forbidden) {
+				t.Errorf("%s still replaces appointments, so a caller booking twice ends with one: %q",
+					provider, forbidden)
+			}
+		}
+	}
+	// A shared mutable default is one call's state leaking into the next, which
+	// is why the list arrives through a factory rather than as a literal.
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		if strings.Contains(emitted(t, agent, provider), "appointments: list[Appointment] = []") {
+			t.Errorf("%s shares one list between calls", provider)
+		}
+	}
+}
+
+// TestAValueOutsideALiteralSetIsRefusedWhereItEnters is FR-004, FR-013a and
+// SC-005, none of which the validation mechanism alone delivers.
+//
+// Three separate claims, and the third is the one that is easy to lose: the
+// value is refused where it enters, the previous contents survive, and the
+// message names the field and lists what was allowed. Driven for real by the
+// smoke test; this holds the branch that makes it possible.
+func TestAValueOutsideALiteralSetIsRefusedWhereItEnters(t *testing.T) {
+	agent := loadTypedState(t)
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		module := emitted(t, agent, provider)
+		// Refused where it enters: the validating call comes before anything is
+		// recorded, on both targets.
+		validate := strings.Index(module, "_typed_result(")
+		if validate < 0 {
+			t.Fatalf("%s validates no finish argument, so a value outside a declared set enters the state",
+				provider)
+		}
+		record := recordIndex(t, module, provider)
+		if record < validate {
+			t.Errorf("%s records the result before validating it, so a refused value is already in the state",
+				provider)
+		}
+		// The previous contents survive, because the refusal is an exception and
+		// the record is the statement after it.
+		if !strings.Contains(module, "except _StateRefused as refused:") {
+			t.Errorf("%s does not catch the refusal, so a bad value ends the step rather than the turn", provider)
+		}
+		// The message names the field and what was allowed. The field comes from
+		// the shared helper's own naming and the allowed set from Pydantic's own
+		// literal message, which lists the entries.
+		if !strings.Contains(module, "refused.message") {
+			t.Errorf("%s discards the refusal message, so the model is never told which field or what was allowed",
+				provider)
+		}
+		if !strings.Contains(module, "Ask again, then call finish with a value that fits.") {
+			t.Errorf("%s does not tell the model what to do next after a refusal", provider)
+		}
+	}
+	// And the shared helper is what names the field and carries Pydantic's own
+	// message, which for a Literal lists every allowed entry.
+	block, err := TypedState(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`named = f"{field}.{where}" if where else field`,
+		`raise _StateRefused(f"{named}: {first[`,
+	} {
+		if !strings.Contains(block.Source, want) {
+			t.Errorf("the shared refusal does not name the field: %q missing", want)
+		}
+	}
+}
+
+// recordIndex is where a target writes the step's result into the state, so a
+// test can say the validation came first.
+func recordIndex(t *testing.T, module string, provider ir.Provider) int {
+	t.Helper()
+	marker := "self.complete(_task_result("
+	if provider == ir.ProviderPipecat {
+		marker = "_results[\"book\"] = _values"
+	}
+	at := strings.Index(module, marker)
+	if at < 0 {
+		t.Fatalf("%s emits no %q, so this test cannot say when the result is recorded", provider, marker)
+	}
+	return at
+}
