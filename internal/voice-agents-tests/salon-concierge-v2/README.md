@@ -46,7 +46,11 @@ name the appointment it is about, which is a shape inside a shape.
 Five values are declared with those shapes. `customer` holds the record and may
 be absent. `appointments` and `complaints` are lists, and the steps that fill
 them append rather than replace, so a caller who books twice ends the call with
-two bookings instead of one. `caller_reason` is a list drawn from a closed set,
+two bookings instead of one. One entry per step visit, because the step hands
+back one appointment: the booking step finishes as soon as a change is saved
+and puts anything else the caller asked for in `unserved_request`, and the
+concierge sends it straight back in. A step that stayed in and booked twice
+would report one of them and lose the other. `caller_reason` is a list drawn from a closed set,
 because one call can do more than one thing, and both of the steps that act
 append to it: the booking step and the complaint step each record the reason
 they ran, so a caller who books and then complains ends with two. The
