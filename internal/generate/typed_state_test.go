@@ -627,3 +627,30 @@ func TestShapedTextTellsTheModelItsFormat(t *testing.T) {
 		}
 	}
 }
+
+// A declared result field the model left out reaches the state as None, not as
+// a missing key.
+//
+// Found by reading the emitted module against the frameworks' own docs. The
+// booking prompt tells the model to leave the appointment out when it saved
+// nothing, and leaving it out is legal: the field may be absent. Skipping an
+// absent field during validation left the key missing from the result, and the
+// assignment that reads it by name raised a KeyError inside the finish handler
+// on Pipecat, whose framework validates no tool argument of its own. LiveKit
+// never saw it, because its own argument parsing fills every declared
+// parameter first. So the one target with no framework validation was the one
+// that crashed.
+func TestAnOmittedResultFieldValidatesRatherThanVanishing(t *testing.T) {
+	agent := loadTypedState(t)
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		source := emitted(t, agent, provider)
+		if !strings.Contains(source, "out[name] = _plain(_typed(name, adapter, out.get(name)))") {
+			t.Errorf("%s does not put an absent declared field through its adapter; the key stays missing "+
+				"and the assignment that reads it raises a KeyError inside the finish handler", provider)
+		}
+		if strings.Contains(source, "if name in out:") {
+			t.Errorf("%s skips validation for a field the model left out, so an absent one vanishes "+
+				"instead of validating as None", provider)
+		}
+	}
+}

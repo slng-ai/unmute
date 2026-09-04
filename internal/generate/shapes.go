@@ -349,8 +349,16 @@ def _typed_result(step, values):
         return values
     out = dict(values)
     for name, adapter in adapters.items():
-        if name in out:
-            out[name] = _plain(_typed(name, adapter, out[name]))
+        # Absent goes through the adapter too, rather than being skipped. A
+        # field the model left out is a field with no value, and that is what a
+        # prompt telling it to leave one out asks for: a value that may be
+        # absent validates as None and the append drops it, and a value that
+        # may not is refused here with the message that lets the model correct
+        # itself. Skipping an absent field instead left the key missing from
+        # the result, and the assignment that reads it by name raised a
+        # KeyError inside the finish handler on the target whose framework
+        # validates no argument of its own.
+        out[name] = _plain(_typed(name, adapter, out.get(name)))
     return out
 
 
