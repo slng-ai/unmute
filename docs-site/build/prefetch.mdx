@@ -172,6 +172,22 @@ entry runs no tool, so `writes:` on either is refused.
 
 **`assign:` and `args:` are lists.** One pair per `- ` line.
 
+**A pre-fetch fills a variable that holds one plain value.** It resolves before
+anybody speaks, so what it has is one value: a formatted clock reading, the
+number the call carries, one field of a tool result. Text is fine, and so is
+shaped text like `Phone` or `Date`, because the shape is checked where the value
+enters the state. A `Literal` works when the tool's own field declares the same
+set. A `list[...]` or a declared shape is refused, and names the step to assign
+it from instead:
+
+```text
+agent.yaml:37: prefetch "today" assigns appointments, which is declared list[Appointment], and a pre-fetch resolves one plain value before the greeting. Assign appointments from the step that produces it, and leave the pre-fetch the values a call already carries
+```
+
+A list is something a call accumulates: two bookings are two entries, and the
+step that took each one appends it. Nothing has happened yet when the pre-fetch
+runs, so there is nothing for it to append.
+
 ## Where it works
 
 `clock:` and `tool:` entries run on every target except `slng`, which refuses

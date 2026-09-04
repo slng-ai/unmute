@@ -299,6 +299,26 @@ func checkPrefetchAssign(pkg *packagespec.Package, agent *Agent, raw packagespec
 			return fmt.Errorf("%s: prefetch %q assigns %s from result.%s, and %s declares no field %q. Its fields "+
 				"are: %s", where, raw.Name, pair.Key, field, prefetchSourceLabel(*entry), field, strings.Join(fields, ", "))
 		}
+		// A pre-fetch resolves one plain value: the clock formats its reading, a
+		// call fact arrives off the wire as text, and a tool hands back one
+		// field. A list or a shape is filled by the step that produces it, and
+		// letting a pre-fetch write one compiled: the emitted step then called
+		// _append_entry on a str and the call died mid-sentence. Named here
+		// rather than left to assignableInto because its advice is to declare
+		// the result field, and a pre-fetch has no step declaring one.
+		want := agent.Variables[pair.Key]
+		if want.Shape != nil && want.Shape.Shaped == "" && len(want.Shape.Literal) == 0 {
+			return fmt.Errorf("%s: prefetch %q assigns %s, which is declared %s, and a pre-fetch resolves one plain "+
+				"value before the greeting. Assign %s from the step that produces it, and leave the pre-fetch the "+
+				"values a call already carries", where, raw.Name, pair.Key, want.Shape.String(), pair.Key)
+		}
+		// Everything a pre-fetch can fill is held to the same predicate a step's
+		// assign: is held to, because the two write into the same variables and
+		// a second predicate would drift from this one.
+		if err := assignableInto(want.Shape, want.Type, prefetchResultField(agent, *entry, field)); err != nil {
+			return fmt.Errorf("%s: prefetch %q assigns %s from result.%s, and %w",
+				where, raw.Name, pair.Key, field, err)
+		}
 		entry.Assign = append(entry.Assign, Pair{Key: pair.Key, Value: text})
 	}
 	return nil
@@ -502,6 +522,33 @@ func prefetchResultFields(agent *Agent, entry Prefetch) []string {
 		properties, _ := agent.Tools[entry.Tool].Output["properties"].(map[string]any)
 		return sortedKeys(properties)
 	}
+}
+
+// prefetchResultField types one field of what an entry resolves, so the assign
+// check can hold a pre-fetch to the same predicate a step's result is held to.
+// Every pre-fetch source is plain text: the clock formats its reading, a call
+// fact arrives off the wire as a string, and a tool's output: is JSON Schema,
+// read here for the one property being assigned rather than passed whole (a
+// whole schema is what assignableInto refuses as having no declared shape).
+func prefetchResultField(agent *Agent, entry Prefetch, field string) ResultField {
+	if entry.Tool == "" {
+		return ResultField{Type: PrimitiveString}
+	}
+	properties, _ := agent.Tools[entry.Tool].Output["properties"].(map[string]any)
+	property, _ := properties[field].(map[string]any)
+	out := ResultField{Type: PrimitiveString}
+	if word, ok := property["type"].(string); ok {
+		switch PrimitiveType(word) {
+		case PrimitiveInteger, PrimitiveNumber, PrimitiveBoolean:
+			out.Type = PrimitiveType(word)
+		}
+	}
+	// A closed set on the tool side assigns into a Literal declaring the same
+	// set, which is the one structured type a pre-fetch can honestly fill.
+	if values, err := stringSlice(property["enum"]); err == nil {
+		out.Enum = values
+	}
+	return out
 }
 
 // prefetchSourceLabel names the source in a refusal the way the author wrote it,

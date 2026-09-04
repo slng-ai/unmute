@@ -778,3 +778,78 @@ func assertRefusal(t *testing.T, err error, want ...string) {
 		}
 	}
 }
+
+// A pre-fetch resolves one plain value before the greeting: the clock formats a
+// reading, a call fact arrives off the wire as text, and a tool hands back one
+// field. Typed state is the other kind, and the two meet here because a step's
+// `assign:` and a pre-fetch's write into the same variables.
+//
+// Letting a pre-fetch fill a list compiled, and the failure was not cosmetic:
+// the emitted step calls `_append_entry` on what the pre-fetch left there, so a
+// declared list holding a string dies with an AttributeError mid-sentence, on
+// the call rather than at compile time.
+func TestBuildPrefetchRefusesAValueWithFields(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		from string
+		to   string
+		want []string
+	}{
+		{
+			// The crash. `caller_name` is what the tool entry assigns, so this
+			// is the whole path: a tool result field into a declared list.
+			name: "a list is filled by the step that produces it",
+			from: "  caller_name:\n    type: string\n    default: \"\"\n",
+			to:   "  caller_name:\n    type: list[string]\n",
+			want: []string{`prefetch "profile" assigns caller_name`, "declared list[str]",
+				"resolves one plain value before the greeting", "from the step that produces it"},
+		},
+		{
+			// The same branch reached through a declared shape rather than a
+			// list, because a shape is the other thing a step hands back whole.
+			name: "a shape is filled by the step that produces it",
+			from: "  caller_name:\n    type: string\n    default: \"\"\n",
+			to: "  caller_name:\n    type: Customer | None\n\n" +
+				"shapes:\n  - name: Customer\n    description: Who the caller is.\n" +
+				"    fields:\n      - phone_number: Phone\n",
+			want: []string{"declared Customer | None", "resolves one plain value before the greeting"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := patchPrefetchCore(t, tc.from, tc.to)
+			if err == nil {
+				t.Fatal("a pre-fetch filled a variable declared with fields")
+			}
+			assertRefusal(t, err, tc.want...)
+		})
+	}
+}
+
+// The other half, and the one that matters more: the fix must not refuse what a
+// pre-fetch legitimately fills. Shaped text is checked where the value enters
+// the state rather than in the schema the model is sent, so plain text assigns
+// into it, and salon-concierge-v2 declares `customer_phone` exactly this way.
+func TestBuildPrefetchFillsShapedText(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		from string
+		to   string
+	}{
+		{
+			name: "a call fact fills a Phone",
+			from: "  caller_phone:\n    type: string\n    default: \"\"\n",
+			to:   "  caller_phone:\n    type: Phone\n    default: \"\"\n",
+		},
+		{
+			name: "the clock fills a Date",
+			from: "  booking_date:\n    type: string\n    default: \"\"\n",
+			to:   "  booking_date:\n    type: Date\n    default: \"\"\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := patchPrefetchCore(t, tc.from, tc.to); err != nil {
+				t.Fatalf("a pre-fetch was refused a variable it can fill: %v", err)
+			}
+		})
+	}
+}

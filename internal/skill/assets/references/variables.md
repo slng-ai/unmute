@@ -269,6 +269,21 @@ and pre-fetch that one instead.
 permission, and it prints no warning: the entry is named in
 `compile-report.json` and in the generated runbook instead.
 
+### A pre-fetch fills a variable holding one plain value
+
+It resolves before anybody speaks, so all it has is one value: a formatted
+clock reading, the number the call carries, one field of a tool result.
+
+Assignable: a plain type, shaped text (`Phone`, `Date`, `Time`, `Id`), and a
+`Literal` when the tool's own result field declares the same set. Refused: a
+`list[...]` or a declared shape, naming the step to assign it from instead.
+
+Do not reach for a pre-fetch to seed a list. A list is what a call accumulates
+while it runs, one entry per thing that happened, appended by the step that
+took it. Nothing has happened when the pre-fetch runs, so there is nothing to
+append, and a plain value written there breaks the append later in the call
+rather than at compile time.
+
 ### A caller's number is best effort
 
 `from_number` and `to_number` resolve less often than the other system
