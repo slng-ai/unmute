@@ -19,7 +19,49 @@ func Schema() (*jsonschema.Schema, error) {
 	options := enumOptions()
 	options.TypeSchemas[reflect.TypeFor[Control]()] = controls
 	options.TypeSchemas[reflect.TypeFor[ResultField]()] = resultField
-	return jsonschema.For[Agent](options)
+	// Every TypeRef publishes a reference to one definition, because a TypeRef's
+	// `list` holds a TypeRef and reflection cannot follow a type into itself:
+	// deriving it directly is a cycle the library refuses.
+	options.TypeSchemas[reflect.TypeFor[TypeRef]()] = &jsonschema.Schema{Ref: typeRefPointer}
+	schema, err := jsonschema.For[Agent](options)
+	if err != nil {
+		return nil, err
+	}
+	if schema.Defs == nil {
+		schema.Defs = map[string]*jsonschema.Schema{}
+	}
+	schema.Defs[typeRefDef] = typeRefSchema()
+	return schema, nil
+}
+
+// typeRefDef names the one definition the resolved type tree lives in, and
+// typeRefPointer is how every field referring to it points there.
+const (
+	typeRefDef     = "TypeRef"
+	typeRefPointer = "#/$defs/" + typeRefDef
+)
+
+// typeRefSchema publishes the resolved type tree.
+//
+// Hand-wired rather than derived, for the same reason resultFieldSchema is: the
+// shape reflection would produce is not the shape the type means. Here the
+// recursion is the reason. Every field of TypeRef appears below, and
+// shape_test.go fails if the struct grows one this misses, so the two cannot
+// drift in silence.
+func typeRefSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type: "object",
+		Description: "One resolved type expression. Exactly one of primitive, shaped, literal, " +
+			"list and shape is set; optional rides on whichever it is.",
+		Properties: map[string]*jsonschema.Schema{
+			"primitive": enum(PrimitiveString, PrimitiveNumber, PrimitiveBoolean, PrimitiveInteger),
+			"shaped":    enum(ShapedPhone, ShapedDate, ShapedTime, ShapedID),
+			"literal":   {Type: "array", Items: &jsonschema.Schema{Type: "string"}},
+			"list":      {Ref: typeRefPointer},
+			"shape":     {Type: "string"},
+			"optional":  {Type: "boolean"},
+		},
+	}
 }
 
 type primitiveResultFieldSchema struct {
@@ -86,6 +128,7 @@ func enumOptions() *jsonschema.ForOptions {
 		reflect.TypeFor[SemanticEndpointing](): enum(SemanticEndpointingRequired, SemanticEndpointingPreferred, SemanticEndpointingOff),
 		reflect.TypeFor[Pace]():                enum(PaceSnappy, PaceBalanced, PacePatient),
 		reflect.TypeFor[PrimitiveType]():       enum(PrimitiveString, PrimitiveNumber, PrimitiveBoolean, PrimitiveInteger),
+		reflect.TypeFor[ShapedText]():          enum(ShapedPhone, ShapedDate, ShapedTime, ShapedID),
 		reflect.TypeFor[VariableSource](): enum(
 			VariableSourceCallStart, VariableSourceSessionID, VariableSourceCarrier,
 			VariableSourceConnection, VariableSourceCallID, VariableSourceStreamID,

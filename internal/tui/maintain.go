@@ -168,6 +168,17 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 			}
 		}
 	}
+	// Shapes first, in the order the author wrote them: it is a list, so the
+	// order is the author's and nothing here sorts it.
+	for _, shape := range pkg.Agent.Shapes {
+		carried := scaffold.Shape{Name: shape.Name, Description: shape.Description}
+		for _, field := range shape.Fields {
+			carried.Fields = append(carried.Fields, scaffold.ShapeField{
+				Name: field.Name, Type: field.Type, Description: field.Description,
+			})
+		}
+		data.Shapes = append(data.Shapes, carried)
+	}
 	for name, variable := range pkg.Agent.Variables {
 		data.Variables = append(data.Variables, scaffold.Variable{Name: name, Type: variable.Type, Default: jsonText(variable.Default), Source: variable.Source})
 	}

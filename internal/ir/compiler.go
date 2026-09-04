@@ -21,9 +21,20 @@ type Agent struct {
 	// entry's Kind records its section (names are one namespace, N15).
 	Models map[string]ModelDef `json:"models" yaml:"models"`
 	// Listen/Turn are the resolved selection names into Models ("" = none).
-	Listen    string              `json:"listen,omitempty" yaml:"listen,omitempty"`
-	Turn      string              `json:"turn,omitempty" yaml:"turn,omitempty"`
-	Variables map[string]Variable `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Listen string `json:"listen,omitempty" yaml:"listen,omitempty"`
+	Turn   string `json:"turn,omitempty" yaml:"turn,omitempty"`
+	// Shapes is the resolved shape catalog, keyed by name. A map here and a list
+	// in the authoring surface is deliberate: the IR is the resolved shape and
+	// is out of the no-dictionaries rule's scope, and every reader of this wants
+	// it by name. Nothing depends on its iteration order: the generated classes
+	// are emitted in dependency order, computed from the references.
+	Shapes map[string]Shape `json:"shapes,omitempty" yaml:"shapes,omitempty"`
+	// VariableOrder is the order the author declared the variables in, which is
+	// the order the composed state block numbers them (FR-005). Variables is a
+	// map and has none, so the order is read off the authored file once and
+	// carried here rather than re-derived by anything that renders.
+	VariableOrder []string            `json:"variable_order,omitempty" yaml:"variable_order,omitempty"`
+	Variables     map[string]Variable `json:"variables,omitempty" yaml:"variables,omitempty"`
 	// Timezone is the validated IANA zone every clock reading in this package is
 	// taken in. Empty when the package declares none, which only a clock prefetch
 	// refuses.
@@ -338,7 +349,14 @@ const (
 )
 
 type Variable struct {
-	Type    PrimitiveType  `json:"type" yaml:"type"`
+	Type PrimitiveType `json:"type" yaml:"type"`
+	// Shape is the resolved type expression, and it is nil unless the declared
+	// type is more than a bare primitive. It sits beside Type rather than
+	// replacing it, which is what makes a package declaring nothing structured
+	// resolve byte-identically (FR-015): every reader that existed before this
+	// field keeps reading Type, and Type is the primitive a structured value
+	// renders as when it reaches a prompt.
+	Shape   *TypeRef       `json:"shape,omitempty" yaml:"shape,omitempty"`
 	Default any            `json:"default,omitempty" yaml:"default,omitempty"`
 	Source  VariableSource `json:"source,omitempty" yaml:"source,omitempty"`
 	// Confirm names the task that must hear the caller agree before anything acts
@@ -389,6 +407,54 @@ const (
 	PrimitiveInteger PrimitiveType = "integer"
 )
 
+// TypeRef is a resolved type expression. Exactly one of Primitive, Shaped,
+// Literal, List and Shape is set, and Optional rides on whichever it is.
+//
+// New beside PrimitiveType rather than instead of it. The cheaper alternative,
+// keeping the declared type a flat string and re-parsing it in each driver, was
+// rejected because it puts one fact in three owners and is exactly how the two
+// code targets would drift on the same package.
+type TypeRef struct {
+	Primitive PrimitiveType `json:"primitive,omitempty" yaml:"primitive,omitempty"`
+	Shaped    ShapedText    `json:"shaped,omitempty" yaml:"shaped,omitempty"`
+	Literal   []string      `json:"literal,omitempty" yaml:"literal,omitempty"`
+	List      *TypeRef      `json:"list,omitempty" yaml:"list,omitempty"`
+	Shape     string        `json:"shape,omitempty" yaml:"shape,omitempty"`
+	Optional  bool          `json:"optional,omitempty" yaml:"optional,omitempty"`
+}
+
+// ShapedText is text whose shape is checked where the value enters the state
+// and never written into the schema the model is sent. A phone number, a day, a
+// time of day and an identifier all have a shape, and none of them may express
+// it as a schema keyword: one target's strict converter strips neither `format`
+// nor `pattern`, strict is that target's default, and the provider rejects
+// both. So each of these lowers to `str` in the schema and to a validator in
+// generated Python.
+type ShapedText string
+
+const (
+	ShapedPhone ShapedText = "Phone"
+	ShapedDate  ShapedText = "Date"
+	ShapedTime  ShapedText = "Time"
+	ShapedID    ShapedText = "Id"
+)
+
+// Shape is one resolved named group of fields, generated as one Pydantic class
+// per target.
+type Shape struct {
+	Name        string  `json:"name" yaml:"name"`
+	Description string  `json:"description,omitempty" yaml:"description,omitempty"`
+	Fields      []Field `json:"fields" yaml:"fields"`
+}
+
+// Field is one resolved member of a shape. Description reaches the model, which
+// is the whole reason it is carried this far.
+type Field struct {
+	Name        string   `json:"name" yaml:"name"`
+	Type        *TypeRef `json:"type" yaml:"type"`
+	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
+}
+
 type VariableSource string
 
 const (
@@ -422,8 +488,13 @@ type Task struct {
 }
 
 type ResultField struct {
-	Type   PrimitiveType  `json:"type,omitempty" yaml:"type,omitempty"`
-	Enum   []string       `json:"enum,omitempty" yaml:"enum,omitempty"`
+	Type PrimitiveType `json:"type,omitempty" yaml:"type,omitempty"`
+	Enum []string      `json:"enum,omitempty" yaml:"enum,omitempty"`
+	// Shape is the resolved type expression when the field declares more than a
+	// bare primitive, which is how a step hands back a whole shape. It sits
+	// beside Schema rather than replacing it: Schema is a raw JSON Schema object
+	// forwarded verbatim, which is a different thing with a different owner.
+	Shape  *TypeRef       `json:"shape,omitempty" yaml:"shape,omitempty"`
 	Schema map[string]any `json:"schema,omitempty" yaml:"schema,omitempty"`
 }
 
@@ -495,8 +566,13 @@ type Delegate struct {
 	// because both are work that can need an input the conversation has not
 	// collected yet. The driver refuses the step to the model, never to the
 	// caller, and names the control that supplies each missing value.
-	Requires []string          `json:"requires,omitempty" yaml:"requires,omitempty"`
-	Assign   map[string]string `json:"assign,omitempty" yaml:"assign,omitempty"`
+	Requires []string `json:"requires,omitempty" yaml:"requires,omitempty"`
+	// Assign is the resolved `assign:` list, in the order the author wrote it.
+	// A list rather than the name-keyed map it was, because an append has to
+	// survive to the driver and a map key cannot carry it. Prefetch.Assign
+	// already uses an ordered list for the same reason, so this follows a
+	// precedent rather than setting one.
+	Assign []AssignTo `json:"assign,omitempty" yaml:"assign,omitempty"`
 	// Announce is one fixed sentence spoken as the step is entered, so the two
 	// model requests it takes to enter one are not silence. Spoken after the
 	// prerequisite guard, never before it: a refused step stays silent.
@@ -504,6 +580,33 @@ type Delegate struct {
 }
 
 func (*Delegate) control() {}
+
+// AssignTo is one resolved assignment from a step's result into a declared
+// variable. Field is the part after `result.`, which is one dict key and not a
+// path: nothing tokenises on a dot on either side of an assignment.
+type AssignTo struct {
+	Var   string `json:"var" yaml:"var"`
+	Field string `json:"field" yaml:"field"`
+	// Append writes one entry onto the end of a list instead of replacing the
+	// whole value, authored as a `+` on the key. Refused at build on a value
+	// whose declared type is not a list, because only the step producing the
+	// value knows whether the caller added an intent or swapped one.
+	Append bool `json:"append,omitempty" yaml:"append,omitempty"`
+}
+
+// AssignedVars names the variables an assign list writes to, sorted. Both the
+// supplier index and the prompt-read check want the names and not the order,
+// and both used to get them from a map.
+func AssignedVars(assign []AssignTo) []string {
+	out := make([]string, 0, len(assign))
+	for _, entry := range assign {
+		if !slices.Contains(out, entry.Var) {
+			out = append(out, entry.Var)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
 
 type AgentTransfer struct {
 	Kind     ControlKind     `json:"kind" yaml:"kind"`

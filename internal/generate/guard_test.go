@@ -14,7 +14,7 @@ import (
 func TestSupplierIndex(t *testing.T) {
 	t.Run("one supplier", func(t *testing.T) {
 		index := SupplierIndex(map[string]ir.Control{
-			"verify_customer": &ir.Delegate{Assign: map[string]string{"customer_phone": "result.customer_phone"}},
+			"verify_customer": &ir.Delegate{Assign: []ir.AssignTo{{Var: "customer_phone", Field: "customer_phone"}}},
 			"manage_booking":  &ir.Delegate{Requires: []string{"customer_phone"}},
 			"to_care":         &ir.AgentTransfer{},
 		})
@@ -32,9 +32,9 @@ func TestSupplierIndex(t *testing.T) {
 	// toss. Sorted control order is the tiebreak.
 	t.Run("several suppliers resolve deterministically", func(t *testing.T) {
 		controls := map[string]ir.Control{
-			"zulu":  &ir.Delegate{Assign: map[string]string{"phone": "result.phone"}},
-			"alpha": &ir.Delegate{Assign: map[string]string{"phone": "result.phone"}},
-			"mike":  &ir.Delegate{Assign: map[string]string{"phone": "result.phone"}},
+			"zulu":  &ir.Delegate{Assign: []ir.AssignTo{{Var: "phone", Field: "phone"}}},
+			"alpha": &ir.Delegate{Assign: []ir.AssignTo{{Var: "phone", Field: "phone"}}},
+			"mike":  &ir.Delegate{Assign: []ir.AssignTo{{Var: "phone", Field: "phone"}}},
 		}
 		for range 20 {
 			if got := SupplierIndex(controls)["phone"]; got != "alpha" {

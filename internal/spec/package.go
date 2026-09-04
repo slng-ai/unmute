@@ -41,7 +41,12 @@ type Package struct {
 	// or a task group an agent names.
 	Tasks     map[string]Task     `json:"-" yaml:"-"`
 	Callables map[string]Callable `json:"-" yaml:"-"`
-	files     map[string][]byte
+	// variableOrder is the order agent.yaml declared the variables in, read off
+	// the file because a map cannot carry it. Unexported and reached through
+	// VariableOrder(), because it is derived from bytes this struct already
+	// holds and nothing should be able to set it to something else.
+	variableOrder []string
+	files         map[string][]byte
 }
 
 // Location returns the first source line containing token in a package file.
@@ -70,8 +75,18 @@ type AgentFile struct {
 	// Listen/Turn select one entry of the matching models section by name.
 	// Optional when the section has at most one entry (the sole entry selects
 	// itself); required with 2+ entries (N15 palette).
-	Listen    string              `json:"listen,omitempty" yaml:"listen,omitempty"`
-	Turn      string              `json:"turn,omitempty" yaml:"turn,omitempty"`
+	Listen string `json:"listen,omitempty" yaml:"listen,omitempty"`
+	Turn   string `json:"turn,omitempty" yaml:"turn,omitempty"`
+	// Shapes declares the named groups of fields a variable's `type:` refers to.
+	// A list, not a name-keyed catalog, for the reason every authored block in
+	// this file is a list: a map has no order a reader can see and no place for a
+	// per-entry comment (CLAUDE.md, no dictionaries in the authoring surface).
+	// `models:` was unavailable for the name as well, because it already holds
+	// the think/speak/listen/turn catalog.
+	//
+	// Declared before Variables because a variable's type reads a shape's name,
+	// and struct order is what the derived schema publishes.
+	Shapes    []Shape             `json:"shapes,omitempty" yaml:"shapes,omitempty"`
 	Variables map[string]Variable `json:"variables,omitempty" yaml:"variables,omitempty"`
 	// Timezone is the IANA zone every clock reading in this package is taken in.
 	// Required before a clock can be pre-fetched, and required rather than

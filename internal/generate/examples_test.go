@@ -599,15 +599,15 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	}
 	requireText("verification delegate", verificationDelegate.When,
 		"reads the phone number back", "needs a yes before it looks anyone up")
-	if _, assigned := verificationDelegate.Assign["customer_name"]; assigned {
+	if slices.Contains(ir.AssignedVars(verificationDelegate.Assign), "customer_name") {
 		t.Error("verify_customer still assigns customer_name")
 	}
 	// Assigned from the result rather than captured from speech: a task result
 	// lands on both drivers by the same path customer_id already proves, while a
 	// conversation-sourced value depends on the capture tool firing, which is
 	// the write site Pipecat missed once already.
-	if got := verificationDelegate.Assign["customer_phone"]; got != "result.customer_phone" {
-		t.Errorf("verify_customer assigns customer_phone from %q, want result.customer_phone", got)
+	if got := assignedField(verificationDelegate.Assign, "customer_phone"); got != "customer_phone" {
+		t.Errorf("verify_customer assigns customer_phone from result.%q, want result.customer_phone", got)
 	}
 	lookup := resolved.Tools["find_or_create_customer"]
 	requireText("customer lookup", lookup.Description,
@@ -754,8 +754,8 @@ func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
 	if !ok {
 		t.Fatalf("verify_customer = %#v, want a delegate", resolved.Controls["verify_customer"])
 	}
-	if verify.Assign["customer_status"] != "result.status" {
-		t.Errorf("verify_customer assigns customer_status from %q, want result.status: nothing else in the package supplies it", verify.Assign["customer_status"])
+	if got := assignedField(verify.Assign, "customer_status"); got != "status" {
+		t.Errorf("verify_customer assigns customer_status from result.%q, want result.status: nothing else in the package supplies it", got)
 	}
 
 	// No default, and this is the load-bearing one. A default is a value the
@@ -1766,4 +1766,15 @@ func TestNothingAuthoredSpeaksTheRetiredShape(t *testing.T) {
 				path, strings.TrimSpace(found))
 		}
 	}
+}
+
+// assignedField is the result field one assignment reads, for a test that used
+// to index a map.
+func assignedField(assign []ir.AssignTo, variable string) string {
+	for _, entry := range assign {
+		if entry.Var == variable {
+			return entry.Field
+		}
+	}
+	return ""
 }

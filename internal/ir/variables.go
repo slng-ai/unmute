@@ -192,7 +192,7 @@ func assigners(agent *Agent) map[string][]string {
 		if !ok {
 			continue
 		}
-		for _, variable := range sortedKeys(delegate.Assign) {
+		for _, variable := range AssignedVars(delegate.Assign) {
 			suppliers[variable] = append(suppliers[variable], name)
 		}
 	}

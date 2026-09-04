@@ -1053,7 +1053,7 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	}
 	agent.Controls["run_collect"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "collect", When: "Collect the caller's account details.",
-		Assign: map[string]string{"verified": "result.verified_flag"},
+		Assign: []ir.AssignTo{{Var: "verified", Field: "verified_flag"}},
 	}
 	agent.Controls["run_triage"] = &ir.Delegate{Kind: ir.ControlDelegate, Group: "triage", When: "Run the triage group."}
 	intake := agent.Agents["intake"]

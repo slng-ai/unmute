@@ -127,10 +127,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 
 	for _, name := range sortedVarNames(agent) {
 		v := agent.Variables[name]
-		pt, def := pyType(v.Type), pyLiteral(v.Default)
-		if v.Default == nil {
-			pt, def = pt+" | None", "None"
-		}
+		pt, def := stateField(v, false)
 		data.Variables = append(data.Variables, pipecatVariable{
 			Name: name, PyType: pt, Default: def, Source: string(v.Source), Description: oneLine(v.Description),
 		})
@@ -189,6 +186,23 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	}
 	setImportNeeds(&data)
 	data.NeedsRender = renderNeeds(agent)
+	typed, err := TypedState(agent)
+	if err != nil {
+		return pipecatData{}, err
+	}
+	if typed.Source != "" {
+		data.TypedState = &typed
+		var typingNames []string
+		if typed.NeedsAnnotated {
+			typingNames = append(typingNames, "Annotated")
+		}
+		if typed.NeedsLiteral {
+			typingNames = append(typingNames, "Literal")
+		}
+		data.TypingImports = strings.Join(typingNames, ", ")
+	}
+	data.PydanticImports = PydanticImports(false, data.TypedState != nil)
+	data.NeedsDataclassField = StateNeedsDataclassField(agent)
 	data.PrerequisiteGuard, data.NeedsPrerequisiteGuard = PrerequisiteGuard(agent)
 	data.NeedsPrefetchUnconfirmed = PrefetchUnconfirmed(agent)
 	if block, needed := Prefetch(agent, prefetchStateExpr, func(entry ir.Prefetch) PrefetchRequest {
@@ -978,10 +992,10 @@ func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, e
 	if c.Task != "" {
 		delegate.Task = c.Task
 		delegate.Then = "return" // a single task always returns (SCHEMA 4.7)
-		for variable, path := range c.Assign {
+		for _, entry := range c.Assign {
 			delegate.Assign = append(delegate.Assign, pipecatAssign{
-				Var: variable, Field: strings.TrimPrefix(path, "result."),
-				Confirms: agent.Variables[variable].Confirm == c.Task,
+				Var: entry.Var, Field: entry.Field, Append: entry.Append,
+				Confirms: agent.Variables[entry.Var].Confirm == c.Task,
 			})
 		}
 		sort.Slice(delegate.Assign, func(i, j int) bool { return delegate.Assign[i].Var < delegate.Assign[j].Var })

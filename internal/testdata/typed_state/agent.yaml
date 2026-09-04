@@ -1,0 +1,112 @@
+# Typed-state fixture: the smallest package that declares a shape and reads it.
+#
+# It exists because every other package in the tree declares only primitive
+# variables, so before this there was nothing to compile as proof that a shape
+# resolves, generates a class, and reaches a prompt. Deliberately small: one
+# agent, two steps, one shape.
+#
+# The three variables are one per thing the state block has to get right. A list
+# of literals renders as compact JSON and refuses an entry outside the set. A
+# list of shapes is what an append writes into. And `caller_phone` carries a
+# `confirm:`, so it renders in exactly one prompt and satisfies no guard until
+# the caller has agreed, which the block's own filter has to reproduce.
+version: 1
+
+name: typed-state
+
+entry_agent: desk
+
+secrets:
+  - OPENAI_API_KEY
+  - DEEPGRAM_API_KEY
+  - SLNG_API_KEY
+
+shapes:
+  - name: Appointment
+    description: One thing being booked, moved or cancelled.
+    fields:
+      - scheduled_date: Date
+      - scheduled_time: Time
+      - name: appointment_type
+        type: Literal["haircut", "dry_cut"]
+        description: The service the caller asked for, in the salon's own words.
+
+variables:
+  caller_reason:
+    type: list[Literal["create_booking", "cancel_booking"]]
+    description: Why the caller rang. More than one, because one call can do more than one thing.
+
+  appointments:
+    type: list[Appointment]
+    description: What this call has booked so far, in the order the caller gave them.
+
+  caller_phone:
+    type: Phone
+    default: ""
+    confirm: confirm_number
+    description: The number the caller rang from, once they have agreed it is theirs.
+
+agents:
+  desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tasks:
+      - name: confirm_number
+        when: Read the caller's number back and get a yes before anything acts on it.
+        instructions: tasks/confirm_number.md
+        assign:
+          - caller_phone: result.caller_phone
+        result:
+          caller_phone: Phone
+          summary: string
+        context:
+          history: reset
+
+      - name: book
+        when: The caller wants an appointment.
+        instructions: tasks/book.md
+        requires:
+          - caller_phone
+        assign:
+          - caller_reason+: result.reason
+          - appointments+: result.appointment
+        result:
+          reason: Literal["create_booking", "cancel_booking"]
+          appointment: Appointment
+          summary: string
+        context:
+          history: reset
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: deepgram
+      model: nova-3
+  turn:
+    vad:
+      provider: local
+      model: silero
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, this is the salon. How can I help?"
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m

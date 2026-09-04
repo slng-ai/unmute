@@ -177,6 +177,17 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		scanArgs([]livekitArg{data.Unserved})
 	}
 	data.NeedsField = needAnnotated
+	typed, err := TypedState(agent)
+	if err != nil {
+		return livekitData{}, err
+	}
+	if typed.Source != "" {
+		data.TypedState = &typed
+		needAnnotated = needAnnotated || typed.NeedsAnnotated
+		needLiteral = needLiteral || typed.NeedsLiteral
+	}
+	data.PydanticImports = PydanticImports(data.NeedsField, data.TypedState != nil)
+	data.NeedsDataclassField = StateNeedsDataclassField(agent)
 	var typingNames []string
 	if needAnnotated {
 		typingNames = append(typingNames, "Annotated")
@@ -323,11 +334,10 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// on the session; `assign` and `requires` read and write its fields.
 	for _, name := range sortedVarNames(agent) {
 		v := agent.Variables[name]
-		def := "None"
-		if v.Default != nil {
-			def = pyLiteral(v.Default)
-		}
-		data.Vars = append(data.Vars, livekitVar{Name: name, PyType: pyType(v.Type), Default: def, Description: oneLine(v.Description)})
+		anno, def := stateField(v, true)
+		data.Vars = append(data.Vars, livekitVar{
+			Name: name, PyType: pyType(v.Type), Anno: anno, Default: def, Description: oneLine(v.Description),
+		})
 		if v.Source == ir.VariableSourceCallStart || v.Source == "" {
 			data.CallStartVars = append(data.CallStartVars, livekitCallStartVar{
 				Name: name, Type: string(v.Type), TypeCheck: livekitTypeCheck(v.Type),
@@ -1019,10 +1029,10 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 		} else {
 			single.CtxExpr, _ = livekitCtxExpr(task.Context)
 		}
-		for variable, path := range c.Assign {
+		for _, entry := range c.Assign {
 			single.Assign = append(single.Assign, livekitAssign{
-				Var: variable, Field: strings.TrimPrefix(path, "result."),
-				Confirms: agent.Variables[variable].Confirm == c.Task,
+				Var: entry.Var, Field: entry.Field, Append: entry.Append,
+				Confirms: agent.Variables[entry.Var].Confirm == c.Task,
 			})
 		}
 		sort.Slice(single.Assign, func(i, j int) bool { return single.Assign[i].Var < single.Assign[j].Var })

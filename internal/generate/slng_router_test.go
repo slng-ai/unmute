@@ -401,7 +401,7 @@ func TestSlngRouterPipecatRefreshesTheBodyOnEveryWrite(t *testing.T) {
 	// a refresh.
 	agent.Controls["run_collect"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "collect", When: "Collect the caller's account details.",
-		Assign: map[string]string{"customer_id": "result.tier"},
+		Assign: []ir.AssignTo{{Var: "customer_id", Field: "tier"}},
 	}
 	source, _ := emitAgentSource(t, agent, ir.ProviderPipecat, "bot.py")
 	// Every place the emitted module assigns into the call state, not just the

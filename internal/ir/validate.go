@@ -1956,6 +1956,28 @@ func validateVariables(agent *Agent, provider targetcap.Provider, caps targetcap
 			break
 		}
 	}
+	// A declared shape and a text type with a validated shape are gated apart,
+	// because they are refused for the same reason but fixed differently: one
+	// asks the author to flatten a group of fields, the other to give up a
+	// check. Reported through the capability table like every other per-target
+	// difference, so one target's refusal cannot drift from its row.
+	declaresShape, declaresShaped := len(agent.Shapes) > 0, false
+	for _, name := range sortedKeys(agent.Variables) {
+		shape := agent.Variables[name].Shape
+		if shape == nil {
+			continue
+		}
+		declaresShaped = declaresShaped || reaches(shape, func(ref *TypeRef) bool { return ref.Shaped != "" })
+		declaresShape = declaresShape || reaches(shape, func(ref *TypeRef) bool {
+			return ref.Shape != "" || len(ref.Literal) > 0 || ref.List != nil || ref.Optional
+		})
+	}
+	if declaresShape {
+		applyCapability(caps, targetcap.FieldTypedState, provider, row)
+	}
+	if declaresShaped {
+		applyCapability(caps, targetcap.FieldShapedText, provider, row)
+	}
 	if len(agent.Prefetch) > 0 {
 		applyCapability(caps, targetcap.FieldPrefetch, provider, row)
 	}

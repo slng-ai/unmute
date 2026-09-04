@@ -47,7 +47,7 @@ func SupplierIndex(controls map[string]ir.Control) map[string]string {
 		if !ok {
 			continue
 		}
-		for _, variable := range sortedKeys(delegate.Assign) {
+		for _, variable := range ir.AssignedVars(delegate.Assign) {
 			if _, taken := index[variable]; !taken {
 				index[variable] = name
 			}

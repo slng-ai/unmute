@@ -35,13 +35,14 @@ from __future__ import annotations
 {{end}}{{if .HasFlows}}import copy
 {{end}}{{if .NeedsFunctionCalls}}import functools
 {{end}}{{if or .NeedsInspect .NeedsFunctionCalls}}import inspect
-{{end}}{{if or .HasFlows .CallStartVars .Slng.Vertex .NeedsPrefetchSeed}}import json
+{{end}}{{if or .HasFlows .CallStartVars .Slng.Vertex .NeedsPrefetchSeed .TypedState}}import json
 {{end}}import os
-{{if .NeedsRender}}import re
+{{if or .NeedsRender (and .TypedState .TypedState.NeedsRe)}}import re
 {{end}}import sys
 {{if .Slng.Any}}import uuid
-{{end}}{{if .Variables}}from dataclasses import dataclass
+{{end}}{{if .Variables}}from dataclasses import {{if .NeedsDataclassField}}dataclass, field{{else}}dataclass{{end}}
 {{end}}{{if .NeedsPrefetchClock}}from datetime import datetime
+{{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
 {{end}}{{if .NeedsPrefetchClock}}from zoneinfo import ZoneInfo
 {{end}}{{if .DailyCarrier}}{{if .DailyCarrier.HasInbound}}
@@ -54,7 +55,8 @@ import httpx
 {{end}}{{if .Knowledge.Knowledge}}import knowledge
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}from dotenv import load_dotenv
-from loguru import logger
+from loguru import logger{{if .PydanticImports}}
+from pydantic import {{.PydanticImports}}{{end}}
 {{if .NeedsMCP}}from mcp.client.session_group import {{join .MCPParamsImports ", "}}
 {{end}}
 {{if not .SemanticOff}}from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
@@ -634,7 +636,9 @@ async def _forward_carrier_call(call_sid: str, sip_uri: str) -> None:
                     f"carrier call update failed with {response.status}: {await response.text()}"
                 )
 {{end}}{{end}}{{end}}
-{{if .Variables}}
+{{if .TypedState}}
+{{.TypedState.Source}}
+{{end}}{{if .Variables}}
 @dataclass
 class State:
     """Typed call variables (SCHEMA 4.4), shared across agents."""

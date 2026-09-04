@@ -511,3 +511,52 @@ func TestSlngRequiresAnExplicitMCPToolList(t *testing.T) {
 		t.Errorf("a warning still says the push has to reach the MCP server: %#v", row.Warnings)
 	}
 }
+
+// TestSlngRefusesADeclaredShape is FR-010 on the one target that cannot express
+// declared state, and the message has to say what to write instead.
+//
+// A shape is a generated Pydantic class with a validator, and the validation
+// runs where the value enters the state, which is inside a module this target
+// never writes. So the refusal is about the missing module, not about the
+// missing tasks: an author who flattens the shape into primitives gets a
+// package that deploys.
+func TestSlngRefusesADeclaredShape(t *testing.T) {
+	agent := slngAgent(t)
+	agent.Shapes = map[string]Shape{"Appointment": {
+		Name:   "Appointment",
+		Fields: []Field{{Name: "scheduled_date", Type: &TypeRef{Shaped: ShapedDate}}},
+	}}
+	variable := agent.Variables["caller_phone"]
+	variable.Shape = &TypeRef{List: &TypeRef{Shape: "Appointment"}}
+	agent.Variables["caller_phone"] = variable
+
+	row := validateSlng(t, agent)
+	wantSlngError(t, row, "slng target pushes a spec and emits no module of its own",
+		"has nowhere to be declared or checked", "compile to livekit or pipecat")
+}
+
+// TestSlngRefusesAShapedTextType is the second row, refused for the same reason
+// and fixed differently: this one asks the author to give up a check rather
+// than to flatten a group of fields, so it says so separately.
+func TestSlngRefusesAShapedTextType(t *testing.T) {
+	agent := slngAgent(t)
+	variable := agent.Variables["caller_phone"]
+	variable.Shape = &TypeRef{Shaped: ShapedPhone}
+	agent.Variables["caller_phone"] = variable
+
+	row := validateSlng(t, agent)
+	wantSlngError(t, row, "a value whose text has a validated shape",
+		"declare the value as one of the primitive types")
+}
+
+// TestSlngAcceptsAPackageDeclaringNothingStructured is the control. Both rows
+// above must fire only on a package that declares one, or every slng package in
+// the tree stops validating.
+func TestSlngAcceptsAPackageDeclaringNothingStructured(t *testing.T) {
+	row := validateSlng(t, slngAgent(t))
+	for _, message := range row.Errors {
+		if strings.Contains(message, "emits no module of its own") {
+			t.Errorf("a package declaring nothing structured was refused: %q", message)
+		}
+	}
+}
