@@ -39,7 +39,6 @@ agents:
 
       - name: manage_booking
         when: The caller wants to create, modify, or cancel a booking.
-        announce: Let me pull up the diary.
         instructions: tasks/booking.md
         requires:
           - customer_phone
@@ -92,7 +91,6 @@ agents:
 
       - name: handle_complaint
         when: The verified caller is unhappy about something and wants it recorded.
-        announce: Let me get this written down properly.
         instructions: tasks/complaint.md
         requires:
           - customer.status

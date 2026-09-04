@@ -1428,11 +1428,10 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
     async def _{{$d.MethodName}}_complete_{{$t.Name}}(self):
 {{end}}{{if not (and $d.HasTransfers (ne $d.Then "end"))}}{{range $d.Assign}}{{if .Append}}        # An entry added, not the value replaced: only the step producing it knows
         # whether the caller added an intent or swapped one, and the list starts
-        # empty so this never has to create it. An absent entry adds nothing,
-        # which is how a step that concluded nothing this time finishes without
-        # inventing one.
-        if self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}] is not None:
-            self.state.{{.Var}}.append(self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}])
+        # empty so this never has to create it. The helper drops an absent entry
+        # and a structured one already on the list, so neither a step that
+        # concluded nothing nor a step re-entered mid-call grows it.
+        _append_entry(self.state.{{.Var}}, self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}])
 {{else}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
 {{end}}{{if .Confirms}}        # The step that confirms this value has just assigned it, so it is settled
         # now and the guard stops holding it back. Discarded here rather than in the
@@ -1476,11 +1475,10 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         self.context.set_tools(tools)
 {{end}}{{if and $d.HasTransfers (ne $d.Then "end")}}{{range $d.Assign}}{{if .Append}}        # An entry added, not the value replaced: only the step producing it knows
         # whether the caller added an intent or swapped one, and the list starts
-        # empty so this never has to create it. An absent entry adds nothing,
-        # which is how a step that concluded nothing this time finishes without
-        # inventing one.
-        if self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}] is not None:
-            self.state.{{.Var}}.append(self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}])
+        # empty so this never has to create it. The helper drops an absent entry
+        # and a structured one already on the list, so neither a step that
+        # concluded nothing nor a step re-entered mid-call grows it.
+        _append_entry(self.state.{{.Var}}, self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}])
 {{else}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
 {{end}}{{if .Confirms}}        # The step that confirms this value has just assigned it, so it is settled
         # now and the guard stops holding it back. Discarded here rather than in the

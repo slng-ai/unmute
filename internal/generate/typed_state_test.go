@@ -287,10 +287,15 @@ func TestTwoAppendedEntriesAreBothRecorded(t *testing.T) {
 	agent := loadTypedState(t)
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		module := emitted(t, agent, provider)
+		holder := "ctx.userdata"
+		if provider == ir.ProviderPipecat {
+			holder = "self.state"
+		}
 		for _, want := range []string{
-			// An entry added, never the value replaced.
-			".appointments.append(",
-			".caller_reason.append(",
+			// An entry added, never the value replaced. Through the helper,
+			// which is also what drops an entry already on the list.
+			"_append_entry(" + holder + ".appointments, ",
+			"_append_entry(" + holder + ".caller_reason, ",
 			// And the list is there to append to before the first step runs.
 			"appointments: list[Appointment] = field(default_factory=list)",
 		} {
@@ -510,26 +515,28 @@ func TestAnAbsentEntryAppendsNothing(t *testing.T) {
 	agent := loadExample(t, "salon-concierge-v2")
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		module := emitted(t, agent, provider)
-		appends := 0
-		for _, line := range strings.Split(module, "\n") {
-			if !strings.Contains(line, ".appointments.append(") {
-				continue
-			}
-			appends++
-			if !strings.HasPrefix(strings.TrimSpace(line), "self.state.appointments.append(") &&
-				!strings.HasPrefix(strings.TrimSpace(line), "ctx.userdata.appointments.append(") {
-				t.Errorf("%s: unexpected append line %q", provider, line)
-			}
-		}
+		appends := strings.Count(module, "_append_entry(")
 		if appends == 0 {
 			t.Fatalf("%s appends nothing to appointments, so this gate proves nothing", provider)
 		}
-		// Every append of a value that may be absent is guarded, so the list
-		// grows only when the step produced something.
-		guards := strings.Count(module, `["appointment"] is not None:`)
-		if guards < appends {
-			t.Errorf("%s guards %d of %d appends; an absent entry would append None and the state would hold a "+
-				"booking nobody made", provider, guards, appends)
+		// The guard is in the helper rather than at each site, so it cannot be
+		// present at one append and missing at the next.
+		if !strings.Contains(module, "def _append_entry(entries, value):") {
+			t.Errorf("%s emits %d appends and no _append_entry, so an absent entry appends None and the "+
+				"state holds a booking nobody made", provider, appends)
+		}
+		for _, want := range []string{
+			"    if value is None:\n        return\n",
+			"    if isinstance(value, (dict, list)) and value in entries:\n        return\n",
+		} {
+			if !strings.Contains(module, want) {
+				t.Errorf("%s does not emit %q in _append_entry", provider, want)
+			}
+		}
+		// And no append reaches the list without going through it.
+		if strings.Contains(module, ".appointments.append(") || strings.Contains(module, ".caller_reason.append(") {
+			t.Errorf("%s appends straight onto a declared list, so a step re-entered mid-call adds the "+
+				"entry it read out of its own state block", provider)
 		}
 	}
 	// And the type is what makes it legal: the element type with its

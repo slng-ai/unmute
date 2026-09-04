@@ -247,6 +247,30 @@ def _typed(field, adapter, value):
         raise _StateRefused(f"{named}: {first['msg']}") from None
 
 
+def _append_entry(entries, value):
+    """One entry onto a declared list, unless it is already on it.
+
+    A step re-entered mid-call can read a value out of its own state block and
+    hand it straight back, which is not a second thing happening. One live call
+    entered the booking step four times and finished three of them immediately,
+    each with the same appointment it had recorded on the first, so one booking
+    became four entries and the caller's recap listed a booking four times.
+
+    An object carries its own identity, so an identical one is the same thing
+    reported twice. A plain value is not: two bookings really do give two
+    reasons of "create_booking", and both of those count. So the skip is for
+    structured entries only.
+
+    Nothing absent is added either, which is how a step that concluded nothing
+    this time finishes without inventing an entry.
+    """
+    if value is None:
+        return
+    if isinstance(value, (dict, list)) and value in entries:
+        return
+    entries.append(value)
+
+
 def _plain(value):
     """A validated value as plain data.
 

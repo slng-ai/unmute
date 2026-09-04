@@ -1383,11 +1383,10 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- if .Append}}
         # An entry added, not the value replaced: only the step producing it
         # knows whether the caller added an intent or swapped one, and the list
-        # starts empty so this never has to create it. An absent entry adds
-        # nothing, which is how a step that concluded nothing this time finishes
-        # without inventing one.
-        if result[{{pyq .Field}}] is not None:
-            ctx.userdata.{{.Var}}.append(result[{{pyq .Field}}])
+        # starts empty so this never has to create it. The helper drops an
+        # absent entry and a structured one already on the list, so neither a
+        # step that concluded nothing nor a step re-entered mid-call grows it.
+        _append_entry(ctx.userdata.{{.Var}}, result[{{pyq .Field}}])
 {{- else}}
         ctx.userdata.{{.Var}} = result[{{pyq .Field}}]
 {{- end}}

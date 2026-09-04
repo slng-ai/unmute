@@ -46,18 +46,30 @@ name the appointment it is about, which is a shape inside a shape.
 Five values are declared with those shapes. `customer` holds the record and may
 be absent. `appointments` and `complaints` are lists, and the steps that fill
 them append rather than replace, so a caller who books twice ends the call with
-two bookings instead of one. One entry per step visit, because the step hands
-back one appointment: the booking step finishes as soon as a change is saved
-and puts anything else the caller asked for in `unserved_request`, and the
-concierge sends it straight back in. A step that stayed in and booked twice
-would report one of them and lose the other. `caller_reason` is a list drawn from a closed set,
-because one call can do more than one thing, and both of the steps that act
-append to it: the booking step and the complaint step each record the reason
-they ran, so a caller who books and then complains ends with two. The
-verification step records none, because it runs on a reset history and cannot
-see why the caller rang; a reason recorded there could only be asked for. `customer_phone` is text with a
+two bookings instead of one.
+
+One entry per step visit, because the step hands back one appointment. The
+booking step finishes as soon as a change is saved and puts anything else the
+caller asked for in `unserved_request`, and the concierge sends it straight
+back in. A step that stayed in and booked twice would report one of them and
+lose the other. And a step that is re-entered and finishes at once re-reports
+what it already recorded, which is why the emitted append drops a structured
+entry the list already holds rather than trusting the prompt not to send one.
+
+`caller_reason` is a list drawn from a closed set, because one call can do more
+than one thing, and both of the steps that act append to it: the booking step
+and the complaint step each record the reason they ran, so a caller who books
+and then complains ends with two. The verification step records none, because
+it runs on a reset history and cannot see why the caller rang; a reason
+recorded there could only be asked for. `customer_phone` is text with a
 validated shape, and it carries `confirm:`, so it renders in the verification
 step's own prompt and nowhere else until the caller has agreed to it.
+
+Neither step announces itself. A task `announce:` speaks one line while the
+step starts, and with the step's own opening line as well the caller heard two
+acknowledgements before any information: "Let me pull up the diary." then "Let
+me check." One of them had to go, and the step's own line is the one that knows
+what it is about to do.
 
 `customer` declares no `default:` on purpose, and the booking step names
 `customer.status` in `requires:`. A default is a value the variable holds before
@@ -85,10 +97,15 @@ outbound route.
 
 The package is named `salon-concierge-v2`, so its deployments are
 `salon-concierge-v2-livekit` and `salon-concierge-v2-pipecat` and neither lands
-on top of the other salon. It declares its own `agent_id` for the same reason:
-the Context Router keys what it can serve from an earlier request on that id,
-and the key carries neither the system prompt nor the values substituted into
-it, so two packages sharing an id would be served each other's prompt.
+on top of the other salon.
+
+Its think model points straight at OpenAI rather than through the Context
+Router. That is temporary: calls were taking too many turns to reach a tool
+call, and taking the router out of the path is how we find out whether its
+caching is why. On the router this package needs its own `agent_id`, because
+the router keys what it can serve from an earlier request on that id and the
+key carries neither the system prompt nor the values substituted into it, so
+two packages sharing an id are served each other's prompt.
 
 ## What you need
 
