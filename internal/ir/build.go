@@ -116,6 +116,13 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		}
 		out.Variables[name] = resolved
 	}
+	// Every input, resolved before any prompt is composed: a receiving agent's
+	// block needs the handoffs that target it, and those are built after the
+	// agents are.
+	inputs, err := buildInputs(pkg, out, declared)
+	if err != nil {
+		return nil, err
+	}
 	for name, tool := range pkg.Tools {
 		built := buildTool(name, tool)
 		built.HandlerSource = pkg.Handlers[built.Handler]
@@ -211,9 +218,13 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		// from. Composed per site: an unconfirmed value belongs in one prompt
 		// only, and no agent prompt is that prompt.
 		instructions = appendPromptSuffix(instructions, out.StateBlock(AgentPromptSite(name)))
+		// Then the brief, after the state block: the request is the last thing
+		// the model reads before it acts. Empty for an agent no handoff briefs.
+		instructions = appendPromptSuffix(instructions, InputBlock(inputs.agents[name]))
 		out.Agents[name] = AgentDef{
 			Instructions: instructions, Model: raw.Think, Voice: raw.Speak,
-			Tools: attached(raw.Tools, callables(raw, pkg), raw.Handoffs, raw.Escalations),
+			Tools:  attached(raw.Tools, callables(raw, pkg), raw.Handoffs, raw.Escalations),
+			Inputs: inputs.agents[name],
 		}
 	}
 
@@ -247,12 +258,14 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg,
 			cmp.Or(raw.Think, pkg.Agent.Agents[pkg.Agent.EntryAgent].Think)))
 		instructions = appendPromptSuffix(instructions, out.StateBlock(TaskPromptSite(name)))
+		instructions = appendPromptSuffix(instructions, InputBlock(inputs.tasks[name]))
 		result, err := buildResult(raw.Result, declared)
 		if err != nil {
 			return nil, fmt.Errorf("%s: task %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
 		out.Tasks[name] = Task{
 			Instructions: instructions, Tools: attached(raw.Tools, raw.Handoffs), Model: raw.Think, Result: result,
+			Inputs:  inputs.tasks[name],
 			Context: buildTaskContext(raw.Context),
 		}
 	}
@@ -303,7 +316,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		out.Controls[name] = control
 	}
 	for _, name := range sortedKeys(pkg.Agent.Handoffs) {
-		control, err := buildHandoff(pkg, pkg.Agent.Handoffs[name], out)
+		control, err := buildHandoff(pkg, pkg.Agent.Handoffs[name], out, inputs.handoffs[name])
 		if err != nil {
 			return nil, fmt.Errorf("%s: handoff %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
@@ -935,7 +948,7 @@ func assignments(pairs []packagespec.Pair) ([]AssignTo, error) {
 	return out, nil
 }
 
-func buildHandoff(pkg *packagespec.Package, raw packagespec.Handoff, agent *Agent) (Control, error) {
+func buildHandoff(pkg *packagespec.Package, raw packagespec.Handoff, agent *Agent, inputs []InputField) (Control, error) {
 	if err := checkRequires(pkg, raw.Requires, agent); err != nil {
 		return nil, err
 	}
@@ -953,7 +966,10 @@ func buildHandoff(pkg *packagespec.Package, raw packagespec.Handoff, agent *Agen
 	if err != nil {
 		return nil, err
 	}
-	return &AgentTransfer{Kind: ControlAgentTransfer, When: raw.When, To: raw.To, Announce: announce, Requires: raw.Requires, Context: context}, nil
+	return &AgentTransfer{
+		Kind: ControlAgentTransfer, When: raw.When, To: raw.To, Announce: announce, Requires: raw.Requires,
+		Inputs: inputs, Context: context,
+	}, nil
 }
 
 func buildEscalation(raw packagespec.Escalation, agent *Agent) (Control, error) {
@@ -1168,13 +1184,23 @@ func buildTransferContext(pkg *packagespec.Package, raw *packagespec.TransferCon
 	}, nil
 }
 
+// buildVariableSelection resolves a handoff's `variables:`. Left out means
+// all: every declared value is shared by every agent already, so `all` changes
+// nothing, and a line that changes nothing should not be required. A list
+// keeps its meaning, the names it holds travel and every other value is reset
+// to its default on the way across, and an empty list is refused because it
+// would reset everything while reading as if it kept something.
 func buildVariableSelection(value any) (VariableSelection, error) {
-	if value == "all" {
+	if value == nil || value == "all" {
 		return VariableSelection{All: true}, nil
 	}
 	values, err := stringSlice(value)
 	if err != nil {
 		return VariableSelection{}, fmt.Errorf("context variables must be all or a list of names")
+	}
+	if len(values) == 0 {
+		return VariableSelection{}, fmt.Errorf("context variables is an empty list. Leave the field out to carry every " +
+			"declared value across, which is what all means, or list the names to keep")
 	}
 	return VariableSelection{Names: values}, nil
 }

@@ -106,11 +106,40 @@ type TypedStateBlock struct {
 	Preview string
 	// Empty is what a value with no contents renders as, so the runbook quotes
 	// the string rather than paraphrasing it.
-	Empty          string
+	Empty string
+	// Inputs is every task and handoff declaring `input:`, with its fields, for
+	// the runbook and the gates. Empty for a package that hands nothing in.
+	Inputs []TypedInputSite
+	// InputEmpty is what an input with no value renders as.
+	InputEmpty     string
 	NeedsRe        bool
 	NeedsJSON      bool
 	NeedsAnnotated bool
 	NeedsLiteral   bool
+}
+
+// TypedInputSite is one task or handoff declaring `input:`.
+type TypedInputSite struct {
+	// Site is the task name or the handoff name: the key the emitted type table
+	// and the tool that validates against it agree on.
+	Site string
+	// Kind is "task" or "handoff".
+	Kind string
+	// Receiver is the prompt the values reach: the task itself, or the agent
+	// the handoff targets.
+	Receiver string
+	Fields   []ir.InputField
+}
+
+// TypedInputField is one field the shared state object declares for an input:
+// one per distinct name across the package, so both drivers declare the same
+// field with the same annotation, and a name two seams share is one field.
+type TypedInputField struct {
+	Name string
+	Anno string
+	// Sites names the seams that hand the value in, for the reader of the
+	// generated module.
+	Sites string
 }
 
 // TypedStateValue is one declared value as the runbook names it.
@@ -147,11 +176,14 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 	}
 	finish := finishTypes(agent)
 	used := usedShapedText(agent)
-	if len(classes) == 0 && len(block.Values) == 0 && len(finish) == 0 {
+	inputs := inputSites(agent)
+	if len(classes) == 0 && len(block.Values) == 0 && len(finish) == 0 && len(inputs) == 0 {
 		return TypedStateBlock{}, nil
 	}
 	block.Preview = agent.StateBlock(ir.AgentPromptSite(agent.EntryAgent))
 	block.Empty = ir.StateEmptyText()
+	block.Inputs = inputs
+	block.InputEmpty = ir.InputEmptyText()
 	block.NeedsRe = len(used) > 0
 	block.NeedsJSON = true
 	block.NeedsLiteral = declaresLiteral(agent)
@@ -160,7 +192,8 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 	// was missing, and the package that would have found it does not exist yet:
 	// every shipped one declaring a shaped type also declares one of the other
 	// two, so the import arrived for another reason.
-	block.NeedsAnnotated = block.NeedsRe || block.NeedsLiteral || fieldCarriesDescription(agent, classes)
+	block.NeedsAnnotated = block.NeedsRe || block.NeedsLiteral || fieldCarriesDescription(agent, classes) ||
+		inputCarriesDescription(inputs)
 
 	var b strings.Builder
 	b.WriteString(`# --- declared state ----------------------------------------------------------
@@ -360,7 +393,11 @@ def _typed_result(step, values):
         # validates no argument of its own.
         out[name] = _plain(_typed(name, adapter, out.get(name)))
     return out
-
+`)
+	if len(inputs) > 0 {
+		b.WriteString(typedInputsSource(inputs))
+	}
+	b.WriteString(`
 
 _STATE_STRUCTURED = {`)
 	for i, name := range block.Structured {
@@ -371,7 +408,24 @@ _STATE_STRUCTURED = {`)
 	}
 	b.WriteString(`}
 _STATE_EMPTY = ` + pyQuote(ir.StateEmptyText()) + `
-# The bound on one rendered value, in characters. The same number the router
+`)
+	// The two lines of _state_text that know about inputs. Substituted rather
+	// than duplicated, so a package handing nothing in emits the function it
+	// always emitted, byte for byte.
+	worded, empty := "if name in _STATE_STRUCTURED:", "return _STATE_EMPTY"
+	if len(inputs) > 0 {
+		b.WriteString("_INPUT_NAMES = {")
+		for i, field := range InputStateFields(agent) {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(pyQuote(field.Name))
+		}
+		b.WriteString("}\n_INPUT_EMPTY = " + pyQuote(ir.InputEmptyText()) + "\n")
+		worded = "if name in _STATE_STRUCTURED or name in _INPUT_NAMES:"
+		empty = "return _INPUT_EMPTY if name in _INPUT_NAMES else _STATE_EMPTY"
+	}
+	b.WriteString(`# The bound on one rendered value, in characters. The same number the router
 # bounds a template variable by, because this is the same value travelling the
 # same way, and one number cannot be two.
 _STATE_VALUE_MAX = ` + strconv.Itoa(slngVariableLimit) + `
@@ -388,9 +442,9 @@ def _state_text(name, value):
     A value that was never declared structured renders exactly as it did before
     this existed, which is what keeps every package written before it unchanged.
     """
-    if name in _STATE_STRUCTURED:
+    ` + worded + `
         if value is None or value == "" or value == [] or value == {}:
-            return _STATE_EMPTY
+            ` + empty + `
         if not isinstance(value, str):
             value = json.dumps(_plain(value), separators=(",", ":"), ensure_ascii=False)
     text = "" if value is None else str(value)
@@ -410,6 +464,145 @@ def _state_text(name, value):
 `)
 	block.Source = b.String()
 	return block, nil
+}
+
+// typedInputsSource is the type table one delegate or handoff validates its
+// arguments against, and the helper that reads it. Emitted only when a package
+// hands something in, beside the finish table rather than folded into it: the
+// finish table's name is in every module a typed result already produced, and
+// a package handing nothing in has to keep emitting those bytes.
+func typedInputsSource(inputs []TypedInputSite) string {
+	var b strings.Builder
+	b.WriteString("\n\n_INPUT_TYPES = {\n")
+	for _, site := range inputs {
+		b.WriteString("    " + pyQuote(site.Site) + ": {\n")
+		for _, field := range site.Fields {
+			b.WriteString("        " + pyQuote(field.Name) + ": TypeAdapter(" + inputAnno(field) + "),\n")
+		}
+		b.WriteString("    },\n")
+	}
+	b.WriteString("}\n_INPUT_REQUIRED = {\n")
+	for _, site := range inputs {
+		var required []string
+		for _, field := range site.Fields {
+			if !field.Optional {
+				required = append(required, pyQuote(field.Name))
+			}
+		}
+		set := "set()"
+		if len(required) > 0 {
+			set = "{" + strings.Join(required, ", ") + "}"
+		}
+		b.WriteString("    " + pyQuote(site.Site) + ": " + set + ",\n")
+	}
+	b.WriteString(`}
+
+
+def _typed_inputs(site, values):
+    """Validate what a step or a receiving agent is handed, before it is entered.
+
+    Every declared input goes through its adapter, an absent one included: a
+    value the agent left out validates as None when its type allows that, and a
+    required one left out or left empty is refused naming the field, so the
+    agent that heard the caller asks rather than the step starting on nothing.
+    Refused before anything is written to the state, so the previous contents
+    stand and no step is ever entered on a value outside its type, on either
+    target: one framework validates tool arguments itself and the other splats
+    the model's JSON into the handler, and this is what makes them agree.
+    """
+    out = {}
+    required = _INPUT_REQUIRED.get(site, set())
+    for name, adapter in _INPUT_TYPES.get(site, {}).items():
+        value = values.get(name)
+        if name in required and (value is None or value == ""):
+            raise _StateRefused(f"{name}: required, and nothing was given")
+        out[name] = _plain(_typed(name, adapter, value))
+    return out
+`)
+	return b.String()
+}
+
+// inputSites is every task and handoff declaring `input:`, tasks first, each
+// group by name, so the emitted table reads the same way twice.
+func inputSites(agent *ir.Agent) []TypedInputSite {
+	var out []TypedInputSite
+	for _, name := range sortedKeys(agent.Tasks) {
+		if task := agent.Tasks[name]; len(task.Inputs) > 0 {
+			out = append(out, TypedInputSite{Site: name, Kind: "task", Receiver: name, Fields: task.Inputs})
+		}
+	}
+	for _, name := range sortedKeys(agent.Controls) {
+		if transfer, ok := agent.Controls[name].(*ir.AgentTransfer); ok && len(transfer.Inputs) > 0 {
+			out = append(out, TypedInputSite{Site: name, Kind: "handoff", Receiver: transfer.To, Fields: transfer.Inputs})
+		}
+	}
+	return out
+}
+
+// InputStateFields is one shared-state field per distinct input name, sorted,
+// each defaulting to None whatever its declared type: an input has no value
+// outside its visit. One function for both drivers, so the two state objects
+// cannot declare the same input two ways.
+func InputStateFields(agent *ir.Agent) []TypedInputField {
+	sites := map[string][]string{}
+	types := map[string]*ir.TypeRef{}
+	for _, site := range inputSites(agent) {
+		for _, field := range site.Fields {
+			sites[field.Name] = append(sites[field.Name], site.Kind+" "+site.Site)
+			types[field.Name] = field.Type
+		}
+	}
+	var out []TypedInputField
+	for _, name := range sortedKeys(sites) {
+		anno := PyAnno(types[name])
+		if !strings.HasSuffix(anno, " | None") {
+			anno += " | None"
+		}
+		out = append(out, TypedInputField{Name: name, Anno: anno, Sites: "input of " + strings.Join(sites[name], ", ")})
+	}
+	return out
+}
+
+// inputAnno is one input's Python annotation: the resolved type, wrapped with
+// its description when it has one so the model is told what to take from the
+// conversation without the task's `when:` repeating it. A shaped text type's
+// format phrase is appended for the reason pyFieldAnno gives.
+func inputAnno(field ir.InputField) string {
+	anno := PyAnno(field.Type)
+	if field.Description == "" {
+		return anno
+	}
+	description := field.Description
+	if kind := shapedKind(field.Type); kind != "" {
+		description = strings.TrimSuffix(description, " ") + " Expected " + shapedPatterns[kind].phrase + "."
+	}
+	return "Annotated[" + anno + ", Field(description=" + pyQuote(description) + ")]"
+}
+
+// inputBlockPreview is every seam's request block as the runbook shows it,
+// composed by the one composer the prompts go through, so the runbook cannot
+// drift from what the module carries.
+func inputBlockPreview(inputs []TypedInputSite) string {
+	blocks := make([]string, 0, len(inputs))
+	for _, site := range inputs {
+		heading := "# " + site.Kind + " " + site.Site
+		if site.Kind == "handoff" {
+			heading += ", read by " + site.Receiver
+		}
+		blocks = append(blocks, heading+"\n"+ir.InputBlock(site.Fields))
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
+func inputCarriesDescription(inputs []TypedInputSite) bool {
+	for _, site := range inputs {
+		for _, field := range site.Fields {
+			if field.Description != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // finishStep is one task's declared result fields that carry a type, in the
@@ -635,6 +828,13 @@ func walkTypeRefs(agent *ir.Agent, visit func(*ir.TypeRef)) {
 		task := agent.Tasks[name]
 		for _, field := range sortedKeys(task.Result) {
 			walk(task.Result[field].Shape)
+		}
+	}
+	// And on every input, so a Literal or a shaped text that appears only at a
+	// seam still brings its import and its alias.
+	for _, site := range inputSites(agent) {
+		for _, field := range site.Fields {
+			walk(field.Type)
 		}
 	}
 }

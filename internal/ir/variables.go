@@ -134,19 +134,27 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 	for _, name := range sortedKeys(pkg.Tools) {
 		raw := pkg.Tools[name]
 		file := filepath.Join("tools", name+".yaml")
+		// The inputs this tool's hidden values may read: required, and handed to
+		// every site the tool is attached to. Decided once per tool, because the
+		// message has to name the site that is not handed the input, and the
+		// shared check below knows the tool only as a formatted site string.
+		inputs, err := checkToolInputReads(pkg, agent, name, raw)
+		if err != nil {
+			return err
+		}
 		for _, key := range sortedKeys(raw.Inject) {
 			value, ok := raw.Inject[key].(string)
 			if !ok {
 				continue
 			}
 			site := fmt.Sprintf("tool %q inject %q", name, key)
-			if err := checkTemplateSite(pkg, agent, file, key, site, value, false); err != nil {
+			if err := checkTemplateSite(pkg, agent, file, key, site, value, false, inputs...); err != nil {
 				return err
 			}
 		}
 		if raw.Webhook != nil && raw.Webhook.Path != "" {
 			site := fmt.Sprintf("tool %q webhook.path", name)
-			if err := checkTemplateSite(pkg, agent, file, "path:", site, raw.Webhook.Path, false); err != nil {
+			if err := checkTemplateSite(pkg, agent, file, "path:", site, raw.Webhook.Path, false, inputs...); err != nil {
 				return err
 			}
 		}
@@ -266,6 +274,19 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 		}
 		variable, ok := agent.Variables[ref]
 		if !ok {
+			// An input is read by the prompt it was handed to and nowhere else.
+			// At run time the value sits on the shared call state for its visit,
+			// so this refusal is the only thing keeping a step's request out of
+			// its parent's prompt. A tool's inject may read one when
+			// checkToolInputReads has allowed it.
+			if sites := inputSites(agent, ref); len(sites) > 0 {
+				if slices.Contains(sites, site) || slices.Contains(alsoAllowed, ref) {
+					continue
+				}
+				return fmt.Errorf("%s: %s references {{%s}}, which is an input handed to %s. Only the prompt that "+
+					"receives an input may read it: name it there, and here ask the caller or read a declared variable",
+					where, site, ref, strings.Join(sites, " and "))
+			}
 			if slices.Contains(agent.Secrets, ref) || envNamePattern.MatchString(ref) {
 				return fmt.Errorf("%s: %s references {{%s}}, but secrets never flow through templates; a secret reaches a tool through its own *_env field", where, site, ref)
 			}

@@ -190,6 +190,18 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	if err != nil {
 		return pipecatData{}, err
 	}
+	// Every input site is reached through some worker's tool, and each of those
+	// advertises an explicit schema, so the import is wanted exactly when the
+	// package hands something in.
+	data.NeedsFunctionSchema = len(inputSites(agent)) > 0
+	// One field per input name, defaulting to None: an input has no value
+	// outside its visit. The same list the LiveKit driver appends to its
+	// Userdata, so the two objects declare the same fields.
+	for _, field := range InputStateFields(agent) {
+		data.Variables = append(data.Variables, pipecatVariable{
+			Name: field.Name, PyType: field.Anno, Default: "None", Description: field.Sites,
+		})
+	}
 	if typed.Source != "" {
 		data.TypedState = &typed
 		var typingNames []string
@@ -911,6 +923,10 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 			transfer := pipecatTransfer{
 				MethodName: ref, To: c.To, When: transferReason(c),
 				Announce: c.Announce, Reason: transferReason(c), Requires: c.Requires,
+				Inputs:         pipecatInputArgs(c.Inputs),
+				InputProps:     inputPropsExpr(ref, c.Inputs),
+				InputRequired:  inputRequiredExpr(c.Inputs),
+				ReceiverInputs: inputNames(agent.Agents[c.To].Inputs),
 			}
 			transfer.CtxExpr, _ = pipecatCtxExpr(c.Context.TaskContext)
 			built.Transfers = append(built.Transfers, transfer)
@@ -941,7 +957,72 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 		}
 	}
 	built.FlowFunctionNames = sortedKeys(flowNames)
+	built.Brief = inputNames(def.Inputs)
+	for _, delegate := range built.Delegates {
+		if len(delegate.Inputs) > 0 {
+			built.InputSchemas = append(built.InputSchemas, pipecatInputSchema{
+				Name: delegate.MethodName, Description: delegate.When,
+				Props: delegate.InputProps, Required: delegate.InputRequired,
+			})
+		}
+	}
+	for _, transfer := range built.Transfers {
+		if len(transfer.Inputs) > 0 {
+			built.InputSchemas = append(built.InputSchemas, pipecatInputSchema{
+				Name: transfer.MethodName, Description: transfer.When,
+				Props: transfer.InputProps, Required: transfer.InputRequired,
+			})
+		}
+	}
 	return built, nil
+}
+
+// pipecatInputArgs lowers a seam's inputs to handler parameters, required
+// first: the framework invokes a direct function with the model's arguments as
+// keyword arguments, so the signature has to name every one even though the
+// schema the model sees is spliced elsewhere.
+func pipecatInputArgs(inputs []ir.InputField) []pipecatArg {
+	var args []pipecatArg
+	for _, optional := range []bool{false, true} {
+		for _, input := range inputs {
+			if input.Optional != optional {
+				continue
+			}
+			args = append(args, pipecatArg{
+				Name: input.Name, PyType: inputAnno(input), PyDefault: "None",
+				Required: !input.Optional, Description: input.Description,
+			})
+		}
+	}
+	return args
+}
+
+// inputPropsExpr is the properties dict of one seam's explicit schema: each
+// entry the declared type's own schema, read through the adapter the input
+// table already holds, with the refs resolved the way finish's are. One owner
+// for the type: the adapter, its validator and the schema the model is sent
+// cannot drift.
+func inputPropsExpr(site string, inputs []ir.InputField) string {
+	if len(inputs) == 0 {
+		return "{}"
+	}
+	entries := make([]string, 0, len(inputs))
+	for _, input := range inputs {
+		entries = append(entries, fmt.Sprintf("%s: _schema(_INPUT_TYPES[%s][%s])",
+			pyQuote(input.Name), pyQuote(site), pyQuote(input.Name)))
+	}
+	return "{" + strings.Join(entries, ", ") + "}"
+}
+
+// inputRequiredExpr is the required list of one seam's explicit schema.
+func inputRequiredExpr(inputs []ir.InputField) string {
+	var required []string
+	for _, input := range inputs {
+		if !input.Optional {
+			required = append(required, input.Name)
+		}
+	}
+	return pyLiteral(anyStrings(required))
 }
 
 // pipecatCtxExpr lowers a context block's history shaping to the Python list a
@@ -991,6 +1072,10 @@ func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, e
 	if c.Task != "" {
 		delegate.Task = c.Task
 		delegate.Then = "return" // a single task always returns (SCHEMA 4.7)
+		inputs := agent.Tasks[c.Task].Inputs
+		delegate.Inputs = pipecatInputArgs(inputs)
+		delegate.InputProps = inputPropsExpr(c.Task, inputs)
+		delegate.InputRequired = inputRequiredExpr(inputs)
 		for _, entry := range c.Assign {
 			delegate.Assign = append(delegate.Assign, pipecatAssign{
 				Var: entry.Var, Field: entry.Field, Append: entry.Append,
@@ -1079,6 +1164,10 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 			built.Transfers = append(built.Transfers, pipecatTransfer{
 				MethodName: ref, To: transfer.To, When: transferReason(transfer),
 				Announce: transfer.Announce, Reason: transferReason(transfer), Requires: transfer.Requires,
+				Inputs:         pipecatInputArgs(transfer.Inputs),
+				InputProps:     inputPropsExpr(ref, transfer.Inputs),
+				InputRequired:  inputRequiredExpr(transfer.Inputs),
+				ReceiverInputs: inputNames(agent.Agents[transfer.To].Inputs),
 			})
 			continue
 		}

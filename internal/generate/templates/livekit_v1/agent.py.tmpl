@@ -1140,7 +1140,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- if $.Capture}}{{template "capture_tool" $.Capture}}{{end}}
 {{range .Transfers}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext):
+    async def {{.Method}}(self, ctx: RunContext{{range .Inputs}}, {{.Name}}: {{.Anno}}{{if not .Required}} = None{{end}}{{end}}):
         {{triple .When}}
 {{- if .Requires}}
         _unmet = _unmet_prerequisites(ctx.userdata, [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
@@ -1154,11 +1154,35 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
             )
             return {"refused": _prerequisite_refusal(_unmet, False)}
 {{- end}}
+{{- if .Inputs}}
+        # The brief, validated before the receiver exists and before anything is
+        # spoken: a value outside its type is refused with the field named and
+        # nobody is handed over.
+        try:
+            _inputs = _typed_inputs({{pyq .Method}}, {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}}{{"}"}})
+        except _StateRefused as refused:
+            logger.warning("input %s: %s", {{pyq .Method}}, refused.message)
+            return {"refused": f"Not started: {refused.message}. Ask the caller, then hand over again with a value that fits."}
+{{- end}}
 {{- if .Announce}}
         await ctx.session.say({{pyq .Announce}}, allow_interruptions=False)
 {{- end}}
 {{- range .ResetVars}}
         ctx.userdata.{{.Name}} = {{.Default}}  # context.variables: not carried on this transfer
+{{- end}}
+{{- if .ReceiverInputs}}
+        # The receiver's brief: every name its prompt reads is reset, then this
+        # handoff's own values are written, so it sees exactly what it was handed
+        # and nothing from an earlier visit. Written before the receiver exists,
+        # because its prompt renders on entry from the shared state, and left in
+        # place after: a brief stays with its agent until the next handoff.
+{{- range .ReceiverInputs}}
+        ctx.userdata.{{.}} = None
+{{- end}}
+{{- end}}
+{{- if .Inputs}}
+        for _name, _value in _inputs.items():
+            setattr(ctx.userdata, _name, _value)
 {{- end}}
 {{- if .Summary}}
         summary_ctx = await _summarize(self.chat_ctx, {{template "llmexpr" .Summary}})
@@ -1361,10 +1385,28 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- range .Delegates}}
 {{- if .Task}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext) -> dict{{if .CanTaskTransfer}} | Agent{{end}}:
+    async def {{.Method}}(self, ctx: RunContext{{range .Inputs}}, {{.Name}}: {{.Anno}}{{if not .Required}} = None{{end}}{{end}}) -> dict{{if .CanTaskTransfer}} | Agent{{end}}:
         {{triple .When}}
 {{- if .Requires}}
 {{template "prerequisite_guard" .}}
+{{- end}}
+{{- if .Inputs}}
+        # What the step is handed, validated before the step exists and before
+        # anything is spoken: refused the way finish refuses a bad result, so
+        # nothing is written and the message goes back to the model, which can
+        # correct itself or ask the caller.
+        try:
+            _inputs = _typed_inputs({{pyq .Task.ID}}, {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}}{{"}"}})
+        except _StateRefused as refused:
+            logger.warning("input %s: %s", {{pyq .Task.ID}}, refused.message)
+            return {"refused": f"Not started: {refused.message}. Ask the caller, then run the step again with a value that fits."}
+        # Written to the shared state for this visit and put back after it. The
+        # step's prompt and the router's template variables both read the state
+        # object and nothing else, and an owner whose own brief shares a name
+        # gets it back rather than losing it to a clear.
+        _previous = {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: ctx.userdata.{{$a.Name}}{{end}}{{"}"}}
+        for _name, _value in _inputs.items():
+            setattr(ctx.userdata, _name, _value)
 {{- end}}{{template "delegate_announce" .}}
         # N13: snapshot before the task, restore after. An awaited AgentTask
         # merges its own turns into this agent's context when it returns
@@ -1388,6 +1430,14 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- if .CanTaskTransfer}}
         except _TaskTransfer as transfer:
             return transfer.agent
+{{- end}}
+{{- if .Inputs}}
+        # The visit is over: put back what the state held before it. Not in a
+        # finally, on purpose: on the handoff path above the receiver's brief
+        # was written on the way out, and a name it shares with this step's
+        # inputs would be erased by a restore that ran regardless.
+        for _name, _value in _previous.items():
+            setattr(ctx.userdata, _name, _value)
 {{- end}}
         await self.update_chat_ctx(owner_ctx)
 {{- range .Task.Assign}}
@@ -1737,7 +1787,7 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 {{- if $.Capture}}{{template "capture_tool" $.Capture}}{{end}}
 {{range .Transfers}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext):
+    async def {{.Method}}(self, ctx: RunContext{{range .Inputs}}, {{.Name}}: {{.Anno}}{{if not .Required}} = None{{end}}{{end}}):
         {{triple .When}}
         if not self._claim_terminal():
             return
@@ -1751,12 +1801,34 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
             )
             return {"refused": _prerequisite_refusal(_unmet, False)}
 {{- end}}
+{{- if .Inputs}}
+        # The brief, validated before the receiver exists. A refusal gives the
+        # terminal claim back, the way the guard above does, so the step can
+        # still finish or hand over once the model has corrected itself.
+        try:
+            _inputs = _typed_inputs({{pyq .Method}}, {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}}{{"}"}})
+        except _StateRefused as refused:
+            self._terminal_claimed = False
+            logger.warning("input %s: %s", {{pyq .Method}}, refused.message)
+            return {"refused": f"Not started: {refused.message}. Ask the caller, then hand over again with a value that fits."}
+{{- end}}
         try:
 {{- if .Announce}}
             await ctx.session.say({{pyq .Announce}}, allow_interruptions=False)
 {{- end}}
 {{- range .ResetVars}}
             ctx.userdata.{{.Name}} = {{.Default}}  # context.variables: not carried on this transfer
+{{- end}}
+{{- if .ReceiverInputs}}
+            # The receiver's brief: reset, then written, before the receiver
+            # exists, so its prompt renders exactly what it was handed.
+{{- range .ReceiverInputs}}
+            ctx.userdata.{{.}} = None
+{{- end}}
+{{- end}}
+{{- if .Inputs}}
+            for _name, _value in _inputs.items():
+                setattr(ctx.userdata, _name, _value)
 {{- end}}
 {{- if .Summary}}
             summary_ctx = await _summarize(self.chat_ctx, {{template "llmexpr" .Summary}})

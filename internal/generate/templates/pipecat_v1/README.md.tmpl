@@ -406,7 +406,34 @@ A text type with a validated shape (`Phone`, `Date`, `Time`, `Id`) is a `str` in
 the schema the model is sent, with its shape checked by a validator. That is
 deliberate: a `pattern` in the schema survives the strict tool-schema converter
 and the provider rejects it, so the shape is checked here instead.
-{{end}}
+{{end}}{{if and .TypedState .TypedState.Inputs}}
+
+## Request block
+
+A step or a receiving agent that declares `input:` is handed those values by
+the agent that ran it or handed the caller over, and its prompt ends with a
+second block the compiler wrote, after the conversation state:
+
+```text
+{{inputBlockPreview .TypedState.Inputs}}
+```
+
+The values are validated before the step is entered or the receiver is
+activated. A value outside its type is refused with the field named, nothing is
+started, and the message reaches the agent that supplied it, which can correct
+itself or ask the caller. A required value the agent left out is refused the
+same way. An optional value left out renders as `{{.TypedState.InputEmpty}}`,
+and the step may ask for that one thing.
+
+The values live on the shared state for one visit. A step's are put back when
+it finishes, and a receiving agent's stay until the next handoff, so a brief
+survives the receiver's own steps. Nothing about an input is recorded unless the
+step's result carries it.
+
+What each seam is handed:
+
+{{range .TypedState.Inputs}}- `{{.Site}}` ({{if eq .Kind "task"}}step{{else}}handoff, read by `{{.Receiver}}`{{end}}):{{range .Fields}} `{{.Name}}` ({{.Type}}{{if .Optional}}, optional{{end}}){{end}}
+{{end}}{{end}}
 ## Required environment
 
 Set these before running (values are never written into the project):

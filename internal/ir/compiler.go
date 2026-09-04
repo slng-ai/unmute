@@ -477,14 +477,36 @@ type AgentDef struct {
 	Model        string   `json:"model" yaml:"model"`
 	Voice        string   `json:"voice" yaml:"voice"`
 	Tools        []string `json:"tools,omitempty" yaml:"tools,omitempty"`
+	// Inputs is this agent's brief: the union of the inputs every handoff that
+	// targets it declares, one entry per name. Its prompt ends with a block
+	// naming each, and a handoff to it resets every one before writing its own.
+	Inputs []InputField `json:"inputs,omitempty" yaml:"inputs,omitempty"`
 }
 
 type Task struct {
-	Instructions string                 `json:"instructions" yaml:"instructions"`
-	Tools        []string               `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Model        string                 `json:"model,omitempty" yaml:"model,omitempty"`
-	Result       map[string]ResultField `json:"result" yaml:"result"`
-	Context      TaskContext            `json:"context" yaml:"context"`
+	Instructions string   `json:"instructions" yaml:"instructions"`
+	Tools        []string `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Model        string   `json:"model,omitempty" yaml:"model,omitempty"`
+	// Inputs is what the step is handed on entry, in authored order. The
+	// delegate that runs the step takes one parameter per entry, validates it
+	// where it enters, and the step's prompt ends with a block naming each one.
+	Inputs  []InputField           `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	Result  map[string]ResultField `json:"result" yaml:"result"`
+	Context TaskContext            `json:"context" yaml:"context"`
+}
+
+// InputField is one value a step or a receiving agent is handed on entry.
+// Declared by the author, filled by the agent that heard the caller, fixed for
+// the visit and gone after it. Not declared state: it appears in no state
+// block, satisfies no guard, and no assign: writes it.
+type InputField struct {
+	Name string `json:"name" yaml:"name"`
+	// Type is the resolved expression, never nil: an input always has a type.
+	Type *TypeRef `json:"type" yaml:"type"`
+	// Optional marks an expression ending in `| None`: the agent may leave the
+	// value out, and the receiving prompt then reads it as not given.
+	Optional    bool   `json:"optional,omitempty" yaml:"optional,omitempty"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 type ResultField struct {
@@ -609,12 +631,16 @@ func AssignedVars(assign []AssignTo) []string {
 }
 
 type AgentTransfer struct {
-	Kind     ControlKind     `json:"kind" yaml:"kind"`
-	When     string          `json:"when,omitempty" yaml:"when,omitempty"`
-	To       string          `json:"to" yaml:"to"`
-	Announce string          `json:"announce,omitempty" yaml:"announce,omitempty"`
-	Requires []string        `json:"requires,omitempty" yaml:"requires,omitempty"`
-	Context  TransferContext `json:"context" yaml:"context"`
+	Kind     ControlKind `json:"kind" yaml:"kind"`
+	When     string      `json:"when,omitempty" yaml:"when,omitempty"`
+	To       string      `json:"to" yaml:"to"`
+	Announce string      `json:"announce,omitempty" yaml:"announce,omitempty"`
+	Requires []string    `json:"requires,omitempty" yaml:"requires,omitempty"`
+	// Inputs is the brief this handoff carries to its receiver, in authored
+	// order. Validated on the departing agent's tool, written to the call state
+	// before the receiver is entered, and shown in the receiver's prompt.
+	Inputs  []InputField    `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	Context TransferContext `json:"context" yaml:"context"`
 }
 
 func (*AgentTransfer) control() {}

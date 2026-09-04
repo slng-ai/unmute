@@ -344,9 +344,6 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 		switch control := control.(type) {
 		case *AgentTransfer:
 			errors = append(errors, validateContextShape(name, control.Context.TaskContext)...)
-			if !control.Context.Variables.All && len(control.Context.Variables.Names) == 0 {
-				errors = add(errors, fmt.Sprintf("control %q context.variables is required", name))
-			}
 		case *HumanTransfer:
 			if control.Mode != TransferCold && control.Mode != TransferWarm {
 				errors = add(errors, fmt.Sprintf("control %q mode must be cold or warm", name))
@@ -880,6 +877,9 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		if task.Model != "" {
 			applyCapability(caps, targetcap.FieldTaskModel, provider, row)
 		}
+		if len(task.Inputs) > 0 {
+			applyCapability(caps, targetcap.FieldInput, provider, row)
+		}
 		if taskContexts[name] {
 			validateContext(task.Context, provider, caps, row)
 		}
@@ -913,6 +913,9 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 			}
 			if len(control.Requires) > 0 {
 				applyCapability(caps, targetcap.FieldTransferRequires, provider, row)
+			}
+			if len(control.Inputs) > 0 {
+				applyCapability(caps, targetcap.FieldInput, provider, row)
 			}
 			validateContext(control.Context.TaskContext, provider, caps, row)
 			if !control.Context.Variables.All {

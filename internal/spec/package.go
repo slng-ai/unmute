@@ -381,7 +381,13 @@ type Task struct {
 	Handoffs []string `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
 	// Think names an entry of `models.think`, overriding the profile the task
 	// would otherwise inherit. Spelled the way every other think pointer is.
-	Think   string         `json:"think,omitempty" yaml:"think,omitempty"`
+	Think string `json:"think,omitempty" yaml:"think,omitempty"`
+	// Input is what the step is handed when the agent runs it: one typed field
+	// per value, in the words a result field uses, filled by the agent from the
+	// conversation it heard. Fixed for the visit and gone after it. A list and
+	// not a map, because the order written is the order the step's prompt shows
+	// them in, and because the Field decoder already reads both authored forms.
+	Input   []Field        `json:"input,omitempty" yaml:"input,omitempty"`
 	Result  map[string]any `json:"result" yaml:"result"`
 	Context TaskContext    `json:"context" yaml:"context"`
 }
@@ -412,7 +418,11 @@ type TransferContext struct {
 	MaxMessages      int    `json:"max_messages,omitempty" yaml:"max_messages,omitempty"`
 	Summarizer       string `json:"summarizer,omitempty" yaml:"summarizer,omitempty"`
 	IncludeToolCalls *bool  `json:"include_tool_calls,omitempty" yaml:"include_tool_calls,omitempty"`
-	Variables        any    `json:"variables" yaml:"variables"`
+	// Variables is `all`, or the list of declared values to keep on the way
+	// across, every other one being reset to its default. Optional: left out
+	// means all, because every declared value is already shared by every agent
+	// and a required line that changed nothing was the only portable spelling.
+	Variables any `json:"variables,omitempty" yaml:"variables,omitempty"`
 }
 
 // Callable is one thing an agent can decide to run: a task carrying a `when:`,
@@ -440,11 +450,15 @@ type Callable struct {
 // missing one is the empty string and is refused by the same check that refuses
 // a `to:` naming an agent that does not exist.
 type Handoff struct {
-	To       string           `json:"to" yaml:"to"`
-	When     string           `json:"when,omitempty" yaml:"when,omitempty"`
-	Announce *string          `json:"announce,omitempty" yaml:"announce,omitempty"`
-	Requires []string         `json:"requires,omitempty" yaml:"requires,omitempty"`
-	Context  *TransferContext `json:"context,omitempty" yaml:"context,omitempty"`
+	To       string   `json:"to" yaml:"to"`
+	When     string   `json:"when,omitempty" yaml:"when,omitempty"`
+	Announce *string  `json:"announce,omitempty" yaml:"announce,omitempty"`
+	Requires []string `json:"requires,omitempty" yaml:"requires,omitempty"`
+	// Input is the brief the receiving agent is handed: the same list a task
+	// takes, filled by the agent handing over. It stays with the receiver until
+	// the next handoff.
+	Input   []Field          `json:"input,omitempty" yaml:"input,omitempty"`
+	Context *TransferContext `json:"context,omitempty" yaml:"context,omitempty"`
 }
 
 // Escalation is one entry under `escalations:`. The caller goes through to a

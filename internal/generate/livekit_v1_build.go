@@ -345,6 +345,14 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			})
 		}
 	}
+	// One field per input name, defaulting to None: an input has no value
+	// outside its visit. The same list the Pipecat driver appends to its State,
+	// so the two objects declare the same fields.
+	for _, field := range InputStateFields(agent) {
+		data.Vars = append(data.Vars, livekitVar{
+			Name: field.Name, PyType: "str", Anno: field.Anno, Default: "None", Description: field.Sites,
+		})
+	}
 	data.HasVars = len(data.Vars) > 0
 	data.Capture = buildLiveKitCapture(agent)
 	// A bare name in a compose environment block is forwarded when the host sets
@@ -951,6 +959,8 @@ func buildLiveKitTransfer(agent *ir.Agent, tgt ir.Target, ref string, control *i
 	transfer := livekitTransfer{
 		Method: ref, When: transferWhen(control), TargetClass: pyName(control.To),
 		Announce: control.Announce, Requires: control.Requires,
+		Inputs:         inputArgs(control.Inputs),
+		ReceiverInputs: inputNames(agent.Agents[control.To].Inputs),
 	}
 	if control.Context.History == ir.HistorySummary {
 		summarizer, err := livekitSummaryLLM(agent, tgt, control.Context.Summarizer, env)
@@ -1060,6 +1070,7 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 			Requires:        c.Requires,
 			Announce:        c.Announce,
 			CanTaskTransfer: livekitTaskCanTransfer(agent, task),
+			Inputs:          inputArgs(task.Inputs),
 		}, nil
 	}
 	group, ok := agent.TaskGroups[c.Group]
@@ -1095,6 +1106,36 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 		delegate.CanTaskTransfer = delegate.CanTaskTransfer || livekitTaskCanTransfer(agent, agent.Tasks[step])
 	}
 	return delegate, nil
+}
+
+// inputArgs lowers a seam's inputs to tool parameters: required first, because
+// Python forbids a parameter with no default after one with a default, and
+// authored order within each group so the signature reads like the package.
+// The annotation carries the description, which is how it reaches the model.
+func inputArgs(inputs []ir.InputField) []livekitArg {
+	var args []livekitArg
+	for _, optional := range []bool{false, true} {
+		for _, input := range inputs {
+			if input.Optional != optional {
+				continue
+			}
+			args = append(args, livekitArg{
+				Name: input.Name, PyType: PyAnno(input.Type), Required: !input.Optional,
+				Desc: input.Description, Anno: inputAnno(input),
+			})
+		}
+	}
+	return args
+}
+
+// inputNames is the names of a receiver's brief, for the reset a handoff does
+// before it writes its own values.
+func inputNames(inputs []ir.InputField) []string {
+	names := make([]string, 0, len(inputs))
+	for _, input := range inputs {
+		names = append(names, input.Name)
+	}
+	return names
 }
 
 func livekitTaskCanTransfer(agent *ir.Agent, task ir.Task) bool {

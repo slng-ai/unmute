@@ -1,0 +1,156 @@
+# Typed-inputs fixture: the smallest package that hands a step and a receiving
+# agent what the caller asked for.
+#
+# It exists because every other package in the tree gives a step nothing but the
+# conversation it inherits, so before this there was nothing to compile as proof
+# that an `input:` resolves, reaches the step's tool schema on both targets, is
+# refused where it enters, and ends the receiving prompt as a block. Small on
+# purpose: two agents, two steps, two handoffs, one shape.
+#
+# The three inputs on the step are one per thing the seam has to get right. A
+# required Literal is refused outside its set and required in both schemas. An
+# optional text renders as words when left out. An optional shape is the one the
+# Pipecat schema has to be spliced for, because that framework reads a schema off
+# a Python signature and a signature cannot say what a class holds.
+#
+# The router think profile is deliberate: the input names have to reach the
+# router's template-variable list, and this is the one path where a placeholder
+# the router cannot fill is a 422 mid-call rather than an empty string.
+version: 1
+
+name: typed-inputs
+
+entry_agent: front
+
+secrets:
+  - OPENAI_API_KEY
+  - DEEPGRAM_API_KEY
+  - SLNG_API_KEY
+
+shapes:
+  - name: Thing
+    description: One thing the caller named.
+    fields:
+      - label: str
+      - name: count
+        type: int
+        description: How many of it.
+
+variables:
+  notes:
+    type: list[Thing]
+    description: What this call has recorded so far.
+
+agents:
+  front:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tasks:
+      - name: do_thing
+        when: The caller wants a thing done.
+        instructions: tasks/do_thing.md
+        input:
+          - kind: Literal["a", "b"]
+          - name: note
+            type: str | None
+            description: Anything the caller added, in their own words. Leave it out if they added nothing.
+          - name: thing
+            type: Thing | None
+            description: The thing the caller named, if they named one.
+        tools:
+          - note_thing
+        # A handoff from inside the step, so the in-task path is compiled too:
+        # the brief is written on the way out and nothing of the step's own
+        # inputs is put back over it.
+        handoffs:
+          - to_specialist
+        assign:
+          - notes+: result.thing
+        result:
+          thing: Thing | None
+          summary: string
+        context:
+          history: reset
+
+      - name: check
+        when: The caller wants something checked.
+        instructions: tasks/check.md
+        result:
+          summary: string
+        context:
+          history: reset
+    handoffs:
+      - to_specialist
+
+  specialist:
+    instructions: agents/specialist.md
+    think: reasoning
+    speak: voice
+    handoffs:
+      - to_front
+
+handoffs:
+  to_specialist:
+    to: specialist
+    when: The caller has a problem the front desk cannot solve.
+    input:
+      - problem: str
+      - name: thing
+        type: Thing | None
+        description: The thing the problem is about, if the caller named one.
+    context:
+      history: reset
+      variables: all
+
+  to_front:
+    to: front
+    when: The caller wants the front desk again.
+    input:
+      - outcome: str
+    context:
+      history: reset
+      variables: all
+
+tools:
+  - note_thing
+
+models:
+  think:
+    reasoning:
+      provider: slng
+      model: openai/gpt-4o-mini
+      agent_id: typed-inputs-v1
+      upstream:
+        provider: openai
+        key_env: OPENAI_API_KEY
+      params:
+        world_part_override: eu
+        reasoning_effort: "none"
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: deepgram
+      model: nova-3
+  turn:
+    vad:
+      provider: local
+      model: silero
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, this is the front desk. How can I help?"
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m

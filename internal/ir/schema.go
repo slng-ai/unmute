@@ -98,6 +98,9 @@ func resultFieldSchema() (*jsonschema.Schema, error) {
 
 func controlSchema() (*jsonschema.Schema, error) {
 	options := enumOptions()
+	// A handoff's inputs carry a TypeRef, so the same reference the whole
+	// schema uses has to be in place here too, or the derivation cycles.
+	options.TypeSchemas[reflect.TypeFor[TypeRef]()] = &jsonschema.Schema{Ref: typeRefPointer}
 	delegate, err := jsonschema.For[Delegate](options)
 	if err != nil {
 		return nil, err
