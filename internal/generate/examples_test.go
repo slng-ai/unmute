@@ -819,30 +819,47 @@ func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
 	// Two steps append rather than replace, because a caller can book twice and
 	// can be unhappy about two things. A replace here is what the `+` exists to
 	// prevent, and it would look like nothing at all.
-	for control, variable := range map[string]string{
-		"manage_booking": "appointments", "handle_complaint": "complaints",
+	for control, variables := range map[string][]string{
 		// Two steps append to one list, which is the case the spec separates
 		// from a change of mind: a caller who books and also complains rang for
 		// two reasons and the state holds both, while a step that changes its
-		// own mind replaces its own value.
-		"verify_customer": "caller_reason",
+		// own mind replaces its own value. Both of them are steps that act, and
+		// that is the fix to a real call rather than a preference. The
+		// verification step recorded the reason first, and it runs on a reset
+		// history: it never receives the caller's triggering utterance, so the
+		// only way it could fill that field was to ask, and it asked on every
+		// call, immediately after the caller had said why they rang.
+		"manage_booking":   {"appointments", "caller_reason"},
+		"handle_complaint": {"complaints", "caller_reason"},
 	} {
 		delegate, ok := resolved.Controls[control].(*ir.Delegate)
 		if !ok {
 			t.Fatalf("%s = %#v, want a delegate", control, resolved.Controls[control])
 		}
-		appends := false
-		for _, entry := range delegate.Assign {
-			if entry.Var == variable {
-				appends = entry.Append
+		for _, variable := range variables {
+			appends := false
+			for _, entry := range delegate.Assign {
+				if entry.Var == variable {
+					appends = entry.Append
+				}
+			}
+			if !appends {
+				t.Errorf("%s does not append to %q, so the caller's second one erases the first", control, variable)
 			}
 		}
-		if !appends {
-			t.Errorf("%s replaces %q rather than appending to it, so the caller's second one erases the first", control, variable)
-		}
-		if control == "handle_complaint" && !slices.Contains(ir.AssignedVars(delegate.Assign), "caller_reason") {
-			t.Error("handle_complaint records no reason, so a caller who books and also complains ends with one " +
-				"reason rather than two, and the book-and-complain case this package exists to run is not run")
+	}
+	// And the step that cannot see the conversation records nothing about it.
+	if got := ir.AssignedVars(verify.Assign); slices.Contains(got, "caller_reason") {
+		t.Errorf("verify_customer assigns %v; a reason recorded by a step running on a reset history can "+
+			"only be asked for, and asking is what this step must never do", got)
+	}
+	// The record holds no id, because no tool in the package returns one. A
+	// required shaped id here was a field the model could only invent, its own
+	// prompt forbids inventing one, and the empty string it sent instead ended
+	// every call at the finish call.
+	for _, field := range resolved.Shapes["Customer"].Fields {
+		if strings.Contains(field.Name, "id") {
+			t.Errorf("Customer declares %q; nothing in the package supplies a customer id, so the model can only invent one or leave it empty", field.Name)
 		}
 	}
 

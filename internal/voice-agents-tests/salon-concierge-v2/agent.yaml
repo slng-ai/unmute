@@ -24,11 +24,15 @@ agents:
         assign:
           - customer_phone: result.customer_phone
           - customer: result.customer
-          - caller_reason+: result.reason
+        # This step records no reason, and that is what `history: reset` costs.
+        # A reset step never receives the caller's triggering utterance, so a
+        # `reason` field here could only be filled by asking, and it asked on
+        # every call: the caller said "a booking for a haircut tomorrow", the
+        # step read the number back, and then asked what they were calling
+        # about. The steps that act read the conversation and record it instead.
         result:
           customer_phone: Phone
           customer: Customer
-          reason: Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]
           summary: string
         context:
           history: reset
@@ -50,12 +54,22 @@ agents:
           - to_complaints
         assign:
           - appointments+: result.appointment
+          # The step that did the thing records why the caller rang. This one
+          # runs on `history: messages`, so the caller's own words are in front
+          # of it and it never has to ask.
+          - caller_reason+: result.reason
         result:
           # Absent when the caller decided against a change, which is a real
           # outcome and not a failure: the append adds nothing that turn rather
           # than the step inventing an appointment to have something to hand
           # back.
           appointment: Appointment | None
+          # All five values, the same set the list declares, though this step
+          # only ever returns one of the three booking ones. A caller who only
+          # asks a question is answered by the concierge itself and runs no
+          # step, so `request_informations` reaches the list from nowhere: the
+          # list holds what a step did, not everything that was said.
+          reason: Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]
           summary: string
         context:
           history: messages
@@ -139,9 +153,14 @@ escalations:
 shapes:
   - name: Customer
     description: Who the caller is, as the salon's records have them.
+    # No id field. Neither lookup tool returns one, so a required `Id` here was
+    # a field the model could only invent, and its own prompt forbids inventing
+    # one. It sent an empty string instead and every call deadlocked at the
+    # finish. A field nothing in the package can fill does not belong in a
+    # shape; `Complaint.complaint_id` and `Appointment.booking_id` are the two
+    # ids that have a supplier.
     fields:
       - customer_name: str
-      - customer_id: Id
       - phone_number: Phone
       - name: status
         type: Literal["existing", "created", "invalid"]

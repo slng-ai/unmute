@@ -542,3 +542,39 @@ func TestAnAbsentEntryAppendsNothing(t *testing.T) {
 		t.Errorf("the booking step's appointment result is %v, want one that may be absent", field.Shape)
 	}
 }
+
+// TestShapedTextAcceptsNoValueYet holds the one loosening in the shape checks,
+// and the reason it is not a hole.
+//
+// Empty is not a wrong value, it is no value yet: it is what a declared
+// variable holds before anything fills it, what the state block renders as
+// words, and what a tool hands back for a field it could not fill. Refusing it
+// deadlocked a live call on both targets and did so differently, which is why
+// the assertion is on the emitted text rather than on one framework's
+// behaviour: LiveKit logged a generic "error parsing arguments for finish" with
+// no field and no expectation, while Pipecat's refusal reached the model, which
+// asked the caller out loud for an identifier that no tool in the package
+// returns. The model had nothing else to send, so every retry was refused the
+// same way and the step never finished.
+//
+// A wrong value is still refused. That half is proven by
+// TestAValueOutsideALiteralSetIsRefusedWhereItEnters and, on a running module,
+// by the L4 smoke.
+func TestShapedTextAcceptsNoValueYet(t *testing.T) {
+	agent := loadTypedState(t)
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		source := emitted(t, agent, provider)
+		checks := strings.Count(source, "def _shape_")
+		if checks == 0 {
+			t.Fatalf("%s emits no shaped-text check, so this gate proves nothing", provider)
+		}
+		if got := strings.Count(source, "if value and not _SHAPE_"); got != checks {
+			t.Errorf("%s emits %d shaped-text checks and %d of them pass an empty value through; "+
+				"all of them have to, because empty is how a declared value says nothing yet and the "+
+				"model has nothing else to send for a field no tool fills", provider, checks, got)
+		}
+		if strings.Contains(source, "if not _SHAPE_") {
+			t.Errorf("%s refuses an empty shaped value; that is what deadlocked a live call on both targets", provider)
+		}
+	}
+}

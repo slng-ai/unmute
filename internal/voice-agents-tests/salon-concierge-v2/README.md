@@ -47,7 +47,11 @@ Five values are declared with those shapes. `customer` holds the record and may
 be absent. `appointments` and `complaints` are lists, and the steps that fill
 them append rather than replace, so a caller who books twice ends the call with
 two bookings instead of one. `caller_reason` is a list drawn from a closed set,
-because one call can do more than one thing. `customer_phone` is text with a
+because one call can do more than one thing, and both of the steps that act
+append to it: the booking step and the complaint step each record the reason
+they ran, so a caller who books and then complains ends with two. The
+verification step records none, because it runs on a reset history and cannot
+see why the caller rang; a reason recorded there could only be asked for. `customer_phone` is text with a
 validated shape, and it carries `confirm:`, so it renders in the verification
 step's own prompt and nowhere else until the caller has agreed to it.
 

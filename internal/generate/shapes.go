@@ -166,7 +166,13 @@ _SHAPE_%s = re.compile(%s)
 
 
 def _shape_%s(value: str) -> str:
-    if not _SHAPE_%s.match(value):
+    # Empty is not a wrong value, it is no value yet. It is what a declared
+    # variable holds before anything fills it, what the state block renders as
+    # words, and what a tool hands back for a field it could not fill. Refusing
+    # it here deadlocked a live call on both targets: the model had nothing else
+    # to send, so every retry was refused the same way and the step never
+    # finished. A wrong value is still refused; an absent one is not wrong.
+    if value and not _SHAPE_%s.match(value):
         raise ValueError(%s)
     return value
 
