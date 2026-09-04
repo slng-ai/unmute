@@ -116,13 +116,22 @@ confirmation code, a reference, an ID. Delimit the characters.
 Never put full stops between single characters. NATO words, Alpha and Bravo, help
 where a letter has to be unambiguous.
 
-**A phone number is not one of these.** It is a conventional format, so write it
-the way it is written on a phone and let normalization read it: `+34 111 111 111`,
-`(415) 555-1212`. Delimiting one instead is a live-call failure already paid for
-here. A verification prompt asked for `plus 3 4, 1 1 1, 1 1 1, 1 1 1`; the voice
-said "plus three four" and never spoke the rest of the number, and the caller
+**A phone number is not one of these.** It is a conventional format, so tell the
+model to write it the way it is written on a phone, a plus sign then the country
+code then groups of two to four digits, and let normalization read it.
+Delimiting one instead is a live-call failure already paid for here. A
+verification prompt asked for `plus 3 4, 1 1 1, 1 1 1, 1 1 1`; the voice said
+"plus three four" and never spoke the rest of the number, and the caller
 confirmed digits they had not heard. Commas inside a run of digits are the thing
 that breaks it.
+
+**And never write a specimen number into a prompt.** Describe the grouping in
+words instead. A model cannot tell your illustration from a value it is holding,
+so it reads the illustration out: an agent whose prompt said never to say the
+caller's number read back the example number in its own speech rules, because
+the example was the only number in front of it. That is also how a `confirm:`
+value leaks. The compiler refuses `{{a_confirmed_value}}` in every prompt but
+its confirming step's, and a hardcoded number walks straight past that refusal.
 
 ### Conversational flow
 

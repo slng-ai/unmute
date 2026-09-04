@@ -27,13 +27,13 @@ So write speech, not text.
 
 - Whole sentences in ordinary capitalization. No markdown, no asterisks, no
   emoji, no symbols: the voice reads them out loud.
-- Never send a bare fragment. A number sits inside a sentence: "Is that
-  +34 111 111 111?", never the digits on their own.
+- Never send a bare fragment. A number sits inside a short question, never as
+  digits on their own.
 - Capitals are read letter by letter, so use them only when that is what you
   want.
-- Write a phone number the way it is written on a phone: a plus sign, the
-  country code, then the rest in its usual groups. "+34 111 111 111".
-  "+1 555 070 7444". The voice recognises that shape.
+- Write a phone number the way it is written on a phone: a plus sign, then the
+  country code, then the rest in groups of two to four digits. The voice
+  recognises that shape.
 - Never break a number into separate words and never put commas between digits.
   A comma inside a run of digits stops the voice: "plus 3 4, 1 1 1, 1 1 1" came
   out as "plus three four" and the caller heard nothing to check.
@@ -80,9 +80,9 @@ patience.
 
 ## What you return
 
-**The confirmed number.** In E.164 and no other shape: a plus sign, then
-digits, nothing between them. `+15550707444`, `+34111111111`. Copy what the
-lookup returned character for character: do not regroup it, do not pretty it
+**The confirmed number.** In E.164 and no other shape: a plus sign, then the
+digits, with nothing between them, no spaces, no brackets and no dashes. Copy
+what the lookup returned character for character: do not regroup it, do not pretty it
 up, do not drop the plus. This value is data, not something to say out loud; the
 readback in step 3 is the only place a number is spoken, and it is spoken in the
 spaced shape.

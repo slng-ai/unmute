@@ -1886,3 +1886,77 @@ func assignedField(assign []ir.AssignTo, variable string) string {
 	}
 	return ""
 }
+
+// promptFiles is every authored prompt in every package, which is every tracked
+// Markdown file inside a directory holding an agent.yaml, minus the README.
+// READMEs are for people and carry real commands with real arguments; a prompt
+// is read by a model that cannot tell an illustration from a value.
+func promptFiles(t *testing.T) map[string]string {
+	t.Helper()
+	root := filepath.Join("..", "..")
+	listed, err := exec.Command("git", "-C", root, "ls-files", "*.md").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	packages := map[string]bool{}
+	for path := range authoredPackageFiles(t) {
+		packages[filepath.Dir(path)] = true
+	}
+	out := map[string]string{}
+	for _, name := range strings.Fields(string(listed)) {
+		if filepath.Base(name) == "README.md" {
+			continue
+		}
+		dir := filepath.Dir(name)
+		owned := false
+		for pkg := range packages {
+			if dir == pkg || strings.HasPrefix(dir, pkg+"/") {
+				owned = true
+				break
+			}
+		}
+		if !owned {
+			continue
+		}
+		source, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[name] = string(source)
+	}
+	if len(out) < 5 {
+		t.Fatalf("found only %d authored prompts; the walk is looking in the wrong place", len(out))
+	}
+	return out
+}
+
+// TestNoPromptCarriesASpecimenPhoneNumber is the other half of the `confirm:`
+// refusal, and it exists because the first half was walked straight past.
+//
+// The compiler refuses a confirmed value's placeholder in every prompt but its
+// confirming step's, so an unconfirmed number reaches no other prompt. Then an
+// author writes one into the speech rules as an illustration, and the model,
+// which cannot tell an illustration from a value it is holding, reads it out.
+// On a live call the concierge, whose own prompt says never to say the caller's
+// number and holds no placeholder for one, opened with the example number from
+// its own formatting rule. The caller said yes to a number that was not theirs,
+// and the verification step then asked again with the real one.
+//
+// So: describe the grouping in words. A prompt needs no specimen, and a
+// specimen is indistinguishable from a leak.
+func TestNoPromptCarriesASpecimenPhoneNumber(t *testing.T) {
+	// A plus, then at least seven digits in any grouping. Tight enough that a
+	// prompt quoting a broken form it tells the model to avoid, which carries no
+	// plus, is not a finding.
+	specimen := regexp.MustCompile(`\+[0-9][0-9 ]{6,}[0-9]`)
+	for path, source := range promptFiles(t) {
+		for i, line := range strings.Split(source, "\n") {
+			if found := specimen.FindString(line); found != "" {
+				t.Errorf("%s:%d writes the phone number %q. A model cannot tell it from a value it is "+
+					"holding and reads it out, which is how an agent told never to say the caller's number "+
+					"said one: describe the grouping in words instead",
+					path, i+1, strings.TrimSpace(found))
+			}
+		}
+	}
+}

@@ -20,9 +20,10 @@ So write speech, not text.
 - Write money, dates, times and numbers the plain written way and let the voice
   say them: 3:00 PM, Friday the 12th, 28 euros, 20 percent. Where the salon's
   own documents write an amount out in words, quote them as written.
-- Write a phone number as a plus sign and the usual digit groups, like
-  +34 111 111 111. Never put commas between digits and never break a number
-  into separate words: the voice drops everything after the first comma.
+- Write a phone number the way it is written on a phone: a plus sign, then the
+  country code, then the rest in groups of two to four digits. Never put commas
+  between digits and never break a number into separate words: the voice drops
+  everything after the first comma.
 - One or two short sentences a turn, one question at a time.
 - Never say agent names, tool names, result keys, or raw results.
 
