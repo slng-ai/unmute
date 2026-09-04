@@ -43,6 +43,24 @@ Pull the state block from each step's request and compare. A value marked
 shows up in the agent's block, or in a later step's, the mark is not doing what
 you think.
 
+## Read the blocks in time order, and do not collapse duplicates
+
+A state block that repeats across many requests invites you to show each
+distinct one and skip the rest. Do not. Collapsing duplicates hides the one
+failure this check exists to catch, which is a value going backwards.
+
+The blocks a call produces come from different prompts: each step's, and each
+agent's. They render at different times, so at any moment two of them can
+legitimately differ. What is never legitimate is one prompt's block losing a
+value it already had. That shows up only when you list every request in time
+order, with its prompt site beside it, and read down the column.
+
+A regression found exactly this way: an agent's own block read `none recorded
+yet` for seventy seconds after the step that filled the value had finished,
+while every step's block in the same window was correct. Deduplicating the
+output had shown one correct block and one stale one and made both look like
+normal variation between sites.
+
 ## Count tool spans, not call rows
 
 A trace shows both what the model asked for and what ran, and they are not the
