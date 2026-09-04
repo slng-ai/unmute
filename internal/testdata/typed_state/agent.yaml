@@ -26,7 +26,9 @@ shapes:
     description: One thing being booked, moved or cancelled.
     fields:
       - scheduled_date: Date
-      - scheduled_time: Time
+      - name: scheduled_time
+        type: Time
+        description: The time the caller agreed to.
       - name: appointment_type
         type: Literal["haircut", "dry_cut"]
         description: The service the caller asked for, in the salon's own words.

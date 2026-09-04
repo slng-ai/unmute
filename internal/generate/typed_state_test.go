@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -125,7 +126,7 @@ func TestTypedStateEmitsTheBlockWhenAuthored(t *testing.T) {
 			"class _StateRefused(Exception):",
 			"def _typed_result(step, values):",
 			"_STATE_STRUCTURED = {",
-			`Phone = Annotated[str, AfterValidator(_shape_phone)]`,
+			"Phone = Annotated[\n    str,\n    AfterValidator(_shape_phone),\n",
 			"field(default_factory=list)",
 		} {
 			if !strings.Contains(module, want) {
@@ -575,6 +576,47 @@ func TestShapedTextAcceptsNoValueYet(t *testing.T) {
 		}
 		if strings.Contains(source, "if not _SHAPE_") {
 			t.Errorf("%s refuses an empty shaped value; that is what deadlocked a live call on both targets", provider)
+		}
+	}
+}
+
+// A shaped text type is the one type whose value the model has to spell a
+// particular way, and the only keyword that can tell it so is the description:
+// a `format` or a `pattern` is stripped or refused (see the gate above). Left
+// off, the format was learned from a refusal mid-call, which is a wasted model
+// round trip on every value the prompt spells one way and the type another. A
+// live call spent one on `"11:30 AM"` against a `Time`.
+func TestShapedTextTellsTheModelItsFormat(t *testing.T) {
+	agent := loadTypedState(t)
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		source := emitted(t, agent, provider)
+		for _, kind := range []ir.ShapedText{ir.ShapedPhone, ir.ShapedDate, ir.ShapedTime, ir.ShapedID} {
+			alias := string(kind) + " = Annotated["
+			if !strings.Contains(source, alias) {
+				continue
+			}
+			phrase := ShapedPhrase(kind)
+			if !strings.Contains(source, "AfterValidator(_shape_"+strings.ToLower(string(kind))+"),\n    Field(description="+strconv.Quote(phrase)) {
+				t.Errorf("%s emits %s with no description carrying %q, so the model is told nothing "+
+					"about the shape until a value is refused mid-call", provider, kind, phrase)
+			}
+			// One phrase, so the sentence the model is shown and the sentence a
+			// refusal prints cannot drift into naming two different formats.
+			if !strings.Contains(source, strconv.Quote("expected "+phrase)) {
+				t.Errorf("%s refuses a wrong %s with wording that is not %q", provider, kind, "expected "+phrase)
+			}
+		}
+	}
+	// A field that documents itself keeps its own sentence, because Pydantic
+	// takes the closest description and drops the alias's. So the format is
+	// appended to it: documenting a field is otherwise the one thing that stops
+	// the model being told what shape the value takes.
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		source := emitted(t, agent, provider)
+		want := "The time the caller agreed to. Expected " + ShapedPhrase(ir.ShapedTime) + "."
+		if !strings.Contains(source, strconv.Quote(want)) {
+			t.Errorf("%s does not emit %q; a described shaped field keeps its own sentence and loses "+
+				"the alias's, so the format has to be appended to it", provider, want)
 		}
 	}
 }

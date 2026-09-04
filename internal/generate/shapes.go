@@ -20,32 +20,42 @@ import (
 // "the same on both targets" (FR-006) is a property of this file rather than of
 // two templates kept in step by hand.
 
-// shapedPattern is the check each text type carries, and the sentence a refusal
-// prints. The pattern lives in an AfterValidator in the emitted code and never
-// in the annotation: a `pattern=` constraint reaches the schema the model is
-// sent, one target's strict converter strips neither `format` nor `pattern`,
+// shapedPattern is the check each text type carries, and the phrase that says
+// what it wants. The pattern lives in an AfterValidator in the emitted code and
+// never in the annotation: a `pattern=` constraint reaches the schema the model
+// is sent, one target's strict converter strips neither `format` nor `pattern`,
 // strict is that target's default, and the provider rejects both.
+//
+// One phrase, used twice: a refusal prints "expected " and it, and the emitted
+// alias carries it as its description. Two strings would be two things to keep
+// in step, and the day they drift the model is told one format and refused
+// against another.
 var shapedPatterns = map[ir.ShapedText]struct {
-	regex    string
-	expected string
+	regex  string
+	phrase string
 }{
 	ir.ShapedPhone: {
 		`^\+[1-9]\d{6,14}$`,
-		"expected a phone number in E.164, one leading plus and 7 to 15 digits, like +34600111222",
+		"a phone number in E.164, one leading plus and 7 to 15 digits, like +34600111222",
 	},
 	ir.ShapedDate: {
 		`^\d{4}-\d{2}-\d{2}$`,
-		"expected a day written year-month-day, like 2026-03-19",
+		"a day written year-month-day, like 2026-03-19",
 	},
 	ir.ShapedTime: {
 		`^([01]\d|2[0-3]):[0-5]\d$`,
-		"expected a time of day on the 24-hour clock, like 09:30 or 17:45",
+		"a time of day on the 24-hour clock, like 09:30 or 17:45",
 	},
 	ir.ShapedID: {
 		`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`,
-		"expected an identifier: letters, digits, and then any of dot, dash, underscore or colon",
+		"an identifier: letters, digits, and then any of dot, dash, underscore or colon",
 	},
 }
+
+// ShapedPhrase is what a text type wants, as the emitted description says it.
+// Exported for the gate that reads it out of the emitted module: the sentence
+// the model is shown and the sentence a refusal prints have to be the same one.
+func ShapedPhrase(kind ir.ShapedText) string { return shapedPatterns[kind].phrase }
 
 // pyRaw writes a pattern as a Python raw string. Not pyQuote: that escapes
 // every backslash, and a regex is mostly backslashes, so the emitted pattern
@@ -145,7 +155,12 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 	block.NeedsRe = len(used) > 0
 	block.NeedsJSON = true
 	block.NeedsLiteral = declaresLiteral(agent)
-	block.NeedsAnnotated = block.NeedsLiteral || fieldCarriesDescription(agent, classes)
+	// A shaped text type is itself an Annotated alias, so using one needs the
+	// import even in a package that declares no literal and no description. It
+	// was missing, and the package that would have found it does not exist yet:
+	// every shipped one declaring a shaped type also declares one of the other
+	// two, so the import arrived for another reason.
+	block.NeedsAnnotated = block.NeedsRe || block.NeedsLiteral || fieldCarriesDescription(agent, classes)
 
 	var b strings.Builder
 	b.WriteString(`# --- declared state ----------------------------------------------------------
@@ -180,10 +195,21 @@ def _shape_%s(value: str) -> str:
 # AfterValidator and never a pattern= constraint: a pattern reaches the schema
 # the model is sent, one target's strict converter keeps it, and the provider
 # rejects it. So the schema says str and the shape is checked here.
-%s = Annotated[str, AfterValidator(_shape_%s)]
+#
+# The description is how the format reaches the model at all, and it is the only
+# keyword that can: it travels as prose, so no strict converter strips it. A
+# field that said nothing about its shape was learned from a refusal mid-call,
+# which cost a model round trip on every value the prompt spells one way and
+# this type another. A field carrying its own description keeps that one; the
+# emitter appends this phrase to it.
+%s = Annotated[
+    str,
+    AfterValidator(_shape_%s),
+    Field(description=%s),
+]
 `,
 			strings.ToUpper(lower), pyRaw(row.regex), lower, strings.ToUpper(lower),
-			pyQuote(row.expected), string(kind), lower)
+			pyQuote("expected "+row.phrase), string(kind), lower, pyQuote(row.phrase))
 	}
 	for _, class := range classes {
 		b.WriteString("\n\nclass " + class.Name + "(BaseModel):\n")
@@ -491,13 +517,34 @@ func PyAnno(ref *ir.TypeRef) string {
 // pyFieldAnno is one class field's annotation, carrying its description so the
 // model is told what the field means without the author repeating it in prose
 // (FR-014).
+//
+// A field's own description replaces the one its shaped type carries rather
+// than joining it, which is Pydantic's rule and not a choice made here. So the
+// format is appended: documenting a field is otherwise the one thing that would
+// stop the model being told what shape the value has to be.
 func pyFieldAnno(field ir.Field) string {
 	anno := PyAnno(field.Type)
 	if field.Description == "" {
 		return anno
 	}
+	description := field.Description
+	if kind := shapedKind(field.Type); kind != "" {
+		description = strings.TrimSuffix(description, " ") + " Expected " + shapedPatterns[kind].phrase + "."
+	}
 	return "Annotated[\n        " + anno + ",\n        Field(description=" +
-		pyQuote(field.Description) + "),\n    ]"
+		pyQuote(description) + "),\n    ]"
+}
+
+// shapedKind is the text type a field is declared with, through a list if it is
+// a list of them, and empty for anything else.
+func shapedKind(ref *ir.TypeRef) ir.ShapedText {
+	if ref == nil {
+		return ""
+	}
+	if ref.Shaped != "" {
+		return ref.Shaped
+	}
+	return shapedKind(ref.List)
 }
 
 // usedShapedText is the set of text types the package actually declares, so a
