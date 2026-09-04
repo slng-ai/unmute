@@ -3,15 +3,15 @@
 Whole packages we compile, deploy and talk to. Not shipped, not examples, and
 nobody is pointed at one as a starting shape.
 
-Three places in this tree hold a package, and they are for different things:
+Three places in this tree hold a package, and they are for different things.
+`examples/` holds the packages a reader is sent to and the shapes the docs
+describe, so each one carries every example gate: a README naming its
+transports, resolving links, and the model and framework pins.
+`internal/testdata/` holds the smallest package that makes one unit assertion
+possible, and it only has to validate and build. This directory holds a whole
+agent we run against real providers, to find what only a real call finds.
 
-| Directory | What it is for | Held to |
-|---|---|---|
-| `examples/` | packages a reader is sent to, and the shapes the docs describe | every example gate: a README naming its transports, resolving links, the model and framework pins |
-| `internal/testdata/` | the smallest package that makes one unit assertion possible | validates and builds |
-| `internal/voice-agents-tests/` | a whole agent we run against real providers, to find what only a real call finds | validates clean and generates on every target it declares |
-
-The bar for this directory is in `internal/generate/examples_test.go`:
+The bar here is in `internal/generate/examples_test.go`:
 `TestVoiceAgentTestPackagesValidateAndGenerate` loads every subdirectory holding
 an `agent.yaml`, validates it against every target it declares with zero errors,
 and generates each one. A package here that stops compiling fails the default
@@ -24,9 +24,10 @@ finding out about.
 
 ## What is here
 
-| Package | What it is for |
-|---|---|
-| [`salon-concierge-v2`](salon-concierge-v2/) | the same salon as `examples/salon-concierge` with each step's context chosen per step and one more value carried as a declared variable, so the two can be run against each other on a real call |
+[`salon-concierge-v2`](salon-concierge-v2/) is the same salon as
+`examples/salon-concierge` with each step's context chosen per step and one more
+value carried as a declared variable, so the two can be run against each other
+on a real call.
 
 ## Running one
 
