@@ -717,32 +717,16 @@ func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
 		t.Errorf("verify_customer runs on history %q; this package's point is that a step reading a number back needs no conversation, so it is %q", got, ir.HistoryReset)
 	}
 
-	// The scopes the package's owner chose, asserted by name rather than as one
-	// rule, because they are no longer all the same and the difference is the
-	// thing to keep visible.
-	//
-	// `manage_booking`, `handle_complaint` and `to_concierge` were moved to
-	// `reset` on 2026-09-04 to cut tokens. Each of the three has to fill a
-	// `reason:` from what the caller said, and a reset step never receives the
-	// triggering utterance, which is the cost `verify_customer` records above
-	// and the reason it is the only step that was on `reset` before. Declared
-	// state carries what the call established, not the request in flight, so
-	// there is no variable for these steps to read it from. Watch a call for a
-	// step asking what the caller is ringing about, or a `reason` that does not
-	// match what they asked for. Both are this line.
+	// Everywhere else: the spoken turns, without the tool records. Both handoffs
+	// included, because a handoff is where a trimmed context is permanent.
 	for name, got := range map[string]ir.History{
-		"manage_booking":   resolved.Tasks["manage_booking"].Context.History,
-		"handle_complaint": resolved.Tasks["handle_complaint"].Context.History,
-		"to_concierge":     resolved.Controls["to_concierge"].(*ir.AgentTransfer).Context.History,
+		"manage_booking": resolved.Tasks["manage_booking"].Context.History,
+		"to_complaints":  resolved.Controls["to_complaints"].(*ir.AgentTransfer).Context.History,
+		"to_concierge":   resolved.Controls["to_concierge"].(*ir.AgentTransfer).Context.History,
 	} {
-		if got != ir.HistoryReset {
-			t.Errorf("%s carries history %q, want %q: the package moved these three off the transcript deliberately", name, got, ir.HistoryReset)
+		if got != ir.HistoryMessages {
+			t.Errorf("%s carries history %q, want %q: a tool record crossing this seam is what the package removes", name, got, ir.HistoryMessages)
 		}
-	}
-	// `to_complaints` stays on the spoken turns: it is the seam where the caller
-	// has just described a problem nobody has recorded yet.
-	if got := resolved.Controls["to_complaints"].(*ir.AgentTransfer).Context.History; got != ir.HistoryMessages {
-		t.Errorf("to_complaints carries history %q, want %q: the caller's own description of the problem crosses here and no value holds it", got, ir.HistoryMessages)
 	}
 
 	// Both handoffs carry every variable. Not a preference: a `variables:` subset

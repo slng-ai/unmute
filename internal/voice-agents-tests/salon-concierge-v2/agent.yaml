@@ -71,7 +71,7 @@ agents:
           reason: Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]
           summary: string
         context:
-          history: reset
+          history: messages
     handoffs:
       - to_complaints
     escalations:
@@ -116,7 +116,7 @@ agents:
           reason: Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]
           summary: string
         context:
-          history: reset
+          history: messages
     handoffs:
       - to_concierge
     escalations:
@@ -134,7 +134,7 @@ handoffs:
     to: concierge
     when: The caller changes to a request owned by another specialist.
     context:
-      history: reset
+      history: messages
       variables: all
 
 escalations:
