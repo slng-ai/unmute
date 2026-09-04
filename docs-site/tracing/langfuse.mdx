@@ -44,7 +44,9 @@ Each target picks its own session ID from something it already has:
 | `pipecat` | `conversation` and `turn` spans, plus `llm` and `tts` generation observations |
 | `livekit` | `llm_node` and `llm_request` generation observations, plus the session and agent spans |
 
-With Langfuse tracing enabled, Pipecat MCP calls emit finite `tool:<name>` spans with tool arguments and, when completed, the result.
+Every tool call is its own span, named `tool:<name>` after the tool that ran, carrying the arguments and, once the call finishes, the result. Both targets name it that way. On `livekit` the framework names all of them `function_tool` and puts the real name in an attribute, so the generated tracing module puts the name back before the span is sent.
+
+A task's structured result is the arguments of its `finish` call, so it is on that call's span rather than on the model request that produced it. That call is named `finish` on `livekit`, and on `pipecat` it carries the step name twice over, once for the entry that runs it, as in `finish_verify_customer_verify_customer`. Every one of them also takes `unserved_request`, which is empty unless the step handed a request back for the agent that owns it to serve.
 
 Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
 

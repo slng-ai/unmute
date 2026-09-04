@@ -10,8 +10,39 @@ from livekit.agents import AgentSession, JobContext
 from livekit.agents.metrics import STTMetrics, TTSMetrics
 from livekit.agents.telemetry import set_tracer_provider
 from livekit.agents.voice import ConversationItemAddedEvent, MetricsCollectedEvent
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.util.types import AttributeValue
+
+
+def _name_tool_spans(span: ReadableSpan) -> bool:
+    """Give a tool span the name of the tool that ran, and export everything.
+
+    livekit-agents starts every tool span as the literal "function_tool"
+    (voice/generation.py) and sets the tool's own name as an attribute inside
+    the span body. A trace view lists span names, so every tool call in a call
+    looks identical and which tool ran is only visible by opening each one. The
+    Pipecat target names the same span `tool:<name>`, so doing it here makes a
+    call read the same way on both targets.
+
+    It has to happen at the end, because the end is the first moment the name
+    is known, and an ended span arrives here as a ReadableSpan with no
+    update_name(). So `_name` is the only seam there is. That is a private
+    attribute, and deliberately: the langfuse processor that calls this hook
+    reads the same `span._name` a few lines further down its own on_end, so the
+    attribute is load-bearing in this dependency whether we touch it or not. If
+    a release renames it, the assignment raises AttributeError, tool spans keep
+    livekit's generic name, and nothing else about the trace changes.
+
+    This is a filter hook, so its answer decides whether the span is exported
+    at all. It always exports.
+    """
+    tool = (span.attributes or {}).get("lk.function_tool.name")
+    if tool and span.name == "function_tool":
+        try:
+            span._name = f"tool:{tool}"
+        except AttributeError:
+            pass
+    return True
 
 
 def setup_langfuse(
@@ -35,7 +66,7 @@ def setup_langfuse(
         secret_key=secret_key,
         base_url=base_url,
         tracer_provider=trace_provider,
-        should_export_span=lambda span: True,
+        should_export_span=_name_tool_spans,
     )
 
     async def flush_trace() -> None:

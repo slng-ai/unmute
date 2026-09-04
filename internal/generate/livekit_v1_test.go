@@ -55,6 +55,64 @@ func TestLiveKitTaskRetryDoesNotRestartTheScript(t *testing.T) {
 	}
 }
 
+// A tool span carries the name of the tool that ran (V5).
+//
+// livekit-agents starts every one of them as the literal "function_tool" and
+// puts the tool's name in an attribute inside the span, so a trace lists one
+// identical row per tool call and reading a call means opening each row to
+// find out which tool it was. Pipecat names the same span `tool:<name>`, so
+// this is also what makes one call comparable across the two targets.
+//
+// The rename is only possible at the end of the span, where the hook gets a
+// ReadableSpan with no update_name(), so it writes `_name`. That is a private
+// attribute of a dependency, which is exactly the kind of thing that stops
+// working quietly, so this asserts the guard as well as the rename: a missing
+// attribute leaves the name alone, an AttributeError is swallowed, and the
+// hook always exports, because its answer decides whether the span is kept.
+func TestLiveKitNamesAToolSpanAfterItsTool(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enableLangfuse(agent)
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracing := artifactFile(t, artifact, "tracing.py")
+
+	for _, want := range []string{
+		`def _name_tool_spans(span: ReadableSpan) -> bool:`,
+		`tool = (span.attributes or {}).get("lk.function_tool.name")`,
+		`if tool and span.name == "function_tool":`,
+		`span._name = f"tool:{tool}"`,
+		`except AttributeError:`,
+		"should_export_span=_name_tool_spans",
+		"from opentelemetry.sdk.trace import ReadableSpan, TracerProvider",
+	} {
+		if !strings.Contains(tracing, want) {
+			t.Errorf("tracing.py missing %q", want)
+		}
+	}
+
+	hook := pipecatMethodBody(t, tracing, "def _name_tool_spans(", "\n\n\ndef ")
+	if !strings.HasSuffix(strings.TrimSpace(hook), "return True") {
+		t.Errorf("the filter hook must end by exporting the span, or a rename drops it:\n%s", hook)
+	}
+	if strings.Contains(hook, "return False") {
+		t.Errorf("this hook renames, it never drops:\n%s", hook)
+	}
+	guardAt := strings.Index(hook, "except AttributeError:")
+	renameAt := strings.Index(hook, `span._name = f"tool:{tool}"`)
+	if guardAt < 0 || renameAt < 0 || guardAt < renameAt {
+		t.Errorf("the private write must be guarded, so a renamed attribute upstream is not a crash mid-call:\n%s", hook)
+	}
+}
+
 func TestLiveKitV1RemyGolden(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
@@ -160,7 +218,7 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 		"def setup_langfuse(",
 		"def trace_speech_metrics(",
 		"set_tracer_provider(trace_provider, metadata=metadata)",
-		"should_export_span=lambda span: True",
+		"should_export_span=_name_tool_spans",
 		"ctx.add_shutdown_callback(flush_trace)",
 		`@session.on("conversation_item_added")`,
 	} {
