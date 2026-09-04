@@ -20,6 +20,11 @@ var movedToolKeys = map[string]string{
 	"auth":         "move auth inside the `webhook:` block",
 	"token_env":    "move token_env under `webhook.auth`",
 	"instructions": "move instructions inside the `builtin:` block",
+	// Retired the other way round from the rest: it did not move inside a block,
+	// it moved onto the caller. A promise on the tool answered "does this write"
+	// once for every use of it; the question is really about one use, so the
+	// prefetch entry that runs the tool answers it.
+	"read_only": "it moved to the caller, because the question is about one use of the tool rather than about the tool: write `writes: true` or `writes: false` on the prefetch entry that runs this one",
 }
 
 // contractToolKeys are the top-level fields that state one tool's contract with

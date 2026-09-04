@@ -42,7 +42,7 @@ func guardedFixture(t *testing.T) *ir.Agent {
 	}
 	agent.Controls["verify_customer"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "book", When: "Identify the caller.",
-		Assign: map[string]string{"customer_id": "result.booked"},
+		Assign: []ir.AssignTo{{Var: "customer_id", Field: "booked"}},
 	}
 	intake := agent.Agents["intake"]
 	intake.Tools = append(intake.Tools, "manage_booking", "verify_customer")

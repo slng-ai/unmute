@@ -15,8 +15,10 @@ caller -> your Twilio number -> Elastic SIP Trunk -> LiveKit SIP -> dispatch rul
 
 This route is SIP. It shares nothing with the Pipecat Twilio route except the
 account the number lives in, and it is the route with the most capability: cold
-transfer, warm transfer, voicemail detection, and the call facts a
-[pre-fetch](/build/prefetch) can read before the greeting.
+transfer, warm transfer, voicemail detection, and seven of the eight call
+facts a [pre-fetch](/build/prefetch) can read before the greeting, every one
+but `stream_id`. The two Pipecat Twilio routes grant a smaller set; see
+[Where it works](/build/prefetch#where-it-works) for the full grid.
 
 <Note>
   Your own `build/livekit/README.md` is the authority for your build. It names

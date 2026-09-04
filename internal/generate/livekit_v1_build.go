@@ -177,6 +177,17 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		scanArgs([]livekitArg{data.Unserved})
 	}
 	data.NeedsField = needAnnotated
+	typed, err := TypedState(agent)
+	if err != nil {
+		return livekitData{}, err
+	}
+	if typed.Source != "" {
+		data.TypedState = &typed
+		needAnnotated = needAnnotated || typed.NeedsAnnotated
+		needLiteral = needLiteral || typed.NeedsLiteral
+	}
+	data.PydanticImports = PydanticImports(data.NeedsField, data.TypedState != nil)
+	data.NeedsDataclassField = StateNeedsDataclassField(agent)
 	var typingNames []string
 	if needAnnotated {
 		typingNames = append(typingNames, "Annotated")
@@ -323,11 +334,10 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// on the session; `assign` and `requires` read and write its fields.
 	for _, name := range sortedVarNames(agent) {
 		v := agent.Variables[name]
-		def := "None"
-		if v.Default != nil {
-			def = pyLiteral(v.Default)
-		}
-		data.Vars = append(data.Vars, livekitVar{Name: name, PyType: pyType(v.Type), Default: def, Description: oneLine(v.Description)})
+		anno, def := stateField(v, true)
+		data.Vars = append(data.Vars, livekitVar{
+			Name: name, PyType: pyType(v.Type), Anno: anno, Default: def, Description: oneLine(v.Description),
+		})
 		if v.Source == ir.VariableSourceCallStart || v.Source == "" {
 			data.CallStartVars = append(data.CallStartVars, livekitCallStartVar{
 				Name: name, Type: string(v.Type), TypeCheck: livekitTypeCheck(v.Type),
@@ -380,7 +390,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		data.NeedsPrefetchClock, data.NeedsPrefetchAsync = block.NeedsClock, block.NeedsAsync
 		data.NeedsPrefetchLocal, data.NeedsPrefetchSeed = block.NeedsLocal, block.NeedsSeed
 		data.NeedsHTTPX = data.NeedsHTTPX || prefetchNeedsHTTPX(agent)
-		data.PrefetchRunbook, _ = PrefetchRunbook(agent)
+		data.PrefetchRunbook, _ = PrefetchRunbook(agent, tgt)
 	}
 	if data.Capture != nil {
 		data.NeedsFunctionTools = true // the generated capture tool is a @function_tool too
@@ -1019,10 +1029,10 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 		} else {
 			single.CtxExpr, _ = livekitCtxExpr(task.Context)
 		}
-		for variable, path := range c.Assign {
+		for _, entry := range c.Assign {
 			single.Assign = append(single.Assign, livekitAssign{
-				Var: variable, Field: strings.TrimPrefix(path, "result."),
-				Confirms: agent.Variables[variable].Confirm == c.Task,
+				Var: entry.Var, Field: entry.Field, Append: entry.Append,
+				Confirms: agent.Variables[entry.Var].Confirm == c.Task,
 			})
 		}
 		sort.Slice(single.Assign, func(i, j int) bool { return single.Assign[i].Var < single.Assign[j].Var })
@@ -1113,6 +1123,10 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 			Anno: pyAnno(base, rf.Enum, ""),
 		})
 	}
+	for _, field := range task.Result {
+		built.Typed = built.Typed || field.Shape != nil
+	}
+	built.ResultExpr = livekitResultExpr(built)
 	for _, ref := range task.Tools {
 		tool, ok := agent.Tools[ref]
 		if !ok {
@@ -1558,9 +1572,37 @@ func humanize(name string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(name, "_", " "), "-", " ")
 }
 
+// livekitResultExpr is the dict the finish handler hands back.
+//
+// Untyped, it is the literal the template used to write inline in four places:
+// each declared field's own name to the argument of that name. Typed, it is the
+// local the validating preamble left behind, so the values recorded are the
+// validated ones and a shape arrives as plain data rather than as a model,
+// which is the only shape this framework accepts back from a tool.
+func livekitResultExpr(task livekitTask) string {
+	if task.Typed {
+		return "_values"
+	}
+	entries := make([]string, 0, len(task.Result))
+	for _, field := range task.Result {
+		entries = append(entries, pyQuote(field.Name)+": "+field.Name)
+	}
+	return "{" + strings.Join(entries, ", ") + "}"
+}
+
 func resultPyType(field ir.ResultField) string {
+	// A declared shape lowers to its generated class, so the model is told the
+	// field names, their types and their descriptions.
+	//
+	// This used to return "dict" for anything nested, which is the silent gap
+	// this closes: a bare dict annotation carries no field names, so the
+	// pydantic conversion had nothing to turn into properties and the model was
+	// asked for an object and told nothing about what belongs in it.
+	if field.Shape != nil {
+		return PyAnno(field.Shape)
+	}
 	if field.Schema != nil {
-		return "dict" // nested result schema (code targets only): a JSON object arg
+		return "dict" // a raw JSON Schema object, forwarded as a JSON object arg
 	}
 	if len(field.Enum) > 0 {
 		return "str"

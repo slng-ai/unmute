@@ -42,7 +42,12 @@ the value comes from, and it changes what you can do with the variable.
 |---|---|---|
 | `call_start` | whatever starts the call | before the first word |
 | `conversation` | the model, during the call | whenever the caller says it |
-| system sources such as `from_number`, `direction`, `call_id` | the phone adapter | on a LiveKit phone call; no Pipecat route supplies one |
+| system sources such as `from_number`, `direction`, `call_id` | the phone adapter | on a phone call, when the route grants that fact. LiveKit's two routes grant the most; Pipecat's two Twilio routes grant a smaller set, each in one direction only for a phone number |
+
+A system source works the same way whether you put it straight on a variable's
+own `source:` or read it through a [`prefetch:`](/build/prefetch) entry: both
+read the same route table, so the fact hydrates on whichever route grants it.
+See the [Variables reference](/reference/variables#sources) for the full grid.
 
 ## Use one in the greeting
 
@@ -145,6 +150,70 @@ cannot call book_appointment yet: requested_service not set. Ask the caller firs
 
 So the model asks. `customer_id` never trips this, because it declares a
 default.
+
+## Group related fields into a shape
+
+Some values are not one thing. A booking has a date, a time and a service.
+Instead of three separate variables, declare a shape once and give a
+variable that shape as its type:
+
+```yaml agent.yaml
+shapes:
+  - name: Appointment
+    description: One thing being booked, moved or cancelled.
+    fields:
+      - scheduled_date: Date
+      - scheduled_time: Time
+      - name: appointment_type
+        type: Literal["haircut", "haircolor", "dry_cut"]
+        description: The service the caller asked for, in the salon's own words.
+
+variables:
+  appointments:
+    type: list[Appointment]
+    description: What this call has booked so far, in the order the caller gave them.
+```
+
+A task fills it the same way it fills any variable, through `assign:`. The
+`+` appends the result to the list instead of replacing it, so a second
+booking in the same call does not erase the first:
+
+```yaml agent.yaml
+      - name: book
+        instructions: tasks/book.md
+        assign:
+          - appointments+: result.appointment
+        result:
+          appointment: Appointment
+          summary: string
+        context:
+          history: reset
+```
+
+## Read the block the compiler adds
+
+Every agent prompt and every task prompt gets one more thing after your own
+text, written by the compiler and never by you:
+
+```text
+Conversation info:
+What this call has established so far. Read it rather than re-reading the
+conversation, and never ask for something already recorded here.
+1. Appointments: [{"scheduled_date":"2026-09-10","scheduled_time":"10:00","appointment_type":"haircut"}]
+```
+
+Before anything is booked, the same line renders as:
+
+```text
+1. Appointments: none recorded yet.
+```
+
+never as `[]` or `null`, so a step can tell "not yet known" from "known to be
+nothing". Add a field to the shape and every prompt shows it, with no prompt
+file touched.
+
+For the full type grammar a shape's fields and a variable's `type:` can use,
+see the [Variables reference](/reference/variables).
 
 ## Secrets are not variables
 

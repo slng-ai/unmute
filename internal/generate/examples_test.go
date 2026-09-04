@@ -51,7 +51,7 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 // single-agent shape the compiler tests need.
 func examplePackagePath(name string) string {
 	switch name {
-	case "remy", "safe_core", "daily_carrier", "simple-prompt":
+	case "remy", "safe_core", "daily_carrier", "simple-prompt", "typed_state":
 		return filepath.Join("..", "testdata", name)
 	case "salon-concierge-v2":
 		// Not a shipped example. It is a package we run against real providers,
@@ -350,26 +350,48 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if _, declared := resolved.Tools["get_current_date"]; declared {
 		t.Error("get_current_date is still declared; the prefetch replaced it")
 	}
-	if resolved.Timezone == "" {
-		t.Error("the package declares no timezone:, so the pre-fetched date would be read in UTC")
-	}
 	var clock, caller, profile bool
 	for _, entry := range resolved.Prefetch {
-		clock = clock || entry.Clock == ir.PrefetchClockDate
+		if entry.Clock == ir.PrefetchClockNow {
+			clock = true
+			// The zone rides the entry that reads it. Without one the date would
+			// be read on the container clock, which is UTC.
+			if entry.Timezone == "" {
+				t.Errorf("prefetch %q reads the clock and names no zone, so the date is read in UTC", entry.Name)
+			}
+			// One reading, three facts. This is the saving the whole entry exists
+			// for: a second clock fact costs a line, not a turn.
+			if got := len(entry.Assign); got < 3 {
+				t.Errorf("the clock entry assigns %d variables, want at least 3: one reading fills as many "+
+					"facts as the prompt needs, and an example showing one teaches that it does not", got)
+			}
+		}
 		caller = caller || entry.Source == ir.VariableSourceFromNumber
 		profile = profile || entry.Tool == "look_up_customer"
 	}
 	if !clock || !caller || !profile {
 		t.Errorf("prefetch = %+v, want a clock entry, a from_number entry and a look_up_customer entry", resolved.Prefetch)
 	}
-	// The lookup a prefetch runs has to be the read-only one. Pre-fetching
-	// find_or_create_customer would create a customer record on every inbound
-	// call, wrong numbers included, which is the reason both tools exist.
-	if !resolved.Tools["look_up_customer"].ReadOnly {
-		t.Error("look_up_customer does not declare read_only: true, so no prefetch could run it")
+	// The lookup a prefetch runs has to be the one that writes nothing, and the
+	// entry running it has to say so. Pre-fetching find_or_create_customer would
+	// create a customer record on every inbound call, wrong numbers included,
+	// which is the reason both tools exist and why the split survived `writes:`
+	// arriving: the shipped example an author copies should not model it.
+	var declared bool
+	for _, entry := range resolved.Prefetch {
+		if entry.Tool != "look_up_customer" {
+			continue
+		}
+		declared = true
+		if entry.Writes {
+			t.Error("the salon pre-fetches look_up_customer and declares writes: true; that entry reads")
+		}
 	}
-	if resolved.Tools["find_or_create_customer"].ReadOnly {
-		t.Error("find_or_create_customer claims read_only: true, and it writes")
+	if !declared {
+		t.Error("no prefetch entry runs look_up_customer, so nothing declares whether the lookup writes")
+	}
+	if _, ok := resolved.Tools["find_or_create_customer"]; !ok {
+		t.Error("find_or_create_customer is gone; it is the writing twin the pre-fetched lookup exists to avoid")
 	}
 	wantBookingResult := []string{"action", "booking_id", "status", "summary"}
 	if got := slices.Sorted(maps.Keys(booking.Result)); !slices.Equal(got, wantBookingResult) {
@@ -599,15 +621,15 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	}
 	requireText("verification delegate", verificationDelegate.When,
 		"reads the phone number back", "needs a yes before it looks anyone up")
-	if _, assigned := verificationDelegate.Assign["customer_name"]; assigned {
+	if slices.Contains(ir.AssignedVars(verificationDelegate.Assign), "customer_name") {
 		t.Error("verify_customer still assigns customer_name")
 	}
 	// Assigned from the result rather than captured from speech: a task result
 	// lands on both drivers by the same path customer_id already proves, while a
 	// conversation-sourced value depends on the capture tool firing, which is
 	// the write site Pipecat missed once already.
-	if got := verificationDelegate.Assign["customer_phone"]; got != "result.customer_phone" {
-		t.Errorf("verify_customer assigns customer_phone from %q, want result.customer_phone", got)
+	if got := assignedField(verificationDelegate.Assign, "customer_phone"); got != "customer_phone" {
+		t.Errorf("verify_customer assigns customer_phone from result.%q, want result.customer_phone", got)
 	}
 	lookup := resolved.Tools["find_or_create_customer"]
 	requireText("customer lookup", lookup.Description,
@@ -634,7 +656,9 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		// tool to call for it, and it says out loud not to call one. A model handed
 		// a date and still told to "call get_current_date first" would call a tool
 		// that no longer exists.
-		"Today is `{{booking_date}}`", "Do not call a tool to ask what day it is",
+		"Today is `{{booking_weekday}}` `{{booking_date}}`",
+		"the salon clock reads\n   `{{salon_local_time}}`",
+		"Do not\n   call a tool to ask what day or time it is",
 		"Never say a booking is saved, moved, or cancelled unless the matching tool ran in this turn")
 	// Open chat is the entry agent's job now, and it holds exactly one lookup:
 	// the salon's own documents. The prompt's job is the same as the deleted chat
@@ -747,23 +771,148 @@ func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
 	if !ok {
 		t.Fatalf("manage_booking = %#v, want a delegate", resolved.Controls["manage_booking"])
 	}
-	if !slices.Contains(booking.Requires, "customer_status") {
-		t.Errorf("manage_booking requires %v; tasks/booking.md reads {{customer_status}}, and the requires: entry is what makes that legal and what holds the step back until the value exists", booking.Requires)
+	// The booking step names a field inside the declared record, which is the
+	// path form: the flat customer_status it replaced said the same thing in a
+	// second variable, and one of the two would have gone stale. The guard still
+	// holds the step back until the verification step has looked somebody up.
+	if !slices.Contains(booking.Requires, "customer.status") {
+		t.Errorf("manage_booking requires %v; the guard names a field inside the declared customer record, and it is what holds the step back until that record exists", booking.Requires)
 	}
 	verify, ok := resolved.Controls["verify_customer"].(*ir.Delegate)
 	if !ok {
 		t.Fatalf("verify_customer = %#v, want a delegate", resolved.Controls["verify_customer"])
 	}
-	if verify.Assign["customer_status"] != "result.status" {
-		t.Errorf("verify_customer assigns customer_status from %q, want result.status: nothing else in the package supplies it", verify.Assign["customer_status"])
+	if got := assignedField(verify.Assign, "customer"); got != "customer" {
+		t.Errorf("verify_customer assigns customer from result.%q, want result.customer: nothing else in the package supplies it", got)
 	}
 
 	// No default, and this is the load-bearing one. A default is a value the
-	// variable holds before the first word, so a defaulted customer_status
-	// satisfies the booking guard on an empty string and the step starts on a
-	// caller nobody looked up.
-	if def := resolved.Variables["customer_status"].Default; def != nil {
-		t.Errorf("customer_status declares default %#v; the booking guard would then be satisfied before verification ran", def)
+	// variable holds before the first word, so a defaulted customer satisfies
+	// the booking guard on an empty record and the step starts on a caller
+	// nobody looked up.
+	if def := resolved.Variables["customer"].Default; def != nil {
+		t.Errorf("customer declares default %#v; the booking guard would then be satisfied before verification ran", def)
+	}
+	if shape := resolved.Variables["customer"].Shape; shape == nil || shape.String() != "Customer | None" {
+		t.Errorf("customer resolves to %q, want Customer | None: absent until the verification step fills it", shape.String())
+	}
+
+	// The declared shapes, and the four values they back. This package is what
+	// the feature is verified with, so a package that stops exercising a part of
+	// it fails here rather than passing quietly.
+	//
+	// The field floor is per shape rather than one number, because a shape is
+	// only as wide as the tools that fill it. `Customer` carries two: the
+	// lookup returns a number and a status and nothing else, so a third field
+	// would be one the model could only invent, which is the defect the shape's
+	// own `no id` comment records and the one the missing name recreated. Two
+	// still exercises what this shape is here for, a shaped text beside a
+	// Literal, and that pair is asserted rather than the count.
+	floors := map[string]int{"Customer": 2, "Appointment": 3, "Complaint": 3}
+	for _, name := range []string{"Customer", "Appointment", "Complaint"} {
+		shape, declared := resolved.Shapes[name]
+		if !declared {
+			t.Errorf("shape %q is no longer declared, so nothing in the tree exercises it", name)
+			continue
+		}
+		if len(shape.Fields) < floors[name] {
+			t.Errorf("shape %q declares %d fields, want at least %d; it is the verification package's own shape and it is meant to be a group",
+				name, len(shape.Fields), floors[name])
+		}
+		if shape.Description == "" {
+			t.Errorf("shape %q has no description, so the model is never told what the class is for", name)
+		}
+	}
+	// What `Customer` is for, now that its floor is two: the shaped text and the
+	// Literal are the two kinds a step has to hand back correctly, and a live
+	// call refused both before they were right.
+	var shaped, literal bool
+	for _, field := range resolved.Shapes["Customer"].Fields {
+		if field.Type == nil {
+			continue
+		}
+		if field.Type.Shaped != "" {
+			shaped = true
+		}
+		if len(field.Type.Literal) > 0 {
+			literal = true
+		}
+	}
+	if !shaped || !literal {
+		t.Errorf("Customer carries shaped text %v and a Literal %v; it needs both, because those are the two kinds a step hands back", shaped, literal)
+	}
+	// A shape inside a shape, which is the one thing no unit test settles: the
+	// generated schema emits $defs and $ref for it, and whether the provider
+	// accepts that has to be proven on a real request. Keeping the nesting here
+	// is what keeps that request meaningful.
+	complaint := resolved.Shapes["Complaint"]
+	nested := false
+	for _, field := range complaint.Fields {
+		nested = nested || field.Type.String() == "Appointment | None"
+	}
+	if !nested {
+		t.Error("Complaint no longer nests an Appointment; the nested-schema question is settled on a real request against this package, and a flat package cannot ask it")
+	}
+	for name, want := range map[string]string{
+		"caller_reason":  `list[Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]]`,
+		"appointments":   "list[Appointment]",
+		"complaints":     "list[Complaint]",
+		"customer_phone": "Phone",
+	} {
+		got := resolved.Variables[name].Shape
+		if got == nil {
+			t.Errorf("variable %q declares no shape, so this package stops exercising the type it exists to exercise", name)
+			continue
+		}
+		if got.String() != want {
+			t.Errorf("variable %q resolves to %q, want %q", name, got.String(), want)
+		}
+	}
+	// Two steps append rather than replace, because a caller can book twice and
+	// can be unhappy about two things. A replace here is what the `+` exists to
+	// prevent, and it would look like nothing at all.
+	for control, variables := range map[string][]string{
+		// Two steps append to one list, which is the case the spec separates
+		// from a change of mind: a caller who books and also complains rang for
+		// two reasons and the state holds both, while a step that changes its
+		// own mind replaces its own value. Both of them are steps that act, and
+		// that is the fix to a real call rather than a preference. The
+		// verification step recorded the reason first, and it runs on a reset
+		// history: it never receives the caller's triggering utterance, so the
+		// only way it could fill that field was to ask, and it asked on every
+		// call, immediately after the caller had said why they rang.
+		"manage_booking":   {"appointments", "caller_reason"},
+		"handle_complaint": {"complaints", "caller_reason"},
+	} {
+		delegate, ok := resolved.Controls[control].(*ir.Delegate)
+		if !ok {
+			t.Fatalf("%s = %#v, want a delegate", control, resolved.Controls[control])
+		}
+		for _, variable := range variables {
+			appends := false
+			for _, entry := range delegate.Assign {
+				if entry.Var == variable {
+					appends = entry.Append
+				}
+			}
+			if !appends {
+				t.Errorf("%s does not append to %q, so the caller's second one erases the first", control, variable)
+			}
+		}
+	}
+	// And the step that cannot see the conversation records nothing about it.
+	if got := ir.AssignedVars(verify.Assign); slices.Contains(got, "caller_reason") {
+		t.Errorf("verify_customer assigns %v; a reason recorded by a step running on a reset history can "+
+			"only be asked for, and asking is what this step must never do", got)
+	}
+	// The record holds no id, because no tool in the package returns one. A
+	// required shaped id here was a field the model could only invent, its own
+	// prompt forbids inventing one, and the empty string it sent instead ended
+	// every call at the finish call.
+	for _, field := range resolved.Shapes["Customer"].Fields {
+		if strings.Contains(field.Name, "id") {
+			t.Errorf("Customer declares %q; nothing in the package supplies a customer id, so the model can only invent one or leave it empty", field.Name)
+		}
 	}
 
 	// Its own deployment and its own router scope. Sharing either with
@@ -1727,6 +1876,16 @@ func authoredPackageFiles(t *testing.T) map[string]string {
 // list of exceptions.
 var placeholders = regexp.MustCompile(`\{\{[^}]*\}\}|\[\[[^\]]*\]\]`)
 
+// typeExpressions strips the other thing that looks like flow style and is not:
+// a declared type.
+//
+// `type: list[Literal["haircut", "dry_cut"]]` is one scalar written in
+// Pydantic's own vocabulary, and its brackets are the type's, not YAML's. A
+// reader copying it gets something that compiles, which is the whole point of
+// the block-style rule. Matched by the key so the strip is narrow: a `[` on any
+// other line is still flow style and still fails.
+var typeExpressions = regexp.MustCompile(`(?m)^\s*(-\s+)?[a-z_]+: (list|Literal)\[.*$`)
+
 // TestAuthoredPackagesAreBlockStyle (FR-028, FR-031). Every shipped package and
 // the scaffold template are written in block style, because block style is what
 // makes the four lists readable at a glance, and a reader copies what they see.
@@ -1737,7 +1896,8 @@ var placeholders = regexp.MustCompile(`\{\{[^}]*\}\}|\[\[[^\]]*\]\]`)
 // declares what an agent can do.
 func TestAuthoredPackagesAreBlockStyle(t *testing.T) {
 	for path, source := range authoredPackageFiles(t) {
-		for i, line := range strings.Split(placeholders.ReplaceAllString(source, ""), "\n") {
+		stripped := typeExpressions.ReplaceAllString(placeholders.ReplaceAllString(source, ""), "")
+		for i, line := range strings.Split(stripped, "\n") {
 			if strings.Contains(line, "#") {
 				line = line[:strings.Index(line, "#")]
 			}
@@ -1764,6 +1924,91 @@ func TestNothingAuthoredSpeaksTheRetiredShape(t *testing.T) {
 		if found := retired.FindString(source); found != "" {
 			t.Errorf("%s still speaks the retired shape (%q); an agent declares what it can do in tools:, delegates:, handoffs: and escalations:",
 				path, strings.TrimSpace(found))
+		}
+	}
+}
+
+// assignedField is the result field one assignment reads, for a test that used
+// to index a map.
+func assignedField(assign []ir.AssignTo, variable string) string {
+	for _, entry := range assign {
+		if entry.Var == variable {
+			return entry.Field
+		}
+	}
+	return ""
+}
+
+// promptFiles is every authored prompt in every package, which is every tracked
+// Markdown file inside a directory holding an agent.yaml, minus the README.
+// READMEs are for people and carry real commands with real arguments; a prompt
+// is read by a model that cannot tell an illustration from a value.
+func promptFiles(t *testing.T) map[string]string {
+	t.Helper()
+	root := filepath.Join("..", "..")
+	listed, err := exec.Command("git", "-C", root, "ls-files", "*.md").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	packages := map[string]bool{}
+	for path := range authoredPackageFiles(t) {
+		packages[filepath.Dir(path)] = true
+	}
+	out := map[string]string{}
+	for _, name := range strings.Fields(string(listed)) {
+		if filepath.Base(name) == "README.md" {
+			continue
+		}
+		dir := filepath.Dir(name)
+		owned := false
+		for pkg := range packages {
+			if dir == pkg || strings.HasPrefix(dir, pkg+"/") {
+				owned = true
+				break
+			}
+		}
+		if !owned {
+			continue
+		}
+		source, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[name] = string(source)
+	}
+	if len(out) < 5 {
+		t.Fatalf("found only %d authored prompts; the walk is looking in the wrong place", len(out))
+	}
+	return out
+}
+
+// TestNoPromptCarriesASpecimenPhoneNumber is the other half of the `confirm:`
+// refusal, and it exists because the first half was walked straight past.
+//
+// The compiler refuses a confirmed value's placeholder in every prompt but its
+// confirming step's, so an unconfirmed number reaches no other prompt. Then an
+// author writes one into the speech rules as an illustration, and the model,
+// which cannot tell an illustration from a value it is holding, reads it out.
+// On a live call the concierge, whose own prompt says never to say the caller's
+// number and holds no placeholder for one, opened with the example number from
+// its own formatting rule. The caller said yes to a number that was not theirs,
+// and the verification step then asked again with the real one.
+//
+// So: describe the grouping in words. A prompt needs no specimen, and a
+// specimen is indistinguishable from a leak.
+func TestNoPromptCarriesASpecimenPhoneNumber(t *testing.T) {
+	// A plus, then at least seven digits in any grouping. Tight enough that a
+	// prompt quoting a broken form it tells the model to avoid, which carries no
+	// plus, is not a finding.
+	specimen := regexp.MustCompile(`\+[0-9][0-9 ]{6,}[0-9]`)
+	for path, source := range promptFiles(t) {
+		for i, line := range strings.Split(source, "\n") {
+			if found := specimen.FindString(line); found != "" {
+				t.Errorf("%s:%d writes the phone number %q. A model cannot tell it from a value it is "+
+					"holding and reads it out, which is how an agent told never to say the caller's number "+
+					"said one: describe the grouping in words instead",
+					path, i+1, strings.TrimSpace(found))
+			}
 		}
 	}
 }

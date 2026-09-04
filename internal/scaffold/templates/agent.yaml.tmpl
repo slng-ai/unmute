@@ -98,6 +98,18 @@ agents:
 [[if .ThenTarget]]    then_target: [[.ThenTarget]]
 [[end]]    merge: results
 [[end]]
+[[end]][[if .Shapes]]# The named groups of fields a value's type: refers to. Each field is one line,
+# `- name: Type`, and grows a block only when it wants a description the model
+# reads.
+shapes:
+[[range .Shapes]]  - name: [[.Name]]
+[[if .Description]]    description: [[yaml .Description]]
+[[end]]    fields:
+[[range .Fields]][[if .Description]]      - name: [[.Name]]
+        type: [[yaml .Type]]
+        description: [[yaml .Description]]
+[[else]]      - [[.Name]]: [[yaml .Type]]
+[[end]][[end]][[end]]
 [[end]][[if .Variables]]variables:
 [[range .Variables]]  [[.Name]]:
     type: [[.Type]]

@@ -168,7 +168,7 @@ def _room_properties(caller: str) -> dict:
     return properties
 
 
-async def _start_agent(request: Request, *, caller: str, call_sid: str) -> dict:
+async def _start_agent(request: Request, *, caller: str, from_number: str, call_sid: str) -> dict:
     """Start the deployed agent on a new room with the SIP interconnect on.
 
     The room is the platform's to create, not this process's. The platform hands
@@ -184,9 +184,22 @@ async def _start_agent(request: Request, *, caller: str, call_sid: str) -> dict:
         json={
             "createDailyRoom": True,
             "dailyRoomProperties": _room_properties(caller),
-            # Everything the agent needs to reach back to the carrier. The room is
-            # not in here: the platform passes that to the agent itself.
-            "body": {"direction": "inbound", "call_sid": call_sid},
+            # Everything the agent needs to reach back to the carrier, plus the
+            # facts only this process ever sees. This helper answers the carrier's
+            # webhook, so the caller's number is in its hand here and nowhere
+            # else: the agent is started by the platform and never sees the form.
+            # The room is not in here: the platform passes that to the agent.
+            #
+            # from_number is the raw form value, not the room display name above.
+            # The display name substitutes the word "caller" when the number was
+            # withheld, and a fact called from_number holding the word "caller"
+            # is worse than one holding nothing: the agent would greet somebody
+            # by a placeholder it believed.
+            "body": {
+                "direction": "inbound",
+                "call_sid": call_sid,
+                "from_number": from_number,
+            },
         },
     ) as response:
         if response.status >= 400:
@@ -211,7 +224,9 @@ async def inbound_call(request: Request) -> Response:
         logger.error("inbound webhook carried no call identifier field: CallSid")
         return _failure_answer()
     try:
-        started = await _start_agent(request, caller=caller or "caller", call_sid=call_sid)
+        started = await _start_agent(
+            request, caller=caller or "caller", from_number=caller, call_sid=call_sid
+        )
         logger.info("inbound call {} started session {}", call_sid, started.get("sessionId"))
     except Exception as exc:
         # Named cause in the log, spoken failure to the caller.

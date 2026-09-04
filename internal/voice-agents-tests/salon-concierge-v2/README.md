@@ -10,11 +10,18 @@ public write-up of what it does is
 The same Sage and Stone salon as
 [`salon-concierge`](../../../examples/salon-concierge/), with one thing changed:
 every step gets the smallest context that still does its job, and what it no
-longer reads off the transcript travels as a declared variable instead.
+longer reads off the transcript travels as declared state instead.
+
+Declared state is typed. The facts a call accumulates are groups of named
+fields, written in Pydantic's own words, and the compiler puts a block naming
+them at the end of every agent prompt and every task prompt. So a step reads
+what the call has established rather than re-reading the call, and a later
+step's prompt stops growing with the length of the conversation.
 
 Same tools, same knowledge bases, same voice, same models, same targets, same
-carriers, same agents and the same tasks. Only the `context:` blocks and the
-`variables:` block differ.
+carriers and the same agents. The `shapes:` block, the `variables:` block, the
+`context:` blocks and each step's `result:` are what differ, plus one step the
+other salon does not have.
 
 ## What it contains
 
@@ -22,28 +29,73 @@ Robin works the front desk, confirms who is calling, runs the booking step and
 answers what it can. Customer care takes complaints and refunds. A control
 cold-transfers to a manager on a phone call.
 
-Two tasks sit under the concierge. `verify_customer` reads a phone number back
-and waits for a yes, and it runs with `history: reset`, so it gets its own
-prompt and its declared values and no part of the conversation. `manage_booking`
-takes one booking change from start to finish, and it runs with
-`history: messages`, so it gets both sides of the conversation without the tool
-records nobody re-reads. Both handoffs carry the spoken turns for the same
-reason.
+Two tasks sit under the concierge and one under customer care.
+`verify_customer` reads a phone number back and waits for a yes, and it runs
+with `history: reset`, so it gets its own prompt and its declared values and no
+part of the conversation. `manage_booking` takes one booking change from start
+to finish, and `handle_complaint` records one thing the caller is unhappy about.
+Both run with `history: messages`, so they get both sides of the conversation
+without the tool records nobody re-reads. Both handoffs carry the spoken turns
+for the same reason.
 
-Two values travel as variables rather than as history. `customer_phone` is the
-confirmed number. `customer_status` says what the lookup found, and the booking
-step names it in `requires:`, which is what makes the step wait for it and what
-lets its prompt read it. `customer_status` declares no `default:` on purpose: a
-default is a value the variable holds before the first word, so a defaulted
-variable would let the booking step start on a caller nobody had looked up.
+Three shapes hold what the call learns. `Customer` is who the caller is once the
+verification step has looked them up, and it is two fields rather than four: the
+phone number is the identity here, so the record carries no id and no name. Both
+were tried and both failed the same way, because neither has a tool that fills
+it. The id left the model inventing one or sending empty, and the name is absent
+for every caller not already on file, so it rendered as an empty string in every
+prompt for the rest of the call. `Appointment` is one thing booked, moved
+or cancelled. `Complaint` is one thing the caller is unhappy about, and it can
+name the appointment it is about, which is a shape inside a shape.
+
+`record_complaint` sits on the complaint step and deliberately not on the
+specialist that owns it. With the tool on both, the specialist recorded the
+complaint itself and never entered the step, so `complaints` stayed empty on a
+call that recorded one. Its prompt already said to run the step. A tool within
+reach beat the prompt, and `unmute validate` now warns on the shape.
+
+Five values are declared with those shapes. `customer` holds the record and may
+be absent. `appointments` and `complaints` are lists, and the steps that fill
+them append rather than replace, so a caller who books twice ends the call with
+two bookings instead of one.
+
+One entry per step visit, because the step hands back one appointment. The
+booking step finishes as soon as a change is saved and puts anything else the
+caller asked for in `unserved_request`, and the concierge sends it straight
+back in. A step that stayed in and booked twice would report one of them and
+lose the other. And a step that is re-entered and finishes at once re-reports
+what it already recorded, which is why the emitted append drops a structured
+entry the list already holds rather than trusting the prompt not to send one.
+
+`caller_reason` is a list drawn from a closed set, because one call can do more
+than one thing, and both of the steps that act append to it: the booking step
+and the complaint step each record the reason they ran, so a caller who books
+and then complains ends with two. The verification step records none, because
+it runs on a reset history and cannot see why the caller rang; a reason
+recorded there could only be asked for. `customer_phone` is text with a
+validated shape, and it carries `confirm:`, so it renders in the verification
+step's own prompt and nowhere else until the caller has agreed to it.
+
+Neither step announces itself. A task `announce:` speaks one line while the
+step starts, and with the step's own opening line as well the caller heard two
+acknowledgements before any information: "Let me pull up the diary." then "Let
+me check." One of them had to go, and the step's own line is the one that knows
+what it is about to do.
+
+`customer` declares no `default:` on purpose, and the booking step names
+`customer.status` in `requires:`. A default is a value the variable holds before
+the first word, so a defaulted record would let the booking step start on a
+caller nobody had looked up. With no default the guard waits.
 
 The files:
 
-- `agent.yaml` is the package: agents and the tasks they run, handoffs,
+- `agent.yaml` is the package: shapes, agents and the tasks they run, handoffs,
   escalations, variables, pre-fetch, knowledge and secrets.
 - `targets.yaml` holds the targets, one per telephony plane.
 - `instructions.md` is the concierge prompt, `agents/complaint-specialist.md`
-  the customer care prompt, and `tasks/` the two task prompts.
+  the customer care prompt, and `tasks/` the three task prompts. None of them
+  contains the conversation info block: the compiler appends that, so adding a
+  field to a shape reaches every prompt with no prompt file edited.
 - `tools/` is one file per tool, all local Python over one in-memory store.
 - `knowledge/refunds/` and `knowledge/services/` are two document sets, each
   with its own index.
@@ -56,10 +108,15 @@ outbound route.
 
 The package is named `salon-concierge-v2`, so its deployments are
 `salon-concierge-v2-livekit` and `salon-concierge-v2-pipecat` and neither lands
-on top of the other salon. It declares its own `agent_id` for the same reason:
-the Context Router keys what it can serve from an earlier request on that id,
-and the key carries neither the system prompt nor the values substituted into
-it, so two packages sharing an id would be served each other's prompt.
+on top of the other salon.
+
+Its think model points straight at OpenAI rather than through the Context
+Router. That is temporary: calls were taking too many turns to reach a tool
+call, and taking the router out of the path is how we find out whether its
+caching is why. On the router this package needs its own `agent_id`, because
+the router keys what it can serve from an earlier request on that id and the
+key carries neither the system prompt nor the values substituted into it, so
+two packages sharing an id are served each other's prompt.
 
 ## What you need
 
@@ -106,10 +163,57 @@ to exercise the pre-fetch and the readback:
 unmute dev internal/voice-agents-tests/salon-concierge-v2 --source from_number=<E.164 number>
 ```
 
-Do not seed `customer_status`. It declares no `source:`, so the dispatch payload
-can fill it and the generated runbook lists it with a `--var` line. That line
-works, and using it hands the booking step a status before anything looked the
-caller up, which is the one thing this package is arranged to prevent.
+Do not seed `customer`. It declares no `source:`, so the dispatch payload can
+fill it and the generated runbook lists it with a `--var` line. That line works,
+and using it hands the booking step a record before anything looked the caller
+up, which is the one thing this package is arranged to prevent.
+
+To see the declared state as the model sees it, read the block the compiler put
+at the end of each prompt:
+
+```sh
+grep -A7 'Conversation info:' internal/voice-agents-tests/salon-concierge-v2/build/livekit/agent.py
+```
+
+It is the same text on both targets, and the generated classes beside it are
+what the steps validate their results against.
+
+## Testing the pre-fetch on a call
+
+This is the package we ring, so its `prefetch:` block is what a call has to
+show: a clock entry filling three variables off one reading, the caller's number
+off the call itself, and one lookup filling both the name and whether the caller
+is on file. On the browser loop only the clock resolves, which is why the
+`--source` line above exists.
+
+Do one thing before the first Pipecat call, or the test proves nothing. On the
+`cloud-websocket` route the caller's number rides a `<Parameter>` in the TwiML
+Bin, so a Bin made before this existed carries none. The entry then skips, the
+log says so, and the code is working perfectly. The emitted
+`build/pipecat/README.md` dictates the markup, and the line to add is
+`<Parameter name="from_number" value="{{From}}"/>`. Nothing warns about this at
+compile time, because reading your Bin back would need carrier credentials the
+compiler never asks for.
+
+Three log lines say it worked, one per entry:
+
+```text
+prefetch today: resolved booking_date=..., booking_weekday=..., salon_local_time=...
+prefetch caller: resolved customer_phone, awaiting confirmation
+prefetch profile: resolved customer_name, customer_on_file, awaiting confirmation
+```
+
+The third line naming two variables is the point of that entry: one call to
+`look_up_customer` fills both, so a second fact costs a line rather than a turn.
+On the call itself, verification reads the number back instead of asking for
+twelve digits, and only after the caller says yes may it greet a returning
+customer as one. The booking step then knows the weekday and the salon's own
+clock without calling anything.
+
+Withhold the caller ID on a call of its own. Every entry has to skip and the
+agent has to ask for a number exactly as it always did. A withheld number does
+not arrive as nothing: it arrives as the word `anonymous`, or as keypad digits
+shaped like a real number, and both are treated as absent.
 
 Run the tools' own check on its own:
 

@@ -142,7 +142,12 @@ type Data struct {
 	Listen        Binding
 	Reason        Binding
 	Speak         Binding
-	Variables     []Variable
+	// Shapes is the package's shapes: section. The console does not edit it, and
+	// it has to be here anyway: maintain rewrites agent.yaml from this struct, so
+	// a field absent here is a field deleted from the author's file, and what
+	// would be deleted is every declared shape and the types that name them.
+	Shapes    []Shape
+	Variables []Variable
 	// Knowledge is the package's knowledge: section. The console does not edit
 	// it, but it has to carry it: maintain rewrites agent.yaml from this struct,
 	// so a field absent here is a field silently deleted from the author's file.
@@ -172,6 +177,22 @@ type Variable struct {
 	Type    string
 	Default string // optional JSON primitive, rendered verbatim
 	Source  string
+}
+
+// Shape is one declared shape: a named group of fields a variable's type:
+// refers to. Carried so the console's rewrite keeps it.
+type Shape struct {
+	Name        string
+	Description string
+	Fields      []ShapeField
+}
+
+// ShapeField is one member of a shape. Description is what decides which of the
+// two authored forms it is written back as: one line without, a block with.
+type ShapeField struct {
+	Name        string
+	Type        string
+	Description string
 }
 
 type Tool struct {

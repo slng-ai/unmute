@@ -10,7 +10,10 @@ import (
 // the step: LiveKit appends it to the delegate tool's docstring, Pipecat to the
 // developer message that hands the results back. Without it the field arrives in
 // a result nobody was told to read.
-const unservedOwnerRule = "A result carrying `" + ir.UnservedResultField + "` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn with your own tools or a handoff. Never end the turn without it and never tell the caller you cannot."
+const unservedOwnerRule = "A result carrying `" + ir.UnservedResultField + "` means a step could not serve that request and handed it back. " +
+	"The caller is still owed it: after one short line about the result, act on that request in the same turn, with your own tools, a handoff, " +
+	"or the same flow again. It is a new request, so running the flow for it is not running it again for the one that just finished. " +
+	"Never end the turn without acting on it, and never tell the caller you cannot."
 
 // taskFinishContract is the compiler's own tail on every task prompt. The
 // authored instructions describe the step; this names the one call that ends it,

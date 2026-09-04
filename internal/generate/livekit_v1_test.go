@@ -826,7 +826,7 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 	agent.Controls["do_find"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "find_slot",
 		When:   "The caller only wants to check for a slot, not book yet.",
-		Assign: map[string]string{"caller_phone": "result.date"},
+		Assign: []ir.AssignTo{{Var: "caller_phone", Field: "date"}},
 	}
 	def := agent.Agents["reservations"]
 	def.Tools = append(def.Tools, "do_find")
@@ -2749,7 +2749,7 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	task.Result["details"] = ir.ResultField{Schema: map[string]any{"type": "object"}}
 	task.Tools = append(task.Tools, "browse_tables")
 	agent.Tasks["find_slot"] = task
-	agent.Controls["do_find"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "find_slot", Assign: map[string]string{"caller_phone": "result.date"}}
+	agent.Controls["do_find"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "find_slot", Assign: []ir.AssignTo{{Var: "caller_phone", Field: "date"}}}
 	resDef := agent.Agents["reservations"]
 	resDef.Tools = append(resDef.Tools, "do_find")
 	agent.Agents["reservations"] = resDef

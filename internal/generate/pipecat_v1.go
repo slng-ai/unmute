@@ -76,18 +76,7 @@ type pipecatAgent struct {
 	// It exists because a task borrows this worker's service: entering one swaps
 	// the task's scope in, and every way out has to swap this back or the owner
 	// would keep answering under the task's cache scope.
-	SlngHeaders string
-	// SlngBody is this agent's router body extension, as a Python literal
-	// spelled for a method body, and it is how a value the call learns partway
-	// through reaches the router. Empty unless this agent's think profile is a
-	// router binding whose prompts reference a variable.
-	//
-	// This target has no per-request seam, so the body sits on the service and is
-	// refreshed where the call writes a variable. That is enough because the only
-	// writes are at call start and when a task finishes, and each is followed by
-	// a turn rather than concurrent with one. A settings delta merges `extra` key
-	// by key, so a body-only delta leaves the site's scope header alone.
-	SlngBody          string
+	SlngHeaders       string
 	LLM               pipecatService
 	TTS               pipecatService
 	Tools             []pipecatTool
@@ -127,14 +116,20 @@ func (s pipecatMCPSource) ParamsClass() string {
 // its instructions, tools, and a uniquely named finish function derived from the
 // result schema (V1). Nodes are emitted inline in the owning delegate's methods.
 type pipecatTask struct {
-	Name           string // node id (the task's snake_case id)
-	FinishName     string // LLM-visible "finish_<delegate>_<task>" — unique so a sticky handler registration can never run a stale step (V1)
-	NextName       string // next step's node in this delegate's chain; "" on the last step
-	Prompt         string
-	PromptExpr     string // the node's role_message: the quoted prompt, or a render call when it names a variable
-	Tools          []pipecatTool
-	Transfers      []pipecatTransfer
-	ResultProps    string // Python literal: JSON-schema properties for finish args
+	Name        string // node id (the task's snake_case id)
+	FinishName  string // LLM-visible "finish_<delegate>_<task>" — unique so a sticky handler registration can never run a stale step (V1)
+	NextName    string // next step's node in this delegate's chain; "" on the last step
+	Prompt      string
+	PromptExpr  string // the node's role_message: the quoted prompt, or a render call when it names a variable
+	Tools       []pipecatTool
+	Transfers   []pipecatTransfer
+	ResultProps string // Python literal: JSON-schema properties for finish args
+	// Typed marks a step whose result declares a shape. This framework
+	// validates nothing itself: it splats the model's raw JSON into the handler,
+	// so a wrong-typed argument is a TypeError inside the handler rather than a
+	// schema error the model can correct. The emitted validation is what makes
+	// the two targets behave the same.
+	Typed          bool
 	ResultRequired string // Python literal: list of required finish arg names
 	// SlngHeaders is this task's own identity header dict, as a Python literal
 	// spelled for a method body. Empty unless the task's think profile is a
@@ -187,6 +182,9 @@ type pipecatDelegate struct {
 type pipecatAssign struct {
 	Var   string
 	Field string
+	// Append writes one entry onto the end of a declared list rather than
+	// replacing the whole value, which is what an authored `+` means.
+	Append bool
 	// Confirms marks a write by the very step that confirms this value, so the
 	// write also settles it. Only that step's write clears the mark: any other
 	// delegate assigning the same variable is not the caller agreeing to it.
@@ -330,6 +328,17 @@ type pipecatCallStartVar struct {
 	Required bool
 }
 
+// pipecatSystemSourceVar is one variable declaring `source: <call fact>`: the
+// fact it reads, and where it lands.
+//
+// A second list beside CallStartVars rather than a widening of it, because the
+// two hydrate from different places. The dispatch payload arrives with the job;
+// a call fact is lifted out of the carrier's own handshake by the route.
+type pipecatSystemSourceVar struct {
+	Name   string
+	Source string
+}
+
 // pipecatDailyCarrier is the (pipecat, daily-sip, twilio) data group: the
 // carrier leg on the Daily route (SCHEMA N37).
 //
@@ -435,20 +444,24 @@ type pipecatData struct {
 	// create; empty when the package declares no secrets. The manifest names it
 	// so a deploy that skipped that step fails at deploy time rather than on a
 	// live call.
-	SecretSet           string
-	MainName            string
-	EntryAgent          string
-	EntryClass          string
-	STT                 pipecatService
-	Agents              []pipecatAgent
-	FlowTools           []pipecatTool      // deduped task tools, emitted as module-level flows handlers
-	LocalTools          []pipecatLocalTool // copied handler files (tools/<name>.py, V13)
-	Variables           []pipecatVariable
-	CallStartVars       []pipecatCallStartVar // dispatched input variables (I.dispatch)
-	Capture             *pipecatCapture       // generated update_variables tool; nil without conversation variables
-	Secrets             []string              // declared secrets, for .env.example (V11)
-	ExtraEnv            []string              // env the route needs that the package never declared
-	GreetingExpr        string                // Python expression for the fixed greeting line
+	SecretSet     string
+	MainName      string
+	EntryAgent    string
+	EntryClass    string
+	STT           pipecatService
+	Agents        []pipecatAgent
+	FlowTools     []pipecatTool      // deduped task tools, emitted as module-level flows handlers
+	LocalTools    []pipecatLocalTool // copied handler files (tools/<name>.py, V13)
+	Variables     []pipecatVariable
+	CallStartVars []pipecatCallStartVar // dispatched input variables (I.dispatch)
+	// SystemSourceVars are the variables reading a fact the call itself carries.
+	// Validate already refused any whose route does not supply the fact, so
+	// everything here is a fact the route lifts into call_context.
+	SystemSourceVars    []pipecatSystemSourceVar
+	Capture             *pipecatCapture // generated update_variables tool; nil without conversation variables
+	Secrets             []string        // declared secrets, for .env.example (V11)
+	ExtraEnv            []string        // env the route needs that the package never declared
+	GreetingExpr        string          // Python expression for the fixed greeting line
 	GreetingText        string
 	GreetingInstruction string
 	GreetingRunLLM      string // "True" or "False"
@@ -522,10 +535,21 @@ type pipecatData struct {
 
 	// Import needs: keep bot.py free of unused imports (only what a given spec
 	// actually exercises), so the emitted pipeline reads clean.
-	NeedsInspect   bool // any local tool (isawaitable on the user handler, V13)
-	NeedsRender    bool // any template site: the _render helper + re import
-	NeedsStateBind bool // any flow tool reading state (inject inside a task)
-	NeedsRefusal   bool // any tool whose injected variables can be unset (V4)
+	NeedsInspect bool // any local tool (isawaitable on the user handler, V13)
+	NeedsRender  bool // any template site: the _render helper + re import
+	// TypedState is the declared-shape block, rendered once in shapes.go for
+	// both targets, or nil for a package that declares nothing structured. That
+	// nil is what makes such a package byte-identical (FR-015).
+	TypedState *TypedStateBlock
+	// PydanticImports is the whole `from pydantic import ...` line, "" if none.
+	PydanticImports string
+	// TypingImports is the `from typing import ...` names, "" if none.
+	TypingImports string
+	// NeedsDataclassField is `field` beside `dataclass`, wanted only by a
+	// declared list, which starts empty through a default_factory.
+	NeedsDataclassField bool
+	NeedsStateBind      bool // any flow tool reading state (inject inside a task)
+	NeedsRefusal        bool // any tool whose injected variables can be unset (V4)
 	// NeedsPrerequisiteGuard and PrerequisiteGuard carry the shared guard block
 	// generated by guard.go. Both targets render the same generated Python, so
 	// the refusal wording cannot drift between them.
@@ -667,34 +691,51 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolInject:           true, // hidden request values merged from State
 	targetcap.FieldWebhookPath:          true, // rendered, URL-encoded path on the base URL
 	targetcap.FieldTemplates:            true, // _render over prompts and the greeting at session start
+	targetcap.FieldTypedState:           true, // a generated Pydantic class per shape, validated at each finish
+	targetcap.FieldShapedText:           true, // str plus an AfterValidator, never a schema keyword
 	targetcap.FieldWarmInstances:        true, // [scaling] min_agents in pcc-deploy.toml
 }
 
 // pipecatDailyCarrierEmittedTelephonyFeatures is the (pipecat, daily-sip,
 // twilio) half of the same agreement. Hand-written, so it holds only what the
-// emitter can keep: no `source.*` entries, because the fill path for those lives
-// in the carrier-websocket adapter this route does not emit (research D11/R14).
+// emitter can keep.
+//
+// Three `source.*` entries. The helper answers the carrier's inbound webhook and
+// so holds the whole POST form: `From` and `CallSid` ride the body it posts, and
+// bot.py lifts them into the call context beside the direction that body already
+// carried. No `to_number`: the outbound body carries a SIP URI, not a number.
 var pipecatDailyCarrierEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
 	targetcap.TelephonyRouteSelected:                   true,
 	targetcap.TelephonyInbound:                         true,
 	targetcap.TelephonyOutbound:                        true,
 	targetcap.TelephonyFeature(targetcap.ColdTransfer): true,
 	targetcap.TelephonyFeature(targetcap.Hangup):       true,
+	"source.call_id":                                   true,
+	"source.direction":                                 true,
+	"source.from_number":                               true,
 }
 
 // pipecatCloudWebsocketEmittedTelephonyFeatures is the (pipecat,
-// cloud-websocket, twilio) half of the emitter agreement. Hand-written like the
-// Daily carrier's, and holding the same five features the row grants: no
-// `source.*` entries, because the call-source table is filled by the
-// carrier-websocket adapter this route does not emit. The dictated Bin carries
-// no call-source parameters for the same reason: a `<Parameter>` nothing reads
-// is markup an operator pastes and then trusts (2026-08-27).
+// cloud-websocket, twilio) half of the emitter agreement, hand-written like the
+// Daily carrier's.
+//
+// Five `source.*` entries. `parse_telephony_websocket` hands the Twilio branch a
+// call id, a stream id and the `<Parameter>` set the Bin dictated, and bot.py
+// lifts all three into the call context. The two numbers are markup an operator
+// pastes, one per direction, and each now has a reader: a `<Parameter>` nothing
+// reads is markup an operator pastes and then trusts, which is what these two
+// were between 815793a and 2026-08-27.
 var pipecatCloudWebsocketEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
 	targetcap.TelephonyRouteSelected:                   true,
 	targetcap.TelephonyInbound:                         true,
 	targetcap.TelephonyOutbound:                        true,
 	targetcap.TelephonyFeature(targetcap.ColdTransfer): true,
 	targetcap.TelephonyFeature(targetcap.Hangup):       true,
+	"source.call_id":                                   true,
+	"source.stream_id":                                 true,
+	"source.direction":                                 true,
+	"source.from_number":                               true,
+	"source.to_number":                                 true,
 }
 
 // GeneratePipecat lowers a validated agent + pipecat target into a project.
@@ -842,8 +883,12 @@ type pipecatReportJSON struct {
 	RequiredEnv []string              `json:"required_env"`
 	Bindings    []ir.ForwardedBinding `json:"bindings,omitempty"`
 	Sizing      []ir.Sizing           `json:"sizing,omitempty"`
-	Variables   []reportVariable      `json:"variables,omitempty"`
-	Secrets     []reportSecret        `json:"secrets,omitempty"`
+	// PrefetchWrites is every prefetch entry the author declared as writing. Here
+	// rather than on stdout: the key is required, so a warning would fire forever
+	// on every package that legitimately writes.
+	PrefetchWrites []PrefetchWrite  `json:"prefetch_writes,omitempty"`
+	Variables      []reportVariable `json:"variables,omitempty"`
+	Secrets        []reportSecret   `json:"secrets,omitempty"`
 	// Prerequisites are inspectable for the same reason the forwarded region is:
 	// a fact the compiler acted on has to be readable back out.
 	Prerequisites []targetcap.RouteAccountPrerequisite `json:"route_prerequisites,omitempty"`
@@ -868,7 +913,7 @@ func pipecatReport(agent *ir.Agent, data pipecatData, files []File, bindings []i
 		// Forwarded without checking, so it must be readable back (constitution).
 		// A list of one on this target: several regions never reach generate.
 		Regions: regionList(data.DeploymentRegion), RequiredEnv: data.RequiredEnv,
-		Bindings: bindings, Sizing: sizing,
+		Bindings: bindings, Sizing: sizing, PrefetchWrites: PrefetchWrites(agent),
 		Variables: reportVariables(agent), Secrets: reportSecrets(agent),
 		Prerequisites: data.Prerequisites,
 		Notes:         data.Notes,

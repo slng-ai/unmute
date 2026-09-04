@@ -3,7 +3,7 @@
 #
 # It exists because no other fixture has all four pieces a prefetch needs: a
 # declared variable to land in, a read-only tool to run, a task an agent runs so
-# `confirm:` has a step to name, and a clock with a timezone to read it in.
+# `confirm:` has a step to name, and a clock entry with a timezone to read it in.
 #
 # Deliberately kept compiling on both code targets, so the byte-identical and
 # per-target-warning tests have one package to read rather than two.
@@ -13,10 +13,6 @@ version: 1
 name: prefetch-fixture
 
 entry_agent: intake
-
-# The zone every clock reading in this package is taken in. A container clock is
-# UTC, so without this the agent would name the wrong day for anybody who is not.
-timezone: Europe/Madrid
 
 agents:
   intake:
@@ -63,8 +59,15 @@ variables:
   verified:
     type: boolean
     default: false
-  # Read once at session start, in the zone above.
+  # All three read once at session start, from one reading of the clock, in the
+  # zone the entry below names.
   booking_date:
+    type: string
+    default: ""
+  booking_weekday:
+    type: string
+    default: ""
+  booking_year:
     type: string
     default: ""
   # No source: here on purpose. The prefetch below reads the carrier fact and
@@ -83,9 +86,14 @@ variables:
 # refused rather than quietly reordered.
 prefetch:
   - name: today
-    clock: date
+    clock: now
+    # The zone sits on the entry that reads it. A container clock is UTC, so
+    # without this the agent would name the wrong day for anybody who is not.
+    timezone: Europe/Madrid
     assign:
       - booking_date: result.date
+      - booking_weekday: result.day_of_week
+      - booking_year: result.year
 
   - name: caller
     source: from_number
@@ -94,6 +102,9 @@ prefetch:
 
   - name: profile
     tool: lookup_customer
+    # This lookup reads. The key is required either way: the compiler cannot
+    # check either answer, so it makes the author state one.
+    writes: false
     args:
       - phone: "{{caller_phone}}"
     assign:

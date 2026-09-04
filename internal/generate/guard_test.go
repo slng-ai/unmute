@@ -14,7 +14,7 @@ import (
 func TestSupplierIndex(t *testing.T) {
 	t.Run("one supplier", func(t *testing.T) {
 		index := SupplierIndex(map[string]ir.Control{
-			"verify_customer": &ir.Delegate{Assign: map[string]string{"customer_phone": "result.customer_phone"}},
+			"verify_customer": &ir.Delegate{Assign: []ir.AssignTo{{Var: "customer_phone", Field: "customer_phone"}}},
 			"manage_booking":  &ir.Delegate{Requires: []string{"customer_phone"}},
 			"to_care":         &ir.AgentTransfer{},
 		})
@@ -32,9 +32,9 @@ func TestSupplierIndex(t *testing.T) {
 	// toss. Sorted control order is the tiebreak.
 	t.Run("several suppliers resolve deterministically", func(t *testing.T) {
 		controls := map[string]ir.Control{
-			"zulu":  &ir.Delegate{Assign: map[string]string{"phone": "result.phone"}},
-			"alpha": &ir.Delegate{Assign: map[string]string{"phone": "result.phone"}},
-			"mike":  &ir.Delegate{Assign: map[string]string{"phone": "result.phone"}},
+			"zulu":  &ir.Delegate{Assign: []ir.AssignTo{{Var: "phone", Field: "phone"}}},
+			"alpha": &ir.Delegate{Assign: []ir.AssignTo{{Var: "phone", Field: "phone"}}},
+			"mike":  &ir.Delegate{Assign: []ir.AssignTo{{Var: "phone", Field: "phone"}}},
 		}
 		for range 20 {
 			if got := SupplierIndex(controls)["phone"]; got != "alpha" {
@@ -143,12 +143,12 @@ func TestForwardDeclarationDropsAClauseTheRuntimeWillNeverNeed(t *testing.T) {
 // FR-024, FR-029 and the byte-identical promise, in one place: the guard reads
 // the unconfirmed set only when a package has one.
 func TestGuardConsultsUnconfirmedOnlyWhenAPackageHasAny(t *testing.T) {
-	with := guardHelperSource(map[string]string{"customer_phone": "verify_customer"}, true)
+	with := guardHelperSource(map[string]string{"customer_phone": "verify_customer"}, true, nil, false)
 	if !strings.Contains(with, `name in getattr(state, "_unconfirmed", ())`) {
 		t.Errorf("an unconfirmed value satisfies a gate it should not:\n%s", with)
 	}
 
-	without := guardHelperSource(map[string]string{"customer_phone": "verify_customer"}, false)
+	without := guardHelperSource(map[string]string{"customer_phone": "verify_customer"}, false, nil, false)
 	if strings.Contains(without, "_unconfirmed") {
 		t.Errorf("a package with no confirm: gained the set, so its emitted output moved:\n%s", without)
 	}
@@ -163,7 +163,7 @@ func TestGuardConsultsUnconfirmedOnlyWhenAPackageHasAny(t *testing.T) {
 // render this same text, which is why the two targets cannot drift: there is
 // only one string to change.
 func TestGuardHelperSource(t *testing.T) {
-	src := guardHelperSource(map[string]string{"customer_phone": "verify_customer"}, false)
+	src := guardHelperSource(map[string]string{"customer_phone": "verify_customer"}, false, nil, false)
 
 	for _, want := range []string{
 		`"customer_phone": "verify_customer"`,
@@ -199,5 +199,68 @@ func TestPrerequisiteGuardOnlyForGuardedPackages(t *testing.T) {
 		if _, needed := PrerequisiteGuard(guarded); !needed {
 			t.Errorf("%s: a guarded control must pull in the guard block", name)
 		}
+	}
+}
+
+// TestEmptyListDoesNotSatisfyAGuard is research section 14, and the naive fix
+// for it regresses the case the predicate was written to protect.
+//
+// `appointments: []` means nothing has been booked yet, which is exactly the
+// state a guard exists to wait for, so it is unmet. But `0`, `False` and `0.0`
+// are real answers a caller can give, so the arm has to test the declared type
+// rather than truthiness: a blanket `if not value` would hold a step back on a
+// caller who answered zero.
+func TestEmptyListDoesNotSatisfyAGuard(t *testing.T) {
+	agent := loadTypedState(t)
+	block, ok := PrerequisiteGuard(agent)
+	if !ok {
+		t.Fatal("the fixture declares no requires:, so this gate proves nothing")
+	}
+	// The set is the declared lists and nothing else, so a primitive cannot
+	// reach the emptiness arm at all.
+	if !strings.Contains(block, `_PREREQUISITE_LISTS = {"appointments", "caller_reason"}`) {
+		t.Errorf("the guard does not name the declared lists:\n%s", block)
+	}
+	// The emptiness arm is reached only through that set. Written as one line so
+	// the membership test and the length test cannot be separated by an edit
+	// without this failing.
+	if !strings.Contains(block, "elif not path and root in _PREREQUISITE_LISTS and len(value) == 0:") {
+		t.Errorf("the guard tests emptiness outside the declared-list set:\n%s", block)
+	}
+	// And the regression the naive fix produces is not there.
+	for _, forbidden := range []string{"if not value", "if not getattr(state", "not value:"} {
+		if strings.Contains(block, forbidden) {
+			t.Errorf("the guard uses truthiness (%q), which holds a step back on a caller who answered 0 or False:\n%s",
+				forbidden, block)
+		}
+	}
+	// A package declaring no list keeps the predicate it had, byte for byte, so
+	// nothing that compiles today changes.
+	plain, ok := PrerequisiteGuard(loadExample(t, "salon-concierge"))
+	if !ok {
+		t.Fatal("the salon package declares no requires:, so the control half proves nothing")
+	}
+	if strings.Contains(plain, "_PREREQUISITE_LISTS") {
+		t.Errorf("a package declaring no list grew the list-aware predicate:\n%s", plain)
+	}
+}
+
+// TestAPathIntoAnUnconfirmedValueSatisfiesNothing is FR-008a's other half: the
+// mark is on the value, so naming a field one level down must not escape it.
+func TestAPathIntoAnUnconfirmedValueSatisfiesNothing(t *testing.T) {
+	agent := loadTypedState(t)
+	block, ok := PrerequisiteGuard(agent)
+	if !ok {
+		t.Fatal("the fixture declares no requires:, so this gate proves nothing")
+	}
+	// The root is what is tested against the set, before any path is walked.
+	root := strings.Index(block, `if root in getattr(state, "_unconfirmed", ())`)
+	walk := strings.Index(block, "for step in path.split")
+	if root < 0 {
+		t.Fatalf("the guard does not test the path's root against the unconfirmed set:\n%s", block)
+	}
+	if walk >= 0 && walk < root {
+		t.Errorf("the guard walks the path before testing its root, so a field one level down escapes the mark:\n%s",
+			block)
 	}
 }

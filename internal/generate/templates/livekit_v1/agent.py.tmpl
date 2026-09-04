@@ -180,13 +180,13 @@ MCP sources, in the order the package lists them. */ -}}
 {{if .Slng.Vertex}}import base64
 {{end}}{{if or .NeedsAsyncio .NeedsMCP .NeedsPrefetchAsync}}import asyncio
 {{end}}{{if or .NeedsInspect .NeedsPrefetchLocal}}import inspect
-{{end}}{{if or .Outbound .Telephony .CallStartVars .NeedsTaskGroups .Slng.Vertex .NeedsPrefetchSeed}}import json
+{{end}}{{if or .Outbound .Telephony .CallStartVars .NeedsTaskGroups .Slng.Vertex .NeedsPrefetchSeed .TypedState}}import json
 {{end}}import logging
 import os
 {{if .Slng.Any}}import uuid
-{{end}}{{if .NeedsRender}}import re
+{{end}}{{if or .NeedsRender (and .TypedState .TypedState.NeedsRe)}}import re
 {{end}}{{if or .HasWarmTransfer .HasColdTransfer}}import time
-{{end}}{{if .HasUserdata}}from dataclasses import dataclass
+{{end}}{{if .HasUserdata}}from dataclasses import {{if .NeedsDataclassField}}dataclass, field{{else}}dataclass{{end}}
 {{end}}{{if .NeedsPrefetchClock}}from datetime import datetime
 {{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
@@ -197,7 +197,7 @@ import os
 {{end}}from dotenv import load_dotenv
 {{if .NeedsOpenAIReasoning}}from openai import types as openai_types
 {{end}}
-{{if .NeedsField}}from pydantic import Field
+{{if .PydanticImports}}from pydantic import {{.PydanticImports}}
 {{end}}{{if or .Outbound .HasColdTransfer .HasWarmTransfer}}from livekit import api
 {{end}}{{if or .HasColdTransfer (and .Telephony (eq .Telephony.Transport "sip") .HasVars)}}from livekit import rtc
 {{end}}from livekit.agents import (
@@ -655,7 +655,15 @@ def _slng_template_variables(state, names) -> dict:
     values = {}
     for name in names:
         value = getattr(state, name, None) if state is not None else None
+{{- if .TypedState}}
+        # The bound is measured on the JSON rendering, not on the repr of the
+        # object: they are different lengths, and the one the router receives is
+        # the one that has to fit. _state_text carries its own bound and its own
+        # warning, so a declared value is already shortened by here.
+        text = _state_text(name, value)
+{{- else}}
         text = "" if value is None else str(value)
+{{- end}}
         if len(text) > _SLNG_VARIABLE_LIMIT:
             logger.warning(
                 "template variable %s is %d characters; truncating to %d for the router",
@@ -697,7 +705,14 @@ def _render(text: str, userdata, *, quote_values: bool = False) -> str:
 
     def _one(match: re.Match[str]) -> str:
         value = getattr(userdata, match.group(1), None)
+{{- if .TypedState}}
+        # Through _state_text, so a declared value renders as compact JSON and
+        # an empty one as words. Anything not declared structured comes back
+        # exactly as str() gave it.
+        value = _state_text(match.group(1), value)
+{{- else}}
         value = "" if value is None else str(value)
+{{- end}}
         return quote(value, safe="") if quote_values else value
 
     return _TEMPLATE.sub(_one, text)
@@ -736,13 +751,16 @@ _prerequisite_refusals: dict[str, int] = {}
 {{- if .NeedsPrefetch}}
 {{.Prefetch}}
 {{end}}
+{{- if .TypedState}}
+{{.TypedState.Source}}
+{{end}}
 {{- if .HasUserdata}}
 # --- shared state ------------------------------------------------------------
 # Typed session state (SCHEMA 4.4): tasks assign into it, transfers read it.
 @dataclass
 class Userdata:
 {{- range .Vars}}
-    {{.Name}}: {{.PyType}} | None = {{.Default}}{{if .Description}}  # {{.Description}}{{end}}
+    {{.Name}}: {{.Anno}} = {{.Default}}{{if .Description}}  # {{.Description}}{{end}}
 {{- end}}
 {{- if .Slng.Any}}
     # One value per call, set where the call begins. It groups this call's think
@@ -984,7 +1002,7 @@ async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
     rather than at construction, for one reason read out of the plugin: it copies
     the per-request extra_kwargs first and then overwrites extra_body and
     extra_headers from its own constructor options (livekit-plugins-openai
-    llm.py:956-962, read at the pinned version). So a constructor value does not
+    llm.py:961-968, read at the pinned version). So a constructor value does not
     merely win, it wins in silence. That is why no router model here is built
     with either field.
 
@@ -1007,7 +1025,7 @@ async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
     """
     session = agent.session
     # The activity resolves a per-class override against the session default the
-    # same way (agent_activity.py:4627). isinstance covers both the not-given and
+    # same way (agent_activity.py:4628-4630). isinstance covers both the not-given and
     # the None case without reaching for a private helper.
     activity_llm = agent.llm if isinstance(agent.llm, llm.LLM) else session.llm
     tool_choice = model_settings.tool_choice if model_settings else NOT_GIVEN
@@ -1362,7 +1380,16 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- end}}
         await self.update_chat_ctx(owner_ctx)
 {{- range .Task.Assign}}
+{{- if .Append}}
+        # An entry added, not the value replaced: only the step producing it
+        # knows whether the caller added an intent or swapped one, and the list
+        # starts empty so this never has to create it. The helper drops an
+        # absent entry and a structured one already on the list, so neither a
+        # step that concluded nothing nor a step re-entered mid-call grows it.
+        _append_entry(ctx.userdata.{{.Var}}, result[{{pyq .Field}}])
+{{- else}}
         ctx.userdata.{{.Var}} = result[{{pyq .Field}}]
+{{- end}}
 {{- if .Confirms}}
         # The step that confirms this value has just assigned it, so it is settled
         # now and the guard stops holding it back. Discarding here rather than in
@@ -1728,34 +1755,46 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
             self._terminal_claimed = False
             raise
 {{end}}    @function_tool
-    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.Anno}}{{end}}, {{$.Unserved.Name}}: {{$.Unserved.Anno}} = "") -> None:
+    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.Anno}}{{end}}, {{$.Unserved.Name}}: {{$.Unserved.Anno}} = ""){{if .Typed}} -> str | None{{else}} -> None{{end}}:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
+{{- if .Typed}}
+        # Validated before anything is recorded, and before the terminal claim:
+        # a value that does not fit its declared type never enters the state,
+        # the previous contents stand, and the message goes back to the model so
+        # it can correct itself on the next turn instead of the step recording
+        # something wrong.
+        try:
+            _values = _typed_result({{pyq .Name}}, {{"{"}}{{range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end}}{{"}"}})
+        except _StateRefused as refused:
+            logger.warning("finish %s: %s", {{pyq .Name}}, refused.message)
+            return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
+{{- end}}
 {{- if .Transfers}}
         if not self._claim_terminal():
             return
         try:
 {{- if $.NeedsTaskGroups}}
-            result = _task_result({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }, {{$.Unserved.Name}})
+            result = _task_result({{.ResultExpr}}, {{$.Unserved.Name}})
             self.complete(result)
             # Record only after complete() succeeds: a rejected duplicate cannot
             # replace the winner, and there is no await for the callback to race.
             self._finish_call_id = ctx.function_call.call_id
 {{- else}}
-            self.complete(_task_result({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }, {{$.Unserved.Name}}))
+            self.complete(_task_result({{.ResultExpr}}, {{$.Unserved.Name}}))
 {{- end}}
         except BaseException:
             self._terminal_claimed = False
             raise
 {{- else}}
 {{- if $.NeedsTaskGroups}}
-        result = _task_result({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }, {{$.Unserved.Name}})
+        result = _task_result({{.ResultExpr}}, {{$.Unserved.Name}})
         self.complete(result)
         # Record only after complete() succeeds: a rejected duplicate cannot
         # replace the winner, and there is no await for the callback to race.
         self._finish_call_id = ctx.function_call.call_id
 {{- else}}
-        self.complete(_task_result({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }, {{$.Unserved.Name}}))
+        self.complete(_task_result({{.ResultExpr}}, {{$.Unserved.Name}}))
 {{- end}}
 {{- end}}
 {{end}}

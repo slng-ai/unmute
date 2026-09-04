@@ -214,7 +214,7 @@ as control flow.
 ## The order to write the file in
 
 ```
-version, name, entry_agent, timezone
+version, name, entry_agent
 agents
 handoffs
 escalations
@@ -227,9 +227,8 @@ conversation, tracing, channels, capacity
 
 That order is a convention, not a schema rule, and it exists so a reader meets
 the agents first and the plumbing last. `unmute init` writes the shape without
-`timezone:` or `prefetch:`, since the scaffold declares neither.
-`examples/salon-concierge` shows where they land once a package uses them:
-`timezone:` right after `entry_agent`, `prefetch:` right after `variables:`.
+`prefetch:`, since the scaffold declares none. `examples/salon-concierge` shows
+where it lands once a package uses it: right after `variables:`.
 
 ## Where to go next
 

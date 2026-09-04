@@ -26,15 +26,33 @@ already had the answers to.
 
 | Write this | And you get |
 |---|---|
-| `clock: date` | today's date, in your `timezone:` |
+| `clock: now` | the date, the time, and more, all from one reading of the clock |
 | `source: from_number` | a fact the call carries, like the number it came from |
-| `tool: my_tool` | whatever one of your read-only tools returns |
+| `tool: my_tool` | whatever one of your tools returns, when you say the call changes nothing |
 
-### The big one: any read-only tool
+### One clock reading, six fields
+
+`clock: now` reads the clock once. Assign as many of the six fields as you
+want, in one entry:
+
+| Field | Example |
+|---|---|
+| `result.date` | `2026-09-04` |
+| `result.time` | `14:32` |
+| `result.datetime` | `2026-09-04T14:32+02:00` |
+| `result.day_of_week` | `Friday` |
+| `result.year` | `2026` |
+| `result.timezone` | `Europe/Madrid` |
+
+All six come from the same reading. An entry assigning `result.date` and
+`result.time` cannot straddle a second, and one assigning `result.date` and
+`result.day_of_week` cannot straddle midnight.
+
+### The big one: any tool that only reads
 
 Any tool in your package can run before the call, as long as:
 
-- it says `read_only: true`, so running it on its own changes nothing;
+- you say `writes: false` on the entry, because a pre-fetch runs unasked, on every call, wrong numbers included;
 - you already have every input it needs. A fixed value, a fact the call carries, the date, or something an earlier entry looked up.
 
 That covers a lot of tools. A customer record, looked up by phone number. Today's
@@ -53,13 +71,13 @@ the call.
 Give each entry a name, one thing to fetch, and where to put the answer.
 
 ```yaml agent.yaml
-timezone: Europe/Madrid
-
 prefetch:
   - name: today
-    clock: date
+    clock: now
+    timezone: Europe/Madrid
     assign:
       - booking_date: result.date
+      - booking_weekday: result.day_of_week
 
   - name: caller
     source: from_number
@@ -68,11 +86,16 @@ prefetch:
 
   - name: profile
     tool: look_up_customer
+    writes: false
     args:
       - phone: "{{customer_phone}}"
     assign:
       - customer_name: result.name
+      - customer_on_file: result.status
 ```
+
+`profile` reads once and assigns twice. An entry can fill as many variables as
+the result has fields, and a second `assign:` line costs no second call.
 
 The variables it fills are normal variables. Give each one a type and a default:
 
@@ -81,10 +104,16 @@ variables:
   booking_date:
     type: string
     default: ""
+  booking_weekday:
+    type: string
+    default: ""
   customer_phone:
     type: string
     default: ""
   customer_name:
+    type: string
+    default: ""
+  customer_on_file:
     type: string
     default: ""
 ```
@@ -108,41 +137,156 @@ agent.yaml:196: prefetch "profile" reads {{customer_phone}}, which prefetch "cal
 
 ## Rules that will stop the build
 
-**A clock needs a `timezone:`.** Containers run on UTC time. Without a timezone, a
-business in Spain taking a late evening booking for "tomorrow" writes down the
-wrong day.
+**A clock entry needs its own `timezone:`.** Containers run on UTC time. Without
+a timezone, a business in Spain taking a late evening booking for "tomorrow"
+writes down the wrong day. The zone sits on the entry itself, not on the
+package, so two entries may honestly want two zones.
 
-**A tool needs `read_only: true`.** A pre-fetch runs on every single call, whether
-the inputs turn out to be right or wrong. So it can only call a tool that reads
-something:
+**`assign:` on a clock entry can only name the six fields above.** Naming
+anything else is refused, listing all six.
 
-```yaml tools/look_up_customer.yaml
-read_only: true
+**A `tool:` entry needs `writes: true` or `writes: false`.** There is no
+default. A pre-fetch runs on every single call, whether the inputs turn out to
+be right or wrong, so the build makes you say whether that is safe before it
+will run the tool at all:
 
-local:
-  handler: tools/customers.py
+```yaml agent.yaml
+prefetch:
+  - name: profile
+    tool: look_up_customer
+    writes: false
+    args:
+      - phone: "{{customer_phone}}"
+    assign:
+      - customer_name: result.name
 ```
 
-The build trusts that line. It cannot open your handler and check. So point a
-pre-fetch at a lookup, never at anything that saves or changes data.
+The build trusts that line. It cannot open your handler and check. `writes:
+true` compiles too. It is a declaration, not a request for permission: the
+entry is named in `compile-report.json` and in the runbook instead of printing
+a warning. Point a pre-fetch at a lookup, and mark anything else `writes: true`
+so it stays easy to find later.
+
+**`writes:` only means something on a `tool:` entry.** A `clock:` or `source:`
+entry runs no tool, so `writes:` on either is refused.
 
 **`assign:` and `args:` are lists.** One pair per `- ` line.
 
+**A pre-fetch fills a variable that holds one plain value.** It resolves before
+anybody speaks, so what it has is one value: a formatted clock reading, the
+number the call carries, one field of a tool result. Text is fine, and so is
+shaped text like `Phone` or `Date`, because the shape is checked where the value
+enters the state. A `Literal` works when the tool's own field declares the same
+set. A `list[...]` or a declared shape is refused, and names the step to assign
+it from instead:
+
+```text
+agent.yaml:37: prefetch "today" assigns appointments, which is declared list[Appointment], and a pre-fetch resolves one plain value before the greeting. Assign appointments from the step that produces it, and leave the pre-fetch the values a call already carries
+```
+
+A list is something a call accumulates: two bookings are two entries, and the
+step that took each one appends it. Nothing has happened yet when the pre-fetch
+runs, so there is nothing for it to append.
+
 ## Where it works
 
-| Entry | LiveKit | Pipecat |
-|---|---|---|
-| `clock:` | yes | yes |
-| `tool:` | yes | yes |
-| `source:` | on `sip` and `connector` only | compiles, never gets a value |
+`clock:` and `tool:` entries run on every target except `slng`, which refuses
+`prefetch:` and `confirm:` outright: it starts the session itself, so there is
+no gap before the greeting to fetch anything in.
 
-`source:` is the row to read twice. **No Pipecat route supplies call facts**, so
-there a `source: from_number` entry compiles, is skipped on every call, and
-`unmute validate` tells you so. The variable keeps its default and the call
-carries on.
+`source:` depends on the route, and on the direction of the call:
 
-The `slng` target refuses `prefetch:` and `confirm:` outright. It starts the
-session itself, so there is no gap before the greeting to fetch anything in.
+| Fact | `livekit sip` | `livekit connector` | `pipecat daily-sip` | `pipecat cloud-websocket` |
+|---|---|---|---|---|
+| `source.session_id` | in, out | in, out |  |  |
+| `source.carrier` | in, out | in, out |  |  |
+| `source.connection` | in, out | in, out |  |  |
+| `source.call_id` | in, out | in, out | in, out | in, out |
+| `source.stream_id` |  | in, out |  | in, out |
+| `source.direction` | in, out | in, out | in, out | in, out |
+| `source.from_number` | in, out | in, out | in | in |
+| `source.to_number` | in, out | in, out |  | out |
+
+`in` means the fact resolves on an inbound call, `out` means it resolves on an
+outbound call. A blank cell means the route supplies nothing there, and an
+entry reading that fact is skipped on every call, with a log line saying so.
+
+The two Pipecat rows read a phone number one way only, and that is not an
+oversight. A TwiML Bin is attached to one number, so on an inbound call the
+number being called is already fixed, and only the caller's number is worth
+carrying. An outbound call goes out from the environment's own caller ID, so
+there the number worth carrying is the one being dialled. Each direction hands
+the agent the one number the carrier knows and unmute does not.
+
+So a `source: from_number` entry gets nothing on an outbound `pipecat
+daily-sip` call, and a `source: to_number` entry gets nothing anywhere on
+Pipecat except an outbound `cloud-websocket` call. `unmute validate` warns
+when a package declares only the direction a route does not grant.
+
+### The number an outbound call carries
+
+An outbound call has nobody calling in, so the number worth carrying is the one
+being dialled. It is the same shape of entry, reading the other fact:
+
+```yaml agent.yaml
+prefetch:
+  - name: dialing
+    source: to_number
+    assign:
+      - customer_phone: result.value
+```
+
+On both LiveKit routes that is all of it. The worker places the call, so it
+already holds the number, and nothing else has to be set up.
+
+On `pipecat cloud-websocket` the number has to be put into the request that
+places the call, alongside the parameter naming the agent:
+
+```xml
+<Parameter name="to_number" value="+15550707444"/>
+```
+
+The number goes into that request twice, once as the number Twilio dials and
+once as this parameter. Twilio fills `{{To}}` in for a TwiML Bin but substitutes
+nothing inside an inline `Twiml=`, so the caller of the API supplies it. The
+generated `build/pipecat/README.md` prints the whole request with your own
+values already in it, which is the copy worth using.
+
+Leave the parameter out and the entry is skipped, exactly as a withheld caller
+ID is skipped, with a line naming the entry:
+
+```text
+prefetch dialing: skipped, the call carries no to_number
+```
+
+### A caller's number is best effort
+
+A phone number is a less certain fact than a call id, on every route that
+supplies one. A caller can withhold their own number, and a withheld number
+does not arrive as nothing:
+
+- Twilio's own policy is to set it to the word `anonymous`.
+- Where an upstream carrier sends a word such as ANONYMOUS or RESTRICTED
+  instead, Twilio converts it to keypad digits, which look exactly like a real
+  number.
+- Some calls simply arrive with the field empty.
+
+unmute treats all three the same way: absent. A number-valued fact resolves
+only when it looks like a plausible E.164 number, a `+` followed by 8 to 15
+digits, and a short list of known digit placeholders is rejected on top of
+that check. Either way the entry is skipped, and the log names which entry and
+why.
+
+On LiveKit `sip`, the number is also absent when the dispatch rule sets
+`HidePhoneNumber`. On `pipecat cloud-websocket` it can be missing for a
+quieter reason: the number rides a `<Parameter>` in the TwiML Bin you made, so
+a Bin created before this existed does not carry it. Nothing warns about that
+at compile time, because checking would need carrier credentials the compiler
+never asks for.
+
+Treat the caller's number as best effort everywhere it resolves, not only on
+Pipecat. A route granting the fact is not a promise that any one call will
+carry it.
 
 <Note>
   The same fact declared as a variable's own `source:` is stricter: on Pipecat that

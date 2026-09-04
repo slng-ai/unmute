@@ -72,6 +72,27 @@ asyncio.run(agent._prefetch(seeded, {"from_number": "+34600111222"}))
 assert seeded.customer_phone == "+34600111222", seeded.customer_phone
 assert "customer_phone" in seeded._unconfirmed, seeded._unconfirmed
 
+# 2c. A withheld caller ID, in all three shapes it arrives in. This is the case a
+#     Go test cannot settle, because the question is what the emitted Python does
+#     with a real value.
+#
+#     Twilio sends the word "anonymous" when a caller withheld their number, and
+#     where an upstream carrier sent a word instead, the keypad digits of it,
+#     which are shaped exactly like a real number. All three mean absent.
+for withheld in ("", "anonymous", "ANONYMOUS", "+266696687", "+8628245225"):
+    hidden = fresh()
+    asyncio.run(agent._prefetch(hidden, {"from_number": withheld}))
+    assert hidden.customer_phone == "", (withheld, hidden.customer_phone)
+    assert hidden._unconfirmed == set(), (withheld, hidden._unconfirmed)
+
+# And a real number is still a real number, including one that begins with the
+# digits a placeholder spells. "unknown" spells 8656696, and +86 5669 6xxx is an
+# ordinary Chinese mobile: reading it as withheld would throw away a real caller.
+for real in ("+34600111222", "+865669612345"):
+    kept = fresh()
+    asyncio.run(agent._prefetch(kept, {"from_number": real}))
+    assert kept.customer_phone == real, (real, kept.customer_phone)
+
 # 3. Timed out. The budget is what stops a slow lookup delaying the greeting, and
 #    the only way to see it work is to be slower than it.
 original = agent.tools.look_up_customer.look_up_customer
@@ -197,13 +218,20 @@ for name in json.load(open("compile-report.json"))["required_env"]:
 
 import agent  # noqa: E402
 
-# The zone resolved at import, or this module would not have loaded. Assert it
-# names the package's own zone rather than trusting that.
-assert agent._PREFETCH_TZ == ZoneInfo("Europe/Madrid"), agent._PREFETCH_TZ
+# The zone the package declared, written out here rather than read back off the
+# module. Reading the module's own constant was circular: an emitter that inlined
+# the wrong zone would agree with itself and pass.
+declared = ZoneInfo("Europe/Madrid")
 
 state = agent.Userdata()
 asyncio.run(agent._prefetch(state, None))
-assert state.booking_date == datetime.now(agent._PREFETCH_TZ).date().isoformat()
+now = datetime.now(declared)
+assert state.booking_date == now.date().isoformat(), state.booking_date
+# The weekday names the day the date lands on. Only a real reading can show this:
+# a compile-time test sees the expression, not that indexing the spelled-out tuple
+# with weekday() lines up, and the tuple exists because strftime("%A") follows the
+# container's locale.
+assert state.booking_weekday == agent._PREFETCH_DAYS[now.weekday()], state.booking_weekday
 
 # The seed fills what the carrier did not.
 os.environ["UNMUTE_CALL_FACTS"] = json.dumps({"from_number": "+34600111222"})

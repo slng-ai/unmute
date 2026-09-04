@@ -117,6 +117,8 @@ const (
 	FieldWebhookPath           Field = "tools.webhook.path"
 	FieldToolDependencies      Field = "tools.local.dependencies"
 	FieldTemplates             Field = "templates.session_start"
+	FieldTypedState            Field = "variables.type.shape"
+	FieldShapedText            Field = "variables.type.shaped"
 )
 
 type Capability struct {
@@ -372,6 +374,12 @@ func Default() Table {
 			// Confirmation holds a value back from a gate, and the gate is the
 			// prerequisite guard on a step. No steps, no guard, nothing to hold.
 			FieldVariableConfirm: field(deny(Slng, slngNoTasks("a value awaiting confirmation"))),
+			// Declared state is a generated Pydantic class in a module the two
+			// code drivers write. The slng target writes a spec and emits no
+			// module, so there is nowhere for the class, the validator or the
+			// composed state block to be.
+			FieldTypedState: field(deny(Slng, slngNoModule("a value with a declared shape"))),
+			FieldShapedText: field(deny(Slng, slngNoModule("a value whose text has a validated shape"))),
 			FieldContextNoToolCalls: field(
 				deny(Pipecat, "the Pipecat driver does not shape transfer context (include_tool_calls) yet"),
 				deny(Slng, slngNoHandoff("include_tool_calls: false")),
@@ -743,6 +751,18 @@ func slngNoKnowledge(what string) string {
 		" has nowhere to be read or searched: drop the knowledge: tool and put the " +
 		"facts in the agent's instructions, or compile to livekit or pipecat which " +
 		"emit the search module and carry the documents in the image"
+}
+
+// slngNoModule is why the slng target refuses a declared shape.
+//
+// Not the tasks reason and not the knowledge reason, though it rhymes with
+// both: what is missing here is the emitted Python module. A shape is a
+// generated class with a validator, and the validation has to run where the
+// value enters the state, which is inside a module this target never writes.
+func slngNoModule(what string) string {
+	return "slng target pushes a spec and emits no module of its own, so " + what +
+		" has nowhere to be declared or checked: declare the value as one of the primitive types, " +
+		"or compile to livekit or pipecat, which generate the class and validate the value where it enters"
 }
 
 func slngNoHandoff(what string) string {

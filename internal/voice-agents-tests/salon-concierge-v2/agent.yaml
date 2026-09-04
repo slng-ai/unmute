@@ -4,8 +4,6 @@ name: salon-concierge-v2
 
 entry_agent: concierge
 
-timezone: Europe/Madrid
-
 agents:
   concierge:
     instructions: instructions.md
@@ -23,25 +21,26 @@ agents:
           - find_or_create_customer
         assign:
           - customer_phone: result.customer_phone
-          - customer_status: result.status
+          - customer: result.customer
+        # This step records no reason, and that is what `history: reset` costs.
+        # A reset step never receives the caller's triggering utterance, so a
+        # `reason` field here could only be filled by asking, and it asked on
+        # every call: the caller said "a booking for a haircut tomorrow", the
+        # step read the number back, and then asked what they were calling
+        # about. The steps that act read the conversation and record it instead.
         result:
-          customer_phone: string
-          status:
-            enum:
-              - existing
-              - created
-              - invalid
+          customer_phone: Phone
+          customer: Customer
           summary: string
         context:
           history: reset
 
       - name: manage_booking
         when: The caller wants to create, modify, or cancel a booking.
-        announce: Let me pull up the diary.
         instructions: tasks/booking.md
         requires:
           - customer_phone
-          - customer_status
+          - customer.status
         tools:
           - list_bookings
           - check_availability
@@ -50,15 +49,24 @@ agents:
           - cancel_booking
         handoffs:
           - to_complaints
+        assign:
+          - appointments+: result.appointment
+          # The step that did the thing records why the caller rang. This one
+          # runs on `history: messages`, so the caller's own words are in front
+          # of it and it never has to ask.
+          - caller_reason+: result.reason
         result:
-          action:
-            enum:
-              - create
-              - modify
-              - cancel
-              - none
-          booking_id: string
-          status: string
+          # Absent when the caller decided against a change, which is a real
+          # outcome and not a failure: the append adds nothing that turn rather
+          # than the step inventing an appointment to have something to hand
+          # back.
+          appointment: Appointment | None
+          # All five values, the same set the list declares, though this step
+          # only ever returns one of the three booking ones. A caller who only
+          # asks a question is answered by the concierge itself and runs no
+          # step, so `request_informations` reaches the list from nowhere: the
+          # list holds what a step did, not everything that was said.
+          reason: Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]
           summary: string
         context:
           history: messages
@@ -71,13 +79,42 @@ agents:
     instructions: agents/complaint-specialist.md
     think: reasoning
     speak: voice
+    # `record_complaint` is deliberately NOT here. A tool on the agent as well
+    # as on its step is a step the model never enters: it took the short route,
+    # recorded the complaint itself, and `complaints` stayed empty on a call
+    # that recorded one (trace 9aa92e09, 2026-09-04). The prompt already said
+    # to run the step; the tool being in reach beat the prompt.
     tools:
       - look_up_refund_policy
-      - record_complaint
-    # The concierge defines this one. A bare name runs the same task from here,
-    # so there is one definition and both agents can offer it.
+    # The concierge defines verify_customer. A bare name runs the same task from
+    # here, so there is one definition and both agents can offer it.
     tasks:
       - verify_customer
+
+      - name: handle_complaint
+        when: The verified caller is unhappy about something and wants it recorded.
+        instructions: tasks/complaint.md
+        requires:
+          - customer.status
+        # The policy lookup stays on the agent rather than on this step: the
+        # Pipecat driver cannot scope a knowledge tool to a task, so a step
+        # holding one compiles on one target and not the other. The specialist
+        # reads the policy and decides what to offer, and this step records it.
+        tools:
+          - record_complaint
+        assign:
+          - complaints+: result.complaint
+          # The second entry on the same list, written by a different step. A
+          # caller who books and also complains rang for two reasons, and the
+          # state holds both: this is the case the spec separates from a change
+          # of mind, where one step replaces its own value instead.
+          - caller_reason+: result.reason
+        result:
+          complaint: Complaint
+          reason: Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]
+          summary: string
+        context:
+          history: messages
     handoffs:
       - to_concierge
     escalations:
@@ -106,9 +143,73 @@ escalations:
       ring_timeout: 30s
       on_unavailable: hangup
 
+# The named groups of fields this call accumulates. Declared once here and
+# referred to by name from a variable's or a task result's `type:`, so the shape
+# the model is asked for and the shape the state holds are one declaration.
+#
+# Each field is one line unless it wants a description, and the description is
+# what reaches the model: it is how the model knows what a field means without
+# the prompt repeating it in prose.
+shapes:
+  - name: Customer
+    description: Who the caller is, as the salon's records have them.
+    # No id field. Neither lookup tool returns one, so a required `Id` here was
+    # a field the model could only invent, and its own prompt forbids inventing
+    # one. It sent an empty string instead and every call deadlocked at the
+    # finish. A field nothing in the package can fill does not belong in a
+    # shape; `Complaint.complaint_id` and `Appointment.booking_id` are the two
+    # ids that have a supplier.
+    fields:
+      # No name field either, for the reason the id has none twice over. The
+      # phone number is the identity here, which is why the verification result
+      # is gated against returning a name. A new caller has none, so the field
+      # rendered as `"customer_name":""` in every prompt for the rest of the
+      # call, and the prefetched `customer_name` variable already holds the one
+      # the record has.
+      - phone_number: Phone
+      - name: status
+        type: Literal["existing", "created", "invalid"]
+        description: >-
+          What the lookup found for the confirmed number: existing for a record
+          that was already there, created for one written during this call, and
+          invalid for a number the lookup could not use.
+
+  - name: Appointment
+    description: One thing being booked, moved or cancelled.
+    fields:
+      - scheduled_date: Date
+      - scheduled_time: Time
+      - name: appointment_type
+        type: Literal["haircut", "haircolor", "haircut_and_haircolor", "dry_cut"]
+        description: The service the caller asked for, in the salon's own words.
+      - name: action
+        type: Literal["create", "modify", "cancel"]
+        description: What this call did to this appointment.
+      - name: booking_id
+        type: Id | None
+        description: >-
+          The diary's own id for the booking, once one exists. Absent while the
+          caller is still choosing a time.
+
+  - name: Complaint
+    description: One thing the caller is unhappy about.
+    fields:
+      - complaint_id: Id
+      - name: reason
+        type: Literal["service_quality", "waiting_time", "price", "staff", "other"]
+        description: What the complaint is about, in the salon's own categories.
+      - name: about
+        type: Appointment | None
+        description: >-
+          The appointment the complaint concerns, when it concerns one. A
+          complaint about the salon in general has none.
+      - name: resolution
+        type: Literal["refund_offered", "rebooking_offered", "escalated", "noted"]
+        description: What was offered or done about it on this call.
+
 variables:
   booking_date:
-    type: string
+    type: Date
     default: ""
     description: >-
       Today's date in the salon's own timezone, YYYY-MM-DD. Read once from the
@@ -118,8 +219,43 @@ variables:
       underneath a conversation would leave the caller and the agent disagreeing
       about what "tomorrow" means halfway through.
 
+  caller_reason:
+    type: list[Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]]
+    description: >-
+      Why the caller rang. A list, because one call can do more than one thing:
+      somebody who books and also complains has two reasons, and each step
+      appends the one it heard rather than replacing what the last step recorded.
+
+  customer:
+    type: Customer | None
+    description: >-
+      Who the caller is, once the verification step has heard them agree to the
+      number and looked the record up. Absent until then, and that absence is
+      load-bearing: the booking step's guard names customer.status, so with no
+      value the step waits rather than starting on a caller nobody looked up.
+
+      No `default:` for the same reason a default was wrong on the flat status
+      value it replaced. A default is a value the variable holds before the first
+      word, so a defaulted customer satisfies the guard on an empty record.
+
+  appointments:
+    type: list[Appointment]
+    description: >-
+      What this call booked, moved or cancelled, in the order the caller gave
+      them. A list because a caller can do two things in one call, and the
+      booking step appends rather than replacing, so the second does not erase
+      the first. It starts empty, which is why a guard naming it waits: an empty
+      list is nothing recorded yet, not a decision the caller made.
+
+  complaints:
+    type: list[Complaint]
+    description: >-
+      What the caller was unhappy about, one entry per thing, each with what was
+      offered about it. Appended by the complaint step for the same reason the
+      appointments are.
+
   customer_phone:
-    type: string
+    type: Phone
     default: ""
     confirm: verify_customer
     description: >-
@@ -143,22 +279,6 @@ variables:
       whole saving, and it replaced twelve spoken digits with one yes. The
       read-back turn does not cache, and that trade was made deliberately.
 
-  customer_status:
-    type: string
-    description: >-
-      What the lookup found for the confirmed number: `existing` for a record
-      that was already there, `created` for one written during this call, and
-      `invalid` for a number the lookup could not use. The verification step
-      assigns it and the booking step declares it, which is the whole reason the
-      booking prompt is allowed to read it.
-
-      No `default:` here, and that is the load-bearing part. A default is a value
-      the variable holds before the first word, so a defaulted variable satisfies
-      the booking step's guard on an empty string and the step starts on a caller
-      nobody has looked up. With no default the guard waits for the verification
-      step, and the compiler refuses the booking prompt if that step ever stops
-      declaring it.
-
   customer_name:
     type: string
     default: ""
@@ -169,9 +289,15 @@ variables:
       was: greeting a stranger by the account holder's name is the worst thing
       this feature could do, and the compiler refuses the prompt that would.
 
+
 prefetch:
   - name: today
-    clock: date
+    clock: now
+    # The zone this entry reads its clock in, and the reason it sits here rather
+    # than on the package: the key belongs beside the reading it governs, and two
+    # entries could honestly want two zones. Not the container's clock, which is
+    # UTC and would name the wrong day for anybody who is not on it.
+    timezone: Europe/Madrid
     assign:
       - booking_date: result.date
 
@@ -182,6 +308,10 @@ prefetch:
 
   - name: profile
     tool: look_up_customer
+    # Does running this unasked, on every call including wrong numbers, change
+    # anything? No: look_up_customer reads. Its twin find_or_create_customer
+    # would answer true, which is why this entry points at this one.
+    writes: false
     args:
       - phone: "{{customer_phone}}"
     assign:
@@ -216,13 +346,9 @@ knowledge:
 models:
   think:
     reasoning:
-      provider: slng
-      model: gpt-5.6-luna
-      agent_id: salon-concierge-v2-v1
-      upstream:
-        provider: openai
+      provider: openai
+      model: gpt-5.6-terra
       params:
-        world_part_override: eu
         reasoning_effort: "none"
   speak:
     voice:

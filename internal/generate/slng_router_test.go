@@ -274,9 +274,19 @@ func TestSlngRouterSendsTheWholeBodyPerRequest(t *testing.T) {
 	agent := routerFixture(t)
 	for _, tc := range routerTargets() {
 		source, _ := emitAgentSource(t, agent, tc.provider, tc.module)
-		for _, want := range []string{`"slng_config": _slng_config_fast_reasoning()`, `"template_variables": _slng_template_variables(`} {
-			if !strings.Contains(source, want) {
-				t.Errorf("%s: the request body does not carry %s", tc.provider, want)
+		want := []string{`"slng_config": _slng_config_fast_reasoning()`}
+		// The variables reach the request through each target's own per-request
+		// seam. LiveKit renders the whole body inside its llm node; Pipecat
+		// overrides the framework's parameter builder and writes the key there.
+		// Two spellings of one requirement, and neither target may snapshot it.
+		if tc.provider == ir.ProviderLiveKit {
+			want = append(want, `"template_variables": _slng_template_variables(`)
+		} else {
+			want = append(want, `body["template_variables"] = _slng_template_variables(`)
+		}
+		for _, one := range want {
+			if !strings.Contains(source, one) {
+				t.Errorf("%s: the request body does not carry %s", tc.provider, one)
 			}
 		}
 		if tc.provider != ir.ProviderLiveKit {
@@ -392,7 +402,7 @@ func TestSlngRouterSuppliesEveryNameAndTruncates(t *testing.T) {
 // present in the delta overwrite keys in the target"), so a body-only delta
 // leaves the site's scope alone, and a delta that named extra_headers as well
 // would replace the scope of whichever site is speaking.
-func TestSlngRouterPipecatRefreshesTheBodyOnEveryWrite(t *testing.T) {
+func TestSlngRouterPipecatReadsTheVariablesPerRequest(t *testing.T) {
 	agent := routerFixture(t)
 	// The fixture's delegates assign nothing, so give one an assignment: that is
 	// the only way a call writes a variable mid-conversation, and it is the whole
@@ -401,7 +411,7 @@ func TestSlngRouterPipecatRefreshesTheBodyOnEveryWrite(t *testing.T) {
 	// a refresh.
 	agent.Controls["run_collect"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "collect", When: "Collect the caller's account details.",
-		Assign: map[string]string{"customer_id": "result.tier"},
+		Assign: []ir.AssignTo{{Var: "customer_id", Field: "tier"}},
 	}
 	source, _ := emitAgentSource(t, agent, ir.ProviderPipecat, "bot.py")
 	// Every place the emitted module assigns into the call state, not just the
@@ -413,8 +423,29 @@ func TestSlngRouterPipecatRefreshesTheBodyOnEveryWrite(t *testing.T) {
 	if len(writes) < 2 {
 		t.Fatalf("the fixture exercises %d state write sites, want at least the task result and the capture tool: %v", len(writes), writes)
 	}
-	if got := strings.Count(source, `extra={"extra_body":`); got < len(writes) {
-		t.Errorf("%d state writes (%v) and %d body refreshes; a value written where nothing refreshes never reaches the router", len(writes), writes, got)
+	// The refresh count that stood here is gone, and so are the refreshes it
+	// counted. Three settings frames used to carry the body after a write, one
+	// per write site, and the count was what caught a fourth write site landing
+	// with no refresh. The service now reads the variables from live state on
+	// every request, so there is nothing to count and nothing to forget: a write
+	// anywhere reaches the next request, including one made mid-turn, which is
+	// the gap the three frames left open.
+	if !strings.Contains(source, "def build_chat_completion_params(self, params_from_context) -> dict:") {
+		t.Errorf("pipecat emits no per-request parameter override, so a value written mid-turn is one turn late:\n%s",
+			source)
+	}
+	if !strings.Contains(source, `body["template_variables"] = _slng_template_variables(`) {
+		t.Error("the override does not rebuild the template variables, so it refreshes nothing")
+	}
+	for _, line := range strings.Split(source, "\n") {
+		if strings.Contains(line, "LLMUpdateSettingsFrame") && strings.Contains(line, "extra_body") {
+			t.Errorf("a settings frame still carries the body, which is now a second owner of it:\n%s", line)
+		}
+	}
+	// And no snapshot in the construction, for the same reason: a value beside
+	// the live read is a reader's question with no answer.
+	if strings.Contains(source, `"template_variables": _slng_template_variables(`) {
+		t.Error("the pipecat construction still snapshots the template variables beside the per-request read")
 	}
 	// The refresh dict names the body only. Anything that also named the headers
 	// would hand the speaking site somebody else's scope.
