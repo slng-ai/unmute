@@ -819,7 +819,14 @@ func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
 	// Two steps append rather than replace, because a caller can book twice and
 	// can be unhappy about two things. A replace here is what the `+` exists to
 	// prevent, and it would look like nothing at all.
-	for control, variable := range map[string]string{"manage_booking": "appointments", "handle_complaint": "complaints"} {
+	for control, variable := range map[string]string{
+		"manage_booking": "appointments", "handle_complaint": "complaints",
+		// Two steps append to one list, which is the case the spec separates
+		// from a change of mind: a caller who books and also complains rang for
+		// two reasons and the state holds both, while a step that changes its
+		// own mind replaces its own value.
+		"verify_customer": "caller_reason",
+	} {
 		delegate, ok := resolved.Controls[control].(*ir.Delegate)
 		if !ok {
 			t.Fatalf("%s = %#v, want a delegate", control, resolved.Controls[control])
@@ -832,6 +839,10 @@ func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
 		}
 		if !appends {
 			t.Errorf("%s replaces %q rather than appending to it, so the caller's second one erases the first", control, variable)
+		}
+		if control == "handle_complaint" && !slices.Contains(ir.AssignedVars(delegate.Assign), "caller_reason") {
+			t.Error("handle_complaint records no reason, so a caller who books and also complains ends with one " +
+				"reason rather than two, and the book-and-complain case this package exists to run is not run")
 		}
 	}
 

@@ -101,6 +101,11 @@ asking what happened, and never make the caller repeat themselves.
   is for when nothing more specific has been offered, not for when recording
   itself failed.
 
+**The reason they rang.** `complain`, always. This step exists because the
+caller is unhappy, and appending it rather than replacing is what lets a caller
+who booked and then complained end the call with both reasons on record instead
+of the second erasing the first.
+
 **The summary.** One short line for whoever reads this next: recorded with
 what was offered, or not recorded and why. Plain words, not a sentence you
 would say out loud to the caller.

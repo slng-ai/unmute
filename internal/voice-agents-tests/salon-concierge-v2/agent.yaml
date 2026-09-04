@@ -90,8 +90,14 @@ agents:
           - record_complaint
         assign:
           - complaints+: result.complaint
+          # The second entry on the same list, written by a different step. A
+          # caller who books and also complains rang for two reasons, and the
+          # state holds both: this is the case the spec separates from a change
+          # of mind, where one step replaces its own value instead.
+          - caller_reason+: result.reason
         result:
           complaint: Complaint
+          reason: Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]
           summary: string
         context:
           history: messages
