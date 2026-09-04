@@ -84,11 +84,32 @@ type TypedStateBlock struct {
 	// as words when empty, sorted. Emitted as a set the render path reads, so a
 	// package declaring nothing structured gets an empty one and every existing
 	// prompt renders exactly as it did.
-	Structured     []string
+	Structured []string
+	// Values is every declared value the block renders, in the order the block
+	// numbers them, with the type its author wrote. The runbook prints it, which
+	// is the one place a reader finds out what the model is being told.
+	Values []TypedStateValue
+	// Preview is the block as it stands in the entry agent's own prompt, so the
+	// runbook shows the real thing rather than a description of it. Composed by
+	// the one composer every prompt goes through, which is why it cannot drift
+	// from what the module actually carries.
+	Preview string
+	// Empty is what a value with no contents renders as, so the runbook quotes
+	// the string rather than paraphrasing it.
+	Empty          string
 	NeedsRe        bool
 	NeedsJSON      bool
 	NeedsAnnotated bool
 	NeedsLiteral   bool
+}
+
+// TypedStateValue is one declared value as the runbook names it.
+type TypedStateValue struct {
+	Name string
+	Type string
+	// Confirm is the step that must hear the caller agree before anything acts
+	// on this value, empty when it is settled on arrival.
+	Confirm string
 }
 
 // TypedState renders the declared shapes, their validators and the finish-time
@@ -97,10 +118,18 @@ type TypedStateBlock struct {
 func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 	var block TypedStateBlock
 	for _, name := range agent.VariableOrder {
-		if agent.Variables[name].Shape != nil {
-			block.Structured = append(block.Structured, name)
+		variable := agent.Variables[name]
+		if variable.Shape == nil {
+			continue
 		}
+		block.Structured = append(block.Structured, name)
+		block.Values = append(block.Values, TypedStateValue{
+			Name: name, Type: variable.Shape.String(), Confirm: variable.Confirm,
+		})
 	}
+	// The set the render path reads is sorted, because it is a membership test.
+	// Values keeps the declaration order, because that is the order a reader of
+	// the block sees.
 	slices.Sort(block.Structured)
 	classes, err := shapeOrder(agent)
 	if err != nil {
@@ -108,9 +137,11 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 	}
 	finish := finishTypes(agent)
 	used := usedShapedText(agent)
-	if len(classes) == 0 && len(block.Structured) == 0 && len(finish) == 0 {
+	if len(classes) == 0 && len(block.Values) == 0 && len(finish) == 0 {
 		return TypedStateBlock{}, nil
 	}
+	block.Preview = agent.StateBlock(ir.AgentPromptSite(agent.EntryAgent))
+	block.Empty = ir.StateEmptyText()
 	block.NeedsRe = len(used) > 0
 	block.NeedsJSON = true
 	block.NeedsLiteral = declaresLiteral(agent)
@@ -198,6 +229,45 @@ def _plain(value):
     if isinstance(value, dict):
         return {key: _plain(entry) for key, entry in value.items()}
     return value
+`)
+	b.WriteString(`
+
+def _schema(adapter):
+    """One declared type's schema, with every $ref resolved into place.
+
+    Pydantic emits $defs and a $ref for a shape that contains another shape, and
+    this is not a formatting preference. Measured on one real request to the
+    provider, three ways:
+
+    - the schema as Pydantic emits it, nested inside one tool property with no
+      strict flag: accepted with a 200, and the model invented field names for
+      the nested object because it never read the definition. Every result would
+      then have been refused where it entered, on every call.
+    - the same schema with the refs inlined: accepted, and the model filled the
+      shape's own fields exactly, the nullable one included.
+    - the shape the other target sends, with the $defs hoisted to the
+      parameters root and strict on: accepted, and correct. A $defs anywhere but
+      that root is a 400 naming the pointer.
+
+    This target nests the schema inside one property and sends no strict flag,
+    so it is the first case unless the refs are resolved here.
+    """
+    schema = adapter.json_schema()
+    defs = schema.pop("$defs", {})
+
+    def resolve(node):
+        if isinstance(node, list):
+            return [resolve(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        target = node.get("$ref")
+        if isinstance(target, str) and target.startswith("#/$defs/"):
+            found = defs.get(target.rsplit("/", 1)[1], {})
+            siblings = {key: value for key, value in node.items() if key != "$ref"}
+            return {**resolve(found), **siblings}
+        return {key: resolve(value) for key, value in node.items()}
+
+    return resolve(schema)
 `)
 	b.WriteString("\n\n_FINISH_TYPES = {\n")
 	for _, step := range finish {

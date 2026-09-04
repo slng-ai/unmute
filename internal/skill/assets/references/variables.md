@@ -16,11 +16,112 @@ variables:
 
 | Field | Required | What it is |
 |---|---|---|
-| `type` | yes | `string`, `number`, `integer`, or `boolean` |
+| `type` | yes | a type expression. See the type grammar below |
 | `source` | no | where the value comes from |
 | `default` | no | the value to use when nothing supplies one |
 | `confirm` | no | the step that must hear the caller agree before anything acts on this |
 | `description` | no | a note; for `conversation` variables the model reads it |
+
+## `shapes:` groups fields into a named type
+
+A top-level list, declared once, each item naming a group of fields a
+`type:` can then refer to:
+
+```yaml agent.yaml
+shapes:
+  - name: Appointment
+    description: One thing being booked, moved or cancelled.
+    fields:
+      - scheduled_date: Date
+      - scheduled_time: Time
+      - name: appointment_type
+        type: Literal["haircut", "haircolor", "haircut_and_haircolor", "dry_cut"]
+      - name: calling_reason
+        type: Literal["create_booking", "modify_booking", "cancel_booking"]
+        description: Why this particular appointment is being touched.
+```
+
+| Key | Required | What it is |
+|---|---|---|
+| `name` | yes | what a `type:` refers to. Written in `CapWords`: it names a generated Pydantic class |
+| `description` | no | reaches the model as the class docstring |
+| `fields` | yes | one or more fields, in either form below |
+
+**Short form**, one line, a `Pair`:
+
+```yaml
+- scheduled_date: Date
+```
+
+**Long form**, reached only when the field wants a description:
+
+```yaml
+- name: scheduled_date
+  type: Date
+  description: The day, as the caller gave it.
+```
+
+Refused, each with its line:
+
+- `confirm:` on a field. It belongs to the variable whose `type:` names the
+  shape, never to a field inside it, so a guard cannot be escaped by naming
+  the field one level down.
+- A field holding two keys, or none. Same rule as every other pair list in
+  this schema.
+- The same field name declared twice in one shape.
+- A shape with no `name:`, no `fields:`, or a name another shape already
+  uses.
+- A shape named the same as a primitive, a shaped text type, `Literal`,
+  `list`, or `None`. Give it a name of its own, in `CapWords`.
+- A shape that refers to itself, directly or through another shape. Nothing
+  can render an object with no bottom, and the model would be asked to fill
+  one in.
+
+## The type grammar
+
+A variable's `type:` and a task result field's type are both one-line type
+expressions, written in Pydantic's own words:
+
+```text
+type  := atom ("|" atom)*
+atom  := name | name "[" args "]"
+args  := arg ("," arg)*
+arg   := type | string
+```
+
+| Written | Accepted | Write instead |
+|---|---|---|
+| `str` `int` `float` `bool` | yes | `string` `number` `integer` `boolean` still work, same meaning |
+| `Phone` `Date` `Time` `Id` | yes | text with a validated shape; sent to the model as `str`, checked where the value enters the state |
+| `Literal["a", "b"]` | yes | a closed set, at least one entry, every entry in double quotes |
+| `list[T]` | yes | `T` is any type in this table |
+| a declared shape name | yes | must appear under `shapes:` |
+| `T \| None` | yes | either side; says the value may be absent |
+| `datetime` | no | write `Date` and `Time` as two fields |
+| `date` | no | write `Date` |
+| `time` | no | write `Time` |
+| `UUID` | no | write `Id` |
+| `SecretStr` | no | a secret never travels through state; give it a tool's own `*_env` field instead |
+| `PaymentCardNumber` | no | outside the declared type scope |
+| `dict[...]` / `Dict[...]` | no | declare a shape under `shapes:` and name it here |
+| `set[...]` | no | write `list[...]` |
+| `tuple[...]` | no | write `list[...]` |
+| `List[...]` | no | write `list[...]`, in lower case |
+| `Optional[...]` | no | write `T \| None` |
+| `Union[...]` | no | write `A \| B`; only `\| None` is meaningful here |
+| `Any` | no | name the real type: nothing can render or guard a value with none |
+| `BaseModel` | no | name one of the shapes declared under `shapes:` |
+
+Anything else is refused by name, with the line and the column inside the
+expression, and the message says what to write instead.
+
+Once a variable's type is anything in this table other than a bare `str`
+`int` `float` `bool`, its value is appended automatically to every agent
+prompt and every task prompt, as a numbered block after the authored text.
+Do not template it into a prompt; the compiler already does. An empty value
+renders as the words `none recorded yet.`, never `[]` or `null`. A value
+carrying `confirm:` renders only in its confirming step's own prompt, and a
+declared secret never renders at all.
 
 ## Where values come from
 
@@ -241,6 +342,47 @@ agents:
 The task's typed result lands in the variable named by `assign:`, and the rest
 of the call uses it without asking again. Declare the variable at the top level
 for it to land in.
+
+A `+` on the key appends one entry instead of replacing the value:
+
+```yaml agent.yaml
+        assign:
+          - appointments+: result.appointment
+```
+
+Legal only when the variable's declared type is `list[...]`. Refused
+otherwise, naming the value and its declared type:
+
+```
+assign appends to "customer_phone" with "customer_phone+:", and "customer_phone"
+is declared Phone rather than a list. Drop the "+" to replace the value, or
+declare it list[...] so an entry can be added to it
+```
+
+Without the `+`, `assign:` replaces the value, exactly as it always has.
+
+## Requiring a field inside a shape
+
+`requires:` still names a whole value, and can now also name a path into one
+declared as a shape:
+
+```yaml agent.yaml
+        requires:
+          - customer_phone            # a whole value
+          - customer.status           # one field inside a shaped value
+```
+
+The path is resolved against the declared shape at compile time, so a typo is
+refused rather than becoming a guard that can never pass:
+
+```
+requires "customer.city" does not resolve: shape "Customer" declares no field
+"city". It declares customer_name, customer_id, phone_number, status
+```
+
+A path through a `list[...]` is refused too: nothing says which entry it
+means. A value awaiting confirmation satisfies no guard through any path
+into it, the same as it satisfies none as a whole value.
 
 ## Carrying variables through a handoff
 

@@ -202,6 +202,23 @@ empty._unconfirmed = {"caller_phone"}
 empty.caller_phone = "+34600111222"
 assert generated._unmet_prerequisites(empty, ["caller_phone"]) == ["caller_phone"]
 
+# The finish schema goes out with no $ref and no $defs left in it. Measured
+# against the provider: a $ref inside one tool property comes back 200 with the
+# model inventing field names for the nested object, so every result would be
+# refused where it entered and nothing would say why.
+nested = generated.TypeAdapter(list[generated.Appointment])
+assert "$ref" in json.dumps(nested.json_schema()), "the fixture stopped producing a $ref to resolve"
+resolved = generated._schema(nested)
+assert "$ref" not in json.dumps(resolved), json.dumps(resolved)
+assert "$defs" not in resolved, sorted(resolved)
+# And the resolution put the referenced object's own fields in place.
+assert resolved["items"]["properties"]["scheduled_date"]["type"] == "string", resolved
+for adapters in generated._FINISH_TYPES.values():
+    for name, adapter in adapters.items():
+        one = generated._schema(adapter)
+        assert "$ref" not in json.dumps(one), (name, one)
+        assert "$defs" not in one, (name, sorted(one))
+
 # And the whole declared state, field for field, against the one expectation
 # both targets read.
 final = {

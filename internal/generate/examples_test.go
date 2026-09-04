@@ -747,23 +747,92 @@ func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
 	if !ok {
 		t.Fatalf("manage_booking = %#v, want a delegate", resolved.Controls["manage_booking"])
 	}
-	if !slices.Contains(booking.Requires, "customer_status") {
-		t.Errorf("manage_booking requires %v; tasks/booking.md reads {{customer_status}}, and the requires: entry is what makes that legal and what holds the step back until the value exists", booking.Requires)
+	// The booking step names a field inside the declared record, which is the
+	// path form: the flat customer_status it replaced said the same thing in a
+	// second variable, and one of the two would have gone stale. The guard still
+	// holds the step back until the verification step has looked somebody up.
+	if !slices.Contains(booking.Requires, "customer.status") {
+		t.Errorf("manage_booking requires %v; the guard names a field inside the declared customer record, and it is what holds the step back until that record exists", booking.Requires)
 	}
 	verify, ok := resolved.Controls["verify_customer"].(*ir.Delegate)
 	if !ok {
 		t.Fatalf("verify_customer = %#v, want a delegate", resolved.Controls["verify_customer"])
 	}
-	if got := assignedField(verify.Assign, "customer_status"); got != "status" {
-		t.Errorf("verify_customer assigns customer_status from result.%q, want result.status: nothing else in the package supplies it", got)
+	if got := assignedField(verify.Assign, "customer"); got != "customer" {
+		t.Errorf("verify_customer assigns customer from result.%q, want result.customer: nothing else in the package supplies it", got)
 	}
 
 	// No default, and this is the load-bearing one. A default is a value the
-	// variable holds before the first word, so a defaulted customer_status
-	// satisfies the booking guard on an empty string and the step starts on a
-	// caller nobody looked up.
-	if def := resolved.Variables["customer_status"].Default; def != nil {
-		t.Errorf("customer_status declares default %#v; the booking guard would then be satisfied before verification ran", def)
+	// variable holds before the first word, so a defaulted customer satisfies
+	// the booking guard on an empty record and the step starts on a caller
+	// nobody looked up.
+	if def := resolved.Variables["customer"].Default; def != nil {
+		t.Errorf("customer declares default %#v; the booking guard would then be satisfied before verification ran", def)
+	}
+	if shape := resolved.Variables["customer"].Shape; shape == nil || shape.String() != "Customer | None" {
+		t.Errorf("customer resolves to %q, want Customer | None: absent until the verification step fills it", shape.String())
+	}
+
+	// The declared shapes, and the four values they back. This package is what
+	// the feature is verified with, so a package that stops exercising a part of
+	// it fails here rather than passing quietly.
+	for _, name := range []string{"Customer", "Appointment", "Complaint"} {
+		shape, declared := resolved.Shapes[name]
+		if !declared {
+			t.Errorf("shape %q is no longer declared, so nothing in the tree exercises it", name)
+			continue
+		}
+		if len(shape.Fields) < 3 {
+			t.Errorf("shape %q declares %d fields; it is the verification package's own shape and it is meant to be a group", name, len(shape.Fields))
+		}
+		if shape.Description == "" {
+			t.Errorf("shape %q has no description, so the model is never told what the class is for", name)
+		}
+	}
+	// A shape inside a shape, which is the one thing no unit test settles: the
+	// generated schema emits $defs and $ref for it, and whether the provider
+	// accepts that has to be proven on a real request. Keeping the nesting here
+	// is what keeps that request meaningful.
+	complaint := resolved.Shapes["Complaint"]
+	nested := false
+	for _, field := range complaint.Fields {
+		nested = nested || field.Type.String() == "Appointment | None"
+	}
+	if !nested {
+		t.Error("Complaint no longer nests an Appointment; the nested-schema question is settled on a real request against this package, and a flat package cannot ask it")
+	}
+	for name, want := range map[string]string{
+		"caller_reason":  `list[Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]]`,
+		"appointments":   "list[Appointment]",
+		"complaints":     "list[Complaint]",
+		"customer_phone": "Phone",
+	} {
+		got := resolved.Variables[name].Shape
+		if got == nil {
+			t.Errorf("variable %q declares no shape, so this package stops exercising the type it exists to exercise", name)
+			continue
+		}
+		if got.String() != want {
+			t.Errorf("variable %q resolves to %q, want %q", name, got.String(), want)
+		}
+	}
+	// Two steps append rather than replace, because a caller can book twice and
+	// can be unhappy about two things. A replace here is what the `+` exists to
+	// prevent, and it would look like nothing at all.
+	for control, variable := range map[string]string{"manage_booking": "appointments", "handle_complaint": "complaints"} {
+		delegate, ok := resolved.Controls[control].(*ir.Delegate)
+		if !ok {
+			t.Fatalf("%s = %#v, want a delegate", control, resolved.Controls[control])
+		}
+		appends := false
+		for _, entry := range delegate.Assign {
+			if entry.Var == variable {
+				appends = entry.Append
+			}
+		}
+		if !appends {
+			t.Errorf("%s replaces %q rather than appending to it, so the caller's second one erases the first", control, variable)
+		}
 	}
 
 	// Its own deployment and its own router scope. Sharing either with

@@ -10,11 +10,18 @@ public write-up of what it does is
 The same Sage and Stone salon as
 [`salon-concierge`](../../../examples/salon-concierge/), with one thing changed:
 every step gets the smallest context that still does its job, and what it no
-longer reads off the transcript travels as a declared variable instead.
+longer reads off the transcript travels as declared state instead.
+
+Declared state is typed. The facts a call accumulates are groups of named
+fields, written in Pydantic's own words, and the compiler puts a block naming
+them at the end of every agent prompt and every task prompt. So a step reads
+what the call has established rather than re-reading the call, and a later
+step's prompt stops growing with the length of the conversation.
 
 Same tools, same knowledge bases, same voice, same models, same targets, same
-carriers, same agents and the same tasks. Only the `context:` blocks and the
-`variables:` block differ.
+carriers and the same agents. The `shapes:` block, the `variables:` block, the
+`context:` blocks and each step's `result:` are what differ, plus one step the
+other salon does not have.
 
 ## What it contains
 
@@ -22,28 +29,42 @@ Robin works the front desk, confirms who is calling, runs the booking step and
 answers what it can. Customer care takes complaints and refunds. A control
 cold-transfers to a manager on a phone call.
 
-Two tasks sit under the concierge. `verify_customer` reads a phone number back
-and waits for a yes, and it runs with `history: reset`, so it gets its own
-prompt and its declared values and no part of the conversation. `manage_booking`
-takes one booking change from start to finish, and it runs with
-`history: messages`, so it gets both sides of the conversation without the tool
-records nobody re-reads. Both handoffs carry the spoken turns for the same
-reason.
+Two tasks sit under the concierge and one under customer care.
+`verify_customer` reads a phone number back and waits for a yes, and it runs
+with `history: reset`, so it gets its own prompt and its declared values and no
+part of the conversation. `manage_booking` takes one booking change from start
+to finish, and `handle_complaint` records one thing the caller is unhappy about.
+Both run with `history: messages`, so they get both sides of the conversation
+without the tool records nobody re-reads. Both handoffs carry the spoken turns
+for the same reason.
 
-Two values travel as variables rather than as history. `customer_phone` is the
-confirmed number. `customer_status` says what the lookup found, and the booking
-step names it in `requires:`, which is what makes the step wait for it and what
-lets its prompt read it. `customer_status` declares no `default:` on purpose: a
-default is a value the variable holds before the first word, so a defaulted
-variable would let the booking step start on a caller nobody had looked up.
+Three shapes hold what the call learns. `Customer` is who the caller is once the
+verification step has looked them up. `Appointment` is one thing booked, moved
+or cancelled. `Complaint` is one thing the caller is unhappy about, and it can
+name the appointment it is about, which is a shape inside a shape.
+
+Five values are declared with those shapes. `customer` holds the record and may
+be absent. `appointments` and `complaints` are lists, and the steps that fill
+them append rather than replace, so a caller who books twice ends the call with
+two bookings instead of one. `caller_reason` is a list drawn from a closed set,
+because one call can do more than one thing. `customer_phone` is text with a
+validated shape, and it carries `confirm:`, so it renders in the verification
+step's own prompt and nowhere else until the caller has agreed to it.
+
+`customer` declares no `default:` on purpose, and the booking step names
+`customer.status` in `requires:`. A default is a value the variable holds before
+the first word, so a defaulted record would let the booking step start on a
+caller nobody had looked up. With no default the guard waits.
 
 The files:
 
-- `agent.yaml` is the package: agents and the tasks they run, handoffs,
+- `agent.yaml` is the package: shapes, agents and the tasks they run, handoffs,
   escalations, variables, pre-fetch, knowledge and secrets.
 - `targets.yaml` holds the targets, one per telephony plane.
 - `instructions.md` is the concierge prompt, `agents/complaint-specialist.md`
-  the customer care prompt, and `tasks/` the two task prompts.
+  the customer care prompt, and `tasks/` the three task prompts. None of them
+  contains the conversation info block: the compiler appends that, so adding a
+  field to a shape reaches every prompt with no prompt file edited.
 - `tools/` is one file per tool, all local Python over one in-memory store.
 - `knowledge/refunds/` and `knowledge/services/` are two document sets, each
   with its own index.
@@ -106,10 +127,20 @@ to exercise the pre-fetch and the readback:
 unmute dev internal/voice-agents-tests/salon-concierge-v2 --source from_number=<E.164 number>
 ```
 
-Do not seed `customer_status`. It declares no `source:`, so the dispatch payload
-can fill it and the generated runbook lists it with a `--var` line. That line
-works, and using it hands the booking step a status before anything looked the
-caller up, which is the one thing this package is arranged to prevent.
+Do not seed `customer`. It declares no `source:`, so the dispatch payload can
+fill it and the generated runbook lists it with a `--var` line. That line works,
+and using it hands the booking step a record before anything looked the caller
+up, which is the one thing this package is arranged to prevent.
+
+To see the declared state as the model sees it, read the block the compiler put
+at the end of each prompt:
+
+```sh
+grep -A7 'Conversation info:' internal/voice-agents-tests/salon-concierge-v2/build/livekit/agent.py
+```
+
+It is the same text on both targets, and the generated classes beside it are
+what the steps validate their results against.
 
 Run the tools' own check on its own:
 

@@ -46,19 +46,32 @@ it earlier" stops being true.
 So one step assigns the value and the next step declares it:
 
 ```yaml agent.yaml
+shapes:
+  - name: Customer
+    description: Who the caller is, as the salon's records have them.
+    fields:
+      - customer_name: str
+      - customer_id: Id
+      - phone_number: Phone
+      - name: status
+        type: Literal["existing", "created", "invalid"]
+        description: >-
+          What the lookup found for the confirmed number: existing for a
+          record that was already there, created for one written during this
+          call, and invalid for a number the lookup could not use.
+
+agents:
+  concierge:
+    tasks:
       - name: verify_customer
         when: Confirm who the caller is before any specialist work.
         instructions: tasks/verify-customer.md
         assign:
           - customer_phone: result.customer_phone
-          - customer_status: result.status
+          - customer: result.customer
         result:
-          customer_phone: string
-          status:
-            enum:
-              - existing
-              - created
-              - invalid
+          customer_phone: Phone
+          customer: Customer
           summary: string
         context:
           history: reset
@@ -68,14 +81,9 @@ So one step assigns the value and the next step declares it:
         instructions: tasks/booking.md
         requires:
           - customer_phone
-          - customer_status
+          - customer.status
         result:
-          action:
-            enum:
-              - create
-              - modify
-              - cancel
-              - none
+          action: Literal["create", "modify", "cancel", "none"]
           summary: string
         context:
           history: messages
@@ -88,13 +96,15 @@ separating:
 1. It holds the step back until the value exists, and tells the model which step
    supplies it. The caller never hears the guard.
 2. It makes the value legal to read in that step's prompt. Without the entry,
-   `{{customer_status}}` in `tasks/booking.md` is refused at compile time.
+   `{{customer}}` in `tasks/booking.md` is refused at compile time.
 3. It is the list a reader can check the prompt against.
 
-The refusal names both steps and what to do:
+The refusal names both steps and what to do. It is about a `{{name}}` an
+author wrote: a value with a declared shape is in the block already, so a
+prompt naming it by hand is a second copy rather than the only one.
 
 ```text wrap
-tasks/booking.md: task "manage_booking" instructions references {{customer_status}}, which only task "verify_customer" assigns. Add customer_status to this task's requires: list, so the step waits for the value and its prompt can read it
+tasks/booking.md: task "manage_booking" instructions references {{customer}}, which only task "verify_customer" assigns. Add customer to this task's requires: list, so the step waits for the value and its prompt can read it
 ```
 
 <Warning>
@@ -104,10 +114,42 @@ guard on an empty string and the step starts on nothing. Give a value that must
 be produced during the call no default, and the guard becomes real.
 </Warning>
 
+## Declared state does not wait for `context.history`
+
+`requires:` still holds a step back, and still makes a plain `{{name}}`
+reference legal in that step's own prompt. What a declared shape changes is
+what a step gets without any `{{...}}` at all.
+
+Give a variable a type that is more than a bare `string`, one built from
+[the type grammar](/reference/variables#the-type-grammar) such as `Phone`, a
+`Literal`, a `list[...]`, or a shape declared under `shapes:`, and the
+compiler appends its current value to every agent prompt and every task
+prompt on its own, after the authored text:
+
+```text
+Conversation info:
+What this call has established so far. Read it rather than re-reading the
+conversation, and never ask for something already recorded here.
+1. Customer: {"customer_name":"Robin","customer_id":"c-4192","phone_number":"+34600111222","status":"existing"}
+```
+
+This does not go through `history:`. `manage_booking` reads `customer` in
+that block even with `history: reset`, and `tasks/booking.md` names it
+nowhere. `requires:` is still the reason the step waits for it; it stops
+being the reason the step can see it.
+
+`customer_phone` carries `confirm: verify_customer`, so it renders only in
+`verify_customer`'s own block, the same rule its own guard already follows: a
+value awaiting the caller's agreement satisfies no `requires:` guard and
+appears in no prompt but the confirming step's own.
+
+An empty value renders as the words `none recorded yet.`, never `[]` or
+`null`, so a step can tell "not yet known" from "known to be nothing".
+
 ## Two things a step loses with `reset`
 
 Both are worth knowing before you choose it, because no compiler error catches
-either.
+either. Declared state is not one of them: see above.
 
 **It does not receive the caller's triggering utterance.** It opens without
 knowing what was just asked. For a step that reads a number back that costs
@@ -171,6 +213,6 @@ unmute dev ./my-agent --source from_number=<a number in E.164>
 ## Where to look next
 
 [Tasks](/build/orchestration/tasks) is the reference for `context.history` and
-`requires:`, [Variables](/reference/variables) for `assign:`, `confirm:` and
-every `source:`, and [Handoffs](/build/orchestration/handoffs) for what crosses
-an agent change.
+`requires:`, [Variables](/reference/variables) for `assign:`, `confirm:`,
+`shapes:` and every `source:`, and [Handoffs](/build/orchestration/handoffs)
+for what crosses an agent change.

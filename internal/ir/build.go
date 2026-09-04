@@ -1027,6 +1027,7 @@ func checkAssignments(taskName string, assign []AssignTo, agent *Agent) error {
 			return fmt.Errorf("assign result field %q does not resolve", entry.Field)
 		}
 		target := want.Shape
+		source := field
 		if entry.Append {
 			if !target.IsList() {
 				return fmt.Errorf("assign appends to %q with %q, and %q is declared %s rather than a list. "+
@@ -1034,8 +1035,15 @@ func checkAssignments(taskName string, assign []AssignTo, agent *Agent) error {
 					entry.Var, entry.Var+"+:", entry.Var, declaredAs(want), "+")
 			}
 			target = target.List
+			// An entry that may be absent is legal to append: it means "add one
+			// if there is one this time", which is the shape a step that
+			// concludes nothing needs. The emitted append skips it, so the list
+			// grows only when the step produced something. Without this the step
+			// would have to invent an entry on the turn the caller changed their
+			// mind.
+			source.Shape = withoutOptional(source.Shape)
 		}
-		if err := assignableInto(target, want.Type, field); err != nil {
+		if err := assignableInto(target, want.Type, source); err != nil {
 			return fmt.Errorf("assign result %q does not fit variable %q: %w", entry.Field, entry.Var, err)
 		}
 	}

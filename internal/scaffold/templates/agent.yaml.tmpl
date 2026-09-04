@@ -103,12 +103,12 @@ agents:
 # reads.
 shapes:
 [[range .Shapes]]  - name: [[.Name]]
-[[if .Description]]    description: [[.Description]]
+[[if .Description]]    description: [[yaml .Description]]
 [[end]]    fields:
 [[range .Fields]][[if .Description]]      - name: [[.Name]]
-        type: [[.Type]]
-        description: [[.Description]]
-[[else]]      - [[.Name]]: [[.Type]]
+        type: [[yaml .Type]]
+        description: [[yaml .Description]]
+[[else]]      - [[.Name]]: [[yaml .Type]]
 [[end]][[end]][[end]]
 [[end]][[if .Variables]]variables:
 [[range .Variables]]  [[.Name]]:

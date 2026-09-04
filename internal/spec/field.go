@@ -76,18 +76,18 @@ func (f *Field) UnmarshalYAML(node ast.Node) error {
 	// One key that is not `name:` is the short form, `- scheduled_date: Date`.
 	if len(values) == 1 && values[0].Key.String() != "name" {
 		f.Name = values[0].Key.String()
-		text, ok := values[0].Value.(*ast.StringNode)
+		text, ok := fieldText(values[0].Value)
 		if !ok {
 			return &PairError{Line: line, Msg: fmt.Sprintf(
 				"field %q holds a %s, and a field is written %q with the type on the same line",
 				f.Name, values[0].Value.Type(), "- name: Type")}
 		}
-		f.Type = text.Value
+		f.Type = text
 		return nil
 	}
 	for _, value := range values {
 		key := value.Key.String()
-		text, ok := value.Value.(*ast.StringNode)
+		text, ok := fieldText(value.Value)
 		if !ok {
 			return &PairError{Line: value.Key.GetToken().Position.Line, Msg: fmt.Sprintf(
 				"field key %q holds a %s, and every key of a field holds one line of text",
@@ -95,11 +95,11 @@ func (f *Field) UnmarshalYAML(node ast.Node) error {
 		}
 		switch key {
 		case "name":
-			f.Name = text.Value
+			f.Name = text
 		case "type":
-			f.Type = text.Value
+			f.Type = text
 		case "description":
-			f.Description = text.Value
+			f.Description = text
 		case "confirm":
 			return &PairError{Line: value.Key.GetToken().Position.Line, Msg: fmt.Sprintf(
 				"field %q declares %q. A confirm: belongs to the variable, not to a field inside it: "+
@@ -120,6 +120,22 @@ func (f *Field) UnmarshalYAML(node ast.Node) error {
 			"field %q declares no type. Write %q, one line, in Pydantic's own words", f.Name, "type:")}
 	}
 	return nil
+}
+
+// fieldText reads one field key's value as text.
+//
+// Both scalar shapes, because a description is prose and prose is written as a
+// folded block: goccy parses `>-` and `|` into a LiteralNode rather than a
+// StringNode, and a decoder that took only the second would refuse every
+// description long enough to want wrapping.
+func fieldText(node ast.Node) (string, bool) {
+	switch scalar := node.(type) {
+	case *ast.StringNode:
+		return scalar.Value, true
+	case *ast.LiteralNode:
+		return strings.TrimRight(scalar.Value.Value, "\n"), true
+	}
+	return "", false
 }
 
 // fieldEntries reads the item's key-value nodes, refusing the two shapes a

@@ -23,14 +23,12 @@ agents:
           - find_or_create_customer
         assign:
           - customer_phone: result.customer_phone
-          - customer_status: result.status
+          - customer: result.customer
+          - caller_reason+: result.reason
         result:
-          customer_phone: string
-          status:
-            enum:
-              - existing
-              - created
-              - invalid
+          customer_phone: Phone
+          customer: Customer
+          reason: Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]
           summary: string
         context:
           history: reset
@@ -41,7 +39,7 @@ agents:
         instructions: tasks/booking.md
         requires:
           - customer_phone
-          - customer_status
+          - customer.status
         tools:
           - list_bookings
           - check_availability
@@ -50,15 +48,14 @@ agents:
           - cancel_booking
         handoffs:
           - to_complaints
+        assign:
+          - appointments+: result.appointment
         result:
-          action:
-            enum:
-              - create
-              - modify
-              - cancel
-              - none
-          booking_id: string
-          status: string
+          # Absent when the caller decided against a change, which is a real
+          # outcome and not a failure: the append adds nothing that turn rather
+          # than the step inventing an appointment to have something to hand
+          # back.
+          appointment: Appointment | None
           summary: string
         context:
           history: messages
@@ -74,10 +71,30 @@ agents:
     tools:
       - look_up_refund_policy
       - record_complaint
-    # The concierge defines this one. A bare name runs the same task from here,
-    # so there is one definition and both agents can offer it.
+    # The concierge defines verify_customer. A bare name runs the same task from
+    # here, so there is one definition and both agents can offer it.
     tasks:
       - verify_customer
+
+      - name: handle_complaint
+        when: The verified caller is unhappy about something and wants it recorded.
+        announce: Let me get this written down properly.
+        instructions: tasks/complaint.md
+        requires:
+          - customer.status
+        # The policy lookup stays on the agent rather than on this step: the
+        # Pipecat driver cannot scope a knowledge tool to a task, so a step
+        # holding one compiles on one target and not the other. The specialist
+        # reads the policy and decides what to offer, and this step records it.
+        tools:
+          - record_complaint
+        assign:
+          - complaints+: result.complaint
+        result:
+          complaint: Complaint
+          summary: string
+        context:
+          history: messages
     handoffs:
       - to_concierge
     escalations:
@@ -106,9 +123,63 @@ escalations:
       ring_timeout: 30s
       on_unavailable: hangup
 
+# The named groups of fields this call accumulates. Declared once here and
+# referred to by name from a variable's or a task result's `type:`, so the shape
+# the model is asked for and the shape the state holds are one declaration.
+#
+# Each field is one line unless it wants a description, and the description is
+# what reaches the model: it is how the model knows what a field means without
+# the prompt repeating it in prose.
+shapes:
+  - name: Customer
+    description: Who the caller is, as the salon's records have them.
+    fields:
+      - customer_name: str
+      - customer_id: Id
+      - phone_number: Phone
+      - name: status
+        type: Literal["existing", "created", "invalid"]
+        description: >-
+          What the lookup found for the confirmed number: existing for a record
+          that was already there, created for one written during this call, and
+          invalid for a number the lookup could not use.
+
+  - name: Appointment
+    description: One thing being booked, moved or cancelled.
+    fields:
+      - scheduled_date: Date
+      - scheduled_time: Time
+      - name: appointment_type
+        type: Literal["haircut", "haircolor", "haircut_and_haircolor", "dry_cut"]
+        description: The service the caller asked for, in the salon's own words.
+      - name: action
+        type: Literal["create", "modify", "cancel"]
+        description: What this call did to this appointment.
+      - name: booking_id
+        type: Id | None
+        description: >-
+          The diary's own id for the booking, once one exists. Absent while the
+          caller is still choosing a time.
+
+  - name: Complaint
+    description: One thing the caller is unhappy about.
+    fields:
+      - complaint_id: Id
+      - name: reason
+        type: Literal["service_quality", "waiting_time", "price", "staff", "other"]
+        description: What the complaint is about, in the salon's own categories.
+      - name: about
+        type: Appointment | None
+        description: >-
+          The appointment the complaint concerns, when it concerns one. A
+          complaint about the salon in general has none.
+      - name: resolution
+        type: Literal["refund_offered", "rebooking_offered", "escalated", "noted"]
+        description: What was offered or done about it on this call.
+
 variables:
   booking_date:
-    type: string
+    type: Date
     default: ""
     description: >-
       Today's date in the salon's own timezone, YYYY-MM-DD. Read once from the
@@ -118,8 +189,43 @@ variables:
       underneath a conversation would leave the caller and the agent disagreeing
       about what "tomorrow" means halfway through.
 
+  caller_reason:
+    type: list[Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]]
+    description: >-
+      Why the caller rang. A list, because one call can do more than one thing:
+      somebody who books and also complains has two reasons, and each step
+      appends the one it heard rather than replacing what the last step recorded.
+
+  customer:
+    type: Customer | None
+    description: >-
+      Who the caller is, once the verification step has heard them agree to the
+      number and looked the record up. Absent until then, and that absence is
+      load-bearing: the booking step's guard names customer.status, so with no
+      value the step waits rather than starting on a caller nobody looked up.
+
+      No `default:` for the same reason a default was wrong on the flat status
+      value it replaced. A default is a value the variable holds before the first
+      word, so a defaulted customer satisfies the guard on an empty record.
+
+  appointments:
+    type: list[Appointment]
+    description: >-
+      What this call booked, moved or cancelled, in the order the caller gave
+      them. A list because a caller can do two things in one call, and the
+      booking step appends rather than replacing, so the second does not erase
+      the first. It starts empty, which is why a guard naming it waits: an empty
+      list is nothing recorded yet, not a decision the caller made.
+
+  complaints:
+    type: list[Complaint]
+    description: >-
+      What the caller was unhappy about, one entry per thing, each with what was
+      offered about it. Appended by the complaint step for the same reason the
+      appointments are.
+
   customer_phone:
-    type: string
+    type: Phone
     default: ""
     confirm: verify_customer
     description: >-
@@ -142,22 +248,6 @@ variables:
       That is now false rather than merely out of date: reading it back is the
       whole saving, and it replaced twelve spoken digits with one yes. The
       read-back turn does not cache, and that trade was made deliberately.
-
-  customer_status:
-    type: string
-    description: >-
-      What the lookup found for the confirmed number: `existing` for a record
-      that was already there, `created` for one written during this call, and
-      `invalid` for a number the lookup could not use. The verification step
-      assigns it and the booking step declares it, which is the whole reason the
-      booking prompt is allowed to read it.
-
-      No `default:` here, and that is the load-bearing part. A default is a value
-      the variable holds before the first word, so a defaulted variable satisfies
-      the booking step's guard on an empty string and the step starts on a caller
-      nobody has looked up. With no default the guard waits for the verification
-      step, and the compiler refuses the booking prompt if that step ever stops
-      declaring it.
 
   customer_name:
     type: string

@@ -449,3 +449,96 @@ func stateBlocksIn(t *testing.T, module string) []string {
 
 // numberedStateLine matches one value's line in a composed block.
 var numberedStateLine = regexp.MustCompile(`^\d+\. .*\{\{[a-z_]+\}\}`)
+
+// TestPipecatFinishSchemaResolvesEveryRef is the gate under the one thing no
+// unit test could settle, now that a real request has settled it.
+//
+// Pydantic emits $defs and a $ref for a shape that contains another shape.
+// Measured against the provider three ways: this target nests the schema inside
+// one tool property and sends no strict flag, and a $ref there comes back 200
+// with the model inventing field names for the nested object, so every result
+// would be refused where it entered. The refs inlined, it fills the shape's own
+// fields. The other target hoists its $defs to the parameters root and sends
+// strict on, which works, and a $defs anywhere but that root is a 400 naming
+// the pointer.
+//
+// So the emitted schema goes through the resolver, and this is what notices if
+// it stops.
+func TestPipecatFinishSchemaResolvesEveryRef(t *testing.T) {
+	agent := loadTypedState(t)
+	module := emitted(t, agent, ir.ProviderPipecat)
+	// One call, and it is the resolver's own. A second is a schema going out
+	// with its refs unresolved.
+	if got := strings.Count(module, ".json_schema()"); got != 1 {
+		t.Errorf("pipecat calls json_schema() %d times, want 1 (the resolver's own): a $ref inside one tool "+
+			"property is a 200 the model answers with invented field names", got)
+	}
+	if !strings.Contains(module, "_schema(_FINISH_TYPES[") {
+		t.Errorf("pipecat's finish schema does not go through the resolver:\n%s", module)
+	}
+	block, err := TypedState(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"def _schema(adapter):",
+		`defs = schema.pop("$defs", {})`,
+		`target = node.get("$ref")`,
+		"siblings = {key: value for key, value in node.items()",
+	} {
+		if !strings.Contains(block.Source, want) {
+			t.Errorf("the resolver is incomplete: %q missing", want)
+		}
+	}
+	// The sibling keys survive the resolution. A `$ref` beside a description is
+	// how a nullable nested field arrives, and dropping the description would
+	// take away the one thing telling the model what the field is.
+	if !strings.Contains(block.Source, "{**resolve(found), **siblings}") {
+		t.Error("the resolver drops the keys beside a $ref, so a nested field loses its description")
+	}
+}
+
+// TestAnAbsentEntryAppendsNothing is the case a step that concluded nothing
+// needs, and it is the one an append would otherwise force a model to invent.
+//
+// A caller who asks about a booking and then changes their mind leaves the step
+// with nothing to add. Without this the result field would have to be required,
+// so the model would produce an appointment to have something to hand back, and
+// the state would record a booking nobody made.
+func TestAnAbsentEntryAppendsNothing(t *testing.T) {
+	agent := loadExample(t, "salon-concierge-v2")
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		module := emitted(t, agent, provider)
+		appends := 0
+		for _, line := range strings.Split(module, "\n") {
+			if !strings.Contains(line, ".appointments.append(") {
+				continue
+			}
+			appends++
+			if !strings.HasPrefix(strings.TrimSpace(line), "self.state.appointments.append(") &&
+				!strings.HasPrefix(strings.TrimSpace(line), "ctx.userdata.appointments.append(") {
+				t.Errorf("%s: unexpected append line %q", provider, line)
+			}
+		}
+		if appends == 0 {
+			t.Fatalf("%s appends nothing to appointments, so this gate proves nothing", provider)
+		}
+		// Every append of a value that may be absent is guarded, so the list
+		// grows only when the step produced something.
+		guards := strings.Count(module, `["appointment"] is not None:`)
+		if guards < appends {
+			t.Errorf("%s guards %d of %d appends; an absent entry would append None and the state would hold a "+
+				"booking nobody made", provider, guards, appends)
+		}
+	}
+	// And the type is what makes it legal: the element type with its
+	// nullability dropped is what an append is checked against.
+	booking, ok := agent.Controls["manage_booking"].(*ir.Delegate)
+	if !ok {
+		t.Fatalf("manage_booking = %#v, want a delegate", agent.Controls["manage_booking"])
+	}
+	field := agent.Tasks[booking.Task].Result["appointment"]
+	if field.Shape == nil || !field.Shape.Optional {
+		t.Errorf("the booking step's appointment result is %v, want one that may be absent", field.Shape)
+	}
+}

@@ -1160,7 +1160,11 @@ func resultPropsExpr(task string, result map[string]ir.ResultField) string {
 			plain[name] = field
 			continue
 		}
-		entries = append(entries, fmt.Sprintf("%s: _FINISH_TYPES[%s][%s].json_schema()",
+		// Through _schema rather than json_schema(): this target nests the
+		// schema inside one tool property and sends no strict flag, and a $ref
+		// there is a 200 whose nested object the model invents the field names
+		// for. Measured on a real request; the emitted helper says so.
+		entries = append(entries, fmt.Sprintf("%s: _schema(_FINISH_TYPES[%s][%s])",
 			pyQuote(name), pyQuote(task), pyQuote(name)))
 	}
 	return "{**" + pyLiteral(resultProperties(plain)) + ", " + strings.Join(entries, ", ") + "}"

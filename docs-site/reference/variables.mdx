@@ -18,11 +18,90 @@ variables:
 
 | Field | Required | What it is |
 |---|---|---|
-| `type` | yes | `string`, `number`, `integer`, or `boolean` |
+| `type` | yes | a type expression, see [the type grammar](#the-type-grammar) below |
 | `source` | no | where the value comes from |
 | `default` | no | the value to use when nothing supplies one |
 | `confirm` | no | the step that must hear the caller agree before anything acts on this value |
 | `description` | no | a note; for `conversation` variables the model reads it |
+
+## The type grammar
+
+`type` is a single line, written in Pydantic's own words.
+
+```text
+type  := atom ("|" atom)*
+atom  := name | name "[" args "]"
+args  := arg ("," arg)*
+arg   := type | string
+```
+
+| Written | Accepted | Notes |
+|---|---|---|
+| `str` `int` `float` `bool` | yes | the four scalar types. `string` `number` `integer` `boolean` still work and mean the same thing |
+| `Phone` `Date` `Time` `Id` | yes | text with a validated shape. Sent to the model as `str`; the shape is checked where the value enters the state |
+| `Literal["a", "b"]` | yes | a closed set of strings, at least one entry |
+| `list[T]` | yes | `T` is any type in this table |
+| a declared shape name | yes | the name must appear under `shapes:`, below |
+| `T \| None` | yes | on either side; says the value may be absent |
+| `datetime` `date` `time` `UUID` | no | write `Date`, `Time`, or `Id` instead |
+| `SecretStr` | no | a secret reaches a tool through its own `*_env` field, never through state |
+| `PaymentCardNumber` | no | outside the declared type scope |
+| `dict[...]` `set[...]` `tuple[...]` | no | declare a shape under `shapes:` instead |
+| `Optional[...]` | no | write `T \| None` |
+| `List[...]` | no | write `list[...]`, in lower case |
+
+A name outside this table is refused with the line and the column inside the
+expression, and the message says what to write instead.
+
+## `shapes:` groups fields into a named type
+
+A top-level list. Each item declares one named group of fields, which a
+`type:` can then refer to by name.
+
+```yaml agent.yaml
+shapes:
+  - name: Appointment
+    description: One thing being booked, moved or cancelled.
+    fields:
+      - scheduled_date: Date
+      - scheduled_time: Time
+      - name: appointment_type
+        type: Literal["haircut", "haircolor", "dry_cut"]
+        description: The service the caller asked for, in the salon's own words.
+```
+
+| Key | Required | What it is |
+|---|---|---|
+| `name` | yes | what a `type:` refers to. Written in `CapWords`, because it names a generated class |
+| `description` | no | reaches the model as the class docstring |
+| `fields` | yes | one or more fields, in either form below |
+
+A field is one line when it needs no description:
+
+```yaml
+- scheduled_date: Date
+```
+
+and a block when it does:
+
+```yaml
+- name: scheduled_date
+  type: Date
+  description: The day, as the caller gave it.
+```
+
+`confirm:` cannot be written on a field. It belongs to the variable whose
+`type:` names the shape, so a guard on an unconfirmed value cannot be
+sidestepped by naming a field one level down.
+
+A shape that refers to itself, directly or through another shape, is
+refused: nothing can render an object with no bottom, and the model would be
+asked to fill one in.
+
+Once a variable's `type:` names a shape, or is anything past the four bare
+scalars, its current value is appended to every agent prompt and every task
+prompt automatically. The [task-led walkthrough](/build/variables) shows the
+block it adds.
 
 ## Sources
 
@@ -312,6 +391,44 @@ agents:
 
 The task's typed result lands in the variable, and the rest of the call can use
 it.
+
+A `+` on the key appends one entry instead of replacing the value:
+
+```yaml agent.yaml
+        assign:
+          - appointments+: result.appointment
+```
+
+Only legal when the variable's declared type is `list[...]`. Refused
+otherwise, naming the value and its type:
+
+```text wrap
+assign appends to "customer_phone" with "customer_phone+:", and "customer_phone" is declared Phone rather than a list. Drop the "+" to replace the value, or declare it list[...] so an entry can be added to it
+```
+
+Without the `+`, an assignment replaces the value, which is what `assign:`
+has always done.
+
+## Requiring a field inside a shape
+
+`requires:` can still name a whole value, and it can also name a path into a
+declared shape:
+
+```yaml agent.yaml
+        requires:
+          - customer_phone            # a whole value
+          - customer.status           # one field inside a shaped value
+```
+
+The path is resolved against the declared shape at compile time, so a typo is
+refused rather than becoming a guard that can never pass:
+
+```text wrap
+requires "customer.city" does not resolve: shape "Customer" declares no field "city". It declares customer_name, customer_id, phone_number, status
+```
+
+A value awaiting confirmation satisfies no guard through any path into it,
+the same as it satisfies none as a whole value.
 
 ## Carrying variables through a handoff
 

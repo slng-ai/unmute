@@ -35,6 +35,14 @@ func TestMaintainKeepsDeclaredShapes(t *testing.T) {
 					Name: "appointment_type", Type: `Literal["haircut", "dry_cut"]`,
 					Description: "The service the caller asked for.",
 				},
+				// A description holding a colon, which is the shape that breaks a
+				// plain YAML scalar. It is also the shape a real description
+				// takes: every one in the verification package explains a value
+				// by naming its cases after a colon.
+				{
+					Name: "status", Type: `Literal["existing", "created"]`,
+					Description: "What the lookup found: existing for a record already there, created for a new one.",
+				},
 			},
 		}},
 		Variables: []scaffold.Variable{
@@ -68,8 +76,8 @@ func TestMaintainKeepsDeclaredShapes(t *testing.T) {
 	if shape.Name != "Appointment" || shape.Description == "" {
 		t.Errorf("shape = %+v, want Appointment with its description", shape)
 	}
-	if len(shape.Fields) != 3 {
-		t.Fatalf("shape declares %d fields, want 3: %+v", len(shape.Fields), shape.Fields)
+	if len(shape.Fields) != 4 {
+		t.Fatalf("shape declares %d fields, want 4: %+v", len(shape.Fields), shape.Fields)
 	}
 	// The long form survives as the long form, and the short form as the short
 	// form: a description read back onto a field with no `description:` would be

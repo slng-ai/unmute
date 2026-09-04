@@ -320,7 +320,47 @@ lk dispatch create --room <room> --agent-name {{.AgentName}} \
   --metadata '{"call_start": { {{range $i, $v := .CallStartVars}}{{if $i}}, {{end}}"{{$v.Name}}": "..."{{end}} }}'
 ```
 {{- end}}
+{{if .TypedState}}
+## Declared state
 
+Every agent prompt and every task prompt in this project ends with a block the
+compiler wrote:
+
+```text
+{{.TypedState.Preview}}
+```
+
+No prompt file contains it. Adding a field to a shape in the source package
+changes every prompt here with no prompt file edited, so the model is told what
+the call has established rather than being left to re-read the conversation.
+
+The values it names:
+
+{{range .TypedState.Values}}- `{{.Name}}` (`{{.Type}}`){{if .Confirm}}, which the caller has to agree to in the `{{.Confirm}}` step{{end}}
+{{end}}
+What to expect when you read a prompt or a trace:
+
+- A value with no contents renders as the words `{{.TypedState.Empty}}`, never as
+  an empty list or a null. A step reading an empty structure cannot tell "not
+  yet known" from "known to be nothing".
+- A value with contents renders as compact JSON, never as a Python repr.
+- A value the caller has not agreed to renders in its confirming step's prompt
+  and nowhere else on the call.
+- No declared secret renders in the block at all.
+- One value is bounded at `_STATE_VALUE_MAX` characters. A longer one is
+  shortened and logged, never dropped and never allowed to end the call.
+
+Each declared shape is a generated Pydantic class in this module. A step's
+result is validated against it before anything is recorded, so a value outside a
+declared set never enters the state: the previous contents stay as they were and
+the model is told which field and what was allowed, which is what lets it
+correct itself on the next turn.
+
+A text type with a validated shape (`Phone`, `Date`, `Time`, `Id`) is a `str` in
+the schema the model is sent, with its shape checked by a validator. That is
+deliberate: a `pattern` in the schema survives the strict tool-schema converter
+and the provider rejects it, so the shape is checked here instead.
+{{end}}
 {{if .Slng.Any}}
 ## SLNG Context Router
 
