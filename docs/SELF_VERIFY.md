@@ -121,6 +121,37 @@ Python from python.org ships no CA bundle, so `urllib` raises
 
 ---
 
+## Reproducing at the conversation layer, without audio
+
+A prompt defect, a seam defect or a wrong tool route lives one layer above a
+single request and one layer below a call: in the model's turns. LiveKit's test
+harness runs the emitted agent with the real model and the real local tools and
+no STT or TTS, and
+[`scripts/text_run_livekit.py`](../scripts/text_run_livekit.py) drives it:
+
+```sh
+uv run --project internal/voice-agents-tests/salon-concierge-v3/build/livekit \
+  python scripts/text_run_livekit.py internal/voice-agents-tests/salon-concierge-v3 \
+  --line "Hi, I'd like a haircut tomorrow afternoon please." \
+  --line "Yes, that's my number." \
+  --line "The 3 PM one works."
+```
+
+After every caller line it prints the tool calls, the handoffs, the assistant
+lines, the active agent, the request block as that agent's prompt holds it, and
+the declared state. Read the block down the column the way you would read a
+trace: a value that appears in no earlier caller line was invented, and a step
+that asks for a value its block holds is the defect typed inputs exist to
+remove.
+
+Two minutes and a few cents per run, so run it three times before believing a
+claim, the same rule as a call. What it cannot see: audio, turn taking, the
+token size of each request, and the Pipecat target. The knowledge indexes are
+not built and a text session has no phone leg, so a `look_up_*` tool answers
+"lookup unavailable" and a manager transfer raises; both are the harness, not
+the package. Three prompt defects on `salon-concierge-v3` were found and fixed
+this way on 2026-09-04 before anyone picked up a phone.
+
 ## Measuring turn taking
 
 Turn taking is the one measurement here where reporting the improvement alone
