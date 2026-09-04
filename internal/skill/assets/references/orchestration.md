@@ -197,10 +197,11 @@ cancellation.
 | Field | What it does |
 |---|---|
 | `history: full` | the new agent sees the conversation so far |
-| `variables: all` | the values collected so far travel with the caller |
+| `variables` | optional. Left out means `all`: every declared value travels. A list keeps those names and resets the rest, livekit only |
 
-Leave them out and the caller gets asked for their phone number twice. Choose on
-purpose, and tell the user what you chose.
+`history` is required. Choose it on purpose, and tell the user what you chose.
+What the caller just asked for is not a declared value: hand it over with
+`input:` on the handoff, the same list a task takes, see below.
 
 `requires:` is legal on a handoff when variables must exist before the call
 leaves this agent. It is also legal on a task, which is usually the better
@@ -267,6 +268,42 @@ assign:
   - customer_id: result.customer_id
   - customer_name: result.customer_name
 ```
+
+**Hand the step what the caller asked for.** A step on `history: reset` never
+receives the turn that triggered it. `input:` is a list of typed fields the step
+is handed when the agent runs it: the agent, which heard the caller, fills them,
+and the step's prompt ends with a block naming each. A field is one line,
+`- name: type`, or a block with `name`, `type` and `description`. The types are
+the ones a shape field takes. A type ending in `| None` is optional; without it
+the agent must have a value before the step can run, so the agent asks, not the
+step.
+
+```yaml
+      - name: manage_booking
+        when: The caller wants to create, modify, or cancel a booking.
+        instructions: tasks/booking.md
+        input:
+          - action: Literal["create", "modify", "cancel"]
+          - name: requested_day
+            type: str | None
+            description: The day, in the caller's own words. Leave it out if they did not say.
+        result:
+          summary: string
+        context:
+          history: reset
+```
+
+The step's prompt ends with a block you do not write, after the conversation
+state block: a `Request:` heading, one numbered line per field, a value left out
+reading `not given.`. Only the receiving prompt may name an input inline as
+`{{action}}`; any other prompt is refused. A value outside its type is refused
+before the step starts, naming the field, and the agent that supplied it is told
+to ask the caller and run the step again. The values are gone after the visit,
+so a fact worth keeping goes through `result:` and `assign:`. An input may not
+share a name with a variable, a secret, a shape or a grammar word, one name has
+one type across the package, and a task inside a task group takes none. A
+handoff takes the same list: the receiving agent is handed the brief and keeps
+it until the next handoff. Same on livekit and pipecat, refused on slng.
 
 A task can also declare its own `think:`, naming a different reasoning
 profile for that one step alone. Leave it out and the task runs on the
@@ -483,7 +520,7 @@ LiveKit agents and Pipecat output are unchanged.
 | `max_messages` | a positive number | legal with `last_n` only |
 | `summarizer` | a model entry name | legal with `summary` only |
 | `include_tool_calls` | `true` or `false` | whether tool calls travel too |
-| `variables` | `all` or a list of names | handoffs only, not tasks |
+| `variables` | `all` or a list of names | handoffs only, optional, left out means all |
 
 What each value gives the step:
 
@@ -498,9 +535,9 @@ What each value gives the step:
 
 `history: full` is usually right, because the caller has already said something
 the task needs. `history: reset` is right when the step must not be influenced
-by what came before, and must be a step whose whole job is described by its
-declared values, since it has no other way to know what the caller is asking
-for.
+by what came before. Give it `input:` for what the caller asked for, because it
+has no other way to know: without inputs it fits only a step whose whole job is
+described by its declared values.
 
 No `history:` value is a privacy control. Shortening the history does not
 unsay what the caller said out loud; the caller's words are still in the
@@ -620,8 +657,9 @@ answer out loud for each boundary the package actually has.
 | Boundary | The question | Where it is answered |
 |---|---|---|
 | a handoff | how much history does the new agent see? | `context.history` on the handoff entry |
-| a handoff | which variables travel with the caller? | `context.variables`: `all` or a list |
+| a handoff | which variables travel with the caller? | `context.variables`, optional: left out means `all`, or a list |
 | a handoff | do tool calls travel too? | `context.include_tool_calls` |
+| a task or a handoff | what is the step or the new agent handed for this visit? | `input:` on the task or the handoff |
 | a task | what does the task see when it starts? | `context.history` on the task |
 | a task | what comes back, and where does it land? | `result:` on the task, `assign:` on the same task |
 | a task group | do the steps share context or each start clean? | `context_scope` |

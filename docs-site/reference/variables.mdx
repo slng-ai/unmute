@@ -432,13 +432,21 @@ the same as it satisfies none as a whole value.
 
 ## Carrying variables through a handoff
 
+Every declared value is shared by every agent in the call, so a handoff needs
+no `variables:` line to carry them. Left out, every value travels.
+
 ```yaml
     context:
       history: full
-      variables: all
 ```
 
-`variables` takes `all` or a list of names.
+`variables: all` written out means the same. A list of names keeps those
+values and resets every other one to its default on the way across. The list
+form compiles on livekit only, and an empty list is refused.
+
+What the caller just asked for is not a declared value. Hand it to the
+receiving agent with `input:` on the handoff, see
+[Handoffs](/build/orchestration/handoffs#hand-the-receiving-agent-a-brief).
 
 ## Where to go next
 

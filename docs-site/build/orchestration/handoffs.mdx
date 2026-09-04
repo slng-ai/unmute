@@ -98,13 +98,12 @@ hearing implementation details such as “I’m connecting you to another agent.
 | Field | What it does |
 |---|---|
 | `history: full` | the new agent sees the conversation so far |
-| `variables: all` | the values collected so far travel with the caller |
+| `variables` | optional. Left out means `all`: every declared value travels with the caller |
 
-Without them, the caller gets asked for their phone number twice.
-
-`variables:` also accepts a list of names instead of `all`, to carry over only
-those values. That list form works on LiveKit only: Pipecat and the SLNG
-target only support `all`, and refuse a named subset.
+`variables:` also accepts a list of names, to carry over only those values and
+reset every other one to its default on the way across. That list form works on
+LiveKit only: Pipecat and the SLNG target only support `all`, and refuse a
+named subset. An empty list is refused.
 
 When a task lists the handoff control, invoking it ends that task and any
 remaining task-group steps before the receiving agent takes over. It never
@@ -117,6 +116,53 @@ the next caller turn. See [The opening turn cannot hand off
 again](#the-opening-turn-cannot-hand-off-again) below for why, and why
 reciprocal handoffs cannot bounce a caller on older carried intent before they
 say anything new.
+
+## Hand the receiving agent a brief
+
+A handoff on `history: reset` gives the new agent nothing but its own prompt,
+so it would open at the start of a conversation that is already in the middle.
+`input:` on the handoff is the brief: typed fields the agent handing over fills
+from what it heard, and the receiving agent reads from the end of its prompt.
+
+```yaml agent.yaml
+handoffs:
+  to_complaints:
+    to: complaint_specialist
+    when: The verified caller has a complaint or service problem.
+    input:
+      - problem: str
+      - name: about
+        type: Appointment | None
+        description: The booking the complaint concerns, if the caller named one.
+    context:
+      history: reset
+```
+
+The fields take the same two forms and the same types as a task's `input:`;
+see [Hand the step what the caller asked for](/build/orchestration/tasks#hand-the-step-what-the-caller-asked-for).
+`| None` marks a field the agent may leave out. A required field the agent has
+no value for stops the handoff, so the agent that heard the caller asks before
+handing over.
+
+The receiving agent's prompt ends with the brief, after the conversation state
+block:
+
+```text
+Request:
+What you were handed for this visit. It does not change while you run.
+1. Problem: the colour came out wrong
+2. About: {"scheduled_date":"2026-03-19","scheduled_time":"09:30","appointment_type":"haircolor","action":"create","booking_id":"bk_12"}
+```
+
+The brief stays with the receiving agent until the next handoff, so it is still
+in the prompt after that agent has run its own steps. When two handoffs target
+the same agent, its block lists the inputs of both, and a handoff that carries
+no value for one of them leaves it reading `not given.`. A value outside its
+type is refused before anyone is handed over, and the message reaches the agent
+that supplied it.
+
+`variables:` may be left out of the `context:` block. Every declared value is
+already shared by every agent, so an omitted line means `all`.
 
 ## A handoff does not come back
 

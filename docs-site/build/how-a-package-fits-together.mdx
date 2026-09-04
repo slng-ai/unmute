@@ -107,6 +107,9 @@ which kind of thing each one is. That glance is the point of the five lists.
 
 **Step 3. Define the handoffs and escalations.**
 
+Each handoff says what travels with the caller. `history` is required.
+`variables:` is optional: left out, every declared value travels.
+
 ```yaml agent.yaml
 handoffs:
   to_complaints:
@@ -114,13 +117,11 @@ handoffs:
     when: The verified caller has a complaint.
     context:
       history: full
-      variables: all
   to_front_desk:
     to: front_desk
     when: The caller is done complaining and wants something else.
     context:
       history: full
-      variables: all
 
 escalations:
   to_manager:

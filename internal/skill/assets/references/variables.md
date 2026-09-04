@@ -386,15 +386,19 @@ into it, the same as it satisfies none as a whole value.
 
 ## Carrying variables through a handoff
 
+Every declared value is shared by every agent in the call, so a handoff needs
+no `variables:` line to carry them. Left out, every value travels.
+
 ```yaml
     context:
       history: full
-      variables: all
 ```
 
-`variables` takes `all` or a list of names. Without it, the caller gets asked
-for their phone number twice. This is a decision, so make it on purpose and say
-which you chose.
+`variables: all` written out means the same. A list of names keeps those
+values and resets every other one to its default on the way across; the list
+form compiles on livekit only, and an empty list is refused. What the caller
+just asked for is not a declared value: hand it over with `input:` on the
+handoff, see `references/orchestration.md`.
 
 ## Seeding values locally
 
