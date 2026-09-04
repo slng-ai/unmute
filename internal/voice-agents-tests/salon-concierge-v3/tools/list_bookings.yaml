@@ -1,0 +1,41 @@
+description: >-
+  List the verified customer's active bookings. The phone number comes from
+  verification and is never supplied or guessed by the model.
+
+input:
+  type: object
+  properties: {}
+
+inject:
+  customer_phone: "{{customer_phone}}"
+
+output:
+  type: object
+  properties:
+    bookings:
+      type: array
+      items:
+        type: object
+        properties:
+          booking_id:
+            type: string
+          service:
+            type: string
+          start_time:
+            type: string
+          status:
+            type: string
+        required:
+          - booking_id
+          - service
+          - start_time
+          - status
+  required:
+    - bookings
+
+local:
+  handler: tools/salon.py
+
+interruption: provider_default
+effect: returns_data
+announce: Let me look.

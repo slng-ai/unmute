@@ -27,7 +27,12 @@ finding out about.
 [`salon-concierge-v2`](salon-concierge-v2/) is the same salon as
 `examples/salon-concierge` with each step's context chosen per step and one more
 value carried as a declared variable, so the two can be run against each other
-on a real call.
+on a real call. It is frozen at the state that closed typed session state.
+
+[`salon-concierge-v3`](salon-concierge-v3/) is that package under its own name,
+and the one the next feature rewrites: typed inputs on every task and handoff,
+so every seam can run on `history: reset`. Until that ships the two differ only
+in name.
 
 ## Running one
 
