@@ -38,8 +38,6 @@ agents:
         when: The caller wants to create, modify, or cancel a booking.
         announce: Let me pull up the diary.
         instructions: tasks/booking.md
-        requires:
-          - customer_phone
         tools:
           - list_bookings
           - check_availability
@@ -131,8 +129,8 @@ variables:
 
       Offered to the caller for a yes, never acted on unasked. Somebody may be
       ringing from a friend's phone, or may hold a second account, so until the
-      verification step has heard them agree this value satisfies no `requires:`
-      guard and appears in no prompt but that step's own.
+      verification step has heard them agree this value stays unconfirmed and
+      appears in no prompt but that step's own.
 
       An earlier version of this note said no prompt ever reads the number back.
       That is now false rather than merely out of date: reading it back is the

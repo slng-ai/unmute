@@ -583,67 +583,10 @@ func TestBuildRefusesAnAppendOnSomethingThatIsNotAList(t *testing.T) {
 	}
 }
 
-func TestBuildRefusesARequiresPathThatDoesNotResolve(t *testing.T) {
-	// A path into a declared shape, with the field misspelled. Without the
-	// resolution this is a guard that can never pass, and nothing says so until
-	// a real call sits waiting on it.
-	pkg := typedPackageWithTasks(t, `shapes:
-  - name: Customer
-    fields:
-      - customer_name: str
-variables:
-  customer:
-    type: Customer | None
-`, `    tasks:
-      - name: book
-        when: The caller wants an appointment.
-        instructions: instructions.md
-        requires:
-          - customer.customer_nam
-        result:
-          summary: string
-`)
-	_, err := Build(pkg)
-	if err == nil {
-		t.Fatal("a requires: path naming no field built, and the guard could never pass")
-	}
-	for _, phrase := range []string{"customer.customer_nam", `shape "Customer" declares no field`, "customer_name"} {
-		if !strings.Contains(err.Error(), phrase) {
-			t.Errorf("refusal %q does not say %q", err.Error(), phrase)
-		}
-	}
-}
-
-// TestBuildAcceptsARequiresPathThatResolves is the other half: a path that
-// names a real field is legal, and the deleted "no route can fill this"
-// refusal must not come back with it.
-func TestBuildAcceptsARequiresPathThatResolves(t *testing.T) {
-	pkg := typedPackageWithTasks(t, `shapes:
-  - name: Customer
-    fields:
-      - customer_name: str
-variables:
-  customer:
-    type: Customer | None
-`, `    tasks:
-      - name: book
-        when: The caller wants an appointment.
-        instructions: instructions.md
-        requires:
-          - customer.customer_name
-        result:
-          summary: string
-`)
-	if _, err := Build(pkg); err != nil {
-		t.Fatalf("a requires: path naming a declared field was refused: %v", err)
-	}
-}
-
 // TestBuildAssignAcceptsASubFieldOfAShapedResult is gap 1 of the scoped
 // variables feature: a step's result can hand back a whole shape, and an
 // assign: may now name one field inside it rather than only the shape as a
-// whole. The walk is FieldPath, the same one requires: uses above, reached
-// from assign: instead of from a guard.
+// whole. The walk is FieldPath, reached from assign:.
 func TestBuildAssignAcceptsASubFieldOfAShapedResult(t *testing.T) {
 	pkg := typedPackageWithTasks(t, `shapes:
   - name: Appointment
@@ -666,10 +609,9 @@ variables:
 	}
 }
 
-// TestBuildRefusesAnAssignPathIntoAList is the same refusal
-// TestBuildAcceptsARequiresPathThatResolves's sibling proves for requires:,
-// reached from assign: instead: a path cannot say which entry of a list it
-// means, so it is refused rather than left as a write nothing can ever satisfy.
+// TestBuildRefusesAnAssignPathIntoAList: a path cannot say which entry of a
+// list it means, so it is refused rather than left as a write nothing can
+// ever satisfy.
 func TestBuildRefusesAnAssignPathIntoAList(t *testing.T) {
 	pkg := typedPackageWithTasks(t, `shapes:
   - name: Appointment

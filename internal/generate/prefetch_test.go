@@ -281,20 +281,32 @@ func TestPrefetchBoundsARouterValueAndSaysSo(t *testing.T) {
 }
 
 // FR-024 and FR-030, the two halves that make confirmation worth having. A
-// settled value satisfies the gate with no change to the guard at all, which is
-// what makes a known caller skip the identification step outright. An unconfirmed
-// one does not, which is what stops the agent acting on a number nobody agreed to.
+// settled value satisfies the emitted _refusal helper with no change to it at
+// all, which is what makes a known caller skip the identification step
+// outright. An unconfirmed one does not, which is what stops the agent acting
+// on a number nobody agreed to.
 func TestPrefetchedValueMeetsTheGateOnlyOnceConfirmed(t *testing.T) {
-	py := prefetchEmitted(t, ir.ProviderLiveKit, "agent.py")
-	// The helper itself is unchanged apart from consulting the set: a filled
-	// variable passes `getattr(state, name, None) in (None, "")` exactly as it did
-	// before this feature, so no new guard code was needed for the settled case.
-	if !strings.Contains(py, `if getattr(userdata, name, None) in (None, "")`) &&
-		!strings.Contains(py, `if getattr(state, name, None) in (None, "")`) {
-		t.Error("the guard no longer reads a filled variable as satisfied")
+	agent := prefetchFixture(t)
+	// prefetch_core's own tools inject nothing, so nothing here emits _refusal
+	// on its own; give get_invoice an inject of the confirmed number so this
+	// fixture exercises the helper the mark actually gates.
+	tool := agent.Tools["get_invoice"]
+	tool.Inject = map[string]any{"phone": "{{caller_phone}}"}
+	agent.Tools["get_invoice"] = tool
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
 	}
-	if !strings.Contains(py, `or name in getattr(state, "_unconfirmed", ())`) {
-		t.Error("the guard does not consult the unconfirmed set, so a proposed value satisfies a step")
+	py := artifactFile(t, artifact, "agent.py")
+	// The helper itself is unchanged apart from consulting the set: a filled
+	// variable passes `getattr(userdata, name, None) in (None, "")` exactly as
+	// it did before this feature, so no new refusal code was needed for the
+	// settled case.
+	if !strings.Contains(py, `if getattr(userdata, name, None) in (None, "")`) {
+		t.Error("_refusal no longer reads a filled variable as satisfied")
+	}
+	if !strings.Contains(py, `or name in getattr(userdata, "_unconfirmed", ())`) {
+		t.Error("_refusal does not consult the unconfirmed set, so a proposed value satisfies a call")
 	}
 	if !strings.Contains(py, `state._unconfirmed.add("caller_phone")`) {
 		t.Error("the pre-fetched number is never marked as awaiting confirmation")

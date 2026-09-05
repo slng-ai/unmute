@@ -294,7 +294,6 @@ type Handoff struct {
 	To       string
 	When     string
 	Announce string
-	Requires []string
 	// Input is the handoff's expect: list, the brief the receiving agent is handed; carried for the reason
 	// Task.Input is.
 	Input            []ShapeField
@@ -328,7 +327,6 @@ type Task struct {
 	Agent    string
 	When     string
 	Announce string
-	Requires []string
 	Assign   string // optional JSON object mapping variables to result fields
 }
 

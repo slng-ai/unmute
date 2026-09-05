@@ -43,7 +43,7 @@ This is the part that catches people. Once a step cannot see the conversation, a
 value its prompt names has to come from somewhere, and "the model will have read
 it earlier" stops being true.
 
-So one step assigns the value and the next step declares it:
+So one step assigns the value, and the next step's own `when:` says so:
 
 ```yaml agent.yaml
 shapes:
@@ -77,11 +77,8 @@ agents:
           history: reset
 
       - name: manage_booking
-        when: The caller wants to create, modify, or cancel a booking.
+        when: The caller wants to create, modify, or cancel a booking, once the caller is verified.
         instructions: tasks/booking.md
-        requires:
-          - customer_phone
-          - customer.status
         result:
           action: Literal["create", "modify", "cancel", "none"]
           summary: string
@@ -90,32 +87,31 @@ agents:
 ```
 
 `assign:` writes one field of a step's own result into a declared variable.
-`requires:` on the next step holds it back until the value exists, and tells
-the model which step supplies it. The caller never hears the guard. It is
-also the list a reader can check the prompt against, so keep using it
-whenever a step's own work genuinely depends on the value existing first.
+`manage_booking`'s own `when:` says it runs only once the caller is verified,
+so the order lives in the same sentence a reader already checks the prompt
+against.
 
-What `requires:` no longer decides is whether `tasks/booking.md` may write
-`{{customer}}` by hand. Any task's or agent's prompt may already name any
-declared variable, listed in `requires:` or not, and an unset one renders as
-nothing rather than as a compile error. A value with a declared shape, like
-`customer` here, is already in the block above, so naming it again by hand is
-a second copy of the same thing rather than the only way to show it.
+Any task's or agent's prompt may already name any declared variable, whether
+anything has assigned it yet or not, and an unset one renders as nothing
+rather than as a compile error. A value with a declared shape, like `customer`
+here, is already in the block above, so naming it again by hand in
+`tasks/booking.md` would be a second copy of the same thing rather than the
+only way to show it.
 
 <Warning>
-A variable with a `default:` is not waited for. A default is a value the
-variable holds before the first word, so a defaulted variable satisfies the
-guard on an empty string and the step starts on nothing. Give a value that must
-be produced during the call no default, and the guard becomes real.
+A variable with a `default:` never reads as empty. The `Conversation info:`
+block a later step's prompt reads shows the default from the first word, not
+a blank, so a `when:` clause that says "once the value exists" has nothing to
+notice: the model can read the step's own words as already satisfied. Give a
+value that must be produced during the call no default, so the block still
+shows nothing recorded until a step actually writes it.
 </Warning>
 
 ## Declared state does not wait for `context.history`
 
-`requires:` still holds a step back. It has nothing to do with whether a
-plain `{{name}}` reference is legal in a prompt any more: any task's or
-agent's prompt may already write `{{name}}` for any declared variable, this
-one included. What a declared shape changes is what a step gets without
-writing any `{{...}}` at all.
+Any task's or agent's prompt may already write `{{name}}` for any declared
+variable. What a declared shape changes is what a step gets without writing
+any `{{...}}` at all.
 
 Give a variable a type that is more than a bare `string`, one built from
 [the type grammar](/reference/variables#the-type-grammar) such as `Phone`, a
@@ -132,13 +128,12 @@ conversation, and never ask for something already recorded here.
 
 This does not go through `history:`. `manage_booking` gets `customer` in
 that block even with `history: reset`, and `tasks/booking.md` names it
-nowhere. `requires:` is still the reason the step waits for the value; the
-block above is why the step can see it without writing `{{customer}}` at
-all.
+nowhere. This is also how `manage_booking`'s own `when:` clause can lean on
+"once the caller is verified": the model reads this same block and can see
+whether `customer` is there yet.
 
 `customer_phone` carries `confirm: verify_customer`, so it renders only in
-`verify_customer`'s own block, the same rule its own guard already follows: a
-value awaiting the caller's agreement satisfies no `requires:` guard and
+`verify_customer`'s own block: a value awaiting the caller's agreement
 appears in no prompt but the confirming step's own.
 
 An empty value renders as the words `none recorded yet.`, never `[]` or
@@ -188,23 +183,25 @@ that has to run on livekit and pipecat has two fewer options.
 
 None of them fails quietly. Each is a validation error naming the field, and the
 `summary` one lists the four values pipecat does shape. The practical
-consequence is that a two-target package narrows on the task side, through
-`requires:`, which works on both. A handoff carries every declared value on
+consequence is that a two-target package narrows on the task side: reach for
+`reset` or `messages`, and order the steps through their own `when:` clauses,
+which work the same on both targets. A handoff carries every declared value on
 both targets regardless, so there is nothing to narrow there.
 
 ## Two things this is not
 
 **It is not a privacy control.** Shortening a step's history does not unsay what
 the caller said out loud. A phone number read back aloud is in the transcript
-whether a variable holds it or not. `reset` plus a short `requires:` list gives a
+whether a variable holds it or not. `reset` plus a short `expect:` list gives a
 step a smaller request, not a redacted one.
 
 **It is not a reason to seed a value locally.** A variable that gets its value
 from a step declares no `source:`, and a variable with no `source:` can be filled
 from the dispatch payload, so the generated runbook lists it under input
-variables with a `--var` line. That line works. Using it hands the guarded step
-its value before anything produced it, which is the opposite of what the
-`requires:` list is for. Seed the fact a real call carries instead:
+variables with a `--var` line. That line works. Using it hands a step the
+value before anything in the call actually produced it, which defeats the
+point of ordering steps by what has really happened. Seed the fact a real call
+carries instead:
 
 ```sh
 unmute dev ./my-agent --source from_number=<a number in E.164>
@@ -213,6 +210,6 @@ unmute dev ./my-agent --source from_number=<a number in E.164>
 ## Where to look next
 
 [Tasks](/build/orchestration/tasks) is the reference for `context.history` and
-`requires:`, [Variables](/reference/variables) for `assign:`, `confirm:`,
-`shapes:` and every `source:`, and [Handoffs](/build/orchestration/handoffs)
-for what crosses an agent change.
+ordering steps with `when:`, [Variables](/reference/variables) for `assign:`,
+`confirm:`, `shapes:` and every `source:`, and
+[Handoffs](/build/orchestration/handoffs) for what crosses an agent change.

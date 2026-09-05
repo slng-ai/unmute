@@ -62,6 +62,51 @@ which the compiler reads. Read the warning and decide.
 A step that declares no tools at all is fine. Its prompt, its context scope and
 its typed result are reasons to enter it that have nothing to do with tools.
 
+## Order steps with the prompt
+
+A step that must run only after another one does not need a code gate for
+that. It needs two sentences: one in the agent's own instructions, and one in
+the step's own `when:`.
+
+Number the flow in the agent's instructions, in the order the caller
+actually moves through it:
+
+```md instructions.md
+1. Confirm who is calling.
+2. Take the booking request.
+3. Hand a complaint to customer care.
+```
+
+Then give the later step a `when:` that names the situation and, in one
+clause, what has to be true first:
+
+```yaml agent.yaml
+      - name: manage_booking
+        when: The caller wants to create, modify, or cancel a booking, once the caller is verified.
+```
+
+The model has something real to check that clause against. Every prompt
+already carries the `Conversation info:` block, so once the earlier step has
+recorded its value there, the agent's own prompt can say so:
+
+```md instructions.md
+Once the conversation info names a customer, verification has already
+succeeded. Never run that step again unless the caller says the number is wrong.
+```
+
+That is a request to the model, not a gate, so it is not the last line of
+defense. The last line sits on the tool. A tool that silently reads a value,
+through `inject:` or a webhook path, still refuses to run while that value is
+empty or unconfirmed, and the model is told which step supplies it, or, when
+nothing does, to ask the caller. The worst case is one extra model turn, not
+a request sent with a blank or an unconfirmed field.
+
+Check the order with a scripted text conversation before you check it on a
+live call. It drives the agent through a fixed script with the real model
+and the real tools, so you see which step ran, and in what order, without
+picking up a phone. See
+[`scripts/text_run_livekit.py`](https://github.com/slng-ai/unmute/blob/main/scripts/text_run_livekit.py).
+
 ## Keep a read on the agent, keep the write on the step
 
 The rule above has a natural shape once you apply it. Lookups that answer
@@ -82,7 +127,7 @@ the transcript costs both money and accuracy.
 | --- | --- | --- |
 | `full` | The whole conversation | The step needs the caller's exact wording, or you have not declared state yet |
 | `messages` | What was said, without tool traffic | The step acts on what the caller asked for and records why |
-| `reset` | Nothing but its own prompt, declared values and what it was handed | The step is described by its `expect:` list and what it requires |
+| `reset` | Nothing but its own prompt, declared values and what it was handed | The step is described by its `expect:` list and its own declared values |
 
 `reset` is the strongest scope. A reset step never receives the turn that
 triggered it, so on its own it cannot know why the caller rang. One agent gave a

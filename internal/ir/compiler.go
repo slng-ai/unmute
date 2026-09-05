@@ -495,7 +495,7 @@ type Task struct {
 // InputField is one value a step or a receiving agent is handed on entry.
 // Declared by the author, filled by the agent that heard the caller, fixed for
 // the visit and gone after it. Not declared state: it appears in no state
-// block, satisfies no guard, and no assign: writes it.
+// block, and no assign: writes it.
 type InputField struct {
 	Name string `json:"name" yaml:"name"`
 	// Type is the resolved expression, never nil: an input always has a type.
@@ -574,12 +574,6 @@ type Delegate struct {
 	When  string      `json:"when,omitempty" yaml:"when,omitempty"`
 	Task  string      `json:"task,omitempty" yaml:"task,omitempty"`
 	Group string      `json:"group,omitempty" yaml:"group,omitempty"`
-	// Requires names the variables that must hold a value before the step may
-	// start. It applies whether the delegate targets a `task:` or a `group:`,
-	// because both are work that can need an input the conversation has not
-	// collected yet. The driver refuses the step to the model, never to the
-	// caller, and names the control that supplies each missing value.
-	Requires []string `json:"requires,omitempty" yaml:"requires,omitempty"`
 	// Assign is the resolved `assign:` list, in the order the author wrote it.
 	// A list rather than the name-keyed map it was, because an append has to
 	// survive to the driver and a map key cannot carry it. Prefetch.Assign
@@ -587,8 +581,10 @@ type Delegate struct {
 	// precedent rather than setting one.
 	Assign []AssignTo `json:"assign,omitempty" yaml:"assign,omitempty"`
 	// Announce is one fixed sentence spoken as the step is entered, so the two
-	// model requests it takes to enter one are not silence. Spoken after the
-	// prerequisite guard, never before it: a refused step stays silent.
+	// model requests it takes to enter one are not silence. Spoken at the very
+	// start of the step, before anything else runs: ordering between steps is
+	// the prompt's job (the step's `when:` sentence and the owning agent's
+	// instructions), not a code gate, so there is nothing left to hold this back.
 	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
 }
 
@@ -629,7 +625,6 @@ type AgentTransfer struct {
 	When     string      `json:"when,omitempty" yaml:"when,omitempty"`
 	To       string      `json:"to" yaml:"to"`
 	Announce string      `json:"announce,omitempty" yaml:"announce,omitempty"`
-	Requires []string    `json:"requires,omitempty" yaml:"requires,omitempty"`
 	// Inputs is the brief this handoff carries to its receiver, in authored
 	// order. Validated on the departing agent's tool, written to the call state
 	// before the receiver is entered, and shown in the receiver's prompt.

@@ -379,7 +379,6 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		env.add(name)
 	}
 	data.NeedsRender = renderNeeds(agent)
-	data.PrerequisiteGuard, data.NeedsPrerequisiteGuard = PrerequisiteGuard(agent)
 	data.NeedsPrefetchUnconfirmed = PrefetchUnconfirmed(agent)
 	if block, needed := Prefetch(agent, prefetchStateExpr, func(entry ir.Prefetch) PrefetchRequest {
 		// The env names a pre-fetched webhook reads join the startup check the
@@ -854,7 +853,7 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 				built.MCPServers = append(built.MCPServers, livekitMCPSource(ref, tool, env))
 				continue
 			}
-			lowered, err := buildLiveKitTool(ref, tool, agent.Variables, env)
+			lowered, err := buildLiveKitTool(ref, tool, agent.Variables, SupplierIndex(agent.Controls), env)
 			if err != nil {
 				return livekitAgent{}, fmt.Errorf("agent %q: %w", name, err)
 			}
@@ -931,7 +930,7 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 func buildLiveKitTransfer(agent *ir.Agent, tgt ir.Target, ref string, control *ir.AgentTransfer, env *envSet) (livekitTransfer, error) {
 	transfer := livekitTransfer{
 		Method: ref, When: transferWhen(control), TargetClass: pyName(control.To),
-		Announce: control.Announce, Requires: control.Requires,
+		Announce:       control.Announce,
 		Inputs:         inputArgs(control.Inputs),
 		ReceiverInputs: inputNames(agent.Agents[control.To].Inputs),
 	}
@@ -1016,10 +1015,9 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 		// hands back the typed result only (C4/N13). The finality guidance stops
 		// the owner LLM re-running the finished flow (B1/V1).
 		return livekitDelegate{
-			Method: ref, When: delegateWhen(c) + delegateReturnFinality + delegateForwardDeclaration(agent, c),
+			Method: ref, When: delegateWhen(c) + delegateReturnFinality,
 			Task:            single,
 			Then:            "return",
-			Requires:        c.Requires,
 			Announce:        c.Announce,
 			CanTaskTransfer: livekitTaskCanTransfer(agent, task),
 			Inputs:          inputArgs(task.Inputs),
@@ -1032,10 +1030,9 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 	// C3: TaskGroup always shares context, so `isolated` lowers to a generated
 	// sequence of standalone AgentTasks (each starts fresh, C4) instead.
 	delegate := livekitDelegate{
-		Method: ref, When: delegateWhen(c) + delegateForwardDeclaration(agent, c), Then: string(group.Then),
+		Method: ref, When: delegateWhen(c), Then: string(group.Then),
 		Announce: c.Announce,
 		Isolated: group.ContextScope == ir.ContextIsolated,
-		Requires: c.Requires,
 	}
 	// N13/§4.7: return hands the owner the typed results; transfer and end do not
 	// return, so the tool description must say so (the model must not wait for a
@@ -1156,7 +1153,7 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 			built.MCPServers = append(built.MCPServers, livekitMCPSource(ref, tool, env))
 			continue
 		}
-		lowered, err := buildLiveKitTool(ref, tool, agent.Variables, env)
+		lowered, err := buildLiveKitTool(ref, tool, agent.Variables, SupplierIndex(agent.Controls), env)
 		if err != nil {
 			return livekitTask{}, fmt.Errorf("task %q: %w", name, err)
 		}
@@ -1176,8 +1173,8 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 // livekitStateExpr is how an emitted @function_tool reaches the call state.
 const livekitStateExpr = "ctx.userdata"
 
-func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variable, env *envSet) (livekitTool, error) {
-	inject, needed := loweredInject(tool, variables, livekitStateExpr)
+func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variable, suppliers map[string]string, env *envSet) (livekitTool, error) {
+	inject, needed := loweredInject(tool, variables, suppliers, livekitStateExpr)
 	args := livekitToolArgs(tool.Input)
 	argNames := make([]string, 0, len(args))
 	for _, arg := range args {

@@ -214,7 +214,6 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	}
 	data.PydanticImports = PydanticImports(false, data.TypedState != nil)
 	data.NeedsDataclassField = StateNeedsDataclassField(agent)
-	data.PrerequisiteGuard, data.NeedsPrerequisiteGuard = PrerequisiteGuard(agent)
 	data.NeedsPrefetchUnconfirmed = PrefetchUnconfirmed(agent)
 	if block, needed := Prefetch(agent, prefetchStateExpr, func(entry ir.Prefetch) PrefetchRequest {
 		return prefetchRequestFor(agent, entry)
@@ -878,7 +877,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 				built.MCPSources = append(built.MCPSources, buildMCPSource(ref, tool, env))
 				continue
 			}
-			lowered, err := buildTool(ref, tool, agent.Variables, env)
+			lowered, err := buildTool(ref, tool, agent.Variables, SupplierIndex(agent.Controls), env)
 			if err != nil {
 				return pipecatAgent{}, err
 			}
@@ -895,7 +894,8 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 			// namespace, D8), so the LLM invokes the tool by its spec name.
 			transfer := pipecatTransfer{
 				MethodName: ref, To: c.To, When: transferReason(c),
-				Announce: c.Announce, Reason: transferReason(c), Requires: c.Requires,
+				Announce:       c.Announce,
+				Reason:         transferReason(c),
 				Inputs:         pipecatInputArgs(c.Inputs),
 				InputProps:     inputPropsExpr(ref, c.Inputs),
 				InputRequired:  inputRequiredExpr(c.Inputs),
@@ -1037,8 +1037,7 @@ func pipecatCtxExpr(c ir.TaskContext) (expr string, needsLastN bool) {
 func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, env *envSet) (pipecatDelegate, error) {
 	delegate := pipecatDelegate{
 		MethodName: ref,
-		When:       delegateReason(c) + delegateForwardDeclaration(agent, c),
-		Requires:   c.Requires,
+		When:       delegateReason(c),
 		Announce:   c.Announce,
 	}
 	steps := []string{c.Task}
@@ -1136,7 +1135,8 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 			}
 			built.Transfers = append(built.Transfers, pipecatTransfer{
 				MethodName: ref, To: transfer.To, When: transferReason(transfer),
-				Announce: transfer.Announce, Reason: transferReason(transfer), Requires: transfer.Requires,
+				Announce:       transfer.Announce,
+				Reason:         transferReason(transfer),
 				Inputs:         pipecatInputArgs(transfer.Inputs),
 				InputProps:     inputPropsExpr(ref, transfer.Inputs),
 				InputRequired:  inputRequiredExpr(transfer.Inputs),
@@ -1150,7 +1150,7 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 		if tool.Execution == ir.ToolMCP {
 			return pipecatTask{}, fmt.Errorf("task %q lists the MCP tool source %q: a Flows node advertises only its own function schemas, so list the source on the agent instead", name, ref)
 		}
-		lowered, err := buildTool(ref, tool, agent.Variables, env)
+		lowered, err := buildTool(ref, tool, agent.Variables, SupplierIndex(agent.Controls), env)
 		if err != nil {
 			return pipecatTask{}, err
 		}
@@ -1330,7 +1330,7 @@ var pipecatLoweredKinds = map[ir.ToolExecution]bool{
 	ir.ToolSlngHosted: true,
 }
 
-func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env *envSet) (pipecatTool, error) {
+func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, suppliers map[string]string, env *envSet) (pipecatTool, error) {
 	if !pipecatLoweredKinds[tool.Execution] {
 		return pipecatTool{}, fmt.Errorf("tool %q: execution kind %q has no pipecat lowering; ir.Validate should have refused it for this target", name, tool.Execution)
 	}
@@ -1341,7 +1341,7 @@ func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env 
 	if tool.Auth != nil {
 		env.addRead(tool.Auth.TokenEnv)
 	}
-	inject, needed := loweredInject(tool, variables, pipecatStateExpr)
+	inject, needed := loweredInject(tool, variables, suppliers, pipecatStateExpr)
 	built := pipecatTool{
 		Name: name, MethodName: name, Description: tool.Description, URLEnv: tool.URLEnv,
 		URLExpr: urlExpr(tool, pipecatStateExpr), Inject: inject, Needed: needed,

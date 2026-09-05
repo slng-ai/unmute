@@ -59,10 +59,11 @@ job.
 
 This is easy to miss the first time.
 
-A step that `requires:` a value is already skipped when that value is there. So a
-step whose job is to collect something stops running as soon as something else
-supplies it. Add a `prefetch:` entry and the step you wanted to avoid is skipped,
-with no change to the step or the routing.
+A tool that silently reads an empty value refuses to run and names the step
+that would supply it. Once a `prefetch:` entry fills the value directly, that
+tool call succeeds on the first try, so the model never has to detour through
+a step that existed only to collect it. Add a `prefetch:` entry and the
+detour disappears, with no change to the step or the routing.
 
 That cuts both ways, so check it on purpose. A pre-fetch that fills a value quietly
 removes a step from the call. If that step also greeted the caller, checked who
@@ -123,9 +124,10 @@ controls decide how far each value travels.
 
 None of this is a rule written in a prompt and hoped for. Paste a confirmed
 value into the greeting and you do not get a bad call, you get a build error.
-A `requires:` naming a variable you never declared is refused the same way. The
-default flips from "every value sits in front of every prompt, because that was
-easier" to "a value goes where the file says it goes, and the build checks".
+A `prefetch:` entry pointed at a tool that is not `read_only: true` is
+refused the same way. The default flips from "every value sits in front of
+every prompt, because that was easier" to "a value goes where the file says
+it goes, and the build checks".
 
 A `prefetch:` entry itself is not held to that bar. An entry whose input is
 empty for this call is skipped with a warning, and the call carries on with the

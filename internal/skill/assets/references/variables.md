@@ -154,7 +154,7 @@ variable reaches a prompt" below for what `confirm:` does to this.
 | Source | Who supplies it | Availability |
 |---|---|---|
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
-| omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so a prompt reads it only through `requires:` or a `default:` |
+| omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so write the prompt to read whole while it is still empty, or give it a `default:` |
 | `session_id`, `call_id`, `direction`, `from_number`, `to_number`, `carrier`, `connection` | the phone adapter | LiveKit `sip` or `connector` only |
 | `stream_id` | the phone adapter | LiveKit `connector` only, not `sip` |
 
@@ -262,7 +262,6 @@ variables:
 
 Until that step has heard the caller agree, the value:
 
-- satisfies no `requires:` guard, so a step needing it does not start;
 - renders in **no prompt** except that step's own, refused at compile time
   everywhere else;
 - and makes every tool injecting it refuse itself to the model, by name.
@@ -349,7 +348,7 @@ Write the value into a sentence and say what to do with it in the
 instructions. A structured part already renders as JSON, so there is nothing
 left for the placeholder to compute.
 
-Same grammar `assign:` and `requires:` use for a path into a result or a
+Same grammar `assign:` uses for a path into a result or a
 shape: see "Picking one part of a structured result" below.
 
 None of the five may name or render a value still awaiting confirmation: see
@@ -370,10 +369,8 @@ prompt is built; give it source: call_start, a system source, or a default
 ```
 
 An agent's instructions and a task's instructions may name any declared
-variable, whether or not anything has assigned it yet, and whether or not a
-task's own `requires:` lists it. `requires:` still holds a step back until
-the value exists; it no longer decides what the step's prompt may read. An
-undeclared name is an error everywhere, greeting included.
+variable, whether or not anything has assigned it yet. An undeclared name is
+an error everywhere, greeting included.
 
 ## Passing a value into a tool without the model seeing it
 
@@ -476,28 +473,14 @@ writing one into the list.
 The same path form works in a prompt placeholder too: see "Naming one part of
 a value" above.
 
-## Requiring a field inside a shape
+## Ordering a step that needs an earlier value
 
-`requires:` still names a whole value, and can now also name a path into one
-declared as a shape:
-
-```yaml agent.yaml
-        requires:
-          - customer_phone            # a whole value
-          - customer.status           # one field inside a shaped value
-```
-
-The path is resolved against the declared shape at compile time, so a typo is
-refused rather than becoming a guard that can never pass:
-
-```
-requires "customer.city" does not resolve: shape "Customer" declares no field
-"city". It declares customer_name, customer_id, phone_number, status
-```
-
-A path through a `list[...]` is refused too: nothing says which entry it
-means. A value awaiting confirmation satisfies no guard through any path
-into it, the same as it satisfies none as a whole value.
+There is no field that holds a step back until a variable exists. Say the
+order instead: number the flow in the agent's own instructions, and give the
+later step a `when:` clause that names what has to be true first, "once the
+caller is verified." See "Order steps with the prompt" in
+`references/orchestration.md` for the full pattern, including what a
+silently reading tool does with a value that is not there yet.
 
 ## A handoff keeps every declared value
 

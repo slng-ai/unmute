@@ -78,13 +78,13 @@ instruction to call a tool.
 
 `announce` is optional. Write the exact short sentence the active agent should
 speak. It is spoken once and finishes before the new agent takes over; the
-model does not paraphrase it. Leave it out for a silent handoff. A failed
-`requires` guard is checked first and never makes a false announcement.
+model does not paraphrase it. Leave it out for a silent handoff.
 
-`requires` is not handoff-only. It is legal on a task too, and that is
-usually the better place for it: guard the step that needs the value rather than
-the route to it. See [Guarding a step](/build/orchestration/tasks#guarding-a-step).
-Never guard the way to a person, though. A caller who asks for a manager should
+Order still matters on a handoff the same way it matters on a task: say the
+dependency in the agent's own flow and in the handoff's `when:`, not with a
+gate. See [Order steps with the
+prompt](/best-practices/step-scoping#order-steps-with-the-prompt). Never
+hold up the way to a person, though. A caller who asks for a manager should
 not be interviewed before anyone will route them.
 
 Prefer a silent handoff when agents are internal roles behind one service. The

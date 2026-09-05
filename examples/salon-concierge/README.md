@@ -38,9 +38,9 @@ it does that with a bare name in its own `tasks:` list rather than a second copy
 
 so there is one definition, one prompt, and one name in the emitted project.
 
-**A guarded step.** `manage_booking` declares `requires: [customer_phone]`, so
-booking cannot start before the caller is identified. The compiler refuses the
-step to the model rather than to the caller, so nobody hears the guard.
+**Ordering carried by the prompt.** `manage_booking` runs after verification,
+but not because the compiler holds it back: the concierge's own instructions
+say to run verification first and never start booking until it has succeeded.
 
 **Facts resolved before the greeting.** The `prefetch:` block reads today's date
 off the clock and the caller's number off the call, then looks up the name on

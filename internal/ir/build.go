@@ -870,43 +870,6 @@ func buildTaskContext(raw packagespec.TaskContext) TaskContext {
 	}
 }
 
-// checkRequires resolves a guard's names against the declared variables. Both
-// kinds that accept `requires:` share this, so the two cannot drift, and a name
-// that does not resolve is a typo the author must see at compile rather than a
-// guard that can never pass at runtime.
-//
-// Resolving the name is the whole check, and a stronger one was tried and
-// deleted: "refuse a name no route can ever fill". There is no such name. A
-// variable with no `source:` at all is seeded from the dispatch payload on both
-// code targets (livekit_v1_build.go and pipecat_v1_build.go both read
-// `v.Source == ir.VariableSourceCallStart || v.Source == ""`), optional rather
-// than required, so every declared variable has at least one route to a value
-// and the refusal could never fire. TestBuildAcceptsEveryRequiresARouteCanFill
-// holds that, so the next person to reach for the check finds the answer before
-// writing it.
-func checkRequires(pkg *packagespec.Package, requires []string, agent *Agent) error {
-	for _, name := range requires {
-		root, path, _ := strings.Cut(name, ".")
-		variable, ok := agent.Variables[root]
-		if !ok {
-			// Name what the field takes, because the common mistake is writing a
-			// tool or another catalog entry here and expecting an ordering rule.
-			return fmt.Errorf("%s: requires names variables, and %q is not declared under the variables: block",
-				pkg.Location("agent.yaml", root), root)
-		}
-		if path == "" {
-			continue
-		}
-		// A path resolves against the declared shape here, so a typo is refused
-		// at compile rather than becoming a guard that can never pass.
-		if _, err := FieldPath(agent.Shapes, variable.Shape, strings.Split(path, ".")); err != nil {
-			return fmt.Errorf("%s: requires %q does not resolve: %w",
-				pkg.Location("agent.yaml", name), name, err)
-		}
-	}
-	return nil
-}
-
 // buildCallable resolves one thing an agent can decide to run.
 //
 // Two refusals its predecessor carried are gone rather than moved. "Exactly one
@@ -914,9 +877,6 @@ func checkRequires(pkg *packagespec.Package, requires []string, agent *Agent) er
 // nested task or a `task_groups:` entry, and "assign is legal on task delegates
 // only" is unwritable because `assign:` is a key on a task and a group has none.
 func buildCallable(pkg *packagespec.Package, raw packagespec.Callable, agent *Agent) (Control, error) {
-	if err := checkRequires(pkg, raw.Requires, agent); err != nil {
-		return nil, err
-	}
 	if raw.Task != "" {
 		if _, ok := agent.Tasks[raw.Task]; !ok {
 			return nil, missing(pkg, "agent.yaml", "task", raw.Task)
@@ -935,7 +895,7 @@ func buildCallable(pkg *packagespec.Package, raw packagespec.Callable, agent *Ag
 	// announcement, so no driver has to decide what " " means.
 	return &Delegate{
 		Kind: ControlDelegate, When: raw.When, Task: raw.Task, Group: raw.Group,
-		Requires: raw.Requires, Assign: assign,
+		Assign:   assign,
 		Announce: strings.TrimSpace(raw.Announce),
 	}, nil
 }
@@ -968,9 +928,6 @@ func assignments(pairs []packagespec.Pair) ([]AssignTo, error) {
 }
 
 func buildHandoff(pkg *packagespec.Package, raw packagespec.Handoff, agent *Agent, inputs []InputField) (Control, error) {
-	if err := checkRequires(pkg, raw.Requires, agent); err != nil {
-		return nil, err
-	}
 	if _, ok := agent.Agents[raw.To]; !ok {
 		return nil, missing(pkg, "agent.yaml", "to", raw.To)
 	}
@@ -986,7 +943,7 @@ func buildHandoff(pkg *packagespec.Package, raw packagespec.Handoff, agent *Agen
 		return nil, err
 	}
 	return &AgentTransfer{
-		Kind: ControlAgentTransfer, When: raw.When, To: raw.To, Announce: announce, Requires: raw.Requires,
+		Kind: ControlAgentTransfer, When: raw.When, To: raw.To, Announce: announce,
 		Inputs: inputs, Context: context,
 	}, nil
 }
@@ -1052,14 +1009,13 @@ func checkAssignments(taskName string, assign []AssignTo, agent *Agent) error {
 	for _, entry := range assign {
 		want, ok := agent.Variables[entry.Var]
 		if !ok {
-			// Same sentence as checkRequires, for the same mistake made in the
-			// other key: name the block the author has to edit, because "does
-			// not resolve" says neither where to look nor what is wrong.
+			// Name the block the author has to edit, because "does not resolve"
+			// says neither where to look nor what is wrong.
 			return fmt.Errorf("assign writes to %q, and it is not declared under the variables: block", entry.Var)
 		}
 		// The first segment indexes the task's own result; anything after the
 		// first dot is a path into that field's declared shape, walked the same
-		// way a `requires:` path is (FieldPath, also used by checkRequires).
+		// way an `expect:` path is (FieldPath).
 		root, rest, _ := strings.Cut(entry.Field, ".")
 		field, ok := task.Result[root]
 		if !ok {

@@ -299,7 +299,7 @@ type Variable struct {
 	Default any    `json:"default,omitempty" yaml:"default,omitempty"`
 	Source  string `json:"source,omitempty" yaml:"source,omitempty"`
 	// Confirm names the step that must hear the caller agree before anything acts
-	// on this value. Until then the value satisfies no prerequisite and renders
+	// on this value. Until then the value stays marked unconfirmed and renders
 	// only in that step's own prompt. Empty means the value is settled the moment
 	// it arrives, which is true of every variable that existed before this field.
 	Confirm     string `json:"confirm,omitempty" yaml:"confirm,omitempty"`
@@ -370,12 +370,9 @@ type Task struct {
 	Instructions string `json:"instructions" yaml:"instructions"`
 	When         string `json:"when,omitempty" yaml:"when,omitempty"`
 	// Announce is one fixed sentence the agent speaks as the task is entered, so
-	// the two model requests it takes to enter one are not silence. Not spoken
-	// when the task is refused for unmet prerequisites: the caller hearing "let
-	// me pull up the diary" and then being asked for a phone number is worse than
-	// hearing nothing.
+	// the two model requests it takes to enter one are not silence. Spoken at
+	// the very start of the step, before anything else runs.
 	Announce string   `json:"announce,omitempty" yaml:"announce,omitempty"`
-	Requires []string `json:"requires,omitempty" yaml:"requires,omitempty"`
 	Assign   []Pair   `json:"assign,omitempty" yaml:"assign,omitempty"`
 	Tools    []string `json:"tools,omitempty" yaml:"tools,omitempty"`
 	Handoffs []string `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
@@ -399,7 +396,6 @@ type TaskGroup struct {
 	Steps        []string `json:"steps" yaml:"steps"`
 	When         string   `json:"when,omitempty" yaml:"when,omitempty"`
 	Announce     string   `json:"announce,omitempty" yaml:"announce,omitempty"`
-	Requires     []string `json:"requires,omitempty" yaml:"requires,omitempty"`
 	ContextScope string   `json:"context_scope" yaml:"context_scope"`
 	Then         string   `json:"then" yaml:"then"`
 	ThenTarget   string   `json:"then_target,omitempty" yaml:"then_target,omitempty"`
@@ -434,7 +430,6 @@ type Callable struct {
 	Group    string
 	When     string
 	Announce string
-	Requires []string
 	Assign   []Pair
 }
 
@@ -445,10 +440,9 @@ type Callable struct {
 // missing one is the empty string and is refused by the same check that refuses
 // a `to:` naming an agent that does not exist.
 type Handoff struct {
-	To       string   `json:"to" yaml:"to"`
-	When     string   `json:"when,omitempty" yaml:"when,omitempty"`
-	Announce *string  `json:"announce,omitempty" yaml:"announce,omitempty"`
-	Requires []string `json:"requires,omitempty" yaml:"requires,omitempty"`
+	To       string  `json:"to" yaml:"to"`
+	When     string  `json:"when,omitempty" yaml:"when,omitempty"`
+	Announce *string `json:"announce,omitempty" yaml:"announce,omitempty"`
 	// Input, authored as `expect:`, is the brief the receiving agent is handed: the same list a task
 	// takes, filled by the agent handing over. It stays with the receiver until
 	// the next handoff.

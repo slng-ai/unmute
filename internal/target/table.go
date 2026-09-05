@@ -75,8 +75,6 @@ const (
 	FieldTaskGroupReturn       Field = "task_groups.then.return"
 	FieldContextIsolated       Field = "task_groups.context_scope.isolated"
 	FieldTransferAnnounce      Field = "controls.agent_transfer.announce"
-	FieldTransferRequires      Field = "controls.agent_transfer.requires"
-	FieldDelegateRequires      Field = "controls.delegate.requires"
 	FieldContextNoToolCalls    Field = "context.include_tool_calls.false"
 	FieldInput                 Field = "expect"
 	FieldTransferBriefing      Field = "controls.human_transfer.warm.briefing"
@@ -350,11 +348,6 @@ func Default() Table {
 			FieldTaskGroupReturn:  field(deny(Slng, slngNoTasks("a task group return step"))),
 			FieldContextIsolated:  field(deny(Slng, slngNoTasks("an isolated task context"))),
 			FieldTransferAnnounce: field(deny(Slng, slngNoHandoff("a transfer announcement"))),
-			FieldTransferRequires: field(deny(Slng, slngNoHandoff("a transfer requirement"))),
-			// A step requirement is refused for the task reason, not the handoff
-			// one: the slng target has no separate step to hold back, so there is
-			// nothing for the guard to guard.
-			FieldDelegateRequires: field(deny(Slng, slngNoTasks("a step requirement"))),
 			// A step announcement is refused for the task reason too: with one
 			// agent and no steps there is no entry to speak over.
 			FieldDelegateAnnounce: field(deny(Slng, slngNoTasks("a step announcement"))),

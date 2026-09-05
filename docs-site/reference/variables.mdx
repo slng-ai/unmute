@@ -129,7 +129,7 @@ asked to fill one in.
 | Source | Who supplies it | Availability |
 |---|---|---|
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
-| omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so a prompt reads it only through `requires:` or a `default:` |
+| omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so write the prompt to read whole while it is still empty, or give it a `default:` |
 | `session_id` | the phone adapter | LiveKit `sip` or `connector` |
 | `call_id` | the phone adapter | LiveKit `sip` or `connector` |
 | `stream_id` | the phone adapter | LiveKit `connector` only, not LiveKit `sip` |
@@ -254,7 +254,6 @@ variables:
 
 Until that step has heard the caller agree, the value:
 
-- **satisfies no `requires:` guard**, so a step needing it will not start;
 - **renders in no prompt but that step's own**, refused at compile time everywhere
   else, including the greeting and every agent prompt;
 - **makes every tool injecting it refuse itself to the model**, naming the value it
@@ -352,7 +351,7 @@ Write the value into a sentence and say what to do with it in the
 instructions. A structured part already renders as JSON, so there is nothing
 left for the placeholder to compute.
 
-This is the same grammar `assign:` and `requires:` already use for a path
+This is the same grammar `assign:` already uses for a path
 into a result or a shape: see [Picking one part of a structured
 result](#picking-one-part-of-a-structured-result).
 
@@ -374,11 +373,8 @@ conversation.greeting.text references {{requested_service}}, which has no value 
 ```
 
 An agent's instructions and a task's instructions may name any declared
-variable, whether or not anything has assigned it yet, and whether or not a
-task's own `requires:` lists it. `requires:` still holds a step back until
-the value exists; it no longer decides what the step's prompt may read. An
-undeclared name is an error everywhere, greeting included, and never a silent
-empty string.
+variable, whether or not anything has assigned it yet. An undeclared name is
+an error everywhere, greeting included, and never a silent empty string.
 
 ## Seeding values locally
 
@@ -529,27 +525,6 @@ writing one into the list.
 
 The same path form works in a prompt placeholder too: see [Naming one part of
 a value](#naming-one-part-of-a-value).
-
-## Requiring a field inside a shape
-
-`requires:` can still name a whole value, and it can also name a path into a
-declared shape:
-
-```yaml agent.yaml
-        requires:
-          - customer_phone            # a whole value
-          - customer.status           # one field inside a shaped value
-```
-
-The path is resolved against the declared shape at compile time, so a typo is
-refused rather than becoming a guard that can never pass:
-
-```text wrap
-requires "customer.city" does not resolve: shape "Customer" declares no field "city". It declares customer_name, customer_id, phone_number, status
-```
-
-A value awaiting confirmation satisfies no guard through any path into it,
-the same as it satisfies none as a whole value.
 
 ## A handoff keeps every declared value
 

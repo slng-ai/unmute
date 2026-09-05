@@ -322,35 +322,6 @@ class FailingSession:
 
 
 async def main():
-    class RefuseSession:
-        async def say(self, *args, **kwargs):
-            raise AssertionError("an empty required value reached the announcement")
-
-    guard_task = RecordingFindSlot()
-    guard_ctx = SimpleNamespace(
-        userdata=SimpleNamespace(caller_phone=""),
-        session=RefuseSession(),
-        function_call=SimpleNamespace(call_id="guard-finish"),
-    )
-    refusal = await guard_task.back_to_greeter(guard_ctx)
-    # The wording comes from internal/generate/guard.go, which both targets
-    # render, so this asserts the shared sentence rather than a per-target one.
-    assert refusal == {
-        "refused": "Not started. Missing: caller_phone. Do not say any of this"
-        " out loud. Get the missing value now, then call this again in the same"
-        " turn."
-    }, refusal
-    assert not guard_task.completions
-    await guard_task.finish(
-        guard_ctx,
-        date="2026-08-18",
-        party_size=2,
-        time="15:00",
-    )
-    assert guard_task.completions == [
-        {"date": "2026-08-18", "party_size": 2, "time": "15:00"}
-    ]
-
     transfer_session = BlockingSession()
     transfer_ctx = SimpleNamespace(
         userdata=SimpleNamespace(caller_phone="+15551234567"),
@@ -1358,7 +1329,6 @@ func TestSmokeLiveKitRegionalInfrastructureInstantiates(t *testing.T) {
 func addLiveKitTaskTransfer(agent *ir.Agent) {
 	transfer := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
 	transfer.Announce = "I will take you back to Remy."
-	transfer.Requires = []string{"caller_phone"}
 	task := agent.Tasks["find_slot"]
 	task.Tools = append(task.Tools, "back_to_greeter")
 	agent.Tasks["find_slot"] = task

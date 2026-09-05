@@ -424,8 +424,8 @@ func pythonSpelling(primitive PrimitiveType) string {
 }
 
 // IsList reports whether the resolved type is a list, which is what an append
-// assignment requires and what a `requires:` guard has to test for emptiness
-// rather than for truthiness.
+// assignment requires and what decides whether the emitted state field starts
+// empty through a factory rather than at None.
 func (t *TypeRef) IsList() bool { return t != nil && t.List != nil }
 
 // Structured reports whether a type is more than a bare primitive, which is
@@ -455,15 +455,15 @@ func (t *TypeRef) Equal(other *TypeRef) bool {
 
 // FieldPath resolves a dotted path into a shape, returning the field's type.
 // One field deep or many: `customer.customer_name` and a longer path both walk
-// the same way, and a path through a list is refused, because a guard cannot
-// say which entry it meant.
+// the same way, and a path through a list is refused, because nothing says
+// which entry it meant.
 func FieldPath(shapes map[string]Shape, root *TypeRef, path []string) (*TypeRef, error) {
 	at := root
 	// A link partway down the path may itself be absent, which makes whatever
 	// the path finds past it absent along with it: the field named at the end
-	// exists only when every field carrying it does. requires: discards the
-	// returned type and never sees this; an assign: needs it, because the
-	// variable it writes into has to be declared to match.
+	// exists only when every field carrying it does. An assign: needs the
+	// returned type, because the variable it writes into has to be declared to
+	// match; a prompt placeholder only needs to know the path resolves.
 	optional := false
 	walked := make([]string, 0, len(path))
 	for _, segment := range path {

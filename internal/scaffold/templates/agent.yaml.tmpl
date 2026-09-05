@@ -39,9 +39,7 @@ agents:
         when: [[quote .When]]
         instructions: [[.PromptPath]]
 [[if .Announce]]        announce: [[quote .Announce]]
-[[end]][[if .Requires]]        requires:
-[[range .Requires]]          - [[.]]
-[[end]][[end]][[if .Input]]        expect:
+[[end]][[if .Input]]        expect:
 [[range .Input]][[if .Description]]          - name: [[.Name]]
             type: [[yaml .Type]]
             description: [[yaml .Description]]
@@ -71,9 +69,7 @@ agents:
     when: [[quote .When]]
 [[if .Announce]]    announce: [[quote .Announce]]
 [[end]]
-[[if .Requires]]    requires:
-[[range .Requires]]      - [[.]]
-[[end]][[end]][[if .Input]]    expect:
+[[if .Input]]    expect:
 [[range .Input]][[if .Description]]      - name: [[.Name]]
         type: [[yaml .Type]]
         description: [[yaml .Description]]

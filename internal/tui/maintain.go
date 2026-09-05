@@ -260,7 +260,7 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 			IncludeToolCalls: task.Context.IncludeToolCalls,
 			Agent:            cmp.Or(definers[name], "assistant"),
 			When:             task.When, Announce: task.Announce,
-			Requires: append([]string(nil), task.Requires...), Assign: pairsText(task.Assign),
+			Assign: pairsText(task.Assign),
 		})
 	}
 	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.TaskGroups)) {
@@ -278,7 +278,6 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		if handoff.Announce != nil {
 			value.Announce = *handoff.Announce
 		}
-		value.Requires = append([]string(nil), handoff.Requires...)
 		value.Input = shapeFields(handoff.Input)
 		if handoff.Context != nil {
 			value.History, value.MaxMessages, value.Summarizer = handoff.Context.History, handoff.Context.MaxMessages, handoff.Context.Summarizer

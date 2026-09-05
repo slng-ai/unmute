@@ -1601,7 +1601,6 @@ func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) e
 			newChoice("Source agent  ·  "+handoff.Source, "source"),
 			newChoice("Target agent  ·  "+handoff.To, "target"),
 			newChoice("Trigger  ·  "+oneLine(handoff.When), "trigger"),
-			newChoice("Required variables  ·  "+cmp.Or(strings.Join(handoff.Requires, ", "), "none"), "requires"),
 			newChoice("Context  ·  "+cmp.Or(handoff.History, "full"), "context"),
 			newChoice("Announcement  ·  "+cmp.Or(oneLine(handoff.Announce), "silent"), "announce"),
 			newChoice("Delete handoff", "delete"),
@@ -1634,14 +1633,6 @@ func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) e
 		case "trigger":
 			if _, err := runner.input("When to hand off", "Plain-language trigger shown to the model.", &handoff.When, validateRequiredText); err != nil {
 				return err
-			}
-		case "requires":
-			selected, back, err := pickReferences(runner, "Required variables (optional)", "The handoff is available only after every selected variable has a value.", variableNames(data), handoff.Requires, true)
-			if err != nil {
-				return err
-			}
-			if !back {
-				handoff.Requires = selected
 			}
 		case "context":
 			if err := editHandoffContextDetails(runner, data, handoff); err != nil {
@@ -3055,9 +3046,6 @@ func deleteResource(data *scaffold.Data, kind, name string) error {
 	switch kind {
 	case "variable":
 		data.Variables = slices.DeleteFunc(data.Variables, func(item scaffold.Variable) bool { return item.Name == name })
-		for i := range data.Handoffs {
-			data.Handoffs[i].Requires = slices.DeleteFunc(data.Handoffs[i].Requires, func(n string) bool { return n == name })
-		}
 		for i := range data.Tasks {
 			removeAssignment(&data.Tasks[i], name)
 		}

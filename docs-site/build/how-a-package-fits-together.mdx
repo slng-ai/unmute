@@ -72,10 +72,8 @@ agents:
         context:
           history: full
       - name: manage_booking
-        when: The caller wants to create, change, or cancel a booking.
+        when: The caller wants to create, change, or cancel a booking, once the caller is identified.
         instructions: tasks/booking.md
-        requires:
-          - customer_phone
         result:
           booking_id: string
           summary: string
@@ -146,23 +144,23 @@ Done. Notice you never wrote `verify_customer` twice. It is defined once,
 inside `front_desk`, and `complaint_specialist` just names it. Sharing is
 naming the same thing.
 
-## Three small words that move data
+## Two small words that move data
 
-Three keys touch your `variables:`. They look similar and do different jobs:
+Two keys touch your `variables:`. They look similar and do different jobs:
 
 | Key | Job | Plain words | Legal on |
 |---|---|---|---|
-| `requires:` | a guard | "do not run this until these variables are set" | tasks, task groups, handoffs |
 | `context:` | luggage | "when the caller moves, these values travel along" | handoffs, tasks |
 | `assign:` | a write-back | "when the task finishes, save its result here" | tasks |
 
-A guard tests a variable. Luggage carries its value. A write-back fills it.
-In the example above, `verify_customer` fills `customer_phone` with `assign:`,
-and `manage_booking` waits for it with `requires:`. That is how "verify before
-booking" works, with no extra agent and nothing the caller can hear.
+Luggage carries a value. A write-back fills it. In the example above,
+`verify_customer` fills `customer_phone` with `assign:`, and `manage_booking`'s
+own `when:` says it runs only once the caller is identified. That is how
+"verify before booking" works, with no extra agent and nothing the caller can
+hear: the order lives in the prompt, not in a gate.
 
-Put the guard on the work that needs the value, not on the route to it. And
-never guard the way to a person: somebody asking for a manager should not be
+Put that clause on the work that needs the value, not on the route to it. And
+never hold up the way to a person: somebody asking for a manager should not be
 interviewed first.
 
 ## Tasks attach handoffs, and nothing else
@@ -236,7 +234,7 @@ the agents first and the plumbing last. `unmute init` writes the shape without
 
 <Columns cols={2}>
   <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
-    Nested tasks, typed results, and guards.
+    Nested tasks and typed results.
   </Card>
   <Card title="Handoffs" icon="users" href="/build/orchestration/handoffs">
     When to split into two agents.

@@ -198,13 +198,6 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// Every internal handoff stays silent and carries the whole conversation, so
 	// the receiving agent never reintroduces itself and never re-asks a question
 	// already answered.
-	//
-	// What is deliberately NOT asserted here is a prerequisite on every handoff.
-	// This package used to gate all four on an identifier, which meant a caller
-	// who opened with "I want to speak to a manager" was interviewed before
-	// anyone would route them. A prerequisite belongs on the step that needs the
-	// value, not on the act of changing who is speaking. T012 below holds the
-	// escalation path specifically.
 	for name, control := range resolved.Controls {
 		transfer, ok := control.(*ir.AgentTransfer)
 		if !ok {
@@ -215,10 +208,9 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		}
 	}
 
-	// FR-008 to FR-010: nothing on the path from the entry agent to a person
-	// carries a prerequisite. The entry agent holds the escalation control
-	// directly, and the handoff to customer care is ungated, so the two ways a
-	// caller reaches a human both work on the first utterance.
+	// The entry agent holds the escalation control directly, so a caller who
+	// opens with "I want to speak to a manager" reaches one on the first
+	// utterance rather than being routed through another agent first.
 	entry := resolved.Agents[resolved.EntryAgent]
 	reachesAPerson := false
 	for _, name := range entry.Tools {
@@ -228,15 +220,6 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	}
 	if !reachesAPerson {
 		t.Errorf("entry agent %q holds no human transfer: %v; a caller asking for a person must not have to pass through another agent to get one", resolved.EntryAgent, entry.Tools)
-	}
-	for _, name := range []string{"to_complaints", "to_concierge"} {
-		transfer, ok := resolved.Controls[name].(*ir.AgentTransfer)
-		if !ok {
-			t.Fatalf("control %q is not an agent transfer: %#v", name, resolved.Controls[name])
-		}
-		if len(transfer.Requires) != 0 {
-			t.Errorf("handoff %q carries prerequisites %v; hearing a complaint and returning to the entry agent must not be gated on identifying the caller", name, transfer.Requires)
-		}
 	}
 
 	// Every action tool here is a local Python handler, so nothing remote has to
@@ -496,34 +479,18 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 			injectedBy[toolName] = append(injectedBy[toolName], ir.TemplateRefs(text)...)
 		}
 	}
-	// A step reached only through a guarded delegate is the one exemption, and it
-	// is not a loophole: the guard has already refused the step unless the value
-	// is set, so the prompt cannot be wrong about it. That is why the booking step
-	// needs no placeholder and customer care does. Nothing guards the route to
-	// customer care, deliberately, because a caller with a complaint must not be
-	// interrogated before anyone will listen.
-	guaranteed := map[string][]string{}
-	for _, control := range resolved.Controls {
-		delegate, ok := control.(*ir.Delegate)
-		if !ok || len(delegate.Requires) == 0 {
-			continue
-		}
-		if delegate.Task != "" {
-			guaranteed[delegate.Task] = append(guaranteed[delegate.Task], delegate.Requires...)
-		}
-	}
-	canSee := func(holder, kind, prompt string, tools []string, given []string) {
+	// The variable's own `confirm:` is the one exemption: it may not appear in
+	// this prompt at all, and the emitted refusal is what tells the model the
+	// value is not usable yet.
+	canSee := func(holder, kind, prompt string, tools []string) {
 		for _, toolName := range tools {
 			for _, variable := range injectedBy[toolName] {
-				if strings.Contains(prompt, "{{"+variable+"}}") || slices.Contains(given, variable) {
+				if strings.Contains(prompt, "{{"+variable+"}}") {
 					continue
 				}
-				// A third way out, and the one this package now takes for the
-				// caller's number: the variable declares `confirm:`, so it may not
-				// appear in this prompt at all, and the emitted refusal is what
-				// tells the model the value is not usable yet. The prompt does not
-				// need to see the value to avoid asking for it: it is told, by name,
-				// which value is missing, on the turn it tries to use it.
+				// The prompt does not need to see the value to avoid asking for it:
+				// it is told, by name, which value is missing, on the turn it tries
+				// to use it.
 				//
 				// Seeing it was the right rule while the only way to have the value
 				// was to have collected it. It stops being the right rule once a
@@ -532,16 +499,16 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 				if resolved.Variables[variable].Confirm != "" {
 					continue
 				}
-				t.Errorf("%s %q holds %q, which injects %s, but it can neither see {{%s}} nor is it reached through a guard that requires it: it has no way to tell whether the value is already collected, so it asks the caller for something it already has",
+				t.Errorf("%s %q holds %q, which injects %s, but it cannot see {{%s}}: it has no way to tell whether the value is already collected, so it asks the caller for something it already has",
 					kind, holder, toolName, variable, variable)
 			}
 		}
 	}
 	for name, def := range resolved.Agents {
-		canSee(name, "agent", def.Instructions, def.Tools, nil)
+		canSee(name, "agent", def.Instructions, def.Tools)
 	}
 	for name, task := range resolved.Tasks {
-		canSee(name, "task", task.Instructions, task.Tools, guaranteed[name])
+		canSee(name, "task", task.Instructions, task.Tools)
 	}
 
 	// Verification is one phone number, nothing else. Spelling a name over a
@@ -672,17 +639,13 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	}
 
 	// The shape, held as tightly as the old shape was held. Two agents, and the
-	// booking step is a guarded delegate on the entry agent rather than an agent
-	// of its own.
+	// booking step is a delegate on the entry agent rather than an agent of its
+	// own.
 	if len(resolved.Agents) != 2 {
 		t.Errorf("the example has %d agents, want 2: %v", len(resolved.Agents), slices.Sorted(maps.Keys(resolved.Agents)))
 	}
-	guardedStep, ok := resolved.Controls["manage_booking"].(*ir.Delegate)
-	if !ok {
+	if _, ok := resolved.Controls["manage_booking"].(*ir.Delegate); !ok {
 		t.Fatalf("manage_booking = %T, want a delegate", resolved.Controls["manage_booking"])
-	}
-	if !slices.Equal(guardedStep.Requires, []string{"customer_phone"}) {
-		t.Errorf("manage_booking requires = %v, want [customer_phone]: the guard is what lets the booking step live on the entry agent", guardedStep.Requires)
 	}
 	if !slices.Contains(resolved.Agents[resolved.EntryAgent].Tools, "manage_booking") {
 		t.Errorf("the entry agent does not hold manage_booking: %v", resolved.Agents[resolved.EntryAgent].Tools)
@@ -728,20 +691,8 @@ func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
 		}
 	}
 
-	// The booking step declares the value its prompt reads. ir.Build refuses the
-	// prompt without this, so the assertion is not what keeps the package
-	// compiling; it is what stops the pair being "simplified" by deleting the
-	// declaration and the read together, which compiles and demonstrates nothing.
-	booking, ok := resolved.Controls["manage_booking"].(*ir.Delegate)
-	if !ok {
+	if _, ok := resolved.Controls["manage_booking"].(*ir.Delegate); !ok {
 		t.Fatalf("manage_booking = %#v, want a delegate", resolved.Controls["manage_booking"])
-	}
-	// The booking step names a field inside the declared record, which is the
-	// path form: the flat customer_status it replaced said the same thing in a
-	// second variable, and one of the two would have gone stale. The guard still
-	// holds the step back until the verification step has looked somebody up.
-	if !slices.Contains(booking.Requires, "customer.status") {
-		t.Errorf("manage_booking requires %v; the guard names a field inside the declared customer record, and it is what holds the step back until that record exists", booking.Requires)
 	}
 	verify, ok := resolved.Controls["verify_customer"].(*ir.Delegate)
 	if !ok {
@@ -752,11 +703,11 @@ func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
 	}
 
 	// No default, and this is the load-bearing one. A default is a value the
-	// variable holds before the first word, so a defaulted customer satisfies
-	// the booking guard on an empty record and the step starts on a caller
-	// nobody looked up.
+	// variable holds before the first word, so a defaulted customer would
+	// render in the conversation info as a real-looking record before anyone
+	// had been looked up.
 	if def := resolved.Variables["customer"].Default; def != nil {
-		t.Errorf("customer declares default %#v; the booking guard would then be satisfied before verification ran", def)
+		t.Errorf("customer declares default %#v; the conversation info would then show a caller nobody verified", def)
 	}
 	if shape := resolved.Variables["customer"].Shape; shape == nil || shape.String() != "Customer | None" {
 		t.Errorf("customer resolves to %q, want Customer | None: absent until the verification step fills it", shape.String())

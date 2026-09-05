@@ -58,9 +58,6 @@ agents:
           - name: requested_time
             type: str | None
             description: The time or part of the day in the caller's own words, like 3 PM or afternoon, only if they said one.
-        requires:
-          - customer_phone
-          - customer.status
         tools:
           - list_bookings
           - check_availability
@@ -122,8 +119,6 @@ agents:
               appointments already recorded, only when the caller means a
               booking this call made. A complaint about an earlier visit has
               none, so leave it out.
-        requires:
-          - customer.status
         # The policy lookup stays on the agent rather than on this step: the
         # Pipecat driver cannot scope a knowledge tool to a task, so a step
         # holding one compiles on one target and not the other. The specialist
@@ -268,13 +263,14 @@ variables:
     type: Customer | None
     description: >-
       Who the caller is, once the verification step has heard them agree to the
-      number and looked the record up. Absent until then, and that absence is
-      load-bearing: the booking step's guard names customer.status, so with no
-      value the step waits rather than starting on a caller nobody looked up.
+      number and looked the record up. Absent until then: the concierge's own
+      instructions say to run verification before the booking step, and
+      ordering between steps is the prompt's job rather than a code gate.
 
       No `default:` for the same reason a default was wrong on the flat status
-      value it replaced. A default is a value the variable holds before the first
-      word, so a defaulted customer satisfies the guard on an empty record.
+      value it replaced. A default is a value the variable holds before the
+      first word, so a defaulted customer would render in the conversation
+      info as a real-looking record before anyone had been looked up.
 
   appointments:
     type: list[Appointment]
@@ -282,8 +278,8 @@ variables:
       What this call booked, moved or cancelled, in the order the caller gave
       them. A list because a caller can do two things in one call, and the
       booking step appends rather than replacing, so the second does not erase
-      the first. It starts empty, which is why a guard naming it waits: an empty
-      list is nothing recorded yet, not a decision the caller made.
+      the first. It starts empty: nothing recorded yet, not a decision the
+      caller made.
 
   complaints:
     type: list[Complaint]
@@ -316,8 +312,8 @@ variables:
 
       Offered to the caller for a yes, never acted on unasked. Somebody may be
       ringing from a friend's phone, or may hold a second account, so until the
-      verification step has heard them agree this value satisfies no `requires:`
-      guard and appears in no prompt but that step's own.
+      verification step has heard them agree this value stays unconfirmed and
+      appears in no prompt but that step's own.
 
       An earlier version of this note said no prompt ever reads the number back.
       That is now false rather than merely out of date: reading it back is the

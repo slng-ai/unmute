@@ -4,30 +4,12 @@
         # its filter follows the context of everything this reply starts: a live call
         # offered one specialist nothing but its delegate for ten turns while the
         # caller asked for another one (B: salon handoffs, 2026-08-20).
-{{end}}{{define "prerequisite_guard"}}        _unmet = _unmet_prerequisites(ctx.userdata, [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
-        if _unmet:
-            # requires guard (machine-checked): the step does not start, and the
-            # refusal goes to the model rather than to the caller.
-            _tries = _prerequisite_refusals.get({{pyq .Method}}, 0) + 1
-            _prerequisite_refusals[{{pyq .Method}}] = _tries
-            _at_limit = _tries >= _PREREQUISITE_LIMIT
-            if _at_limit:
-                logger.info(
-                    "prerequisite guard: step %s refused, unmet %s, retry limit reached; asking the caller",
-                    {{pyq .Method}}, ", ".join(_unmet),
-                )
-            else:
-                logger.info(
-                    "prerequisite guard: step %s refused, unmet %s",
-                    {{pyq .Method}}, ", ".join(_unmet),
-                )
-            return {"refused": _prerequisite_refusal(_unmet, _at_limit)}
-        _prerequisite_refusals[{{pyq .Method}}] = 0
 {{end}}{{- /* delegate_announce covers the entry to a step: two model requests
 pass between the caller finishing and the step's first word, and this puts
-speech in them. Rendered after the guard by every delegate shape, so a refused
-step stays silent — the caller hearing "let me pull up the diary" and then being
-asked for a phone number is worse than hearing nothing. */ -}}
+speech in them. Rendered at the very start of every delegate shape, before
+anything else runs: ordering between steps is the prompt's job (the step's
+`when:` sentence and the owning agent's instructions), not a code gate, so
+there is nothing left to hold this back. */ -}}
 {{define "delegate_announce"}}{{if .Announce}}
         # Not awaited, for the same reason the tool announcement is not: awaiting
         # the handle holds the step until playout finishes, which is the delay
@@ -709,7 +691,7 @@ def _render(text: str, userdata, *, quote_values: bool = False) -> str:
 {{- if .NeedsRefusal}}
 def _refusal(tool: str, userdata, needed: list[tuple[str, str]]) -> str:
     """Refuse a call whose injected variables are still unset (V4): the model is
-    told what to ask for, and no half-formed request is ever sent."""
+    told what to do about each one, and no half-formed request is ever sent."""
     unset = [
         (name, hint)
         for name, hint in needed
@@ -725,15 +707,7 @@ def _refusal(tool: str, userdata, needed: list[tuple[str, str]]) -> str:
         return ""
     names = ", ".join(name for name, _ in unset)
     hints = " ".join(f"{name}: {hint}" for name, hint in unset if hint)
-    return f"cannot call {tool} yet: {names} not set. Ask the caller first. {hints}".strip()
-
-{{end}}
-{{- if .NeedsPrerequisiteGuard}}
-{{.PrerequisiteGuard}}
-# One counter per guarded control per session. Held on the module rather than the
-# agent because a handoff replaces the agent object and a caller who keeps
-# refusing across a handoff has not started over.
-_prerequisite_refusals: dict[str, int] = {}
+    return f"cannot call {tool} yet: {names} not set. {hints}".strip()
 
 {{end}}
 {{- if .NeedsPrefetch}}
@@ -1129,18 +1103,6 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
     @function_tool
     async def {{.Method}}(self, ctx: RunContext{{range .Inputs}}, {{.Name}}: {{.Anno}}{{if not .Required}} = None{{end}}{{end}}):
         {{triple .When}}
-{{- if .Requires}}
-        _unmet = _unmet_prerequisites(ctx.userdata, [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
-        if _unmet:
-            # requires guard (machine-checked): the same shared wording every
-            # other guard uses, so the two targets cannot describe the same
-            # refusal differently.
-            logger.info(
-                "prerequisite guard: handoff %s refused, unmet %s",
-                {{pyq .Method}}, ", ".join(_unmet),
-            )
-            return {"refused": _prerequisite_refusal(_unmet, False)}
-{{- end}}
 {{- if .Inputs}}
         # The brief, validated before the receiver exists and before anything is
         # spoken: a value outside its type is refused with the field named and
@@ -1370,15 +1332,11 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- if .Task}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext{{range .Inputs}}, {{.Name}}: {{.Anno}}{{if not .Required}} = None{{end}}{{end}}) -> dict{{if .CanTaskTransfer}} | Agent{{end}}:
-        {{triple .When}}
-{{- if .Requires}}
-{{template "prerequisite_guard" .}}
-{{- end}}
+        {{triple .When}}{{template "delegate_announce" .}}
 {{- if .Inputs}}
-        # What the step is handed, validated before the step exists and before
-        # anything is spoken: refused the way finish refuses a bad result, so
-        # nothing is written and the message goes back to the model, which can
-        # correct itself or ask the caller.
+        # What the step is handed, validated before the step exists: refused the
+        # way finish refuses a bad result, so nothing is written and the message
+        # goes back to the model, which can correct itself or ask the caller.
         try:
             _inputs = _typed_inputs({{pyq .Task.ID}}, {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}}{{"}"}})
         except _StateRefused as refused:
@@ -1391,7 +1349,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
         _previous = {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: ctx.userdata.{{$a.Name}}{{end}}{{"}"}}
         for _name, _value in _inputs.items():
             setattr(ctx.userdata, _name, _value)
-{{- end}}{{template "delegate_announce" .}}
+{{- end}}
         # N13: snapshot before the task, restore after. An awaited AgentTask
         # merges its own turns into this agent's context when it returns
         # (livekit/agents/voice/agent.py, merge on handoff-return), so without
@@ -1437,14 +1395,14 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- end}}
 {{- if .Confirms}}
         # The step that confirms this value has just assigned it, so it is settled
-        # now and the guard stops holding it back. Discarding here rather than in
-        # the step's prompt is the point: a model can be talked out of an
-        # instruction, not out of a set membership test.
+        # now and the emitted _refusal helper stops holding it back. Discarding
+        # here rather than in the step's prompt is the point: a model can be
+        # talked out of an instruction, not out of a set membership test.
         #
-        # getattr with a default, matching the guard: the set is created by the
-        # pre-fetch, and this step can be reached on a path where the pre-fetch
-        # never ran. A bare attribute read there is an AttributeError inside a
-        # finish handler, which is a call that dies mid-step.
+        # getattr with a default: the set is created by the pre-fetch, and this
+        # step can be reached on a path where the pre-fetch never ran. A bare
+        # attribute read there is an AttributeError inside a finish handler,
+        # which is a call that dies mid-step.
         getattr(ctx.userdata, "_unconfirmed", set()).discard({{pyq .Var}})
 {{- end}}
 {{- end}}
@@ -1460,10 +1418,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- $canTaskTransfer := .CanTaskTransfer}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{if .CanTaskTransfer}} | Agent{{end}}{{end}}:
-        {{triple .When}}
-{{- if .Requires}}
-{{template "prerequisite_guard" .}}
-{{- end}}{{template "delegate_announce" .}}
+        {{triple .When}}{{template "delegate_announce" .}}
         # context_scope: isolated — each step is a standalone AgentTask starting
         # fresh (C3/C4); the grouped form always shares context, so it is not used.
         # Starting fresh says nothing about coming back: an AgentTask merges its
@@ -1497,10 +1452,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- else}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{if .CanTaskTransfer}} | Agent{{end}}{{end}}:
-        {{triple .When}}
-{{- if .Requires}}
-{{template "prerequisite_guard" .}}
-{{- end}}{{template "delegate_announce" .}}
+        {{triple .When}}{{template "delegate_announce" .}}
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
             summarize_chat_ctx=False,
@@ -1774,20 +1726,10 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
         {{triple .When}}
         if not self._claim_terminal():
             return
-{{- if .Requires}}
-        _unmet = _unmet_prerequisites(ctx.userdata, [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
-        if _unmet:
-            self._terminal_claimed = False
-            logger.info(
-                "prerequisite guard: handoff %s refused, unmet %s",
-                {{pyq .Method}}, ", ".join(_unmet),
-            )
-            return {"refused": _prerequisite_refusal(_unmet, False)}
-{{- end}}
 {{- if .Inputs}}
         # The brief, validated before the receiver exists. A refusal gives the
-        # terminal claim back, the way the guard above does, so the step can
-        # still finish or hand over once the model has corrected itself.
+        # terminal claim back, so the step can still finish or hand over once
+        # the model has corrected itself.
         try:
             _inputs = _typed_inputs({{pyq .Method}}, {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}}{{"}"}})
         except _StateRefused as refused:

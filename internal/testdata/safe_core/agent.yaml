@@ -5,7 +5,7 @@
 # What it deliberately avoids, and why:
 #   - tasks / task_groups: running a step and returning is unverified on Vapi
 #   - history other than `full`: fails on Pipecat
-#   - requires:, fallback:, thinking_audio:, human transfer: each fails
+#   - fallback:, thinking_audio:, human transfer: each fails
 #     on at least one of the four
 #   - outbound calls: omitted; Deepgram's carrier-conditional lowering warns
 

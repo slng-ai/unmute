@@ -737,7 +737,7 @@ def _render(text: str, state, *, quote_values: bool = False) -> str:
 
 def _refusal(tool: str, state, needed: list[tuple[str, str]]) -> str:
     """Refuse a call whose injected variables are still unset (V4): the model is
-    told what to ask for, and no half-formed request is ever sent."""
+    told what to do about each one, and no half-formed request is ever sent."""
     unset = [
         (name, hint)
         for name, hint in needed
@@ -753,14 +753,7 @@ def _refusal(tool: str, state, needed: list[tuple[str, str]]) -> str:
         return ""
     names = ", ".join(name for name, _ in unset)
     hints = " ".join(f"{name}: {hint}" for name, hint in unset if hint)
-    return f"cannot call {tool} yet: {names} not set. Ask the caller first. {hints}".strip()
-{{end}}{{if .NeedsPrerequisiteGuard}}
-
-{{.PrerequisiteGuard}}
-# One counter per guarded control per session. Held on the module rather than the
-# worker because activating another worker replaces the object and a caller who
-# keeps refusing across a handoff has not started over.
-_prerequisite_refusals: dict[str, int] = {}
+    return f"cannot call {tool} yet: {names} not set. {hints}".strip()
 {{end}}{{if .NeedsPrefetch}}
 
 {{.Prefetch}}
@@ -1017,16 +1010,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
     @_direct_tool(cancel_on_interruption=False)
     async def {{.MethodName}}(self, params: FunctionCallParams{{range .Inputs}}, {{.Name}}: {{.PyType}}{{if not .Required}} = None{{end}}{{end}}):
         """{{.When}}"""
-{{if .Requires}}        _unmet = _unmet_prerequisites(self.state, [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
-        if _unmet:
-            logger.info(
-                "prerequisite guard: handoff {} refused, unmet {}".format(
-                    {{pyq .MethodName}}, ", ".join(_unmet)
-                )
-            )
-            await params.result_callback({"refused": _prerequisite_refusal(_unmet, False)})
-            return
-{{end}}{{if .Inputs}}        # The brief, validated before the receiver is activated and before
+{{if .Inputs}}        # The brief, validated before the receiver is activated and before
         # anything is spoken: a value outside its type is refused with the field
         # named and nobody is handed over. This framework validates no tool
         # argument itself, which is why this runs on both targets.
@@ -1240,37 +1224,15 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
     @_direct_tool
     async def {{$d.MethodName}}(self, params: FunctionCallParams{{range $d.Inputs}}, {{.Name}}: {{.PyType}}{{if not .Required}} = None{{end}}{{end}}):
         """{{$d.When}}"""
-{{if $d.Requires}}        _unmet = _unmet_prerequisites(self.state, [{{range $i, $r := $d.Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
-        if _unmet:
-            # requires guard (machine-checked): no flow starts, so nothing else
-            # in this process is going to speak. The call is resolved WITHOUT
-            # run_llm=False on purpose. The success path below sets it because
-            # the flow's first node is the sole responder; copying that here
-            # would leave a live call silent with nothing in the trace, because
-            # there is no first node to respond.
-            _tries = _prerequisite_refusals.get({{pyq $d.MethodName}}, 0) + 1
-            _prerequisite_refusals[{{pyq $d.MethodName}}] = _tries
-            _at_limit = _tries >= _PREREQUISITE_LIMIT
-            if _at_limit:
-                logger.info(
-                    "prerequisite guard: step {} refused, unmet {}, retry limit reached; asking the caller".format(
-                        {{pyq $d.MethodName}}, ", ".join(_unmet)
-                    )
-                )
-            else:
-                logger.info(
-                    "prerequisite guard: step {} refused, unmet {}".format(
-                        {{pyq $d.MethodName}}, ", ".join(_unmet)
-                    )
-                )
-            await params.result_callback({"refused": _prerequisite_refusal(_unmet, _at_limit)})
-            return
-        _prerequisite_refusals[{{pyq $d.MethodName}}] = 0
-{{end}}{{if $d.Inputs}}        # What the step is handed, validated before the flow exists and before
-        # anything is spoken: refused the way finish refuses a bad result, so
-        # nothing is written and the message goes back to the model. This
-        # framework validates no tool argument itself, which is why this runs on
-        # both targets.
+{{if $d.Announce}}        # Cover the entry: two model requests pass between the caller finishing and
+        # the step's first word, and this puts speech in them. TTSSpeakFrame is a
+        # DataFrame, so it is queued and speech starts while the flow is built.
+        # Queued at the very start of the method, before anything else runs.
+        await self.queue_frame(TTSSpeakFrame({{pyq $d.Announce}}))
+{{end}}{{if $d.Inputs}}        # What the step is handed, validated before the flow exists: refused the
+        # way finish refuses a bad result, so nothing is written and the message
+        # goes back to the model. This framework validates no tool argument
+        # itself, which is why this runs on both targets.
         try:
             _inputs = _typed_inputs({{pyq $d.Task}}, params.arguments)
         except _StateRefused as refused:
@@ -1283,13 +1245,6 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         self._{{$d.MethodName}}_previous = {{"{"}}{{range $i, $a := $d.Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: self.state.{{$a.Name}}{{end}}{{"}"}}
         for _name, _value in _inputs.items():
             setattr(self.state, _name, _value)
-{{end}}{{if $d.Announce}}        # Cover the entry: two model requests pass between the caller finishing and
-        # the step's first word, and this puts speech in them. TTSSpeakFrame is a
-        # DataFrame, so it is queued and speech starts while the flow is built.
-        # Queued after the guard, so a refused step stays silent: the caller
-        # hearing "let me pull up the diary" and then being asked for a phone
-        # number is worse than hearing nothing.
-        await self.queue_frame(TTSSpeakFrame({{pyq $d.Announce}}))
 {{end}}        self._{{$d.MethodName}}_results = {}
 {{if $d.HasTransfers}}        self._{{$d.MethodName}}_active_step = {{pyq (index $d.StepTasks 0).Name}}
 {{end}}        flow = FlowManager(
@@ -1355,15 +1310,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{range $x := $t.Transfers}}    async def _{{$d.MethodName}}_transfer_{{$t.Name}}_{{$x.MethodName}}(self, args, flow_manager):
         if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
             return {"status": "already handled"}, NO_RESPONSE
-{{if $x.Requires}}        _unmet = _unmet_prerequisites(self.state, [{{range $i, $r := $x.Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
-        if _unmet:
-            logger.info(
-                "prerequisite guard: handoff {} refused, unmet {}".format(
-                    {{pyq $x.MethodName}}, ", ".join(_unmet)
-                )
-            )
-            return {"refused": _prerequisite_refusal(_unmet, False)}, None
-{{end}}{{if $x.Inputs}}        # The brief, validated before anything moves: a refusal leaves the step
+{{if $x.Inputs}}        # The brief, validated before anything moves: a refusal leaves the step
         # active and the message goes back to the model.
         try:
             _inputs = _typed_inputs({{pyq $x.MethodName}}, dict(args))
@@ -1489,11 +1436,11 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         _append_entry(self.state.{{.Var}}, {{resultAccess (printf "self._%s_results[%s]" $d.MethodName (pyq $d.Task)) .Field}})
 {{else}}        self.state.{{.Var}} = {{resultAccess (printf "self._%s_results[%s]" $d.MethodName (pyq $d.Task)) .Field}}
 {{end}}{{if .Confirms}}        # The step that confirms this value has just assigned it, so it is settled
-        # now and the guard stops holding it back. Discarded here rather than in the
-        # step's prompt: a model can be talked out of an instruction, not out of a
-        # set membership test. getattr with a default, matching the guard: this step
-        # can be reached on a path where the pre-fetch never ran, and a bare read
-        # there is an AttributeError inside a finish handler.
+        # now and the emitted _refusal helper stops holding it back. Discarded
+        # here rather than in the step's prompt: a model can be talked out of an
+        # instruction, not out of a set membership test. getattr with a default:
+        # this step can be reached on a path where the pre-fetch never ran, and a
+        # bare read there is an AttributeError inside a finish handler.
         getattr(self.state, "_unconfirmed", set()).discard({{pyq .Var}})
 {{end}}{{end}}{{end}}{{if eq $d.Then "end"}}{{if $agentSlngHeaders}}        # The terminal node's goodbye is spoken by this agent, not by the step,
         # so the owner's cache scope goes back first.
@@ -1541,11 +1488,11 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         _append_entry(self.state.{{.Var}}, {{resultAccess (printf "self._%s_results[%s]" $d.MethodName (pyq $d.Task)) .Field}})
 {{else}}        self.state.{{.Var}} = {{resultAccess (printf "self._%s_results[%s]" $d.MethodName (pyq $d.Task)) .Field}}
 {{end}}{{if .Confirms}}        # The step that confirms this value has just assigned it, so it is settled
-        # now and the guard stops holding it back. Discarded here rather than in the
-        # step's prompt: a model can be talked out of an instruction, not out of a
-        # set membership test. getattr with a default, matching the guard: this step
-        # can be reached on a path where the pre-fetch never ran, and a bare read
-        # there is an AttributeError inside a finish handler.
+        # now and the emitted _refusal helper stops holding it back. Discarded
+        # here rather than in the step's prompt: a model can be talked out of an
+        # instruction, not out of a set membership test. getattr with a default:
+        # this step can be reached on a path where the pre-fetch never ran, and a
+        # bare read there is an AttributeError inside a finish handler.
         getattr(self.state, "_unconfirmed", set()).discard({{pyq .Var}})
 {{end}}{{end}}{{end}}        return {"status": "ok"}, None
 {{end}}{{end}}{{end}}{{if eq $d.Then "end"}}

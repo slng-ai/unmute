@@ -451,8 +451,7 @@ agents:
 | `name` | the task's name; unique across the whole package, checked before anything else |
 | `instructions` | the task's own prompt file |
 | `when` | the situation the model reads to decide whether to run the task. Absent makes the task a definition only, valid solely as a step of a task group; an agent naming such a task by bare name is refused |
-| `announce` | optional exact spoken text, said as the task is entered; not spoken when a `requires:` guard holds the task back |
-| `requires` | guard: declared variable names that must be set before the task runs, which waits until they hold a value. A task's or an agent's prompt may already read any declared variable, listed here or not |
+| `announce` | optional exact spoken text, said as the task is entered |
 | `expect` | optional list of typed fields the step expects when the agent runs it, each `- name: type` or a block with `name`, `type` and `description`. The agent fills them from the conversation it heard; a type ending in `\| None` marks one the agent may leave out. The step's prompt ends with a block naming each, and only that prompt may read them |
 | `assign` | write-back: a list of one-key `variable: result.<field>` pairs; the right side may be a dotted path into a declared shape, picking one part of the result into a declared variable. See [variables](/reference/variables#assigning-a-task-result-to-a-variable) |
 | `tools` | tool files this task may call; definitions never go here |
@@ -460,6 +459,11 @@ agents:
 | `think` | optional override of the thinking model |
 | `result` | the typed result returned by the whole task, not a tool's `output` schema |
 | `context` | what the task sees, see below |
+
+`requires` is not a field here, on a task group, or on a handoff: a package
+that writes it is refused as an unknown field. Order a step with the agent's
+own numbered flow and the step's `when:` instead, see [Order steps with the
+prompt](/best-practices/step-scoping#order-steps-with-the-prompt).
 
 Two agents defining a task under the same name is refused:
 
@@ -525,7 +529,6 @@ task_groups:
 | `steps` | task names, in order, at least one |
 | `when` | the situation the model reads |
 | `announce` | optional exact spoken text, said as the group is entered |
-| `requires` | guard: declared variable names. The group does not run until every one holds a value |
 | `context_scope` | `shared` or `isolated` |
 | `then` | `return`, `transfer`, or `end` |
 | `then_target` | an agent name, required with `transfer`, illegal otherwise |
@@ -549,7 +552,6 @@ The conversation becomes another agent, and never comes back.
 | `to` | required; names an entry under `agents:` |
 | `when` | the situation the model reads |
 | `announce` | optional exact spoken text |
-| `requires` | guard: declared variable names |
 | `expect` | optional list of typed fields the receiving agent expects, the same shape a task's `expect` takes; its prompt ends with a block naming each |
 | `context` | payload: `history` |
 

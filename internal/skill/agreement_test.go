@@ -692,26 +692,22 @@ func TestOrchestrationGuidanceMatchesCodeOwnedFacts(t *testing.T) {
 	if tasksSection == nil {
 		t.Fatal("docs-site/reference/agent-yaml.mdx has no tasks section")
 	}
-	for _, field := range []string{"`when`", "`assign`", "`requires`"} {
+	for _, field := range []string{"`when`", "`assign`"} {
 		if !strings.Contains(tasksSection[1], field) {
 			t.Errorf("docs-site/reference/agent-yaml.mdx tasks section does not document %s", field)
 		}
 	}
 
-	// This assertion used to run the other way: it failed when the reference put
-	// `requires:` on a delegate, because the compiler allowed it on an
-	// agent_transfer only. The compiler now allows it on both a task and a
-	// handoff, so the gate is inverted rather than deleted. A coding assistant
-	// that never sees the guarded shape will keep writing the
-	// agent-in-front-of-a-step workaround this feature exists to remove.
-	guarded := false
+	// requires: is retired: ordering between steps is the prompt's job now (a
+	// step's `when:` sentence and the owning agent's instructions), not a code
+	// gate, and the compiler refuses the key wherever it is written. A coding
+	// assistant that still saw it modeled here would write a package that no
+	// longer decodes, which is the opposite of what this assertion used to
+	// guard against.
 	for _, match := range regexp.MustCompile("(?s)```yaml[^\\n]*\\n(.*?)```").FindAllStringSubmatch(orchestration, -1) {
-		if strings.Contains(match[1], "tasks:") && strings.Contains(match[1], "requires:") {
-			guarded = true
+		if strings.Contains(match[1], "requires:") {
+			t.Error("references/orchestration.md still shows requires:, which the compiler no longer accepts anywhere")
 		}
-	}
-	if !guarded {
-		t.Error("references/orchestration.md shows no guarded task; code allows requires: on a task and the skill must teach it")
 	}
 
 	historyRow := regexp.MustCompile("(?m)^\\| `pipecat` \\| (.*) \\| (.*) \\|$").FindStringSubmatch(orchestration)

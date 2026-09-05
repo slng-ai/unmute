@@ -82,10 +82,11 @@ acknowledgements before any information: "Let me pull up the diary." then "Let
 me check." One of them had to go, and the step's own line is the one that knows
 what it is about to do.
 
-`customer` declares no `default:` on purpose, and the booking step names
-`customer.status` in `requires:`. A default is a value the variable holds before
-the first word, so a defaulted record would let the booking step start on a
-caller nobody had looked up. With no default the guard waits.
+`customer` declares no `default:` on purpose. A default is a value the
+variable holds before the first word, so a defaulted record would render in
+the conversation info as a real-looking caller nobody had looked up. Ordering
+the booking step after verification is the concierge's own instructions' job,
+not a code gate.
 
 The files:
 

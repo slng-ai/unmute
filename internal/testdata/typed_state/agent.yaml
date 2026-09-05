@@ -8,7 +8,7 @@
 # The three variables are one per thing the state block has to get right. A list
 # of literals renders as compact JSON and refuses an entry outside the set. A
 # list of shapes is what an append writes into. And `caller_phone` carries a
-# `confirm:`, so it renders in exactly one prompt and satisfies no guard until
+# `confirm:`, so it renders in exactly one prompt and stays unconfirmed until
 # the caller has agreed, which the block's own filter has to reproduce.
 version: 1
 
@@ -72,8 +72,6 @@ agents:
       - name: book
         when: The caller wants an appointment.
         instructions: tasks/book.md
-        requires:
-          - caller_phone
         assign:
           - caller_reason+: result.reason
           - appointments+: result.appointment

@@ -11,10 +11,10 @@ import (
 // The pre-fetch block, and the one place its words are written.
 //
 // Facts knowable before the greeting are resolved here, once per call, so the
-// model is never asked to discover them. Following guard.go: one file owns the
-// emitted text, both drivers render what it produces, and the two targets agree
-// by construction rather than by a test that has to notice they stopped
-// agreeing. The test still exists, because construction can be undone.
+// model is never asked to discover them. One file owns the emitted text, both
+// drivers render what it produces, and the two targets agree by construction
+// rather than by a test that has to notice they stopped agreeing. The test
+// still exists, because construction can be undone.
 
 // PrefetchBudget bounds the whole block, in seconds.
 //
@@ -83,8 +83,7 @@ const LocalCallFactsEnv = "UNMUTE_CALL_FACTS"
 //
 // A package that declares no `prefetch:` gets no block and no behaviour change:
 // its emitted output is byte-for-byte what it was before this existed. That is
-// why this returns a flag rather than always emitting a helper nothing calls,
-// exactly as PrerequisiteGuard does.
+// why this returns a flag rather than always emitting a helper nothing calls.
 func Prefetch(agent *ir.Agent, stateExpr string, request func(entry ir.Prefetch) PrefetchRequest) (PrefetchBlock, bool) {
 	if len(agent.Prefetch) == 0 {
 		return PrefetchBlock{}, false
@@ -176,9 +175,10 @@ async def _prefetch(state, call_context) -> None:
 		b.WriteString("    call_context = _prefetch_call_facts(call_context)\n")
 	}
 	if block.Unconfirmed {
-		b.WriteString(`    # Every value awaiting the caller's agreement. The prerequisite guard reads
-    # this set, so an unconfirmed value satisfies no step, and each generated
-    # assign write discards its own name as the caller settles it.
+		b.WriteString(`    # Every value awaiting the caller's agreement. The emitted _refusal helper
+    # reads this set, so a tool that injects an unconfirmed value is held back,
+    # and each generated assign write discards its own name as the caller
+    # settles it.
     state._unconfirmed = set()
 `)
 	}
@@ -409,10 +409,10 @@ func PrefetchRunbook(agent *ir.Agent) (string, bool) {
 			}
 		}
 		b.WriteString(strings.Join(names, ", ") + " arrive\nfilled but not yet agreed to. Until the naming step has heard the caller agree,\n" +
-			"such a value satisfies no `requires:` guard and appears in no prompt except that\n" +
-			"step's own. So the agent reads the value back and asks for a yes rather than\n" +
-			"acting on it, which is what stops somebody ringing from a friend's phone being\n" +
-			"treated as the account holder.\n")
+			"such a value appears in no prompt except that step's own, and any tool that\n" +
+			"reads it is refused. So the agent reads the value back and asks for a yes\n" +
+			"rather than acting on it, which is what stops somebody ringing from a friend's\n" +
+			"phone being treated as the account holder.\n")
 	}
 	b.WriteString("\n**What you see in the log.** One line per entry, naming the entry and the values:\n\n```text\n")
 	b.WriteString("prefetch " + agent.Prefetch[0].Name + ": resolved " + prefetchAssignedNames(agent.Prefetch[0]) + "\n")
@@ -452,7 +452,7 @@ func prefetchRequestFor(agent *ir.Agent, entry ir.Prefetch) PrefetchRequest {
 	for _, pair := range entry.Args {
 		values = append(values, injectedValue{Key: pair.Key, Expr: injectExpr(pair.Value, prefetchStateExpr)})
 	}
-	injected, _ := loweredInject(tool, agent.Variables, prefetchStateExpr)
+	injected, _ := loweredInject(tool, agent.Variables, SupplierIndex(agent.Controls), prefetchStateExpr)
 	values = append(values, injected...)
 	request := PrefetchRequest{Name: entry.Tool, Local: tool.Execution == ir.ToolLocal}
 	if request.Local {
@@ -501,7 +501,8 @@ func prefetchNeedsHTTPX(agent *ir.Agent) bool {
 const prefetchStateExpr = "state"
 
 // PrefetchUnconfirmed reports whether a package has any value awaiting the
-// caller's agreement, which is what decides whether the guard consults the set.
+// caller's agreement, which is what decides whether the emitted _refusal
+// helper consults the set.
 func PrefetchUnconfirmed(agent *ir.Agent) bool {
 	for _, name := range sortedKeys(agent.Variables) {
 		if agent.Variables[name].Confirm != "" {

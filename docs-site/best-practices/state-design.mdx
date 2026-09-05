@@ -121,8 +121,8 @@ customer_phone:
   confirm: verify_customer
 ```
 
-The compiler then keeps it out of every other prompt, satisfies no `requires:`
-guard with it, and refuses a prompt that names it. On a live call the front desk
+The compiler then keeps it out of every other prompt and refuses a prompt
+that names it. On a live call the front desk
 agent, asked "what number am I calling from", said it could not check. It was
 not being careful. It genuinely did not have the value.
 

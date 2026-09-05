@@ -253,14 +253,13 @@ name and wrong for a token. See [secrets](/reference/secrets).
 unmute dev my-agent --var customer_id=cus_2002
 ```
 
-Seeding `customer_id` is the same thing a production call does when it already
-knows who is calling. Put `requires: customer_id` on a task and the step
-goes straight through with a value already set, while without the flag the agent
-has to ask first. That difference is the variable doing its job.
+Seeding `customer_id` is the same thing a production call does when it
+already knows who is calling: the greeting and every prompt read the real
+value from the first word, instead of the default.
 
-That difference is also the whole idea behind [pre-fetch](/build/prefetch): fill
-a value before the greeting and the step that existed to collect it is skipped,
-with no edit to the step itself.
+That is also the whole idea behind [pre-fetch](/build/prefetch): fill a
+value before the greeting, from a lookup instead of a flag, so a step that
+existed only to collect it has nothing left to ask for.
 
 ## Where to go next
 

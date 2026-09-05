@@ -21,7 +21,7 @@ Use a task instead of the other shapes when:
 
 The YAML on this page is one worked pair of tasks. For a shipped package that
 does it, read `examples/salon-concierge`: a verification task and a booking
-task, one of them behind a `requires:` guard.
+task that runs only once the caller is identified.
 
 ## Declare the task where it is used
 
@@ -117,13 +117,13 @@ utterance, so it opens without knowing what was just asked. Give it `expect:`
 for what the caller asked for, see the next section, and it asks nothing it
 was handed. Without an `expect:` list it fits only a step fully described by its own
 declared values, such as confirming a number or taking a payment. There is no
-compiler error for choosing wrong, so pick it only when the values the step expects, its
-instructions and its `requires:` values are the whole story.
+compiler error for choosing wrong, so pick it only when the values the step
+expects and its instructions are the whole story.
 
 **No value here is a privacy control.** Shortening the history does not
 unsay what the caller said out loud. A phone number the caller read aloud is
 in the transcript whether a variable holds it or not. `reset` plus a short
-`requires:` list gives a step a smaller request, not a redacted one.
+`expect:` list gives a step a smaller request, not a redacted one.
 
 [Scoping a step's context](/optimization/context-scope) is the worked version
 of all of this: which value to give which step, what has to travel as a variable
@@ -213,17 +213,13 @@ and says to compile to a code target. A handoff takes the same list; see
 
 A task can carry `announce:`, one fixed line spoken as the step starts, so
 the two model requests between the caller finishing and the task's first
-word are not silence. It never speaks when the task is held back by
-`requires:`: a caller who hears "let me pull up the diary" and is then asked
-for a phone number has been told something untrue.
+word are not silence.
 
 ```yaml agent.yaml
       - name: manage_booking
         when: The caller wants to create, modify, or cancel a booking.
         announce: Let me pull up the diary.
         instructions: tasks/booking.md
-        requires:
-          - customer_phone
 ```
 
 `examples/salon-concierge` declares it exactly this way on `manage_booking`.
@@ -255,52 +251,20 @@ agents:
 Task names are unique across the whole package. Two agents defining a task
 under the same name is refused, naming both agents and the fix.
 
-## Guarding a step
+## Order a step with the prompt
 
-A task that needs a value the conversation has not collected yet declares
-`requires:`:
+A step that needs an earlier step's value first does not declare that on the
+task itself. It says so in the agent's instructions and in the step's own
+`when:`:
 
 ```yaml agent.yaml
       - name: manage_appointment
-        when: The caller wants to make, change, or cancel an appointment.
-        requires:
-          - customer_phone
+        when: The caller wants to make, change, or cancel an appointment, once the caller is identified.
 ```
 
-Every name must be a declared variable, or the package will not compile. A guard
-on a name nothing sets could never pass, and the symptom would be a step that
-silently never starts.
-
-`requires:` has one job: it holds the step back until the value exists. It is
-not what decides whether a prompt may read the value. Any task's or agent's
-instructions may already write `{{name}}` for any declared variable, listed
-in `requires:` or not; write the sentence so it reads whole when the value is
-still empty. Add a name to `requires:` when the step's own work cannot start
-without it, not in order to make it readable.
-
-**The caller hears nothing.** While `customer_phone` is empty the task does not
-run, and the refusal goes to the model rather than to the caller. It names the
-missing variable and the task that supplies it, so the model runs
-`customer_record` and calls the step again in the same turn. The caller just hears
-the next natural question.
-
-The compiler also appends the requirement to the step's own description, so the
-model usually collects the value during the earlier turns and never reaches the
-guard at all. The guard is the net; the description is the mechanism.
-
-**When the model cannot recover.** After five refusals of the same step the agent
-stops recovering quietly and asks the caller for the missing value out loud, in
-its own words. It does not fall silent and it does not end the call. That limit
-lives in the emitted code, not in a prompt: a model can be argued out of an
-instruction, and this exists for the case where it already has been.
-
-Both refusals are logged, with variable and step names only. No caller speech and
-no variable value is written, which matters when the identifier is a phone
-number.
-
-`requires:` works the same way on an [agent handoff](/build/orchestration/handoffs),
-but prefer the step. Guarding the route rather than the work means adding an agent
-whose only job is to hold the guard, and the caller has to be spoken through it.
+The full pattern, including what a tool does when it is handed a value that
+is not there yet, is in [Order steps with the
+prompt](/best-practices/step-scoping#order-steps-with-the-prompt).
 
 ## What the agent can do shrinks
 
@@ -390,8 +354,8 @@ unmute dev examples/salon-concierge --target pipecat
 ```
 
 Ask to book a haircut. The agent runs the `verify_customer` task first,
-and only then `manage_booking`, which is held back by `requires:
-customer_phone` until the caller is identified.
+because its own instructions say to identify the caller before it takes a
+booking, and only then runs `manage_booking`.
 
 ## Where to go next
 

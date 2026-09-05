@@ -70,9 +70,7 @@ func checkSecrets(pkg *packagespec.Package) error {
 // step ever assigns — that is the whole point of assign: reading it back
 // somewhere with no message history. A variable with nothing in it yet renders
 // as words, never as a hole (_state_text and _render's plain fallback, both in
-// generate), so naming one early is never silent. requires: is a different
-// question: it holds a step back until a value it needs exists, and stays the
-// only place that guard lives.
+// generate), so naming one early is never silent.
 func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 	if pkg.Agent.Conversation != nil && pkg.Agent.Conversation.Greeting != nil {
 		text := pkg.Agent.Conversation.Greeting.Text

@@ -187,21 +187,6 @@ assert "'" not in rendered, rendered
 assert "None" not in rendered, rendered
 assert generated._state_text("caller_reason", state.caller_reason) == '["create_booking","cancel_booking"]'
 
-# The guard. An empty list is unmet, because "nothing booked yet" is exactly the
-# state a guard exists to wait for. A zero and a false are not: they are real
-# answers a caller can give.
-empty = generated.` + stateExpr + `
-assert generated._unmet_prerequisites(empty, ["appointments"]) == ["appointments"]
-assert generated._unmet_prerequisites(state, ["appointments"]) == []
-empty.a_zero, empty.a_false = 0, False
-assert generated._unmet_prerequisites(empty, ["a_zero", "a_false"]) == []
-
-# A value awaiting the caller's agreement satisfies no guard through any path
-# into it, so naming a field one level down cannot escape the mark.
-empty._unconfirmed = {"caller_phone"}
-empty.caller_phone = "+34600111222"
-assert generated._unmet_prerequisites(empty, ["caller_phone"]) == ["caller_phone"]
-
 # The finish schema goes out with no $ref and no $defs left in it. Measured
 # against the provider: a $ref inside one tool property comes back 200 with the
 # model inventing field names for the nested object, so every result would be

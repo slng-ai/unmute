@@ -32,8 +32,6 @@ agents:
       - name: confirm_number
         when: Read the caller's number back and get a yes before anything acts on it.
         instructions: tasks/confirm_number.md
-        requires:
-          - caller_phone
         assign:
           - caller_phone: result.caller_phone
         result:

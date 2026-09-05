@@ -106,9 +106,7 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			// mid-call, and again after one of its own steps writes state (gap 3
 			// of the scoped variables feature). So it may name a variable with no
 			// value yet, the same as a task prompt below: the value renders as
-			// words rather than a hole (_state_text/_render's plain fallback),
-			// and requires: is the separate question of whether a step waits for
-			// it before it may run.
+			// words rather than a hole (_state_text/_render's plain fallback).
 			name: "an agent prompt may name a variable that has no value yet",
 			mutet: func(pkg *packagespec.Package) {
 				pkg.Agent.Variables["caller_alias"] = packagespec.Variable{Type: "string"}
@@ -394,7 +392,7 @@ func attachStep(pkg *packagespec.Package, agent string, task packagespec.Task, b
 	pkg.Agent.Agents[agent] = def
 	pkg.Tasks[task.Name] = task
 	pkg.Callables[task.Name] = packagespec.Callable{
-		Task: task.Name, When: task.When, Requires: task.Requires, Assign: task.Assign,
+		Task: task.Name, When: task.When, Assign: task.Assign,
 	}
 	pkg.Markdown[task.Instructions] = body
 }
@@ -403,10 +401,10 @@ func attachStep(pkg *packagespec.Package, agent string, task packagespec.Task, b
 // variables feature. checkTaskPromptReads used to refuse a task prompt naming
 // a value only some other step assigns unless this step's own requires: named
 // it too, so a value nobody had to wait for could still never be read once
-// some other step happened to assign it as well. The owner's decision deletes
-// that restriction: requires: still holds a step back until a value exists,
-// but reading one and waiting for one are different questions, and only the
-// second is a guard. manage_booking here declares no requires: at all.
+// some other step happened to assign it as well. The owner's decision deleted
+// that restriction: reading a value and waiting for one are different
+// questions, and ordering between steps is the prompt's job now, not a code
+// gate. manage_booking here names customer_status without waiting for it.
 func TestTaskPromptMayNameAVariableOnlyAnotherStepAssigns(t *testing.T) {
 	pkg := loadSafeCore(t)
 	pkg.Agent.Variables["customer_status"] = packagespec.Variable{Type: "string"}

@@ -78,17 +78,18 @@ the server, not the package, owns that order.
 | the prompt keeps growing and starts contradicting itself | split it: tasks if the parts serve one caller goal, a handoff if they are separate roles |
 | the model does things out of order | a task group. The order is declared, not requested |
 | the model calls a tool it should not have yet | move the tool. Lists are per agent and per task, so a tool the current step does not hold cannot be called at all |
-| a step runs before you have the value it needs | `requires:` on that task. The step is held back, and the model is told which control fills the gap |
+| a step runs before you have the value it needs | give the step's own `when:` the clause that names what has to be true first, "once the caller is identified" |
 | you need a value out of a step and want to keep it | a task with `result:`, saved to a variable with `assign:` |
 | two phases need different tools or different permissions | a handoff |
 | the caller changes intent while a task is active | put the destination's handoff on that task's own `handoffs:` list |
 | the caller needs a person | none of these. That is an escalation, and what it can do depends on the phone route. See `transfers.md` |
 
 A prompt that says "always identify the caller first" is a request. A task group
-is a guarantee. That is the difference you are buying. Reach for a task group
-when the order must hold, and for `requires:` when one value must exist before
-one step runs. `requires:` is cheaper: no extra step, no extra prompt, and
-nothing the caller is spoken through.
+is a guarantee. A `when:` clause naming the dependency is not a guarantee the
+same way, but it is cheap: no extra step, no extra prompt, and nothing the
+caller is spoken through. See "Order steps with the prompt" below. Reach for
+a task group when the order must hold, and for a `when:` clause when one
+value should usually be there before one step runs.
 
 ## What each shape costs
 
@@ -202,9 +203,9 @@ nothing to write: see `variables.md`. What the caller just asked for is not a
 declared value: hand it over with `expect:` on the handoff, the same list a
 task takes, see below.
 
-`requires:` is legal on a handoff when variables must exist before the call
-leaves this agent. It is also legal on a task, which is usually the better
-place for it: see [Guarding a step](#guarding-a-step) below.
+Order matters on a handoff the same way it matters on a task: say the
+dependency in the agent's own flow and in the handoff's `when:`, not with a
+gate. See "Order steps with the prompt" below.
 
 ## Task
 
@@ -364,14 +365,9 @@ sentence, spoken as the task starts:
         when: The caller wants to create, modify, or cancel a booking.
         announce: Let me pull up the diary.
         instructions: tasks/booking.md
-        requires:
-          - customer_phone
 ```
 
 Same field as a tool's, same rules: one fixed sentence, spoken word for word.
-**Not spoken when the task is held back by a `requires:` guard**, which
-matters: a caller who hears "let me pull up the diary" and is then asked for a
-phone number has been told something untrue.
 
 Do not put one on a task whose first tool already announces, and check the
 tool that runs immediately **before** the task too: a lookup at the end of one
@@ -382,11 +378,11 @@ is usually the one worth keeping.
 
 Denied on the `slng` target, which writes one agent with no steps.
 
-## Guarding a step
+## Order steps with the prompt
 
-A task that needs a value the conversation has not collected yet declares
-`requires:`. Put the guard on the task that needs the value, not on the
-handoff that reaches it:
+There is no field that holds a task back until a variable exists. Put the
+order in the prompt: number the flow in the agent's own instructions, and
+give the later task a `when:` that names what has to be true first:
 
 ```yaml agent.yaml
 agents:
@@ -403,9 +399,7 @@ agents:
           history: full
 
       - name: manage_appointment
-        when: The caller wants to make, change, or cancel an appointment.
-        requires:
-          - customer_phone
+        when: The caller wants to make, change, or cancel an appointment, once the caller is identified.
         instructions: tasks/appointment.md
         result:
           status: string
@@ -413,39 +407,24 @@ agents:
           history: full
 ```
 
-Every name in `requires:` must be a declared variable, or the package fails to
-compile. That is deliberate: a guard on a name nothing sets can never pass, and
-the symptom would be a task that silently never starts.
+Every prompt already carries the `Conversation info:` block, so a step's own
+prompt can lean on it directly: "once the info names a customer, verification
+has already succeeded, never run it again." That is a request to the model,
+not a gate, so it is not the only line of defense.
 
-**`requires:` has one job: it holds the step back until the value exists.**
-It does not decide what a task's own prompt may read. Any task's or agent's
-`instructions` may already name any declared variable, listed in `requires:`
-or not, and an unset one renders as nothing rather than failing to compile;
-write the sentence so it reads whole either way. Keep using `requires:` when
-the step's own work genuinely cannot start without the value: the guard is
-still what stops the step running early, and it is still the list a reader
-can check the prompt against.
+**The last line sits on the tool.** A tool that silently reads a value,
+through `inject:` or a webhook path, refuses to run while that value is empty
+or unconfirmed, and the model is told which task supplies it, or, when
+nothing does, to ask the caller. The worst case is one extra model turn, not
+a request sent with a blank or an unconfirmed field.
 
-**What the caller hears: nothing.** The refusal goes to the model, not to the
-caller. It names the missing variable and the task that supplies it, so the
-model runs `customer_record` and calls the step again on the same turn. The
-compiler also appends the requirement to the task's own description, so the
-model usually collects the value during the earlier turns and the guard is
-never reached. After five refusals of the same task the agent stops recovering
-quietly and asks the caller for the value out loud, in its own words. That
-bound lives in the emitted code, not in a prompt. Both refusals are logged
-with the variable and task names only, never the value, which matters when
-the name is a phone number.
+**Check the order with a scripted text conversation before a live call.**
+It drives the agent through a fixed script with the real model and the real
+tools, so you see which task ran, and in what order.
 
-**Do not put an agent in front of a task to hold a guard.** Before `requires:`
-worked on a task, the only machine-checked way to gate a step was to give the
-step to a second agent and guard the handoff to it. That agent then had to be
-spoken through, which cost the caller a turn and taught a shape nobody needed.
-One agent, one guarded task.
-
-**And do not gate reaching a person.** An escalation takes no `requires:` at
-all, and a handoff to the agent that hears complaints should not carry one.
-Someone who asks for a manager should not be interviewed first.
+**Never hold up the way to a person.** An escalation should carry no
+dependency like this, and neither should a handoff to the agent that hears
+complaints. Someone who asks for a manager should not be interviewed first.
 
 **While a task runs, the caller is talking to the task**: its prompt, and only
 what the task's own `tools:` and `handoffs:` lists name. The agent's lists are
@@ -726,15 +705,14 @@ rather than one list with a kind field.
 | typed result | yes, `result:` | no |
 | targets | a task, run in place | another agent |
 | context control | `context:` on the task | `context:` on the handoff entry |
-| `requires:` | yes | yes |
 
 ## The shapes, as packages
 
 One package in the unmute repository shows these shapes working together:
 `examples/salon-concierge` has two agents that hand the caller over, two tasks
-nested in the concierge (one of them guarded with `requires:`) and a bare
-name that lets the complaint specialist run the same verification task without
-a second copy.
+nested in the concierge (one of them ordered after the other by the agent's
+own prompt) and a bare name that lets the complaint specialist run the same
+verification task without a second copy.
 
 The one-agent, one-prompt shape has no package. `unmute init <name>` scaffolds
 it, and `package.md` in this bundle has the same shape inline.

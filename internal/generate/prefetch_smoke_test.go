@@ -112,11 +112,12 @@ asyncio.run(agent._prefetch(second, None))
 assert "customer_phone" in first._unconfirmed, first._unconfirmed
 assert second._unconfirmed == set(), second._unconfirmed
 
-# And an unconfirmed value satisfies no gate, which is the whole point of marking
-# it: the emitted guard is what a step consults before it starts.
-assert agent._unmet_prerequisites(first, ["customer_phone"]) == ["customer_phone"]
+# And an unconfirmed value refuses any tool call that would inject it, which is
+# the whole point of marking it: the emitted _refusal helper is what a tool
+# call consults before it runs.
+assert agent._refusal("probe", first, [("customer_phone", "hint")]) != ""
 first._unconfirmed.discard("customer_phone")
-assert agent._unmet_prerequisites(first, ["customer_phone"]) == []
+assert agent._refusal("probe", first, [("customer_phone", "hint")]) == ""
 
 print("prefetch outcomes check passed")
 `
@@ -176,9 +177,9 @@ assert failed.booking_date, "a failed lookup lost the clock reading too"
 
 bot.tools.look_up_customer.look_up_customer = original
 
-assert bot._unmet_prerequisites(seeded, ["customer_phone"]) == ["customer_phone"]
+assert bot._refusal("probe", seeded, [("customer_phone", "hint")]) != ""
 seeded._unconfirmed.discard("customer_phone")
-assert bot._unmet_prerequisites(seeded, ["customer_phone"]) == []
+assert bot._refusal("probe", seeded, [("customer_phone", "hint")]) == ""
 
 print("prefetch outcomes check passed")
 `

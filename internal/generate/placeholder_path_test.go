@@ -52,7 +52,7 @@ func TestInjectOfAPathLowersToTheLookup(t *testing.T) {
 		t.Errorf("injectExpr(whole value) = %s, which is not the attribute read it always was", got)
 	}
 	needed := neededVars(ir.Tool{Inject: map[string]any{"status": "{{customer__status}}", "phone": "{{customer__phone_number}}"}},
-		map[string]ir.Variable{"customer": {Description: "The record the lookup returned."}})
+		map[string]ir.Variable{"customer": {Description: "The record the lookup returned."}}, nil)
 	if len(needed) != 1 || needed[0].Name != "customer" {
 		t.Errorf("neededVars = %+v, want the one root customer", needed)
 	}

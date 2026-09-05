@@ -33,8 +33,6 @@ What the one agent does differently:
   "tomorrow" costs two chained requests.
 - The number is not a declared variable, so the model reads it off the
   transcript and retypes it into every tool call.
-- "Identify the caller before any booking tool runs" is a sentence in a prompt
-  rather than a `requires:` guard the compiler enforces.
 - Turn taking is `pace: patient`, which reproduces the framework defaults.
 - Thinking goes straight to the model's own endpoint rather than through the
   Context Router.
