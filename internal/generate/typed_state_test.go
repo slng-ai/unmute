@@ -24,6 +24,7 @@ var typedStateMarkers = []string{
 	"def _plain(",
 	"def _typed_result(",
 	"def _state_text(",
+	"def _state_lookup(",
 	"_FINISH_TYPES",
 	"_STATE_STRUCTURED",
 	"_STATE_EMPTY",

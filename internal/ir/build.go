@@ -212,6 +212,10 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		if !ok {
 			return nil, missing(pkg, "agent.yaml", "instructions", raw.Instructions)
 		}
+		// Stored in the emitted form, {{customer__status}} for an authored
+		// {{customer.status}}, so every consumer of the IR sees one flat name
+		// per placeholder. checkTemplates reads the authored text.
+		instructions = FlattenPaths(instructions)
 		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg, raw.Think))
 		// The composed state block, after the authored suffix, because the suffix
 		// is a directive about how to answer and this is the record it answers
@@ -250,6 +254,10 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		if !ok {
 			return nil, missing(pkg, "agent.yaml", "instructions", raw.Instructions)
 		}
+		// Stored in the emitted form, {{customer__status}} for an authored
+		// {{customer.status}}, so every consumer of the IR sees one flat name
+		// per placeholder. checkTemplates reads the authored text.
+		instructions = FlattenPaths(instructions)
 		// A task with no think profile of its own runs on the entry agent's, which
 		// is the same rule slngProfileHasTools applies. One rule, read twice,
 		// rather than two spellings that can drift. Deliberately the entry agent's
@@ -670,13 +678,13 @@ func flattenFallback(pkg *packagespec.Package, section map[string]packagespec.Mo
 func buildTool(name string, raw packagespec.Tool) Tool {
 	tool := Tool{
 		Description: raw.Description, Input: raw.Input, Output: raw.Output,
-		Execution: ToolExecution(raw.ExecutionKind()), Inject: raw.Inject,
+		Execution: ToolExecution(raw.ExecutionKind()), Inject: flattenInject(raw.Inject),
 	}
 	switch {
 	case raw.Webhook != nil:
 		tool.URLEnv = raw.Webhook.URLEnv
 		tool.BaseURL = raw.Webhook.BaseURL
-		tool.Path = raw.Webhook.Path
+		tool.Path = FlattenPaths(raw.Webhook.Path)
 		tool.Auth = buildToolAuth(raw.Webhook.Auth)
 	case raw.Local != nil:
 		tool.Handler = raw.Local.Handler
@@ -790,6 +798,24 @@ func floatOr(authored *float64, fallback float64) float64 {
 // buildToolAuth resolves an auth block: the scheme's own default lands here so
 // every generator reads settled values. An unknown type passes through
 // unchanged for Validate to reject by name.
+// flattenInject stores each templated inject value in its emitted form, the way
+// Build stores a prompt. A map with nothing in it is returned as it came, so a
+// tool declaring no inject keeps the nil the generators test for.
+func flattenInject(inject map[string]any) map[string]any {
+	if len(inject) == 0 {
+		return inject
+	}
+	out := make(map[string]any, len(inject))
+	for key, value := range inject {
+		if text, ok := value.(string); ok {
+			out[key] = FlattenPaths(text)
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
 func buildToolAuth(raw *packagespec.ToolAuth) *ToolAuth {
 	if raw == nil {
 		return nil
@@ -1756,7 +1782,7 @@ func buildConversation(raw *packagespec.Conversation) *Conversation {
 	}
 	conversation := &Conversation{MaxDuration: Duration(raw.MaxDuration), ThinkingAudio: ThinkingAudio(raw.ThinkingAudio)}
 	if raw.Greeting != nil {
-		conversation.Greeting = &Greeting{SpeaksFirst: SpeaksFirst(raw.Greeting.SpeaksFirst), Text: raw.Greeting.Text}
+		conversation.Greeting = &Greeting{SpeaksFirst: SpeaksFirst(raw.Greeting.SpeaksFirst), Text: FlattenPaths(raw.Greeting.Text)}
 	}
 	if raw.Interruption != nil {
 		conversation.Interruption = &Interruption{

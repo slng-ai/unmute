@@ -461,6 +461,27 @@ def _state_text(name, value):
         )
         text = text[:_STATE_VALUE_MAX]
     return text
+
+
+def _state_lookup(state, name):
+    """The value a placeholder names, and the declared name it belongs to.
+
+    A path is authored {{customer.status}} and emitted {{customer__status}}: one
+    flat name, because the router substitutes flat names only and both render
+    paths have to agree. Everything before the first "__" is the declared value;
+    each "__" after it starts a field, read as a dict key or an attribute and as
+    None past an absent link, so a field of a record nobody has filled renders
+    as the empty words and never raises. The root's name comes back with the
+    value because the words for an empty value are the root's: a field of a
+    variable reads as the state's, a field of a brief as the request's.
+    """
+    root, _, path = name.partition("__")
+    value = getattr(state, root, None) if state is not None else None
+    for part in path.split("__") if path else ():
+        if value is None:
+            break
+        value = value.get(part) if isinstance(value, dict) else getattr(value, part, None)
+    return root, value
 `)
 	block.Source = b.String()
 	return block, nil

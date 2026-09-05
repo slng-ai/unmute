@@ -219,6 +219,12 @@ a value. It may already name any declared variable, whether or not anything
 has assigned it yet: an unset one renders as nothing, so write the sentence to
 read whole either way. See `variables.md`.
 
+A placeholder may also name one field of a structured value with a dotted
+path, such as `{{customer.status}}`. That part renders the same empty words
+as a whole value when it is missing, so the sentence still has to read
+whole. A placeholder carries no logic: no conditions, no filters, nothing
+computed, just the value written into the sentence.
+
 ## Making it sound human
 
 Rules tell the agent what to do. Examples tell it how to sound, and examples do

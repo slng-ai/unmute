@@ -39,6 +39,13 @@ func injectExpr(value any, stateExpr string) string {
 		return pyLiteral(value)
 	}
 	if name := ir.TemplateVar(text); name != "" {
+		if ir.PathRoot(name) != name {
+			// One part of a declared value, emitted as a flat name. Through the
+			// lookup rather than an attribute read, and [1] because the lookup
+			// also returns the root's name, which a request body has no use for.
+			// The part keeps its own type, so an integer field stays an integer.
+			return "_state_lookup(" + stateExpr + ", " + pyQuote(name) + ")[1]"
+		}
 		return stateExpr + "." + name
 	}
 	if !ir.HasTemplate(text) {
@@ -91,15 +98,18 @@ func neededVars(tool ir.Tool, variables map[string]ir.Variable) []neededVar {
 	var needed []neededVar
 	collect := func(text string) {
 		for _, ref := range ir.TemplateRefs(text) {
-			variable, ok := variables[ref]
-			if !ok || seen[ref] || ir.IsSystemSource(variable.Source) {
+			// The root: a path into a value that is unset is a request against
+			// nobody's record, and the refusal names the record to ask for.
+			name := ir.PathRoot(ref)
+			variable, ok := variables[name]
+			if !ok || seen[name] || ir.IsSystemSource(variable.Source) {
 				continue
 			}
 			if variable.Default != nil && variable.Confirm == "" {
 				continue
 			}
-			seen[ref] = true
-			needed = append(needed, neededVar{Name: ref, Description: variable.Description})
+			seen[name] = true
+			needed = append(needed, neededVar{Name: name, Description: variable.Description})
 		}
 	}
 	keys := make([]string, 0, len(tool.Inject))

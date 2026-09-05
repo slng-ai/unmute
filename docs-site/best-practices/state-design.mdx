@@ -150,6 +150,14 @@ Read the conversation info below. Once it names a booking, that booking is
 already saved and you never make it again.
 ```
 
+A part picked out with a dotted path, such as `{{customer.status}}`, is still
+the same kind of value and renders the same empty words when it, or a link on
+the way, is missing, so it needs the same care:
+
+```md
+The caller is a {{customer.status}} customer, if the lookup has run.
+```
+
 ## A value reaches the prompt when a step records it
 
 Declared state is not pushed to the model the moment it changes. It reaches a

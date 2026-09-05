@@ -148,27 +148,42 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 			}
 			continue
 		}
-		variable, ok := agent.Variables[ref]
+		// A reference is a root and, when it carries a path, the fields the path
+		// walks: {{customer.status}} is the variable customer read at its field
+		// status. Every rule here is about the root, because the root is the
+		// value the site reads; the path is resolved last, against the root's
+		// declared shape, and only decides which part is rendered.
+		root, fields := PathRoot(ref), PathFields(ref)
+		variable, ok := agent.Variables[root]
 		if !ok {
 			// An expected value is read by the prompt it was handed to and nowhere else.
 			// At run time the value sits on the shared call state for its visit,
 			// so this refusal is the only thing keeping a step's request out of
 			// its parent's prompt. A tool's inject may read one when
 			// checkToolInputReads has allowed it.
-			if sites := inputSites(agent, ref); len(sites) > 0 {
-				if slices.Contains(sites, site) || slices.Contains(alsoAllowed, ref) {
-					continue
+			if sites := inputSites(agent, root); len(sites) > 0 {
+				if !slices.Contains(sites, site) && !slices.Contains(alsoAllowed, root) {
+					what := "which is"
+					if len(fields) > 0 {
+						what = "and " + root + " is"
+					}
+					return fmt.Errorf("%s: %s references {{%s}}, %s a value %s expects to be handed. Only the prompt that "+
+						"expects it may read it: name it there, and here ask the caller or read a declared variable",
+						where, site, ref, what, strings.Join(sites, " and "))
 				}
-				return fmt.Errorf("%s: %s references {{%s}}, which is a value %s expects to be handed. Only the prompt that "+
-					"expects it may read it: name it there, and here ask the caller or read a declared variable",
-					where, site, ref, strings.Join(sites, " and "))
+				if len(fields) > 0 {
+					if err := checkPathFields(agent.Shapes, root, "", inputType(agent, root), fields); err != nil {
+						return fmt.Errorf("%s: %s references {{%s}}: %w", where, site, ref, err)
+					}
+				}
+				continue
 			}
-			if slices.Contains(agent.Secrets, ref) || envNamePattern.MatchString(ref) {
+			if slices.Contains(agent.Secrets, root) || envNamePattern.MatchString(root) {
 				return fmt.Errorf("%s: %s references {{%s}}, but secrets never flow through templates; a secret reaches a tool through its own *_env field", where, site, ref)
 			}
 			return fmt.Errorf("%s: %s references {{%s}}, which is not a declared variable", where, site, ref)
 		}
-		if requireNow && !hasSessionStartValue(agent, ref, variable) && !slices.Contains(alsoAllowed, ref) {
+		if requireNow && !hasSessionStartValue(agent, root, variable) && !slices.Contains(alsoAllowed, root) {
 			return fmt.Errorf("%s: %s references {{%s}}, which has no value when the prompt is built; give it source: call_start, a system source, or a default", where, site, ref)
 		}
 		// Refusal 16. A value awaiting confirmation renders in exactly one prompt:
@@ -194,8 +209,39 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 				"task %q, the step that confirms it. Read it back there, and name it here only after that step has "+
 				"assigned it", where, site, ref, step)
 		}
+		if len(fields) > 0 {
+			if err := checkPathFields(agent.Shapes, root, string(variable.Type), variable.Shape, fields); err != nil {
+				return fmt.Errorf("%s: %s references {{%s}}: %w", where, site, ref, err)
+			}
+		}
 	}
 	return nil
+}
+
+// checkPathFields resolves the fields a placeholder walks after its root. The
+// root's own type decides whether there is anything to walk: a plain type, a
+// text type such as Phone, a literal set and a list have no fields, and each is
+// refused naming the type and the whole name to write instead. The list case is
+// caught here rather than left to FieldPath so the message can name the root,
+// which FieldPath never sees. Past the root, FieldPath's own messages apply: an
+// unknown field lists the fields the shape declares, a list partway down says
+// nothing names its entry, and a plain field partway down says it has no fields.
+// A token carrying anything but names and dots ends up here too, and is refused
+// as an unknown field with the text as written: a placeholder carries no logic.
+func checkPathFields(shapes map[string]Shape, root, plain string, typ *TypeRef, fields []string) error {
+	switch {
+	case typ == nil:
+		return fmt.Errorf("%s is a plain %s with no fields to name; write {{%s}}", root, plain, root)
+	case typ.IsList():
+		return fmt.Errorf("%s is %s, and a path cannot name a field inside a list: nothing says which entry it "+
+			"means. Record the entry you need into its own variable with assign: on the step that records it, "+
+			"and name that variable here", root, typ.String())
+	}
+	if _, ok := shapes[typ.Shape]; !ok {
+		return fmt.Errorf("%s is %s, which has no fields to name; write {{%s}}", root, typ.String(), root)
+	}
+	_, err := FieldPath(shapes, typ, fields)
+	return err
 }
 
 // hasSessionStartValue reports whether a variable holds a value before the first

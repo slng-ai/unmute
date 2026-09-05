@@ -516,7 +516,7 @@ func TestSlngRouterCarriesInputNamesOnBothTargets(t *testing.T) {
 	}
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		helper := functionBody(t, emitted(t, agent, provider), "def _slng_template_variables(state, names) -> dict:")
-		if !strings.Contains(helper, "getattr(state, name, None)") || !strings.Contains(helper, "_state_text(name, value)") {
+		if !strings.Contains(helper, "_state_text(*_state_lookup(state, name))") {
 			t.Errorf("%s: the router path does not read the state object through _state_text", provider)
 		}
 	}

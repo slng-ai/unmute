@@ -48,6 +48,10 @@ variables:
     confirm: confirm_number
     description: The number the caller rang from, once they have agreed it is theirs.
 
+  last_appointment:
+    type: Appointment | None
+    description: The appointment most recently booked on this call, so a prompt can name one part of it.
+
 agents:
   desk:
     instructions: instructions.md
@@ -73,6 +77,7 @@ agents:
         assign:
           - caller_reason+: result.reason
           - appointments+: result.appointment
+          - last_appointment: result.appointment
         result:
           reason: Literal["create_booking", "cancel_booking"]
           appointment: Appointment

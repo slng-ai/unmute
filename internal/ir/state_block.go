@@ -60,9 +60,9 @@ func (a *Agent) StateBlock(site string) string {
 	b.WriteString(StateBlockNote)
 	b.WriteString("\n")
 	for i, name := range names {
-		// A placeholder naming the whole value, never a dotted path: the emitted
-		// substitution regex tokenises flat identifiers only, so a dotted name
-		// would survive into the prompt as literal text.
+		// A placeholder naming the whole value, never a path into it: the block
+		// is the record's whole-value view, and a sentence that wants one part
+		// names it with a path of its own, checked and rendered as such.
 		fmt.Fprintf(&b, "%d. %s: {{%s}}\n", i+1, stateBlockLabel(name), name)
 	}
 	return strings.TrimRight(b.String(), "\n")

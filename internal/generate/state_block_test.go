@@ -22,8 +22,8 @@ func TestStateBlockRendersJSONAndNotARepr(t *testing.T) {
 		for _, want := range []string{
 			`json.dumps(_plain(value), separators=(",", ":"), ensure_ascii=False)`,
 			"_STATE_VALUE_MAX",
-			"value = _state_text(match.group(1), value)",
-			"text = _state_text(name, value)",
+			"value = _state_text(*_state_lookup(",
+			"text = _state_text(*_state_lookup(state, name))",
 		} {
 			if !strings.Contains(module, want) {
 				t.Errorf("%s does not emit %q, so a declared value reaches a prompt as a Python repr",

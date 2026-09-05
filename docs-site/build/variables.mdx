@@ -208,6 +208,29 @@ file touched.
 For the full type grammar a shape's fields and a variable's `type:` can use,
 see the [Variables reference](/reference/variables).
 
+## Name one part in a sentence
+
+A placeholder can also read one field of a shaped variable, with a dotted
+path, rather than the whole thing:
+
+```yaml agent.yaml
+variables:
+  next_appointment:
+    type: Appointment | None
+```
+
+```md
+Your next appointment is a {{next_appointment.appointment_type}} visit, if one is booked.
+```
+
+Before a booking exists, that field renders the same empty words the whole
+variable would: `none recorded yet.` Never `None`, never a hole, never an
+error, so the sentence still reads whole.
+
+The full rules, what a path can and cannot reach, and the refusals for a
+wrong one, are in the [Variables
+reference](/reference/variables#naming-one-part-of-a-value).
+
 ## Secrets are not variables
 
 `{{...}}` renders variables only. Naming a secret in a template is a compile

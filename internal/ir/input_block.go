@@ -48,8 +48,9 @@ func InputBlock(inputs []InputField) string {
 	b.WriteString(InputBlockNote)
 	b.WriteString("\n")
 	for i, input := range inputs {
-		// A flat placeholder, never a dotted path, for the reason the state
-		// block gives: the emitted substitution regex tokenises flat identifiers.
+		// A placeholder naming the whole value, for the reason the state block
+		// gives: the block is the whole-record view, and a sentence that wants
+		// one part names it with a path of its own.
 		fmt.Fprintf(&b, "%d. %s: {{%s}}\n", i+1, stateBlockLabel(input.Name), input.Name)
 	}
 	return strings.TrimRight(b.String(), "\n")
@@ -248,29 +249,54 @@ func checkToolInputReads(pkg *packagespec.Package, agent *Agent, tool string, ra
 	var allowed []string
 	for _, text := range texts {
 		for _, ref := range TemplateRefs(text) {
-			if _, declared := agent.Variables[ref]; declared || len(inputSites(agent, ref)) == 0 {
+			// The root, because a value is handed whole: {{about.scheduled_date}}
+			// reads the expected value about, and the path into it is checked by
+			// checkTemplateSite once this has allowed the root.
+			name := PathRoot(ref)
+			if _, declared := agent.Variables[name]; declared || len(inputSites(agent, name)) == 0 {
 				continue
 			}
-			for _, name := range sortedKeys(pkg.Agent.Agents) {
-				if !slices.Contains(pkg.Agent.Agents[name].Tools, tool) {
+			for _, owner := range sortedKeys(pkg.Agent.Agents) {
+				if !slices.Contains(pkg.Agent.Agents[owner].Tools, tool) {
 					continue
 				}
-				if err := inputReadable(agent.Agents[name].Inputs, ref, fmt.Sprintf("agent %q", name)); err != nil {
+				if err := inputReadable(agent.Agents[owner].Inputs, name, fmt.Sprintf("agent %q", owner)); err != nil {
 					return nil, fmt.Errorf("%s: tool %q injects {{%s}}, %w", pkg.Location(file, "{{"+ref), tool, ref, err)
 				}
 			}
-			for _, name := range sortedKeys(pkg.Tasks) {
-				if !slices.Contains(pkg.Tasks[name].Tools, tool) {
+			for _, owner := range sortedKeys(pkg.Tasks) {
+				if !slices.Contains(pkg.Tasks[owner].Tools, tool) {
 					continue
 				}
-				if err := inputReadable(agent.Tasks[name].Inputs, ref, fmt.Sprintf("task %q", name)); err != nil {
+				if err := inputReadable(agent.Tasks[owner].Inputs, name, fmt.Sprintf("task %q", owner)); err != nil {
 					return nil, fmt.Errorf("%s: tool %q injects {{%s}}, %w", pkg.Location(file, "{{"+ref), tool, ref, err)
 				}
 			}
-			allowed = append(allowed, ref)
+			allowed = append(allowed, name)
 		}
 	}
 	return allowed, nil
+}
+
+// inputType is the declared type of an expected value, wherever it is declared:
+// one name has one type across the package, so the first declaration found is
+// the type. Nil for a name no site expects.
+func inputType(agent *Agent, name string) *TypeRef {
+	for _, def := range agent.Agents {
+		for _, field := range def.Inputs {
+			if field.Name == name {
+				return field.Type
+			}
+		}
+	}
+	for _, task := range agent.Tasks {
+		for _, field := range task.Inputs {
+			if field.Name == name {
+				return field.Type
+			}
+		}
+	}
+	return nil
 }
 
 func inputReadable(inputs []InputField, name, site string) error {

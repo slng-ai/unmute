@@ -71,6 +71,9 @@ agents:
           - to_complaints
         assign:
           - appointments+: result.appointment
+          # One part of the structured result, so a later step or agent can read
+          # the day back without this call's message history.
+          - last_booking_day: result.appointment.scheduled_date
         result:
           # Absent when the caller decided against a change, which is a real
           # outcome and not a failure: the append adds nothing that turn rather
@@ -288,6 +291,13 @@ variables:
       What the caller was unhappy about, one entry per thing, each with what was
       offered about it. Appended by the complaint step for the same reason the
       appointments are.
+
+  last_booking_day:
+    type: Date | None
+    description: >-
+      The day of the caller's most recently booked appointment, assigned from
+      the booking step's own result so a later step or agent can read it back
+      without sharing this call's message history.
 
   customer_phone:
     type: Phone

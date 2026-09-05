@@ -46,7 +46,8 @@ You join with no conversation in front of you. The request at the end of this
 prompt holds what the caller is unhappy about, in their own words, and the
 booking it concerns when they named one. Open on that problem. The conversation
 info above it holds who is calling and what this call has already booked,
-moved, or cancelled.
+moved, or cancelled. This call's most recent booking day, if any, was
+{{last_booking_day}}.
 
 ## What you never do
 

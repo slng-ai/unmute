@@ -294,6 +294,68 @@ as a webhook path. The five sites render at different times:
 | a tool's `inject:` value | on every tool call | any declared variable |
 | a webhook tool's `path` | on every tool call | any declared variable, URL encoded |
 
+### Naming one part of a value
+
+A `{{name}}` placeholder can also name one field inside a variable or an
+expected value, with a dotted path: `{{customer.status}}`. The root, the name
+before the first dot, follows every rule a whole value already follows at
+that site: it has to be a declared variable or an expected value handed to
+that prompt, a value still awaiting confirmation renders only in its
+confirming step's prompt, the greeting may only name something that already
+has a value, and a secret never renders.
+
+Each name after the first dot is a field the shape of the value before it
+declares, so a path can go as deep as the shapes go.
+
+```yaml agent.yaml
+shapes:
+  - name: Customer
+    fields:
+      - phone_number: Phone
+      - name: status
+        type: Literal["new", "returning", "vip"]
+
+variables:
+  customer:
+    type: Customer | None
+```
+
+`customer` gets its value from a step's `assign:`, the same as any variable.
+A prompt can then read one field of it:
+
+```md
+The caller is a {{customer.status}} customer, if the lookup has run.
+```
+
+Written to read whole before the lookup has run: a part renders the same
+empty words the whole value would when the value, or a link on the way, is
+absent, `none recorded yet.` for a variable and `not given.` for an expected
+value, never `None`, never a hole, never an error. A field that is itself a
+shape or a list renders as compact JSON; any other field renders as plain
+text.
+
+The compiler checks the path before generating anything, naming the file and
+the line. These are the refusals:
+
+```text wrap
+references {{last_appointment.kind}}: shape "Appointment" declares no field "kind". It declares scheduled_date, scheduled_time, appointment_type
+
+references {{appointments.scheduled_date}}: appointments is list[Appointment], and a path cannot name a field inside a list: nothing says which entry it means. Record the entry you need into its own variable with assign: on the step that records it, and name that variable here
+
+references {{note.first}}: note is a plain string with no fields to name; write {{note}}
+
+references {{caller_phone.digits}}: caller_phone is Phone, which has no fields to name; write {{caller_phone}}
+```
+
+A placeholder carries no logic: no conditions, no filters, no function calls.
+Write the value into a sentence and say what to do with it in the
+instructions. A structured part already renders as JSON, so there is nothing
+left for the placeholder to compute.
+
+This is the same grammar `assign:` and `requires:` already use for a path
+into a result or a shape: see [Picking one part of a structured
+result](#picking-one-part-of-a-structured-result).
+
 None of the five may name or render a value still awaiting the caller's
 agreement: see [`confirm:`](#confirm-marks-a-value-the-caller-has-to-agree-to)
 above for what each site does instead.
@@ -464,6 +526,9 @@ value may be absent for a visit where the task left it out. Give the variable
 the same option, `Date | None`, so an absent pick is a legal value, or use an
 appending assign, `name+:`, which already skips an absent entry instead of
 writing one into the list.
+
+The same path form works in a prompt placeholder too: see [Naming one part of
+a value](#naming-one-part-of-a-value).
 
 ## Requiring a field inside a shape
 

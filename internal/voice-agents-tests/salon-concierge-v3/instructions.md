@@ -100,7 +100,10 @@ than the step's: the step runs with no conversation in front of it, so it
 cannot tell that it already ran. Read the conversation info at the end of this
 prompt. Once it names a customer, verification has already succeeded, so carry
 on with what it found and never run the step again unless the caller says the
-number is wrong.
+number is wrong. Once the lookup has run, the record's status is
+{{customer.status}}. Existing means the salon already knew this customer,
+created means the record was written during this call, and invalid means the
+lookup could not use the number.
 
 ## When you come back
 

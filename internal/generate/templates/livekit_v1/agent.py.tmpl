@@ -640,14 +640,15 @@ def _slng_template_variables(state, names) -> dict:
     """
     values = {}
     for name in names:
-        value = getattr(state, name, None) if state is not None else None
 {{- if .TypedState}}
         # The bound is measured on the JSON rendering, not on the repr of the
         # object: they are different lengths, and the one the router receives is
         # the one that has to fit. _state_text carries its own bound and its own
-        # warning, so a declared value is already shortened by here.
-        text = _state_text(name, value)
+        # warning, so a declared value is already shortened by here. A path
+        # arrives as one flat name, and _state_lookup walks it.
+        text = _state_text(*_state_lookup(state, name))
 {{- else}}
+        value = getattr(state, name, None) if state is not None else None
         text = "" if value is None else str(value)
 {{- end}}
         if len(text) > _SLNG_VARIABLE_LIMIT:
@@ -690,13 +691,14 @@ def _render(text: str, userdata, *, quote_values: bool = False) -> str:
         return text
 
     def _one(match: re.Match[str]) -> str:
-        value = getattr(userdata, match.group(1), None)
 {{- if .TypedState}}
-        # Through _state_text, so a declared value renders as compact JSON and
-        # an empty one as words. Anything not declared structured comes back
-        # exactly as str() gave it.
-        value = _state_text(match.group(1), value)
+        # Through _state_lookup, which walks a path emitted as one flat name, and
+        # _state_text, so a declared value renders as compact JSON and an empty
+        # one as words. Anything not declared structured comes back exactly as
+        # str() gave it.
+        value = _state_text(*_state_lookup(userdata, match.group(1)))
 {{- else}}
+        value = getattr(userdata, match.group(1), None)
         value = "" if value is None else str(value)
 {{- end}}
         return quote(value, safe="") if quote_values else value

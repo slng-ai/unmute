@@ -192,9 +192,9 @@ func TestStateBlockIsEmptyForAPackageWithNoShapes(t *testing.T) {
 // TestStateBlockNamesNoDottedPath holds decision 9: a placeholder in the block
 // names a whole declared value.
 //
-// The emitted substitution regex tokenises flat identifiers only, so a dotted
-// name is not substituted and survives into the prompt as literal text. That is
-// silently wrong today rather than refused, so the block must never write one.
+// The block is the record's whole-value view. A path into a value is the
+// author's tool for one sentence, and it is stored in its flat emitted form, so
+// a dot in a block placeholder would be a dot no render path substitutes.
 func TestStateBlockNamesNoDottedPath(t *testing.T) {
 	_, agent := typedStateAgent(t)
 	for name := range agent.Agents {

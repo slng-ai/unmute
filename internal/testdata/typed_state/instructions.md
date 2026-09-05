@@ -19,3 +19,6 @@ Everything you say is rendered as audio.
 
 Read the conversation info below rather than re-reading the call. It is the
 record of what this call has already established.
+
+The service most recently booked on this call, if any, is
+{{last_appointment.appointment_type}}.

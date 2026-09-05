@@ -109,6 +109,15 @@ func buildShapes(pkg *packagespec.Package) (map[string]Shape, error) {
 		}
 		seen := make(map[string]bool, len(shape.Fields))
 		for _, field := range shape.Fields {
+			// The same grammar a variable name has, because a field is named in
+			// a prompt as {{value.field}} and emitted as value__field: a field
+			// name with two underscores in a row would make that flat form read
+			// as a deeper path.
+			if !namePattern.MatchString(field.Name) {
+				return nil, fmt.Errorf("%s: shape %q field %q is not a name this scope takes. A field name is lower "+
+					"case letters and digits with single underscores between words, starting with a letter, "+
+					"like scheduled_date", where, shape.Name, field.Name)
+			}
 			if seen[field.Name] {
 				return nil, fmt.Errorf("%s: shape %q declares field %q twice. One field, one name: the second "+
 					"would silently replace the first in the generated class", where, shape.Name, field.Name)

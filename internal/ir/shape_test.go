@@ -336,6 +336,21 @@ variables:
 			phrases: []string{`field "scheduled_date" twice`, "silently replace"},
 		},
 		{
+			// Two underscores in a row would make the flat emitted form of a
+			// path, value__field, read as a deeper path.
+			name: "a field named outside the name grammar",
+			blocks: `shapes:
+  - name: Appointment
+    fields:
+      - scheduled__date: Date
+variables:
+  appointments:
+    type: list[Appointment]
+`,
+			at:      "- name: Appointment",
+			phrases: []string{`field "scheduled__date" is not a name this scope takes`, "like scheduled_date"},
+		},
+		{
 			name: "a shape declared twice",
 			blocks: `shapes:
   - name: Appointment
@@ -488,7 +503,7 @@ func TestBuildResolvesTheDeclaredShapes(t *testing.T) {
 		t.Errorf("appointments Type = %q, want the primitive a prompt renders", got)
 	}
 	// And the order the block will number them in is the authored order.
-	want := []string{"caller_reason", "appointments", "caller_phone"}
+	want := []string{"caller_reason", "appointments", "caller_phone", "last_appointment"}
 	if len(agent.VariableOrder) != len(want) {
 		t.Fatalf("VariableOrder = %v, want %v", agent.VariableOrder, want)
 	}
