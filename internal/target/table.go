@@ -75,10 +75,8 @@ const (
 	FieldTaskGroupReturn       Field = "task_groups.then.return"
 	FieldContextIsolated       Field = "task_groups.context_scope.isolated"
 	FieldTransferAnnounce      Field = "controls.agent_transfer.announce"
-	FieldTransferRequires      Field = "controls.agent_transfer.requires"
-	FieldDelegateRequires      Field = "controls.delegate.requires"
 	FieldContextNoToolCalls    Field = "context.include_tool_calls.false"
-	FieldContextVariableSubset Field = "context.variables.list"
+	FieldInput                 Field = "expect"
 	FieldTransferBriefing      Field = "controls.human_transfer.warm.briefing"
 	FieldGreetingUserFirst     Field = "conversation.greeting.user"
 	FieldGreetingModelWritten  Field = "conversation.greeting.model_written"
@@ -109,7 +107,6 @@ const (
 	FieldWarmInstances         Field = "warm_instances"
 	FieldTracingLangfuse       Field = "tracing.provider.langfuse"
 	FieldTracingCoval          Field = "tracing.provider.coval"
-	FieldVariableConversation  Field = "variables.source.conversation"
 	FieldPrefetch              Field = "prefetch"
 	FieldVariableConfirm       Field = "variables.confirm"
 	FieldDelegateAnnounce      Field = "controls.delegate.announce"
@@ -117,6 +114,8 @@ const (
 	FieldWebhookPath           Field = "tools.webhook.path"
 	FieldToolDependencies      Field = "tools.local.dependencies"
 	FieldTemplates             Field = "templates.session_start"
+	FieldTypedState            Field = "variables.type.shape"
+	FieldShapedText            Field = "variables.type.shaped"
 )
 
 type Capability struct {
@@ -349,11 +348,6 @@ func Default() Table {
 			FieldTaskGroupReturn:  field(deny(Slng, slngNoTasks("a task group return step"))),
 			FieldContextIsolated:  field(deny(Slng, slngNoTasks("an isolated task context"))),
 			FieldTransferAnnounce: field(deny(Slng, slngNoHandoff("a transfer announcement"))),
-			FieldTransferRequires: field(deny(Slng, slngNoHandoff("a transfer requirement"))),
-			// A step requirement is refused for the task reason, not the handoff
-			// one: the slng target has no separate step to hold back, so there is
-			// nothing for the guard to guard.
-			FieldDelegateRequires: field(deny(Slng, slngNoTasks("a step requirement"))),
 			// A step announcement is refused for the task reason too: with one
 			// agent and no steps there is no entry to speak over.
 			FieldDelegateAnnounce: field(deny(Slng, slngNoTasks("a step announcement"))),
@@ -372,13 +366,22 @@ func Default() Table {
 			// Confirmation holds a value back from a gate, and the gate is the
 			// prerequisite guard on a step. No steps, no guard, nothing to hold.
 			FieldVariableConfirm: field(deny(Slng, slngNoTasks("a value awaiting confirmation"))),
+			// Declared state is a generated Pydantic class in a module the two
+			// code drivers write. The slng target writes a spec and emits no
+			// module, so there is nowhere for the class, the validator or the
+			// composed state block to be.
+			FieldTypedState: field(deny(Slng, slngNoModule("a value with a declared shape"))),
+			FieldShapedText: field(deny(Slng, slngNoModule("a value whose text has a validated shape"))),
+			// An expected value is validated where it enters and written into the
+			// receiving prompt for one visit, and both happen inside the module
+			// the two code drivers write. This target writes none, so there is
+			// nothing to hand a value to.
+			FieldInput: field(deny(Slng, "slng target pushes a spec and emits no module of its own, so an expect: list "+
+				"has nowhere to be handed in, checked or written into a prompt: remove the expect: lists, or compile to "+
+				"livekit or pipecat, which validate each value where it enters and hand it to the receiving prompt")),
 			FieldContextNoToolCalls: field(
 				deny(Pipecat, "the Pipecat driver does not shape transfer context (include_tool_calls) yet"),
 				deny(Slng, slngNoHandoff("include_tool_calls: false")),
-			),
-			FieldContextVariableSubset: field(
-				deny(Pipecat, "the Pipecat driver does not shape transfer context (variables subset) yet"),
-				deny(Slng, slngNoHandoff("a variables subset")),
 			),
 			// SCHEMA N25: `briefing` is free text, so there is no per-value row
 			// to resolve. It rides the warm_transfer control row, which already
@@ -614,14 +617,11 @@ func Default() Table {
 				deny(Slng, "slng target deploys a hosted agent and exposes no instance pool of yours to keep warm: drop warm_instances, or compile to pipecat which writes the number into pcc-deploy.toml"),
 			),
 			// Variables and secrets (variable_secrets_specs.md V5). The code
-			// drivers own the session state and the request, so they can capture
-			// a value mid-call and merge hidden parameters; a managed target can
-			// only do what its own API exposes, and the Deepgram driver is
-			// unwritten. Each row lifts when its provider mechanism is
-			// doc-verified (the verify table in that spec).
-			FieldVariableConversation: field(
-				deny(Slng, "slng target declares variables and their defaults but has no slot for one captured during the call: supply the value when the call is dispatched, or compile to livekit or pipecat which capture it mid-call"),
-			),
+			// drivers own the session state and the request, so they can merge
+			// hidden parameters into it; a managed target can only do what its
+			// own API exposes, and the Deepgram driver is unwritten. Each row
+			// lifts when its provider mechanism is doc-verified (the verify
+			// table in that spec).
 			FieldToolInject: field(allow(Slng)),
 			// Same reason as FieldToolAuth: the path was written into a tool
 			// body, or into the attachment's config override when it carried a
@@ -743,6 +743,18 @@ func slngNoKnowledge(what string) string {
 		" has nowhere to be read or searched: drop the knowledge: tool and put the " +
 		"facts in the agent's instructions, or compile to livekit or pipecat which " +
 		"emit the search module and carry the documents in the image"
+}
+
+// slngNoModule is why the slng target refuses a declared shape.
+//
+// Not the tasks reason and not the knowledge reason, though it rhymes with
+// both: what is missing here is the emitted Python module. A shape is a
+// generated class with a validator, and the validation has to run where the
+// value enters the state, which is inside a module this target never writes.
+func slngNoModule(what string) string {
+	return "slng target pushes a spec and emits no module of its own, so " + what +
+		" has nowhere to be declared or checked: declare the value as one of the primitive types, " +
+		"or compile to livekit or pipecat, which generate the class and validate the value where it enters"
 }
 
 func slngNoHandoff(what string) string {

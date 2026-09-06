@@ -4,8 +4,6 @@ name: salon-concierge-single-prompt
 
 entry_agent: concierge
 
-timezone: Europe/Madrid
-
 agents:
   concierge:
     instructions: instructions.md

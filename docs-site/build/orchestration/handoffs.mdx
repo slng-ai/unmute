@@ -64,7 +64,6 @@ handoffs:
     announce: "I’m connecting you with our appointment manager now."
     context:
       history: full
-      variables: all
 
   to_booking_desk:
     to: booking_desk
@@ -72,7 +71,6 @@ handoffs:
     announce: "I’m connecting you back to the booking desk for your new appointment."
     context:
       history: full
-      variables: all
 ```
 
 `when` is the condition the model reads. Write it as the situation, not as an
@@ -80,31 +78,28 @@ instruction to call a tool.
 
 `announce` is optional. Write the exact short sentence the active agent should
 speak. It is spoken once and finishes before the new agent takes over; the
-model does not paraphrase it. Leave it out for a silent handoff. A failed
-`requires` guard is checked first and never makes a false announcement.
+model does not paraphrase it. Leave it out for a silent handoff.
 
-`requires` is not handoff-only. It is legal on a task too, and that is
-usually the better place for it: guard the step that needs the value rather than
-the route to it. See [Guarding a step](/build/orchestration/tasks#guarding-a-step).
-Never guard the way to a person, though. A caller who asks for a manager should
+Order still matters on a handoff the same way it matters on a task: say the
+dependency in the agent's own flow and in the handoff's `when:`, not with a
+gate. See [Order steps with the
+prompt](/best-practices/step-scoping#order-steps-with-the-prompt). Never
+hold up the way to a person, though. A caller who asks for a manager should
 not be interviewed before anyone will route them.
 
 Prefer a silent handoff when agents are internal roles behind one service. The
 caller can keep talking to the same salon, clinic, or support desk without
 hearing implementation details such as “I’m connecting you to another agent.”
 
-`context` decides what the new agent knows. It is the whole of what travels:
+`context` decides how much of the conversation the new agent sees:
 
 | Field | What it does |
 |---|---|
 | `history: full` | the new agent sees the conversation so far |
-| `variables: all` | the values collected so far travel with the caller |
 
-Without them, the caller gets asked for their phone number twice.
-
-`variables:` also accepts a list of names instead of `all`, to carry over only
-those values. That list form works on LiveKit only: Pipecat and the SLNG
-target only support `all`, and refuse a named subset.
+Every declared value travels with the caller regardless, on every target,
+with nothing to write: see
+[Variables](/reference/variables#a-handoff-keeps-every-declared-value).
 
 When a task lists the handoff control, invoking it ends that task and any
 remaining task-group steps before the receiving agent takes over. It never
@@ -117,6 +112,50 @@ the next caller turn. See [The opening turn cannot hand off
 again](#the-opening-turn-cannot-hand-off-again) below for why, and why
 reciprocal handoffs cannot bounce a caller on older carried intent before they
 say anything new.
+
+## Hand the receiving agent a brief
+
+A handoff on `history: reset` gives the new agent nothing but its own prompt,
+so it would open at the start of a conversation that is already in the middle.
+`expect:` on the handoff is the brief: typed fields the agent handing over fills
+from what it heard, and the receiving agent reads from the end of its prompt.
+
+```yaml agent.yaml
+handoffs:
+  to_complaints:
+    to: complaint_specialist
+    when: The verified caller has a complaint or service problem.
+    expect:
+      - problem: str
+      - name: about
+        type: Appointment | None
+        description: The booking the complaint concerns, if the caller named one.
+    context:
+      history: reset
+```
+
+The fields take the same two forms and the same types as a task's `expect:`;
+see [Hand the step what the caller asked for](/build/orchestration/tasks#hand-the-step-what-the-caller-asked-for).
+`| None` marks a field the agent may leave out. A required field the agent has
+no value for stops the handoff, so the agent that heard the caller asks before
+handing over.
+
+The receiving agent's prompt ends with the brief, after the conversation state
+block:
+
+```text
+Request:
+What you were handed for this visit. It does not change while you run.
+1. Problem: the colour came out wrong
+2. About: {"scheduled_date":"2026-03-19","scheduled_time":"09:30","appointment_type":"haircolor","action":"create","booking_id":"bk_12"}
+```
+
+The brief stays with the receiving agent until the next handoff, so it is still
+in the prompt after that agent has run its own steps. When two handoffs target
+the same agent, its block lists what both expect, and a handoff that carries
+no value for one of them leaves it reading `not given.`. A value outside its
+type is refused before anyone is handed over, and the message reaches the agent
+that supplied it.
 
 ## A handoff does not come back
 

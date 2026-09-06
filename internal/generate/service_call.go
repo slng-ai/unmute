@@ -178,6 +178,15 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 		}
 		fields, overflow := splitParams(params, overflowArg)
 		if router {
+			// The live state and the names the prompts on this profile
+			// reference, for a target whose service reads them per request. Two
+			// flat kwargs rather than a settings entry, because they are the
+			// service object's own state and not part of any request: the
+			// service is what turns them into template_variables on each call.
+			if site.VariablesPerRequest && len(site.Names) > 0 {
+				flat(pyKV{Key: "slng_state", Value: slngStateExpr(site.StateExpr)})
+				flat(pyKV{Key: "slng_variable_names", Value: "(" + pyTuple(site.Names) + ")"})
+			}
 			// Pipecat merges Settings.extra into the request params, so the two
 			// dicts ride there; LiveKit takes them as constructor kwargs. Either
 			// way they reach the same place in the request.

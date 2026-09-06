@@ -1,0 +1,16 @@
+# One instance per code target. The same source compiles to both, which is what
+# the typed-state gates compare.
+targets:
+  livekit:
+    provider: livekit
+    version: "1.6.10"
+    sdk_language: python
+    models:
+      # LiveKit runs its own turn model rather than Silero.
+      vad:
+        provider: livekit
+        model: turn-detector-mini
+
+  pipecat:
+    provider: pipecat
+    version: "1.8.0"

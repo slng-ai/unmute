@@ -5,16 +5,15 @@ package generate
 import "testing"
 
 // L4 smoke for the variables surface (variable_secrets_specs.md T12): the
-// emitted render helper, the refusal gate, and the generated capture tool are
-// exercised against the real SDK in a real venv. Opt-in (`make smoke`).
+// emitted render helper and the refusal gate are exercised against the real SDK
+// in a real venv. Opt-in (`make smoke`).
 // addReminderVariables (smoke_fixture_test.go) adds the sources this suite
 // drives; the salon ships one, so none of the three would be emitted without it.
 
-// pipecatVariablesSmokeScript imports the emitted bot, then drives the three
-// pieces directly: rendering with and without a value, the refusal that keeps a
-// half-formed request off the wire, and the capture tool writing State.
-const pipecatVariablesSmokeScript = `"""Smoke check: templates, refusal, and capture on the emitted Pipecat bot."""
-import asyncio
+// pipecatVariablesSmokeScript imports the emitted bot, then drives the two
+// pieces directly: rendering with and without a value, and the refusal that
+// keeps a half-formed request off the wire.
+const pipecatVariablesSmokeScript = `"""Smoke check: templates and refusal on the emitted Pipecat bot."""
 import json
 import os
 
@@ -28,8 +27,6 @@ os.environ["UNMUTE_CALL_START"] = json.dumps(
 
 import bot  # noqa: E402
 
-# A conversation variable is not a call-context field: it must never appear in
-# the startup check, or every call would fail before the greeting (B3).
 state = bot.build_state()
 assert state.name == "Ada", state.name
 # Not hydrated: this pipecat target has no telephony plane. The field is still on
@@ -56,21 +53,6 @@ assert "reschedule_to" in refusal and "reschedule_appointment" in refusal, refus
 state.reschedule_to = "Friday at 4"
 assert bot._refusal("reschedule_appointment", state, [("reschedule_to", "the new slot")]) == ""
 
-# The generated capture tool writes the state and reports what it saved.
-agent = bot.ConciergeAgent(state=state, context=None, call_context=None, slng_session_id="smoke")
-saved = {}
-
-
-class _Params:
-    async def result_callback(self, value, **kwargs):
-        saved.update(value)
-
-
-state.reschedule_to = None
-asyncio.run(agent.update_variables(_Params(), reschedule_to="Saturday at noon"))
-assert state.reschedule_to == "Saturday at noon", state.reschedule_to
-assert saved == {"saved": ["reschedule_to"]}, saved
-
 # A second dispatch payload lands on a fresh state.
 os.environ["UNMUTE_CALL_START"] = json.dumps({"name": "Grace", "customer_phone": "cus_7", "appointment_time": "Monday"})
 dispatched = bot.build_state()
@@ -79,13 +61,13 @@ assert dispatched.name == "Grace", dispatched.name
 print("pipecat variables ok")
 `
 
-func TestSmokePipecatVariablesRenderRefuseAndCapture(t *testing.T) {
+func TestSmokePipecatVariablesRenderAndRefuse(t *testing.T) {
 	runPipecatSmokeScript(t, "salon-concierge", nil, addReminderVariables, pipecatVariablesSmokeScript)
 }
 
 // livekitVariablesSmokeScript does the same against the emitted LiveKit agent:
 // the module imports on the real SDK, and the helpers behave.
-const livekitVariablesSmokeScript = `"""Smoke check: templates, refusal, and capture on the emitted LiveKit agent."""
+const livekitVariablesSmokeScript = `"""Smoke check: templates and refusal on the emitted LiveKit agent."""
 import json
 import os
 
@@ -117,12 +99,9 @@ fresh = generated.Userdata()
 generated._hydrate_call_start(fresh, values)
 assert fresh.name == "Grace", fresh.name
 
-# The capture tool is a real function tool on the agent class.
-assert hasattr(generated.Concierge, "update_variables"), "update_variables missing"
-
 print("livekit variables ok")
 `
 
-func TestSmokeLiveKitVariablesRenderRefuseAndCapture(t *testing.T) {
+func TestSmokeLiveKitVariablesRenderAndRefuse(t *testing.T) {
 	runLiveKitSmokeScript(t, "salon-concierge", nil, addReminderVariables, livekitVariablesSmokeScript)
 }

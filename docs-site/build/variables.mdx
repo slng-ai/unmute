@@ -1,6 +1,6 @@
 ---
 title: "Variables"
-description: "Personalize a call, let the model save what it hears, and pass values into a tool without showing them to the model."
+description: "Personalize a call, group values into a shape, and pass values into a tool without showing them to the model."
 ---
 
 A variable is a named value that lives for one call. Use it to greet someone by
@@ -31,8 +31,8 @@ variables:
     description: CRM id of the caller. The booking tool receives it directly; never say it out loud.
   requested_service:
     type: string
-    source: conversation
-    description: The service the caller wants, for example a haircut or a colour. Save it as soon as they say it.
+    default: ""
+    description: The service the caller wants, for example a haircut or a colour.
 ```
 
 `type` is one of `string`, `number`, `integer`, `boolean`. `source` says where
@@ -41,8 +41,18 @@ the value comes from, and it changes what you can do with the variable.
 | Source | Who sets it | When |
 |---|---|---|
 | `call_start` | whatever starts the call | before the first word |
-| `conversation` | the model, during the call | whenever the caller says it |
-| system sources such as `from_number`, `direction`, `call_id` | the phone adapter | on a LiveKit phone call; no Pipecat route supplies one |
+| left out | nothing yet; a task's own `result:` and `assign:` can fill it later | once a step records it |
+| system sources such as `from_number`, `direction`, `call_id` | the phone adapter | on a phone call, when the route grants that fact. LiveKit's two routes grant the most; Pipecat's two Twilio routes grant a smaller set, each in one direction only for a phone number |
+
+A system source works the same way whether you put it straight on a variable's
+own `source:` or read it through a [`prefetch:`](/build/prefetch) entry: both
+read the same route table, so the fact hydrates on whichever route grants it.
+See the [Variables reference](/reference/variables#sources) for the full grid.
+
+`requested_service` above declares no `source:`, so it starts at its default
+and stays there until a task records it. A task hears the caller, and its own
+`result:` and `assign:` write the value; see
+[Tasks](/build/orchestration/tasks) for how a step does that.
 
 ## Use one in the greeting
 
@@ -53,9 +63,11 @@ conversation:
     text: "Hi {{customer_name}}, thanks for calling Sage and Stone Salon. What can I do for you?"
 ```
 
-`{{name}}` renders the variable's value. The greeting and the prompt render
-once, at the start of the call, so they can only name a variable that already
-has a value: a `call_start` variable, or one with a `default`.
+`{{name}}` renders the variable's value. The greeting renders once, at the
+start of the call, so it can only name a variable that already has a value: a
+`call_start` variable, or one with a `default`. A prompt elsewhere in the
+package is less restricted: see the [Variables
+reference](/reference/variables#how-a-variable-reaches-a-prompt).
 
 ## Seed a value locally
 
@@ -82,19 +94,10 @@ and a variable that declares no `source:` at all. It refuses anything else
 instead of accepting it and dropping it:
 
 ```text wrap
-unmute: dev my-agent: --var requested_service=haircut: "requested_service" has source conversation, so the model saves it mid-call through update_variables, not you
+unmute: dev my-agent: --var from_number=+15551234567: "from_number" has source from_number, so the runtime supplies it, not you
 ```
 
 An undeclared name is refused the same way.
-
-## Let the model save one
-
-Declaring a variable with `source: conversation` creates a tool called
-`update_variables` in the generated project. You do not write it. The model
-calls it when the caller says something worth keeping.
-
-Say "I'd like a haircut" and `requested_service` is stored for the rest of the
-call.
 
 ## Hand a value to a tool
 
@@ -146,6 +149,93 @@ cannot call book_appointment yet: requested_service not set. Ask the caller firs
 So the model asks. `customer_id` never trips this, because it declares a
 default.
 
+## Group related fields into a shape
+
+Some values are not one thing. A booking has a date, a time and a service.
+Instead of three separate variables, declare a shape once and give a
+variable that shape as its type:
+
+```yaml agent.yaml
+shapes:
+  - name: Appointment
+    description: One thing being booked, moved or cancelled.
+    fields:
+      - scheduled_date: Date
+      - scheduled_time: Time
+      - name: appointment_type
+        type: Literal["haircut", "haircolor", "dry_cut"]
+        description: The service the caller asked for, in the salon's own words.
+
+variables:
+  appointments:
+    type: list[Appointment]
+    description: What this call has booked so far, in the order the caller gave them.
+```
+
+A task fills it the same way it fills any variable, through `assign:`. The
+`+` appends the result to the list instead of replacing it, so a second
+booking in the same call does not erase the first:
+
+```yaml agent.yaml
+      - name: book
+        instructions: tasks/book.md
+        assign:
+          - appointments+: result.appointment
+        result:
+          appointment: Appointment
+          summary: string
+        context:
+          history: reset
+```
+
+## Read the block the compiler adds
+
+Every agent prompt and every task prompt gets one more thing after your own
+text, written by the compiler and never by you:
+
+```text
+Conversation info:
+What this call has established so far. Read it rather than re-reading the
+conversation, and never ask for something already recorded here.
+1. Appointments: [{"scheduled_date":"2026-09-10","scheduled_time":"10:00","appointment_type":"haircut"}]
+```
+
+Before anything is booked, the same line renders as:
+
+```text
+1. Appointments: none recorded yet.
+```
+
+never as `[]` or `null`, so a step can tell "not yet known" from "known to be
+nothing". Add a field to the shape and every prompt shows it, with no prompt
+file touched.
+
+For the full type grammar a shape's fields and a variable's `type:` can use,
+see the [Variables reference](/reference/variables).
+
+## Name one part in a sentence
+
+A placeholder can also read one field of a shaped variable, with a dotted
+path, rather than the whole thing:
+
+```yaml agent.yaml
+variables:
+  next_appointment:
+    type: Appointment | None
+```
+
+```md
+Your next appointment is a {{next_appointment.appointment_type}} visit, if one is booked.
+```
+
+Before a booking exists, that field renders the same empty words the whole
+variable would: `none recorded yet.` Never `None`, never a hole, never an
+error, so the sentence still reads whole.
+
+The full rules, what a path can and cannot reach, and the refusals for a
+wrong one, are in the [Variables
+reference](/reference/variables#naming-one-part-of-a-value).
+
 ## Secrets are not variables
 
 `{{...}}` renders variables only. Naming a secret in a template is a compile
@@ -168,14 +258,13 @@ name and wrong for a token. See [secrets](/reference/secrets).
 unmute dev my-agent --var customer_id=cus_2002
 ```
 
-Seeding `customer_id` is the same thing a production call does when it already
-knows who is calling. Put `requires: customer_id` on a task and the step
-goes straight through with a value already set, while without the flag the agent
-has to ask first. That difference is the variable doing its job.
+Seeding `customer_id` is the same thing a production call does when it
+already knows who is calling: the greeting and every prompt read the real
+value from the first word, instead of the default.
 
-That difference is also the whole idea behind [pre-fetch](/build/prefetch): fill
-a value before the greeting and the step that existed to collect it is skipped,
-with no edit to the step itself.
+That is also the whole idea behind [pre-fetch](/build/prefetch): fill a
+value before the greeting, from a lookup instead of a flag, so a step that
+existed only to collect it has nothing left to ask for.
 
 ## Where to go next
 

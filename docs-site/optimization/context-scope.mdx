@@ -27,7 +27,7 @@ needs the part of the conversation that sentence means.
 
 | The step | Give it | Because |
 |---|---|---|
-| reads a value back, takes a payment, writes down a decision already made | `reset` | its instructions and its declared values are the whole story |
+| reads a value back, takes a payment, or is handed what the caller asked for through `expect:` | `reset` | its instructions, its declared values and the values it expects are the whole story |
 | has to know what the caller asked for | `messages` | both sides of the conversation, without the tool records nobody re-reads |
 | only the recent turns matter, on a call that runs long | `last_n` with `max_messages` | the newest entries, and never a tool result whose call was cut |
 | has to interpret anything, including its own earlier work | `full` | the running transcript, tool records included |
@@ -43,75 +43,112 @@ This is the part that catches people. Once a step cannot see the conversation, a
 value its prompt names has to come from somewhere, and "the model will have read
 it earlier" stops being true.
 
-So one step assigns the value and the next step declares it:
+So one step assigns the value, and the next step's own `when:` says so:
 
 ```yaml agent.yaml
+shapes:
+  - name: Customer
+    description: Who the caller is, as the salon's records have them.
+    fields:
+      - customer_name: str
+      - customer_id: Id
+      - phone_number: Phone
+      - name: status
+        type: Literal["existing", "created", "invalid"]
+        description: >-
+          What the lookup found for the confirmed number: existing for a
+          record that was already there, created for one written during this
+          call, and invalid for a number the lookup could not use.
+
+agents:
+  concierge:
+    tasks:
       - name: verify_customer
         when: Confirm who the caller is before any specialist work.
         instructions: tasks/verify-customer.md
         assign:
           - customer_phone: result.customer_phone
-          - customer_status: result.status
+          - customer: result.customer
         result:
-          customer_phone: string
-          status:
-            enum:
-              - existing
-              - created
-              - invalid
+          customer_phone: Phone
+          customer: Customer
           summary: string
         context:
           history: reset
 
       - name: manage_booking
-        when: The caller wants to create, modify, or cancel a booking.
+        when: The caller wants to create, modify, or cancel a booking, once the caller is verified.
         instructions: tasks/booking.md
-        requires:
-          - customer_phone
-          - customer_status
         result:
-          action:
-            enum:
-              - create
-              - modify
-              - cancel
-              - none
+          action: Literal["create", "modify", "cancel", "none"]
           summary: string
         context:
           history: messages
 ```
 
 `assign:` writes one field of a step's own result into a declared variable.
-`requires:` on the next step then does three things at once, and they are worth
-separating:
+`manage_booking`'s own `when:` says it runs only once the caller is verified,
+so the order lives in the same sentence a reader already checks the prompt
+against.
 
-1. It holds the step back until the value exists, and tells the model which step
-   supplies it. The caller never hears the guard.
-2. It makes the value legal to read in that step's prompt. Without the entry,
-   `{{customer_status}}` in `tasks/booking.md` is refused at compile time.
-3. It is the list a reader can check the prompt against.
-
-The refusal names both steps and what to do:
-
-```text wrap
-tasks/booking.md: task "manage_booking" instructions references {{customer_status}}, which only task "verify_customer" assigns. Add customer_status to this task's requires: list, so the step waits for the value and its prompt can read it
-```
+Any task's or agent's prompt may already name any declared variable, whether
+anything has assigned it yet or not, and an unset one renders as nothing
+rather than as a compile error. A value with a declared shape, like `customer`
+here, is already in the block above, so naming it again by hand in
+`tasks/booking.md` would be a second copy of the same thing rather than the
+only way to show it.
 
 <Warning>
-A variable with a `default:` is not waited for. A default is a value the
-variable holds before the first word, so a defaulted variable satisfies the
-guard on an empty string and the step starts on nothing. Give a value that must
-be produced during the call no default, and the guard becomes real.
+A variable with a `default:` never reads as empty. The `Conversation info:`
+block a later step's prompt reads shows the default from the first word, not
+a blank, so a `when:` clause that says "once the value exists" has nothing to
+notice: the model can read the step's own words as already satisfied. Give a
+value that must be produced during the call no default, so the block still
+shows nothing recorded until a step actually writes it.
 </Warning>
+
+## Declared state does not wait for `context.history`
+
+Any task's or agent's prompt may already write `{{name}}` for any declared
+variable. What a declared shape changes is what a step gets without writing
+any `{{...}}` at all.
+
+Give a variable a type that is more than a bare `string`, one built from
+[the type grammar](/reference/variables#the-type-grammar) such as `Phone`, a
+`Literal`, a `list[...]`, or a shape declared under `shapes:`, and the
+compiler appends its current value to every agent prompt and every task
+prompt on its own, after the authored text:
+
+```text
+Conversation info:
+What this call has established so far. Read it rather than re-reading the
+conversation, and never ask for something already recorded here.
+1. Customer: {"customer_name":"Robin","customer_id":"c-4192","phone_number":"+34600111222","status":"existing"}
+```
+
+This does not go through `history:`. `manage_booking` gets `customer` in
+that block even with `history: reset`, and `tasks/booking.md` names it
+nowhere. This is also how `manage_booking`'s own `when:` clause can lean on
+"once the caller is verified": the model reads this same block and can see
+whether `customer` is there yet.
+
+`customer_phone` carries `confirm: verify_customer`, so it renders only in
+`verify_customer`'s own block: a value awaiting the caller's agreement
+appears in no prompt but the confirming step's own.
+
+An empty value renders as the words `none recorded yet.`, never `[]` or
+`null`, so a step can tell "not yet known" from "known to be nothing".
 
 ## Two things a step loses with `reset`
 
 Both are worth knowing before you choose it, because no compiler error catches
-either.
+either. Declared state is not one of them: see above.
 
 **It does not receive the caller's triggering utterance.** It opens without
-knowing what was just asked. For a step that reads a number back that costs
-nothing, which is the test for choosing `reset` at all.
+knowing what was just asked. Give the step `expect:` for what the caller asked
+for, and the agent that heard the caller hands it in: the step then asks
+nothing it was handed. For a step that reads a number back nothing is lost
+either way, which is the test for choosing `reset` with no `expect:` list at all.
 
 **It cannot tell that it already ran.** A prompt saying "if verification already
 succeeded, reuse it" only worked because the step could see the history. Move
@@ -135,34 +172,36 @@ only when you have decided the earlier turns are genuinely finished business.
 
 ## What a package on both code targets cannot use
 
-Two of these values, and one companion field, compile on livekit only. A package
-that has to run on livekit and pipecat has three fewer options.
+One of these values, and one companion field, compile on livekit only. A package
+that has to run on livekit and pipecat has two fewer options.
 
 | Field | livekit | pipecat |
 |---|---|---|
 | `history: full`, `messages`, `last_n`, `reset` | shapes | shapes |
 | `history: summary` | shapes | refused |
 | `include_tool_calls: false` | shapes | refused |
-| a `variables:` list on a handoff, rather than `all` | shapes | refused |
 
 None of them fails quietly. Each is a validation error naming the field, and the
 `summary` one lists the four values pipecat does shape. The practical
-consequence is that a two-target package narrows on the task side, through
-`requires:`, which works on both, and writes `variables: all` on its handoffs.
+consequence is that a two-target package narrows on the task side: reach for
+`reset` or `messages`, and order the steps through their own `when:` clauses,
+which work the same on both targets. A handoff carries every declared value on
+both targets regardless, so there is nothing to narrow there.
 
 ## Two things this is not
 
 **It is not a privacy control.** Shortening a step's history does not unsay what
 the caller said out loud. A phone number read back aloud is in the transcript
-whether a variable holds it or not. `reset` plus a short `requires:` list gives a
+whether a variable holds it or not. `reset` plus a short `expect:` list gives a
 step a smaller request, not a redacted one.
 
 **It is not a reason to seed a value locally.** A variable that gets its value
 from a step declares no `source:`, and a variable with no `source:` can be filled
 from the dispatch payload, so the generated runbook lists it under input
-variables with a `--var` line. That line works. Using it hands the guarded step
-its value before anything produced it, which is the opposite of what the
-`requires:` list is for. Seed the fact a real call carries instead:
+variables with a `--var` line. That line works. Using it hands a step the
+value before anything in the call actually produced it, which defeats the
+point of ordering steps by what has really happened. Seed the fact a real call
+carries instead:
 
 ```sh
 unmute dev ./my-agent --source from_number=<a number in E.164>
@@ -171,6 +210,6 @@ unmute dev ./my-agent --source from_number=<a number in E.164>
 ## Where to look next
 
 [Tasks](/build/orchestration/tasks) is the reference for `context.history` and
-`requires:`, [Variables](/reference/variables) for `assign:`, `confirm:` and
-every `source:`, and [Handoffs](/build/orchestration/handoffs) for what crosses
-an agent change.
+ordering steps with `when:`, [Variables](/reference/variables) for `assign:`,
+`confirm:`, `shapes:` and every `source:`, and
+[Handoffs](/build/orchestration/handoffs) for what crosses an agent change.

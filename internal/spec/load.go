@@ -37,6 +37,7 @@ func Load(dir string) (*Package, error) {
 	if err := pkg.readYAML("agent.yaml", &pkg.Agent); err != nil {
 		return nil, err
 	}
+	pkg.readVariableOrder()
 
 	for _, name := range pkg.Agent.Tools {
 		if filepath.Base(name) != name {
@@ -153,7 +154,6 @@ func (p *Package) flattenTasks() error {
 				Task:     task.Name,
 				When:     task.When,
 				Announce: task.Announce,
-				Requires: task.Requires,
 				Assign:   task.Assign,
 			}
 		}
@@ -162,7 +162,7 @@ func (p *Package) flattenTasks() error {
 		for _, name := range p.Agent.Agents[agent].TaskGroups {
 			group := p.Agent.TaskGroups[name]
 			p.Callables[name] = Callable{
-				Group: name, When: group.When, Announce: group.Announce, Requires: group.Requires,
+				Group: name, When: group.When, Announce: group.Announce,
 			}
 		}
 	}

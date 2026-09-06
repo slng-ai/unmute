@@ -4,30 +4,12 @@
         # its filter follows the context of everything this reply starts: a live call
         # offered one specialist nothing but its delegate for ten turns while the
         # caller asked for another one (B: salon handoffs, 2026-08-20).
-{{end}}{{define "prerequisite_guard"}}        _unmet = _unmet_prerequisites(ctx.userdata, [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
-        if _unmet:
-            # requires guard (machine-checked): the step does not start, and the
-            # refusal goes to the model rather than to the caller.
-            _tries = _prerequisite_refusals.get({{pyq .Method}}, 0) + 1
-            _prerequisite_refusals[{{pyq .Method}}] = _tries
-            _at_limit = _tries >= _PREREQUISITE_LIMIT
-            if _at_limit:
-                logger.info(
-                    "prerequisite guard: step %s refused, unmet %s, retry limit reached; asking the caller",
-                    {{pyq .Method}}, ", ".join(_unmet),
-                )
-            else:
-                logger.info(
-                    "prerequisite guard: step %s refused, unmet %s",
-                    {{pyq .Method}}, ", ".join(_unmet),
-                )
-            return {"refused": _prerequisite_refusal(_unmet, _at_limit)}
-        _prerequisite_refusals[{{pyq .Method}}] = 0
 {{end}}{{- /* delegate_announce covers the entry to a step: two model requests
 pass between the caller finishing and the step's first word, and this puts
-speech in them. Rendered after the guard by every delegate shape, so a refused
-step stays silent — the caller hearing "let me pull up the diary" and then being
-asked for a phone number is worse than hearing nothing. */ -}}
+speech in them. Rendered at the very start of every delegate shape, before
+anything else runs: ordering between steps is the prompt's job (the step's
+`when:` sentence and the owning agent's instructions), not a code gate, so
+there is nothing left to hold this back. */ -}}
 {{define "delegate_announce"}}{{if .Announce}}
         # Not awaited, for the same reason the tool announcement is not: awaiting
         # the handle holds the step until playout finishes, which is the delay
@@ -143,20 +125,6 @@ webhook_tool, so a kind with no arm renders an HTTP POST to an environment name
 nobody registered rather than rendering nothing. buildLiveKitTool refuses an
 unlowerable kind for the same reason. */ -}}
 {{define "method_tool"}}{{if .KnowledgeBase}}{{template "knowledge_tool" .}}{{else if .Local}}{{template "local_tool" .}}{{else if .HostedCode}}{{template "hosted_tool" .}}{{else if .HostedRequest}}{{template "webhook_tool" .}}{{else}}{{template "webhook_tool" .}}{{end}}{{end -}}
-{{- /* capture_tool is the generated update_variables tool: the model saves what
-it learns mid-call into the session userdata (variable_secrets_specs.md V6). */ -}}
-{{define "capture_tool"}}
-    @function_tool
-    async def {{.Name}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}} = None{{end}}) -> str:
-        {{triple .Description}}
-        saved = []
-{{- range .Fields}}
-        if {{.}} is not None:
-            ctx.userdata.{{.}} = {{.}}
-            saved.append({{pyq .}})
-{{- end}}
-        return "Saved: " + ", ".join(saved) if saved else "Nothing new to save."
-{{end -}}
 {{- /* prebuilt_list renders execution: builtin tools as SDK helper instances
 spread into the tools= kwarg. */ -}}
 {{define "prebuilt_list"}}{{range $i, $p := .}}{{if $i}}, {{end}}{{if eq $p.Builtin "end_call"}}*EndCallTool(extra_description={{pyq $p.Description}}{{if $p.Instructions}}, end_instructions={{pyq $p.Instructions}}{{end}}).tools{{end}}{{end}}{{end -}}
@@ -180,13 +148,13 @@ MCP sources, in the order the package lists them. */ -}}
 {{if .Slng.Vertex}}import base64
 {{end}}{{if or .NeedsAsyncio .NeedsMCP .NeedsPrefetchAsync}}import asyncio
 {{end}}{{if or .NeedsInspect .NeedsPrefetchLocal}}import inspect
-{{end}}{{if or .Outbound .Telephony .CallStartVars .NeedsTaskGroups .Slng.Vertex .NeedsPrefetchSeed}}import json
+{{end}}{{if or .Outbound .Telephony .CallStartVars .NeedsTaskGroups .Slng.Vertex .NeedsPrefetchSeed .TypedState}}import json
 {{end}}import logging
 import os
 {{if .Slng.Any}}import uuid
-{{end}}{{if .NeedsRender}}import re
+{{end}}{{if or .NeedsRender (and .TypedState .TypedState.NeedsRe)}}import re
 {{end}}{{if or .HasWarmTransfer .HasColdTransfer}}import time
-{{end}}{{if .HasUserdata}}from dataclasses import dataclass
+{{end}}{{if .HasUserdata}}from dataclasses import {{if .NeedsDataclassField}}dataclass, field{{else}}dataclass{{end}}
 {{end}}{{if .NeedsPrefetchClock}}from datetime import datetime
 {{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
@@ -197,7 +165,7 @@ import os
 {{end}}from dotenv import load_dotenv
 {{if .NeedsOpenAIReasoning}}from openai import types as openai_types
 {{end}}
-{{if .NeedsField}}from pydantic import Field
+{{if .PydanticImports}}from pydantic import {{.PydanticImports}}
 {{end}}{{if or .Outbound .HasColdTransfer .HasWarmTransfer}}from livekit import api
 {{end}}{{if or .HasColdTransfer (and .Telephony (eq .Telephony.Transport "sip") .HasVars)}}from livekit import rtc
 {{end}}from livekit.agents import (
@@ -654,8 +622,17 @@ def _slng_template_variables(state, names) -> dict:
     """
     values = {}
     for name in names:
+{{- if .TypedState}}
+        # The bound is measured on the JSON rendering, not on the repr of the
+        # object: they are different lengths, and the one the router receives is
+        # the one that has to fit. _state_text carries its own bound and its own
+        # warning, so a declared value is already shortened by here. A path
+        # arrives as one flat name, and _state_lookup walks it.
+        text = _state_text(*_state_lookup(state, name))
+{{- else}}
         value = getattr(state, name, None) if state is not None else None
         text = "" if value is None else str(value)
+{{- end}}
         if len(text) > _SLNG_VARIABLE_LIMIT:
             logger.warning(
                 "template variable %s is %d characters; truncating to %d for the router",
@@ -696,8 +673,16 @@ def _render(text: str, userdata, *, quote_values: bool = False) -> str:
         return text
 
     def _one(match: re.Match[str]) -> str:
+{{- if .TypedState}}
+        # Through _state_lookup, which walks a path emitted as one flat name, and
+        # _state_text, so a declared value renders as compact JSON and an empty
+        # one as words. Anything not declared structured comes back exactly as
+        # str() gave it.
+        value = _state_text(*_state_lookup(userdata, match.group(1)))
+{{- else}}
         value = getattr(userdata, match.group(1), None)
         value = "" if value is None else str(value)
+{{- end}}
         return quote(value, safe="") if quote_values else value
 
     return _TEMPLATE.sub(_one, text)
@@ -706,7 +691,7 @@ def _render(text: str, userdata, *, quote_values: bool = False) -> str:
 {{- if .NeedsRefusal}}
 def _refusal(tool: str, userdata, needed: list[tuple[str, str]]) -> str:
     """Refuse a call whose injected variables are still unset (V4): the model is
-    told what to ask for, and no half-formed request is ever sent."""
+    told what to do about each one, and no half-formed request is ever sent."""
     unset = [
         (name, hint)
         for name, hint in needed
@@ -722,19 +707,14 @@ def _refusal(tool: str, userdata, needed: list[tuple[str, str]]) -> str:
         return ""
     names = ", ".join(name for name, _ in unset)
     hints = " ".join(f"{name}: {hint}" for name, hint in unset if hint)
-    return f"cannot call {tool} yet: {names} not set. Ask the caller first. {hints}".strip()
-
-{{end}}
-{{- if .NeedsPrerequisiteGuard}}
-{{.PrerequisiteGuard}}
-# One counter per guarded control per session. Held on the module rather than the
-# agent because a handoff replaces the agent object and a caller who keeps
-# refusing across a handoff has not started over.
-_prerequisite_refusals: dict[str, int] = {}
+    return f"cannot call {tool} yet: {names} not set. {hints}".strip()
 
 {{end}}
 {{- if .NeedsPrefetch}}
 {{.Prefetch}}
+{{end}}
+{{- if .TypedState}}
+{{.TypedState.Source}}
 {{end}}
 {{- if .HasUserdata}}
 # --- shared state ------------------------------------------------------------
@@ -742,7 +722,7 @@ _prerequisite_refusals: dict[str, int] = {}
 @dataclass
 class Userdata:
 {{- range .Vars}}
-    {{.Name}}: {{.PyType}} | None = {{.Default}}{{if .Description}}  # {{.Description}}{{end}}
+    {{.Name}}: {{.Anno}} = {{.Default}}{{if .Description}}  # {{.Description}}{{end}}
 {{- end}}
 {{- if .Slng.Any}}
     # One value per call, set where the call begins. It groups this call's think
@@ -984,7 +964,7 @@ async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
     rather than at construction, for one reason read out of the plugin: it copies
     the per-request extra_kwargs first and then overwrites extra_body and
     extra_headers from its own constructor options (livekit-plugins-openai
-    llm.py:956-962, read at the pinned version). So a constructor value does not
+    llm.py:961-968, read at the pinned version). So a constructor value does not
     merely win, it wins in silence. That is why no router model here is built
     with either field.
 
@@ -1007,7 +987,7 @@ async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
     """
     session = agent.session
     # The activity resolves a per-class override against the session default the
-    # same way (agent_activity.py:4627). isinstance covers both the not-given and
+    # same way (agent_activity.py:4628-4630). isinstance covers both the not-given and
     # the None case without reaching for a private helper.
     activity_llm = agent.llm if isinstance(agent.llm, llm.LLM) else session.llm
     tool_choice = model_settings.tool_choice if model_settings else NOT_GIVEN
@@ -1071,10 +1051,21 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- end}}
         )
 
-    async def on_enter(self) -> None:
+{{if .RefreshPrompt}}    async def _refresh_prompt(self) -> None:
+        """Render this agent's prompt again, after a step wrote declared state.
+
+        on_enter runs once per entry and this agent is entered once per call, so
+        without this the conversation state block keeps whatever it held before
+        the first step finished. Its own steps looked right the whole time,
+        because a step is entered per visit and renders on the way in.
+        """
+        await self.update_instructions({{.PromptExpr}})
+
+{{end}}    async def on_enter(self) -> None:
 {{- if .PromptExpr}}
-        # The prompt names call variables, so it is rendered once the session
-        # state exists (C11: rendered at session start, never re-rendered).
+        # Rendered on the way in, and again by _refresh_prompt whenever a step
+        # writes declared state: a call variable never changes, a declared value
+        # does, and both reach this prompt through the same placeholders.
         await self.update_instructions({{.PromptExpr}})
 {{- end}}
 {{- if and .IsEntry (not $.SingleAgentMinimal)}}
@@ -1108,28 +1099,36 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- end}}
 {{- end}}
 {{- range .Tools}}{{template "method_tool" .}}{{end}}
-{{- if $.Capture}}{{template "capture_tool" $.Capture}}{{end}}
 {{range .Transfers}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext):
+    async def {{.Method}}(self, ctx: RunContext{{range .Inputs}}, {{.Name}}: {{.Anno}}{{if not .Required}} = None{{end}}{{end}}):
         {{triple .When}}
-{{- if .Requires}}
-        _unmet = _unmet_prerequisites(ctx.userdata, [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
-        if _unmet:
-            # requires guard (machine-checked): the same shared wording every
-            # other guard uses, so the two targets cannot describe the same
-            # refusal differently.
-            logger.info(
-                "prerequisite guard: handoff %s refused, unmet %s",
-                {{pyq .Method}}, ", ".join(_unmet),
-            )
-            return {"refused": _prerequisite_refusal(_unmet, False)}
+{{- if .Inputs}}
+        # The brief, validated before the receiver exists and before anything is
+        # spoken: a value outside its type is refused with the field named and
+        # nobody is handed over.
+        try:
+            _inputs = _typed_inputs({{pyq .Method}}, {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}}{{"}"}})
+        except _StateRefused as refused:
+            logger.warning("%s expects: %s", {{pyq .Method}}, refused.message)
+            return {"refused": f"Not started: {refused.message}. Ask the caller, then hand over again with a value that fits."}
 {{- end}}
 {{- if .Announce}}
         await ctx.session.say({{pyq .Announce}}, allow_interruptions=False)
 {{- end}}
-{{- range .ResetVars}}
-        ctx.userdata.{{.Name}} = {{.Default}}  # context.variables: not carried on this transfer
+{{- if .ReceiverInputs}}
+        # The receiver's brief: every name its prompt reads is reset, then this
+        # handoff's own values are written, so it sees exactly what it was handed
+        # and nothing from an earlier visit. Written before the receiver exists,
+        # because its prompt renders on entry from the shared state, and left in
+        # place after: a brief stays with its agent until the next handoff.
+{{- range .ReceiverInputs}}
+        ctx.userdata.{{.}} = None
+{{- end}}
+{{- end}}
+{{- if .Inputs}}
+        for _name, _value in _inputs.items():
+            setattr(ctx.userdata, _name, _value)
 {{- end}}
 {{- if .Summary}}
         summary_ctx = await _summarize(self.chat_ctx, {{template "llmexpr" .Summary}})
@@ -1332,11 +1331,25 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- range .Delegates}}
 {{- if .Task}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext) -> dict{{if .CanTaskTransfer}} | Agent{{end}}:
-        {{triple .When}}
-{{- if .Requires}}
-{{template "prerequisite_guard" .}}
-{{- end}}{{template "delegate_announce" .}}
+    async def {{.Method}}(self, ctx: RunContext{{range .Inputs}}, {{.Name}}: {{.Anno}}{{if not .Required}} = None{{end}}{{end}}) -> dict{{if .CanTaskTransfer}} | Agent{{end}}:
+        {{triple .When}}{{template "delegate_announce" .}}
+{{- if .Inputs}}
+        # What the step is handed, validated before the step exists: refused the
+        # way finish refuses a bad result, so nothing is written and the message
+        # goes back to the model, which can correct itself or ask the caller.
+        try:
+            _inputs = _typed_inputs({{pyq .Task.ID}}, {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}}{{"}"}})
+        except _StateRefused as refused:
+            logger.warning("%s expects: %s", {{pyq .Task.ID}}, refused.message)
+            return {"refused": f"Not started: {refused.message}. Ask the caller, then run the step again with a value that fits."}
+        # Written to the shared state for this visit and put back after it. The
+        # step's prompt and the router's template variables both read the state
+        # object and nothing else, and an owner whose own brief shares a name
+        # gets it back rather than losing it to a clear.
+        _previous = {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: ctx.userdata.{{$a.Name}}{{end}}{{"}"}}
+        for _name, _value in _inputs.items():
+            setattr(ctx.userdata, _name, _value)
+{{- end}}
         # N13: snapshot before the task, restore after. An awaited AgentTask
         # merges its own turns into this agent's context when it returns
         # (livekit/agents/voice/agent.py, merge on handoff-return), so without
@@ -1360,21 +1373,43 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
         except _TaskTransfer as transfer:
             return transfer.agent
 {{- end}}
+{{- if .Inputs}}
+        # The visit is over: put back what the state held before it. Not in a
+        # finally, on purpose: on the handoff path above the receiver's brief
+        # was written on the way out, and a name it shares with this step's
+        # inputs would be erased by a restore that ran regardless.
+        for _name, _value in _previous.items():
+            setattr(ctx.userdata, _name, _value)
+{{- end}}
         await self.update_chat_ctx(owner_ctx)
 {{- range .Task.Assign}}
-        ctx.userdata.{{.Var}} = result[{{pyq .Field}}]
+{{- if .Append}}
+        # An entry added, not the value replaced: only the step producing it
+        # knows whether the caller added an intent or swapped one, and the list
+        # starts empty so this never has to create it. The helper drops an
+        # absent entry and a structured one already on the list, so neither a
+        # step that concluded nothing nor a step re-entered mid-call grows it.
+        _append_entry(ctx.userdata.{{.Var}}, {{resultAccess "result" .Field}})
+{{- else}}
+        ctx.userdata.{{.Var}} = {{resultAccess "result" .Field}}
+{{- end}}
 {{- if .Confirms}}
         # The step that confirms this value has just assigned it, so it is settled
-        # now and the guard stops holding it back. Discarding here rather than in
-        # the step's prompt is the point: a model can be talked out of an
-        # instruction, not out of a set membership test.
+        # now and the emitted _refusal helper stops holding it back. Discarding
+        # here rather than in the step's prompt is the point: a model can be
+        # talked out of an instruction, not out of a set membership test.
         #
-        # getattr with a default, matching the guard: the set is created by the
-        # pre-fetch, and this step can be reached on a path where the pre-fetch
-        # never ran. A bare attribute read there is an AttributeError inside a
-        # finish handler, which is a call that dies mid-step.
+        # getattr with a default: the set is created by the pre-fetch, and this
+        # step can be reached on a path where the pre-fetch never ran. A bare
+        # attribute read there is an AttributeError inside a finish handler,
+        # which is a call that dies mid-step.
         getattr(ctx.userdata, "_unconfirmed", set()).discard({{pyq .Var}})
 {{- end}}
+{{- end}}
+{{- if .RefreshOwnerPrompt}}
+        # The values above are in this agent's own prompt, which was rendered on
+        # entry and would otherwise still read as it did before this step ran.
+        await self._refresh_prompt()
 {{- end}}
         # C4/N13: the task's turns are not propagated back; the typed result is
         # the only return.
@@ -1383,10 +1418,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- $canTaskTransfer := .CanTaskTransfer}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{if .CanTaskTransfer}} | Agent{{end}}{{end}}:
-        {{triple .When}}
-{{- if .Requires}}
-{{template "prerequisite_guard" .}}
-{{- end}}{{template "delegate_announce" .}}
+        {{triple .When}}{{template "delegate_announce" .}}
         # context_scope: isolated — each step is a standalone AgentTask starting
         # fresh (C3/C4); the grouped form always shares context, so it is not used.
         # Starting fresh says nothing about coming back: an AgentTask merges its
@@ -1420,10 +1452,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- else}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{if .CanTaskTransfer}} | Agent{{end}}{{end}}:
-        {{triple .When}}
-{{- if .Requires}}
-{{template "prerequisite_guard" .}}
-{{- end}}{{template "delegate_announce" .}}
+        {{triple .When}}{{template "delegate_announce" .}}
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
             summarize_chat_ctx=False,
@@ -1691,29 +1720,37 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
         self.session.generate_reply()
 {{- end}}
 {{range .Tools}}{{template "method_tool" .}}{{end}}
-{{- if $.Capture}}{{template "capture_tool" $.Capture}}{{end}}
 {{range .Transfers}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext):
+    async def {{.Method}}(self, ctx: RunContext{{range .Inputs}}, {{.Name}}: {{.Anno}}{{if not .Required}} = None{{end}}{{end}}):
         {{triple .When}}
         if not self._claim_terminal():
             return
-{{- if .Requires}}
-        _unmet = _unmet_prerequisites(ctx.userdata, [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
-        if _unmet:
+{{- if .Inputs}}
+        # The brief, validated before the receiver exists. A refusal gives the
+        # terminal claim back, so the step can still finish or hand over once
+        # the model has corrected itself.
+        try:
+            _inputs = _typed_inputs({{pyq .Method}}, {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}}{{"}"}})
+        except _StateRefused as refused:
             self._terminal_claimed = False
-            logger.info(
-                "prerequisite guard: handoff %s refused, unmet %s",
-                {{pyq .Method}}, ", ".join(_unmet),
-            )
-            return {"refused": _prerequisite_refusal(_unmet, False)}
+            logger.warning("%s expects: %s", {{pyq .Method}}, refused.message)
+            return {"refused": f"Not started: {refused.message}. Ask the caller, then hand over again with a value that fits."}
 {{- end}}
         try:
 {{- if .Announce}}
             await ctx.session.say({{pyq .Announce}}, allow_interruptions=False)
 {{- end}}
-{{- range .ResetVars}}
-            ctx.userdata.{{.Name}} = {{.Default}}  # context.variables: not carried on this transfer
+{{- if .ReceiverInputs}}
+            # The receiver's brief: reset, then written, before the receiver
+            # exists, so its prompt renders exactly what it was handed.
+{{- range .ReceiverInputs}}
+            ctx.userdata.{{.}} = None
+{{- end}}
+{{- end}}
+{{- if .Inputs}}
+            for _name, _value in _inputs.items():
+                setattr(ctx.userdata, _name, _value)
 {{- end}}
 {{- if .Summary}}
             summary_ctx = await _summarize(self.chat_ctx, {{template "llmexpr" .Summary}})
@@ -1728,34 +1765,46 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
             self._terminal_claimed = False
             raise
 {{end}}    @function_tool
-    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.Anno}}{{end}}, {{$.Unserved.Name}}: {{$.Unserved.Anno}} = "") -> None:
+    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.Anno}}{{end}}, {{$.Unserved.Name}}: {{$.Unserved.Anno}} = ""){{if .Typed}} -> str | None{{else}} -> None{{end}}:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
+{{- if .Typed}}
+        # Validated before anything is recorded, and before the terminal claim:
+        # a value that does not fit its declared type never enters the state,
+        # the previous contents stand, and the message goes back to the model so
+        # it can correct itself on the next turn instead of the step recording
+        # something wrong.
+        try:
+            _values = _typed_result({{pyq .Name}}, {{"{"}}{{range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end}}{{"}"}})
+        except _StateRefused as refused:
+            logger.warning("finish %s: %s", {{pyq .Name}}, refused.message)
+            return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
+{{- end}}
 {{- if .Transfers}}
         if not self._claim_terminal():
             return
         try:
 {{- if $.NeedsTaskGroups}}
-            result = _task_result({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }, {{$.Unserved.Name}})
+            result = _task_result({{.ResultExpr}}, {{$.Unserved.Name}})
             self.complete(result)
             # Record only after complete() succeeds: a rejected duplicate cannot
             # replace the winner, and there is no await for the callback to race.
             self._finish_call_id = ctx.function_call.call_id
 {{- else}}
-            self.complete(_task_result({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }, {{$.Unserved.Name}}))
+            self.complete(_task_result({{.ResultExpr}}, {{$.Unserved.Name}}))
 {{- end}}
         except BaseException:
             self._terminal_claimed = False
             raise
 {{- else}}
 {{- if $.NeedsTaskGroups}}
-        result = _task_result({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }, {{$.Unserved.Name}})
+        result = _task_result({{.ResultExpr}}, {{$.Unserved.Name}})
         self.complete(result)
         # Record only after complete() succeeds: a rejected duplicate cannot
         # replace the winner, and there is no await for the callback to race.
         self._finish_call_id = ctx.function_call.call_id
 {{- else}}
-        self.complete(_task_result({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }, {{$.Unserved.Name}}))
+        self.complete(_task_result({{.ResultExpr}}, {{$.Unserved.Name}}))
 {{- end}}
 {{- end}}
 {{end}}

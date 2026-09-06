@@ -157,17 +157,42 @@ async def _slng_log_provenance(response) -> None:
 
 
 class _SlngRouterLLMService(OpenAILLMService):
-    """The router's LLM service, plus a response hook on the client it builds.
+    """The router's LLM service: a response hook, and per-request variables.
 
-    Overriding create_client is the only seam this framework offers for it: the
-    service builds its own AsyncOpenAI and hands us neither the raw response nor
-    its headers, and the router states where an answer came from only in headers.
+    Two overrides, two different seams, and the second one is why this class
+    holds any state.
 
+    create_client is the only seam for reading the response headers: the service
+    builds its own AsyncOpenAI and hands us neither the raw response nor its
+    headers, and the router states where an answer came from only in a header.
     The connection limits restate the base class's own (pipecat
     services/openai/base_llm.py create_client at the pinned version). Restating
     them is deliberate. Anything different here would change connection reuse,
     which is a latency change nobody asked for and nothing would report.
+
+    build_chat_completion_params is the seam for the request body. The base
+    class's last statement before returning is params.update(self._settings.extra),
+    which reads a settings snapshot mutated only by an explicit update: nothing
+    re-evaluates the expression that filled it, so a value written part way
+    through a step reached the model one turn late. This override reads the live
+    state instead, on the streaming path and the one-shot path both, which is
+    what makes the two targets refresh at the same point.
     """
+
+    def __init__(self, *args, slng_state=None, slng_variable_names=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self._slng_state = slng_state
+        self._slng_variable_names = slng_variable_names
+
+    def build_chat_completion_params(self, params_from_context) -> dict:
+        params = super().build_chat_completion_params(params_from_context)
+        if self._slng_variable_names:
+            body = dict(params.get("extra_body") or {})
+            body["template_variables"] = _slng_template_variables(
+                self._slng_state, self._slng_variable_names
+            )
+            params["extra_body"] = body
+        return params
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         return AsyncOpenAI(
@@ -320,6 +345,8 @@ def build_state(call_context: dict | None = None) -> State:
     state = State()
     missing = []
     call_start = _dispatched_call_start(call_context)
+    if "caller_alias" in call_start:
+        setattr(state, "caller_alias", call_start["caller_alias"])
     if "customer_id" in call_start:
         setattr(state, "customer_id", call_start["customer_id"])
     if "verified" in call_start:
@@ -383,10 +410,12 @@ def build_billing_llm(state=None, *, slng_session_id):
     return _SlngRouterLLMService(
         api_key=os.environ["SLNG_API_KEY"],
         base_url="https://eu.context-router.slng.ai/v1",
+        slng_state=state,
+        slng_variable_names=("caller_alias", "customer_id"),
         settings=OpenAILLMService.Settings(
             model="gpt-5.6-luna",
             system_instruction=BILLING_PROMPT,
-            extra={"extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(state, ("caller_alias", "customer_id"))}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:billing", "X-Slng-Session-Id": slng_session_id}},
+            extra={"extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning()}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:billing", "X-Slng-Session-Id": slng_session_id}},
         ),
     )
 
@@ -414,28 +443,6 @@ class BillingAgent(LLMWorker):
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
 
 
-    @_direct_tool(cancel_on_interruption=False)
-    async def update_variables(self, params: FunctionCallParams, caller_alias: str | None = None):
-        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them.
-
-        Args:
-            caller_alias (str | None): What the caller says to call them.
-        """
-        saved = []
-        if caller_alias is not None:
-            self.state.caller_alias = caller_alias
-            saved.append("caller_alias")
-        if saved:
-            # The third place this call writes a variable, and the one that made
-            # the other two insufficient: a value the caller offers arrives here,
-            # not at a task result. The router substitutes these into the prompt's
-            # placeholders, so the value has to reach it before the next turn
-            # asks. Body only, so the speaking site's cache scope stays put.
-            await self.queue_frame(LLMUpdateSettingsFrame(
-                delta=LLMSettings(extra={"extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(self.state, ("caller_alias", "customer_id"))}}),
-            ))
-        await params.result_callback({"saved": saved})
-
 
     @_direct_tool
     async def get_invoice(self, params: FunctionCallParams, customer_id: str):
@@ -459,10 +466,12 @@ def build_intake_llm(state=None, *, slng_session_id):
     return _SlngRouterLLMService(
         api_key=os.environ["SLNG_API_KEY"],
         base_url="https://eu.context-router.slng.ai/v1",
+        slng_state=state,
+        slng_variable_names=("caller_alias", "customer_id"),
         settings=OpenAILLMService.Settings(
             model="gpt-5.6-luna",
             system_instruction=INTAKE_PROMPT,
-            extra={"extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(state, ("caller_alias", "customer_id"))}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": slng_session_id}},
+            extra={"extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning()}, "extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": slng_session_id}},
         ),
     )
 
@@ -506,28 +515,6 @@ class IntakeAgent(LLMWorker):
         ))
         await super().on_activated(args)
 
-
-    @_direct_tool(cancel_on_interruption=False)
-    async def update_variables(self, params: FunctionCallParams, caller_alias: str | None = None):
-        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them.
-
-        Args:
-            caller_alias (str | None): What the caller says to call them.
-        """
-        saved = []
-        if caller_alias is not None:
-            self.state.caller_alias = caller_alias
-            saved.append("caller_alias")
-        if saved:
-            # The third place this call writes a variable, and the one that made
-            # the other two insufficient: a value the caller offers arrives here,
-            # not at a task result. The router substitutes these into the prompt's
-            # placeholders, so the value has to reach it before the next turn
-            # asks. Body only, so the speaking site's cache scope stays put.
-            await self.queue_frame(LLMUpdateSettingsFrame(
-                delta=LLMSettings(extra={"extra_body": {"reasoning_effort": "none", "slng_config": _slng_config_fast_reasoning(), "template_variables": _slng_template_variables(self.state, ("caller_alias", "customer_id"))}}),
-            ))
-        await params.result_callback({"saved": saved})
 
 
     @_direct_tool(cancel_on_interruption=False)
@@ -627,7 +614,7 @@ class IntakeAgent(LLMWorker):
         await self.flush_pipeline()
         self.context.set_messages(messages + [{
             "role": "developer",
-            "content": "Task results: " + json.dumps(self._run_collect_results) + " Continue with the caller in one short line. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn with your own tools or a handoff. Never end the turn without it and never tell the caller you cannot.",
+            "content": "Task results: " + json.dumps(self._run_collect_results) + " Continue with the caller in one short line. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn, with your own tools, a handoff, or the same flow again. It is a new request, so running the flow for it is not running it again for the one that just finished. Never end the turn without acting on it, and never tell the caller you cannot.",
         }])
         self.context.set_tools(tools)
         return {"status": "ok"}, None
@@ -727,7 +714,7 @@ class IntakeAgent(LLMWorker):
         await self.flush_pipeline()
         self.context.set_messages(messages + [{
             "role": "developer",
-            "content": "Task results: " + json.dumps(self._run_triage_results) + " Continue with the caller in one short line. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn with your own tools or a handoff. Never end the turn without it and never tell the caller you cannot.",
+            "content": "Task results: " + json.dumps(self._run_triage_results) + " Continue with the caller in one short line. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn, with your own tools, a handoff, or the same flow again. It is a new request, so running the flow for it is not running it again for the one that just finished. Never end the turn without acting on it, and never tell the caller you cannot.",
         }])
         self.context.set_tools(tools)
         return {"status": "ok"}, None

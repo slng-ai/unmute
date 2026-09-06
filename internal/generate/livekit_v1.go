@@ -52,10 +52,22 @@ func (l livekitChain) services() []livekitService {
 }
 
 type livekitAgent struct {
-	Name           string
-	Class          string
-	PromptConst    string
-	PromptExpr     string // render call when the prompt is templated, else ""
+	Name        string
+	Class       string
+	PromptConst string
+	PromptExpr  string // render call when the prompt is templated, else ""
+	// RefreshPrompt emits _refresh_prompt() on this class, which one of its own
+	// steps calls after writing declared state.
+	//
+	// C11 ("rendered at session start, never re-rendered") was written when a
+	// prompt could only name a call variable, and a call variable does not
+	// change. Declared session state does, and an agent is entered once per
+	// call, so on_enter alone froze the block at "none recorded yet" for the
+	// whole call while its own steps saw the real values: a step is entered per
+	// visit and renders fresh. Pipecat never inherited the assumption, because
+	// it rebuilds a node's prompt per request, so this is also what keeps the
+	// two targets refreshing at the same rate.
+	RefreshPrompt  bool
 	IsEntry        bool
 	LLM            *livekitChain   // set only when it differs from the session default
 	TTS            *livekitService // set only when it differs from the session default
@@ -89,17 +101,22 @@ type livekitGreeting struct {
 
 // livekitTransfer carries the shaped context of an agent_transfer (V5): a
 // prebuilt Python expression for the handed-over ChatContext ("" = history:
-// reset, the target starts fresh), an optional generated summarizer, and the
-// userdata fields the transfer does not carry (context.variables subset).
+// reset, the target starts fresh), and an optional generated summarizer.
 type livekitTransfer struct {
 	Method      string
 	When        string
 	TargetClass string
 	Announce    string
-	Requires    []string      // guard: refuse until these userdata fields are set (V7)
 	CtxExpr     string        // Python expr for chat_ctx=; "" = reset
 	Summary     *livekitChain // set for history: summary — _summarize before handoff
-	ResetVars   []livekitVar
+	// Inputs is the brief this handoff carries, one typed parameter each,
+	// validated before the receiver is built.
+	Inputs []livekitArg
+	// ReceiverInputs is every input name the receiving agent's prompt reads,
+	// reset before this handoff's own values are written so the receiver sees
+	// exactly this brief and nothing from an earlier visit. Set whenever the
+	// receiver has a brief at all, even by a handoff that carries none.
+	ReceiverInputs []string
 }
 
 // livekitHumanTransfer lowers a human_transfer control (V6, SCHEMA N25): cold is
@@ -187,12 +204,19 @@ type livekitDelegate struct {
 	Then            string // "return" | "transfer" | "end"
 	ThenClass       string // target Agent class, set only for then: transfer
 	CanTaskTransfer bool   // one member task can hand the caller directly to another agent
-	// Requires names the variables this step needs before it may start. The
-	// method refuses to the model while any is unset; see guard.go.
-	Requires []string
-	// Announce is one sentence spoken as the step is entered, rendered after the
-	// guard so a refused step stays silent.
+	// Announce is one sentence spoken as the step is entered, rendered at the
+	// very start of the method, before anything else runs.
 	Announce string
+	// RefreshOwnerPrompt re-renders the owning agent's prompt after this step's
+	// `assign:` writes, because the owner's prompt is rendered in on_enter and
+	// the owner is entered once per call. See livekitAgent.RefreshPrompt.
+	RefreshOwnerPrompt bool
+	// Inputs is what the step is handed: one typed parameter per declared
+	// input, required first so the signature is valid Python. Validated in the
+	// body before the task exists, written to the userdata for the visit and
+	// put back after it. Empty for a step declaring none, which emits the
+	// method it always emitted.
+	Inputs []livekitArg
 }
 
 // livekitSingleTask is the task side of a single-task delegate: the AgentTask
@@ -209,6 +233,9 @@ type livekitSingleTask struct {
 type livekitAssign struct {
 	Var   string
 	Field string
+	// Append writes one entry onto the end of a declared list rather than
+	// replacing the whole value, which is what an authored `+` means.
+	Append bool
 	// Confirms marks a write by the very step that confirms this value, so the
 	// write also settles it. Only that step's write clears the mark: any other
 	// delegate assigning the same variable is not the caller agreeing to it.
@@ -218,19 +245,13 @@ type livekitAssign struct {
 // livekitVar is one typed shared-state field on the generated Userdata
 // dataclass (SCHEMA 4.4; LiveKit session userdata).
 type livekitVar struct {
+	// Anno is the whole annotation, including nullability, because a declared
+	// list is not nullable: it starts empty so an append never has to create it.
+	Anno        string
 	Name        string
 	PyType      string
 	Default     string // Python literal; "None" when the spec declares none
 	Description string
-}
-
-// livekitCapture is the generated update_variables tool (V6): one optional
-// argument per conversation variable, writing the session userdata.
-type livekitCapture struct {
-	Name        string
-	Description string
-	Args        []livekitArg
-	Fields      []string
 }
 
 // livekitCallStartVar is one dispatched input variable, hydrated from the job
@@ -263,6 +284,14 @@ type livekitTask struct {
 	// profile is a router binding. A task's prompt is not its owner's, so its
 	// scope is not its owner's either.
 	SlngScope string
+	// Typed marks a step whose result declares a shape, so its finish validates
+	// the arguments where they enter the state before anything is recorded.
+	Typed bool
+	// ResultExpr is the dict the finish hands back: the validated values when
+	// Typed, and the inline literal built from the arguments otherwise. One
+	// expression rather than four inline copies, so the typed case is one branch
+	// and the other emits exactly what it emitted before.
+	ResultExpr string
 }
 
 type livekitTool struct {
@@ -394,7 +423,6 @@ type livekitData struct {
 	Tasks           []livekitTask
 	Vars            []livekitVar
 	CallStartVars   []livekitCallStartVar // dispatched input variables (I.dispatch)
-	Capture         *livekitCapture       // generated update_variables tool; nil without conversation variables
 	Secrets         []string              // declared secrets, for .env.example (V11)
 	ExtraEnv        []string              // env the route needs that the package never declared
 	RequiredSecrets []string              // required secrets: a startup check refuses to run without them (V12)
@@ -439,22 +467,24 @@ type livekitData struct {
 	NeedsTaskGroups    bool       // beta.workflows TaskGroup import
 	NeedsFunctionTools bool       // RunContext + function_tool imports
 	TypingImports      string     // `from typing import ...` names (Annotated/Literal), "" if none (V2)
-	NeedsField         bool       // `from pydantic import Field` — any tool arg carries a description (V2)
-	SingleAgentMinimal bool       // one agent, never a handoff target: drop the chat_ctx ctor plumbing (F3)
-	NeedsLLM           bool       // the `llm` module import (chat_ctx param, fallback chains, or history helpers)
-	NeedsHTTPX         bool       // any webhook tool
-	NeedsRender        bool       // any template site: the _render helper + re import
-	NeedsRefusal       bool       // any tool whose injected variables can be unset (V4)
-	// NeedsPrerequisiteGuard and PrerequisiteGuard carry the shared guard block
-	// generated by guard.go. Both targets render the same generated Python, so
-	// the refusal wording cannot drift between them.
-	NeedsPrerequisiteGuard bool
-	PrerequisiteGuard      string
+	NeedsField         bool       // any tool arg carries a description (V2)
+	PydanticImports    string     // the whole `from pydantic import ...` line, "" if none
+	// NeedsDataclassField is `field` beside `dataclass`, wanted only by a
+	// declared list, which starts empty through a default_factory.
+	NeedsDataclassField bool
+	// TypedState is the declared-shape block, rendered once in shapes.go for
+	// both targets, or nil for a package that declares nothing structured. That
+	// nil is what makes such a package byte-identical (FR-015).
+	TypedState         *TypedStateBlock
+	SingleAgentMinimal bool // one agent, never a handoff target: drop the chat_ctx ctor plumbing (F3)
+	NeedsLLM           bool // the `llm` module import (chat_ctx param, fallback chains, or history helpers)
+	NeedsHTTPX         bool // any webhook tool
+	NeedsRender        bool // any template site: the _render helper + re import
+	NeedsRefusal       bool // any tool whose injected variables can be unset (V4)
 	// NeedsPrefetch and Prefetch carry the shared pre-fetch block generated by
-	// prefetch.go, on the same terms as the guard above: one generator, two
-	// targets, no drift. NeedsPrefetchClock and NeedsPrefetchAsync gate the
-	// imports the block needs, so a package that pre-fetches nothing gains no
-	// import either.
+	// prefetch.go: one generator, two targets, no drift. NeedsPrefetchClock and
+	// NeedsPrefetchAsync gate the imports the block needs, so a package that
+	// pre-fetches nothing gains no import either.
 	NeedsPrefetch      bool
 	NeedsPrefetchClock bool
 	NeedsPrefetchAsync bool
@@ -532,13 +562,10 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTaskGroupReturn:       true, // N13 snapshot/restore + task_results
 	targetcap.FieldContextIsolated:       true, // standalone-AgentTask sequence (T13)
 	targetcap.FieldTransferAnnounce:      true, // awaited outgoing reply before handoff (N44)
-	targetcap.FieldTransferRequires:      true, // generated guard naming unmet vars (V7)
-	targetcap.FieldDelegateRequires:      true, // the same guard before a step starts (guard.go)
-	targetcap.FieldDelegateAnnounce:      true, // unawaited session.say() after the guard, matching the tool idiom
+	targetcap.FieldDelegateAnnounce:      true, // unawaited session.say() at the start of the method, matching the tool idiom
 	targetcap.FieldPrefetch:              true, // _prefetch between hydration and session.start (prefetch.go)
-	targetcap.FieldVariableConfirm:       true, // state._unconfirmed, which the guard reads
+	targetcap.FieldVariableConfirm:       true, // state._unconfirmed, which the emitted _refusal helper reads
 	targetcap.FieldContextNoToolCalls:    true, // copy(exclude_function_call=True)
-	targetcap.FieldContextVariableSubset: true, // uncarried userdata fields reset (D7)
 	targetcap.FieldTransferBriefing:      true, // WarmTransferTask instructions extra (N25)
 	targetcap.FieldGreetingUserFirst:     true,
 	targetcap.FieldGreetingModelWritten:  true,
@@ -565,10 +592,12 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTracingLangfuse:       true,
 	targetcap.FieldTracingCoval:          true, // tracing.py exports to Coval off the SIP simulation ID
 	targetcap.FieldDeploymentMultiRegion: true, // one README deploy row per declared region, own config file
-	targetcap.FieldVariableConversation:  true, // generated update_variables @function_tool writing userdata
 	targetcap.FieldToolInject:            true, // hidden request values merged from userdata
 	targetcap.FieldWebhookPath:           true, // rendered, URL-encoded path on the base URL
 	targetcap.FieldTemplates:             true, // update_instructions/_render at session start
+	targetcap.FieldTypedState:            true, // a generated Pydantic class per shape, validated at each finish
+	targetcap.FieldShapedText:            true, // str plus an AfterValidator, never a schema keyword
+	targetcap.FieldInput:                 true, // typed delegate and handoff parameters, validated before entry, written to Userdata for the visit
 }
 
 var livekitEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
@@ -821,10 +850,12 @@ func renderLiveKitV1(name string, data livekitData) ([]byte, error) {
 		return nil, fmt.Errorf("livekit template %s: %w", name, err)
 	}
 	tmpl, err := template.New(name).Funcs(template.FuncMap{
-		"pyq":        pyQuote,
-		"join":       strings.Join,
-		"triple":     pyTriple,
-		"mcpTimeout": func() int { return mcpTimeoutSeconds },
+		"pyq":               pyQuote,
+		"resultAccess":      resultAccess,
+		"join":              strings.Join,
+		"inputBlockPreview": inputBlockPreview,
+		"triple":            pyTriple,
+		"mcpTimeout":        func() int { return mcpTimeoutSeconds },
 		// SLNG's contract for a hosted code tool, named once in Go so the
 		// template cannot drift from what internal/generate/hosted_tool.go says
 		// the platform guarantees.
@@ -862,9 +893,13 @@ type livekitReportJSON struct {
 	RequiredEnv []string              `json:"required_env"`
 	Bindings    []ir.ForwardedBinding `json:"bindings,omitempty"`
 	Sizing      []ir.Sizing           `json:"sizing,omitempty"`
-	Variables   []reportVariable      `json:"variables,omitempty"`
-	Secrets     []reportSecret        `json:"secrets,omitempty"`
-	Notes       []string              `json:"notes,omitempty"`
+	// PrefetchWrites is every prefetch entry the author declared as writing. Here
+	// rather than on stdout: the key is required, so a warning would fire forever
+	// on every package that legitimately writes.
+	PrefetchWrites []PrefetchWrite  `json:"prefetch_writes,omitempty"`
+	Variables      []reportVariable `json:"variables,omitempty"`
+	Secrets        []reportSecret   `json:"secrets,omitempty"`
+	Notes          []string         `json:"notes,omitempty"`
 }
 
 func livekitReport(agent *ir.Agent, data livekitData, files []File, bindings []ir.ForwardedBinding, sizing []ir.Sizing) ([]byte, error) {
@@ -888,7 +923,7 @@ func livekitReport(agent *ir.Agent, data livekitData, files []File, bindings []i
 		Agents: agents, Tasks: tasks, Files: generated,
 		// Forwarded without checking, so it must be readable back (constitution).
 		Regions: data.DeploymentRegions, RequiredEnv: data.RequiredEnv,
-		Bindings: bindings, Sizing: sizing,
+		Bindings: bindings, Sizing: sizing, PrefetchWrites: PrefetchWrites(agent),
 		Variables: reportVariables(agent), Secrets: reportSecrets(agent),
 		Notes: data.Notes,
 	}, "", "  ")

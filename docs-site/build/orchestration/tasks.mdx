@@ -21,7 +21,7 @@ Use a task instead of the other shapes when:
 
 The YAML on this page is one worked pair of tasks. For a shipped package that
 does it, read `examples/salon-concierge`: a verification task and a booking
-task, one of them behind a `requires:` guard.
+task that runs only once the caller is identified.
 
 ## Declare the task where it is used
 
@@ -61,6 +61,11 @@ agents:
 `record_status` can only be one of three values. That is what makes a task
 different from a longer prompt: the outcome has a shape.
 
+Each field's type is the same one-line grammar a variable's `type:` takes;
+`string` and an `{enum: [...]}` block are its older spellings for a scalar and
+a closed set, and both still work. See [the type
+grammar](/reference/variables#the-type-grammar).
+
 `assign` copies fields out of the result into package variables, so the rest
 of the call can use them without asking again. It is a list of one-key
 `variable: result.<field>` pairs, one per line:
@@ -72,6 +77,12 @@ variables:
   customer_name:
     type: string
 ```
+
+The right side of a pair can also be a dotted path into a declared shape,
+`result.<field>.<subfield>`, to pick one part of it rather than the whole
+thing. See [Assigning a task result to a
+variable](/reference/variables#assigning-a-task-result-to-a-variable) for the
+full rule, including what happens when the picked part is optional.
 
 Every task, including a task inside a group, needs a non-empty `result:` and `context.history`.
 
@@ -94,7 +105,7 @@ caller has already said something the task needs.
 | `full` | the running transcript, tool records included | a step that has to interpret anything |
 | `messages` | what the caller and the agent said out loud, no tool records | most steps, and the default choice when trimming |
 | `last_n` | the newest n entries, tool records included, never a tool result whose call was cut | a long call where only the recent turns matter |
-| `reset` | its own instructions and its declared values, nothing else | a step fully described by its variables: confirm a number, take a payment |
+| `reset` | its own instructions, its declared values and what it was handed through `expect:`, nothing else | a step described by the values it expects and its variables: confirm a number, take a booking request |
 | `summary` | one summarizer turn in place of the transcript, livekit only | a long call handed to a new specialist |
 
 `last_n` also needs `max_messages` alongside it. `summary` needs its own
@@ -102,37 +113,113 @@ caller has already said something the task needs.
 refuses it and names the four values it does shape instead.
 
 **The reset floor.** A `reset` step does not receive the caller's triggering
-utterance, so it opens without knowing what was just asked. It fits a step
-fully described by its own declared values, such as confirming a number or
-taking a payment. It does not fit a step that has to interpret what the
-caller just said. There is no compiler error for choosing wrong, so pick it
-only when the step's instructions and `requires:` values are the whole story.
+utterance, so it opens without knowing what was just asked. Give it `expect:`
+for what the caller asked for, see the next section, and it asks nothing it
+was handed. Without an `expect:` list it fits only a step fully described by its own
+declared values, such as confirming a number or taking a payment. There is no
+compiler error for choosing wrong, so pick it only when the values the step
+expects and its instructions are the whole story.
 
 **No value here is a privacy control.** Shortening the history does not
 unsay what the caller said out loud. A phone number the caller read aloud is
 in the transcript whether a variable holds it or not. `reset` plus a short
-`requires:` list gives a step a smaller request, not a redacted one.
+`expect:` list gives a step a smaller request, not a redacted one.
 
 [Scoping a step's context](/optimization/context-scope) is the worked version
 of all of this: which value to give which step, what has to travel as a variable
 once a step cannot see the conversation, and the two values a package running on
 both code targets cannot use.
 
+## Hand the step what the caller asked for
+
+A step on `history: reset` never receives the turn that triggered it. Without
+help it opens by asking for what the caller just said. `expect:` is that help:
+a list of typed fields the step is handed when the agent runs it. The agent,
+which heard the caller, fills them. The step reads them from its own prompt.
+
+```yaml agent.yaml
+agents:
+  appointment_desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tasks:
+      - name: manage_booking
+        when: The caller wants to create, modify, or cancel a booking.
+        instructions: tasks/booking.md
+        expect:
+          - action: Literal["create", "modify", "cancel"]
+          - name: service
+            type: Literal["haircut", "haircolor", "dry_cut"] | None
+            description: Only what the caller said. Leave it out if they did not name one.
+          - requested_day: str | None
+        tools:
+          - check_availability
+          - create_booking
+        result:
+          summary: string
+        context:
+          history: reset
+```
+
+A field is one line, `- name: type`, and grows a block only when it wants a
+`description`. The description reaches the agent that fills the field, so the
+task's `when:` need not repeat it. The types are the ones a result field and a
+shape field take: `str`, `int`, `float`, `bool`, `Literal[...]`, `list[...]`,
+a declared shape, and `Phone`, `Date`, `Time` or `Id`. A type ending in
+`| None` marks a field the agent may leave out. Without it the field is
+required, and the agent cannot run the step until it has a value. So the agent
+asks, not the step.
+
+The step's prompt ends with a block you do not write, after the conversation
+state block:
+
+```text
+Request:
+What you were handed for this visit. It does not change while you run.
+1. Action: create
+2. Service: not given.
+3. Requested day: tomorrow
+```
+
+A value left out reads as `not given.`, which is the one thing the step may
+ask for. A value with a declared shape renders as compact JSON. The task's own
+prompt may also name a field inline as `{{service}}`. No other prompt may: a
+placeholder naming a value another step expects is refused when the package is loaded,
+and the refusal names the one prompt that may read it.
+
+A value outside its type is refused where it enters, before the step starts.
+The step is not entered, nothing is written, and the agent that supplied the
+value is told which field and what was allowed, so it can correct itself or
+ask the caller. The text it reads back starts with `Not started:`, names the
+field, and ends by asking it to run the step again with a value that fits.
+
+The values are fixed for the visit and gone after it. A step entered twice is
+handed fresh values each time and never sees the earlier ones. Nothing about an
+expected value is recorded unless the step's result carries it, which is what `assign:`
+is for.
+
+Three rules keep the names clean. An expected value may not share a name with a
+declared variable, a secret, a shape, a word of the type grammar, or
+`unserved_request`. One name has one type across the whole package. And a task
+that is a step of a task group takes no `expect:`, because a group is entered by
+one call that cannot say which step a value is for.
+
+`expect:` compiles the same on livekit and pipecat. The slng target refuses it
+and says to compile to a code target. A handoff takes the same list; see
+[Handoffs](/build/orchestration/handoffs#hand-the-receiving-agent-a-brief).
+
 ## Announce it
 
 A task can carry `announce:`, one fixed line spoken as the step starts, so
 the two model requests between the caller finishing and the task's first
-word are not silence. It never speaks when the task is held back by
-`requires:`: a caller who hears "let me pull up the diary" and is then asked
-for a phone number has been told something untrue.
+word are not silence.
 
 ```yaml agent.yaml
       - name: manage_booking
         when: The caller wants to create, modify, or cancel a booking.
         announce: Let me pull up the diary.
         instructions: tasks/booking.md
-        requires:
-          - customer_phone
 ```
 
 `examples/salon-concierge` declares it exactly this way on `manage_booking`.
@@ -164,45 +251,20 @@ agents:
 Task names are unique across the whole package. Two agents defining a task
 under the same name is refused, naming both agents and the fix.
 
-## Guarding a step
+## Order a step with the prompt
 
-A task that needs a value the conversation has not collected yet declares
-`requires:`:
+A step that needs an earlier step's value first does not declare that on the
+task itself. It says so in the agent's instructions and in the step's own
+`when:`:
 
 ```yaml agent.yaml
       - name: manage_appointment
-        when: The caller wants to make, change, or cancel an appointment.
-        requires:
-          - customer_phone
+        when: The caller wants to make, change, or cancel an appointment, once the caller is identified.
 ```
 
-Every name must be a declared variable, or the package will not compile. A guard
-on a name nothing sets could never pass, and the symptom would be a step that
-silently never starts.
-
-**The caller hears nothing.** While `customer_phone` is empty the task does not
-run, and the refusal goes to the model rather than to the caller. It names the
-missing variable and the task that supplies it, so the model runs
-`customer_record` and calls the step again in the same turn. The caller just hears
-the next natural question.
-
-The compiler also appends the requirement to the step's own description, so the
-model usually collects the value during the earlier turns and never reaches the
-guard at all. The guard is the net; the description is the mechanism.
-
-**When the model cannot recover.** After five refusals of the same step the agent
-stops recovering quietly and asks the caller for the missing value out loud, in
-its own words. It does not fall silent and it does not end the call. That limit
-lives in the emitted code, not in a prompt: a model can be argued out of an
-instruction, and this exists for the case where it already has been.
-
-Both refusals are logged, with variable and step names only. No caller speech and
-no variable value is written, which matters when the identifier is a phone
-number.
-
-`requires:` works the same way on an [agent handoff](/build/orchestration/handoffs),
-but prefer the step. Guarding the route rather than the work means adding an agent
-whose only job is to hold the guard, and the caller has to be spoken through it.
+The full pattern, including what a tool does when it is handed a value that
+is not there yet, is in [Order steps with the
+prompt](/best-practices/step-scoping#order-steps-with-the-prompt).
 
 ## What the agent can do shrinks
 
@@ -292,8 +354,8 @@ unmute dev examples/salon-concierge --target pipecat
 ```
 
 Ask to book a haircut. The agent runs the `verify_customer` task first,
-and only then `manage_booking`, which is held back by `requires:
-customer_phone` until the caller is identified.
+because its own instructions say to identify the caller before it takes a
+booking, and only then runs `manage_booking`.
 
 ## Where to go next
 

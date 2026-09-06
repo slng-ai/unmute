@@ -799,22 +799,6 @@ func TestV18AgentMenuShowsAndEditsSavedAgent(t *testing.T) {
 	}
 }
 
-func TestV19HandoffShowsExistingVariablesAsChoices(t *testing.T) {
-	data := scaffold.Data{Instructions: scaffold.DefaultInstructions, Variables: []scaffold.Variable{{Name: "customer_id", Type: "string"}}}
-	data.SetTarget("pipecat")
-	data.Agents = []scaffold.Agent{{Name: "billing", Instructions: "Handle billing.", Reason: data.Reason, Speak: data.Speak}}
-	var output bytes.Buffer
-	err := editHandoffs(newRunner(strings.NewReader("1\nto_billing\n4\n"), &output, true), &data)
-	if !errors.Is(err, errAborted) {
-		t.Fatalf("editHandoffs() error = %v, want ErrUserAborted", err)
-	}
-	for _, want := range []string{"assistant", "billing", "customer_id"} {
-		if !strings.Contains(output.String(), want) {
-			t.Errorf("handoff choices missing %q:\n%s", want, output.String())
-		}
-	}
-}
-
 func TestV19TaskShowsExistingToolsAsChoices(t *testing.T) {
 	data := scaffold.Data{Tools: []scaffold.Tool{{Name: "lookup_customer"}}}
 	data.SetTarget("pipecat")
@@ -939,7 +923,7 @@ func TestRunAddAgentAndHandoff(t *testing.T) {
 	t.Chdir(t.TempDir())
 	input := "1\nagent\n" +
 		"5\n1\n2\nbilling\n1\nYou handle billing questions.\n7\n5\n" +
-		"5\n2\n1\nto_billing\n3\nCaller asks about billing.\n8\n3\n" +
+		"5\n2\n1\nto_billing\n3\nCaller asks about billing.\n7\n3\n" +
 		"7\n\n"
 	var output bytes.Buffer
 	got, err := RunConsole(strings.NewReader(input), &output, true, nil)
@@ -958,10 +942,10 @@ func TestHandoffAnnouncementEditsAndRoundTrips(t *testing.T) {
 	data := scaffold.Data{Instructions: scaffold.DefaultInstructions}
 	data.SetTarget("pipecat")
 	data.Agents = []scaffold.Agent{{Name: "billing", Instructions: "Handle billing.", Reason: data.Reason, Speak: data.Speak}}
-	data.Handoffs = []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing", When: "Billing", History: "full", AllVariables: true}}
+	data.Handoffs = []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing", When: "Billing", History: "full"}}
 
 	var output bytes.Buffer
-	if err := editHandoffDetails(newRunner(strings.NewReader("6\nI’ll connect you to billing now.\n8\n"), &output, true), &data, "to_billing"); err != nil {
+	if err := editHandoffDetails(newRunner(strings.NewReader("5\nI’ll connect you to billing now.\n7\n"), &output, true), &data, "to_billing"); err != nil {
 		t.Fatal(err)
 	}
 	if got := data.Handoffs[0].Announce; got != "I’ll connect you to billing now." {
@@ -1299,7 +1283,7 @@ func TestV25SavedResourcesOfferDelete(t *testing.T) {
 		data.Variables = []scaffold.Variable{{Name: "customer_id", Type: "string"}}
 		data.Tools = []scaffold.Tool{{Name: "lookup_customer", Description: "Lookup", Input: `{}`}}
 		data.Agents = []scaffold.Agent{{Name: "billing", Instructions: "Billing", Reason: data.Reason, Speak: data.Speak}}
-		data.Handoffs = []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing", When: "Billing", History: "full", AllVariables: true}}
+		data.Handoffs = []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing", When: "Billing", History: "full"}}
 		data.Tasks = []scaffold.Task{{Name: "collect", Instructions: "Collect", Result: `{"result":"string"}`, History: "full", Agent: "assistant", When: "Collect"}}
 		data.TaskGroups = []scaffold.TaskGroup{{Name: "flow", Steps: []string{"collect"}, ContextScope: "shared", Then: "return", Agent: "assistant", When: "Flow"}}
 		data.Channels = []scaffold.Channel{{Name: "phone", Kind: "telephony", Inbound: true}}
@@ -1342,7 +1326,7 @@ func TestV25DeleteResourceCleansReferences(t *testing.T) {
 	data.Agents = []scaffold.Agent{{Name: "billing"}}
 	data.Variables = []scaffold.Variable{{Name: "customer_id", Type: "string"}}
 	data.Tools = []scaffold.Tool{{Name: "lookup", AttachTo: []string{"billing"}, AttachTasks: []string{"collect"}}}
-	data.Handoffs = []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing", Requires: []string{"customer_id"}, Variables: []string{"customer_id"}}}
+	data.Handoffs = []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing"}}
 	data.Tasks = []scaffold.Task{{Name: "collect", Tools: []string{"lookup"}, Model: "billing_model", Assign: `{"customer_id":"result.result"}`, Agent: "billing"}}
 	data.TaskGroups = []scaffold.TaskGroup{{Name: "flow", Steps: []string{"collect"}, Agent: "billing"}}
 	data.HumanTransfers = []scaffold.HumanTransfer{{Name: "human", Agent: "billing"}}

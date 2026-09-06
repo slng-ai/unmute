@@ -297,6 +297,10 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
         for name, value in supplied.items():
             values.setdefault(name, value)
     missing = []
+    if "caller_alias" in values:
+        value = values["caller_alias"]
+        if not (isinstance(value, str)):
+            raise RuntimeError("call_start.caller_alias must be string")
     if "customer_id" in values:
         value = values["customer_id"]
         if not (isinstance(value, str)):
@@ -311,6 +315,8 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
 
 
 def _hydrate_call_start(userdata, values: dict) -> None:
+    if "caller_alias" in values:
+        userdata.caller_alias = values["caller_alias"]
     if "customer_id" in values:
         userdata.customer_id = values["customer_id"]
     if "verified" in values:
@@ -354,7 +360,7 @@ async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
     rather than at construction, for one reason read out of the plugin: it copies
     the per-request extra_kwargs first and then overwrites extra_body and
     extra_headers from its own constructor options (livekit-plugins-openai
-    llm.py:956-962, read at the pinned version). So a constructor value does not
+    llm.py:961-968, read at the pinned version). So a constructor value does not
     merely win, it wins in silence. That is why no router model here is built
     with either field.
 
@@ -377,7 +383,7 @@ async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
     """
     session = agent.session
     # The activity resolves a per-class override against the session default the
-    # same way (agent_activity.py:4627). isinstance covers both the not-given and
+    # same way (agent_activity.py:4628-4630). isinstance covers both the not-given and
     # the None case without reaching for a private helper.
     activity_llm = agent.llm if isinstance(agent.llm, llm.LLM) else session.llm
     tool_choice = model_settings.tool_choice if model_settings else NOT_GIVEN
@@ -442,15 +448,6 @@ class Billing(_SlngScoped, IgnorePhrasesMixin, Agent):
             resp.raise_for_status()
             return resp.json()
 
-    @function_tool
-    async def update_variables(self, ctx: RunContext, caller_alias: str | None = None) -> str:
-        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them."""
-        saved = []
-        if caller_alias is not None:
-            ctx.userdata.caller_alias = caller_alias
-            saved.append("caller_alias")
-        return "Saved: " + ", ".join(saved) if saved else "Nothing new to save."
-
 
 
 class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
@@ -486,15 +483,6 @@ class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
             resp.raise_for_status()
             return resp.json()
 
-    @function_tool
-    async def update_variables(self, ctx: RunContext, caller_alias: str | None = None) -> str:
-        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them."""
-        saved = []
-        if caller_alias is not None:
-            ctx.userdata.caller_alias = caller_alias
-            saved.append("caller_alias")
-        return "Saved: " + ", ".join(saved) if saved else "Nothing new to save."
-
 
     @function_tool
     async def to_billing(self, ctx: RunContext):
@@ -503,7 +491,7 @@ class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
 
     @function_tool
     async def run_collect(self, ctx: RunContext) -> dict:
-        """Collect the caller's account details. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn with your own tools or a handoff. Never end the turn without it and never tell the caller you cannot."""
+        """Collect the caller's account details. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn, with your own tools, a handoff, or the same flow again. It is a new request, so running the flow for it is not running it again for the one that just finished. Never end the turn without acting on it, and never tell the caller you cannot."""
         # N13: snapshot before the task, restore after. An awaited AgentTask
         # merges its own turns into this agent's context when it returns
         # (livekit/agents/voice/agent.py, merge on handoff-return), so without
@@ -520,7 +508,7 @@ class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
 
     @function_tool
     async def run_triage(self, ctx: RunContext) -> dict:
-        """Run the triage group. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn with your own tools or a handoff. Never end the turn without it and never tell the caller you cannot."""
+        """Run the triage group. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn, with your own tools, a handoff, or the same flow again. It is a new request, so running the flow for it is not running it again for the one that just finished. Never end the turn without acting on it, and never tell the caller you cannot."""
         # context_scope: isolated — each step is a standalone AgentTask starting
         # fresh (C3/C4); the grouped form always shares context, so it is not used.
         # Starting fresh says nothing about coming back: an AgentTask merges its
@@ -738,15 +726,6 @@ class Collect(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict])
             return resp.json()
 
     @function_tool
-    async def update_variables(self, ctx: RunContext, caller_alias: str | None = None) -> str:
-        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them."""
-        saved = []
-        if caller_alias is not None:
-            ctx.userdata.caller_alias = caller_alias
-            saved.append("caller_alias")
-        return "Saved: " + ", ".join(saved) if saved else "Nothing new to save."
-
-    @function_tool
     async def finish(self, ctx: RunContext, tier: str, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> None:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
@@ -764,15 +743,6 @@ class Confirm(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict])
     async def on_enter(self) -> None:
         # The task's own instructions describe this step; let them drive the opening.
         self.session.generate_reply()
-
-    @function_tool
-    async def update_variables(self, ctx: RunContext, caller_alias: str | None = None) -> str:
-        """Save details the caller gives you, as soon as you learn them. caller_alias: What the caller says to call them."""
-        saved = []
-        if caller_alias is not None:
-            ctx.userdata.caller_alias = caller_alias
-            saved.append("caller_alias")
-        return "Saved: " + ", ".join(saved) if saved else "Nothing new to save."
 
     @function_tool
     async def finish(self, ctx: RunContext, confirmed: bool, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> None:

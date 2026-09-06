@@ -25,7 +25,3 @@ webhook:
 
 interruption: provider_default
 effect: returns_data
-
-# The author's promise that this tool writes nothing. Required before a prefetch
-# may run it, because a prefetch runs unasked on every call.
-read_only: true

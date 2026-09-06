@@ -1,0 +1,30 @@
+description: Write one note about the thing being done.
+
+input:
+  type: object
+  properties:
+    text:
+      type: string
+      description: The note, in one sentence.
+  required:
+    - text
+
+output:
+  type: object
+  properties:
+    saved:
+      type: boolean
+  required:
+    - saved
+
+# The step's required input, injected: the tool is called during the visit,
+# when the value is on the call state, and only from the step that is handed
+# it. That is the whole of what makes an input legal here.
+inject:
+  kind: "{{kind}}"
+
+local:
+  handler: tools/note_thing.py
+
+interruption: provider_default
+effect: returns_data

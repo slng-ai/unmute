@@ -80,21 +80,18 @@ handoffs:
     when: Caller wants to book a table for a normal dine-in visit.
     context:
       history: full
-      variables: all
 
   to_events:
     to: events
     when: Caller wants to plan a private event, party, or large group booking.
     context:
       history: full
-      variables: all
 
   back_to_greeter:
     to: greeter
     when: Caller wants something else, or to start over.
     context:
       history: full
-      variables: all
 
 task_groups:
   do_reserve:

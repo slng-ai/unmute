@@ -826,7 +826,7 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 	agent.Controls["do_find"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "find_slot",
 		When:   "The caller only wants to check for a slot, not book yet.",
-		Assign: map[string]string{"caller_phone": "result.date"},
+		Assign: []ir.AssignTo{{Var: "caller_phone", Field: "date"}},
 	}
 	def := agent.Agents["reservations"]
 	def.Tools = append(def.Tools, "do_find")
@@ -886,7 +886,6 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 	}
 	transfer := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
 	transfer.Announce = "I will take you back to Remy."
-	transfer.Requires = []string{"caller_phone"}
 	task := agent.Tasks["find_slot"]
 	task.Tools = append(task.Tools, "back_to_greeter")
 	agent.Tasks["find_slot"] = task
@@ -909,8 +908,6 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 		"def _claim_terminal(self) -> bool:",
 		"async def back_to_greeter(self, ctx: RunContext):",
 		"if not self._claim_terminal():\n            return",
-		`_unmet = _unmet_prerequisites(ctx.userdata, ["caller_phone"])`,
-		"if _unmet:\n            self._terminal_claimed = False",
 		`await ctx.session.say("I will take you back to Remy.", allow_interruptions=False)`,
 		"self.complete(_TaskTransfer(Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))))",
 		"except BaseException:\n            self._terminal_claimed = False\n            raise",
@@ -953,11 +950,9 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 	}
 
 	// The task path reuses the complete agent-transfer contract, including
-	// summary history and variable selection.
+	// summary history.
 	transfer.Context.History = ir.HistorySummary
 	transfer.Context.Summarizer = "reasoning"
-	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
-	transfer.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}}
 	summaryArtifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
 	if err != nil {
 		t.Fatalf("generate summary transfer: %v", err)
@@ -965,7 +960,6 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 	summaryBot := artifactFile(t, summaryArtifact, "agent.py")
 	for _, want := range []string{
 		"async def _summarize(source: llm.ChatContext",
-		"ctx.userdata.visit_count = None  # context.variables: not carried on this transfer",
 		"self.complete(_TaskTransfer(Greeter(chat_ctx=summary_ctx)))",
 	} {
 		if !strings.Contains(summaryBot, want) {
@@ -1364,8 +1358,8 @@ func TestLiveKitV1PerTaskModel(t *testing.T) {
 }
 
 // TestLiveKitV1HistoryShapingAndFallback covers the T5 lowerings (V4/V5):
-// every history value compiles, include_tool_calls and variables subsets
-// shape the handoff, and a fallback chain lowers to llm.FallbackAdapter.
+// every history value compiles, include_tool_calls shapes the handoff, and a
+// fallback chain lowers to llm.FallbackAdapter.
 func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
@@ -1381,10 +1375,8 @@ func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
 	agent.Models["reasoning"] = profile
 	agent.Models["backup"] = ir.ModelDef{Kind: ir.KindThink, Placement: ir.PlacementAPI}
 	// Shape each transfer differently.
-	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
 	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
 	toRes.Context.History = ir.HistoryMessages
-	toRes.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}} // visit_count not carried
 	toEvents := agent.Controls["to_events"].(*ir.AgentTransfer)
 	toEvents.Context.History = ir.HistoryLastN
 	toEvents.Context.MaxMessages = 6
@@ -1410,8 +1402,6 @@ func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
 		`summary_ctx = await _summarize(self.chat_ctx, openai.LLM(api_key=os.environ["OPENAI_API_KEY"], model="gpt-4o"))`,
 		"return Greeter(chat_ctx=summary_ctx)",
 		"async def _summarize(source: llm.ChatContext",
-		// D7: an uncarried variable resets on the transfer.
-		"ctx.userdata.visit_count = None  # context.variables: not carried on this transfer",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -1465,9 +1455,6 @@ func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
 	}
 	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
 	toRes.Announce = "I’ll connect you to reservations now."
-	toRes.Requires = []string{"caller_phone"}
-	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
-	toRes.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}}
 	back := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
 	back.Context.History = ir.HistoryReset
 
@@ -1485,13 +1472,10 @@ func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
 		t.Fatal("agent.py missing the end of to_reservations")
 	}
 	method := botpy[start : start+1+end]
-	guardAt := strings.Index(method, "        if _unmet:")
 	announceAt := strings.Index(method, `        await ctx.session.say("I’ll connect you to reservations now.", allow_interruptions=False)`)
-	resetAt := strings.Index(method, "        ctx.userdata.visit_count = None")
 	returnAt := strings.Index(method, "        return Reservations(")
-	if guardAt < 0 || announceAt < 0 || resetAt < 0 || returnAt < 0 ||
-		guardAt >= announceAt || announceAt >= resetAt || resetAt >= returnAt {
-		t.Errorf("transfer must guard, finish its announcement, shape context, then hand off:\n%s", method)
+	if announceAt < 0 || returnAt < 0 || announceAt >= returnAt {
+		t.Errorf("transfer must finish its announcement, then hand off:\n%s", method)
 	}
 	if strings.Contains(method, "generate_reply(instructions=") {
 		t.Errorf("the exact announcement must not start another LLM turn:\n%s", method)
@@ -1882,35 +1866,6 @@ func TestLiveKitV1HumanTransferHangupAlwaysShutsDown(t *testing.T) {
 				t.Errorf("%s hangup can skip shutdown when goodbye generation fails; missing:\n%s", name, want)
 			}
 		})
-	}
-}
-
-// TestLiveKitV1RequiresGuard covers V7: a transfer with requires: emits a
-// machine-checked guard that refuses unset and empty values.
-func TestLiveKitV1RequiresGuard(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, err := ir.Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
-	toRes.Requires = []string{"caller_phone"}
-
-	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
-	if err != nil {
-		t.Fatalf("generate: %v", err)
-	}
-	botpy := artifactFile(t, artifact, "agent.py")
-	for _, want := range []string{
-		`_unmet = _unmet_prerequisites(ctx.userdata, ["caller_phone"])`,
-		`return {"refused": _prerequisite_refusal(_unmet, False)}`,
-	} {
-		if !strings.Contains(botpy, want) {
-			t.Errorf("agent.py missing %q", want)
-		}
 	}
 }
 
@@ -2693,17 +2648,14 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	enabled, noCalls := true, false
 	agent.Conversation.Interruption = &ir.Interruption{Enabled: &enabled, MinimumWords: 2, IgnorePhrases: []string{"uh-huh"}}
 	agent.Conversation.ThinkingAudio = ir.ThinkingSubtle
-	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
 	agent.Models["backup"] = ir.ModelDef{Kind: ir.KindThink, Placement: ir.PlacementAPI}
 	profile := agent.Models["reasoning"]
 	profile.Fallback = []string{"backup"}
 	agent.Models["reasoning"] = profile
 	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
-	toRes.Requires = []string{"caller_phone"}
 	toRes.Context.History = ir.HistoryLastN
 	toRes.Context.MaxMessages = 6
 	toRes.Context.IncludeToolCalls = &noCalls
-	toRes.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}}
 	back := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
 	back.Context.History = ir.HistorySummary
 	back.Context.Summarizer = "backup"
@@ -2749,7 +2701,7 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	task.Result["details"] = ir.ResultField{Schema: map[string]any{"type": "object"}}
 	task.Tools = append(task.Tools, "browse_tables")
 	agent.Tasks["find_slot"] = task
-	agent.Controls["do_find"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "find_slot", Assign: map[string]string{"caller_phone": "result.date"}}
+	agent.Controls["do_find"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "find_slot", Assign: []ir.AssignTo{{Var: "caller_phone", Field: "date"}}}
 	resDef := agent.Agents["reservations"]
 	resDef.Tools = append(resDef.Tools, "do_find")
 	agent.Agents["reservations"] = resDef
@@ -3196,93 +3148,5 @@ func TestLiveKitV1TaskDropsParentInFlightCall(t *testing.T) {
 	}
 	if strings.Contains(got, "running_placeholders") {
 		t.Error("a package with no tasks emits the in-flight strip anyway")
-	}
-}
-
-// TestLiveKitV1DelegateRequiresGuard covers the emitted guard on a returning
-// step: it runs before the step starts, refuses while a value is unset, resets
-// on a successful start, speaks at the bound, logs both paths, and declares its
-// requirement on the tool description so the model rarely reaches the guard.
-func TestLiveKitV1DelegateRequiresGuard(t *testing.T) {
-	agent := guardedFixture(t)
-	py := emitFor(t, agent, ir.ProviderLiveKit, "agent.py")
-
-	start := strings.Index(py, "    async def manage_booking(self, ctx: RunContext)")
-	if start < 0 {
-		t.Fatal("agent.py has no manage_booking method")
-	}
-	method := py[start:]
-	if end := strings.Index(method[1:], "\n    @function_tool"); end >= 0 {
-		method = method[:end+1]
-	}
-
-	guardAt := strings.Index(method, `_unmet = _unmet_prerequisites(ctx.userdata, ["customer_id"])`)
-	workAt := strings.Index(method, "owner_ctx = self.chat_ctx.copy()")
-	if guardAt < 0 || workAt < 0 || guardAt >= workAt {
-		t.Fatalf("the guard must run before the step does any work:\n%s", method)
-	}
-
-	for _, want := range []string{
-		`_tries = _prerequisite_refusals.get("manage_booking", 0) + 1`,
-		"_at_limit = _tries >= _PREREQUISITE_LIMIT",
-		`return {"refused": _prerequisite_refusal(_unmet, _at_limit)}`,
-		`_prerequisite_refusals["manage_booking"] = 0`,
-	} {
-		if !strings.Contains(method, want) {
-			t.Errorf("emitted guard missing %q:\n%s", want, method)
-		}
-	}
-
-	// The reset must be on the path that actually starts the step, not inside
-	// the refusal branch, or the counter never advances and the bound never
-	// fires.
-	resetAt := strings.Index(method, `_prerequisite_refusals["manage_booking"] = 0`)
-	if resetAt < guardAt || resetAt > workAt {
-		t.Errorf("the counter must reset where the step starts, not in the refusal branch:\n%s", method)
-	}
-
-	// FR-003b: the requirement is declared where the model sees it before it
-	// gets here.
-	docEnd := strings.Index(method, `_unmet = _unmet_prerequisites`)
-	doc := method[:docEnd]
-	for _, want := range []string{"customer_id", "verify_customer"} {
-		if !strings.Contains(doc, want) {
-			t.Errorf("the tool description must name %q so the model collects it earlier:\n%s", want, doc)
-		}
-	}
-
-	assertGuardLogsNamesOnly(t, method, "livekit")
-}
-
-// assertGuardLogsNamesOnly holds FR-003f and SC-005d.
-//
-// The identifier in the release example is a caller's phone number. A log line
-// that formats a variable's value writes real phone numbers into an operator's
-// log, which is a privacy defect and not a formatting slip. Every argument to
-// the guard's log calls must be a name or a step, never a lookup of a value.
-func assertGuardLogsNamesOnly(t *testing.T, method, label string) {
-	t.Helper()
-	logged := 0
-	for _, line := range strings.Split(method, "\n") {
-		if !strings.Contains(line, "prerequisite guard:") {
-			continue
-		}
-		logged++
-		if !strings.Contains(line, "refused") {
-			t.Errorf("%s: a refusal log line must say the step was refused: %s", label, line)
-		}
-	}
-	if logged < 2 {
-		t.Errorf("%s: both the ordinary refusal and the one that reaches the bound must be logged, found %d", label, logged)
-	}
-
-	// The only values that may reach a log argument. ctx.userdata.<name> and
-	// self.state.<name> are the two ways a value could get there.
-	for _, forbidden := range []string{"ctx.userdata.", "self.state.", "getattr(ctx.userdata", "getattr(self.state"} {
-		for _, line := range strings.Split(method, "\n") {
-			if strings.Contains(line, "logger.") && strings.Contains(line, forbidden) {
-				t.Errorf("%s: a log line reads a variable's value (%q); the identifier is a phone number, so only names may be logged: %s", label, forbidden, line)
-			}
-		}
 	}
 }

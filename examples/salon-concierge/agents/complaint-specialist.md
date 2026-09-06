@@ -23,8 +23,8 @@ So write speech, not text.
   say them: 3:00 PM, Friday the 12th, 28 euros, 20 percent. Do not spell them
   out into words yourself. Where the refund policy already writes an amount or a
   deadline out in words, quote it exactly as it is written.
-- Write a phone number the way it is written on a phone, a plus sign and the
-  usual digit groups, like +34 111 111 111. Never put commas between digits and
+- Write a phone number the way it is written on a phone, a plus sign, then the
+  country code, then groups of two to four digits. Never put commas between digits and
   never break a number into separate words: the voice reads the shape above and
   drops everything after the first comma.
 - Commas and full stops are your only pauses. Use them where you would breathe.

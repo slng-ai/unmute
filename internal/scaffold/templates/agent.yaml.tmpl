@@ -39,9 +39,12 @@ agents:
         when: [[quote .When]]
         instructions: [[.PromptPath]]
 [[if .Announce]]        announce: [[quote .Announce]]
-[[end]][[if .Requires]]        requires:
-[[range .Requires]]          - [[.]]
-[[end]][[end]][[$taskTools := $.TaskTools .Name]][[if $taskTools]]        tools:
+[[end]][[if .Input]]        expect:
+[[range .Input]][[if .Description]]          - name: [[.Name]]
+            type: [[yaml .Type]]
+            description: [[yaml .Description]]
+[[else]]          - [[.Name]]: [[yaml .Type]]
+[[end]][[end]][[end]][[$taskTools := $.TaskTools .Name]][[if $taskTools]]        tools:
 [[range $taskTools]]          - [[.]]
 [[end]][[end]][[$taskHandoffs := $.TaskHandoffs .Name]][[if $taskHandoffs]]        handoffs:
 [[range $taskHandoffs]]          - [[.]]
@@ -66,17 +69,17 @@ agents:
     when: [[quote .When]]
 [[if .Announce]]    announce: [[quote .Announce]]
 [[end]]
-[[if .Requires]]    requires:
-[[range .Requires]]      - [[.]]
-[[end]][[end]]    context:
+[[if .Input]]    expect:
+[[range .Input]][[if .Description]]      - name: [[.Name]]
+        type: [[yaml .Type]]
+        description: [[yaml .Description]]
+[[else]]      - [[.Name]]: [[yaml .Type]]
+[[end]][[end]][[end]]    context:
       history: [[.History]]
 [[if .MaxMessages]]      max_messages: [[.MaxMessages]]
 [[end]][[if .Summarizer]]      summarizer: [[.Summarizer]]
 [[end]][[if .IncludeToolCalls]]      include_tool_calls: [[boolValue .IncludeToolCalls]]
-[[end]][[if .AllVariables]]      variables: all
-[[else]]      variables:
-[[range .Variables]]        - [[.]]
-[[end]][[end]]
+[[end]]
 [[end]]
 [[end]][[if .HumanTransfers]]escalations:
 [[range .HumanTransfers]]  [[.Name]]:
@@ -98,6 +101,18 @@ agents:
 [[if .ThenTarget]]    then_target: [[.ThenTarget]]
 [[end]]    merge: results
 [[end]]
+[[end]][[if .Shapes]]# The named groups of fields a value's type: refers to. Each field is one line,
+# `- name: Type`, and grows a block only when it wants a description the model
+# reads.
+shapes:
+[[range .Shapes]]  - name: [[.Name]]
+[[if .Description]]    description: [[yaml .Description]]
+[[end]]    fields:
+[[range .Fields]][[if .Description]]      - name: [[.Name]]
+        type: [[yaml .Type]]
+        description: [[yaml .Description]]
+[[else]]      - [[.Name]]: [[yaml .Type]]
+[[end]][[end]][[end]]
 [[end]][[if .Variables]]variables:
 [[range .Variables]]  [[.Name]]:
     type: [[.Type]]

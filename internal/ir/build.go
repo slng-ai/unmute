@@ -57,6 +57,11 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+	shapes, err := buildShapes(pkg)
+	if err != nil {
+		return nil, err
+	}
+	declared := shapeNames(shapes)
 	out := &Agent{
 		Version:      pkg.Agent.Version,
 		Name:         strings.TrimSpace(pkg.Agent.Name),
@@ -64,6 +69,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		Models:       models,
 		Listen:       listenName,
 		Turn:         turnName,
+		Shapes:       shapes,
 		Variables:    make(map[string]Variable, len(pkg.Agent.Variables)),
 		Secrets:      slices.Sorted(slices.Values(pkg.Agent.Secrets)),
 		Agents:       make(map[string]AgentDef, len(pkg.Agent.Agents)),
@@ -81,12 +87,41 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	}
 	out.Knowledge = buildKnowledge(pkg)
 	out.Documents = pkg.Documents
-	for name, variable := range pkg.Agent.Variables {
-		out.Variables[name] = Variable{
+	out.VariableOrder = variableOrder(pkg)
+	for _, name := range out.VariableOrder {
+		variable := pkg.Agent.Variables[name]
+		resolved := Variable{
 			Type: PrimitiveType(variable.Type), Default: variable.Default,
 			Source: VariableSource(variable.Source), Confirm: variable.Confirm,
 			Description: variable.Description,
 		}
+		// An empty type: is left exactly as it was, because Validate already
+		// refuses it by name and its message is the one an author has read
+		// before. Everything else resolves, and a bare primitive keeps Shape nil
+		// so a package declaring nothing structured resolves byte-identically.
+		if strings.TrimSpace(variable.Type) != "" {
+			ref, err := resolveType(variable.Type, declared)
+			if err != nil {
+				return nil, fmt.Errorf("%s: variable %q: %w",
+					locateType(pkg, variable.Type, name+":"), name, err)
+			}
+			if ref.Structured() {
+				// A structured value reaches a prompt as text, which is the one
+				// thing every existing reader of Type does with it. The truth is
+				// in Shape.
+				resolved.Shape, resolved.Type = ref, PrimitiveString
+			} else {
+				resolved.Type = ref.Primitive
+			}
+		}
+		out.Variables[name] = resolved
+	}
+	// Every input, resolved before any prompt is composed: a receiving agent's
+	// block needs the handoffs that target it, and those are built after the
+	// agents are.
+	inputs, err := buildInputs(pkg, out, declared)
+	if err != nil {
+		return nil, err
 	}
 	for name, tool := range pkg.Tools {
 		built := buildTool(name, tool)
@@ -177,10 +212,23 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		if !ok {
 			return nil, missing(pkg, "agent.yaml", "instructions", raw.Instructions)
 		}
+		// Stored in the emitted form, {{customer__status}} for an authored
+		// {{customer.status}}, so every consumer of the IR sees one flat name
+		// per placeholder. checkTemplates reads the authored text.
+		instructions = FlattenPaths(instructions)
 		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg, raw.Think))
+		// The composed state block, after the authored suffix, because the suffix
+		// is a directive about how to answer and this is the record it answers
+		// from. Composed per site: an unconfirmed value belongs in one prompt
+		// only, and no agent prompt is that prompt.
+		instructions = appendPromptSuffix(instructions, out.StateBlock(AgentPromptSite(name)))
+		// Then the brief, after the state block: the request is the last thing
+		// the model reads before it acts. Empty for an agent no handoff briefs.
+		instructions = appendPromptSuffix(instructions, InputBlock(inputs.agents[name]))
 		out.Agents[name] = AgentDef{
 			Instructions: instructions, Model: raw.Think, Voice: raw.Speak,
-			Tools: attached(raw.Tools, callables(raw, pkg), raw.Handoffs, raw.Escalations),
+			Tools:  attached(raw.Tools, callables(raw, pkg), raw.Handoffs, raw.Escalations),
+			Inputs: inputs.agents[name],
 		}
 	}
 
@@ -206,6 +254,10 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		if !ok {
 			return nil, missing(pkg, "agent.yaml", "instructions", raw.Instructions)
 		}
+		// Stored in the emitted form, {{customer__status}} for an authored
+		// {{customer.status}}, so every consumer of the IR sees one flat name
+		// per placeholder. checkTemplates reads the authored text.
+		instructions = FlattenPaths(instructions)
 		// A task with no think profile of its own runs on the entry agent's, which
 		// is the same rule slngProfileHasTools applies. One rule, read twice,
 		// rather than two spellings that can drift. Deliberately the entry agent's
@@ -213,12 +265,15 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		// names it, so the profile cannot come from where it happens to be written.
 		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg,
 			cmp.Or(raw.Think, pkg.Agent.Agents[pkg.Agent.EntryAgent].Think)))
-		result, err := buildResult(raw.Result)
+		instructions = appendPromptSuffix(instructions, out.StateBlock(TaskPromptSite(name)))
+		instructions = appendPromptSuffix(instructions, InputBlock(inputs.tasks[name]))
+		result, err := buildResult(raw.Result, declared)
 		if err != nil {
 			return nil, fmt.Errorf("%s: task %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
 		out.Tasks[name] = Task{
 			Instructions: instructions, Tools: attached(raw.Tools, raw.Handoffs), Model: raw.Think, Result: result,
+			Inputs:  inputs.tasks[name],
 			Context: buildTaskContext(raw.Context),
 		}
 	}
@@ -269,7 +324,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		out.Controls[name] = control
 	}
 	for _, name := range sortedKeys(pkg.Agent.Handoffs) {
-		control, err := buildHandoff(pkg, pkg.Agent.Handoffs[name], out)
+		control, err := buildHandoff(pkg, pkg.Agent.Handoffs[name], out, inputs.handoffs[name])
 		if err != nil {
 			return nil, fmt.Errorf("%s: handoff %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
@@ -327,17 +382,13 @@ func checkNames(pkg *packagespec.Package) error {
 	}
 	// All five kinds become callable function names at runtime, so they share one
 	// flat namespace: a name may sit in exactly one catalog, and never on a tool
-	// as well. The capture tool is generated whenever a conversation variable
-	// exists, so its name is reserved across all of them (V7).
+	// as well.
 	//
 	// Task groups are the easy half to miss. They were never checked while a
 	// delegate pointed at them, because the delegate carried the name into the
 	// emitted project. An agent names a group directly now, so the group name IS
 	// the emitted method name, and a group colliding with a tool would define one
 	// Python function twice and silently drop the tool.
-	if _, ok := pkg.Tools[CaptureToolName]; ok {
-		return fmt.Errorf("%s: tool name %q is reserved: unmute generates %s for source: conversation variables", pkg.Location("agent.yaml", CaptureToolName), CaptureToolName, CaptureToolName)
-	}
 	declared := map[string]string{}
 	for _, catalog := range []struct {
 		kind  string
@@ -354,9 +405,6 @@ func checkNames(pkg *packagespec.Package) error {
 			declared[name] = catalog.kind
 			if _, ok := pkg.Tools[name]; ok {
 				return fmt.Errorf("%s: tool and %s name %q collide", pkg.Location("agent.yaml", name), catalog.kind, name)
-			}
-			if name == CaptureToolName {
-				return fmt.Errorf("%s: %s name %q is reserved: unmute generates %s for source: conversation variables", pkg.Location("agent.yaml", name), catalog.kind, name, CaptureToolName)
 			}
 		}
 	}
@@ -630,13 +678,13 @@ func flattenFallback(pkg *packagespec.Package, section map[string]packagespec.Mo
 func buildTool(name string, raw packagespec.Tool) Tool {
 	tool := Tool{
 		Description: raw.Description, Input: raw.Input, Output: raw.Output,
-		Execution: ToolExecution(raw.ExecutionKind()), Inject: raw.Inject,
+		Execution: ToolExecution(raw.ExecutionKind()), Inject: flattenInject(raw.Inject),
 	}
 	switch {
 	case raw.Webhook != nil:
 		tool.URLEnv = raw.Webhook.URLEnv
 		tool.BaseURL = raw.Webhook.BaseURL
-		tool.Path = raw.Webhook.Path
+		tool.Path = FlattenPaths(raw.Webhook.Path)
 		tool.Auth = buildToolAuth(raw.Webhook.Auth)
 	case raw.Local != nil:
 		tool.Handler = raw.Local.Handler
@@ -685,7 +733,6 @@ func buildTool(name string, raw packagespec.Tool) Tool {
 	// whitespace-only line reads as no announcement, so every driver sees a
 	// settled value and none has to decide what " " means.
 	tool.Announce = strings.TrimSpace(raw.Announce)
-	tool.ReadOnly = raw.ReadOnly
 	return tool
 }
 
@@ -750,6 +797,24 @@ func floatOr(authored *float64, fallback float64) float64 {
 // buildToolAuth resolves an auth block: the scheme's own default lands here so
 // every generator reads settled values. An unknown type passes through
 // unchanged for Validate to reject by name.
+// flattenInject stores each templated inject value in its emitted form, the way
+// Build stores a prompt. A map with nothing in it is returned as it came, so a
+// tool declaring no inject keeps the nil the generators test for.
+func flattenInject(inject map[string]any) map[string]any {
+	if len(inject) == 0 {
+		return inject
+	}
+	out := make(map[string]any, len(inject))
+	for key, value := range inject {
+		if text, ok := value.(string); ok {
+			out[key] = FlattenPaths(text)
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
 func buildToolAuth(raw *packagespec.ToolAuth) *ToolAuth {
 	if raw == nil {
 		return nil
@@ -761,12 +826,25 @@ func buildToolAuth(raw *packagespec.ToolAuth) *ToolAuth {
 	return auth
 }
 
-func buildResult(raw map[string]any) (map[string]ResultField, error) {
+func buildResult(raw map[string]any, declared map[string]bool) (map[string]ResultField, error) {
 	result := make(map[string]ResultField, len(raw))
 	for name, value := range raw {
 		switch value := value.(type) {
 		case string:
-			result[name] = ResultField{Type: PrimitiveType(value)}
+			// A result field's type is a type expression, the same grammar a
+			// variable's is, so a step can hand back a whole shape and the
+			// assignment can match it against the variable it writes to. The
+			// four JSON Schema words every package written before this uses
+			// resolve to the same primitives they always did.
+			ref, err := resolveType(value, declared)
+			if err != nil {
+				return nil, fmt.Errorf("result %q: %w", name, err)
+			}
+			if ref.Structured() {
+				result[name] = ResultField{Type: PrimitiveString, Shape: ref}
+			} else {
+				result[name] = ResultField{Type: ref.Primitive}
+			}
 		case map[string]any:
 			if enumValue, ok := value["enum"]; ok && len(value) == 1 {
 				values, err := stringSlice(enumValue)
@@ -791,32 +869,6 @@ func buildTaskContext(raw packagespec.TaskContext) TaskContext {
 	}
 }
 
-// checkRequires resolves a guard's names against the declared variables. Both
-// kinds that accept `requires:` share this, so the two cannot drift, and a name
-// that does not resolve is a typo the author must see at compile rather than a
-// guard that can never pass at runtime.
-//
-// Resolving the name is the whole check, and a stronger one was tried and
-// deleted: "refuse a name no route can ever fill". There is no such name. A
-// variable with no `source:` at all is seeded from the dispatch payload on both
-// code targets (livekit_v1_build.go and pipecat_v1_build.go both read
-// `v.Source == ir.VariableSourceCallStart || v.Source == ""`), optional rather
-// than required, so every declared variable has at least one route to a value
-// and the refusal could never fire. TestBuildAcceptsEveryRequiresARouteCanFill
-// holds that, so the next person to reach for the check finds the answer before
-// writing it.
-func checkRequires(pkg *packagespec.Package, requires []string, agent *Agent) error {
-	for _, name := range requires {
-		if _, ok := agent.Variables[name]; !ok {
-			// Name what the field takes, because the common mistake is writing a
-			// tool or another catalog entry here and expecting an ordering rule.
-			return fmt.Errorf("%s: requires names variables, and %q is not declared under the variables: block",
-				pkg.Location("agent.yaml", name), name)
-		}
-	}
-	return nil
-}
-
 // buildCallable resolves one thing an agent can decide to run.
 //
 // Two refusals its predecessor carried are gone rather than moved. "Exactly one
@@ -824,9 +876,6 @@ func checkRequires(pkg *packagespec.Package, requires []string, agent *Agent) er
 // nested task or a `task_groups:` entry, and "assign is legal on task delegates
 // only" is unwritable because `assign:` is a key on a task and a group has none.
 func buildCallable(pkg *packagespec.Package, raw packagespec.Callable, agent *Agent) (Control, error) {
-	if err := checkRequires(pkg, raw.Requires, agent); err != nil {
-		return nil, err
-	}
 	if raw.Task != "" {
 		if _, ok := agent.Tasks[raw.Task]; !ok {
 			return nil, missing(pkg, "agent.yaml", "task", raw.Task)
@@ -845,7 +894,7 @@ func buildCallable(pkg *packagespec.Package, raw packagespec.Callable, agent *Ag
 	// announcement, so no driver has to decide what " " means.
 	return &Delegate{
 		Kind: ControlDelegate, When: raw.When, Task: raw.Task, Group: raw.Group,
-		Requires: raw.Requires, Assign: assign,
+		Assign:   assign,
 		Announce: strings.TrimSpace(raw.Announce),
 	}, nil
 }
@@ -854,25 +903,30 @@ func buildCallable(pkg *packagespec.Package, raw packagespec.Callable, agent *Ag
 // representation holds. A pair value is one scalar by the time it decodes, and
 // an assignment is always a `result.<field>` string, so anything else is refused
 // here rather than reaching checkAssignments as something no path can be.
-func assignments(pairs []packagespec.Pair) (map[string]string, error) {
+func assignments(pairs []packagespec.Pair) ([]AssignTo, error) {
 	if len(pairs) == 0 {
 		return nil, nil
 	}
-	out := make(map[string]string, len(pairs))
+	out := make([]AssignTo, 0, len(pairs))
 	for _, pair := range pairs {
 		text, ok := pair.Value.(string)
 		if !ok {
 			return nil, fmt.Errorf("assign %q must use result.<field>, and %v is not a name", pair.Key, pair.Value)
 		}
-		out[pair.Key] = text
+		// A `+` on the key is an append. Stripped here, where the authored
+		// spelling stops and the resolved shape starts, so no driver has to
+		// know that the mark was ever part of a name.
+		name, appends := strings.CutSuffix(pair.Key, "+")
+		field, ok := strings.CutPrefix(text, "result.")
+		if !ok {
+			return nil, fmt.Errorf("assign %q must use result.<field>", text)
+		}
+		out = append(out, AssignTo{Var: name, Field: field, Append: appends})
 	}
 	return out, nil
 }
 
-func buildHandoff(pkg *packagespec.Package, raw packagespec.Handoff, agent *Agent) (Control, error) {
-	if err := checkRequires(pkg, raw.Requires, agent); err != nil {
-		return nil, err
-	}
+func buildHandoff(pkg *packagespec.Package, raw packagespec.Handoff, agent *Agent, inputs []InputField) (Control, error) {
 	if _, ok := agent.Agents[raw.To]; !ok {
 		return nil, missing(pkg, "agent.yaml", "to", raw.To)
 	}
@@ -887,7 +941,10 @@ func buildHandoff(pkg *packagespec.Package, raw packagespec.Handoff, agent *Agen
 	if err != nil {
 		return nil, err
 	}
-	return &AgentTransfer{Kind: ControlAgentTransfer, When: raw.When, To: raw.To, Announce: announce, Requires: raw.Requires, Context: context}, nil
+	return &AgentTransfer{
+		Kind: ControlAgentTransfer, When: raw.When, To: raw.To, Announce: announce,
+		Inputs: inputs, Context: context,
+	}, nil
 }
 
 func buildEscalation(raw packagespec.Escalation, agent *Agent) (Control, error) {
@@ -943,32 +1000,158 @@ func buildHumanTransfer(raw packagespec.Escalation) (Control, error) {
 // so strict decoding refuses the same inputs, and it names file, line and column
 // where the matrix named only the field.
 
-func checkAssignments(taskName string, assign map[string]string, agent *Agent) error {
+func checkAssignments(taskName string, assign []AssignTo, agent *Agent) error {
 	if taskName == "" {
 		return nil
 	}
 	task := agent.Tasks[taskName]
-	for variable, path := range assign {
-		want, ok := agent.Variables[variable]
+	for _, entry := range assign {
+		want, ok := agent.Variables[entry.Var]
 		if !ok {
-			// Same sentence as checkRequires, for the same mistake made in the
-			// other key: name the block the author has to edit, because "does
-			// not resolve" says neither where to look nor what is wrong.
-			return fmt.Errorf("assign writes to %q, and it is not declared under the variables: block", variable)
+			// Name the block the author has to edit, because "does not resolve"
+			// says neither where to look nor what is wrong.
+			return fmt.Errorf("assign writes to %q, and it is not declared under the variables: block", entry.Var)
 		}
-		fieldName, ok := strings.CutPrefix(path, "result.")
+		// The first segment indexes the task's own result; anything after the
+		// first dot is a path into that field's declared shape, walked the same
+		// way an `expect:` path is (FieldPath).
+		root, rest, _ := strings.Cut(entry.Field, ".")
+		field, ok := task.Result[root]
 		if !ok {
-			return fmt.Errorf("assign %q must use result.<field>", path)
+			return fmt.Errorf("assign result field %q does not resolve", entry.Field)
 		}
-		field, ok := task.Result[fieldName]
-		if !ok {
-			return fmt.Errorf("assign result field %q does not resolve", fieldName)
+		source := field
+		if rest != "" {
+			if field.Shape == nil {
+				// A raw JSON Schema field, an enum field and a bare primitive
+				// field all have no declared shape, so none has fields a path
+				// can walk into. FieldPath says this the same way for a shape
+				// field with no such name; this is the same refusal for a field
+				// that never had fields to begin with.
+				kind := pythonSpelling(field.Type)
+				switch {
+				case field.Schema != nil:
+					kind = "a raw JSON Schema object"
+				case len(field.Enum) > 0:
+					kind = "an enum"
+				}
+				return fmt.Errorf("assign result %q: %q is %s, which has no fields to name", entry.Field, root, kind)
+			}
+			picked, err := FieldPath(agent.Shapes, field.Shape, strings.Split(rest, "."))
+			if err != nil {
+				return fmt.Errorf("assign result %q: %w", entry.Field, err)
+			}
+			if picked.Structured() {
+				source = ResultField{Type: PrimitiveString, Shape: picked}
+			} else {
+				source = ResultField{Type: picked.Primitive}
+			}
 		}
-		if field.Schema != nil || field.Type != want.Type {
-			return fmt.Errorf("assign result %q type does not match variable %q", fieldName, variable)
+		target := want.Shape
+		if entry.Append {
+			if !target.IsList() {
+				return fmt.Errorf("assign appends to %q with %q, and %q is declared %s rather than a list. "+
+					"Drop the %q to replace the value, or declare it list[...] so an entry can be added to it",
+					entry.Var, entry.Var+"+:", entry.Var, declaredAs(want), "+")
+			}
+			target = target.List
+			// An entry that may be absent is legal to append: it means "add one
+			// if there is one this time", which is the shape a step that
+			// concludes nothing needs. The emitted append skips it, so the list
+			// grows only when the step produced something. Without this the step
+			// would have to invent an entry on the turn the caller changed their
+			// mind.
+			source.Shape = withoutOptional(source.Shape)
+		}
+		if err := assignableInto(target, want.Type, source); err != nil {
+			return fmt.Errorf("assign result %q does not fit variable %q: %w", entry.Field, entry.Var, err)
 		}
 	}
 	return nil
+}
+
+// declaredAs names a variable's type the way its author wrote it, for a refusal
+// that has to say what the value is as well as what it is not.
+func declaredAs(variable Variable) string {
+	if variable.Shape != nil {
+		return variable.Shape.String()
+	}
+	return pythonSpelling(variable.Type)
+}
+
+// assignableInto is the one predicate deciding whether a step's result field can
+// be written into a declared value. It replaced a single condition,
+// `field.Schema != nil || field.Type != want.Type`, whose first half is what
+// made a structured result unassignable at all.
+//
+// The three refusals that condition's siblings carry are untouched: an unknown
+// variable, an unresolved result field, and a path not written `result.<field>`.
+func assignableInto(target *TypeRef, targetPrimitive PrimitiveType, field ResultField) error {
+	// A raw JSON Schema result field stays unassignable, and deliberately: it is
+	// provider passthrough with no declared shape to match, so nothing can say
+	// whether it fits. Declaring a shape is what makes it assignable.
+	if field.Schema != nil {
+		return fmt.Errorf("the result field is a raw JSON Schema object, which has no declared shape to match. "+
+			"Declare the fields under %q and name that shape as the result field's type", "shapes:")
+	}
+	if target == nil {
+		// Both sides plain: the check that existed before this feature, byte for
+		// byte, so every package that compiles today keeps compiling.
+		if field.Shape != nil {
+			return fmt.Errorf("the result field is %s and the variable is %s. Declare the variable with the same "+
+				"type as the result field", field.Shape.String(), pythonSpelling(targetPrimitive))
+		}
+		if field.Type != targetPrimitive {
+			return fmt.Errorf("the result field is %s and the variable is %s",
+				pythonSpelling(field.Type), pythonSpelling(targetPrimitive))
+		}
+		return nil
+	}
+	source := field.Shape
+	if source == nil {
+		// A text type with a validated shape accepts plain text, because the
+		// shape is checked where the value enters the state and not in the
+		// schema the model is sent (FR-013). Everything else has to be declared.
+		if target.Shaped != "" && field.Type == PrimitiveString {
+			return nil
+		}
+		// An `enum:` result field and a Literal are the same closed set written
+		// two ways, so the same set assigns. A different set, or a bare string
+		// into a closed set, does not: the model would never be told the set and
+		// the value would be refused on every call.
+		if len(target.Literal) > 0 && len(field.Enum) > 0 {
+			if sameSet(target.Literal, field.Enum) {
+				return nil
+			}
+			return fmt.Errorf("the result field allows %s and the variable allows %s. Give both the same words",
+				strings.Join(field.Enum, ", "), strings.Join(target.Literal, ", "))
+		}
+		return fmt.Errorf("the result field is %s and the variable is %s. Declare the result field with the "+
+			"same type, so the model is told what to produce", pythonSpelling(field.Type), target.String())
+	}
+	// Optional on the target and not on the source is fine: a value that may be
+	// absent accepts one that is present.
+	if source.Equal(target) || (target.Optional && source.Equal(withoutOptional(target))) {
+		return nil
+	}
+	return fmt.Errorf("the result field is %s and the variable is %s", source.String(), target.String())
+}
+
+// withoutOptional is the target type with its nullability dropped, for the one
+// comparison that has to ignore it.
+func withoutOptional(ref *TypeRef) *TypeRef {
+	if ref == nil {
+		return nil
+	}
+	bare := *ref
+	bare.Optional = false
+	return &bare
+}
+
+// sameSet reports whether two closed sets hold the same entries. Order is how a
+// Literal renders and is not what makes two sets equal.
+func sameSet(left, right []string) bool {
+	return slices.Equal(slices.Sorted(slices.Values(left)), slices.Sorted(slices.Values(right)))
 }
 
 func stringValue(value *string) string {
@@ -987,33 +1170,12 @@ func buildTransferContext(pkg *packagespec.Package, raw *packagespec.TransferCon
 			return TransferContext{}, missing(pkg, "agent.yaml", "summarizer", raw.Summarizer)
 		}
 	}
-	selection, err := buildVariableSelection(raw.Variables)
-	if err != nil {
-		return TransferContext{}, err
-	}
-	for _, name := range selection.Names {
-		if _, ok := agent.Variables[name]; !ok {
-			return TransferContext{}, missing(pkg, "agent.yaml", "variable", name)
-		}
-	}
 	return TransferContext{
 		TaskContext: TaskContext{
 			History: History(raw.History), MaxMessages: raw.MaxMessages, Summarizer: raw.Summarizer,
 			IncludeToolCalls: raw.IncludeToolCalls,
 		},
-		Variables: selection,
 	}, nil
-}
-
-func buildVariableSelection(value any) (VariableSelection, error) {
-	if value == "all" {
-		return VariableSelection{All: true}, nil
-	}
-	values, err := stringSlice(value)
-	if err != nil {
-		return VariableSelection{}, fmt.Errorf("context variables must be all or a list of names")
-	}
-	return VariableSelection{Names: values}, nil
 }
 
 func stringSlice(value any) ([]string, error) {
@@ -1575,7 +1737,7 @@ func buildConversation(raw *packagespec.Conversation) *Conversation {
 	}
 	conversation := &Conversation{MaxDuration: Duration(raw.MaxDuration), ThinkingAudio: ThinkingAudio(raw.ThinkingAudio)}
 	if raw.Greeting != nil {
-		conversation.Greeting = &Greeting{SpeaksFirst: SpeaksFirst(raw.Greeting.SpeaksFirst), Text: raw.Greeting.Text}
+		conversation.Greeting = &Greeting{SpeaksFirst: SpeaksFirst(raw.Greeting.SpeaksFirst), Text: FlattenPaths(raw.Greeting.Text)}
 	}
 	if raw.Interruption != nil {
 		conversation.Interruption = &Interruption{
@@ -1914,6 +2076,34 @@ func checkAttachments(pkg *packagespec.Package, list string, names []string) err
 
 func missing(pkg *packagespec.Package, file, kind, name string) error {
 	return fmt.Errorf("%s: %s %q does not resolve", pkg.Location(file, name), kind, name)
+}
+
+// shapeNames is the membership set resolveType needs, which is all it needs.
+func shapeNames(shapes map[string]Shape) map[string]bool {
+	out := make(map[string]bool, len(shapes))
+	for name := range shapes {
+		out[name] = true
+	}
+	return out
+}
+
+// variableOrder is every declared variable, in the order agent.yaml declared
+// them. The authored order is read off the file, so a name it somehow missed is
+// appended sorted rather than dropped: the composed state block covers every
+// variable or it is not the state.
+func variableOrder(pkg *packagespec.Package) []string {
+	out := make([]string, 0, len(pkg.Agent.Variables))
+	for _, name := range pkg.VariableOrder() {
+		if _, ok := pkg.Agent.Variables[name]; ok && !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	for _, name := range sortedKeys(pkg.Agent.Variables) {
+		if !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func sortedKeys[V any](values map[string]V) []string {

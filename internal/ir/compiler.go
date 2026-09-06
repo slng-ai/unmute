@@ -21,13 +21,20 @@ type Agent struct {
 	// entry's Kind records its section (names are one namespace, N15).
 	Models map[string]ModelDef `json:"models" yaml:"models"`
 	// Listen/Turn are the resolved selection names into Models ("" = none).
-	Listen    string              `json:"listen,omitempty" yaml:"listen,omitempty"`
-	Turn      string              `json:"turn,omitempty" yaml:"turn,omitempty"`
-	Variables map[string]Variable `json:"variables,omitempty" yaml:"variables,omitempty"`
-	// Timezone is the validated IANA zone every clock reading in this package is
-	// taken in. Empty when the package declares none, which only a clock prefetch
-	// refuses.
-	Timezone string `json:"timezone,omitempty" yaml:"timezone,omitempty"`
+	Listen string `json:"listen,omitempty" yaml:"listen,omitempty"`
+	Turn   string `json:"turn,omitempty" yaml:"turn,omitempty"`
+	// Shapes is the resolved shape catalog, keyed by name. A map here and a list
+	// in the authoring surface is deliberate: the IR is the resolved shape and
+	// is out of the no-dictionaries rule's scope, and every reader of this wants
+	// it by name. Nothing depends on its iteration order: the generated classes
+	// are emitted in dependency order, computed from the references.
+	Shapes map[string]Shape `json:"shapes,omitempty" yaml:"shapes,omitempty"`
+	// VariableOrder is the order the author declared the variables in, which is
+	// the order the composed state block numbers them (FR-005). Variables is a
+	// map and has none, so the order is read off the authored file once and
+	// carried here rather than re-derived by anything that renders.
+	VariableOrder []string            `json:"variable_order,omitempty" yaml:"variable_order,omitempty"`
+	Variables     map[string]Variable `json:"variables,omitempty" yaml:"variables,omitempty"`
 	// Prefetch is the resolved prefetch list, **in the order the author wrote
 	// it**, which is the order the emitted agent resolves them in. Nothing sorts
 	// this slice: an entry reading a value a later entry assigns was refused at
@@ -338,7 +345,14 @@ const (
 )
 
 type Variable struct {
-	Type    PrimitiveType  `json:"type" yaml:"type"`
+	Type PrimitiveType `json:"type" yaml:"type"`
+	// Shape is the resolved type expression, and it is nil unless the declared
+	// type is more than a bare primitive. It sits beside Type rather than
+	// replacing it, which is what makes a package declaring nothing structured
+	// resolve byte-identically (FR-015): every reader that existed before this
+	// field keeps reading Type, and Type is the primitive a structured value
+	// renders as when it reaches a prompt.
+	Shape   *TypeRef       `json:"shape,omitempty" yaml:"shape,omitempty"`
 	Default any            `json:"default,omitempty" yaml:"default,omitempty"`
 	Source  VariableSource `json:"source,omitempty" yaml:"source,omitempty"`
 	// Confirm names the task that must hear the caller agree before anything acts
@@ -359,12 +373,20 @@ type Pair struct {
 // Prefetch is one resolved prefetch entry. Exactly one of Clock, Source and Tool
 // is set; Build refuses zero or more than one.
 type Prefetch struct {
-	Name   string         `json:"name" yaml:"name"`
-	Clock  string         `json:"clock,omitempty" yaml:"clock,omitempty"`
-	Source VariableSource `json:"source,omitempty" yaml:"source,omitempty"`
-	Tool   string         `json:"tool,omitempty" yaml:"tool,omitempty"`
-	Args   []Pair         `json:"args,omitempty" yaml:"args,omitempty"`
-	Assign []Pair         `json:"assign,omitempty" yaml:"assign,omitempty"`
+	Name  string `json:"name" yaml:"name"`
+	Clock string `json:"clock,omitempty" yaml:"clock,omitempty"`
+	// Timezone is the validated IANA zone this entry reads its clock in, empty on
+	// every entry that reads no clock. Per entry, not per package: two entries may
+	// honestly read two zones, and the key belongs beside the reading it governs.
+	Timezone string         `json:"timezone,omitempty" yaml:"timezone,omitempty"`
+	Source   VariableSource `json:"source,omitempty" yaml:"source,omitempty"`
+	Tool     string         `json:"tool,omitempty" yaml:"tool,omitempty"`
+	// Writes is the author's answer for this entry, false on every entry that
+	// runs no tool. Nothing branches on it: it is carried so the compile report
+	// and the emitted runbook can name the entries that write.
+	Writes bool   `json:"writes,omitempty" yaml:"writes,omitempty"`
+	Args   []Pair `json:"args,omitempty" yaml:"args,omitempty"`
+	Assign []Pair `json:"assign,omitempty" yaml:"assign,omitempty"`
 	// Inputs are the declared variables Args reads, sorted. Resolved here so the
 	// emitted skip check and the per-target warning both read one list rather
 	// than each re-parsing the templates.
@@ -389,6 +411,54 @@ const (
 	PrimitiveInteger PrimitiveType = "integer"
 )
 
+// TypeRef is a resolved type expression. Exactly one of Primitive, Shaped,
+// Literal, List and Shape is set, and Optional rides on whichever it is.
+//
+// New beside PrimitiveType rather than instead of it. The cheaper alternative,
+// keeping the declared type a flat string and re-parsing it in each driver, was
+// rejected because it puts one fact in three owners and is exactly how the two
+// code targets would drift on the same package.
+type TypeRef struct {
+	Primitive PrimitiveType `json:"primitive,omitempty" yaml:"primitive,omitempty"`
+	Shaped    ShapedText    `json:"shaped,omitempty" yaml:"shaped,omitempty"`
+	Literal   []string      `json:"literal,omitempty" yaml:"literal,omitempty"`
+	List      *TypeRef      `json:"list,omitempty" yaml:"list,omitempty"`
+	Shape     string        `json:"shape,omitempty" yaml:"shape,omitempty"`
+	Optional  bool          `json:"optional,omitempty" yaml:"optional,omitempty"`
+}
+
+// ShapedText is text whose shape is checked where the value enters the state
+// and never written into the schema the model is sent. A phone number, a day, a
+// time of day and an identifier all have a shape, and none of them may express
+// it as a schema keyword: one target's strict converter strips neither `format`
+// nor `pattern`, strict is that target's default, and the provider rejects
+// both. So each of these lowers to `str` in the schema and to a validator in
+// generated Python.
+type ShapedText string
+
+const (
+	ShapedPhone ShapedText = "Phone"
+	ShapedDate  ShapedText = "Date"
+	ShapedTime  ShapedText = "Time"
+	ShapedID    ShapedText = "Id"
+)
+
+// Shape is one resolved named group of fields, generated as one Pydantic class
+// per target.
+type Shape struct {
+	Name        string  `json:"name" yaml:"name"`
+	Description string  `json:"description,omitempty" yaml:"description,omitempty"`
+	Fields      []Field `json:"fields" yaml:"fields"`
+}
+
+// Field is one resolved member of a shape. Description reaches the model, which
+// is the whole reason it is carried this far.
+type Field struct {
+	Name        string   `json:"name" yaml:"name"`
+	Type        *TypeRef `json:"type" yaml:"type"`
+	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
+}
+
 type VariableSource string
 
 const (
@@ -401,9 +471,6 @@ const (
 	VariableSourceDirection  VariableSource = "direction"
 	VariableSourceFromNumber VariableSource = "from_number"
 	VariableSourceToNumber   VariableSource = "to_number"
-	// VariableSourceConversation marks a value the model saves mid-call through
-	// the generated update_variables tool (variable_secrets_specs.md N23).
-	VariableSourceConversation VariableSource = "conversation"
 )
 
 type AgentDef struct {
@@ -411,19 +478,46 @@ type AgentDef struct {
 	Model        string   `json:"model" yaml:"model"`
 	Voice        string   `json:"voice" yaml:"voice"`
 	Tools        []string `json:"tools,omitempty" yaml:"tools,omitempty"`
+	// Inputs is this agent's brief: the union of the inputs every handoff that
+	// targets it declares, one entry per name. Its prompt ends with a block
+	// naming each, and a handoff to it resets every one before writing its own.
+	Inputs []InputField `json:"inputs,omitempty" yaml:"inputs,omitempty"`
 }
 
 type Task struct {
-	Instructions string                 `json:"instructions" yaml:"instructions"`
-	Tools        []string               `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Model        string                 `json:"model,omitempty" yaml:"model,omitempty"`
-	Result       map[string]ResultField `json:"result" yaml:"result"`
-	Context      TaskContext            `json:"context" yaml:"context"`
+	Instructions string   `json:"instructions" yaml:"instructions"`
+	Tools        []string `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Model        string   `json:"model,omitempty" yaml:"model,omitempty"`
+	// Inputs is what the step is handed on entry, in authored order. The
+	// delegate that runs the step takes one parameter per entry, validates it
+	// where it enters, and the step's prompt ends with a block naming each one.
+	Inputs  []InputField           `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	Result  map[string]ResultField `json:"result" yaml:"result"`
+	Context TaskContext            `json:"context" yaml:"context"`
+}
+
+// InputField is one value a step or a receiving agent is handed on entry.
+// Declared by the author, filled by the agent that heard the caller, fixed for
+// the visit and gone after it. Not declared state: it appears in no state
+// block, and no assign: writes it.
+type InputField struct {
+	Name string `json:"name" yaml:"name"`
+	// Type is the resolved expression, never nil: an input always has a type.
+	Type *TypeRef `json:"type" yaml:"type"`
+	// Optional marks an expression ending in `| None`: the agent may leave the
+	// value out, and the receiving prompt then reads it as not given.
+	Optional    bool   `json:"optional,omitempty" yaml:"optional,omitempty"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 type ResultField struct {
-	Type   PrimitiveType  `json:"type,omitempty" yaml:"type,omitempty"`
-	Enum   []string       `json:"enum,omitempty" yaml:"enum,omitempty"`
+	Type PrimitiveType `json:"type,omitempty" yaml:"type,omitempty"`
+	Enum []string      `json:"enum,omitempty" yaml:"enum,omitempty"`
+	// Shape is the resolved type expression when the field declares more than a
+	// bare primitive, which is how a step hands back a whole shape. It sits
+	// beside Schema rather than replacing it: Schema is a raw JSON Schema object
+	// forwarded verbatim, which is a different thing with a different owner.
+	Shape  *TypeRef       `json:"shape,omitempty" yaml:"shape,omitempty"`
 	Schema map[string]any `json:"schema,omitempty" yaml:"schema,omitempty"`
 }
 
@@ -463,12 +557,6 @@ type TaskContext struct {
 
 type TransferContext struct {
 	TaskContext
-	Variables VariableSelection `json:"variables" yaml:"variables"`
-}
-
-type VariableSelection struct {
-	All   bool     `json:"all,omitempty" yaml:"all,omitempty"`
-	Names []string `json:"names,omitempty" yaml:"names,omitempty"`
 }
 
 type History string
@@ -490,28 +578,62 @@ type Delegate struct {
 	When  string      `json:"when,omitempty" yaml:"when,omitempty"`
 	Task  string      `json:"task,omitempty" yaml:"task,omitempty"`
 	Group string      `json:"group,omitempty" yaml:"group,omitempty"`
-	// Requires names the variables that must hold a value before the step may
-	// start. It applies whether the delegate targets a `task:` or a `group:`,
-	// because both are work that can need an input the conversation has not
-	// collected yet. The driver refuses the step to the model, never to the
-	// caller, and names the control that supplies each missing value.
-	Requires []string          `json:"requires,omitempty" yaml:"requires,omitempty"`
-	Assign   map[string]string `json:"assign,omitempty" yaml:"assign,omitempty"`
+	// Assign is the resolved `assign:` list, in the order the author wrote it.
+	// A list rather than the name-keyed map it was, because an append has to
+	// survive to the driver and a map key cannot carry it. Prefetch.Assign
+	// already uses an ordered list for the same reason, so this follows a
+	// precedent rather than setting one.
+	Assign []AssignTo `json:"assign,omitempty" yaml:"assign,omitempty"`
 	// Announce is one fixed sentence spoken as the step is entered, so the two
-	// model requests it takes to enter one are not silence. Spoken after the
-	// prerequisite guard, never before it: a refused step stays silent.
+	// model requests it takes to enter one are not silence. Spoken at the very
+	// start of the step, before anything else runs: ordering between steps is
+	// the prompt's job (the step's `when:` sentence and the owning agent's
+	// instructions), not a code gate, so there is nothing left to hold this back.
 	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
 }
 
 func (*Delegate) control() {}
 
+// AssignTo is one resolved assignment from a step's result into a declared
+// variable. Field is the part after `result.`: one dict key naming a top-level
+// result field, or a dotted path into that field's declared shape (checked by
+// FieldPath, internal/ir/shapes.go). Left as the authored string rather than
+// pre-split, because both checkAssignments and the template lowering that
+// reads a step's result at run time split it the same way, on ".".
+type AssignTo struct {
+	Var   string `json:"var" yaml:"var"`
+	Field string `json:"field" yaml:"field"`
+	// Append writes one entry onto the end of a list instead of replacing the
+	// whole value, authored as a `+` on the key. Refused at build on a value
+	// whose declared type is not a list, because only the step producing the
+	// value knows whether the caller added an intent or swapped one.
+	Append bool `json:"append,omitempty" yaml:"append,omitempty"`
+}
+
+// AssignedVars names the variables an assign list writes to, sorted. Both the
+// supplier index and the prompt-read check want the names and not the order,
+// and both used to get them from a map.
+func AssignedVars(assign []AssignTo) []string {
+	out := make([]string, 0, len(assign))
+	for _, entry := range assign {
+		if !slices.Contains(out, entry.Var) {
+			out = append(out, entry.Var)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 type AgentTransfer struct {
-	Kind     ControlKind     `json:"kind" yaml:"kind"`
-	When     string          `json:"when,omitempty" yaml:"when,omitempty"`
-	To       string          `json:"to" yaml:"to"`
-	Announce string          `json:"announce,omitempty" yaml:"announce,omitempty"`
-	Requires []string        `json:"requires,omitempty" yaml:"requires,omitempty"`
-	Context  TransferContext `json:"context" yaml:"context"`
+	Kind     ControlKind `json:"kind" yaml:"kind"`
+	When     string      `json:"when,omitempty" yaml:"when,omitempty"`
+	To       string      `json:"to" yaml:"to"`
+	Announce string      `json:"announce,omitempty" yaml:"announce,omitempty"`
+	// Inputs is the brief this handoff carries to its receiver, in authored
+	// order. Validated on the departing agent's tool, written to the call state
+	// before the receiver is entered, and shown in the receiver's prompt.
+	Inputs  []InputField    `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	Context TransferContext `json:"context" yaml:"context"`
 }
 
 func (*AgentTransfer) control() {}
@@ -596,10 +718,6 @@ type Tool struct {
 	// is not silence. Webhook, local and knowledge only; blank means no
 	// announcement, so no driver has to interpret whitespace.
 	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
-	// ReadOnly is the author's promise that this tool writes nothing, required
-	// before a prefetch entry may run it. A declaration, not a guarantee: the
-	// compiler cannot check it.
-	ReadOnly bool `json:"read_only,omitempty" yaml:"read_only,omitempty"`
 	// KnowledgeBase names the base this tool searches (knowledge only).
 	// Validation has proven the name is declared.
 	KnowledgeBase string `json:"knowledge_base,omitempty" yaml:"knowledge_base,omitempty"`

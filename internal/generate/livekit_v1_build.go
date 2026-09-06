@@ -177,6 +177,17 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		scanArgs([]livekitArg{data.Unserved})
 	}
 	data.NeedsField = needAnnotated
+	typed, err := TypedState(agent)
+	if err != nil {
+		return livekitData{}, err
+	}
+	if typed.Source != "" {
+		data.TypedState = &typed
+		needAnnotated = needAnnotated || typed.NeedsAnnotated
+		needLiteral = needLiteral || typed.NeedsLiteral
+	}
+	data.PydanticImports = PydanticImports(data.NeedsField, data.TypedState != nil)
+	data.NeedsDataclassField = StateNeedsDataclassField(agent)
 	var typingNames []string
 	if needAnnotated {
 		typingNames = append(typingNames, "Annotated")
@@ -323,11 +334,10 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// on the session; `assign` and `requires` read and write its fields.
 	for _, name := range sortedVarNames(agent) {
 		v := agent.Variables[name]
-		def := "None"
-		if v.Default != nil {
-			def = pyLiteral(v.Default)
-		}
-		data.Vars = append(data.Vars, livekitVar{Name: name, PyType: pyType(v.Type), Default: def, Description: oneLine(v.Description)})
+		anno, def := stateField(v, true)
+		data.Vars = append(data.Vars, livekitVar{
+			Name: name, PyType: pyType(v.Type), Anno: anno, Default: def, Description: oneLine(v.Description),
+		})
 		if v.Source == ir.VariableSourceCallStart || v.Source == "" {
 			data.CallStartVars = append(data.CallStartVars, livekitCallStartVar{
 				Name: name, Type: string(v.Type), TypeCheck: livekitTypeCheck(v.Type),
@@ -335,8 +345,15 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			})
 		}
 	}
+	// One field per input name, defaulting to None: an input has no value
+	// outside its visit. The same list the Pipecat driver appends to its State,
+	// so the two objects declare the same fields.
+	for _, field := range InputStateFields(agent) {
+		data.Vars = append(data.Vars, livekitVar{
+			Name: field.Name, PyType: "str", Anno: field.Anno, Default: "None", Description: field.Sites,
+		})
+	}
 	data.HasVars = len(data.Vars) > 0
-	data.Capture = buildLiveKitCapture(agent)
 	// A bare name in a compose environment block is forwarded when the host sets
 	// it and absent otherwise, which is exactly what the dev loop's measurement
 	// switch needs: the worker runs in a container, so inheriting the parent's
@@ -362,7 +379,6 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		env.add(name)
 	}
 	data.NeedsRender = renderNeeds(agent)
-	data.PrerequisiteGuard, data.NeedsPrerequisiteGuard = PrerequisiteGuard(agent)
 	data.NeedsPrefetchUnconfirmed = PrefetchUnconfirmed(agent)
 	if block, needed := Prefetch(agent, prefetchStateExpr, func(entry ir.Prefetch) PrefetchRequest {
 		// The env names a pre-fetched webhook reads join the startup check the
@@ -380,12 +396,8 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		data.NeedsPrefetchClock, data.NeedsPrefetchAsync = block.NeedsClock, block.NeedsAsync
 		data.NeedsPrefetchLocal, data.NeedsPrefetchSeed = block.NeedsLocal, block.NeedsSeed
 		data.NeedsHTTPX = data.NeedsHTTPX || prefetchNeedsHTTPX(agent)
-		data.PrefetchRunbook, _ = PrefetchRunbook(agent)
+		data.PrefetchRunbook, _ = PrefetchRunbook(agent, tgt)
 	}
-	if data.Capture != nil {
-		data.NeedsFunctionTools = true // the generated capture tool is a @function_tool too
-	}
-
 	// Prompt constants, ordered agents-then-tasks for a stable file.
 	for _, a := range data.Agents {
 		data.Prompts = append(data.Prompts, livekitPrompt{Const: a.PromptConst, Body: agent.Agents[a.Name].Instructions})
@@ -535,28 +547,6 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	}
 	data.AuthorEnv = authorEnv(data.RequiredEnv, supplied)
 	return data, nil
-}
-
-// buildLiveKitCapture builds the generated update_variables tool: one optional
-// argument per conversation variable, writing the session userdata (V6).
-func buildLiveKitCapture(agent *ir.Agent) *livekitCapture {
-	fields := captureFields(agent)
-	if len(fields) == 0 {
-		return nil
-	}
-	capture := &livekitCapture{
-		Name: ir.CaptureToolName, Description: captureDescription(agent, fields), Fields: fields,
-	}
-	for _, name := range fields {
-		variable := agent.Variables[name]
-		// Every field is optional: the model saves what it has learned so far,
-		// one call or several, never all of them at once.
-		anno := pyType(variable.Type) + " | None"
-		capture.Args = append(capture.Args, livekitArg{
-			Name: name, PyType: pyType(variable.Type), Desc: variable.Description, Anno: anno,
-		})
-	}
-	return capture
 }
 
 func buildLiveKitTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*livekitTelephony, error) {
@@ -863,7 +853,7 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 				built.MCPServers = append(built.MCPServers, livekitMCPSource(ref, tool, env))
 				continue
 			}
-			lowered, err := buildLiveKitTool(ref, tool, agent.Variables, env)
+			lowered, err := buildLiveKitTool(ref, tool, agent.Variables, SupplierIndex(agent.Controls), env)
 			if err != nil {
 				return livekitAgent{}, fmt.Errorf("agent %q: %w", name, err)
 			}
@@ -918,6 +908,20 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 			built.Delegates = append(built.Delegates, delegate)
 		}
 	}
+	// A step that writes declared state has to leave the owner's prompt holding
+	// the value it just wrote. Wired here rather than in buildLiveKitDelegate
+	// because only the owner knows whether its own prompt is templated, and a
+	// package whose steps assign nothing emits exactly what it did before.
+	if built.PromptExpr != "" {
+		for i := range built.Delegates {
+			task := built.Delegates[i].Task
+			if task == nil || len(task.Assign) == 0 {
+				continue
+			}
+			built.Delegates[i].RefreshOwnerPrompt = true
+			built.RefreshPrompt = true
+		}
+	}
 	return built, nil
 }
 
@@ -926,7 +930,9 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 func buildLiveKitTransfer(agent *ir.Agent, tgt ir.Target, ref string, control *ir.AgentTransfer, env *envSet) (livekitTransfer, error) {
 	transfer := livekitTransfer{
 		Method: ref, When: transferWhen(control), TargetClass: pyName(control.To),
-		Announce: control.Announce, Requires: control.Requires,
+		Announce:       control.Announce,
+		Inputs:         inputArgs(control.Inputs),
+		ReceiverInputs: inputNames(agent.Agents[control.To].Inputs),
 	}
 	if control.Context.History == ir.HistorySummary {
 		summarizer, err := livekitSummaryLLM(agent, tgt, control.Context.Summarizer, env)
@@ -936,27 +942,6 @@ func buildLiveKitTransfer(agent *ir.Agent, tgt ir.Target, ref string, control *i
 		transfer.Summary = &summarizer
 	} else {
 		transfer.CtxExpr, _ = livekitCtxExpr(control.Context.TaskContext)
-	}
-	// context.variables (D7): a subset resets the fields the transfer does not
-	// carry; `all` leaves the shared session userdata untouched.
-	if !control.Context.Variables.All {
-		carried := map[string]bool{}
-		for _, name := range control.Context.Variables.Names {
-			carried[name] = true
-		}
-		for _, name := range sortedVarNames(agent) {
-			if carried[name] {
-				continue
-			}
-			variable := agent.Variables[name]
-			def := "None"
-			if variable.Default != nil {
-				def = pyLiteral(variable.Default)
-			}
-			transfer.ResetVars = append(transfer.ResetVars, livekitVar{
-				Name: name, PyType: pyType(variable.Type), Default: def,
-			})
-		}
 	}
 	return transfer, nil
 }
@@ -1019,10 +1004,10 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 		} else {
 			single.CtxExpr, _ = livekitCtxExpr(task.Context)
 		}
-		for variable, path := range c.Assign {
+		for _, entry := range c.Assign {
 			single.Assign = append(single.Assign, livekitAssign{
-				Var: variable, Field: strings.TrimPrefix(path, "result."),
-				Confirms: agent.Variables[variable].Confirm == c.Task,
+				Var: entry.Var, Field: entry.Field, Append: entry.Append,
+				Confirms: agent.Variables[entry.Var].Confirm == c.Task,
 			})
 		}
 		sort.Slice(single.Assign, func(i, j int) bool { return single.Assign[i].Var < single.Assign[j].Var })
@@ -1030,12 +1015,12 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 		// hands back the typed result only (C4/N13). The finality guidance stops
 		// the owner LLM re-running the finished flow (B1/V1).
 		return livekitDelegate{
-			Method: ref, When: delegateWhen(c) + delegateReturnFinality + delegateForwardDeclaration(agent, c),
+			Method: ref, When: delegateWhen(c) + delegateReturnFinality,
 			Task:            single,
 			Then:            "return",
-			Requires:        c.Requires,
 			Announce:        c.Announce,
 			CanTaskTransfer: livekitTaskCanTransfer(agent, task),
+			Inputs:          inputArgs(task.Inputs),
 		}, nil
 	}
 	group, ok := agent.TaskGroups[c.Group]
@@ -1045,10 +1030,9 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 	// C3: TaskGroup always shares context, so `isolated` lowers to a generated
 	// sequence of standalone AgentTasks (each starts fresh, C4) instead.
 	delegate := livekitDelegate{
-		Method: ref, When: delegateWhen(c) + delegateForwardDeclaration(agent, c), Then: string(group.Then),
+		Method: ref, When: delegateWhen(c), Then: string(group.Then),
 		Announce: c.Announce,
 		Isolated: group.ContextScope == ir.ContextIsolated,
-		Requires: c.Requires,
 	}
 	// N13/§4.7: return hands the owner the typed results; transfer and end do not
 	// return, so the tool description must say so (the model must not wait for a
@@ -1071,6 +1055,36 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 		delegate.CanTaskTransfer = delegate.CanTaskTransfer || livekitTaskCanTransfer(agent, agent.Tasks[step])
 	}
 	return delegate, nil
+}
+
+// inputArgs lowers a seam's inputs to tool parameters: required first, because
+// Python forbids a parameter with no default after one with a default, and
+// authored order within each group so the signature reads like the package.
+// The annotation carries the description, which is how it reaches the model.
+func inputArgs(inputs []ir.InputField) []livekitArg {
+	var args []livekitArg
+	for _, optional := range []bool{false, true} {
+		for _, input := range inputs {
+			if input.Optional != optional {
+				continue
+			}
+			args = append(args, livekitArg{
+				Name: input.Name, PyType: PyAnno(input.Type), Required: !input.Optional,
+				Desc: input.Description, Anno: inputAnno(input),
+			})
+		}
+	}
+	return args
+}
+
+// inputNames is the names of a receiver's brief, for the reset a handoff does
+// before it writes its own values.
+func inputNames(inputs []ir.InputField) []string {
+	names := make([]string, 0, len(inputs))
+	for _, input := range inputs {
+		names = append(names, input.Name)
+	}
+	return names
 }
 
 func livekitTaskCanTransfer(agent *ir.Agent, task ir.Task) bool {
@@ -1113,6 +1127,10 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 			Anno: pyAnno(base, rf.Enum, ""),
 		})
 	}
+	for _, field := range task.Result {
+		built.Typed = built.Typed || field.Shape != nil
+	}
+	built.ResultExpr = livekitResultExpr(built)
 	for _, ref := range task.Tools {
 		tool, ok := agent.Tools[ref]
 		if !ok {
@@ -1135,7 +1153,7 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 			built.MCPServers = append(built.MCPServers, livekitMCPSource(ref, tool, env))
 			continue
 		}
-		lowered, err := buildLiveKitTool(ref, tool, agent.Variables, env)
+		lowered, err := buildLiveKitTool(ref, tool, agent.Variables, SupplierIndex(agent.Controls), env)
 		if err != nil {
 			return livekitTask{}, fmt.Errorf("task %q: %w", name, err)
 		}
@@ -1155,8 +1173,8 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 // livekitStateExpr is how an emitted @function_tool reaches the call state.
 const livekitStateExpr = "ctx.userdata"
 
-func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variable, env *envSet) (livekitTool, error) {
-	inject, needed := loweredInject(tool, variables, livekitStateExpr)
+func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variable, suppliers map[string]string, env *envSet) (livekitTool, error) {
+	inject, needed := loweredInject(tool, variables, suppliers, livekitStateExpr)
 	args := livekitToolArgs(tool.Input)
 	argNames := make([]string, 0, len(args))
 	for _, arg := range args {
@@ -1558,9 +1576,37 @@ func humanize(name string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(name, "_", " "), "-", " ")
 }
 
+// livekitResultExpr is the dict the finish handler hands back.
+//
+// Untyped, it is the literal the template used to write inline in four places:
+// each declared field's own name to the argument of that name. Typed, it is the
+// local the validating preamble left behind, so the values recorded are the
+// validated ones and a shape arrives as plain data rather than as a model,
+// which is the only shape this framework accepts back from a tool.
+func livekitResultExpr(task livekitTask) string {
+	if task.Typed {
+		return "_values"
+	}
+	entries := make([]string, 0, len(task.Result))
+	for _, field := range task.Result {
+		entries = append(entries, pyQuote(field.Name)+": "+field.Name)
+	}
+	return "{" + strings.Join(entries, ", ") + "}"
+}
+
 func resultPyType(field ir.ResultField) string {
+	// A declared shape lowers to its generated class, so the model is told the
+	// field names, their types and their descriptions.
+	//
+	// This used to return "dict" for anything nested, which is the silent gap
+	// this closes: a bare dict annotation carries no field names, so the
+	// pydantic conversion had nothing to turn into properties and the model was
+	// asked for an object and told nothing about what belongs in it.
+	if field.Shape != nil {
+		return PyAnno(field.Shape)
+	}
 	if field.Schema != nil {
-		return "dict" // nested result schema (code targets only): a JSON object arg
+		return "dict" // a raw JSON Schema object, forwarded as a JSON object arg
 	}
 	if len(field.Enum) > 0 {
 		return "str"

@@ -1557,7 +1557,7 @@ func editHandoffs(runner *fieldRunner, data *scaffold.Data) error {
 		}
 
 		agents := data.AllAgents()
-		handoff := scaffold.Handoff{Source: agents[0].Name, To: agents[1].Name, History: "full", AllVariables: true}
+		handoff := scaffold.Handoff{Source: agents[0].Name, To: agents[1].Name, History: "full"}
 		handoff.Name = "to_" + handoff.To
 		back, err := runner.input("Handoff name", "Lowercase snake_case; tools, delegates, handoffs and escalations share one namespace.", &handoff.Name, func(value string) error {
 			if err := validateIdentifier(value); err != nil {
@@ -1585,13 +1585,6 @@ func editHandoffs(runner *fieldRunner, data *scaffold.Data) error {
 	}
 }
 
-func handoffVariablesLabel(handoff scaffold.Handoff) string {
-	if handoff.AllVariables {
-		return "all"
-	}
-	return cmp.Or(strings.Join(handoff.Variables, ", "), "none")
-}
-
 func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) error {
 	for {
 		var handoff *scaffold.Handoff
@@ -1608,8 +1601,7 @@ func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) e
 			newChoice("Source agent  ·  "+handoff.Source, "source"),
 			newChoice("Target agent  ·  "+handoff.To, "target"),
 			newChoice("Trigger  ·  "+oneLine(handoff.When), "trigger"),
-			newChoice("Required variables  ·  "+cmp.Or(strings.Join(handoff.Requires, ", "), "none"), "requires"),
-			newChoice("Context  ·  "+cmp.Or(handoff.History, "full")+" · variables "+handoffVariablesLabel(*handoff), "context"),
+			newChoice("Context  ·  "+cmp.Or(handoff.History, "full"), "context"),
 			newChoice("Announcement  ·  "+cmp.Or(oneLine(handoff.Announce), "silent"), "announce"),
 			newChoice("Delete handoff", "delete"),
 			newChoice("← Back", actionBack),
@@ -1642,14 +1634,6 @@ func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) e
 			if _, err := runner.input("When to hand off", "Plain-language trigger shown to the model.", &handoff.When, validateRequiredText); err != nil {
 				return err
 			}
-		case "requires":
-			selected, back, err := pickReferences(runner, "Required variables (optional)", "The handoff is available only after every selected variable has a value.", variableNames(data), handoff.Requires, true)
-			if err != nil {
-				return err
-			}
-			if !back {
-				handoff.Requires = selected
-			}
 		case "context":
 			if err := editHandoffContextDetails(runner, data, handoff); err != nil {
 				return err
@@ -1677,12 +1661,6 @@ func editHandoffContextDetails(runner *fieldRunner, data *scaffold.Data, handoff
 		if handoff.IncludeToolCalls != nil {
 			tools = map[bool]string{true: "include", false: "exclude"}[*handoff.IncludeToolCalls]
 		}
-		scope := "none"
-		if handoff.AllVariables {
-			scope = "all"
-		} else if len(handoff.Variables) > 0 {
-			scope = "selected"
-		}
 		options := []menuChoice{newChoice("History  ·  "+history, "history")}
 		if history == "last_n" {
 			options = append(options, newChoice(fmt.Sprintf("Maximum messages  ·  %d", handoff.MaxMessages), "maximum"))
@@ -1691,12 +1669,6 @@ func editHandoffContextDetails(runner *fieldRunner, data *scaffold.Data, handoff
 			options = append(options, newChoice("Summarizer model  ·  "+cmp.Or(handoff.Summarizer, data.AllAgents()[0].ModelProfile()), "summarizer"))
 		}
 		options = append(options, newChoice("Tool calls  ·  "+tools, "tools"))
-		if len(data.Variables) > 0 {
-			options = append(options, newChoice("Variable scope  ·  "+scope, "scope"))
-			if scope == "selected" {
-				options = append(options, newChoice("Selected variables  ·  "+strings.Join(handoff.Variables, ", "), "variables"))
-			}
-		}
 		options = append(options, newChoice("← Back", actionBack))
 		choice, _, err := runner.selectOne("Handoff context", "Edit one field, then return here.", options, true)
 		if err != nil || choice == actionBack {
@@ -1758,27 +1730,6 @@ func editHandoffContextDetails(runner *fieldRunner, data *scaffold.Data, handoff
 					include := selected == "yes"
 					handoff.IncludeToolCalls = &include
 				}
-			}
-		case "scope":
-			selected, back, err := runner.selectOne("Variables in context", "Available variables: "+strings.Join(variableNames(data), ", "), []menuChoice{newChoice("All variables", "all"), newChoice("Selected variables", "selected"), newChoice("No variables", "none"), newChoice("← Back", actionBack)}, true)
-			if err != nil {
-				return err
-			}
-			if !back {
-				handoff.AllVariables = selected == "all"
-				if selected == "selected" && len(handoff.Variables) == 0 {
-					handoff.Variables = []string{data.Variables[0].Name}
-				} else if selected != "selected" {
-					handoff.Variables = nil
-				}
-			}
-		case "variables":
-			selected, back, err := pickReferences(runner, "Variables to include", "Choose which saved variables enter the target agent's context.", variableNames(data), handoff.Variables, false)
-			if err != nil {
-				return err
-			}
-			if !back {
-				handoff.Variables = selected
 			}
 		}
 	}
@@ -3095,10 +3046,6 @@ func deleteResource(data *scaffold.Data, kind, name string) error {
 	switch kind {
 	case "variable":
 		data.Variables = slices.DeleteFunc(data.Variables, func(item scaffold.Variable) bool { return item.Name == name })
-		for i := range data.Handoffs {
-			data.Handoffs[i].Requires = slices.DeleteFunc(data.Handoffs[i].Requires, func(n string) bool { return n == name })
-			data.Handoffs[i].Variables = slices.DeleteFunc(data.Handoffs[i].Variables, func(n string) bool { return n == name })
-		}
 		for i := range data.Tasks {
 			removeAssignment(&data.Tasks[i], name)
 		}

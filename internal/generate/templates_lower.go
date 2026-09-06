@@ -23,10 +23,58 @@ type injectedValue struct {
 }
 
 // neededVar is a variable an injected value reads. The generated tool refuses
-// the call when one is unset, so no half-formed request is ever sent (V4).
+// the call when one is unset, so no half-formed request is ever sent (V4). Hint
+// is the advice the refusal gives about this one name, composed once in Go by
+// neededHint so both targets render the same words.
 type neededVar struct {
-	Name        string
-	Description string
+	Name string
+	Hint string
+}
+
+// SupplierIndex maps a variable name to the control that fills it.
+//
+// Only a delegate can fill a variable, through its `assign:` block, so that is
+// the whole search. Where two controls assign the same variable, the first in
+// sorted control order wins, which makes the emitted output deterministic rather
+// than dependent on map order.
+func SupplierIndex(controls map[string]ir.Control) map[string]string {
+	index := map[string]string{}
+	for _, name := range sortedKeys(controls) {
+		delegate, ok := controls[name].(*ir.Delegate)
+		if !ok {
+			continue
+		}
+		for _, variable := range ir.AssignedVars(delegate.Assign) {
+			if _, taken := index[variable]; !taken {
+				index[variable] = name
+			}
+		}
+	}
+	return index
+}
+
+// neededHint is the advice a refusal gives about one still-unset name: run the
+// step that supplies it, when one exists, or ask the caller for it.
+//
+// A confirm value names its own confirming step even though that step's
+// assign: also makes it the supplier index's answer, so checking Confirm
+// first never disagrees with the index; it only avoids a lookup. Naming a
+// step is right for any value a task hands the agent rather than the caller:
+// telling the model to ask the caller for a value the salon's own lookup
+// supplies is the mistake confirm: exists to prevent (a caller asked to read
+// out a number the agent is about to use to look them up). Everything neither
+// assigned nor confirmed really is something only the caller can supply.
+func neededHint(name string, variable ir.Variable, suppliers map[string]string) string {
+	if variable.Confirm != "" {
+		return "run " + variable.Confirm + " first."
+	}
+	if supplier, ok := suppliers[name]; ok {
+		return "run " + supplier + " first."
+	}
+	if variable.Description == "" {
+		return "ask the caller for it."
+	}
+	return "ask the caller for it. " + variable.Description
 }
 
 // injectExpr renders one inject value as a Python expression. A value that is
@@ -39,6 +87,13 @@ func injectExpr(value any, stateExpr string) string {
 		return pyLiteral(value)
 	}
 	if name := ir.TemplateVar(text); name != "" {
+		if ir.PathRoot(name) != name {
+			// One part of a declared value, emitted as a flat name. Through the
+			// lookup rather than an attribute read, and [1] because the lookup
+			// also returns the root's name, which a request body has no use for.
+			// The part keeps its own type, so an integer field stays an integer.
+			return "_state_lookup(" + stateExpr + ", " + pyQuote(name) + ")[1]"
+		}
 		return stateExpr + "." + name
 	}
 	if !ir.HasTemplate(text) {
@@ -50,7 +105,7 @@ func injectExpr(value any, stateExpr string) string {
 // loweredInject builds the sorted inject expressions for a tool plus the
 // variables they read, so the emitter can both send the values and refuse the
 // call when one is missing.
-func loweredInject(tool ir.Tool, variables map[string]ir.Variable, stateExpr string) ([]injectedValue, []neededVar) {
+func loweredInject(tool ir.Tool, variables map[string]ir.Variable, suppliers map[string]string, stateExpr string) ([]injectedValue, []neededVar) {
 	keys := make([]string, 0, len(tool.Inject))
 	for key := range tool.Inject {
 		keys = append(keys, key)
@@ -60,7 +115,7 @@ func loweredInject(tool ir.Tool, variables map[string]ir.Variable, stateExpr str
 	for _, key := range keys {
 		values = append(values, injectedValue{Key: key, Expr: injectExpr(tool.Inject[key], stateExpr)})
 	}
-	return values, neededVars(tool, variables)
+	return values, neededVars(tool, variables, suppliers)
 }
 
 // oneLine collapses every run of whitespace to a single space, for text emitted
@@ -75,31 +130,35 @@ func oneLine(text string) string { return strings.Join(strings.Fields(text), " "
 
 // neededVars collects the variables a tool's inject values and path read that
 // could still be unset when the model calls it, in name order. Two kinds are
-// left out: one carrying a default (it always has a value), and a system one
-// (B2 — a refusal tells the model to go and ask, and nobody can be asked for a
-// value the runtime owns; a route that owns it fails at session start instead).
+// left out: one carrying a default (it always has a value), and a system one.
+// B2: a refusal tells the model what to do about a name, and nothing can be
+// done about a value the runtime owns; a route that owns it fails at session
+// start instead.
 //
 // One kind is deliberately kept in despite carrying a default: a variable
 // declaring `confirm:`. It has a value the moment the pre-fetch runs, and that
 // value is a proposal rather than a fact, so a tool that injected it before the
 // caller agreed would list somebody else's bookings or record a complaint against
 // somebody else's record. The emitted refusal is what stops that, and it stops it
-// wherever the tool is attached, which is why this needs no walk over the control
-// graph to work out whether the tool is reachable unguarded.
-func neededVars(tool ir.Tool, variables map[string]ir.Variable) []neededVar {
+// wherever the tool is attached, with no need to walk the control graph to work
+// out whether some other step already stands in front of it.
+func neededVars(tool ir.Tool, variables map[string]ir.Variable, suppliers map[string]string) []neededVar {
 	seen := make(map[string]bool)
 	var needed []neededVar
 	collect := func(text string) {
 		for _, ref := range ir.TemplateRefs(text) {
-			variable, ok := variables[ref]
-			if !ok || seen[ref] || ir.IsSystemSource(variable.Source) {
+			// The root: a path into a value that is unset is a request against
+			// nobody's record, and the refusal names the record to ask for.
+			name := ir.PathRoot(ref)
+			variable, ok := variables[name]
+			if !ok || seen[name] || ir.IsSystemSource(variable.Source) {
 				continue
 			}
 			if variable.Default != nil && variable.Confirm == "" {
 				continue
 			}
-			seen[ref] = true
-			needed = append(needed, neededVar{Name: ref, Description: variable.Description})
+			seen[name] = true
+			needed = append(needed, neededVar{Name: name, Hint: neededHint(name, variable, suppliers)})
 		}
 	}
 	keys := make([]string, 0, len(tool.Inject))
@@ -121,7 +180,7 @@ func neededVars(tool ir.Tool, variables map[string]ir.Variable) []neededVar {
 func neededLiteral(needed []neededVar) string {
 	pairs := make([]string, 0, len(needed))
 	for _, variable := range needed {
-		pairs = append(pairs, "("+pyQuote(variable.Name)+", "+pyQuote(variable.Description)+")")
+		pairs = append(pairs, "("+pyQuote(variable.Name)+", "+pyQuote(variable.Hint)+")")
 	}
 	return "[" + strings.Join(pairs, ", ") + "]"
 }
@@ -208,31 +267,6 @@ func renderNeeds(agent *ir.Agent) bool {
 		}
 	}
 	return false
-}
-
-// captureFields returns the conversation variables, in name order: the schema of
-// the generated update_variables tool (V6).
-func captureFields(agent *ir.Agent) []string {
-	var names []string
-	for name, variable := range agent.Variables {
-		if variable.Source == ir.VariableSourceConversation {
-			names = append(names, name)
-		}
-	}
-	slices.Sort(names)
-	return names
-}
-
-// captureDescription is the generated tool's description: one fixed line plus
-// each variable's own description, so the model knows what to listen for.
-func captureDescription(agent *ir.Agent, names []string) string {
-	text := "Save details the caller gives you, as soon as you learn them."
-	for _, name := range names {
-		if description := agent.Variables[name].Description; description != "" {
-			text += " " + name + ": " + description
-		}
-	}
-	return text
 }
 
 // requiredSecretEnv lists the declared secrets a generated runtime refuses to

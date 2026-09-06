@@ -219,13 +219,13 @@ number the call already carried, and a date that costs two chained tool hops
 with nothing spoken over them.
 
 ```yaml agent.yaml
-timezone: Europe/Madrid          # required before any entry reads the clock
-
 prefetch:
   - name: today
-    clock: date
+    clock: now
+    timezone: Europe/Madrid
     assign:
       - booking_date: result.date
+      - booking_weekday: result.day_of_week
 
   - name: caller
     source: from_number
@@ -233,10 +233,16 @@ prefetch:
       - customer_phone: result.value
 ```
 
-A `clock:` entry works on any route, and so does a `tool:` entry whose arguments
-you already hold. A `source:` entry only receives a value where the route supplies
-call facts, which is LiveKit `sip` and `connector`: no Pipecat route supplies them,
-and `unmute validate` warns when an entry can never resolve on a target.
+One reading of the clock fills both variables above, at no extra cost: an
+entry assigns as many variables as the result has fields, from one call.
+
+A `clock:` entry works on any route, and so does a `tool:` entry whose
+arguments you already hold, once you say `writes: false` on it. A `source:`
+entry depends on the route: LiveKit's two routes supply every fact, and
+Pipecat's two Twilio routes supply a smaller set, each in one direction only
+for a phone number. `unmute validate` warns when an entry can never resolve on
+a target. See [Where it works](/build/prefetch#where-it-works) for the full
+grid.
 
 A fact from the carrier is a proposal, not a settled value, so mark anything a
 caller could dispute with `confirm:`. The step that used to collect it then reads

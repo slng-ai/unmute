@@ -60,7 +60,7 @@ func TestCallFactsPayload(t *testing.T) {
 	}{
 		{"not name=value", "from_number", "must be name=value"},
 		{"not a call fact", "caller_name=Ada", "not a fact a call carries"},
-		{"the model's own", "conversation=x", "the model saves mid-call"},
+		{"conversation is not a call fact either", "conversation=x", "not a fact a call carries"},
 		{"the dispatch payload", "call_start=x", "seed it with --var"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,15 +79,12 @@ func TestCallFactsPayload(t *testing.T) {
 // drivers hydrate from it: `source: call_start`, and a variable declaring no
 // source at all. Both emitted runbooks print a `--var <name>=...` line for
 // every one of them, so a name the runbook prints and the flag refuses is a
-// runbook teaching a command that does not work. The refusal for a sourceless
-// variable also named `update_variables`, which is generated over
-// `source: conversation` only, so it described a mechanism that could not have
-// written the value either.
+// runbook teaching a command that does not work.
 func TestCallStartPayload(t *testing.T) {
 	agent := &ir.Agent{Variables: map[string]ir.Variable{
 		"dispatched":     {Type: ir.PrimitiveString, Source: ir.VariableSourceCallStart},
 		"sourceless":     {Type: ir.PrimitiveString},
-		"mid_call":       {Type: ir.PrimitiveString, Source: ir.VariableSourceConversation},
+		"unrecognized":   {Type: ir.PrimitiveString, Source: ir.VariableSource("conversation")},
 		"from_the_route": {Type: ir.PrimitiveString, Source: ir.VariableSourceFromNumber},
 	}}
 
@@ -109,7 +106,7 @@ func TestCallStartPayload(t *testing.T) {
 	}{
 		{"not name=value", "dispatched", "must be name=value"},
 		{"undeclared", "nobody=Ada", "no variable"},
-		{"the model's own", "mid_call=Ada", ir.CaptureToolName},
+		{"an unrecognized source", "unrecognized=Ada", "not a source unmute recognizes"},
 		{"the route's own", "from_the_route=Ada", "the runtime supplies it"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

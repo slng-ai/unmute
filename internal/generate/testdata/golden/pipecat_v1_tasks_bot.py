@@ -422,7 +422,7 @@ class IntakeAgent(TracedLLMWorker):
         await self.flush_pipeline()
         self.context.set_messages(messages + [{
             "role": "developer",
-            "content": "Task results: " + json.dumps(self._run_collect_results) + " Continue with the caller in one short line. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn with your own tools or a handoff. Never end the turn without it and never tell the caller you cannot.",
+            "content": "Task results: " + json.dumps(self._run_collect_results) + " Continue with the caller in one short line. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn, with your own tools, a handoff, or the same flow again. It is a new request, so running the flow for it is not running it again for the one that just finished. Never end the turn without acting on it, and never tell the caller you cannot.",
         }])
         self.context.set_tools(tools)
         return {"status": "ok"}, None
@@ -485,7 +485,7 @@ class IntakeAgent(TracedLLMWorker):
         await self.flush_pipeline()
         self.context.set_messages(messages + [{
             "role": "developer",
-            "content": "Task results: " + json.dumps(self._run_triage_results) + " Continue with the caller in one short line. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn with your own tools or a handoff. Never end the turn without it and never tell the caller you cannot.",
+            "content": "Task results: " + json.dumps(self._run_triage_results) + " Continue with the caller in one short line. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn, with your own tools, a handoff, or the same flow again. It is a new request, so running the flow for it is not running it again for the one that just finished. Never end the turn without acting on it, and never tell the caller you cannot.",
         }])
         self.context.set_tools(tools)
         return {"status": "ok"}, None

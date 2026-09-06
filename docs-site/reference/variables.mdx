@@ -7,6 +7,30 @@ sidebarTitle: "Variables"
 A variable is a named value that lives for one call. This is the complete field
 reference. For a task-led introduction, start with [Variables](/build/variables).
 
+## How a value moves
+
+Four keys write or read state, and it is easy to blur them together. This is
+the map: the rest of this page works through `variables:` and `prefetch:` in
+full, and [Tasks](/build/orchestration/tasks) does the same for `expect:`.
+
+| Key | Think of it as | Lives | Read by |
+|---|---|---|---|
+| `variables:` | the call's state | the whole call | every prompt, through the block the compiler adds or `{{name}}` |
+| `prefetch:` + `assign:` | state filled before the first word | the whole call | the same |
+| `expect:` | what a step or a receiving agent is handed, filled by the calling model from the caller's words | one visit (a task), until the next handoff (an agent) | that prompt only, in its `Request:` block |
+| `result:` + `assign:` | what a step hands back, or one part of it, written into state at `finish` | the whole call from then on | every prompt |
+
+State is written only at a seam: before the call, by `prefetch:`, and at
+`finish`, by a step's `result:` and `assign:`. The caller's own words enter a
+step through `expect:`. A step keeps what matters for later by putting it in
+its result.
+
+`variables:` and `prefetch:` are the rest of this page.
+[Assigning a task result to a variable](#assigning-a-task-result-to-a-variable)
+below covers `result:` and `assign:`. `expect:` belongs to a task or a
+handoff, not to a variable: see [Hand the step what the caller asked
+for](/build/orchestration/tasks#hand-the-step-what-the-caller-asked-for).
+
 ```yaml agent.yaml
 variables:
   customer_name:
@@ -18,31 +42,109 @@ variables:
 
 | Field | Required | What it is |
 |---|---|---|
-| `type` | yes | `string`, `number`, `integer`, or `boolean` |
+| `type` | yes | a type expression, see [the type grammar](#the-type-grammar) below |
 | `source` | no | where the value comes from |
 | `default` | no | the value to use when nothing supplies one |
 | `confirm` | no | the step that must hear the caller agree before anything acts on this value |
-| `description` | no | a note; for `conversation` variables the model reads it |
+| `description` | no | a note for readers of this file; not sent to the model |
+
+## The type grammar
+
+`type` is a single line, written in Pydantic's own words. A task's or a
+handoff's `result:` field takes the same grammar, so a step can hand back a
+whole shape.
+
+```text
+type  := atom ("|" atom)*
+atom  := name | name "[" args "]"
+args  := arg ("," arg)*
+arg   := type | string
+```
+
+| Written | Accepted | Notes |
+|---|---|---|
+| `str` `int` `float` `bool` | yes | the four scalar types. `string` `number` `integer` `boolean` still work and mean the same thing |
+| `Phone` `Date` `Time` `Id` | yes | text with a validated shape. Sent to the model as `str`; the shape is checked where the value enters the state |
+| `Literal["a", "b"]` | yes | a closed set of strings, at least one entry |
+| `list[T]` | yes | `T` is any type in this table |
+| a declared shape name | yes | the name must appear under `shapes:`, below |
+| `T \| None` | yes | on either side; says the value may be absent |
+| `datetime` `date` `time` `UUID` | no | write `Date`, `Time`, or `Id` instead |
+| `SecretStr` | no | a secret reaches a tool through its own `*_env` field, never through state |
+| `PaymentCardNumber` | no | outside the declared type scope |
+| `dict[...]` `set[...]` `tuple[...]` | no | declare a shape under `shapes:` instead |
+| `Optional[...]` | no | write `T \| None` |
+| `List[...]` | no | write `list[...]`, in lower case |
+
+A name outside this table is refused with the line and the column inside the
+expression, and the message says what to write instead.
+
+## `shapes:` groups fields into a named type
+
+A top-level list. Each item declares one named group of fields, which a
+`type:` can then refer to by name.
+
+```yaml agent.yaml
+shapes:
+  - name: Appointment
+    description: One thing being booked, moved or cancelled.
+    fields:
+      - scheduled_date: Date
+      - scheduled_time: Time
+      - name: appointment_type
+        type: Literal["haircut", "haircolor", "dry_cut"]
+        description: The service the caller asked for, in the salon's own words.
+```
+
+| Key | Required | What it is |
+|---|---|---|
+| `name` | yes | what a `type:` refers to. Written in `CapWords`, because it names a generated class |
+| `description` | no | reaches the model as the class docstring |
+| `fields` | yes | one or more fields, in either form below |
+
+A field is one line when it needs no description:
+
+```yaml
+- scheduled_date: Date
+```
+
+and a block when it does:
+
+```yaml
+- name: scheduled_date
+  type: Date
+  description: The day, as the caller gave it.
+```
+
+`confirm:` cannot be written on a field. It belongs to the variable whose
+`type:` names the shape, so a guard on an unconfirmed value cannot be
+sidestepped by naming a field one level down.
+
+A shape that refers to itself, directly or through another shape, is
+refused: nothing can render an object with no bottom, and the model would be
+asked to fill one in.
 
 ## Sources
 
 | Source | Who supplies it | Availability |
 |---|---|---|
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
-| `conversation` | the model, through the generated `update_variables` tool | during the call |
+| omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so write the prompt to read whole while it is still empty, or give it a `default:` |
 | `session_id` | the phone adapter | LiveKit `sip` or `connector` |
-| `call_id` | the phone adapter | LiveKit `sip` or `connector` |
-| `stream_id` | the phone adapter | LiveKit `connector` only, not LiveKit `sip` |
-| `direction` | the phone adapter | LiveKit `sip` or `connector` |
-| `from_number` | the phone adapter | LiveKit `sip` or `connector` |
-| `to_number` | the phone adapter | LiveKit `sip` or `connector` |
+| `call_id` | the phone adapter | LiveKit `sip` or `connector`, and both Pipecat Twilio routes |
+| `stream_id` | the phone adapter | LiveKit `connector`, and Pipecat `cloud-websocket` |
+| `direction` | the phone adapter | LiveKit `sip` or `connector`, and both Pipecat Twilio routes |
+| `from_number` | the phone adapter | LiveKit `sip` or `connector`, both directions; both Pipecat Twilio routes, inbound calls only |
+| `to_number` | the phone adapter | LiveKit `sip` or `connector`, both directions; Pipecat `cloud-websocket`, outbound calls only |
 | `carrier` | the phone adapter | LiveKit `sip` or `connector` |
 | `connection` | the phone adapter | LiveKit `sip` or `connector` |
 
-The last eight are system sources. You declare them and the selected phone route
-must prove it can supply them. **No Pipecat route binds a system source**, so
-declaring one on a Pipecat target is a validation error: neither `daily-sip` nor
-`cloud-websocket` emits an adapter that fills the table these read from.
+The last eight are system sources. You declare them, and the selected route
+must be able to supply the fact: a route that grants nothing for it refuses
+the declaration at validation. A `prefetch:` entry reads the same route table
+as a variable's own `source:`, so the same fact hydrates either way, on
+whichever route grants it. [The full grid](/build/prefetch#where-it-works) has
+exactly what each route grants, fact by fact and direction by direction.
 
 For an inbound LiveKit or Pipecat telephony channel, every `call_start` variable
 needs a default. There is no dispatch payload to supply an unsolicited incoming
@@ -58,13 +160,13 @@ discovering them.
 **It is an ordered list. Entries resolve top to bottom.**
 
 ```yaml agent.yaml
-timezone: Europe/Madrid          # required before any entry reads the clock
-
 prefetch:
   - name: today
-    clock: date
+    clock: now
+    timezone: Europe/Madrid
     assign:
       - booking_date: result.date
+      - booking_weekday: result.day_of_week
 
   - name: caller
     source: from_number
@@ -73,19 +175,29 @@ prefetch:
 
   - name: profile
     tool: look_up_customer
+    writes: false
     args:
       - phone: "{{customer_phone}}"
     assign:
       - customer_name: result.name
+      - customer_on_file: result.status
 ```
+
+`profile` assigns two variables from one lookup. An entry can `assign:` as
+many variables as the result has fields, from the one call.
 
 Every entry carries a `name:` and exactly one source key.
 
 | Key | Reads | Result fields |
 |---|---|---|
-| `clock: date` | the package clock, in the declared `timezone:` | `result.date` |
+| `clock: now` | the clock, in the entry's own `timezone:` | `result.date`, `result.time`, `result.datetime`, `result.day_of_week`, `result.year`, `result.timezone` |
 | `source: <name>` | one of the eight facts a call carries | `result.value` |
-| `tool: <name>` | one already-declared read-only tool | `result.<field>`, from the tool's `output:` |
+| `tool: <name>` | one already-declared tool, with `writes:` declared on this entry | `result.<field>`, from the tool's `output:` |
+
+A `clock: now` entry reads the clock once and may `assign:` as many of the six
+fields as you want. All six come from that one reading, so an entry assigning
+`result.date` and `result.time` cannot straddle a second, and one assigning
+`result.date` and `result.day_of_week` cannot straddle midnight.
 
 `args:` belongs to a `tool:` entry only, and takes the same value grammar as a
 tool's `inject:`.
@@ -101,31 +213,47 @@ with its line number.
 - **The order you write is the order it runs.** An entry reading a value that a
   later entry assigns is refused, naming both entries and which one to move up.
   Reading a value an earlier entry assigned is the intended shape.
-- **`tool:` requires `read_only: true`** on the tool, and webhook or local
-  execution. A pre-fetch runs unasked on every call.
+- **`tool:` requires `writes: true` or `writes: false`** on the entry, and
+  webhook or local execution on the tool. There is no default: a pre-fetch
+  runs unasked on every call, so the build makes you say whether that is
+  safe. `writes:` is refused on a `clock:` or `source:` entry, which run no
+  tool.
 - **The variable receiving a call fact declares no `source:` of its own.** That is
   what keeps the package compiling on a route that supplies no caller ID.
-- **`timezone:` is required for a clock, never defaulted.** A container clock is
-  UTC, so a business in Spain taking a booking for "tomorrow" at 23:30 local would
-  name the wrong day, and nothing would report it.
+- **A `clock:` entry requires its own `timezone:`, never defaulted.** A container
+  clock is UTC, so a business in Spain taking a booking for "tomorrow" at 23:30
+  local would name the wrong day, and nothing would report it. The zone lives on
+  the entry, not on the package, so two entries may read two zones.
+- **`clock: now` is the only value `clock:` accepts.** `assign:` then names any of
+  the six result fields; naming anything else is refused, listing all six.
 
 ### What happens when it cannot resolve
 
 An entry whose inputs are empty is **skipped**, and so is every later entry that
 reads what it would have assigned. The values keep their declared defaults and the
-call carries on. That is the specified behaviour, not a failure: no Pipecat route
-supplies a caller number, a caller can withhold theirs, and the browser loop has
-no carrier at all.
+call carries on. That is the specified behaviour, not a failure: a caller can
+withhold their number, the browser loop has no carrier at all, and some facts
+are absent on some routes, or on one direction of a route, by design.
 
-`unmute validate` warns per target, naming the route, the entry, and the knock-on
-entry:
+`unmute validate` warns per target, naming the route, the entry, and the
+knock-on entry. A fact the route never supplies reads like this:
 
 ```
-warning: target "pipecat": prefetch "caller" reads source: from_number, which route
+warning: pipecat: prefetch "caller" reads source: session_id, which route
   (pipecat, cloud-websocket) does not supply, so this entry is skipped on every call
   there and customer_phone holds its default. prefetch "profile" reads it, so that
-  entry is skipped too. Call sources compile on (livekit, sip) trunks and on
-  (livekit, connector)
+  entry is skipped too. source.session_id is supplied on (livekit, connector) and
+  (livekit, sip)
+```
+
+A fact the route supplies on the other direction only reads like this, naming
+the direction the route grants and the one the package declares:
+
+```
+warning: pipecat: prefetch "caller" reads source: from_number, which route
+  (pipecat, daily-sip) supplies on an inbound call only, and this package declares
+  outbound. The entry is skipped on every call there and customer_phone holds its
+  default. prefetch "profile" reads it, so that entry is skipped too
 ```
 
 So **every prompt naming a pre-fetched value has to read as a whole sentence when
@@ -135,6 +263,34 @@ that value is empty.** An unset variable renders as nothing, never as the word
 The whole block has a two second budget, and it cannot fail a call: a lookup that
 times out or raises is logged and stepped over. Every outcome is one log line
 naming the entry.
+
+### A caller's number is best effort
+
+`from_number` and `to_number` resolve less often than the other system
+sources, on every route that grants them. A caller can withhold their own
+number, and withholding does not arrive as nothing:
+
+- Twilio's own policy is to set it to the word `anonymous`.
+- Where an upstream carrier sends a word such as ANONYMOUS or RESTRICTED
+  instead, Twilio converts it to keypad digits, which look exactly like a real
+  number.
+- Some calls simply arrive with the field empty.
+
+unmute treats all three as absent. A number-valued fact resolves only when it
+looks like a plausible E.164 number, a `+` followed by 8 to 15 digits, and a
+short list of known digit placeholders is rejected on top of that check.
+Either way the entry is skipped, and the log names which entry and why.
+
+On LiveKit `sip`, the number is also absent when the dispatch rule sets
+`HidePhoneNumber`. On `pipecat cloud-websocket` it can be missing for a
+configuration reason instead: the number rides a `<Parameter>` in the TwiML
+Bin you made, so a Bin created before this existed does not carry it. Nothing
+warns about that at compile time, because checking would need carrier
+credentials the compiler never asks for.
+
+Treat the caller's number as best effort on every route that grants it, not
+only on Pipecat. A route granting the fact is not a promise that any one call
+will carry it.
 
 Denied on the `slng` target: that platform owns session start, so there is no seam
 to resolve a fact in.
@@ -154,7 +310,6 @@ variables:
 
 Until that step has heard the caller agree, the value:
 
-- **satisfies no `requires:` guard**, so a step needing it will not start;
 - **renders in no prompt but that step's own**, refused at compile time everywhere
   else, including the greeting and every agent prompt;
 - **makes every tool injecting it refuse itself to the model**, naming the value it
@@ -169,46 +324,113 @@ the account holder's name.
 Write the confirming step's prompt to read the value back and ask for a yes when it
 has one, and to ask from scratch when it does not.
 
-## Where a variable can be used
+## How a variable reaches a prompt
 
-`{{name}}` renders a variable. Two kinds of site, with different timing:
+Two ways, and knowing which one applies is the difference between a value
+that just shows up and one you template in by hand.
+
+**Automatically, for anything typed past a bare scalar.** Once a variable's
+`type:` names a shape, or is anything past the four bare scalars, its current
+value is appended to every agent prompt and every task prompt on its own,
+after the authored text. The [task-led walkthrough](/build/variables) shows
+the block it adds. Do not also template such a value into a prompt by hand;
+the compiler already does.
+
+**By hand, with `{{name}}`, at five sites.** A bare `string`, `number`,
+`integer` or `boolean` variable renders only where you write `{{name}}`, and a
+typed one can be templated the same way at a site that is not a prompt, such
+as a webhook path. The five sites render at different times:
 
 | Site | Renders | Can name |
 |---|---|---|
-| `conversation.greeting.text` | once, at session start | a variable that already has a value, never one awaiting confirmation |
-| an agent's instructions | once, at session start | a variable that already has a value, never one awaiting confirmation |
-| a task's instructions | when that task starts | a variable that already has a value, or one listed in this task's own `requires:`; one awaiting confirmation only in the step that confirms it |
-| a tool's `inject:` value | on every tool call | any declared variable; one awaiting confirmation makes the call refuse itself until it is settled |
+| `conversation.greeting.text` | once, at session start | a variable that already has a value |
+| an agent's instructions | on entry, and again once one of its own steps records a value | any declared variable |
+| a task's instructions | when that task starts | any declared variable |
+| a tool's `inject:` value | on every tool call | any declared variable |
 | a webhook tool's `path` | on every tool call | any declared variable, URL encoded |
 
-"Already has a value" means `source: call_start`, a system source, a `default`, or
-a `prefetch:` entry that assigns it. Naming anything else in a session-start site
-is an error:
+### Naming one part of a value
+
+A `{{name}}` placeholder can also name one field inside a variable or an
+expected value, with a dotted path: `{{customer.status}}`. The root, the name
+before the first dot, follows every rule a whole value already follows at
+that site: it has to be a declared variable or an expected value handed to
+that prompt, a value still awaiting confirmation renders only in its
+confirming step's prompt, the greeting may only name something that already
+has a value, and a secret never renders.
+
+Each name after the first dot is a field the shape of the value before it
+declares, so a path can go as deep as the shapes go.
+
+```yaml agent.yaml
+shapes:
+  - name: Customer
+    fields:
+      - phone_number: Phone
+      - name: status
+        type: Literal["new", "returning", "vip"]
+
+variables:
+  customer:
+    type: Customer | None
+```
+
+`customer` gets its value from a step's `assign:`, the same as any variable.
+A prompt can then read one field of it:
+
+```md
+The caller is a {{customer.status}} customer, if the lookup has run.
+```
+
+Written to read whole before the lookup has run: a part renders the same
+empty words the whole value would when the value, or a link on the way, is
+absent, `none recorded yet.` for a variable and `not given.` for an expected
+value, never `None`, never a hole, never an error. A field that is itself a
+shape or a list renders as compact JSON; any other field renders as plain
+text.
+
+The compiler checks the path before generating anything, naming the file and
+the line. These are the refusals:
+
+```text wrap
+references {{last_appointment.kind}}: shape "Appointment" declares no field "kind". It declares scheduled_date, scheduled_time, appointment_type
+
+references {{appointments.scheduled_date}}: appointments is list[Appointment], and a path cannot name a field inside a list: nothing says which entry it means. Record the entry you need into its own variable with assign: on the step that records it, and name that variable here
+
+references {{note.first}}: note is a plain string with no fields to name; write {{note}}
+
+references {{caller_phone.digits}}: caller_phone is Phone, which has no fields to name; write {{caller_phone}}
+```
+
+A placeholder carries no logic: no conditions, no filters, no function calls.
+Write the value into a sentence and say what to do with it in the
+instructions. A structured part already renders as JSON, so there is nothing
+left for the placeholder to compute.
+
+This is the same grammar `assign:` already uses for a path
+into a result or a shape: see [Picking one part of a structured
+result](#picking-one-part-of-a-structured-result).
+
+None of the five may name or render a value still awaiting the caller's
+agreement: see [`confirm:`](#confirm-marks-a-value-the-caller-has-to-agree-to)
+above for what each site does instead.
+
+Write the sentence so it reads whole when the named value is empty: at every
+site but one, an unset variable renders as nothing, never as the word `None`.
+
+The greeting is that one exception. It renders once, before the first word,
+with no later turn to catch up on a value that arrives after, so it may only
+name a variable that already has a value: `source: call_start`, a system
+source, a `default`, or a `prefetch:` entry that assigns it. Naming anything
+else there is an error, not a silent empty string:
 
 ```text wrap
 conversation.greeting.text references {{requested_service}}, which has no value when the prompt is built; give it source: call_start, a system source, or a default
 ```
 
-Task instructions render live call state when the task begins, but a task
-prompt may still only name a variable that already has a value or one listed
-in its own `requires:`. Naming a variable only another task assigns, without
-listing it here, is a compile error:
-
-```text wrap
-tasks/booking.md: task "manage_booking" instructions references {{customer_status}}, which only task "verify_customer" assigns. Add customer_status to this task's requires: list, so the step waits for the value and its prompt can read it
-```
-
-Listing the name in `requires:` also holds the task back until the value
-exists, so the prompt never renders it empty. A task naming a value only it
-assigns itself cannot fix this by adding the name to its own `requires:`,
-because that would wait on the task's own output:
-
-```text wrap
-tasks/verify-customer.md: task "verify_customer" instructions references {{customer_status}}, and "verify_customer" is the only step that assigns it, so the value does not exist while this prompt is being built. Give the variable a default or a source:, or assign it from an earlier step
-```
-
-An undeclared name is an error too. Invalid session-start and undeclared names
-are never silent empty strings.
+An agent's instructions and a task's instructions may name any declared
+variable, whether or not anything has assigned it yet. An undeclared name is
+an error everywhere, greeting included, and never a silent empty string.
 
 ## Seeding values locally
 
@@ -220,11 +442,11 @@ Repeatable. Each value is parsed against the declared type, so an `integer`
 variable receives a number and not a quoted string. `--var` is the local stand
 in for the dispatch payload production sends, so it accepts the two kinds of
 variable that payload fills: `source: call_start`, and a variable that declares
-no `source:` at all. It refuses a runtime owned source and a `conversation`
-source, because neither one arrives with the dispatch:
+no `source:` at all. It refuses a runtime-owned source, because that one
+arrives from the carrier, not the dispatch:
 
 ```text wrap
-unmute: dev my-agent: --var requested_service=haircut: "requested_service" has source conversation, so the model saves it mid-call through update_variables, not you
+unmute: dev my-agent: --var from_number=+15551234567: "from_number" has source from_number, so the runtime supplies it, not you
 ```
 
 An undeclared name is refused rather than accepted and dropped.
@@ -247,14 +469,6 @@ Do not seed the variable with `--var` instead. That writes the value directly,
 skips the pre-fetch, marks nothing as awaiting confirmation, and lets a local run
 act on a number it never read back. The run would pass a path a real call fails.
 </Warning>
-
-## Letting the model save one
-
-Declaring any `source: conversation` variable creates a tool named
-`update_variables` in the generated project. You do not write it, and you do
-not list it. The name is reserved: a package tool, task, task group, handoff,
-or escalation cannot also be named `update_variables`. The model calls it when
-the caller says something worth keeping.
 
 ## Passing a value into a tool
 
@@ -313,15 +527,75 @@ agents:
 The task's typed result lands in the variable, and the rest of the call can use
 it.
 
-## Carrying variables through a handoff
+A `+` on the key appends one entry instead of replacing the value:
+
+```yaml agent.yaml
+        assign:
+          - appointments+: result.appointment
+```
+
+Only legal when the variable's declared type is `list[...]`. Refused
+otherwise, naming the value and its type:
+
+```text wrap
+assign appends to "customer_phone" with "customer_phone+:", and "customer_phone" is declared Phone rather than a list. Drop the "+" to replace the value, or declare it list[...] so an entry can be added to it
+```
+
+Without the `+`, an assignment replaces the value, which is what `assign:`
+has always done.
+
+### Picking one part of a structured result
+
+The right side of an `assign:` pair does not have to be the whole result. It
+can be `result.<field>`, or a dotted path into a declared shape,
+`result.<field>.<subfield>`, as deep as the shape goes:
+
+```yaml agent.yaml
+tasks:
+  - name: manage_booking
+    result:
+      appointment: Appointment | None
+    assign:
+      - appointments+: result.appointment
+      - last_booking_day: result.appointment.scheduled_date
+```
+
+with `last_booking_day` declared `type: Date | None`.
+
+The picked part's type has to fit the variable it lands in: a `Date` field
+into a `Date` variable, a `Literal` into the same `Literal`, a whole shape
+into a variable declared with that shape.
+
+Two paths are refused rather than silently accepted:
+
+- **a path through a list.** Nothing says which entry to take, so
+  `result.appointments.scheduled_date` is refused.
+- **a path into a field with no declared shape.** Once the path reaches a
+  scalar, going one level deeper has nothing left to read.
+
+If a field on the way is optional, `Appointment | None` above, the picked
+value may be absent for a visit where the task left it out. Give the variable
+the same option, `Date | None`, so an absent pick is a legal value, or use an
+appending assign, `name+:`, which already skips an absent entry instead of
+writing one into the list.
+
+The same path form works in a prompt placeholder too: see [Naming one part of
+a value](#naming-one-part-of-a-value).
+
+## A handoff keeps every declared value
+
+Every declared value is shared by every agent in the call, on both targets,
+with nothing to write and no field to set: a handoff carries all of them,
+always.
 
 ```yaml
     context:
       history: full
-      variables: all
 ```
 
-`variables` takes `all` or a list of names.
+What the caller just asked for is not a declared value, so this does not cover
+it. Hand it to the receiving agent with `expect:` on the handoff instead, see
+[Handoffs](/build/orchestration/handoffs#hand-the-receiving-agent-a-brief).
 
 ## Where to go next
 

@@ -142,7 +142,12 @@ type Data struct {
 	Listen        Binding
 	Reason        Binding
 	Speak         Binding
-	Variables     []Variable
+	// Shapes is the package's shapes: section. The console does not edit it, and
+	// it has to be here anyway: maintain rewrites agent.yaml from this struct, so
+	// a field absent here is a field deleted from the author's file, and what
+	// would be deleted is every declared shape and the types that name them.
+	Shapes    []Shape
+	Variables []Variable
 	// Knowledge is the package's knowledge: section. The console does not edit
 	// it, but it has to carry it: maintain rewrites agent.yaml from this struct,
 	// so a field absent here is a field silently deleted from the author's file.
@@ -172,6 +177,22 @@ type Variable struct {
 	Type    string
 	Default string // optional JSON primitive, rendered verbatim
 	Source  string
+}
+
+// Shape is one declared shape: a named group of fields a variable's type:
+// refers to. Carried so the console's rewrite keeps it.
+type Shape struct {
+	Name        string
+	Description string
+	Fields      []ShapeField
+}
+
+// ShapeField is one member of a shape. Description is what decides which of the
+// two authored forms it is written back as: one line without, a block with.
+type ShapeField struct {
+	Name        string
+	Type        string
+	Description string
 }
 
 type Tool struct {
@@ -268,18 +289,18 @@ func (a Agent) PromptPath() string {
 }
 
 type Handoff struct {
-	Name             string
-	Source           string
-	To               string
-	When             string
-	Announce         string
-	Requires         []string
+	Name     string
+	Source   string
+	To       string
+	When     string
+	Announce string
+	// Input is the handoff's expect: list, the brief the receiving agent is handed; carried for the reason
+	// Task.Input is.
+	Input            []ShapeField
 	History          string
 	MaxMessages      int
 	Summarizer       string
 	IncludeToolCalls *bool
-	AllVariables     bool
-	Variables        []string
 }
 
 type Task struct {
@@ -289,8 +310,13 @@ type Task struct {
 	// Handoffs is the one other kind a task may attach. It has no Delegates and
 	// no Escalations for the same reason spec.Task does not: the illegal thing
 	// has nowhere to be written.
-	Handoffs         []string
-	Model            string
+	Handoffs []string
+	Model    string
+	// Input is the step's expect: list, one typed field each, written back the
+	// way a shape's fields are. Carried because the console rewrites agent.yaml
+	// from this struct, and a field it does not carry is a field `unmute
+	// maintain` deletes at exit 0.
+	Input            []ShapeField
 	Result           string // flat typed result as a JSON object
 	History          string
 	MaxMessages      int
@@ -301,7 +327,6 @@ type Task struct {
 	Agent    string
 	When     string
 	Announce string
-	Requires []string
 	Assign   string // optional JSON object mapping variables to result fields
 }
 

@@ -8,7 +8,7 @@ the brief before you write files, then say what context crosses that boundary.
 One rule carries most of the surface:
 
 > Four of the five lists point at a same-named top-level catalog; attach by
-> name. The fifth, `tasks:`, has none — write the task right where it runs.
+> name. The fifth, `tasks:`, has none: write the task right where it runs.
 
 | Agent list | Catalog | What it does | Does control come back? |
 |---|---|---|---|
@@ -32,12 +32,12 @@ agents can offer one task without either owning a second copy of it.
 
 A task has `tools:` and `handoffs:` and no other list. There is no
 `task_groups:` and no `escalations:` key on a task, so a task cannot start
-another task or reach a person directly — those shapes are unwritable rather
+another task or reach a person directly: those shapes are unwritable rather
 than rejected.
 
 A task with no `when:` is a definition only, valid solely as a step of a task
-group. An agent naming it by bare name — rather than listing it as a step of a
-`task_groups:` entry — is refused: there is no trigger for the agent to act
+group. An agent naming it by bare name (rather than listing it as a step of a
+`task_groups:` entry) is refused: there is no trigger for the agent to act
 on.
 
 ## Choose the native shape
@@ -78,17 +78,18 @@ the server, not the package, owns that order.
 | the prompt keeps growing and starts contradicting itself | split it: tasks if the parts serve one caller goal, a handoff if they are separate roles |
 | the model does things out of order | a task group. The order is declared, not requested |
 | the model calls a tool it should not have yet | move the tool. Lists are per agent and per task, so a tool the current step does not hold cannot be called at all |
-| a step runs before you have the value it needs | `requires:` on that task. The step is held back, and the model is told which control fills the gap |
+| a step runs before you have the value it needs | give the step's own `when:` the clause that names what has to be true first, "once the caller is identified" |
 | you need a value out of a step and want to keep it | a task with `result:`, saved to a variable with `assign:` |
 | two phases need different tools or different permissions | a handoff |
 | the caller changes intent while a task is active | put the destination's handoff on that task's own `handoffs:` list |
 | the caller needs a person | none of these. That is an escalation, and what it can do depends on the phone route. See `transfers.md` |
 
 A prompt that says "always identify the caller first" is a request. A task group
-is a guarantee. That is the difference you are buying. Reach for a task group
-when the order must hold, and for `requires:` when one value must exist before
-one step runs. `requires:` is cheaper: no extra step, no extra prompt, and
-nothing the caller is spoken through.
+is a guarantee. A `when:` clause naming the dependency is not a guarantee the
+same way, but it is cheap: no extra step, no extra prompt, and nothing the
+caller is spoken through. See "Order steps with the prompt" below. Reach for
+a task group when the order must hold, and for a `when:` clause when one
+value should usually be there before one step runs.
 
 ## What each shape costs
 
@@ -149,7 +150,6 @@ handoffs:
     announce: "I’m connecting you with our appointment manager now."
     context:
       history: full
-      variables: all
 
   to_booking_desk:
     to: booking_desk
@@ -157,7 +157,6 @@ handoffs:
     announce: "I’m connecting you back to the booking desk for your new appointment."
     context:
       history: full
-      variables: all
 ```
 
 `entry_agent` decides who answers. Each agent has its own prompt file and its
@@ -197,14 +196,16 @@ cancellation.
 | Field | What it does |
 |---|---|
 | `history: full` | the new agent sees the conversation so far |
-| `variables: all` | the values collected so far travel with the caller |
 
-Leave them out and the caller gets asked for their phone number twice. Choose on
-purpose, and tell the user what you chose.
+`history` is required. Choose it on purpose, and tell the user what you chose.
+Every declared value travels with the caller already, on every target, with
+nothing to write: see `variables.md`. What the caller just asked for is not a
+declared value: hand it over with `expect:` on the handoff, the same list a
+task takes, see below.
 
-`requires:` is legal on a handoff when variables must exist before the call
-leaves this agent. It is also legal on a task, which is usually the better
-place for it: see [Guarding a step](#guarding-a-step) below.
+Order matters on a handoff the same way it matters on a task: say the
+dependency in the agent's own flow and in the handoff's `when:`, not with a
+gate. See "Order steps with the prompt" below.
 
 ## Task
 
@@ -238,7 +239,7 @@ agents:
 ```
 
 A task is nested inside the agent that runs it. The mapping does two things at
-once: it defines the task — `instructions`, `tools`, `result`, `context` — and
+once: it defines the task (`instructions`, `tools`, `result`, `context`) and
 it attaches it, because `when:` is the trigger the model reads to decide to
 run it. There is no separate catalog to keep in step with the agent's own
 list.
@@ -267,6 +268,47 @@ assign:
   - customer_id: result.customer_id
   - customer_name: result.customer_name
 ```
+
+The right side of a pair can also be a dotted path into a declared shape,
+`result.<field>.<subfield>`, to pick one part of it instead of the whole
+result; see "Picking one part of a structured result" in
+`references/variables.md`.
+
+**Hand the step what the caller asked for.** A step on `history: reset` never
+receives the turn that triggered it. `expect:` is a list of typed fields the step
+expects when the agent runs it: the agent, which heard the caller, fills them,
+and the step's prompt ends with a block naming each. A field is one line,
+`- name: type`, or a block with `name`, `type` and `description`. The types are
+the ones a shape field takes. A type ending in `| None` is optional; without it
+the agent must have a value before the step can run, so the agent asks, not the
+step.
+
+```yaml
+      - name: manage_booking
+        when: The caller wants to create, modify, or cancel a booking.
+        instructions: tasks/booking.md
+        expect:
+          - action: Literal["create", "modify", "cancel"]
+          - name: requested_day
+            type: str | None
+            description: The day, in the caller's own words. Leave it out if they did not say.
+        result:
+          summary: string
+        context:
+          history: reset
+```
+
+The step's prompt ends with a block you do not write, after the conversation
+state block: a `Request:` heading, one numbered line per field, a value left out
+reading `not given.`. Only the receiving prompt may name an expected value inline as
+`{{action}}`; any other prompt is refused. A value outside its type is refused
+before the step starts, naming the field, and the agent that supplied it is told
+to ask the caller and run the step again. The values are gone after the visit,
+so a fact worth keeping goes through `result:` and `assign:`. An expected value may not
+share a name with a variable, a secret, a shape or a grammar word, one name has
+one type across the package, and a task inside a task group takes none. A
+handoff takes the same list: the receiving agent is handed the brief and keeps
+it until the next handoff. Same on livekit and pipecat, refused on slng.
 
 A task can also declare its own `think:`, naming a different reasoning
 profile for that one step alone. Leave it out and the task runs on the
@@ -308,8 +350,8 @@ agent.yaml:17: task "customer_record" is defined by agent "appointment_desk" and
 ### A definition with no `when:`
 
 A task with no `when:` is a definition only, valid solely as a step of a task
-group. An agent naming it by bare name — rather than listing it as a step in
-some `task_groups:` entry — is refused: there is no trigger for the agent to
+group. An agent naming it by bare name (rather than listing it as a step in
+some `task_groups:` entry) is refused: there is no trigger for the agent to
 act on. Give it a `when:` to make it something an agent runs on its own, or
 list it as a step in [Task group](#task-group).
 
@@ -323,14 +365,9 @@ sentence, spoken as the task starts:
         when: The caller wants to create, modify, or cancel a booking.
         announce: Let me pull up the diary.
         instructions: tasks/booking.md
-        requires:
-          - customer_phone
 ```
 
 Same field as a tool's, same rules: one fixed sentence, spoken word for word.
-**Not spoken when the task is held back by a `requires:` guard**, which
-matters: a caller who hears "let me pull up the diary" and is then asked for a
-phone number has been told something untrue.
 
 Do not put one on a task whose first tool already announces, and check the
 tool that runs immediately **before** the task too: a lookup at the end of one
@@ -341,11 +378,11 @@ is usually the one worth keeping.
 
 Denied on the `slng` target, which writes one agent with no steps.
 
-## Guarding a step
+## Order steps with the prompt
 
-A task that needs a value the conversation has not collected yet declares
-`requires:`. Put the guard on the task that needs the value, not on the
-handoff that reaches it:
+There is no field that holds a task back until a variable exists. Put the
+order in the prompt: number the flow in the agent's own instructions, and
+give the later task a `when:` that names what has to be true first:
 
 ```yaml agent.yaml
 agents:
@@ -362,9 +399,7 @@ agents:
           history: full
 
       - name: manage_appointment
-        when: The caller wants to make, change, or cancel an appointment.
-        requires:
-          - customer_phone
+        when: The caller wants to make, change, or cancel an appointment, once the caller is identified.
         instructions: tasks/appointment.md
         result:
           status: string
@@ -372,56 +407,24 @@ agents:
           history: full
 ```
 
-Every name in `requires:` must be a declared variable, or the package fails to
-compile. That is deliberate: a guard on a name nothing sets can never pass, and
-the symptom would be a task that silently never starts.
+Every prompt already carries the `Conversation info:` block, so a step's own
+prompt can lean on it directly: "once the info names a customer, verification
+has already succeeded, never run it again." That is a request to the model,
+not a gate, so it is not the only line of defense.
 
-**`requires:` also decides what a task's own prompt may read.** A task's
-`instructions` may always name a variable that already has a value, such as one
-with a `default` or `source: call_start`. To name a variable another task
-assigns, list it in this task's own `requires:` too. Naming it without
-listing it is a compile error:
+**The last line sits on the tool.** A tool that silently reads a value,
+through `inject:` or a webhook path, refuses to run while that value is empty
+or unconfirmed, and the model is told which task supplies it, or, when
+nothing does, to ask the caller. The worst case is one extra model turn, not
+a request sent with a blank or an unconfirmed field.
 
-```
-agent.yaml:41: task "manage_booking" instructions references {{customer_status}},
-which only task "verify_customer" assigns. Add customer_status to this task's
-requires: list, so the step waits for the value and its prompt can read it
-```
+**Check the order with a scripted text conversation before a live call.**
+It drives the agent through a fixed script with the real model and the real
+tools, so you see which task ran, and in what order.
 
-The same list that holds the task back is what makes the value safe to read:
-by the time the guard lets the task start, the value exists. Do not fix the
-refusal by adding the name to the reading task's own `requires:` when that
-same task is the one assigning it. That waits on the task's own output.
-Assign it from an earlier task instead, or give the variable a default or a
-`source:`:
-
-```
-agent.yaml:52: task "verify_customer" instructions references {{customer_status}},
-and "verify_customer" is the only step that assigns it, so the value does not
-exist while this prompt is being built. Assign it from an earlier step, or
-give the variable a default or a source:
-```
-
-**What the caller hears: nothing.** The refusal goes to the model, not to the
-caller. It names the missing variable and the task that supplies it, so the
-model runs `customer_record` and calls the step again on the same turn. The
-compiler also appends the requirement to the task's own description, so the
-model usually collects the value during the earlier turns and the guard is
-never reached. After five refusals of the same task the agent stops recovering
-quietly and asks the caller for the value out loud, in its own words. That
-bound lives in the emitted code, not in a prompt. Both refusals are logged
-with the variable and task names only — never the value, which matters when
-the name is a phone number.
-
-**Do not put an agent in front of a task to hold a guard.** Before `requires:`
-worked on a task, the only machine-checked way to gate a step was to give the
-step to a second agent and guard the handoff to it. That agent then had to be
-spoken through, which cost the caller a turn and taught a shape nobody needed.
-One agent, one guarded task.
-
-**And do not gate reaching a person.** An escalation takes no `requires:` at
-all, and a handoff to the agent that hears complaints should not carry one.
-Someone who asks for a manager should not be interviewed first.
+**Never hold up the way to a person.** An escalation should carry no
+dependency like this, and neither should a handoff to the agent that hears
+complaints. Someone who asks for a manager should not be interviewed first.
 
 **While a task runs, the caller is talking to the task**: its prompt, and only
 what the task's own `tools:` and `handoffs:` lists name. The agent's lists are
@@ -443,7 +446,7 @@ the caller's original reason for being in the step is not an unserved request,
 and a handoff the step declares wins over it.
 
 The request itself travels in `unserved_request`, a reserved optional string on
-every generated finish. **Never declare it in a task's `result:`** — validation
+every generated finish. **Never declare it in a task's `result:`.** Validation
 rejects a task result that claims the name. It arrives inside the returned
 result, and the owning agent is told to take that request next, so the caller
 does not repeat it. Only `then: return` hands the result to an owner on both
@@ -483,7 +486,7 @@ LiveKit agents and Pipecat output are unchanged.
 | `max_messages` | a positive number | legal with `last_n` only |
 | `summarizer` | a model entry name | legal with `summary` only |
 | `include_tool_calls` | `true` or `false` | whether tool calls travel too |
-| `variables` | `all` or a list of names | handoffs only, not tasks |
+| `variables` | `all` or a list of names | handoffs only, optional, left out means all |
 
 What each value gives the step:
 
@@ -498,9 +501,9 @@ What each value gives the step:
 
 `history: full` is usually right, because the caller has already said something
 the task needs. `history: reset` is right when the step must not be influenced
-by what came before, and must be a step whose whole job is described by its
-declared values, since it has no other way to know what the caller is asking
-for.
+by what came before. Give it `expect:` for what the caller asked for, because it
+has no other way to know: without an `expect:` list it fits only a step whose whole job is
+described by its declared values.
 
 No `history:` value is a privacy control. Shortening the history does not
 unsay what the caller said out loud; the caller's words are still in the
@@ -620,8 +623,8 @@ answer out loud for each boundary the package actually has.
 | Boundary | The question | Where it is answered |
 |---|---|---|
 | a handoff | how much history does the new agent see? | `context.history` on the handoff entry |
-| a handoff | which variables travel with the caller? | `context.variables`: `all` or a list |
 | a handoff | do tool calls travel too? | `context.include_tool_calls` |
+| a task or a handoff | what is the step or the new agent handed for this visit? | `expect:` on the task or the handoff |
 | a task | what does the task see when it starts? | `context.history` on the task |
 | a task | what comes back, and where does it land? | `result:` on the task, `assign:` on the same task |
 | a task group | do the steps share context or each start clean? | `context_scope` |
@@ -648,23 +651,12 @@ Two things the table does not cover, because they trip people up:
 
   The same check covers a task group nothing attaches, an agent no handoff
   reaches, a `destinations:` entry no escalation resolves to, and a `tools:`
-  entry no agent lists. A task with no `when:` that no task group's `steps:`
-  lists is refused too, with its own message. An unreferenced `models:` entry
-  is the one exception: that map is a palette and unused entries are legal.
-- **A second agent's instructions cannot read a `conversation` variable.** An
-  instructions file renders once, at session start, so it can only name a value
-  that already exists. With `history: full` the new agent can see what was said,
-  but writing `{{customer_name}}` into its prompt for a value the first agent
-  collected mid-call is refused. Rely on the history and say so in prose.
-  That holds for `history: full` and `history: messages`. It does not hold for
-  `history: reset`: a reset step gets its own instructions and its declared
-  values, nothing else, so there is no history to rely on and no way to write
-  a prompt that leans on one. A reset step also never sees the caller's
-  triggering utterance, so it cannot work out what was just asked. Give it to
-  a step that is fully described by its declared values, such as confirming a
-  number or taking a payment, never to one that has to interpret what the
-  caller wants. Nothing in the compiler catches the wrong choice, which is why
-  it has to be said here.
+  entry no agent lists. A tool named only by a `prefetch:` entry's
+  `tool:` field passes: the reachability walk marks it reachable on its own,
+  because it never reaches an agent's `tools:` list. A
+  task with no `when:` that no task group's `steps:` lists is refused too,
+  with its own message. An unreferenced `models:` entry is the one exception:
+  that map is a palette and unused entries are legal.
 
 ## Where a target refuses a shape
 
@@ -674,7 +666,6 @@ Raise these **before** you write files, not after validate fails.
 |---|---|---|
 | `think:` on a task | Pipecat | the Pipecat driver does not emit per-task model yet |
 | `include_tool_calls: false` on a transfer context | Pipecat | the Pipecat driver does not shape transfer context yet |
-| a variables subset on a transfer context | Pipecat | Pipecat accepts context, not a subset |
 
 ### Task history by target
 
@@ -714,15 +705,14 @@ rather than one list with a kind field.
 | typed result | yes, `result:` | no |
 | targets | a task, run in place | another agent |
 | context control | `context:` on the task | `context:` on the handoff entry |
-| `requires:` | yes | yes |
 
 ## The shapes, as packages
 
 One package in the unmute repository shows these shapes working together:
 `examples/salon-concierge` has two agents that hand the caller over, two tasks
-nested in the concierge — one of them guarded with `requires:` — and a bare
-name that lets the complaint specialist run the same verification task without
-a second copy.
+nested in the concierge (one of them ordered after the other by the agent's
+own prompt) and a bare name that lets the complaint specialist run the same
+verification task without a second copy.
 
 The one-agent, one-prompt shape has no package. `unmute init <name>` scaffolds
 it, and `package.md` in this bundle has the same shape inline.
