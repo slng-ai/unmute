@@ -1,0 +1,8 @@
+{
+  "trunk": {
+    "name": "salon-concierge-v3 twilio inbound",
+    "numbers": [
+      "${SIP_FROM_NUMBER}"
+    ]
+  }
+}
