@@ -1,5 +1,6 @@
 .env
 .env.local
 config/secrets.json
+.agents/skills/
 .specify
 specs/

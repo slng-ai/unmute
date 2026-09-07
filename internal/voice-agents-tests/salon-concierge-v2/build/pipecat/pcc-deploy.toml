@@ -1,0 +1,29 @@
+agent_name = "salon-concierge-v2-pipecat"
+region = "eu-central"
+secret_set = "salon-concierge-v2-pipecat-secrets"
+
+# Your carrier connects to the platform's stream endpoint directly, and a static
+# piece of markup in a carrier console cannot fetch a token first, so token
+# authentication is structurally impossible on this route. The working value is
+# written here rather than inherited, for two reasons: the platform's own
+# documentation states the default both ways (one page says "none", another says
+# new agents default to requiring a token), and a security posture is worth
+# reading in the manifest instead of guessing from a version.
+#
+# What limits who can start a session, then, is knowledge of the
+# "<agent>.<organization>" string your markup carries. Treat it like a
+# capability: not a secret in the cryptographic sense, but anyone holding it can
+# open sessions you pay for. The README says the same thing in the same words.
+websocket_auth = "none"
+
+# Instances held ready, from `warm_instances` on this target in targets.yaml.
+# It lives here rather than on the deploy command because `--min-agents` applies
+# to the deploy you pass it on, and this file is rewritten by every
+# `unmute compile`, so a hand-added block would not survive one.
+#
+# This table comes last on purpose: in TOML every key after a table header
+# belongs to that table, so a top-level key emitted below it would silently
+# become `scaling.<key>` and the platform would never read it.
+[scaling]
+min_agents = 1
+
