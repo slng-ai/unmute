@@ -763,6 +763,7 @@ class IntakeAgent(TracedLLMWorker):
         # then: return — restore the owner's pre-flow context (messages and
         # tools); only a completed or unserved status crosses back.
         messages, tools = self._run_collect_snapshot
+        _settle_task_call(messages, "run_collect", _group_status(self._run_collect_results))
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(system_instruction=INTAKE_PROMPT),
         ))
@@ -846,6 +847,7 @@ class IntakeAgent(TracedLLMWorker):
         # then: return — restore the owner's pre-flow context (messages and
         # tools); only a completed or unserved status crosses back.
         messages, tools = self._run_triage_snapshot
+        _settle_task_call(messages, "run_triage", _group_status(self._run_triage_results))
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(system_instruction=INTAKE_PROMPT),
         ))
@@ -856,6 +858,17 @@ class IntakeAgent(TracedLLMWorker):
         }])
         self.context.set_tools(tools)
         return {"status": "ok"}, None
+
+
+def _settle_task_call(messages, name, status):
+    """Replace this invocation's running reply before restoring the owner."""
+    for message in reversed(messages):
+        for call in message.get("tool_calls", []):
+            if call.get("function", {}).get("name") == name:
+                for reply in messages:
+                    if reply.get("role") == "tool" and reply.get("tool_call_id") == call["id"]:
+                        reply["content"] = json.dumps(status)
+                return
 
 
 def _flow_visit(worker, delegate, handler):

@@ -1369,6 +1369,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{else}}        # then: {{$d.Then}} — restore the owner's pre-flow context (messages and
         # tools); only a completed or unserved status crosses back.
         messages, tools = self._{{$d.MethodName}}_snapshot
+        _settle_task_call(messages, {{pyq $d.MethodName}}, _group_status(self._{{$d.MethodName}}_results))
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(system_instruction={{$agentPromptExpr}}{{if $agentSlngHeaders}},
                 # The owner's cache scope goes back with its prompt. A leaked
@@ -1404,6 +1405,17 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         )
 {{end}}{{end}}
 {{end}}{{end}}{{if and (not .Inline) .HasFlows}}
+def _settle_task_call(messages, name, status):
+    """Replace this invocation's running reply before restoring the owner."""
+    for message in reversed(messages):
+        for call in message.get("tool_calls", []):
+            if call.get("function", {}).get("name") == name:
+                for reply in messages:
+                    if reply.get("role") == "tool" and reply.get("tool_call_id") == call["id"]:
+                        reply["content"] = json.dumps(status)
+                return
+
+
 def _flow_visit(worker, delegate, handler):
     visit = getattr(worker, "_" + delegate + "_visit", None)
     async def invoke(args, flow_manager):

@@ -1078,6 +1078,7 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 		// The agent prompt is one module constant, referenced by builder + restore (V2).
 		`INTAKE_PROMPT = """# Intake agent`,
 		`delta=LLMSettings(system_instruction=INTAKE_PROMPT)`,
+		`_settle_task_call(messages, "run_collect", _group_status(self._run_collect_results))`,
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing task role boundary %q", want)
