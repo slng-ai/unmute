@@ -329,7 +329,7 @@ Only variables referenced by the current prompt are sent. Declaring a shape
 or saving a task result does not add all call state to a router request.
 Dotted references such as `{{appointment.date}}` select that field alone.
 
-On LiveKit, values are read for each router request. On Pipecat, they refresh
+On LiveKit, values are read again for every request. On Pipecat, they refresh
 when the call saves state. Direct-provider agent prompts refresh when their
 tasks save values, and task prompts render on entry.
 
