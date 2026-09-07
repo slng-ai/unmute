@@ -54,9 +54,14 @@ You are handling appointment {{appointment_id}}.
 Ask what the caller wants to change.
 ```
 
-The receiving agent gets `appointment_id` because its prompt names it. It does
-not receive other variables automatically. A dotted placeholder sends only
-that field.
+The receiving agent gets the saved `appointment_id` because its prompt names
+it. It does not receive other variables automatically. A dotted placeholder
+sends only that field. With `messages`, it can also read facts spoken earlier.
+
+To avoid repeating verification or asking for an appointment already selected,
+reference the saved verification status and appointment in the receiving
+prompt, then explain how to use them. The [context guide](/optimization/context-scope)
+walks through this choice and the return behavior of tasks.
 
 ## Choose conversation history
 

@@ -477,9 +477,41 @@ Used by tasks and by handoffs.
 | Field | Values | Notes |
 |---|---|---|
 | `history` | `full`, `messages`, `last_n`, `summary`, `reset` | optional; omission means `messages`. `summary` compiles on livekit only; slng refuses every value |
-| `max_messages` | a positive number | legal with `last_n` only |
-| `summarizer` | a model entry name | legal with `summary` only |
-| `include_tool_calls` | `true` or `false` | whether tool calls travel too |
+| `max_messages` | a positive integer | required with `last_n`; refused with other history choices |
+| `summarizer` | a `models.think` entry name | required with `summary`; refused with other history choices |
+| `include_tool_calls` | `true` or `false` | omitted behaves as `true` where the history mode keeps tool records; explicit `false` is LiveKit only |
+
+| `history` | What the receiver gets |
+|---|---|
+| `messages` | Caller and agent speech; tool calls and replies are removed together |
+| `full` | Earlier speech and paired tool records, without earlier instructions |
+| `last_n` | The newest `max_messages` entries, keeping tool calls paired with replies |
+| `reset` | No earlier conversation, including the sentence that triggered the task or handoff |
+| `summary` | A generated summary of earlier conversation, using `summarizer` |
+
+`include_tool_calls: true` does not add tool records to `messages` or `reset`.
+To keep old tool results, use `full` or `last_n`. Pipecat supports those two
+modes plus `messages` and `reset`; it refuses `summary` and explicit
+`include_tool_calls: false`. SLNG refuses task and handoff context settings.
+
+For example, these are two separate context blocks:
+
+```yaml
+context:
+  history: last_n
+  max_messages: 8
+```
+
+```yaml
+context:
+  history: summary
+  summarizer: reasoning
+```
+
+History controls entry into the receiver. A returning task always restores
+the owner's earlier conversation and adds only a status. Saved values reach
+either prompt only through explicit placeholders. See
+[Reduce context sharing step by step](/optimization/context-scope).
 
 ## `task_groups`
 

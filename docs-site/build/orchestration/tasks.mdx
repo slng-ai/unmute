@@ -58,7 +58,8 @@ The verified customer is {{customer_name}} with ID {{customer_id}}.
 Help them manage their appointment.
 ```
 
-The task receives only the values its prompt names. A description does not
+The task receives saved state only through the values its prompt names.
+Its history may separately contain facts spoken earlier. A description does not
 send a value to the model. An unset value renders as `none recorded yet.`
 
 A dotted reference selects one field and does not send its siblings:
@@ -105,6 +106,8 @@ saved, the task must ask for it again.
 
 History controls model input; it does not redact speech already retained in a
 different context. Use `reset` when the receiver should inherit no transcript.
+The [step-by-step context guide](/optimization/context-scope) shows how to
+save the request first and keep the owner informed after the task finishes.
 
 ## What returns
 
@@ -125,8 +128,18 @@ request do not cross back. The owner reads saved values through its own prompt
 placeholders.
 
 Every generated finish call includes optional `unserved_request`. A task uses
-it only when its tools and handoffs cannot serve a new request. The owner sees
-the `unserved` status and asks the caller what they need.
+it when it cannot complete the request with its tools or handoffs. A non-empty
+value skips all assignments. The owner sees the `unserved` status and asks the
+caller what they need; it does not receive the private request text.
+
+After a tool reports success, finish immediately with the result to save.
+Let the owner confirm it once, using its own placeholders. If the task waits
+for another turn, it may receive a new request before saving the first result.
+An `unserved` status does not undo an action already completed by a tool.
+
+For requests that another agent can handle, a task may declare `handoffs:`.
+Taking one ends the task and any remaining task-group steps. See
+[Handoffs](/build/orchestration/handoffs).
 
 ## Append and project values
 
@@ -164,6 +177,7 @@ agents:
   appointment_desk:
     tasks:
       - name: verify_customer
+        when: Identify the caller before booking.
         instructions: tasks/verify-customer.md
         assign:
           - customer_id: result.customer_id
@@ -177,7 +191,9 @@ Task names are unique across the package.
 
 ## Announce a task
 
-`announce:` is an optional fixed line spoken as the task starts:
+`announce:` is an optional fixed line spoken as the task starts. Omit it for
+a silent transition. If you add one, tell the model not to repeat it with a
+second "let me check" line:
 
 ```yaml agent.yaml
       - name: manage_booking
@@ -193,6 +209,20 @@ Task names are unique across the package.
 | control returns | yes | no |
 | saved values | through `assign:` | already live in call state; read only by explicit placeholders |
 | prompt | one focused step | a whole role |
+
+## Update an older task definition
+
+| Earlier configuration | What to do now | Why |
+|---|---|---|
+| A task `result:` schema | Put the types on variables and use task `assign:` | One declaration defines the saved value and finish argument |
+| Task or handoff `expect:` | Save needed facts first and reference them in the receiving prompt | Sharing is explicit, including with `reset` |
+| Task `requires:` | Put the order in the owner's prompt and the task's `when:` | The model can follow the flow; injected tools still guard missing or unconfirmed values |
+| An automatically appended state block | Add placeholders to each prompt that needs saved facts | Saving a value no longer shares it with every prompt |
+| An omitted history choice | Review whether `messages` is appropriate | `messages` is now the default |
+
+Ordinary tool `input:` and `output:` schemas are unchanged. Run
+`unmute validate` after updating an older package; retired keys produce a
+located error with migration advice.
 
 ## Try it
 

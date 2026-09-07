@@ -15,7 +15,8 @@ variable.
 When the model calls a tool, it thinks twice: once to decide to call it, once to
 use what came back. The caller waits through both, in silence.
 
-A pre-fetch has already run by the time the caller says hello. Nobody waits.
+Prefetch moves that work before the greeting. It removes a lookup from the
+conversation, but its own run time can delay the greeting. Keep it short.
 
 The salon-concierge example agent used to ask people to read out a phone
 number the phone network had already given it. It also called one tool to ask
@@ -28,7 +29,7 @@ already had the answers to.
 |---|---|
 | `clock: now` | the date, the time, and more, all from one reading of the clock |
 | `source: from_number` | a fact the call carries, like the number it came from |
-| `tool: my_tool` | whatever one of your tools returns, when you say the call changes nothing |
+| `tool: my_tool` | a result from a local or webhook tool; declare whether it changes data |
 
 ### One clock reading, six fields
 
@@ -44,16 +45,24 @@ want, in one entry:
 | `result.year` | `2026` |
 | `result.timezone` | `Europe/Madrid` |
 
+All six fields are text, including `result.year`. Use `Date` for
+`result.date`, `Time` for `result.time`, and `str` for the weekday, year,
+combined datetime, or timezone.
+
 All six come from the same reading. An entry assigning `result.date` and
 `result.time` cannot straddle a second, and one assigning `result.date` and
 `result.day_of_week` cannot straddle midnight.
 
-### The big one: any tool that only reads
+### Choose a lookup with known inputs
 
-Any tool in your package can run before the call, as long as:
+A local or webhook tool can run before the greeting when every input is
+already known: a fixed value, a call fact, or a value an earlier entry saved.
+MCP, knowledge, prebuilt, and hosted tools cannot run as prefetch entries.
 
-- you say `writes: false` on the entry, because a pre-fetch runs unasked, on every call, wrong numbers included;
-- you already have every input it needs. A fixed value, a fact the call carries, the date, or something an earlier entry looked up.
+Declare `writes: false` for a lookup that only reads. `writes: true` is also
+supported, but means the tool changes data on every call with usable inputs,
+including wrong numbers and calls that end before a conversation. It does not
+wait for the caller's agreement.
 
 That covers a lot of tools. A customer record, looked up by phone number. Today's
 opening hours, looked up by date. Someone's last order, looked up by their
@@ -68,7 +77,12 @@ the call.
 
 ## How to write it
 
-Give each entry a name, one thing to fetch, and where to put the answer.
+This example uses the salon package's existing `look_up_customer` tool.
+In your own package, declare a local or webhook tool with the corresponding
+`phone` input and `name` and `status` output fields.
+
+Add the ordered prefetch entries below and declare their receiving variables.
+Each entry needs a name, one source, and assignments to existing variables.
 
 ```yaml agent.yaml
 prefetch:
@@ -97,18 +111,19 @@ prefetch:
 `profile` reads once and assigns twice. An entry can fill as many variables as
 the result has fields, and a second `assign:` line costs no second call.
 
-The variables it fills are normal variables. Give each one a type and a default:
+Declare the receiving variables. A default is optional; here an empty string
+means the value is not known yet:
 
 ```yaml agent.yaml
 variables:
   booking_date:
-    type: string
+    type: Date
     default: ""
   booking_weekday:
     type: string
     default: ""
   customer_phone:
-    type: string
+    type: Phone
     default: ""
   customer_name:
     type: string
@@ -118,7 +133,15 @@ variables:
     default: ""
 ```
 
-Now you can write `{{booking_date}}` in a prompt.
+Read a prefetched value only in prompts that need it:
+
+```markdown tasks/booking.md
+Local date: {{booking_date}}
+Use this as today when the caller says tomorrow or names a weekday.
+If no date is recorded, ask for the exact date before booking.
+```
+
+A prefetch assignment does not add a value to any prompt by itself.
 
 <Note>
   Do not give these variables a `source:` of their own. The pre-fetch entry is
@@ -184,9 +207,9 @@ it from instead:
 agent.yaml:37: prefetch "today" assigns appointments, which is declared list[Appointment], and a pre-fetch resolves one plain value before the greeting. Assign appointments from the step that produces it, and leave the pre-fetch the values a call already carries
 ```
 
-A list is something a call accumulates: two bookings are two entries, and the
-step that took each one appends it. Nothing has happened yet when the pre-fetch
-runs, so there is nothing for it to append.
+If you need an object or a list from a lookup, run it in a task and save the
+result through task `assign:`. Prefetch currently supports scalar destinations
+only, even if your backend already has structured records.
 
 ## Where it works
 
@@ -289,9 +312,10 @@ Pipecat. A route granting the fact is not a promise that any one call will
 carry it.
 
 <Note>
-  The same fact declared as a variable's own `source:` is stricter: on Pipecat that
-  is a hard error, not a warning. Letting the entry fill the variable instead is
-  what keeps one package compiling on every route.
+  The same fact declared as a variable's own `source:` is stricter: a route
+  that cannot supply it refuses the declaration. This depends on the fact and
+  route, not simply on whether the target is Pipecat. A prefetch entry can
+  instead skip an unavailable fact and leave the variable at its default.
 </Note>
 
 ## Always check a value with the caller
@@ -305,7 +329,7 @@ say yes:
 ```yaml agent.yaml
 variables:
   customer_phone:
-    type: string
+    type: Phone
     default: ""
     confirm: verify_customer
 ```
@@ -313,7 +337,9 @@ variables:
 Until they say yes, the value is held back:
 
 - no prompt can use it, except that one step's own;
-- any tool you hand it to refuses to run, and says which value it is waiting for.
+- during the conversation, a tool that reads it through `inject:` or a webhook
+  path refuses to run until it is confirmed. A prefetch lookup may still read
+  the candidate so it can prepare a record before the greeting.
 
 This carries over. `customer_name` was looked up from a number nobody has
 confirmed yet, so it is unconfirmed too. That is what stops the agent greeting a
@@ -326,32 +352,76 @@ The call came from {{customer_phone}}. If there is a number there, read it back
 and ask if it is the right one for the booking. If it is empty, ask for a number.
 ```
 
-Now the step checks a number instead of collecting one, which is a much shorter
-conversation.
+The task must save the agreed number to clear confirmation. Add the assignment
+to the confirming task:
+
+```yaml agent.yaml
+agents:
+  concierge:
+    tasks:
+      - name: verify_customer
+        when: Confirm the customer's number before using their account.
+        instructions: tasks/verify-customer.md
+        assign:
+          - customer_phone: result.phone
+```
+
+End its instructions with:
+
+```markdown tasks/verify-customer.md
+After the caller agrees, finish with the confirmed phone number. If they
+correct it, confirm the corrected number before finishing.
+```
+
+The prompt asks for agreement; the runtime clears the confirmation mark when
+that named task saves the value. It cannot infer agreement from speech alone.
+Confirmation is not identity authentication; add the checks your service needs.
+
+If the caller confirms the same number, the prefetched dependent values can
+be used. If they change it, values looked up from the old number are cleared.
+They are not automatically fetched again: use a task tool to look up the new
+number and save its result. Unrelated facts, such as today's date, remain.
+
+To avoid repeating verification in another task or agent, also save a typed
+verification status and reference it in the receiving prompt. The public
+[salon example](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)
+shows this pattern.
 
 ## What happens when there is nothing to fetch
 
-This is common. Your own machine has no phone network. Callers hide their
-number. Your lookup will not know a first-time customer. The entry is
-skipped, so is anything later that needed its answer, and the call carries on
-with the variables' defaults.
+The whole prefetch list shares a two-second budget. Entries run in order, once
+per call. There is no per-entry retry or automatic refresh during the call.
 
-A pre-fetch also never breaks a call outright: it runs under a time limit and
-gives up quietly on an error. [Deciding what to pre-fetch](/optimization/prefetch)
-covers writing a prompt that still reads well with the value empty, and how to
-read the one log line each entry leaves.
+| Outcome | What happens |
+|---|---|
+| An input is missing | The entry is skipped |
+| A lookup times out or raises an error | The entry is logged and skipped |
+| The result fails type validation | Its assignments are not saved |
+| An entry saves several fields | All are validated before any are saved |
+| The shared budget runs out | Remaining work is skipped so the call can continue |
+
+Skipped entries leave the destination values unchanged, usually at their
+initial defaults. A later entry is skipped too if an input it needs is still
+missing. If a usable default supplies that input, the later entry may run.
+
+Write prompts to handle missing values. `none recorded yet.` means an unset
+value, not proof that no customer or booking exists. Check a lookup's explicit
+status before drawing that conclusion. See
+[What to fetch before the call](/optimization/prefetch) for choosing useful
+lookups and reading their logs.
 
 ## Try it
 
 Your machine has no caller ID, so stand in for one:
 
 ```sh
-unmute dev ./my-agent --source from_number=<a number in E.164>
+unmute dev examples/salon-concierge --target livekit --source from_number=+15005550006
 ```
 
-Give it a number your lookup knows and the agent should read it back and ask for a
-yes. Leave the flag off and it should ask for a number from scratch. Both of those
-happen in production.
+The command above uses a test number. For your own lookup, use a test account
+number it knows. Check four cases: the caller confirms it, corrects it, has
+no record, or has no caller ID. Leave the flag off for the last case. The
+agent should ask only for the missing information in each case.
 
 <Warning>
   Do not use `--var` for this. It writes the value straight in, skips the

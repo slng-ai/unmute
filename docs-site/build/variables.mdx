@@ -1,265 +1,242 @@
 ---
 title: "Variables"
-description: "Personalize a call, group values into a shape, and pass values into a tool without showing them to the model."
+description: "Declare a type once, save a task's result, and use it only where it is needed."
 ---
 
-A variable is a named value that lives for one call. Use it to greet someone by
-name, to remember what they asked for, and to hand a tool a value the model
-should never see.
+Use a variable when a later task or agent needs a reliable fact from this call.
+For example, after moving a booking, save the new appointment. The next task
+can use its current date without trying to resolve conflicting dates in the
+conversation.
 
-This page teaches the common workflow. For every type, source, and supported
-location, use the [Variables reference](/reference/variables).
+A variable lives for one call. It is not a database record. Your tools save
+changes in your booking system; variables let the agent use the result later.
 
-Every snippet below is a worked example you can paste into a package of your
-own. No shipped example declares a `call_start` variable, so the commands here
-name `my-agent`: the package you get from
-[`unmute init`](/reference/cli/init), with the `variables:` block below added.
+There are three choices: **declare** what a value holds, **save** it when a
+task finishes, and **read** it in each prompt or tool that needs it. Saving a
+value does not automatically share it with any prompt.
+
+The snippets below extend an existing package. Merge them into the matching
+blocks in `agent.yaml`; do not add duplicate top-level keys.
 
 ## Declare them
 
+Start with the smallest useful value:
+
 ```yaml agent.yaml
 variables:
-  customer_name:
-    type: string
-    source: call_start
-    default: there
-    description: Caller's first name, used in the greeting and the prompt.
-  customer_id:
-    type: string
-    source: call_start
-    default: cus_1001
-    description: CRM id of the caller. The booking tool receives it directly; never say it out loud.
   requested_service:
-    type: string
-    default: ""
-    description: The service the caller wants, for example a haircut or a colour.
+    type: Literal["haircut", "hair-color", "blowout"]
+    description: The service the caller chose.
 ```
 
-`type` is one of `string`, `number`, `integer`, `boolean`. `source` says where
-the value comes from, and it changes what you can do with the variable.
+Use `str` for free text, `int` or `float` for numbers, and `bool` for a yes or
+no fact. Use `Phone`, `Date`, `Time`, or `Id` when the spelling matters. Use a
+`Literal` when there is a fixed set of choices.
 
-| Source | Who sets it | When |
-|---|---|---|
-| `call_start` | whatever starts the call | before the first word |
-| left out | nothing yet; a task's `assign:` can fill it later | once a step records it |
-| system sources such as `from_number`, `direction`, `call_id` | the phone adapter | on a phone call, when the route grants that fact. LiveKit's two routes grant the most; Pipecat's two Twilio routes grant a smaller set, each in one direction only for a phone number |
+The [type reference](/reference/variables#the-type-grammar) lists every type,
+its limits, and how to represent an absent value.
 
-A system source works the same way whether you put it straight on a variable's
-own `source:` or read it through a [`prefetch:`](/build/prefetch) entry: both
-read the same route table, so the fact hydrates on whichever route grants it.
-See the [Variables reference](/reference/variables#sources) for the full grid.
+## Save a value when a task finishes
 
-`requested_service` above declares no `source:`, so it starts at its default
-and stays there until a task records it. A task's `assign:` derives its finish
-field from this declaration and writes the value; see
-[Tasks](/build/orchestration/tasks) for how a step does that.
+Add this task under an agent in your package:
 
-## Use one in the greeting
-
-```yaml
-conversation:
-  greeting:
-    speaks_first: agent
-    text: "Hi {{customer_name}}, thanks for calling Sage and Stone Salon. What can I do for you?"
+```yaml agent.yaml
+agents:
+  concierge:
+    tasks:
+      - name: choose_service
+        when: Find out which service the caller wants.
+        instructions: tasks/choose-service.md
+        assign:
+          - requested_service: result.service
 ```
 
-`{{name}}` renders the variable's value. The greeting renders once, at the
-start of the call, so it can only name a variable that already has a value: a
-`call_start` variable, or one with a `default`. A prompt elsewhere in the
-package is less restricted: see the [Variables
-reference](/reference/variables#how-a-variable-reaches-a-prompt).
-
-## Seed a value locally
-
-In production the values arrive with the call. On your machine, `--var` stands
-in for that:
-
-```sh
-unmute dev my-agent --var customer_id=cus_2002
+```markdown tasks/choose-service.md
+Find out which salon service the caller wants. Use what they have already
+said and ask only if the service is missing or unclear. Then finish with
+that service.
 ```
 
-It is repeatable, so several values seed one call:
+The task gets the conversation by default. `assign:` gives its generated
+finish call a `service` argument with the type of `requested_service`. You
+declare the type once, on the variable. You do not write a separate task
+result schema or ask the owning agent to repeat the caller's request.
 
-```sh
-unmute dev my-agent \
-  --var customer_name=Priya \
-  --var customer_id=cus_2002
+Unmute checks the finish arguments before saving them. If validation fails,
+the task stays open so the model can correct the value. An ordinary tool
+result does not fill a variable by itself: the task must finish.
+
+## Read a value where it is needed
+
+Add a placeholder to each prompt that should use the saved value:
+
+```markdown tasks/booking.md
+Requested service: {{requested_service}}
+Use it if present. If no service is recorded, ask which service the caller wants.
 ```
 
-Leave the flags out and the declared defaults are used, so the agent always has
-something to say.
+An unset value renders as `none recorded yet.` The instructions work before
+and after the earlier task saves the service.
 
-`--var` seeds the variables the dispatch payload fills: `source: call_start`,
-and a variable that declares no `source:` at all. It refuses anything else
-instead of accepting it and dropping it:
-
-```text wrap
-unmute: dev my-agent: --var from_number=+15551234567: "from_number" has source from_number, so the runtime supplies it, not you
-```
-
-An undeclared name is refused the same way.
-
-## Hand a value to a tool
-
-This is the part worth internalizing. A tool's `input:` schema is everything
-the model sees. `inject:` adds arguments the model never sees:
-
-```yaml tools/book_appointment.yaml
-input:
-  type: object
-  properties:
-    slot_id:
-      type: string
-      description: ID returned by check_availability
-  required:
-    - slot_id
-
-inject:
-  - customer_id: "{{customer_id}}"
-  - service: "{{requested_service}}"
-```
-
-The model is offered a one parameter function, `book_appointment(slot_id)`.
-Your handler takes all three as ordinary arguments and knows nothing about
-variables:
-
-```python tools/book_appointment.py
-def book_appointment(customer_id, service, slot_id):
-    ...
-```
-
-The generated project renders the `{{tokens}}` from the live call state at the
-moment of the call and passes them by keyword.
-
-<Note>
-  `inject:` renders on every call, not once at the start. That is why
-  `{{requested_service}}` is legal here even though nobody has said it yet when
-  the call begins.
-</Note>
-
-### What happens when the value is missing
-
-An injected variable with no value refuses the call rather than sending a half
-formed request. The model gets told why:
-
-```text
-cannot call book_appointment yet: requested_service not set. Ask the caller first.
-```
-
-So the model asks. `customer_id` never trips this, because it declares a
-default.
+The owning agent also needs a reference if it should remember the result
+after the task returns. It receives a completion status and its earlier
+conversation, not the private conversation inside the task. This rule applies
+even when the task uses `history: messages`.
 
 ## Group related fields into a shape
 
-Some values are not one thing. A booking has a date, a time and a service.
-Instead of three separate variables, declare a shape once and give a
-variable that shape as its type:
+A booking's ID, date, and time belong together. A shape lets one successful
+task save them as one value:
 
 ```yaml agent.yaml
 shapes:
   - name: Appointment
-    description: One thing being booked, moved or cancelled.
     fields:
-      - scheduled_date: Date
-      - scheduled_time: Time
-      - name: appointment_type
-        type: Literal["haircut", "haircolor", "dry_cut"]
-        description: The service the caller asked for, in the salon's own words.
+      - booking_id: Id
+      - service: Literal["haircut", "hair-color", "blowout"]
+      - date: Date
+      - time: Time
 
 variables:
-  appointments:
-    type: list[Appointment]
-    description: What this call has booked so far, in the order the caller gave them.
+  appointment:
+    type: Appointment
+    description: The latest appointment successfully saved by the booking tool.
 ```
 
-A task fills it the same way it fills any variable, through `assign:`. The
-`+` appends the result to the list instead of replacing it, so a second
-booking in the same call does not erase the first:
+In a booking task, add:
 
-```yaml agent.yaml
-      - name: book
-        instructions: tasks/book.md
-        assign:
-          - appointments+: result.appointment
-        context:
-          history: reset
+```yaml
+assign:
+  - appointment: result.appointment
 ```
 
-## Read a value where it is needed
+Write the task's instructions to copy the successful tool result and finish
+immediately. Have the owner confirm the saved appointment to the caller:
 
-Put a placeholder in each prompt that needs the value:
-
-```markdown tasks/review-booking.md
-Review these appointments with the caller: {{appointments}}.
+```markdown instructions.md
+Latest saved appointment: {{appointment}}
+When the booking task completes, confirm this appointment once in plain speech.
+Use its date and time in preference to older dates mentioned in the conversation.
 ```
 
-The whole shape renders as compact JSON. An unset value renders as
-`none recorded yet.` A prompt with no placeholder receives no saved value,
-even when the call holds many of them.
-
-For the full type grammar a shape's fields and a variable's `type:` can use,
-see the [Variables reference](/reference/variables).
+`{{appointment}}` renders the whole object as compact JSON. This is input to
+the model; the prompt tells it how to speak about the value.
 
 ## Name one part in a sentence
 
-A placeholder can also read one field of a shaped variable, with a dotted
-path, rather than the whole thing:
+A prompt that needs only the date can read it directly:
+
+```markdown
+Appointment date: {{appointment.date}}
+Use this date to answer the caller's question. If no date is recorded, ask for it.
+```
+
+The placeholder sends only that field. It does not include the booking ID,
+service, or time. Nested shapes support longer paths. A path cannot select
+an entry in a list; save the selected entry in its own variable first.
+
+## Keep several records
+
+Use a list when later steps need several records, such as complaints recorded
+during the call. Use a single variable when only the latest value matters.
 
 ```yaml agent.yaml
 variables:
-  next_appointment:
-    type: Appointment | None
+  appointments:
+    type: list[Appointment]
 ```
 
-```md
-Your next appointment is a {{next_appointment.appointment_type}} visit, if one is booked.
+```yaml
+assign:
+  - appointments+: result.appointment
 ```
 
-Before a booking exists, that field renders the same empty words the whole
-variable would: `none recorded yet.` Never `None`, never a hole, never an
-error, so the sentence still reads whole.
+The `+` adds one item. Without it, an assignment replaces the value. A list
+starts empty. A null append adds nothing, and an identical structured item
+is not added twice. A changed appointment is a different item; this does not
+update an older list entry by booking ID. Use a single `appointment` variable
+for the latest booking instead.
 
-The full rules, what a path can and cannot reach, and the refusals for a
-wrong one, are in the [Variables
-reference](/reference/variables#naming-one-part-of-a-value).
+## Hand a value to a tool
+
+Sometimes the tool needs a value the model does not need to read or type.
+Use `inject:` for that argument:
+
+```yaml tools/check_availability.yaml
+input:
+  type: object
+  properties:
+    date:
+      type: string
+  required:
+    - date
+inject:
+  - service: "{{requested_service}}"
+local:
+  handler: tools/check_availability.py
+```
+
+The model supplies `date`. The handler receives both `date` and the current
+`service`. Keep injected arguments out of `input.properties` and
+`input.required`.
+
+### What happens when the value is missing
+
+A missing or unconfirmed injected value stops the tool before it runs. The
+error tells the model which task supplies or confirms the value, when one is
+declared. Otherwise it asks the model to collect the missing value.
+
+Injection is separate from prompt sharing. Tool results and spoken messages
+can still contain the same value. See [Reduce context sharing step by
+step](/optimization/context-scope).
+
+## Use one in the greeting
+
+If a name arrives with the call, declare it as a call-start value:
+
+```yaml agent.yaml
+variables:
+  customer_name:
+    type: str
+    source: call_start
+    default: there
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi {{customer_name}}, how can I help?"
+```
+
+The greeting renders once. It may name a value supplied at session start,
+a default, or a prefetch assignment. Do not put an unconfirmed customer name
+in the greeting; use [confirmation](/build/prefetch#always-check-a-value-with-the-caller)
+when the call's identity still needs to be checked.
+
+## Seed a value locally
+
+```sh
+unmute dev my-agent --var customer_name=Priya
+```
+
+Use `--var` for a declared variable with `source: call_start` or no `source`.
+Values are parsed against the variable's type. For an object or list, pass
+JSON and quote it for your shell.
+
+System sources such as `from_number` depend on the phone route. LiveKit and
+Pipecat supply different facts in different directions; the
+[source reference](/reference/variables#sources) lists them. To exercise
+prefetch and confirmation locally, use `--source from_number=+15005550006`
+instead of seeding the phone variable directly.
 
 ## Secrets are not variables
 
-`{{...}}` renders variables only. Naming a secret in a template is a compile
-error, not a value that leaks at run time:
-
-```text
-unmute: validate my-agent: build: agent.yaml:70: conversation.greeting.text
-references {{OPENAI_API_KEY}}, but secrets never flow through templates; a secret
-reaches a tool through its own *_env field
-```
-
-The file and the line are always there.
-
-A template renders into speech, a prompt, a URL, or a log. That is right for a
-name and wrong for a token. See [secrets](/reference/secrets).
-
-## Try it
-
-```sh
-unmute dev my-agent --var customer_id=cus_2002
-```
-
-Seeding `customer_id` is the same thing a production call does when it
-already knows who is calling: the greeting and every prompt read the real
-value from the first word, instead of the default.
-
-That is also the whole idea behind [pre-fetch](/build/prefetch): fill a
-value before the greeting, from a lookup instead of a flag, so a step that
-existed only to collect it has nothing left to ask for.
+Store credentials in the environment and declare their names under
+`secrets:`. Never put a credential in a prompt placeholder, default, or task
+result. See [Secrets](/reference/secrets).
 
 ## Where to go next
 
-<CardGroup cols={2}>
-  <Card title="Pre-fetch" icon="clock" href="/build/prefetch">
-    Resolve the values that were knowable before anybody spoke.
-  </Card>
-  <Card title="Tools" icon="wrench" href="/build/tools/overview">
-    Give the agent something to do besides talk.
-  </Card>
-</CardGroup>
+- [Prefetch](/build/prefetch): fill values that are known before the greeting.
+- [Tasks](/build/orchestration/tasks): save results and return control.
+- [Context scope](/optimization/context-scope): keep continuity or share only selected facts.
+- [Variables reference](/reference/variables): every type, field, and assignment option.

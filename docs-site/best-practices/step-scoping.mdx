@@ -118,8 +118,9 @@ route to the thing the caller is asking for.
 
 ## Scope history down and let state carry the facts
 
-Once a step reads declared state, it does not need the transcript, and sending
-the transcript costs both money and accuracy.
+A task may not need the transcript if its prompt names every fact it needs.
+Start with `messages`. Use `reset` only when the saved inputs cover the job;
+otherwise the caller will have to repeat details that were only spoken.
 
 | Scope | What the step sees | Use it when |
 | --- | --- | --- |
@@ -134,7 +135,7 @@ the reset step asks for it again.
 
 ## Give every step an escape, and read it
 
-A step advertises its own tools plus its finish, and nothing else. When the
+A task offers its own tools, declared handoffs, and finish call. When the
 caller asks for something none of those cover, a step with no way out refuses,
 the caller presses, and it refuses again.
 

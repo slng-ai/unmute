@@ -325,24 +325,18 @@ itself. Every call sends the same prompt, so turns can still repeat. This
 applies to the system prompt only; greetings, tool arguments, injected
 values, and webhook paths keep rendering locally.
 
-Values are read again for every request, not once when the call started, so
-a value learned partway through is in the prompt from the next turn on. Any
-agent or task prompt may already name a variable with no value yet, whether
-its think binding routes through here or straight to a provider: an unset
-variable renders as nothing rather than leaving a compile-time hole. What
-differs on a router-bound prompt is only the timing of the read. A
-direct-provider prompt renders locally, on entry or on the way into a step,
-so it only catches up once something re-renders it. A router-bound prompt is
-never rendered here at all: it keeps its placeholder, and the router fills it
-fresh on every single request, so a value learned mid-call reaches it without
-waiting on a re-render.
+Only variables referenced by the current prompt are sent. Declaring a shape
+or saving a task result does not add all call state to a router request.
+Dotted references such as `{{appointment.date}}` select that field alone.
 
-Three details worth knowing: a variable with no value sends an empty string,
-never "None", and is still sent, so a placeholder the router got no value for
-is a 422 that ends the call; a value over 4000 characters is truncated with a
-warning on stderr and the call continues; and on Pipecat the refresh happens
-where the call writes the value rather than on every request, since that
-framework offers no per-request hook.
+On LiveKit, values are read for each router request. On Pipecat, they refresh
+when the call saves state. Direct-provider agent prompts refresh when their
+tasks save values, and task prompts render on entry.
+
+An unset referenced value is sent as `none recorded yet.`, never `None`.
+Shapes and lists use compact JSON. A rendered value over 4000 characters is
+shortened with a warning. Prefetch has its own smaller input limit; see
+[Variables](/reference/variables#what-happens-when-it-cannot-resolve).
 
 ### Which values belong in a placeholder
 

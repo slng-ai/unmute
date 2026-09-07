@@ -230,7 +230,7 @@ The contract fields are shared, with one exception that matters:
 | `description` | yes, except on `builtin:` and `mcp:` | optional on `builtin:`, illegal on `mcp:`, legal everywhere else |
 | `input` | yes on tool contracts | illegal on `builtin:`, `mcp:` and `knowledge:`, required everywhere else |
 | `output` | no | illegal on `builtin:`, `mcp:` and `knowledge:`; author-side only elsewhere, not sent to the model, not included in the compile report, and not enforced at run time on the code targets |
-| `inject` | no | `webhook:` and `local:` only; values must be scalars |
+| `inject` | no | `webhook:`, `local:`, and hosted `slng:`; authored values are scalars or placeholder strings. See [Variables](/reference/variables#passing-a-value-into-a-tool) |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` and `knowledge:` |
 | `announce` | no | `webhook:`, `local:` and `knowledge:` only; a fixed sentence, no `{{variables}}` |

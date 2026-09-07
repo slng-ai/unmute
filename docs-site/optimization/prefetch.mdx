@@ -55,20 +55,20 @@ product they want, why they are calling, whether an option suits them. No amount
 of pre-fetching helps there, and a step that collects a decision is doing its
 job.
 
-## Filling a value is enough. You do not rewrite anything
+## Update the prompt to use what was fetched
 
-This is easy to miss the first time.
+A saved value can remove a lookup from the conversation only if the agent or
+tool uses it. Add a placeholder where the model needs to read it, or use
+`inject:` for a tool argument it need not type.
 
-A tool that silently reads an empty value refuses to run and names the step
-that would supply it. Once a `prefetch:` entry fills the value directly, that
-tool call succeeds on the first try, so the model never has to detour through
-a step that existed only to collect it. Add a `prefetch:` entry and the
-detour disappears, with no change to the step or the routing.
+Then update any instruction that still says to collect the value from scratch.
+Tell the agent to use the existing value when present and ask only when it is
+missing. If a value needs the caller's agreement, keep the verification task
+and make it confirm the candidate instead of collecting it again.
 
-That cuts both ways, so check it on purpose. A pre-fetch that fills a value quietly
-removes a step from the call. If that step also greeted the caller, checked who
-they were, or told them what would happen next, removing it changes how the call
-behaves and not just how fast it is.
+Prefetch does not decide task order or automatically skip tasks. Prompts and
+`when:` descriptions still guide that flow. Check them together with the
+prefetch entries.
 
 ## Collecting becomes confirming
 
@@ -87,9 +87,10 @@ So the step does not disappear. It changes job:
 - **after:** read back what you already have, hear a yes. One.
 
 [`confirm:`](/build/prefetch#always-check-a-value-with-the-caller) makes that
-happen. Until the caller says yes, the value unlocks no step, appears in no prompt
-except the confirming step's own, and makes any tool handed it refuse to run. You
-cannot forget to confirm, because the build will not let the value be used.
+happen. Only the confirming task may reference the candidate in a prompt. During the
+conversation, tools that inject it refuse to run until that task saves the
+confirmed value. The prompt must ask for agreement; saving through the named
+task is what clears the runtime mark.
 
 <Tip>
   Confirmation carries over. Anything looked up from an unconfirmed value is
@@ -120,8 +121,8 @@ controls decide how far each value travels.
 
 ### Why this beats a prompt instruction
 
-None of this is a rule written in a prompt and hoped for. Paste a confirmed
-value into the greeting and you do not get a bad call, you get a build error.
+None of this is a rule written in a prompt and hoped for. Reference a value that still requires confirmation in the greeting and
+you get a build error.
 A `prefetch:` tool entry without an explicit `writes: true` or
 `writes: false` is refused the same way. A value goes only where the file
 says it goes.
@@ -151,9 +152,9 @@ Three rules keep it safe, and the first two are enforced for you:
 2. It **cannot fail a call**. An error is logged and given up on too.
 3. Keep the list short, and do not chain a lookup off a lookup off a lookup. Entries run one after another, so a chain eats the time limit.
 
-If a lookup is usually slow, a pre-fetch is the wrong place for it. Leave it as a
-tool the model calls during the call, with an `announce:` line over it, where the
-caller has already heard a voice.
+If a lookup is usually slow, leave it as a tool called during the conversation.
+For a noticeable wait, consider one short `announce:` line. Omit it for quick
+tools, and avoid a second model-generated line saying the same thing.
 
 ## Design for empty, because empty is the common case
 
@@ -167,7 +168,7 @@ Your lookup will not know a first-time customer.
 So the empty call is not an edge case to handle later. It is the one to write
 first:
 
-- Write each prompt so it reads as a whole sentence with the value empty. An unset variable renders as nothing, so "Your number is {{customer_phone}}." becomes "Your number is ." unless you write around it.
+- Write each prompt so it reads as a whole sentence with the value empty. An unset variable renders as `none recorded yet.` Use a label such as `Candidate phone: {{customer_phone}}` and explain what to ask when it is absent.
 - Then check it still reads well once the value is there.
 - Then run the agent both ways: `unmute dev` with `--source` and without it. Both are real paths in production.
 
@@ -185,12 +186,11 @@ Both make a gap easier to sit through. They are not interchangeable.
 | when it runs | once, before the greeting | every time that tool fires |
 | use it for | a value that was already knowable | a value you really do have to fetch now |
 
-The pause a caller sits through when the agent moves into a step is not a lookup
-at all, so no pre-fetch can help. That one gets an `announce:` on the task
-instead.
+A task transition may also take time. A task can have an `announce:` line,
+but it is optional; test whether the caller benefits from hearing it.
 
 Reach for a pre-fetch first, because a round trip you remove is gone for good.
-Then use an announce for what is left. And never let two things speak for one
+Use an announcement only for waits that need one. And never let two things speak for one
 request: two tools in the same turn, or a tool at the end of one step and a
 task at the start of the next. The caller hears two cover lines for one thing
 they asked for.
