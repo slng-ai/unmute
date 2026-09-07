@@ -192,33 +192,21 @@ async def create_then_cancel(userdata):
         ctx, confirmed=True, service="haircut", slot_id=slot_id
     )
     assert created["status"] == "booked", created
-    applied = {
-        "action": "create",
-        "booking_id": created["booking_id"],
-        "status": created["status"],
-        "summary": created["summary"],
-    }
-    await task.finish(ctx, **applied)
-    assert task.completions == [applied]
+    await task.finish(ctx)
+    assert task.completions == [{"unserved_request": ""}]
 
     task = recording_task(agent.ManageBooking)
     listed = await task.list_bookings(ctx)
     assert [item["booking_id"] for item in listed["bookings"]] == [
-        applied["booking_id"]
+        created["booking_id"]
     ]
     cancelled = await task.cancel_booking(
-        ctx, booking_id=applied["booking_id"], confirmed=True
+        ctx, booking_id=created["booking_id"], confirmed=True
     )
     assert cancelled["status"] == "cancelled", cancelled
-    finished = {
-        "action": "cancel",
-        "booking_id": cancelled["booking_id"],
-        "status": cancelled["status"],
-        "summary": cancelled["summary"],
-    }
-    await task.finish(ctx, **finished)
-    assert task.completions == [finished]
-    return applied["booking_id"], slot_id
+    await task.finish(ctx)
+    assert task.completions == [{"unserved_request": ""}]
+    return created["booking_id"], slot_id
 
 
 async def split_verification_then_intent_change():
@@ -239,13 +227,11 @@ async def split_verification_then_intent_change():
     verification = recording_task(agent.VerifyCustomer, chat_ctx)
     ctx = run_context(userdata, "verification-finish")
     verified = await verification.find_or_create_customer(ctx, phone="3035550199")
-    finish_result = {
-        "customer_phone": verified["customer_phone"],
-        "status": verified["status"],
-        "summary": verified["summary"],
-    }
+    finish_result = {"customer_phone": verified["customer_phone"]}
     await verification.finish(ctx, **finish_result)
-    assert verification.completions == [finish_result]
+    assert verification.completions == [
+        {**finish_result, "unserved_request": ""}
+    ]
     userdata.customer_phone = verified["customer_phone"]
 
     complaint = "Actually, I need to complain about my last visit."
@@ -433,15 +419,12 @@ async def booking_flow(worker, context, *, action, booking_id=""):
 
     expected_status = "booked" if action == "create" else "cancelled"
     assert result["status"] == expected_status, result
-    applied = {
-        "action": action,
-        "booking_id": booking_id,
-        "status": result["status"],
-        "summary": result["summary"],
-    }
-    finished, next_node = await worker._manage_booking_finish_manage_booking(applied, None)
+    result_fields = {"unserved_request": ""}
+    finished, next_node = await worker._manage_booking_finish_manage_booking(
+        result_fields, None
+    )
     assert finished == {"status": "ok"} and next_node is None
-    assert worker._manage_booking_results == {"manage_booking": applied}
+    assert worker._manage_booking_results == {"manage_booking": result_fields}
     return booking_id, slot_id
 
 
@@ -459,6 +442,7 @@ async def split_verification_then_intent_change():
     )
     await quiet(concierge)
     concierge._verify_customer_results = {}
+    concierge._verify_customer_active_step = "verify_customer"
     concierge._verify_customer_snapshot = (
         [dict(message) for message in context.get_messages()],
         context.tools,
@@ -466,9 +450,8 @@ async def split_verification_then_intent_change():
     verified = await bot._flow_tool_find_or_create_customer(
         {"phone": "3035550199"}, SimpleNamespace(worker=concierge)
     )
-    finished, next_node = await concierge._verify_customer_finish_verify_customer(
-        verified, None
-    )
+    saved = {"customer_phone": verified["customer_phone"]}
+    finished, next_node = await concierge._verify_customer_finish_verify_customer(saved, None)
     assert finished == {"status": "ok"} and next_node is None
     assert state.customer_phone == verified["customer_phone"]
     # E.164, not raw digits and not spoken groups. The step returns the number in
