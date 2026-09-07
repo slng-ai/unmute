@@ -3,20 +3,12 @@ title: "Variables"
 description: "Declare a type once, save a task's result, and use it only where it is needed."
 ---
 
-Use a variable when a later task or agent needs a reliable fact from this call.
-For example, after moving a booking, save the new appointment. The next task
-can use its current date without trying to resolve conflicting dates in the
-conversation.
-
-A variable lives for one call. It is not a database record. Your tools save
-changes in your booking system; variables let the agent use the result later.
-
-There are three choices: **declare** what a value holds, **save** it when a
-task finishes, and **read** it in each prompt or tool that needs it. Saving a
-value does not automatically share it with any prompt.
+Variables hold typed values for the duration of a call. Declare what each
+value holds, save it from call-start data, prefetch, or a task, and reference
+it in the prompts or tools that need it.
 
 The snippets below extend an existing package. Merge them into the matching
-blocks in `agent.yaml`; do not add duplicate top-level keys.
+blocks in `agent.yaml`.
 
 ## Declare a simple variable
 
@@ -30,8 +22,7 @@ variables:
 ```
 
 `requested_service` is the name you use in assignments and prompt placeholders.
-`str` means the value holds text. Declaring it creates a place to save a value;
-it does not ask the caller a question or fill the value from the conversation.
+`str` means the value holds text. The declaration creates a place to save it.
 
 A variable starts unset unless you supply an initial value. Use `default:`
 only when there is a useful answer before anyone supplies one, such as a
@@ -39,82 +30,69 @@ fallback greeting name. Leave a requested service unset until it is known.
 
 ### Add a description that explains the meaning
 
-`description:` is optional. Use it to explain what the value means and which
-answer belongs there. "The new date selected by the caller" is more useful
-than "A date": it distinguishes the request from the date already booked.
+`description:` is optional. Explain what the value means and which answer
+belongs there. Include details that distinguish it from similar values,
+such as whether a date is requested or already confirmed.
 
-When a task assigns this variable, Unmute uses its description to describe
-the generated finish argument to the model. The type defines which values
-are accepted; the description helps the model choose the right one. The
-description is guidance, not a validation rule or a prompt placeholder. It
-does not give another task access to the saved value.
+When a task saves the variable, Unmute includes this description in the
+finish argument shown to the model. The type controls which values are
+accepted; the description helps the model choose the right answer.
 
 ## Choose a type
 
-Types make saved answers predictable. A `bool` gives later steps a yes or no
-value; a `Literal` keeps service names within the choices your tool accepts;
-a `Time` keeps times in one format. Unmute derives the task's finish arguments
-from these types and checks the values before saving them. You do not write
-the same types again on each task.
+Types give later steps a consistent value to work with. Unmute uses the
+variable's type to define the task's finish argument and validate its answer
+before saving it.
 
-These are all the supported built-in types and ways to combine them. Names
-are case-sensitive.
+### Built-in types
 
-| Type | What it holds | Example value | Why use it |
-|---|---|---|---|
-| `str` | Free text | `haircut` | Names, notes, email addresses, or external keys with arbitrary punctuation |
-| `int` | A whole number | `2` | Counts that must not have a decimal part |
-| `float` | A number that may have a decimal part | `12.5` | Measurements or other numeric values |
-| `bool` | A yes or no value | `true` | A fact later steps can check without interpreting text |
-| `Phone` | International phone number text | `+15005550006` | One leading `+` and 7 to 15 digits, with a nonzero first digit |
-| `Date` | Date text | `2026-09-12` | Consistent `YYYY-MM-DD` format |
-| `Time` | Time text | `11:30` | Valid hours and minutes in 24-hour `HH:MM` format |
-| `Id` | Identifier text | `bkg_1001` | 1 to 64 characters; starts with a letter or digit, then permits letters, digits, `.`, `-`, `_`, and `:` |
-| `Literal["haircut", "hair-color", "blowout"]` | One of the listed strings | `haircut` | A fixed set of accepted choices |
-| A shape name, such as `Appointment` | An object with fields you declare | A booking ID, date, and time together | Save related facts as one record |
-| `list[T]`, such as `list[Appointment]` | Several values of the same type | An array of appointment objects | Keep more than one value |
-| `T \| None`, such as `Date \| None` | A scalar or shape that may be absent | A date or `null` | Allow a successful task to report that no value exists |
+| Type | What it holds |
+|---|---|
+| `str` | Free text, including names, notes, and email addresses |
+| `int` | A whole number |
+| `float` | A number that may have a decimal part |
+| `bool` | `true` or `false` |
+| `Phone` | An international phone number in E.164 format |
+| `Date` | Date text in `YYYY-MM-DD` format |
+| `Time` | A 24-hour time in `HH:MM` format |
+| `Id` | A short identifier with a defined character set |
 
 `string`, `integer`, `number`, and `boolean` are aliases for `str`, `int`,
-`float`, and `bool`. `None | T` means the same thing as `T | None`.
+`float`, and `bool`.
 
-There is no built-in `Email` type. Use `str` for an email address and check it
-in your tool if needed. `Phone` checks format, not whether a number exists or
-belongs to the caller. `Date` checks the text format, not calendar validity
-or booking availability. Your tools still check those facts. Keep timezone
-separately from `Date` and `Time`.
+### Custom types and combinations
 
-For the salon's fixed service menu, replace `str` in the first declaration:
+| Form | What it holds |
+|---|---|
+| `Literal["value1", "value2"]` | One string from the choices you list |
+| Your shape's name | An object whose fields and types you define under `shapes:` |
+| `list[T]` | A list of values of type `T` |
+| `T \| None` | A value of type `T`, or `null` when absence is a valid result |
 
-```yaml agent.yaml
-variables:
-  requested_service:
-    type: Literal["haircut", "hair-color", "blowout"]
-    description: The service the caller chose for this booking.
-```
+Here, `T` stands for the type you choose. Use `Literal` for a fixed set of
+choices, a shape for related fields, and a list for several values. The next
+section shows how to define your own object type.
 
-Now a task must finish with one of those three strings. Keep `str` instead
-when any service name is allowed.
-
-A value can be unset before a task runs even without `| None`. Add `| None`
-only when absence is a valid result to save. Lists start as `[]`; they cannot
-also be nullable or directly contain another list. A shape can contain lists
-and other shapes, but cannot refer back to itself. See the
-[type reference](/reference/variables#the-type-grammar) for the full grammar
-and validation limits.
+The [type reference](/reference/variables#the-type-grammar) gives the exact
+formats and composition rules. Your tools check business rules, such as
+record existence and availability.
 
 <Note>
-LiveKit and Pipecat support all these types. The SLNG target supports only
-basic scalar variables (`str`, `int`, `float`, `bool` and their aliases);
-it does not support tasks or the other types on this page.
+LiveKit and Pipecat support all these types. The SLNG target supports basic
+scalar variables: `str`, `int`, `float`, `bool`, and their aliases.
 </Note>
 
 ## Group related fields into a shape
 
-A shape is a type you define by naming its fields and their types. A booking's
-ID, service, date, and time describe one appointment. Grouping them lets a task
-save one complete record, instead of updating separate variables that might
-end up describing different bookings:
+A shape defines your own reusable object type. Choose a name, then declare
+each field and its type under `shapes:`. Set a variable's `type:` to that
+name to store an object with those fields.
+
+One shape can be used by several variables. Each variable holds its own
+value, and a task assignment saves all of the object's fields together.
+
+For example, this package defines an object type called `Appointment` and
+uses it for the variable `appointment`:
 
 ```yaml agent.yaml
 shapes:
@@ -131,23 +109,11 @@ variables:
     description: The latest appointment successfully saved by the booking tool.
 ```
 
-`Appointment` defines the record's structure. The `appointment` variable
-holds one record of that type for this call. You can reuse the shape for other
-variables without declaring its fields again.
-
-The short field form, such as `- date: Date`, is enough when the meaning is
-clear. To explain a field, replace that line with the longer form:
-
-```yaml
-- name: date
-  type: Date
-  description: The date successfully saved by the booking tool, not a requested change.
-```
-
-A field description guides the model filling that field. You can also add a
-`description:` to the shape itself to explain the record as a whole. The
-field types check its structure; the task prompt must still say to copy the
-successful tool result.
+Use the short field form, `- field_name: Type`, or add a field description
+with `name:`, `type:`, and `description:`. A description on the shape explains
+the whole object; a description on a field explains that part to the model.
+See the [shape reference](/reference/variables#shapes-groups-fields-into-a-named-type)
+for both forms.
 
 For deciding which fields belong together, separating requested changes from
 saved results, and choosing one record or a list, see
@@ -174,26 +140,16 @@ said and ask only if the service is missing or unclear. Then finish with
 that service.
 ```
 
-The task gets the conversation by default. `assign:` gives its generated
-finish call a `service` argument with the type of `requested_service`. You
-declare the type once, on the variable. You do not write a separate task
-result schema or ask the owning agent to repeat the caller's request.
+Here, `assign:` creates a finish argument named `service` from the
+`requested_service` declaration. The task receives the conversation by default.
+Its instructions say when to collect the answer and finish.
 
-Unmute checks the finish arguments before saving them. If validation fails,
-the task stays open so the model can correct the value. An ordinary tool
-result does not fill a variable by itself: the task must finish.
+Assignments also accept whole objects. Use `appointment: result.appointment`
+to save the shaped variable above. Tell a task using a tool to copy the
+successful tool result and finish immediately.
 
-### Save a shaped result
-
-In a booking task, add:
-
-```yaml
-assign:
-  - appointment: result.appointment
-```
-
-Write the task's instructions to copy the successful tool result and finish
-immediately.
+All assigned values are checked before any are saved. If validation fails,
+the task stays open so the model can correct the answer.
 
 ## Read a value where it is needed
 
@@ -212,53 +168,25 @@ after the task returns. It receives a completion status and its earlier
 conversation, not the private conversation inside the task. This rule applies
 even when the task uses `history: messages`.
 
-### Read a shaped result
+### Read an object or one field
 
-Have the owner confirm the saved appointment to the caller:
+Use `{{variable}}` for the whole object, rendered as compact JSON. Use
+`{{variable.field}}` for one field. A dotted path can follow nested shapes.
+To read fields from a list item, first save that item in its own variable.
 
-```markdown instructions.md
-Latest saved appointment: {{appointment}}
-When the booking task completes, confirm this appointment once in plain speech.
-Use its date and time in preference to older dates mentioned in the conversation.
-```
-
-`{{appointment}}` renders the whole object as compact JSON. This is input to
-the model; the prompt tells it how to speak about the value.
-
-## Name one part in a sentence
-
-A prompt that needs only the date can read it directly:
-
-```markdown
-Appointment date: {{appointment.date}}
-Use this date to answer the caller's question. If no date is recorded, ask for it.
-```
-
-The placeholder sends only that field. It does not include the booking ID,
-service, or time. Nested shapes support longer paths. A path cannot select
-an entry in a list; save the selected entry in its own variable first.
+Tell the prompt how to use the value and what to do when it is missing.
 
 ## Keep several records
 
-Use a list when later steps need several records, such as complaints recorded
-during the call. Use a single variable when only the latest value matters.
+Declare `type: list[T]` when later steps need several values of the same
+type. A list starts as `[]`.
 
-```yaml agent.yaml
-variables:
-  appointments:
-    type: list[Appointment]
-```
-
-```yaml
-assign:
-  - appointments+: result.appointment
-```
-
-The `+` adds one item. Without it, an assignment replaces the value. A list
-starts empty. A null append adds nothing, and an identical structured item
-is not added twice. A changed appointment is a different item; this does not
-update an older list entry by booking ID. Use a single `appointment` variable
-for the latest booking instead.
+In a task's `assign:`, use `variable+: result.field` to append one item or
+`variable: result.field` to replace the list. Appending skips `null` and
+identical structured items. See
+[assignment rules](/reference/variables#assigning-a-task-result-to-a-variable)
+for details, and [state design](/best-practices/state-design#choose-a-current-value-or-a-list)
+to choose between a current value and a list.
 
 ## Hand a value to a tool
 
@@ -331,11 +259,10 @@ Pipecat supply different facts in different directions; the
 prefetch and confirmation locally, use `--source from_number=+15005550006`
 instead of seeding the phone variable directly.
 
-## Secrets are not variables
+## Credentials
 
 Store credentials in the environment and declare their names under
-`secrets:`. Never put a credential in a prompt placeholder, default, or task
-result. See [Secrets](/reference/secrets).
+[`secrets:`](/reference/secrets).
 
 ## Where to go next
 
