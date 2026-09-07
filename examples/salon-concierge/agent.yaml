@@ -14,8 +14,11 @@ agents:
     tasks:
       - name: verify_customer
         when: >-
-          Confirm who the caller is before booking or recording a complaint. It reads
-          the phone number back and needs a yes before it looks anyone up.
+          Run only when saved customer_status is unavailable or invalid, or the
+          caller explicitly corrects their phone number. Existing or created means
+          verification is complete for the whole call, including later booking changes
+          and complaints. When verification is needed, it reads the phone number back
+          and needs a yes before it looks anyone up.
         instructions: tasks/verify-customer.md
         tools:
           - find_or_create_customer

@@ -127,7 +127,7 @@ async def run(args: argparse.Namespace) -> None:
         # initial=False takes the handoff branch of on_enter, which opens with a
         # model turn rather than the greeting session.say would speak; there is
         # no TTS here to speak it.
-        await session.start(entry(initial=False))
+        await session.start(entry(initial=False), capture_run=True)
         for i, line in enumerate(args.line, 1):
             print(f"\n=== turn {i}: caller says {line!r}")
             result = await session.run(user_input=line)
