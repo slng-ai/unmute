@@ -79,7 +79,7 @@ the server, not the package, owns that order.
 | the model does things out of order | a task group. The order is declared, not requested |
 | the model calls a tool it should not have yet | move the tool. Lists are per agent and per task, so a tool the current step does not hold cannot be called at all |
 | a step runs before you have the value it needs | give the step's own `when:` the clause that names what has to be true first, "once the caller is identified" |
-| you need a value out of a step and want to keep it | a task with `result:`, saved to a variable with `assign:` |
+| you need a value out of a step and want to keep it | a task that saves it to a typed variable with `assign:` |
 | two phases need different tools or different permissions | a handoff |
 | the caller changes intent while a task is active | put the destination's handoff on that task's own `handoffs:` list |
 | the caller needs a person | none of these. That is an escalation, and what it can do depends on the phone route. See `transfers.md` |
@@ -98,7 +98,7 @@ value should usually be there before one step runs.
 | one agent and tools | stays with the agent for the whole call | the whole conversation | ask again | the prompt carries everything, and grows |
 | task | returns when the task finishes | what `context:` gives the task | run it again | one more prompt and one more tool list to keep straight |
 | task group | returns when the group finishes | shared across the steps, or not | steps can be revisited inside the group | an order you have to be sure about |
-| handoff | leaves for good | only what `context:` carries over | another handoff back | nothing returns, so there is no result and no automatic way back |
+| handoff | leaves for good | chosen speech history plus explicitly referenced saved values | another handoff back | nothing returns, so there is no automatic way back |
 
 These are not exclusive. One agent can run a task in one phase and hand off in
 another.
@@ -195,13 +195,13 @@ cancellation.
 
 | Field | What it does |
 |---|---|
-| `history: full` | the new agent sees the conversation so far |
+| omitted or `history: messages` | spoken caller and agent messages; tool records are removed |
+| `history: reset` | no earlier conversation |
+| `history: full` | spoken messages and complete tool-call pairs |
 
-`history` is required. Choose it on purpose, and tell the user what you chose.
-Every declared value travels with the caller already, on every target, with
-nothing to write: see `variables.md`. What the caller just asked for is not a
-declared value: hand it over with `expect:` on the handoff, the same list a
-task takes, see below.
+Saved values remain in call state, but the receiving model sees only those its
+own prompt references with `{{name}}` or `{{name.field}}`. Use `reset` plus
+explicit references when the receiver needs saved facts without earlier speech.
 
 Order matters on a handoff the same way it matters on a task: say the
 dependency in the agent's own flow and in the handoff's `when:`, not with a
@@ -210,6 +210,12 @@ gate. See "Order steps with the prompt" below.
 ## Task
 
 ```yaml agent.yaml
+variables:
+  customer_id:
+    type: string
+  customer_name:
+    type: string
+
 agents:
   appointment_desk:
     instructions: instructions.md
@@ -225,38 +231,20 @@ agents:
         assign:
           - customer_id: result.customer_id
           - customer_name: result.customer_name
-        result:
-          customer_id: string
-          customer_name: string
-          record_status:
-            enum:
-              - existing
-              - created
-              - failed
-          summary: string
-        context:
-          history: full
 ```
 
 A task is nested inside the agent that runs it. The mapping does two things at
-once: it defines the task (`instructions`, `tools`, `result`, `context`) and
+once: it defines the task (`instructions`, `tools`, `assign`, `context`) and
 it attaches it, because `when:` is the trigger the model reads to decide to
 run it. There is no separate catalog to keep in step with the agent's own
 list.
 
-`result:` is the contract. The task must come back with those fields, and
-`record_status` can only be one of three values. That shape is what makes a
-task different from a longer prompt. Its internal turns stay out of the
-agent's context, while the completed call stays there so the same request
-does not run twice.
+`assign:` is the save contract. The compiler derives each finish field's type
+and description from its destination variable. A task with no values to save
+may omit `assign:`. Tool `output:` remains the tool's own API contract.
 
-Every task, including a task inside a group, needs a non-empty `result:` and `context.history`.
-
-**Task `result:` and tool `output:` are different contracts.** Tool contracts
-live in `tools/<name>.yaml`; the task's `tools:` list contains names only. The
-task result describes the outcome returned after all of its tool calls. Keep
-only what the calling agent needs instead of copying an attached tool's output
-schema by default.
+When a task returns, its private turns and finish fields stay private. The
+owner receives only `{"status":"completed"}` or `{"status":"unserved"}`.
 
 `assign:` copies fields out of the result into package variables, so the rest
 of the call uses them without asking again. Declare each of those variables at
@@ -274,41 +262,21 @@ The right side of a pair can also be a dotted path into a declared shape,
 result; see "Picking one part of a structured result" in
 `references/variables.md`.
 
-**Hand the step what the caller asked for.** A step on `history: reset` never
-receives the turn that triggered it. `expect:` is a list of typed fields the step
-expects when the agent runs it: the agent, which heard the caller, fills them,
-and the step's prompt ends with a block naming each. A field is one line,
-`- name: type`, or a block with `name`, `type` and `description`. The types are
-the ones a shape field takes. A type ending in `| None` is optional; without it
-the agent must have a value before the step can run, so the agent asks, not the
-step.
+**Give a reset task only what it needs.** Save facts that must cross the
+boundary as typed variables, then reference those variables in the task's own
+prompt.
 
 ```yaml
       - name: manage_booking
-        when: The caller wants to create, modify, or cancel a booking.
+        when: The caller wants to move a saved booking.
         instructions: tasks/booking.md
-        expect:
-          - action: Literal["create", "modify", "cancel"]
-          - name: requested_day
-            type: str | None
-            description: The day, in the caller's own words. Leave it out if they did not say.
-        result:
-          summary: string
         context:
           history: reset
 ```
 
-The step's prompt ends with a block you do not write, after the conversation
-state block: a `Request:` heading, one numbered line per field, a value left out
-reading `not given.`. Only the receiving prompt may name an expected value inline as
-`{{action}}`; any other prompt is refused. A value outside its type is refused
-before the step starts, naming the field, and the agent that supplied it is told
-to ask the caller and run the step again. The values are gone after the visit,
-so a fact worth keeping goes through `result:` and `assign:`. An expected value may not
-share a name with a variable, a secret, a shape or a grammar word, one name has
-one type across the package, and a task inside a task group takes none. A
-handoff takes the same list: the receiving agent is handed the brief and keeps
-it until the next handoff. Same on livekit and pipecat, refused on slng.
+For example, `tasks/booking.md` can say `Move appointment {{appointment_id}} to
+{{appointment_date}} at {{appointment_time}}.` No request block, summary or
+triggering sentence is added automatically.
 
 A task can also declare its own `think:`, naming a different reasoning
 profile for that one step alone. Leave it out and the task runs on the
@@ -320,16 +288,18 @@ A second agent that should offer the same task does not redefine it. It names
 the task by bare string instead:
 
 ```yaml agent.yaml
+variables:
+  customer_id:
+    type: string
+
 agents:
   appointment_desk:
     tasks:
       - name: customer_record
         when: Identify the caller before handling an appointment request.
         instructions: tasks/customer-record.md
-        result:
-          customer_id: string
-        context:
-          history: full
+        assign:
+          - customer_id: result.customer_id
 
   billing_desk:
     # appointment_desk defines this one. A bare name runs the same task from
@@ -393,24 +363,14 @@ agents:
         instructions: tasks/customer-record.md
         assign:
           - customer_phone: result.customer_phone
-        result:
-          customer_phone: string
-        context:
-          history: full
 
       - name: manage_appointment
         when: The caller wants to make, change, or cancel an appointment, once the caller is identified.
         instructions: tasks/appointment.md
-        result:
-          status: string
-        context:
-          history: full
 ```
 
-Every prompt already carries the `Conversation info:` block, so a step's own
-prompt can lean on it directly: "once the info names a customer, verification
-has already succeeded, never run it again." That is a request to the model,
-not a gate, so it is not the only line of defense.
+Reference a saved value in a task prompt only when that task needs it. No
+automatic state block is added.
 
 **The last line sits on the tool.** A tool that silently reads a value,
 through `inject:` or a webhook path, refuses to run while that value is empty
@@ -446,12 +406,9 @@ the caller's original reason for being in the step is not an unserved request,
 and a handoff the step declares wins over it.
 
 The request itself travels in `unserved_request`, a reserved optional string on
-every generated finish. **Never declare it in a task's `result:`.** Validation
-rejects a task result that claims the name. It arrives inside the returned
-result, and the owning agent is told to take that request next, so the caller
-does not repeat it. Only `then: return` hands the result to an owner on both
-targets: `then: end` ends the call, and on `then: transfer` only Pipecat passes
-the results to the receiving agent.
+every generated finish. It saves no domain values. On return, the owner receives
+only `{"status":"unserved"}`; the caller's request remains in shared speech
+history when that boundary uses messages or full history.
 
 ### The opening turn cannot hand off again
 
@@ -482,7 +439,7 @@ LiveKit agents and Pipecat output are unchanged.
 
 | Field | Values | Notes |
 |---|---|---|
-| `history` | `full`, `messages`, `last_n`, `summary`, `reset` | required |
+| `history` | `full`, `messages`, `last_n`, `summary`, `reset` | optional; omitted means `messages` |
 | `max_messages` | a positive number | legal with `last_n` only |
 | `summarizer` | a model entry name | legal with `summary` only |
 | `include_tool_calls` | `true` or `false` | whether tool calls travel too |
@@ -495,15 +452,14 @@ What each value gives the step:
   dropped.
 - `last_n` with `max_messages: n`: the newest n entries, tool records kept,
   never a tool result whose call was cut.
-- `reset`: the step's own instructions and its declared values, nothing else.
+- `reset`: the step's own instructions and its explicit saved-value references, nothing else.
 - `summary`: one summarizer turn in place of the transcript. LiveKit only;
   Pipecat refuses it, see the per-target table below.
 
-`history: full` is usually right, because the caller has already said something
-the task needs. `history: reset` is right when the step must not be influenced
-by what came before. Give it `expect:` for what the caller asked for, because it
-has no other way to know: without an `expect:` list it fits only a step whose whole job is
-described by its declared values.
+Omitted history is usually enough: the task gets what both people said without
+tool records. Use `full` only when the task needs tool-call pairs. Use `reset`
+when it should see no earlier speech, and put each saved value it needs directly
+in its prompt.
 
 No `history:` value is a privacy control. Shortening the history does not
 unsay what the caller said out loud; the caller's words are still in the
@@ -517,6 +473,14 @@ tools:
   - check_availability
   - book_appointment
 
+variables:
+  customer_id:
+    type: string
+  selected_slot:
+    type: string
+  booking_status:
+    type: Literal["booked", "cancelled"]
+
 agents:
   appointment_desk:
     instructions: instructions.md
@@ -527,34 +491,22 @@ agents:
         instructions: tasks/identify-customer.md
         tools:
           - lookup_customer
-        result:
-          customer_id: string
-          summary: string
-        context:
-          history: full
+        assign:
+          - customer_id: result.customer_id
 
       - name: select_appointment
         instructions: tasks/select-appointment.md
         tools:
           - check_availability
-        result:
-          selected_slot: string
-          summary: string
-        context:
-          history: full
+        assign:
+          - selected_slot: result.selected_slot
 
       - name: finalize_appointment
         instructions: tasks/finalize-appointment.md
         tools:
           - book_appointment
-        result:
-          booking_status:
-            enum:
-              - booked
-              - cancelled
-          summary: string
-        context:
-          history: full
+        assign:
+          - booking_status: result.booking_status
     task_groups:
       - appointment_flow
 
@@ -580,8 +532,8 @@ group contains tasks, not other groups.
 An agent runs a group by naming it in its own `task_groups:` list, the same
 way it names a handoff or an escalation. The group's `context_scope` governs
 how the members relate while the group runs. It does not replace a member
-task's `context:` block. Every member still needs its own non-empty `result:`
-and `context.history` so it is a complete task on its own.
+task's `context:` block. A member may omit both `assign:` and `context:` when it
+saves no value and the default spoken-message history is right.
 
 | Field | Values | What it does |
 |---|---|---|
@@ -624,14 +576,15 @@ answer out loud for each boundary the package actually has.
 |---|---|---|
 | a handoff | how much history does the new agent see? | `context.history` on the handoff entry |
 | a handoff | do tool calls travel too? | `context.include_tool_calls` |
-| a task or a handoff | what is the step or the new agent handed for this visit? | `expect:` on the task or the handoff |
+| a task or a handoff | which saved values can the receiver see? | only `{{references}}` in the receiver's own prompt |
 | a task | what does the task see when it starts? | `context.history` on the task |
-| a task | what comes back, and where does it land? | `result:` on the task, `assign:` on the same task |
+| a task | what is saved? | `assign:` on the task; destination variables supply the types |
 | a task group | do the steps share context or each start clean? | `context_scope` |
 | a task group | what happens when the last step ends? | `then`, and `then_target` if it transfers |
 | a task group | what reaches later shared steps and returns to the caller? | exact intermediate results enter shared context before the next step; the final `merge: results` map is keyed by task name |
 
-A boundary with no stated decision is a default nobody chose. Name it.
+Omitted history has a deliberate default: spoken messages without tool
+records. State other choices when they matter.
 
 Two things the table does not cover, because they trip people up:
 
@@ -702,7 +655,7 @@ rather than one list with a kind field.
 | | `tasks:` | `handoffs:` |
 |---|---|---|
 | returns | yes | no |
-| typed result | yes, `result:` | no |
+| typed save | yes, through `assign:` and destination variables | no |
 | targets | a task, run in place | another agent |
 | context control | `context:` on the task | `context:` on the handoff entry |
 

@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"github.com/slng-ai/unmute/internal/spec"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -115,6 +117,33 @@ func TestMaintainKeepsDeclaredShapes(t *testing.T) {
 	for _, want := range []string{"shapes:", "- name: Appointment", "- scheduled_date: Date", "type: list[Appointment]"} {
 		if !strings.Contains(source, want) {
 			t.Errorf("rewritten agent.yaml missing %q:\n%s", want, source)
+		}
+	}
+}
+
+func TestMaintainKeepsAssignmentPathsAndOrder(t *testing.T) {
+	data := scaffold.Data{
+		Name: "saved-record", AgentName: "saved-record", Instructions: "Handle appointments.",
+		Shapes:    []scaffold.Shape{{Name: "Appointment", Fields: []scaffold.ShapeField{{Name: "date", Type: "Date"}}}},
+		Variables: []scaffold.Variable{{Name: "appointments", Type: "list[Appointment]"}, {Name: "selected", Type: "Appointment | None"}, {Name: "date", Type: "Date | None"}},
+		Tasks: []scaffold.Task{{Name: "choose", Agent: "assistant", When: "Choose an appointment", Instructions: "Choose an appointment.", History: "reset",
+			Assign: []spec.Pair{{Key: "date", Value: "result.appointment.date"}, {Key: "appointments+", Value: "result.appointment"}, {Key: "selected", Value: "result.appointment"}}}},
+	}
+	data.SetTarget("livekit")
+	root := filepath.Join(t.TempDir(), "package")
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+	maintained, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(maintained.data.Tasks) != 1 || !reflect.DeepEqual(maintained.data.Tasks[0].Assign, data.Tasks[0].Assign) {
+		t.Fatalf("assignment paths/order changed: %+v", maintained.data.Tasks)
+	}
+	for _, loss := range maintained.losses {
+		if strings.Contains(loss, "assign") {
+			t.Fatal(loss)
 		}
 	}
 }

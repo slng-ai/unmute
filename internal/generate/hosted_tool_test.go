@@ -330,12 +330,12 @@ func TestUnhandledExecutionKindIsRefusedNotPosted(t *testing.T) {
 	// builders are called directly, with no validation in front of them.
 	t.Run("the builders refuse it themselves", func(t *testing.T) {
 		env := newEnvSet()
-		if _, err := buildLiveKitTool("lookup_customer", unknown, agent.Variables, SupplierIndex(agent.Controls), env); err == nil {
+		if _, err := buildLiveKitTool("lookup_customer", unknown, agent.Variables, SupplierIndex(agent.Tasks), env); err == nil {
 			t.Error("buildLiveKitTool built a tool for a kind it cannot lower, which renders as a webhook POST")
 		} else if !strings.Contains(err.Error(), "ir.Validate") {
 			t.Errorf("the livekit builder's refusal does not say validation should have caught it: %v", err)
 		}
-		if _, err := buildTool("lookup_customer", unknown, agent.Variables, SupplierIndex(agent.Controls), env); err == nil {
+		if _, err := buildTool("lookup_customer", unknown, agent.Variables, SupplierIndex(agent.Tasks), env); err == nil {
 			t.Error("the pipecat buildTool built a tool for a kind it cannot lower, which renders as a webhook POST")
 		} else if !strings.Contains(err.Error(), "ir.Validate") {
 			t.Errorf("the pipecat builder's refusal does not say validation should have caught it: %v", err)

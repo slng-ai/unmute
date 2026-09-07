@@ -11,8 +11,8 @@ import (
 //
 // Found on a live call: `record_complaint` sat on a complaint specialist as well
 // as on its `handle_complaint` step. The specialist recorded the complaint,
-// answered the caller sensibly, and the state block still read
-// "Complaints: none recorded yet" at the end of the call. The specialist's own
+// answered the caller sensibly, and the saved complaints list stayed empty at
+// the end of the call. The specialist's own
 // prompt said "then run the complaint step in the same turn, silently", so this
 // is not a prompt that was missing a rule. A tool within reach beat the prompt.
 func TestWarnsWhenAnAgentHoldsEveryToolOfItsStep(t *testing.T) {

@@ -32,10 +32,9 @@ complaint_specialist:
         - complaints+: result.complaint
 ```
 
-On a live call it recorded the complaint correctly, gave the caller a sensible
-next step, and the state block still read `Complaints: none recorded yet` at the
-end of the call. The specialist had the tool in reach, so it never entered the
-step, so nothing appended to `complaints`.
+On a live call it recorded the complaint correctly and gave the caller a
+sensible next step, but `complaints` stayed empty. The specialist had the tool
+in reach, so it never entered the step, so nothing appended to `complaints`.
 
 The prompt was not the problem. Its workflow said "then run the complaint step
 in the same turn, silently", in those words. A tool within reach beat the prompt.
@@ -59,8 +58,8 @@ model takes the short route depends on your prompt and your `when:`, neither of
 which the compiler reads. Read the warning and decide.
 </Note>
 
-A step that declares no tools at all is fine. Its prompt, its context scope and
-its typed result are reasons to enter it that have nothing to do with tools.
+A step that declares no tools at all is fine. Its prompt, context choice, and
+saved assignments are reasons to enter it that have nothing to do with tools.
 
 ## Order steps with the prompt
 
@@ -85,12 +84,11 @@ clause, what has to be true first:
         when: The caller wants to create, modify, or cancel a booking, once the caller is verified.
 ```
 
-The model has something real to check that clause against. Every prompt
-already carries the `Conversation info:` block, so once the earlier step has
-recorded its value there, the agent's own prompt can say so:
+The model has something real to check that clause against when the agent's
+prompt explicitly references the value the earlier task saved:
 
 ```md instructions.md
-Once the conversation info names a customer, verification has already
+The verified customer is {{customer_id}}. Once that value is present, verification has already
 succeeded. Never run that step again unless the caller says the number is wrong.
 ```
 
@@ -125,19 +123,14 @@ the transcript costs both money and accuracy.
 
 | Scope | What the step sees | Use it when |
 | --- | --- | --- |
-| `full` | The whole conversation | The step needs the caller's exact wording, or you have not declared state yet |
-| `messages` | What was said, without tool traffic | The step acts on what the caller asked for and records why |
-| `reset` | Nothing but its own prompt, declared values and what it was handed | The step is described by its `expect:` list and its own declared values |
+| `messages` | What was said, without tool traffic | The default for normal continuity |
+| `full` | Speech and paired tool records, without old instructions | The step needs earlier tool results |
+| `reset` | Its own prompt and the saved values that prompt names | The package intentionally declares every fact the step needs |
 
 `reset` is the strongest scope. A reset step never receives the turn that
-triggered it, so on its own it cannot know why the caller rang. One agent gave a
-verification step a "reason" field to fill under `reset`, and the step asked the
-caller what they were calling about on every call, immediately after they had
-just said. That is what `expect:` is for. Declare on the step what the caller
-asked for, and the agent that heard the caller hands it in when it runs the
-step. The step asks nothing it was handed. Mark a value the caller might not
-have given with `| None`, so nobody invents one. A reset step records only what
-it is handed, and steps that act record why.
+triggered it. Save a fact before the boundary and reference it in the reset
+prompt when the receiver needs it. If the fact was only spoken and never saved,
+the reset step asks for it again.
 
 ## Give every step an escape, and read it
 
@@ -149,18 +142,14 @@ Every generated step carries a reserved `unserved_request` field for this. The
 step does its own work, then names the request it could not serve in its own
 words, and finishes.
 
-The half people forget is the other side. The agent that owns the step has to
-act on that field. Say so once in the owning agent's prompt, and say it as a
-job:
+The owner receives only an `unserved` status, not the private request text. It
+asks what the caller needs and handles the new request with its own tools or
+handoffs:
 
 ```md
-A step handing back an unserved request has given you a job, not an excuse, so
-act on it in the same turn and never apologise for it.
+When a step returns unserved, ask the caller what they need and help with the
+tools or handoffs available here.
 ```
-
-Left implicit, an agent will read the field, say something sympathetic, and end
-the turn. On one call it apologised to the caller for a booking it was fully
-able to make.
 
 ## Do not let two prompts disagree
 
@@ -181,7 +170,7 @@ sitting and check it still agrees.
 
 <CardGroup cols={2}>
   <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
-    Declaring a step, its result, and the reserved finish contract.
+    Declaring a step, its saved values, and the reserved finish contract.
   </Card>
   <Card title="Choosing a context scope" icon="scissors" href="/optimization/context-scope">
     What each scope costs, and what has to travel as declared state.

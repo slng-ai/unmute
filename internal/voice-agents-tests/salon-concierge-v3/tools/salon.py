@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 _fresh = types.ModuleType("unmute_salon_state")
 _fresh.customers = set()
 _fresh.names = {"34111111111": "Robin Vega"}
+_fresh.customer_ids = {"34111111111": "cus_robin_vega"}
 _fresh.bookings = {}
 _fresh.complaints = {}
 _fresh.lock = threading.Lock()
@@ -36,7 +37,7 @@ def _booking_today() -> date:
     Not `date.today()`, which reads the container clock. That clock is UTC, so a
     booking taken at 23:30 in Madrid landed on the following day and every date
     check here disagreed with the caller by one. The zone matches `timezone:` in
-    agent.yaml, which is also what the pre-fetched {{booking_date}} is read in, so
+    agent.yaml, which is also what the pre-fetched {{today_date}} is read in, so
     the prompt and the validation agree about what day it is.
     """
     return datetime.now(ZoneInfo(_SALON_TIMEZONE)).date()
@@ -95,15 +96,26 @@ def find_or_create_customer(phone):
     if not normalized_phone:
         return {
             "customer_phone": "",
+            "customer_name": "",
+            "customer_id": "",
+            "customer_status": "invalid",
             "status": "invalid",
             "summary": "A valid phone number of 10 to 15 digits is required.",
         }
     with _state.lock:
         known = normalized_phone in _state.customers
         _state.customers.add(normalized_phone)
+        customer_id = _state.customer_ids.setdefault(
+            normalized_phone, f"cus_{uuid4().hex[:12]}"
+        )
+        customer_name = _state.names.get(normalized_phone, "")
+    status = "existing" if known else "created"
     return {
         "customer_phone": _e164(normalized_phone),
-        "status": "existing" if known else "created",
+        "customer_name": customer_name,
+        "customer_id": customer_id,
+        "customer_status": status,
+        "status": status,
         "summary": (
             "The existing customer was verified."
             if known
@@ -143,11 +155,16 @@ def look_up_customer(phone):
     """
     normalized_phone = _normalize_phone(phone)
     if not normalized_phone:
-        return {"name": "", "status": "unknown"}
+        return {"name": "", "id": "", "status": "unknown"}
     with _state.lock:
         name = _state.names.get(normalized_phone, "")
         known = normalized_phone in _state.customers or bool(name)
-    return {"name": name, "status": "existing" if known else "unknown"}
+        customer_id = _state.customer_ids.get(normalized_phone, "")
+    return {
+        "name": name,
+        "id": customer_id,
+        "status": "existing" if known else "unknown",
+    }
 
 
 def check_availability(service, date):
@@ -336,12 +353,13 @@ def _demo():
             assert len({result["customer_phone"] for result in concurrent}) == 1
             assert [result["status"] for result in concurrent].count("created") == 1
 
-    before = (set(_state.customers), dict(_state.names))
+    before = (set(_state.customers), dict(_state.names), dict(_state.customer_ids))
     seeded = look_up_customer("+34 111 111 111")
-    assert seeded == {"name": "Robin Vega", "status": "existing"}
-    assert look_up_customer("+1 555 010 0000") == {"name": "", "status": "unknown"}
-    assert look_up_customer("nonsense") == {"name": "", "status": "unknown"}
-    assert (set(_state.customers), dict(_state.names)) == before, "look_up_customer wrote"
+    assert seeded == {"name": "Robin Vega", "id": "cus_robin_vega", "status": "existing"}
+    unknown = {"name": "", "id": "", "status": "unknown"}
+    assert look_up_customer("+1 555 010 0000") == unknown
+    assert look_up_customer("nonsense") == unknown
+    assert (set(_state.customers), dict(_state.names), dict(_state.customer_ids)) == before, "look_up_customer wrote"
 
     current_date = _booking_today().isoformat()
     assert current_date == datetime.now(ZoneInfo(_SALON_TIMEZONE)).date().isoformat()

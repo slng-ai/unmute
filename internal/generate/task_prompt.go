@@ -10,10 +10,8 @@ import (
 // the step: LiveKit appends it to the delegate tool's docstring, Pipecat to the
 // developer message that hands the results back. Without it the field arrives in
 // a result nobody was told to read.
-const unservedOwnerRule = "A result carrying `" + ir.UnservedResultField + "` means a step could not serve that request and handed it back. " +
-	"The caller is still owed it: after one short line about the result, act on that request in the same turn, with your own tools, a handoff, " +
-	"or the same flow again. It is a new request, so running the flow for it is not running it again for the one that just finished. " +
-	"Never end the turn without acting on it, and never tell the caller you cannot."
+const unservedOwnerRule = "A completed status means the step finished. Read any saved values through your own prompt references. " +
+	"An unserved status means the step could not help. Ask the caller what they need, then use your tools or a handoff."
 
 // taskFinishContract is the compiler's own tail on every task prompt. The
 // authored instructions describe the step; this names the one call that ends it,
@@ -43,8 +41,8 @@ func taskFinishContract(finishName string, resultNames []string) string {
 		"work: the caller's original reason for being here is not an unserved request. " +
 		"If a handoff here covers what they want, call that handoff instead. Only when " +
 		"no tool and no handoff here can serve what the caller is asking, call " + call +
-		" with the closest result you have and their request in `" +
+		" with their request in `" +
 		ir.UnservedResultField + "`, in their own words, rather than refusing or " +
 		"explaining what you cannot do here. The agent that owns this step reads that " +
-		"field and takes the caller from there."
+		"status and takes the caller from there."
 }

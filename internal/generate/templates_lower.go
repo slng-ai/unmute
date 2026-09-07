@@ -31,20 +31,11 @@ type neededVar struct {
 	Hint string
 }
 
-// SupplierIndex maps a variable name to the control that fills it.
-//
-// Only a delegate can fill a variable, through its `assign:` block, so that is
-// the whole search. Where two controls assign the same variable, the first in
-// sorted control order wins, which makes the emitted output deterministic rather
-// than dependent on map order.
-func SupplierIndex(controls map[string]ir.Control) map[string]string {
+// SupplierIndex names the first task that saves each variable, including group steps.
+func SupplierIndex(tasks map[string]ir.Task) map[string]string {
 	index := map[string]string{}
-	for _, name := range sortedKeys(controls) {
-		delegate, ok := controls[name].(*ir.Delegate)
-		if !ok {
-			continue
-		}
-		for _, variable := range ir.AssignedVars(delegate.Assign) {
+	for _, name := range sortedKeys(tasks) {
+		for _, variable := range ir.AssignedVars(tasks[name].Assign) {
 			if _, taken := index[variable]; !taken {
 				index[variable] = name
 			}
@@ -146,19 +137,19 @@ func neededVars(tool ir.Tool, variables map[string]ir.Variable, suppliers map[st
 	seen := make(map[string]bool)
 	var needed []neededVar
 	collect := func(text string) {
-		for _, ref := range ir.TemplateRefs(text) {
+		for _, ref := range ir.TemplateRefs(ir.FlattenPaths(text)) {
 			// The root: a path into a value that is unset is a request against
 			// nobody's record, and the refusal names the record to ask for.
 			name := ir.PathRoot(ref)
 			variable, ok := variables[name]
-			if !ok || seen[name] || ir.IsSystemSource(variable.Source) {
+			if !ok || seen[ref] || (name == ref && ir.IsSystemSource(variable.Source)) {
 				continue
 			}
-			if variable.Default != nil && variable.Confirm == "" {
+			if name == ref && variable.Default != nil && variable.Default != "" && variable.Confirm == "" {
 				continue
 			}
-			seen[name] = true
-			needed = append(needed, neededVar{Name: name, Hint: neededHint(name, variable, suppliers)})
+			seen[ref] = true
+			needed = append(needed, neededVar{Name: ref, Hint: neededHint(name, variable, suppliers)})
 		}
 	}
 	keys := make([]string, 0, len(tool.Inject))
@@ -238,11 +229,11 @@ func urlExpr(tool ir.Tool, stateExpr string) string {
 // site renders locally exactly as before, which is FR-017 by construction rather
 // than by care: greetings, tool arguments, inject values and webhook paths go
 // through their own lowering helpers and never reach this function.
-func promptExpr(constName, body, stateExpr string, raw bool) string {
+func promptExpr(constName, body, stateExpr string, raw bool, site string) string {
 	if raw || !ir.HasTemplate(body) {
 		return constName
 	}
-	return fmt.Sprintf("_render(%s, %s)", constName, stateExpr)
+	return fmt.Sprintf("_render(%s, %s, site=%s)", constName, stateExpr, pyQuote(site))
 }
 
 // renderNeeds reports whether the emitted runtime needs the render helper at

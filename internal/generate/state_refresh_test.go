@@ -7,11 +7,11 @@ import (
 	"github.com/slng-ai/unmute/internal/ir"
 )
 
-// The conversation state block has to hold what a step just wrote, in the
-// prompt of the agent that sent the step in.
+// Explicit prompt references have to hold what a task just wrote in the prompt
+// of the agent that sent the task in.
 //
 // LiveKit renders an agent's prompt in `on_enter`, and an agent is entered once
-// per call, so the block froze at whatever it held before the first step
+// per call, so the rendered reference froze at whatever it held before the first step
 // finished. Its steps looked right the whole time, which is what made this hard
 // to see: a step is entered per visit and renders on the way in. On a live call
 // (trace 798550937, 2026-09-04) `verify_customer` finished at 15:05:03 and the
@@ -26,43 +26,24 @@ import (
 func TestLiveKitRefreshesTheOwnerPromptAfterAStepWritesState(t *testing.T) {
 	t.Parallel()
 
-	got := emitted(t, loadExample(t, "salon-concierge-v2"), ir.ProviderLiveKit)
+	got := emitted(t, loadExample(t, "salon-concierge-v3"), ir.ProviderLiveKit)
 
-	// Every agent that owns an assigning step declares the method, and the
-	// method re-renders rather than doing something else.
-	if strings.Count(got, "async def _refresh_prompt(self) -> None:") != 2 {
-		t.Errorf("want _refresh_prompt on both agents, got %d",
+	// The owner whose prompt reads saved state declares the method.
+	if strings.Count(got, "async def _refresh_prompt(self) -> None:") != 1 {
+		t.Errorf("want one _refresh_prompt, got %d",
 			strings.Count(got, "async def _refresh_prompt(self) -> None:"))
 	}
 
 	// Every assign site calls it. Counting the calls against the assign sites
 	// is what catches a new step added without one.
-	assigns := strings.Count(got, "_append_entry(ctx.userdata.") + strings.Count(got, "ctx.userdata.customer = result[")
-	if assigns == 0 {
-		t.Fatal("no assign sites found; this gate is testing nothing")
-	}
-	if calls := strings.Count(got, "await self._refresh_prompt()"); calls != 4 {
-		t.Errorf("got %d refresh calls for %d assign sites, want one per step that assigns", calls, assigns)
+	if calls := strings.Count(got, "await self._refresh_prompt()"); calls != 2 {
+		t.Errorf("got %d refresh calls, want one for each assigning concierge task", calls)
 	}
 
 	// The call comes after the writes, not before: refreshing first renders the
 	// old value and is the bug with extra steps.
-	for _, step := range []string{"ctx.userdata.customer = result[", "_append_entry(ctx.userdata.appointments"} {
-		write := strings.Index(got, step)
-		if write < 0 {
-			t.Fatalf("assign site %q is gone", step)
-		}
-		refresh := strings.Index(got[write:], "await self._refresh_prompt()")
-		if refresh < 0 {
-			t.Errorf("no refresh after %q", step)
-			continue
-		}
-		// Nothing else may write state between the two, or that write is lost
-		// from the prompt until the next step runs.
-		between := got[write : write+refresh]
-		if strings.Count(between, "return result") > 0 {
-			t.Errorf("the step returns before refreshing the prompt, after %q", step)
-		}
+	if save := strings.Index(got, `result = await ManageBooking(`); save < 0 || !strings.Contains(got[save:], "await self._refresh_prompt()") {
+		t.Error("manage_booking returns without refreshing the owner's prompt")
 	}
 }
 
@@ -74,8 +55,8 @@ func TestLiveKitRefreshesTheOwnerPromptAfterAStepWritesState(t *testing.T) {
 func TestBothTargetsRefreshDeclaredStateWithoutWaitingForAnEntry(t *testing.T) {
 	t.Parallel()
 
-	livekit := emitted(t, loadExample(t, "salon-concierge-v2"), ir.ProviderLiveKit)
-	pipecat := emitted(t, loadExample(t, "salon-concierge-v2"), ir.ProviderPipecat)
+	livekit := emitted(t, loadExample(t, "salon-concierge-v3"), ir.ProviderLiveKit)
+	pipecat := emitted(t, loadExample(t, "salon-concierge-v3"), ir.ProviderPipecat)
 
 	// LiveKit: the render call reaches the owner outside on_enter.
 	enter := strings.Index(livekit, "async def on_enter(self) -> None:")
@@ -95,7 +76,7 @@ func TestBothTargetsRefreshDeclaredStateWithoutWaitingForAnEntry(t *testing.T) {
 	// So the assertion is per owner and not global: each agent's prompt is
 	// rendered more than once, which is the same guarantee _refresh_prompt now
 	// gives LiveKit.
-	for _, prompt := range []string{"CONCIERGE_PROMPT", "COMPLAINT_SPECIALIST_PROMPT"} {
+	for _, prompt := range []string{"CONCIERGE_PROMPT"} {
 		renders := strings.Count(pipecat, "system_instruction=_render("+prompt)
 		if renders < 2 {
 			t.Errorf("pipecat renders %s %d time(s); an owner prompt rendered once per entry goes stale "+
@@ -114,6 +95,30 @@ func TestNoRefreshEmittedForAPackageWhoseStepsAssignNothing(t *testing.T) {
 		got := emitted(t, loadExample(t, pkg), ir.ProviderLiveKit)
 		if strings.Contains(got, "_refresh_prompt") {
 			t.Errorf("%s emits _refresh_prompt; its steps assign nothing so nothing can go stale", pkg)
+		}
+	}
+}
+
+func TestPromptsContainOnlyAuthoredStateReferences(t *testing.T) {
+	agent := loadTypedState(t)
+	for name, task := range agent.Tasks {
+		if strings.Contains(task.Instructions, "Conversation info:") || strings.Contains(task.Instructions, "Request:") {
+			t.Errorf("task %s includes an automatic sharing block", name)
+		}
+	}
+}
+
+func TestTaskReturnsOnlyNeutralStatus(t *testing.T) {
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		got := emitted(t, loadTypedState(t), provider)
+		if provider == ir.ProviderLiveKit && !strings.Contains(got, "return _task_status(result)") {
+			t.Error("LiveKit delegate returns raw result")
+		}
+		if strings.Contains(got, "Task results: ") {
+			t.Error("Pipecat puts private results in owner context")
+		}
+		if !strings.Contains(got, `"status": "unserved" if values.get("unserved_request") else "completed"`) {
+			t.Error("missing neutral outcome")
 		}
 	}
 }

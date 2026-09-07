@@ -88,14 +88,18 @@ Say the format once, in the type. A prompt that repeats it can drift from the
 validator, and then the two tell the model different things.
 </Note>
 
-## Do not name what the state block already names
+## Name only the values this prompt needs
 
-The conversation state block reaches every prompt and lists what the call has
-established. A prompt that also tells the model to recap that information gets
-it said twice.
+Saved values reach a prompt only through placeholders you write. Keep those
+references close to the instruction that uses them:
 
-The pattern that works: the step that did the thing says it, in one short
-sentence that names nothing, and the agent above it confirms without repeating.
+```md
+Move appointment {{appointment_id}} to {{appointment_date}} at
+{{appointment_time}}.
+```
+
+The step that did the thing can say it in one short sentence, and the agent
+above it can confirm without repeating every detail.
 
 ```md instructions.md
 When the booking step hands its result back, confirm it in one short sentence
@@ -103,9 +107,8 @@ that names nothing. "You're all set." "That's booked." The step already said the
 service, the day and the time, so naming them again is the same news twice.
 ```
 
-Naming them from the state block is worse than repeating, because the block
-holds everything this call recorded and not just the thing that has this second
-happened. An agent reading it back after a second booking will recite the first.
+Do not add saved values just because they exist. Every placeholder is an
+intentional context grant to that prompt.
 
 ## Tell the model to vary, and it will
 

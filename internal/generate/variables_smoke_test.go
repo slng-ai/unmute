@@ -41,9 +41,15 @@ assert rendered == "Hi Ada, see you tomorrow at 3 pm.", rendered
 
 # A path renders with its values URL-encoded, separators untouched.
 state.customer_phone = "cus/10 42"
-path = bot._render("/customers/{{customer_phone}}/appointments", state, quote_values=True)
+path = bot._render(
+    "/customers/{{customer_phone}}/appointments",
+    state,
+    quote_values=True,
+    site="task:verify_customer",
+)
 assert path == "/customers/cus%2F10%2042/appointments", path
 state.customer_phone = "cus_1042"
+bot._save_result("verify_customer", state, {"customer_phone": state.customer_phone})
 
 # An unset variable produces a refusal naming it, not a request.
 assert state.reschedule_to is None
@@ -84,8 +90,16 @@ userdata.customer_phone = "cus_1042"
 rendered = generated._render("Hi {{name}}!", userdata)
 assert rendered == "Hi Ada!", rendered
 
-path = generated._render("/customers/{{customer_phone}}/appointments", userdata, quote_values=True)
+path = generated._render(
+    "/customers/{{customer_phone}}/appointments",
+    userdata,
+    quote_values=True,
+    site="task:verify_customer",
+)
 assert path == "/customers/cus_1042/appointments", path
+generated._save_result(
+    "verify_customer", userdata, {"customer_phone": userdata.customer_phone}
+)
 
 refusal = generated._refusal("reschedule_appointment", userdata, [("reschedule_to", "the new slot")])
 assert "reschedule_to" in refusal, refusal

@@ -5,25 +5,18 @@ variable, and the two never mix.
 
 ## How a value moves
 
-Four keys write or read state, and it is easy to blur them together. This
-page works through `variables:` and `prefetch:` in full; `references/orchestration.md`
-does the same for `expect:`.
+Three parts write or read state:
 
 | Key | Think of it as | Lives | Read by |
 |---|---|---|---|
-| `variables:` | the call's state | the whole call | every prompt, through the block the compiler adds or `{{name}}` |
+| `variables:` | the call's typed state | the whole call | only prompts and tools that explicitly reference a value |
 | `prefetch:` + `assign:` | state filled before the first word | the whole call | the same |
-| `expect:` | what a step or a receiving agent is handed, filled by the calling model from the caller's words | one visit (a task), until the next handoff (an agent) | that prompt only, in its `Request:` block |
-| `result:` + `assign:` | what a step hands back, or one part of it, written into state at `finish` | the whole call from then on | every prompt |
+| task `assign:` | fields a task saves when it finishes | the whole call from then on | the same |
 
-State is written only at a seam: before the call, by `prefetch:`, and at
-`finish`, by a step's `result:` and `assign:`. The caller's own words enter a
-step through `expect:`. A step keeps what matters for later by putting it in
-its result.
-
-`variables:` and `prefetch:` are below. So is "Getting a value out of a
-task", which covers `result:` and `assign:`. `expect:` belongs to a task or a
-handoff, not to a variable: see `references/orchestration.md`.
+State is written only at a seam: before the call by `prefetch:`, and at task
+finish by `assign:`. Conversation sharing is controlled separately by
+`context.history`. A reset task receives no old speech, so put each saved value
+it needs directly in its prompt as `{{name}}`.
 
 ## Declaring a variable
 
@@ -101,8 +94,9 @@ Refused, each with its line:
 
 ## The type grammar
 
-A variable's `type:` and a task result field's type are both one-line type
-expressions, written in Pydantic's own words:
+A variable's `type:` is a one-line type expression, written in Pydantic's own
+words. Task finish fields reuse the destination variable types named by
+`assign:`:
 
 ```text
 type  := atom ("|" atom)*
@@ -110,11 +104,6 @@ atom  := name | name "[" args "]"
 args  := arg ("," arg)*
 arg   := type | string
 ```
-
-A result field also still takes the older JSON Schema spellings: `string`
-`number` `integer` `boolean` in place of `str` `int` `float` `bool`, and an
-`{enum: [...]}` block in place of `Literal[...]`. Both mean the same thing;
-reach for the grammar first.
 
 | Written | Accepted | Write instead |
 |---|---|---|
@@ -142,12 +131,9 @@ reach for the grammar first.
 Anything else is refused by name, with the line and the column inside the
 expression, and the message says what to write instead.
 
-Once a variable's type is anything in this table other than a bare `str`
-`int` `float` `bool`, its value is appended automatically to every agent
-prompt and every task prompt, as a numbered block after the authored text.
-Do not template it into a prompt; the compiler already does. An empty value
-renders as the words `none recorded yet.`, never `[]` or `null`. See "How a
-variable reaches a prompt" below for what `confirm:` does to this.
+No variable is appended to prompts automatically. Use `{{name}}` or a dotted
+path at each prompt that needs it. An empty referenced value renders as the
+words `none recorded yet.`, never `None`.
 
 ## Where values come from
 
@@ -384,11 +370,7 @@ and to ask from scratch when the value is empty. Both paths, in one prompt.
 
 ## How a variable reaches a prompt
 
-Two ways, and the difference is the thing people get wrong.
-
-**Automatically**, for anything typed past a bare scalar: see the type grammar
-section above. **By hand**, with `{{name}}`, at five sites, with different
-timing:
+Use `{{name}}` at the site that needs the value:
 
 | Site | Renders | Can name |
 |---|---|---|
@@ -400,11 +382,10 @@ timing:
 
 ### Naming one part of a value
 
-A `{{name}}` placeholder can also name one field inside a variable or an
-expected value, with a dotted path: `{{customer.status}}`. The root, the name
-before the first dot, follows every rule a whole value already follows at
-that site: a declared variable or an expected value handed to that prompt, a
-value awaiting confirmation renders only in its confirming step's prompt, the
+A `{{name}}` placeholder can also name one field inside a variable, with a
+dotted path: `{{customer.status}}`. The root, the name before the first dot,
+follows every rule a whole value already follows at that site: a declared
+variable awaiting confirmation renders only in its confirming step's prompt, the
 greeting only names something that already has a value, and a secret never
 renders.
 
@@ -433,8 +414,7 @@ The caller is a {{customer.status}} customer, if the lookup has run.
 
 Written to read whole before the lookup has run: a part renders the same
 empty words the whole value would when the value, or a link on the way, is
-absent, `none recorded yet.` for a variable and `not given.` for an expected
-value, never `None`, never a hole, never an error. A field that is itself a
+absent, `none recorded yet.`, never `None`, never a hole, never an error. A field that is itself a
 shape or a list renders as compact JSON; any other field renders as plain
 text.
 
@@ -492,8 +472,8 @@ input:
     - slot_id
 
 inject:
-  customer_id: "{{customer_id}}"
-  service: "{{requested_service}}"
+  - customer_id: "{{customer_id}}"
+  - service: "{{requested_service}}"
 ```
 
 `inject` values are not part of the model's schema, so the model can neither see
@@ -522,9 +502,9 @@ agents:
           - customer_id: result.customer_id
 ```
 
-The task's typed result lands in the variable named by `assign:`, and the rest
-of the call uses it without asking again. Declare the variable at the top level
-for it to land in.
+The task's finish field is derived from the destination variable named by
+`assign:`. A successful finish saves it there. Declare the variable at the top
+level; do not repeat the field or type in a task `result:` block.
 
 A `+` on the key appends one entry instead of replacing the value:
 
@@ -553,8 +533,6 @@ can be `result.<field>`, or a dotted path into a declared shape,
 ```yaml agent.yaml
 tasks:
   - name: manage_booking
-    result:
-      appointment: Appointment | None
     assign:
       - appointments+: result.appointment
       - last_booking_day: result.appointment.scheduled_date
@@ -590,20 +568,19 @@ caller is verified." See "Order steps with the prompt" in
 `references/orchestration.md` for the full pattern, including what a
 silently reading tool does with a value that is not there yet.
 
-## A handoff keeps every declared value
+## Share saved values across a handoff
 
-Every declared value is shared by every agent in the call, on both targets,
-with nothing to write and no field to set: a handoff carries all of them,
-always.
+Saved values remain in call state across a handoff, but the receiving model
+sees only values its own prompt references. Put each needed value in that
+prompt with `{{name}}` or `{{name.field}}`.
 
 ```yaml
     context:
       history: full
 ```
 
-What the caller just asked for is not a declared value, so this does not
-cover it: hand it over with `expect:` on the handoff instead, see
-`references/orchestration.md`.
+Omitting `history` shares spoken messages by default. Use `history: reset` to
+share no earlier speech.
 
 ## Seeding values locally
 

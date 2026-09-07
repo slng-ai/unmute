@@ -229,6 +229,27 @@ lk dispatch create --room <room> --agent-name remy-fixture-livekit \
   --metadata '{"call_start": { "caller_phone": "..." }}'
 ```
 
+## Declared state
+
+Variables declare types once. A task's `assign` derives its finish fields and
+saves validated values. A failed or unserved finish saves nothing.
+
+A prompt reads only its own `{{variable}}` or `{{variable.field}}`
+references. Missing values render as `none recorded yet.`; false, zero and
+empty lists keep their values. Referencing an object shares the whole object.
+History is a separate choice and does not clear saved values.
+
+Each declared shape is a generated Pydantic class in this module. A step's
+result is validated against it before anything is recorded, so a value outside a
+declared set never enters the state: the previous contents stay as they were and
+the model is told which field and what was allowed, which is what lets it
+correct itself on the next turn.
+
+A text type with a validated shape (`Phone`, `Date`, `Time`, `Id`) is a `str` in
+the schema the model is sent, with its shape checked by a validator. That is
+deliberate: a `pattern` in the schema survives the strict tool-schema converter
+and the provider rejects it, so the shape is checked here instead.
+
 ## Deploy
 
 Two supported paths: LiveKit Cloud with the `lk` CLI, or a worker you host
@@ -371,7 +392,7 @@ from typing import Annotated
 import httpx
 from dotenv import load_dotenv
 
-from pydantic import Field
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from livekit.agents import (
     NOT_GIVEN,
     Agent,
@@ -451,9 +472,9 @@ You are handling only the confirmation for this caller. Work one question per tu
 If the caller declines, send nothing and finish. Do not promise anything beyond the text message.
 
 
-When this step is complete, call `finish` with: sent.
+When this step is complete, call `finish`.
 
-`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with the closest result you have and their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that field and takes the caller from there."""
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there."""
 
 FIND_SLOT_PROMPT = """# Find a table
 
@@ -467,9 +488,9 @@ You are handling only the table search for this caller. Work one question per tu
 Never promise a table that check_availability did not return. If nothing is open, say so plainly and offer the nearest alternatives it returned.
 
 
-When this step is complete, call `finish` with: date, party_size, time.
+When this step is complete, call `finish`.
 
-`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with the closest result you have and their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that field and takes the caller from there."""
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there."""
 
 QUALIFY_EVENT_PROMPT = """# Qualify a private event
 
@@ -482,9 +503,9 @@ You are handling only the event details for this caller. Work one question per t
 When you have all three, record them and finish. Do not quote prices, menus, or availability; the events team handles that after the call.
 
 
-When this step is complete, call `finish` with: date, headcount, occasion.
+When this step is complete, call `finish`.
 
-`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with the closest result you have and their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that field and takes the caller from there."""
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there."""
 
 # --- required environment ----------------------------------------------------
 # Everything this agent needs to run: the model providers' keys, the connection
@@ -515,6 +536,318 @@ def require_env() -> None:
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if missing:
         raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
+
+
+# --- declared state ----------------------------------------------------------
+# Generated from the `shapes:` and the typed `variables:` in agent.yaml. Both
+# target frameworks already depend on Pydantic, so nothing here adds one.
+#
+# Emitted from one place in the compiler for both targets, so the classes, the
+# checks and the refusal wording cannot differ between them.
+
+
+class _StateRefused(Exception):
+    """A value that does not fit its declared type, refused where it enters.
+
+    Carried as an exception rather than a return so the write cannot happen by
+    accident: the previous contents stay exactly as they were, and the message
+    goes back to the model, which is what lets it correct itself on the next
+    turn instead of the step recording something wrong.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+def _typed(field, adapter, value):
+    """Validate one value entering the declared state."""
+    try:
+        return adapter.validate_python(value)
+    except ValidationError as error:
+        first = error.errors()[0]
+        where = ".".join(str(part) for part in first["loc"])
+        named = f"{field}.{where}" if where else field
+        raise _StateRefused(f"{named}: {first['msg']}") from None
+
+
+def _append_entry(entries, value):
+    """One entry onto a declared list, unless it is already on it.
+
+    A step re-entered mid-call can read a value through an explicit prompt
+    reference and hand it straight back, which is not a second thing happening. One live call
+    entered the booking step four times and finished three of them immediately,
+    each with the same appointment it had recorded on the first, so one booking
+    became four entries and the caller's recap listed a booking four times.
+
+    An object carries its own identity, so an identical one is the same thing
+    reported twice. A plain value is not: two bookings really do give two
+    reasons of "create_booking", and both of those count. So the skip is for
+    structured entries only.
+
+    Nothing absent is added either, which is how a step that concluded nothing
+    this time finishes without inventing an entry.
+    """
+    if value is None:
+        return
+    if isinstance(value, (dict, list)) and value in entries:
+        return
+    entries.append(value)
+
+
+def _plain(value):
+    """A validated value as plain data.
+
+    Plain data is the only shape both frameworks accept back from a tool: one
+    refuses a BaseModel outright and drops the whole tool result with a log
+    line, the other cannot serialise one at all.
+    """
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, list):
+        return [_plain(entry) for entry in value]
+    if isinstance(value, dict):
+        return {key: _plain(entry) for key, entry in value.items()}
+    return value
+
+
+def _schema(adapter):
+    """One declared type's schema, with every $ref resolved into place.
+
+    Pydantic emits $defs and a $ref for a shape that contains another shape, and
+    this is not a formatting preference. Measured on one real request to the
+    provider, three ways:
+
+    - the schema as Pydantic emits it, nested inside one tool property with no
+      strict flag: accepted with a 200, and the model invented field names for
+      the nested object because it never read the definition. Every result would
+      then have been refused where it entered, on every call.
+    - the same schema with the refs inlined: accepted, and the model filled the
+      shape's own fields exactly, the nullable one included.
+    - the shape the other target sends, with the $defs hoisted to the
+      parameters root and strict on: accepted, and correct. A $defs anywhere but
+      that root is a 400 naming the pointer.
+
+    This target nests the schema inside one property and sends no strict flag,
+    so it is the first case unless the refs are resolved here.
+    """
+    schema = adapter.json_schema()
+    defs = schema.pop("$defs", {})
+
+    def resolve(node):
+        if isinstance(node, list):
+            return [resolve(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        target = node.get("$ref")
+        if isinstance(target, str) and target.startswith("#/$defs/"):
+            found = defs.get(target.rsplit("/", 1)[1], {})
+            siblings = {key: value for key, value in node.items() if key != "$ref"}
+            return {**resolve(found), **siblings}
+        return {key: resolve(value) for key, value in node.items()}
+
+    return resolve(schema)
+
+
+_FINISH_TYPES = {
+    "confirm_booking": {
+    },
+    "find_slot": {
+    },
+    "qualify_event": {
+    },
+}
+
+
+def _task_status(values):
+    return {"status": "unserved" if values.get("unserved_request") else "completed"}
+
+
+def _group_status(results):
+    return {"status": "unserved" if any(value.get("unserved_request") for value in results.values()) else "completed"}
+
+
+def _typed_result(step, values):
+    """Validate a step's declared results where they enter the state.
+
+    Refused here rather than carried into a later step that assumes it is
+    right, and refused on both targets rather than on the one whose framework
+    happens to validate tool arguments: one of them validates through Pydantic
+    and lets the model self-correct, the other splats raw JSON into the handler.
+    """
+    if values.get("unserved_request"):
+        return {"unserved_request": values["unserved_request"]}
+    adapters = _FINISH_TYPES.get(step)
+    if not adapters:
+        return values
+    out = dict(values)
+    for name, adapter in adapters.items():
+        # Absent goes through the adapter too, rather than being skipped. A
+        # field the model left out is a field with no value, and that is what a
+        # prompt telling it to leave one out asks for: a value that may be
+        # absent validates as None and the append drops it, and a value that
+        # may not is refused here with the message that lets the model correct
+        # itself. Skipping an absent field instead left the key missing from
+        # the result, and the assignment that reads it by name raised a
+        # KeyError inside the finish handler on the target whose framework
+        # validates no argument of its own.
+        out[name] = _plain(_typed(name, adapter, out.get(name)))
+    return out
+
+
+_STATE_TYPES = {
+    "caller_phone": TypeAdapter(str),
+}
+_TASK_ASSIGNMENTS = {
+    "confirm_booking": [
+    ],
+    "find_slot": [
+    ],
+    "qualify_event": [
+    ],
+}
+_STATE_CONFIRM = {
+}
+_STATE_DEPENDENCIES = {
+}
+
+
+def _save_result(step, state, values):
+    """Validate all assignments before changing any call state."""
+    values = _typed_result(step, values)
+    if values.get("unserved_request"):
+        return values
+    pending = {}
+    for name, path, append in _TASK_ASSIGNMENTS.get(step, ()):
+        value = values
+        for part in path.split("."):
+            value = value.get(part) if isinstance(value, dict) else None
+        if append:
+            if value is None:
+                continue
+            entries = list(getattr(state, name, None) or [])
+            _append_entry(entries, value)
+            value = entries
+        pending[name] = _plain(_typed(name, _STATE_TYPES[name], value))
+    _save_batch(state, pending, step=step)
+    return values
+
+
+def _save_batch(state, values, *, step=None, inputs=None):
+    """Commit a validated batch and invalidate older results of changed inputs."""
+    if not values:
+        return
+    pending = {name: _plain(_typed(name, _STATE_TYPES[name], value)) for name, value in values.items()}
+    unconfirmed: set[str] = set(getattr(state, "_unconfirmed", ()))
+    provenance = dict(getattr(state, "_prefetch_provenance", {}))
+    affected = {name for name, value in pending.items() if getattr(state, name, None) != value}
+    while True:
+        more = {name for name, reads in provenance.items() if set(reads) & affected} - affected
+        if not more:
+            break
+        affected.update(more)
+    invalidated = affected - pending.keys()
+    for name in invalidated:
+        provenance.pop(name, None)
+    for name, value in pending.items():
+        if inputs is not None:
+            provenance[name] = tuple(inputs)
+        else:
+            provenance.pop(name, None)
+        if name in _STATE_CONFIRM:
+            if _STATE_CONFIRM[name] == step and value is not None and value != "":
+                unconfirmed.discard(name)
+            else:
+                unconfirmed.add(name)
+    def current(name):
+        return None if name in invalidated else pending.get(name, getattr(state, name, None))
+    # Dependencies are acyclic: prefetch can only read earlier entries.
+    for _ in range(len(_STATE_DEPENDENCIES) + 1):
+        before = set(unconfirmed)
+        for name, reads in _STATE_DEPENDENCIES.items():
+            if current(name) is not None and current(name) != "" and all(
+                source not in unconfirmed and current(source) is not None and current(source) != "" for source in reads
+            ):
+                unconfirmed.discard(name)
+            else:
+                unconfirmed.add(name)
+        if before == unconfirmed:
+            break
+    for name in invalidated:
+        setattr(state, name, None)
+    for name, value in pending.items():
+        setattr(state, name, value)
+    if hasattr(state, "_unconfirmed"):
+        state._unconfirmed = unconfirmed
+    if inputs is not None or hasattr(state, "_prefetch_provenance"):
+        state._prefetch_provenance = provenance
+
+
+
+_STATE_STRUCTURED = {}
+_STATE_EMPTY = "none recorded yet."
+# The bound on one rendered value, in characters. The same number the router
+# bounds a template variable by, because this is the same value travelling the
+# same way, and one number cannot be two.
+_STATE_VALUE_MAX = 4000
+
+
+def _state_text(name, value):
+    """One value as a prompt reads it.
+
+    Compact JSON for anything declared structured, never a Python repr: a repr
+    writes single quotes and None, which is not JSON and is not what any
+    provider produced. Words for a declared value with no contents, so a step
+    cannot mistake "not yet known" for "known to be nothing".
+
+    A value that was never declared structured renders exactly as it did before
+    this existed, which is what keeps every package written before it unchanged.
+    """
+    if value is None or value == "":
+        return _STATE_EMPTY
+    if not isinstance(value, str):
+        value = json.dumps(_plain(value), separators=(",", ":"), ensure_ascii=False)
+    text = str(value)
+    if len(text) > _STATE_VALUE_MAX:
+        # The length is only knowable here, at run time, so this cannot be a
+        # compile-time refusal. What it must not be is silent: a shortened value
+        # is a value the model reads as complete. An f-string rather than a
+        # placeholder, because this line is emitted into two modules that log
+        # through two different libraries and either style prints literally on
+        # the other one.
+        logger.warning(
+            f"declared state: {name} rendered {len(text)} characters and is shortened to "
+            f"{_STATE_VALUE_MAX}; a value this long also stops the prompt being cached"
+        )
+        text = text[:_STATE_VALUE_MAX]
+    return text
+
+
+def _prompt_value(state, name, site=""):
+    root, value = _state_lookup(state, name)
+    if root in getattr(state, "_unconfirmed", ()) and site != "task:" + _STATE_CONFIRM.get(root, ""):
+        return root, None
+    return root, value
+
+
+def _state_lookup(state, name):
+    """The value a placeholder names, and the declared name it belongs to.
+
+    A path is authored {{customer.status}} and emitted {{customer__status}}: one
+    flat name, because the router substitutes flat names only and both render
+    paths have to agree. Everything before the first "__" is the declared value;
+    each "__" after it starts a field, read as a dict key or an attribute and as
+    None past an absent link, so a field of a record nobody has filled renders
+    as the empty words and never raises. The root's name comes back with the
+    value because the words for an empty value belong to the root variable.
+    """
+    root, _, path = name.partition("__")
+    value = getattr(state, root, None) if state is not None else None
+    for part in path.split("__") if path else ():
+        if value is None:
+            break
+        value = value.get(part) if isinstance(value, dict) else getattr(value, part, None)
+    return root, value
 
 
 # --- shared state ------------------------------------------------------------
@@ -606,7 +939,7 @@ async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent) -> Non
         shared_output.model_copy(
             update={
                 "output": json.dumps(
-                    {"task_id": event.task_id, "result": event.result},
+                    _task_status(event.result),
                     sort_keys=True,
                 )
             }
@@ -628,6 +961,8 @@ class Events(Agent):
             chat_ctx=chat_ctx,
             tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], voice="aura-2-orion-en", model="slng/deepgram/aura:2-en"),
         )
+        if isinstance(chat_ctx, llm.ChatContext):
+            self._chat_ctx = chat_ctx.copy()
 
     async def on_enter(self) -> None:
         # This agent took over via handoff; let its own instructions drive the
@@ -643,33 +978,25 @@ class Events(Agent):
     @function_tool
     async def back_to_greeter(self, ctx: RunContext):
         """Caller wants something else, or to start over."""
-        return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
+        return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
 
     @function_tool
     async def do_event(self, ctx: RunContext) -> dict:
-        """The caller is ready to plan their event; run the events flow. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn, with your own tools, a handoff, or the same flow again. It is a new request, so running the flow for it is not running it again for the one that just finished. Never end the turn without acting on it, and never tell the caller you cannot."""
-        group = TaskGroup(
-            chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
-            summarize_chat_ctx=False,
-            on_task_completed=lambda event: _share_task_result(group, event),
-        )
-        group.add(
-            lambda: QualifyEvent(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)),
-            id="qualify_event",
-            description="qualify event",
-        )
-        group.add(
-            lambda: ConfirmBooking(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)),
-            id="confirm_booking",
-            description="confirm booking",
-        )
+        """The caller is ready to plan their event; run the events flow. When this flow finishes it returns a status. Continue with the caller. Do not run this flow again for the same request. A completed status means the step finished. Read any saved values through your own prompt references. An unserved status means the step could not help. Ask the caller what they need, then use your tools or a handoff."""
         owner_ctx = self.chat_ctx.copy()
-        result = await group
-        # N13: the flow's own turns must not land in the owner's context. The
-        # TaskGroup merges them back on completion, so restore the pre-flow
-        # context and hand the owner only the typed results (merge: results).
-        await self.update_chat_ctx(owner_ctx)
-        return result.task_results
+        try:
+            group = TaskGroup(
+                summarize_chat_ctx=False,
+                on_task_completed=lambda event: _share_task_result(group, event),
+            )
+            await group.update_chat_ctx(owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True), exclude_invalid_function_calls=False)
+            group.add(lambda: QualifyEvent(), id="qualify_event", description="qualify event")
+            group.add(lambda: ConfirmBooking(), id="confirm_booking", description="confirm booking")
+            result = await group
+            task_results = result.task_results
+        finally:
+            await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
+        return _group_status(task_results)
 
 
 class Greeter(Agent):
@@ -679,6 +1006,8 @@ class Greeter(Agent):
             instructions=GREETER_PROMPT,
             chat_ctx=chat_ctx,
         )
+        if isinstance(chat_ctx, llm.ChatContext):
+            self._chat_ctx = chat_ctx.copy()
 
     async def on_enter(self) -> None:
         if not self._initial:
@@ -695,12 +1024,12 @@ class Greeter(Agent):
     @function_tool
     async def to_reservations(self, ctx: RunContext):
         """Caller wants to book a table for a normal dine-in visit."""
-        return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
+        return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
 
     @function_tool
     async def to_events(self, ctx: RunContext):
         """Caller wants to plan a private event, party, or large group booking."""
-        return Events(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
+        return Events(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
 
 
 class Reservations(Agent):
@@ -710,6 +1039,8 @@ class Reservations(Agent):
             chat_ctx=chat_ctx,
             tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], voice="aura-2-orion-en", model="slng/deepgram/aura:2-en"),
         )
+        if isinstance(chat_ctx, llm.ChatContext):
+            self._chat_ctx = chat_ctx.copy()
 
     async def on_enter(self) -> None:
         # This agent took over via handoff; let its own instructions drive the
@@ -725,33 +1056,25 @@ class Reservations(Agent):
     @function_tool
     async def back_to_greeter(self, ctx: RunContext):
         """Caller wants something else, or to start over."""
-        return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
+        return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
 
     @function_tool
     async def do_reserve(self, ctx: RunContext) -> dict:
-        """The caller is ready to book a table; run the reservation flow. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn, with your own tools, a handoff, or the same flow again. It is a new request, so running the flow for it is not running it again for the one that just finished. Never end the turn without acting on it, and never tell the caller you cannot."""
-        group = TaskGroup(
-            chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
-            summarize_chat_ctx=False,
-            on_task_completed=lambda event: _share_task_result(group, event),
-        )
-        group.add(
-            lambda: FindSlot(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)),
-            id="find_slot",
-            description="find slot",
-        )
-        group.add(
-            lambda: ConfirmBooking(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)),
-            id="confirm_booking",
-            description="confirm booking",
-        )
+        """The caller is ready to book a table; run the reservation flow. When this flow finishes it returns a status. Continue with the caller. Do not run this flow again for the same request. A completed status means the step finished. Read any saved values through your own prompt references. An unserved status means the step could not help. Ask the caller what they need, then use your tools or a handoff."""
         owner_ctx = self.chat_ctx.copy()
-        result = await group
-        # N13: the flow's own turns must not land in the owner's context. The
-        # TaskGroup merges them back on completion, so restore the pre-flow
-        # context and hand the owner only the typed results (merge: results).
-        await self.update_chat_ctx(owner_ctx)
-        return result.task_results
+        try:
+            group = TaskGroup(
+                summarize_chat_ctx=False,
+                on_task_completed=lambda event: _share_task_result(group, event),
+            )
+            await group.update_chat_ctx(owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True), exclude_invalid_function_calls=False)
+            group.add(lambda: FindSlot(), id="find_slot", description="find slot")
+            group.add(lambda: ConfirmBooking(), id="confirm_booking", description="confirm booking")
+            result = await group
+            task_results = result.task_results
+        finally:
+            await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
+        return _group_status(task_results)
 
 
 # --- tasks -----------------------------------------------------------------
@@ -765,6 +1088,17 @@ def _task_result(values: dict, unserved_request: str) -> dict:
 
 class _RetryEmptyTaskResponseMixin:
     _response_tool_call_ids: set[str]
+
+    async def update_chat_ctx(self, chat_ctx, *, exclude_invalid_function_calls=False):
+        # History policy owns old tool records, including tools this task cannot run.
+        assert isinstance(self, Agent)
+        await Agent.update_chat_ctx(self, chat_ctx, exclude_invalid_function_calls=exclude_invalid_function_calls)
+
+    async def update_tools(self, tools):
+        assert isinstance(self, Agent)
+        history = self.chat_ctx.copy()
+        await Agent.update_tools(self, tools)
+        await self.update_chat_ctx(history, exclude_invalid_function_calls=False)
 
     async def llm_node(self, chat_ctx, tools, model_settings):
         # Every generated user of this mixin is an AgentTask; narrow that
@@ -925,10 +1259,13 @@ class _RetryEmptyTaskResponseMixin:
 class ConfirmBooking(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(instructions=CONFIRM_BOOKING_PROMPT, chat_ctx=chat_ctx)
+        if isinstance(chat_ctx, llm.ChatContext):
+            self._chat_ctx = chat_ctx.copy()
         self._response_tool_call_ids: set[str] = set()
         self._finish_call_id: str | None = None
 
     async def on_enter(self) -> None:
+        await self.update_chat_ctx(self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
         # The task's own instructions describe this step; let them drive the opening.
         self.session.generate_reply()
 
@@ -944,22 +1281,28 @@ class ConfirmBooking(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
             return resp.json()
 
     @function_tool
-    async def finish(self, ctx: RunContext, sent: bool, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> None:
-        """Record the result of this step and finish. complete() is the sole
-        resolution; do not relay anything after it."""
-        result = _task_result({"sent": sent}, unserved_request)
-        self.complete(result)
-        # Record only after complete() succeeds: a rejected duplicate cannot
-        # replace the winner, and there is no await for the callback to race.
+    async def finish(self, ctx: RunContext, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> str | None:
+        """Save this step's values and finish, or return unserved without saving."""
+        if self.done():
+            return
+        try:
+            _values = _save_result("confirm_booking", ctx.userdata, {"unserved_request": unserved_request})
+        except _StateRefused as refused:
+            logger.warning("finish %s: %s", "confirm_booking", refused.message)
+            return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
+        self.complete(_values)
         self._finish_call_id = ctx.function_call.call_id
 
 class FindSlot(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(instructions=FIND_SLOT_PROMPT, chat_ctx=chat_ctx)
+        if isinstance(chat_ctx, llm.ChatContext):
+            self._chat_ctx = chat_ctx.copy()
         self._response_tool_call_ids: set[str] = set()
         self._finish_call_id: str | None = None
 
     async def on_enter(self) -> None:
+        await self.update_chat_ctx(self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
         # The task's own instructions describe this step; let them drive the opening.
         self.session.generate_reply()
 
@@ -975,33 +1318,42 @@ class FindSlot(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
             return resp.json()
 
     @function_tool
-    async def finish(self, ctx: RunContext, date: str, party_size: int, time: str, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> None:
-        """Record the result of this step and finish. complete() is the sole
-        resolution; do not relay anything after it."""
-        result = _task_result({"date": date, "party_size": party_size, "time": time}, unserved_request)
-        self.complete(result)
-        # Record only after complete() succeeds: a rejected duplicate cannot
-        # replace the winner, and there is no await for the callback to race.
+    async def finish(self, ctx: RunContext, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> str | None:
+        """Save this step's values and finish, or return unserved without saving."""
+        if self.done():
+            return
+        try:
+            _values = _save_result("find_slot", ctx.userdata, {"unserved_request": unserved_request})
+        except _StateRefused as refused:
+            logger.warning("finish %s: %s", "find_slot", refused.message)
+            return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
+        self.complete(_values)
         self._finish_call_id = ctx.function_call.call_id
 
 class QualifyEvent(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(instructions=QUALIFY_EVENT_PROMPT, chat_ctx=chat_ctx)
+        if isinstance(chat_ctx, llm.ChatContext):
+            self._chat_ctx = chat_ctx.copy()
         self._response_tool_call_ids: set[str] = set()
         self._finish_call_id: str | None = None
 
     async def on_enter(self) -> None:
+        await self.update_chat_ctx(self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
         # The task's own instructions describe this step; let them drive the opening.
         self.session.generate_reply()
 
     @function_tool
-    async def finish(self, ctx: RunContext, date: str, headcount: int, occasion: str, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> None:
-        """Record the result of this step and finish. complete() is the sole
-        resolution; do not relay anything after it."""
-        result = _task_result({"date": date, "headcount": headcount, "occasion": occasion}, unserved_request)
-        self.complete(result)
-        # Record only after complete() succeeds: a rejected duplicate cannot
-        # replace the winner, and there is no await for the callback to race.
+    async def finish(self, ctx: RunContext, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> str | None:
+        """Save this step's values and finish, or return unserved without saving."""
+        if self.done():
+            return
+        try:
+            _values = _save_result("qualify_event", ctx.userdata, {"unserved_request": unserved_request})
+        except _StateRefused as refused:
+            logger.warning("finish %s: %s", "qualify_event", refused.message)
+            return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
+        self.complete(_values)
         self._finish_call_id = ctx.function_call.call_id
 
 

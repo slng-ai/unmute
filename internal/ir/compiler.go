@@ -29,10 +29,8 @@ type Agent struct {
 	// it by name. Nothing depends on its iteration order: the generated classes
 	// are emitted in dependency order, computed from the references.
 	Shapes map[string]Shape `json:"shapes,omitempty" yaml:"shapes,omitempty"`
-	// VariableOrder is the order the author declared the variables in, which is
-	// the order the composed state block numbers them (FR-005). Variables is a
-	// map and has none, so the order is read off the authored file once and
-	// carried here rather than re-derived by anything that renders.
+	// VariableOrder preserves authoring order for generated declarations and
+	// runbooks. Variables is a map and has no order of its own.
 	VariableOrder []string            `json:"variable_order,omitempty" yaml:"variable_order,omitempty"`
 	Variables     map[string]Variable `json:"variables,omitempty" yaml:"variables,omitempty"`
 	// Prefetch is the resolved prefetch list, **in the order the author wrote
@@ -358,8 +356,9 @@ type Variable struct {
 	// Confirm names the task that must hear the caller agree before anything acts
 	// on this value. Empty means settled on arrival, which is every variable that
 	// existed before the prefetch feature.
-	Confirm     string `json:"confirm,omitempty" yaml:"confirm,omitempty"`
-	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	Confirm          string `json:"confirm,omitempty" yaml:"confirm,omitempty"`
+	ConfirmInherited bool   `json:"confirm_inherited,omitempty" yaml:"confirm_inherited,omitempty"`
+	Description      string `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 // Pair is one resolved item of an authored pair list. Ordered, because the
@@ -478,41 +477,22 @@ type AgentDef struct {
 	Model        string   `json:"model" yaml:"model"`
 	Voice        string   `json:"voice" yaml:"voice"`
 	Tools        []string `json:"tools,omitempty" yaml:"tools,omitempty"`
-	// Inputs is this agent's brief: the union of the inputs every handoff that
-	// targets it declares, one entry per name. Its prompt ends with a block
-	// naming each, and a handoff to it resets every one before writing its own.
-	Inputs []InputField `json:"inputs,omitempty" yaml:"inputs,omitempty"`
 }
 
 type Task struct {
-	Instructions string   `json:"instructions" yaml:"instructions"`
-	Tools        []string `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Model        string   `json:"model,omitempty" yaml:"model,omitempty"`
-	// Inputs is what the step is handed on entry, in authored order. The
-	// delegate that runs the step takes one parameter per entry, validates it
-	// where it enters, and the step's prompt ends with a block naming each one.
-	Inputs  []InputField           `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	Result  map[string]ResultField `json:"result" yaml:"result"`
-	Context TaskContext            `json:"context" yaml:"context"`
-}
-
-// InputField is one value a step or a receiving agent is handed on entry.
-// Declared by the author, filled by the agent that heard the caller, fixed for
-// the visit and gone after it. Not declared state: it appears in no state
-// block, and no assign: writes it.
-type InputField struct {
-	Name string `json:"name" yaml:"name"`
-	// Type is the resolved expression, never nil: an input always has a type.
-	Type *TypeRef `json:"type" yaml:"type"`
-	// Optional marks an expression ending in `| None`: the agent may leave the
-	// value out, and the receiving prompt then reads it as not given.
-	Optional    bool   `json:"optional,omitempty" yaml:"optional,omitempty"`
-	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	// Assign saves this task's result, regardless of how it is run.
+	Assign       []AssignTo             `json:"assign,omitempty" yaml:"assign,omitempty"`
+	Instructions string                 `json:"instructions" yaml:"instructions"`
+	Tools        []string               `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Model        string                 `json:"model,omitempty" yaml:"model,omitempty"`
+	Result       map[string]ResultField `json:"result" yaml:"result"`
+	Context      TaskContext            `json:"context" yaml:"context"`
 }
 
 type ResultField struct {
-	Type PrimitiveType `json:"type,omitempty" yaml:"type,omitempty"`
-	Enum []string      `json:"enum,omitempty" yaml:"enum,omitempty"`
+	Description string        `json:"description,omitempty" yaml:"description,omitempty"`
+	Type        PrimitiveType `json:"type,omitempty" yaml:"type,omitempty"`
+	Enum        []string      `json:"enum,omitempty" yaml:"enum,omitempty"`
 	// Shape is the resolved type expression when the field declares more than a
 	// bare primitive, which is how a step hands back a whole shape. It sits
 	// beside Schema rather than replacing it: Schema is a raw JSON Schema object
@@ -578,12 +558,6 @@ type Delegate struct {
 	When  string      `json:"when,omitempty" yaml:"when,omitempty"`
 	Task  string      `json:"task,omitempty" yaml:"task,omitempty"`
 	Group string      `json:"group,omitempty" yaml:"group,omitempty"`
-	// Assign is the resolved `assign:` list, in the order the author wrote it.
-	// A list rather than the name-keyed map it was, because an append has to
-	// survive to the driver and a map key cannot carry it. Prefetch.Assign
-	// already uses an ordered list for the same reason, so this follows a
-	// precedent rather than setting one.
-	Assign []AssignTo `json:"assign,omitempty" yaml:"assign,omitempty"`
 	// Announce is one fixed sentence spoken as the step is entered, so the two
 	// model requests it takes to enter one are not silence. Spoken at the very
 	// start of the step, before anything else runs: ordering between steps is
@@ -625,15 +599,11 @@ func AssignedVars(assign []AssignTo) []string {
 }
 
 type AgentTransfer struct {
-	Kind     ControlKind `json:"kind" yaml:"kind"`
-	When     string      `json:"when,omitempty" yaml:"when,omitempty"`
-	To       string      `json:"to" yaml:"to"`
-	Announce string      `json:"announce,omitempty" yaml:"announce,omitempty"`
-	// Inputs is the brief this handoff carries to its receiver, in authored
-	// order. Validated on the departing agent's tool, written to the call state
-	// before the receiver is entered, and shown in the receiver's prompt.
-	Inputs  []InputField    `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	Context TransferContext `json:"context" yaml:"context"`
+	Kind     ControlKind     `json:"kind" yaml:"kind"`
+	When     string          `json:"when,omitempty" yaml:"when,omitempty"`
+	To       string          `json:"to" yaml:"to"`
+	Announce string          `json:"announce,omitempty" yaml:"announce,omitempty"`
+	Context  TransferContext `json:"context" yaml:"context"`
 }
 
 func (*AgentTransfer) control() {}

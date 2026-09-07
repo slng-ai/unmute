@@ -17,12 +17,6 @@ output:
   required:
     - saved
 
-# The step's required input, injected: the tool is called during the visit,
-# when the value is on the call state, and only from the step that is handed
-# it. That is the whole of what makes an input legal here.
-inject:
-  kind: "{{kind}}"
-
 local:
   handler: tools/note_thing.py
 

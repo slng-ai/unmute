@@ -7,7 +7,7 @@ PipelineWorker owns the transport + STT, each agent is an LLMWorker with its own
 LLM and voice, and agent_transfer is activate_worker(). Tasks and task groups
 run as Pipecat Flows on the owning agent: a delegate tool snapshots the shared
 context, a FlowManager walks the steps as nodes, and control returns with only
-the typed results.
+a completed or unserved status.
 """
 
 from __future__ import annotations
@@ -20,17 +20,19 @@ import json
 import os
 import sys
 from dataclasses import dataclass
+from typing import Literal
 
 import httpx
 from dotenv import load_dotenv
 from loguru import logger
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.bus import BusBridgeProcessor
-from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, FlowsFunctionSchema, NodeConfig
+from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, FlowsFunctionSchema, NodeConfig, NO_RESPONSE
 from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMUpdateSettingsFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -179,9 +181,318 @@ require_env()
 
 
 
+# --- declared state ----------------------------------------------------------
+# Generated from the `shapes:` and the typed `variables:` in agent.yaml. Both
+# target frameworks already depend on Pydantic, so nothing here adds one.
+#
+# Emitted from one place in the compiler for both targets, so the classes, the
+# checks and the refusal wording cannot differ between them.
+
+
+class _StateRefused(Exception):
+    """A value that does not fit its declared type, refused where it enters.
+
+    Carried as an exception rather than a return so the write cannot happen by
+    accident: the previous contents stay exactly as they were, and the message
+    goes back to the model, which is what lets it correct itself on the next
+    turn instead of the step recording something wrong.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+def _typed(field, adapter, value):
+    """Validate one value entering the declared state."""
+    try:
+        return adapter.validate_python(value)
+    except ValidationError as error:
+        first = error.errors()[0]
+        where = ".".join(str(part) for part in first["loc"])
+        named = f"{field}.{where}" if where else field
+        raise _StateRefused(f"{named}: {first['msg']}") from None
+
+
+def _append_entry(entries, value):
+    """One entry onto a declared list, unless it is already on it.
+
+    A step re-entered mid-call can read a value through an explicit prompt
+    reference and hand it straight back, which is not a second thing happening. One live call
+    entered the booking step four times and finished three of them immediately,
+    each with the same appointment it had recorded on the first, so one booking
+    became four entries and the caller's recap listed a booking four times.
+
+    An object carries its own identity, so an identical one is the same thing
+    reported twice. A plain value is not: two bookings really do give two
+    reasons of "create_booking", and both of those count. So the skip is for
+    structured entries only.
+
+    Nothing absent is added either, which is how a step that concluded nothing
+    this time finishes without inventing an entry.
+    """
+    if value is None:
+        return
+    if isinstance(value, (dict, list)) and value in entries:
+        return
+    entries.append(value)
+
+
+def _plain(value):
+    """A validated value as plain data.
+
+    Plain data is the only shape both frameworks accept back from a tool: one
+    refuses a BaseModel outright and drops the whole tool result with a log
+    line, the other cannot serialise one at all.
+    """
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, list):
+        return [_plain(entry) for entry in value]
+    if isinstance(value, dict):
+        return {key: _plain(entry) for key, entry in value.items()}
+    return value
+
+
+def _schema(adapter):
+    """One declared type's schema, with every $ref resolved into place.
+
+    Pydantic emits $defs and a $ref for a shape that contains another shape, and
+    this is not a formatting preference. Measured on one real request to the
+    provider, three ways:
+
+    - the schema as Pydantic emits it, nested inside one tool property with no
+      strict flag: accepted with a 200, and the model invented field names for
+      the nested object because it never read the definition. Every result would
+      then have been refused where it entered, on every call.
+    - the same schema with the refs inlined: accepted, and the model filled the
+      shape's own fields exactly, the nullable one included.
+    - the shape the other target sends, with the $defs hoisted to the
+      parameters root and strict on: accepted, and correct. A $defs anywhere but
+      that root is a 400 naming the pointer.
+
+    This target nests the schema inside one property and sends no strict flag,
+    so it is the first case unless the refs are resolved here.
+    """
+    schema = adapter.json_schema()
+    defs = schema.pop("$defs", {})
+
+    def resolve(node):
+        if isinstance(node, list):
+            return [resolve(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        target = node.get("$ref")
+        if isinstance(target, str) and target.startswith("#/$defs/"):
+            found = defs.get(target.rsplit("/", 1)[1], {})
+            siblings = {key: value for key, value in node.items() if key != "$ref"}
+            return {**resolve(found), **siblings}
+        return {key: resolve(value) for key, value in node.items()}
+
+    return resolve(schema)
+
+
+_FINISH_TYPES = {
+    "collect": {
+        "tier": TypeAdapter(Literal["free", "pro"]),
+        "verified_flag": TypeAdapter(bool),
+    },
+}
+
+
+def _task_status(values):
+    return {"status": "unserved" if values.get("unserved_request") else "completed"}
+
+
+def _group_status(results):
+    return {"status": "unserved" if any(value.get("unserved_request") for value in results.values()) else "completed"}
+
+
+def _typed_result(step, values):
+    """Validate a step's declared results where they enter the state.
+
+    Refused here rather than carried into a later step that assumes it is
+    right, and refused on both targets rather than on the one whose framework
+    happens to validate tool arguments: one of them validates through Pydantic
+    and lets the model self-correct, the other splats raw JSON into the handler.
+    """
+    if values.get("unserved_request"):
+        return {"unserved_request": values["unserved_request"]}
+    adapters = _FINISH_TYPES.get(step)
+    if not adapters:
+        return values
+    out = dict(values)
+    for name, adapter in adapters.items():
+        # Absent goes through the adapter too, rather than being skipped. A
+        # field the model left out is a field with no value, and that is what a
+        # prompt telling it to leave one out asks for: a value that may be
+        # absent validates as None and the append drops it, and a value that
+        # may not is refused here with the message that lets the model correct
+        # itself. Skipping an absent field instead left the key missing from
+        # the result, and the assignment that reads it by name raised a
+        # KeyError inside the finish handler on the target whose framework
+        # validates no argument of its own.
+        out[name] = _plain(_typed(name, adapter, out.get(name)))
+    return out
+
+
+_STATE_TYPES = {
+    "customer_id": TypeAdapter(str),
+    "verified": TypeAdapter(bool),
+}
+_TASK_ASSIGNMENTS = {
+    "collect": [
+        ("verified", "verified_flag", False),
+    ],
+}
+_STATE_CONFIRM = {
+}
+_STATE_DEPENDENCIES = {
+}
+
+
+def _save_result(step, state, values):
+    """Validate all assignments before changing any call state."""
+    values = _typed_result(step, values)
+    if values.get("unserved_request"):
+        return values
+    pending = {}
+    for name, path, append in _TASK_ASSIGNMENTS.get(step, ()):
+        value = values
+        for part in path.split("."):
+            value = value.get(part) if isinstance(value, dict) else None
+        if append:
+            if value is None:
+                continue
+            entries = list(getattr(state, name, None) or [])
+            _append_entry(entries, value)
+            value = entries
+        pending[name] = _plain(_typed(name, _STATE_TYPES[name], value))
+    _save_batch(state, pending, step=step)
+    return values
+
+
+def _save_batch(state, values, *, step=None, inputs=None):
+    """Commit a validated batch and invalidate older results of changed inputs."""
+    if not values:
+        return
+    pending = {name: _plain(_typed(name, _STATE_TYPES[name], value)) for name, value in values.items()}
+    unconfirmed: set[str] = set(getattr(state, "_unconfirmed", ()))
+    provenance = dict(getattr(state, "_prefetch_provenance", {}))
+    affected = {name for name, value in pending.items() if getattr(state, name, None) != value}
+    while True:
+        more = {name for name, reads in provenance.items() if set(reads) & affected} - affected
+        if not more:
+            break
+        affected.update(more)
+    invalidated = affected - pending.keys()
+    for name in invalidated:
+        provenance.pop(name, None)
+    for name, value in pending.items():
+        if inputs is not None:
+            provenance[name] = tuple(inputs)
+        else:
+            provenance.pop(name, None)
+        if name in _STATE_CONFIRM:
+            if _STATE_CONFIRM[name] == step and value is not None and value != "":
+                unconfirmed.discard(name)
+            else:
+                unconfirmed.add(name)
+    def current(name):
+        return None if name in invalidated else pending.get(name, getattr(state, name, None))
+    # Dependencies are acyclic: prefetch can only read earlier entries.
+    for _ in range(len(_STATE_DEPENDENCIES) + 1):
+        before = set(unconfirmed)
+        for name, reads in _STATE_DEPENDENCIES.items():
+            if current(name) is not None and current(name) != "" and all(
+                source not in unconfirmed and current(source) is not None and current(source) != "" for source in reads
+            ):
+                unconfirmed.discard(name)
+            else:
+                unconfirmed.add(name)
+        if before == unconfirmed:
+            break
+    for name in invalidated:
+        setattr(state, name, None)
+    for name, value in pending.items():
+        setattr(state, name, value)
+    if hasattr(state, "_unconfirmed"):
+        state._unconfirmed = unconfirmed
+    if inputs is not None or hasattr(state, "_prefetch_provenance"):
+        state._prefetch_provenance = provenance
+
+
+
+_STATE_STRUCTURED = {}
+_STATE_EMPTY = "none recorded yet."
+# The bound on one rendered value, in characters. The same number the router
+# bounds a template variable by, because this is the same value travelling the
+# same way, and one number cannot be two.
+_STATE_VALUE_MAX = 4000
+
+
+def _state_text(name, value):
+    """One value as a prompt reads it.
+
+    Compact JSON for anything declared structured, never a Python repr: a repr
+    writes single quotes and None, which is not JSON and is not what any
+    provider produced. Words for a declared value with no contents, so a step
+    cannot mistake "not yet known" for "known to be nothing".
+
+    A value that was never declared structured renders exactly as it did before
+    this existed, which is what keeps every package written before it unchanged.
+    """
+    if value is None or value == "":
+        return _STATE_EMPTY
+    if not isinstance(value, str):
+        value = json.dumps(_plain(value), separators=(",", ":"), ensure_ascii=False)
+    text = str(value)
+    if len(text) > _STATE_VALUE_MAX:
+        # The length is only knowable here, at run time, so this cannot be a
+        # compile-time refusal. What it must not be is silent: a shortened value
+        # is a value the model reads as complete. An f-string rather than a
+        # placeholder, because this line is emitted into two modules that log
+        # through two different libraries and either style prints literally on
+        # the other one.
+        logger.warning(
+            f"declared state: {name} rendered {len(text)} characters and is shortened to "
+            f"{_STATE_VALUE_MAX}; a value this long also stops the prompt being cached"
+        )
+        text = text[:_STATE_VALUE_MAX]
+    return text
+
+
+def _prompt_value(state, name, site=""):
+    root, value = _state_lookup(state, name)
+    if root in getattr(state, "_unconfirmed", ()) and site != "task:" + _STATE_CONFIRM.get(root, ""):
+        return root, None
+    return root, value
+
+
+def _state_lookup(state, name):
+    """The value a placeholder names, and the declared name it belongs to.
+
+    A path is authored {{customer.status}} and emitted {{customer__status}}: one
+    flat name, because the router substitutes flat names only and both render
+    paths have to agree. Everything before the first "__" is the declared value;
+    each "__" after it starts a field, read as a dict key or an attribute and as
+    None past an absent link, so a field of a record nobody has filled renders
+    as the empty words and never raises. The root's name comes back with the
+    value because the words for an empty value belong to the root variable.
+    """
+    root, _, path = name.partition("__")
+    value = getattr(state, root, None) if state is not None else None
+    for part in path.split("__") if path else ():
+        if value is None:
+            break
+        value = value.get(part) if isinstance(value, dict) else getattr(value, part, None)
+    return root, value
+
+
 @dataclass
 class State:
     """Typed call variables (SCHEMA 4.4), shared across agents."""
+
     customer_id: str | None = None
     verified: bool = False
 
@@ -275,6 +586,12 @@ class BillingAgent(TracedLLMWorker):
         llm = build_billing_llm(state)
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
 
+    async def on_activated(self, args) -> None:
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(system_instruction=BILLING_PROMPT),
+        ))
+        await super().on_activated(args)
+
 
 
     @_direct_tool
@@ -325,8 +642,6 @@ class IntakeAgent(TracedLLMWorker):
         super().__init__("intake", llm=llm, pipeline=Pipeline([llm, build_intake_tts()]), bridged=())
 
     async def on_activated(self, args) -> None:
-        # A Flow replaces this worker's system instruction with its task role.
-        # Re-entry restores the owning agent before tools/messages run.
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(system_instruction=INTAKE_PROMPT),
         ))
@@ -337,10 +652,13 @@ class IntakeAgent(TracedLLMWorker):
     @_direct_tool(cancel_on_interruption=False)
     async def to_billing(self, params: FunctionCallParams):
         """Caller asks about billing, an invoice, or a refund."""
+        # context.history on this handoff. One LLMContext is shared for the whole
+        # call, so the receiver is given the shaped list rather than a copy.
+        self.context.set_messages([dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")])
         await self.activate_worker(
             "billing",
             args=LLMWorkerActivationArgs(
-                messages=[{"role": "developer", "content": "Caller asks about billing, an invoice, or a refund."}],
+                messages=[],
                 run_llm=True,
             ),
             deactivate_self=True,
@@ -367,7 +685,9 @@ class IntakeAgent(TracedLLMWorker):
     @_direct_tool
     async def run_collect(self, params: FunctionCallParams):
         """Collect the caller's account details."""
+        self._run_collect_visit = object()
         self._run_collect_results = {}
+        self._run_collect_active_step = "collect"
         flow = FlowManager(
             llm=self.llm,
             context_aggregator=LLMContextAggregatorPair(self.context),
@@ -385,12 +705,16 @@ class IntakeAgent(TracedLLMWorker):
         # restoration erases that call and the unchanged request delegates again.
         await self.flush_pipeline()
         self._run_collect_snapshot = (copy.deepcopy(self.context.get_messages()), self.context.tools)
+        # context.history on this task. Shaped after the snapshot above, so the
+        # finish path restores the owner's own context whatever this step saw.
+        self.context.set_messages([dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")])
         await flow.initialize(self._run_collect_node_collect())
 
     def _run_collect_node_collect(self) -> NodeConfig:
+        self.context.set_messages([dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")])
         return NodeConfig(
             name="collect",
-            role_message="Ask for the caller's email, look them up, and confirm their account tier.\n\nWhen this step is complete, call `finish_run_collect_collect` with: tier, verified_flag.\n\n`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_collect_collect` with the closest result you have and their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that field and takes the caller from there.",
+            role_message="Ask for the caller's email, look them up, and confirm their account tier.\n\nWhen this step is complete, call `finish_run_collect_collect` with: tier, verified_flag.\n\n`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_collect_collect` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.",
             task_messages=[{"role": "developer", "content": "Begin this step."}],
             functions=[
                 FlowsFunctionSchema(
@@ -403,18 +727,31 @@ class IntakeAgent(TracedLLMWorker):
                 FlowsFunctionSchema(
                     name="finish_run_collect_collect",
                     description="Record the result of this step and finish.",
-                    properties={"tier": {"enum": ["free", "pro"], "type": "string"}, "unserved_request": {"description": "Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.", "type": "string"}, "verified_flag": {"type": "boolean"}},
-                    required=["tier", "verified_flag"],
-                    handler=self._trace_flow_tool("finish_run_collect_collect", self._run_collect_finish_collect),
+                    properties={"unserved_request": {"description": "Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.", "type": "string"}, "tier": _schema(TypeAdapter(Literal["free", "pro"] | None)), "verified_flag": _schema(TypeAdapter(bool | None))},
+                    required=[],
+                    handler=_flow_visit(self, "run_collect", self._trace_flow_tool("finish_run_collect_collect", self._run_collect_finish_collect)),
                 ),
             ],
         )
 
     async def _run_collect_finish_collect(self, args, flow_manager):
-        self._run_collect_results["collect"] = dict(args)
-        self.state.verified = self._run_collect_results["collect"]["verified_flag"]
+        if self._run_collect_active_step != "collect":
+            return {"status": "already handled"}, NO_RESPONSE
+        # Validated before anything is recorded: a value that does not fit its
+        # declared type never enters the state, the previous contents stand, and
+        # the message goes back to the model so it can correct itself on the next
+        # turn instead of the step recording something wrong. This framework
+        # validates no tool argument itself, so without this the two targets
+        # would behave differently on the same package.
+        try:
+            _values = _save_result("collect", self.state, dict(args))
+        except _StateRefused as refused:
+            logger.warning("finish {}: {}", "collect", refused.message)
+            return {"refused": f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."}, None
+        self._run_collect_results["collect"] = _values
+        self._run_collect_active_step = None
         # then: return — restore the owner's pre-flow context (messages and
-        # tools); only the typed results cross back (merge: results, N13).
+        # tools); only a completed or unserved status crosses back.
         messages, tools = self._run_collect_snapshot
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(system_instruction=INTAKE_PROMPT),
@@ -422,7 +759,7 @@ class IntakeAgent(TracedLLMWorker):
         await self.flush_pipeline()
         self.context.set_messages(messages + [{
             "role": "developer",
-            "content": "Task results: " + json.dumps(self._run_collect_results) + " Continue with the caller in one short line. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn, with your own tools, a handoff, or the same flow again. It is a new request, so running the flow for it is not running it again for the one that just finished. Never end the turn without acting on it, and never tell the caller you cannot.",
+            "content": json.dumps(_group_status(self._run_collect_results)),
         }])
         self.context.set_tools(tools)
         return {"status": "ok"}, None
@@ -430,7 +767,9 @@ class IntakeAgent(TracedLLMWorker):
     @_direct_tool
     async def run_triage(self, params: FunctionCallParams):
         """Run the triage group."""
+        self._run_triage_visit = object()
         self._run_triage_results = {}
+        self._run_triage_active_step = "collect"
         flow = FlowManager(
             llm=self.llm,
             context_aggregator=LLMContextAggregatorPair(self.context),
@@ -448,12 +787,16 @@ class IntakeAgent(TracedLLMWorker):
         # restoration erases that call and the unchanged request delegates again.
         await self.flush_pipeline()
         self._run_triage_snapshot = (copy.deepcopy(self.context.get_messages()), self.context.tools)
+        # context.history on this task. Shaped after the snapshot above, so the
+        # finish path restores the owner's own context whatever this step saw.
+        self.context.set_messages([dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")])
         await flow.initialize(self._run_triage_node_collect())
 
     def _run_triage_node_collect(self) -> NodeConfig:
+        self.context.set_messages([])
         return NodeConfig(
             name="collect",
-            role_message="Ask for the caller's email, look them up, and confirm their account tier.\n\nWhen this step is complete, call `finish_run_triage_collect` with: tier, verified_flag.\n\n`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_triage_collect` with the closest result you have and their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that field and takes the caller from there.",
+            role_message="Ask for the caller's email, look them up, and confirm their account tier.\n\nWhen this step is complete, call `finish_run_triage_collect` with: tier, verified_flag.\n\n`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_triage_collect` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.",
             task_messages=[{"role": "developer", "content": "Begin this step."}],
             functions=[
                 FlowsFunctionSchema(
@@ -466,18 +809,32 @@ class IntakeAgent(TracedLLMWorker):
                 FlowsFunctionSchema(
                     name="finish_run_triage_collect",
                     description="Record the result of this step and finish.",
-                    properties={"tier": {"enum": ["free", "pro"], "type": "string"}, "unserved_request": {"description": "Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.", "type": "string"}, "verified_flag": {"type": "boolean"}},
-                    required=["tier", "verified_flag"],
-                    handler=self._trace_flow_tool("finish_run_triage_collect", self._run_triage_finish_collect),
+                    properties={"unserved_request": {"description": "Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.", "type": "string"}, "tier": _schema(TypeAdapter(Literal["free", "pro"] | None)), "verified_flag": _schema(TypeAdapter(bool | None))},
+                    required=[],
+                    handler=_flow_visit(self, "run_triage", self._trace_flow_tool("finish_run_triage_collect", self._run_triage_finish_collect)),
                 ),
             ],
             context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
         )
 
     async def _run_triage_finish_collect(self, args, flow_manager):
-        self._run_triage_results["collect"] = dict(args)
+        if self._run_triage_active_step != "collect":
+            return {"status": "already handled"}, NO_RESPONSE
+        # Validated before anything is recorded: a value that does not fit its
+        # declared type never enters the state, the previous contents stand, and
+        # the message goes back to the model so it can correct itself on the next
+        # turn instead of the step recording something wrong. This framework
+        # validates no tool argument itself, so without this the two targets
+        # would behave differently on the same package.
+        try:
+            _values = _save_result("collect", self.state, dict(args))
+        except _StateRefused as refused:
+            logger.warning("finish {}: {}", "collect", refused.message)
+            return {"refused": f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."}, None
+        self._run_triage_results["collect"] = _values
+        self._run_triage_active_step = None
         # then: return — restore the owner's pre-flow context (messages and
-        # tools); only the typed results cross back (merge: results, N13).
+        # tools); only a completed or unserved status crosses back.
         messages, tools = self._run_triage_snapshot
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(system_instruction=INTAKE_PROMPT),
@@ -485,10 +842,19 @@ class IntakeAgent(TracedLLMWorker):
         await self.flush_pipeline()
         self.context.set_messages(messages + [{
             "role": "developer",
-            "content": "Task results: " + json.dumps(self._run_triage_results) + " Continue with the caller in one short line. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn, with your own tools, a handoff, or the same flow again. It is a new request, so running the flow for it is not running it again for the one that just finished. Never end the turn without acting on it, and never tell the caller you cannot.",
+            "content": json.dumps(_group_status(self._run_triage_results)),
         }])
         self.context.set_tools(tools)
         return {"status": "ok"}, None
+
+
+def _flow_visit(worker, delegate, handler):
+    visit = getattr(worker, "_" + delegate + "_visit", None)
+    async def invoke(args, flow_manager):
+        if getattr(worker, "_" + delegate + "_visit", None) is not visit:
+            return {"status": "already handled"}, NO_RESPONSE
+        return await handler(args, flow_manager)
+    return invoke
 
 
 # --- task tools (flows handlers) ----------------------------------------------

@@ -45,10 +45,9 @@ back, `handoffs:` and `escalations:` do not. No `kind:` field, and all five shar
 one namespace. `references/orchestration.md` has the table.
 **Define each tool once.** Its contract lives in `tools/<name>.yaml`; `tools:` lists hold names only.
 
-**Task `result:` and tool `output:` are different contracts.** Shape a task
-result for its caller instead of copying a tool output.
+**Task `assign:` and tool `output:` are different contracts.** Task finish fields come from destination variables; do not repeat their types.
 
-Every task, including a task inside a group, needs a non-empty `result:` and `context.history`.
+Omitted task and handoff history means `messages`: spoken turns without tool records. With `reset`, name each needed saved value in the receiver's prompt as `{{variable}}`.
 
 Use block-style YAML sequences in assistant-authored packages. Do not use anchors or aliases.
 

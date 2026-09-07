@@ -345,7 +345,7 @@ func TestV32PipecatGreetingModes(t *testing.T) {
 				Text:        "Hi, this is Sage and Stone Salon.",
 			},
 			want: []string{
-				"from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, TTSSpeakFrame",
+				"TTSSpeakFrame",
 				`TTSSpeakFrame("Hi, this is Sage and Stone Salon.")`,
 				"next(agent for agent in agents",
 				"args=LLMWorkerActivationArgs(run_llm=False)",
@@ -881,8 +881,9 @@ func TestPipecatV1MCPReservesFlowFunctionNames(t *testing.T) {
 			t.Errorf("bot.py does not reserve Flow function %q against MCP collisions:\n%s", want, bot)
 		}
 	}
-	initAt := strings.Index(bot, "self._mcp_clients = [")
-	activationAt := strings.Index(bot, "async def on_activated(self, args) -> None:")
+	worker := pipecatMethodBody(t, bot, "class IntakeAgent(", "\nclass BillingAgent(")
+	initAt := strings.Index(worker, "self._mcp_clients = [")
+	activationAt := strings.Index(worker, "async def on_activated(self, args) -> None:")
 	if initAt < 0 || activationAt < 0 || initAt > activationAt {
 		t.Error("a Flow-owning MCP worker must construct its clients before on_activated")
 	}
@@ -943,23 +944,20 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 	for _, want := range []string{
 		"from pipecat.flows import FlowManager, FlowsFunctionSchema, NodeConfig, NO_RESPONSE",
 		`name="to_billing"`,
-		"handler=self._run_verify_transfer_verify_to_billing",
+		"handler=_flow_visit(self, \"run_verify\"",
 		"async def _run_verify_transfer_verify_to_billing(self, args, flow_manager):",
 		`self._run_verify_active_step = "verify"`,
 		`if self._run_verify_active_step != "verify":`,
 		`return {"status": "already handled"}, NO_RESPONSE`,
 		`async def on_activated(self, args) -> None:`,
-		`delta=LLMSettings(system_instruction=_render(INTAKE_PROMPT, self.state))`,
-		`task_start = len(messages) if flow_messages[:len(messages)] == messages else 0`,
-		`if message.get("role") in {"user", "assistant", "tool"}`,
+		`self.context.set_messages([dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")])`,
 		`return {"transferred": True}, NO_RESPONSE`,
-		`return {"status": "ok", "result": self._run_verify_results["verify"]}, self._run_verify_node_complete()`,
+		`return _task_status(self._run_verify_results["verify"]), self._run_verify_node_complete()`,
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing task-transfer invariant %q", want)
 		}
 	}
-
 	transferAt := strings.Index(bot, "async def _run_verify_transfer_verify_to_billing")
 	finishAt := strings.Index(bot, "async def _run_verify_finish_verify")
 	nextFinishAt := strings.Index(bot, "async def _run_verify_finish_complete")
@@ -995,8 +993,6 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 	for _, want := range []string{
 		`return await self._run_verify_complete_complete()`,
 		`async def _run_verify_complete_complete(self):`,
-		`self._run_verify_active_step = "complete"`,
-		`self._run_verify_results.pop("complete", None)`,
 		// The prompt continues with the compiler's finish contract, so match its
 		// opening rather than the whole literal.
 		`delta=LLMSettings(system_instruction="Complete verification.`,
@@ -1045,9 +1041,11 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	agent.TaskGroups["triage"] = ir.TaskGroup{
 		Steps: []string{"collect"}, ContextScope: ir.ContextIsolated, Then: ir.GroupReturn, Merge: ir.GroupMergeResults,
 	}
+	assignedTask := agent.Tasks["collect"]
+	assignedTask.Assign = []ir.AssignTo{{Var: "verified", Field: "verified_flag"}}
+	agent.Tasks["collect"] = assignedTask
 	agent.Controls["run_collect"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "collect", When: "Collect the caller's account details.",
-		Assign: []ir.AssignTo{{Var: "verified", Field: "verified_flag"}},
 	}
 	agent.Controls["run_triage"] = &ir.Delegate{Kind: ir.ControlDelegate, Group: "triage", When: "Run the triage group."}
 	intake := agent.Agents["intake"]
@@ -1412,8 +1410,11 @@ func TestV2PipecatV1AgentTransferAnnouncementWaitsForSourcePlayout(t *testing.T)
 	if !strings.Contains(body, "run_llm=True") {
 		t.Error("receiver must answer normally after source playout completes")
 	}
-	if !strings.Contains(body, `"content": "Caller asks about billing, an invoice, or a refund."`) {
-		t.Error("target activation lost its existing transfer reason")
+	if !strings.Contains(body, "messages=[]") {
+		t.Error("target activation does not keep the handoff payload empty")
+	}
+	if strings.Contains(body, `"content": "Caller asks about billing, an invoice, or a refund."`) {
+		t.Error("target activation leaks an implicit source-side briefing")
 	}
 
 	transfer.Announce = ""
@@ -2917,13 +2918,10 @@ func TestPipecatLowersEveryTaskHistoryValue(t *testing.T) {
 	if !containsCollapsed(bot, "self.context.set_messages(_last_n(self.context.get_messages(), 6))") {
 		t.Error("history: last_n does not bound the task entry by the authored max_messages")
 	}
-	// full is the control, and it is in this same package: a value that shapes
-	// nothing must emit nothing even where its neighbours emit something. The
-	// entry is the span from the owner snapshot to the node initialize; the
-	// finish path further down restores and legitimately calls set_messages.
+	// full keeps speech and paired tool records while dropping old instructions.
 	entry := pipecatMethodBody(t, bot, "self._take_message_snapshot = (", "await flow.initialize(")
-	if strings.Contains(entry, "set_messages(") {
-		t.Errorf("history: full shapes the context, and the shared LLMContext is already the whole history:\n%s", entry)
+	if !strings.Contains(entry, `m.get("role") in ("user", "assistant", "tool")`) {
+		t.Errorf("history: full does not remove prior instructions:\n%s", entry)
 	}
 
 	// The emitted module has to parse. The shaping sites add a helper, two call
@@ -3123,8 +3121,8 @@ func pipecatMethodBody(t *testing.T, bot, from, to string) string {
 	return rest
 }
 
-// A task group's `context_scope` keeps governing its member steps, and a
-// member's own `history:` is not consulted (FR-014).
+// A shared task group keeps its shared context while each member applies its
+// own history policy.
 //
 // This is behaviour at HEAD that the change must not disturb, and the way it
 // holds is structural: the driver reads a task's context only on a single-task
@@ -3141,8 +3139,7 @@ func TestPipecatTaskGroupStillGovernsItsMembersContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	addPipecatTaskTransferFixture(agent)
-	// A member asking for the shortest context there is. The group says shared,
-	// so the member is ignored.
+	// A member asking for the shortest context there is inside a shared group.
 	verify := agent.Tasks["verify"]
 	verify.Context = ir.TaskContext{History: ir.HistoryReset}
 	agent.Tasks["verify"] = verify
@@ -3155,20 +3152,16 @@ func TestPipecatTaskGroupStillGovernsItsMembersContext(t *testing.T) {
 		t.Fatalf("generate task group: %v", err)
 	}
 	bot := artifactFile(t, artifact, "bot.py")
-	entry := pipecatMethodBody(t, bot, "self._run_verify_snapshot = (", "await flow.initialize(")
-	if strings.Contains(entry, "set_messages(") {
-		t.Errorf("a group step's own history: shaped the group's entry:\n%s", entry)
+	if !strings.Contains(bot, "_last_n(self.context.get_messages(), 2)") {
+		t.Error("the later group member does not apply its own last_n policy")
 	}
-	if strings.Contains(bot, "_last_n(") {
-		t.Error("a group step's last_n emitted the window helper, so the member's history: was consulted")
-	}
-	if strings.Contains(bot, "ContextStrategy.RESET") {
-		t.Error("a group step's reset emitted the RESET strategy; context_scope: shared has to win")
+	if !strings.Contains(bot, "ContextStrategy.RESET") {
+		t.Error("the first group member does not apply its own reset policy")
 	}
 }
 
-// A Pipecat package where every task and handoff authors `history: full` emits
-// nothing new at all (FR-013).
+// A Pipecat package where every task and handoff authors `history: full` drops
+// prior instructions while retaining speech and tool pairs.
 //
 // This is what makes the change safe to land: `full` on this target is not a
 // setting the driver implements, it is what one shared LLMContext per call
@@ -3202,13 +3195,13 @@ func TestPipecatFullOnlyPackageEmitsNoShaping(t *testing.T) {
 	if strings.Contains(bot, "ContextStrategy") {
 		t.Error("a full-only package imports or names ContextStrategy")
 	}
-	// The single-task delegate is the site history: full would have shaped.
+	// The single-task delegate applies full's role filter.
 	entry := pipecatMethodBody(t, bot, "self._run_complete_snapshot = (", "await flow.initialize(")
-	if strings.Contains(entry, "set_messages(") {
-		t.Errorf("history: full shaped a single-task delegate's entry:\n%s", entry)
+	if !strings.Contains(entry, `m.get("role") in ("user", "assistant", "tool")`) {
+		t.Errorf("history: full does not strip old instructions on task entry:\n%s", entry)
 	}
 	handoff := pipecatMethodBody(t, bot, "async def to_billing(self, params: FunctionCallParams):", "\n    @_direct_tool")
-	if strings.Contains(handoff, "set_messages(") {
-		t.Errorf("history: full shaped a handoff:\n%s", handoff)
+	if !strings.Contains(handoff, `m.get("role") in ("user", "assistant", "tool")`) {
+		t.Errorf("history: full does not strip old instructions on handoff:\n%s", handoff)
 	}
 }

@@ -28,10 +28,6 @@ agents:
         # every call: the caller said "a booking for a haircut tomorrow", the
         # step read the number back, and then asked what they were calling
         # about. The steps that act read the conversation and record it instead.
-        result:
-          customer_phone: Phone
-          customer: Customer
-          summary: string
         context:
           history: reset
 
@@ -52,19 +48,6 @@ agents:
           # runs on `history: messages`, so the caller's own words are in front
           # of it and it never has to ask.
           - caller_reason+: result.reason
-        result:
-          # Absent when the caller decided against a change, which is a real
-          # outcome and not a failure: the append adds nothing that turn rather
-          # than the step inventing an appointment to have something to hand
-          # back.
-          appointment: Appointment | None
-          # All five values, the same set the list declares, though this step
-          # only ever returns one of the three booking ones. A caller who only
-          # asks a question is answered by the concierge itself and runs no
-          # step, so `request_informations` reaches the list from nowhere: the
-          # list holds what a step did, not everything that was said.
-          reason: Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]
-          summary: string
         context:
           history: messages
     handoffs:
@@ -104,10 +87,6 @@ agents:
           # state holds both: this is the case the spec separates from a change
           # of mind, where one step replaces its own value instead.
           - caller_reason+: result.reason
-        result:
-          complaint: Complaint
-          reason: Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]
-          summary: string
         context:
           history: messages
     handoffs:

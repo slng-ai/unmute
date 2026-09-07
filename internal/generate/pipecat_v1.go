@@ -88,10 +88,10 @@ type pipecatAgent struct {
 	// targeting it declares. A worker with a brief re-renders its prompt on
 	// activation even when it has no steps, because the brief is written just
 	// before it is activated and its prompt was rendered at construction.
-	Brief []string
+
 	// InputSchemas is the explicit schema per step and handoff handed inputs,
 	// advertised by build_tools in place of the signature-derived one.
-	InputSchemas []pipecatInputSchema
+
 }
 
 // pipecatMCPSource is one MCP tool source this agent carries (N40): one
@@ -188,18 +188,9 @@ type pipecatDelegate struct {
 	// into an explicit FunctionSchema in build_tools, because this framework
 	// derives a schema from type hints and cannot express a Literal or a
 	// declared class that way.
-	Inputs        []pipecatArg
+
 	InputProps    string // Python dict literal: one _schema(...) per input
 	InputRequired string // Python list literal: the required input names
-}
-
-// pipecatInputSchema is one explicit tool schema a worker advertises in place
-// of the signature-derived one, for a step or a handoff handed typed inputs.
-type pipecatInputSchema struct {
-	Name        string
-	Description string
-	Props       string
-	Required    string
 }
 
 type pipecatAssign struct {
@@ -325,12 +316,12 @@ type pipecatTransfer struct {
 	CtxExpr string
 	// Inputs is the brief this handoff carries; see pipecatDelegate.Inputs for
 	// why the schema is explicit.
-	Inputs        []pipecatArg
+
 	InputProps    string
 	InputRequired string
 	// ReceiverInputs is every input name the receiving worker's prompt reads,
 	// reset before this handoff's own values are written.
-	ReceiverInputs []string
+
 }
 
 type pipecatVariable struct {
@@ -601,7 +592,6 @@ type pipecatData struct {
 	// NeedsFunctionSchema imports FunctionSchema for the explicit schema a step
 	// or handoff handed typed inputs advertises.
 	NeedsFunctionSchema bool
-	ResultsHint         string // developer-message tail when a delegate hands its results back
 	// Pace carries the resolved floor and ceiling. On this target the floor does
 	// not vary with the pace and the ceiling does; see internal/target/pace.go
 	// for the measurement behind that.
@@ -706,8 +696,8 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTemplates:            true, // _render over prompts and the greeting at session start
 	targetcap.FieldTypedState:           true, // a generated Pydantic class per shape, validated at each finish
 	targetcap.FieldShapedText:           true, // str plus an AfterValidator, never a schema keyword
-	targetcap.FieldInput:                true, // an explicit FunctionSchema per delegate and handoff with inputs, validated before entry, written to State for the visit
-	targetcap.FieldWarmInstances:        true, // [scaling] min_agents in pcc-deploy.toml
+
+	targetcap.FieldWarmInstances: true, // [scaling] min_agents in pcc-deploy.toml
 }
 
 // pipecatDailyCarrierEmittedTelephonyFeatures is the (pipecat, daily-sip,
@@ -856,12 +846,12 @@ func renderPipecatV1(name string, data pipecatData) ([]byte, error) {
 		return nil, fmt.Errorf("pipecat template %s: %w", name, err)
 	}
 	tmpl, err := template.New(name).Funcs(template.FuncMap{
-		"pyq":               pyQuote,
-		"resultAccess":      resultAccess,
-		"pytriple":          pyTriple,
-		"join":              strings.Join,
-		"inputBlockPreview": inputBlockPreview,
-		"mcpTimeout":        func() int { return mcpTimeoutSeconds },
+		"pyq":          pyQuote,
+		"resultAccess": resultAccess,
+		"pytriple":     pyTriple,
+		"join":         strings.Join,
+
+		"mcpTimeout": func() int { return mcpTimeoutSeconds },
 		// SLNG's contract for a hosted code tool, named once in Go so neither
 		// driver's template can drift from what hosted_tool.go says the
 		// platform guarantees.

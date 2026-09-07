@@ -116,11 +116,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		}
 		out.Variables[name] = resolved
 	}
-	// Every input, resolved before any prompt is composed: a receiving agent's
-	// block needs the handoffs that target it, and those are built after the
-	// agents are.
-	inputs, err := buildInputs(pkg, out, declared)
-	if err != nil {
+	if err := checkInject(pkg); err != nil {
 		return nil, err
 	}
 	for name, tool := range pkg.Tools {
@@ -217,18 +213,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		// per placeholder. checkTemplates reads the authored text.
 		instructions = FlattenPaths(instructions)
 		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg, raw.Think))
-		// The composed state block, after the authored suffix, because the suffix
-		// is a directive about how to answer and this is the record it answers
-		// from. Composed per site: an unconfirmed value belongs in one prompt
-		// only, and no agent prompt is that prompt.
-		instructions = appendPromptSuffix(instructions, out.StateBlock(AgentPromptSite(name)))
-		// Then the brief, after the state block: the request is the last thing
-		// the model reads before it acts. Empty for an agent no handoff briefs.
-		instructions = appendPromptSuffix(instructions, InputBlock(inputs.agents[name]))
 		out.Agents[name] = AgentDef{
 			Instructions: instructions, Model: raw.Think, Voice: raw.Speak,
-			Tools:  attached(raw.Tools, callables(raw, pkg), raw.Handoffs, raw.Escalations),
-			Inputs: inputs.agents[name],
+			Tools: attached(raw.Tools, callables(raw, pkg), raw.Handoffs, raw.Escalations),
 		}
 	}
 
@@ -265,16 +252,24 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		// names it, so the profile cannot come from where it happens to be written.
 		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg,
 			cmp.Or(raw.Think, pkg.Agent.Agents[pkg.Agent.EntryAgent].Think)))
-		instructions = appendPromptSuffix(instructions, out.StateBlock(TaskPromptSite(name)))
-		instructions = appendPromptSuffix(instructions, InputBlock(inputs.tasks[name]))
-		result, err := buildResult(raw.Result, declared)
+		assign, err := assignments(raw.Assign)
+		if err != nil {
+			return nil, fmt.Errorf("%s: task %q: %w", pkg.Location("agent.yaml", name), name, err)
+		}
+		result, err := deriveResult(assign, out)
 		if err != nil {
 			return nil, fmt.Errorf("%s: task %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
 		out.Tasks[name] = Task{
+			Assign:       assign,
 			Instructions: instructions, Tools: attached(raw.Tools, raw.Handoffs), Model: raw.Think, Result: result,
-			Inputs:  inputs.tasks[name],
 			Context: buildTaskContext(raw.Context),
+		}
+	}
+
+	for _, name := range sortedKeys(out.Tasks) {
+		if err := checkAssignments(name, out.Tasks[name].Assign, out); err != nil {
+			return nil, fmt.Errorf("%s: task %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
 	}
 
@@ -324,7 +319,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		out.Controls[name] = control
 	}
 	for _, name := range sortedKeys(pkg.Agent.Handoffs) {
-		control, err := buildHandoff(pkg, pkg.Agent.Handoffs[name], out, inputs.handoffs[name])
+		control, err := buildHandoff(pkg, pkg.Agent.Handoffs[name], out)
 		if err != nil {
 			return nil, fmt.Errorf("%s: handoff %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
@@ -336,9 +331,6 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 			return nil, fmt.Errorf("%s: escalation %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
 		out.Controls[name] = control
-	}
-	if err := checkInject(pkg); err != nil {
-		return nil, err
 	}
 	// After the controls, because a confirm: names a task a delegate runs, and
 	// before checkTemplates, because a prefetch-assigned variable is one that has
@@ -800,12 +792,13 @@ func floatOr(authored *float64, fallback float64) float64 {
 // flattenInject stores each templated inject value in its emitted form, the way
 // Build stores a prompt. A map with nothing in it is returned as it came, so a
 // tool declaring no inject keeps the nil the generators test for.
-func flattenInject(inject map[string]any) map[string]any {
+func flattenInject(inject []packagespec.Pair) map[string]any {
 	if len(inject) == 0 {
-		return inject
+		return nil
 	}
 	out := make(map[string]any, len(inject))
-	for key, value := range inject {
+	for _, pair := range inject {
+		key, value := pair.Key, pair.Value
 		if text, ok := value.(string); ok {
 			out[key] = FlattenPaths(text)
 			continue
@@ -826,43 +819,63 @@ func buildToolAuth(raw *packagespec.ToolAuth) *ToolAuth {
 	return auth
 }
 
-func buildResult(raw map[string]any, declared map[string]bool) (map[string]ResultField, error) {
-	result := make(map[string]ResultField, len(raw))
-	for name, value := range raw {
-		switch value := value.(type) {
-		case string:
-			// A result field's type is a type expression, the same grammar a
-			// variable's is, so a step can hand back a whole shape and the
-			// assignment can match it against the variable it writes to. The
-			// four JSON Schema words every package written before this uses
-			// resolve to the same primitives they always did.
-			ref, err := resolveType(value, declared)
-			if err != nil {
-				return nil, fmt.Errorf("result %q: %w", name, err)
+// deriveResult first establishes whole fields, so a projection can precede its anchor.
+func deriveResult(assign []AssignTo, agent *Agent) (map[string]ResultField, error) {
+	result := make(map[string]ResultField)
+	seen := make(map[string]bool)
+	for _, entry := range assign {
+		if seen[entry.Var] {
+			return nil, fmt.Errorf("assign writes variable %q twice", entry.Var)
+		}
+		seen[entry.Var] = true
+		variable, ok := agent.Variables[entry.Var]
+		if !ok {
+			return nil, fmt.Errorf("assign writes to %q, and it is not declared under the variables: block", entry.Var)
+		}
+		typ := variable.Shape
+		if typ == nil {
+			typ = &TypeRef{Primitive: variable.Type}
+		}
+		if entry.Append {
+			if !typ.IsList() {
+				return nil, fmt.Errorf("assign appends to %q: declare a list or remove +", entry.Var)
 			}
-			if ref.Structured() {
-				result[name] = ResultField{Type: PrimitiveString, Shape: ref}
-			} else {
-				result[name] = ResultField{Type: ref.Primitive}
+			item := *typ.List
+			item.Optional = true
+			typ = &item
+		}
+		root, rest, _ := strings.Cut(entry.Field, ".")
+		if !namePattern.MatchString(root) {
+			return nil, fmt.Errorf("assign result field %q is not a valid name", root)
+		}
+		if rest != "" {
+			continue
+		}
+		field := ResultField{Type: typ.Primitive, Description: variable.Description}
+		if typ.Structured() {
+			field.Type, field.Shape = PrimitiveString, typ
+		}
+		if prior, exists := result[root]; exists {
+			if prior.Type != field.Type || !prior.Shape.Equal(field.Shape) {
+				return nil, fmt.Errorf("assign result.%s has conflicting destination types", root)
 			}
-		case map[string]any:
-			if enumValue, ok := value["enum"]; ok && len(value) == 1 {
-				values, err := stringSlice(enumValue)
-				if err != nil {
-					return nil, fmt.Errorf("result %q enum: %w", name, err)
-				}
-				result[name] = ResultField{Type: PrimitiveString, Enum: values}
-			} else {
-				result[name] = ResultField{Schema: value}
-			}
-		default:
-			return nil, fmt.Errorf("result %q must be a primitive type, enum, or JSON Schema object", name)
+			continue
+		}
+		result[root] = field
+	}
+	for _, entry := range assign {
+		root, _, _ := strings.Cut(entry.Field, ".")
+		if _, ok := result[root]; !ok {
+			return nil, fmt.Errorf("assign result.%s needs a whole-field assignment to establish its type; assign result.%s to a declared shape first", entry.Field, root)
 		}
 	}
 	return result, nil
 }
 
 func buildTaskContext(raw packagespec.TaskContext) TaskContext {
+	if raw.History == "" {
+		raw.History = string(HistoryMessages)
+	}
 	return TaskContext{
 		History: History(raw.History), MaxMessages: raw.MaxMessages, Summarizer: raw.Summarizer,
 		IncludeToolCalls: raw.IncludeToolCalls,
@@ -883,18 +896,10 @@ func buildCallable(pkg *packagespec.Package, raw packagespec.Callable, agent *Ag
 	} else if _, ok := agent.TaskGroups[raw.Group]; !ok {
 		return nil, missing(pkg, "agent.yaml", "group", raw.Group)
 	}
-	assign, err := assignments(raw.Assign)
-	if err != nil {
-		return nil, err
-	}
-	if err := checkAssignments(raw.Task, assign, agent); err != nil {
-		return nil, err
-	}
 	// ponytail: one TrimSpace, matching buildTool. A blank line reads as no
 	// announcement, so no driver has to decide what " " means.
 	return &Delegate{
 		Kind: ControlDelegate, When: raw.When, Task: raw.Task, Group: raw.Group,
-		Assign:   assign,
 		Announce: strings.TrimSpace(raw.Announce),
 	}, nil
 }
@@ -926,7 +931,7 @@ func assignments(pairs []packagespec.Pair) ([]AssignTo, error) {
 	return out, nil
 }
 
-func buildHandoff(pkg *packagespec.Package, raw packagespec.Handoff, agent *Agent, inputs []InputField) (Control, error) {
+func buildHandoff(pkg *packagespec.Package, raw packagespec.Handoff, agent *Agent) (Control, error) {
 	if _, ok := agent.Agents[raw.To]; !ok {
 		return nil, missing(pkg, "agent.yaml", "to", raw.To)
 	}
@@ -943,7 +948,7 @@ func buildHandoff(pkg *packagespec.Package, raw packagespec.Handoff, agent *Agen
 	}
 	return &AgentTransfer{
 		Kind: ControlAgentTransfer, When: raw.When, To: raw.To, Announce: announce,
-		Inputs: inputs, Context: context,
+		Context: context,
 	}, nil
 }
 
@@ -1012,9 +1017,8 @@ func checkAssignments(taskName string, assign []AssignTo, agent *Agent) error {
 			// says neither where to look nor what is wrong.
 			return fmt.Errorf("assign writes to %q, and it is not declared under the variables: block", entry.Var)
 		}
-		// The first segment indexes the task's own result; anything after the
-		// first dot is a path into that field's declared shape, walked the same
-		// way an `expect:` path is (FieldPath).
+		// The first segment indexes the task's derived finish fields; anything
+		// after the first dot is a path into that field's declared shape.
 		root, rest, _ := strings.Cut(entry.Field, ".")
 		field, ok := task.Result[root]
 		if !ok {
@@ -1163,7 +1167,7 @@ func stringValue(value *string) string {
 
 func buildTransferContext(pkg *packagespec.Package, raw *packagespec.TransferContext, agent *Agent) (TransferContext, error) {
 	if raw == nil {
-		return TransferContext{}, nil
+		return TransferContext{TaskContext: buildTaskContext(packagespec.TaskContext{})}, nil
 	}
 	if raw.Summarizer != "" {
 		if _, ok := agent.Models[raw.Summarizer]; !ok {
@@ -1171,10 +1175,7 @@ func buildTransferContext(pkg *packagespec.Package, raw *packagespec.TransferCon
 		}
 	}
 	return TransferContext{
-		TaskContext: TaskContext{
-			History: History(raw.History), MaxMessages: raw.MaxMessages, Summarizer: raw.Summarizer,
-			IncludeToolCalls: raw.IncludeToolCalls,
-		},
+		TaskContext: buildTaskContext(packagespec.TaskContext{History: raw.History, MaxMessages: raw.MaxMessages, Summarizer: raw.Summarizer, IncludeToolCalls: raw.IncludeToolCalls}),
 	}, nil
 }
 
@@ -2087,10 +2088,9 @@ func shapeNames(shapes map[string]Shape) map[string]bool {
 	return out
 }
 
-// variableOrder is every declared variable, in the order agent.yaml declared
-// them. The authored order is read off the file, so a name it somehow missed is
-// appended sorted rather than dropped: the composed state block covers every
-// variable or it is not the state.
+// variableOrder is every declared variable in authoring order. A name somehow
+// missed by the parser is appended sorted so generated output stays complete
+// and deterministic.
 func variableOrder(pkg *packagespec.Package) []string {
 	out := make([]string, 0, len(pkg.Agent.Variables))
 	for _, name := range pkg.VariableOrder() {

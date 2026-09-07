@@ -788,7 +788,7 @@ func TestLiveKitV1DelegateThenTransferAndEnd(t *testing.T) {
 	for _, want := range []string{
 		// transfer: hands off to the target, does not return; no typed-result return.
 		"async def do_reserve(self, ctx: RunContext):",
-		"return Greeter(chat_ctx=owner_ctx)",
+		"return Greeter(chat_ctx=owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))",
 		"when it finishes the caller is handed to the greeter.",
 		// end: shuts the session down, does not return.
 		"self.session.shutdown()",
@@ -823,10 +823,13 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assignedTask := agent.Tasks["find_slot"]
+	assignedTask.Assign = []ir.AssignTo{{Var: "caller_phone", Field: "date"}}
+	assignedTask.Result = map[string]ir.ResultField{"date": {Type: ir.PrimitiveString}}
+	agent.Tasks["find_slot"] = assignedTask
 	agent.Controls["do_find"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "find_slot",
-		When:   "The caller only wants to check for a slot, not book yet.",
-		Assign: []ir.AssignTo{{Var: "caller_phone", Field: "date"}},
+		When: "The caller only wants to check for a slot, not book yet.",
 	}
 	def := agent.Agents["reservations"]
 	def.Tools = append(def.Tools, "do_find")
@@ -839,8 +842,8 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
 		"async def do_find(self, ctx: RunContext) -> dict:",
-		"result = await FindSlot(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))",
-		`ctx.userdata.caller_phone = result["date"]`,
+		"result = await FindSlot(chat_ctx=owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))",
+		`_values = _save_result("find_slot", ctx.userdata, {"date": date, "unserved_request": unserved_request})`,
 		"@dataclass\nclass Userdata:",
 		"caller_phone: str | None = None",
 		"session = AgentSession[Userdata](",
@@ -855,7 +858,7 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 		// and the model runs the whole flow a second time. The docstring above
 		// asks for that; only these two lines enforce it.
 		"owner_ctx = self.chat_ctx.copy()",
-		"await self.update_chat_ctx(owner_ctx)",
+		"await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -863,10 +866,10 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 	}
 	// The restore must land between the task and the assignment, or the owner
 	// keeps the merged turns.
-	restore := strings.Index(botpy, "await self.update_chat_ctx(owner_ctx)")
-	assign := strings.Index(botpy, `ctx.userdata.caller_phone = result["date"]`)
-	if restore < 0 || assign < 0 || restore > assign {
-		t.Errorf("the owner context is restored at %d, after the assignment at %d", restore, assign)
+	restore := strings.Index(botpy, "await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)")
+	result := strings.Index(botpy, "return _task_status(result)")
+	if restore < 0 || result < 0 || restore > result {
+		t.Errorf("the owner context is restored at %d, after the neutral result at %d", restore, result)
 	}
 	if strings.Contains(botpy, "_terminal_claimed") {
 		t.Error("a task without transfers must not emit terminal-claim state")
@@ -909,7 +912,7 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 		"async def back_to_greeter(self, ctx: RunContext):",
 		"if not self._claim_terminal():\n            return",
 		`await ctx.session.say("I will take you back to Remy.", allow_interruptions=False)`,
-		"self.complete(_TaskTransfer(Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))))",
+		"self.complete(_TaskTransfer(Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))))",
 		"except BaseException:\n            self._terminal_claimed = False\n            raise",
 		"except _TaskTransfer as transfer:",
 		"return transfer.agent",
@@ -927,8 +930,8 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 		t.Fatal("could not bound FindSlot task")
 	}
 	taskBlock := botpy[taskStart : taskStart+taskEnd]
-	if got := strings.Count(taskBlock, "if not self._claim_terminal():"); got != 2 {
-		t.Errorf("transfer and finish claim the terminal %d times, want 2", got)
+	if got := strings.Count(taskBlock, "if not self._claim_terminal():"); got != 1 {
+		t.Errorf("transfer claims the terminal %d times, want 1", got)
 	}
 	transferMethod := strings.Index(taskBlock, "async def back_to_greeter")
 	claim := -1
@@ -999,7 +1002,8 @@ func TestLiveKitV1SharedGroupTaskTransferAndResults(t *testing.T) {
 		"group = TaskGroup(",
 		"summarize_chat_ctx=False,",
 		"on_task_completed=lambda event: _share_task_result(group, event),",
-		"try:\n            result = await group",
+		"try:\n            group = TaskGroup(",
+		"result = await group",
 		"except _TaskTransfer as transfer:\n            return transfer.agent",
 	} {
 		if !strings.Contains(block, want) {
@@ -1045,7 +1049,9 @@ func TestLiveKitV1IsolatedGroupTaskAgentTransfer(t *testing.T) {
 	}
 	block := botpy[start:]
 	for _, want := range []string{
-		"try:\n            task_results[\"find_slot\"] = await FindSlot()\n            task_results[\"confirm_booking\"] = await ConfirmBooking()",
+		"try:\n            task_results = {}",
+		`task_results["find_slot"] = await FindSlot(chat_ctx=llm.ChatContext())`,
+		`task_results["confirm_booking"] = await ConfirmBooking(chat_ctx=llm.ChatContext())`,
 		"except _TaskTransfer as transfer:\n            return transfer.agent",
 	} {
 		if !strings.Contains(block, want) {
@@ -1053,7 +1059,7 @@ func TestLiveKitV1IsolatedGroupTaskAgentTransfer(t *testing.T) {
 		}
 	}
 	catch := strings.Index(block, "except _TaskTransfer as transfer:")
-	second := strings.Index(block, `task_results["confirm_booking"] = await ConfirmBooking()`)
+	second := strings.Index(block, `task_results["confirm_booking"] = await ConfirmBooking(chat_ctx=llm.ChatContext())`)
 	if catch < second {
 		t.Fatalf("catch at %d must wrap the later step at %d", catch, second)
 	}
@@ -1129,8 +1135,14 @@ func TestV1LiveKitCompletedFlowEndsOnce(t *testing.T) {
 			break
 		}
 	}
-	if finishLine == "" || !strings.HasSuffix(finishLine, ") -> None:") {
-		t.Error("finish must be typed -> None (complete() is the sole resolution)")
+	for _, line := range strings.Split(botpy, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "async def finish(") {
+			finishLine = line
+			break
+		}
+	}
+	if finishLine == "" {
+		t.Error("finish tool is missing")
 	}
 	if strings.Contains(botpy, `return "Done."`) {
 		t.Error(`finish must not return a value after self.complete() (stray post-completion output)`)
@@ -1199,7 +1211,7 @@ func TestV2LiveKitToolCarriesSchema(t *testing.T) {
 
 	for _, want := range []string{
 		"from typing import Annotated, Literal",
-		"from pydantic import Field",
+		"Field, TypeAdapter",
 		// enum → Literal, description → Annotated[..., Field(...)]
 		`service: Annotated[Literal["haircut", "hair-color", "blowout"], Field(description="The service requested")]`,
 		// non-enum described args still carry the description
@@ -1292,9 +1304,9 @@ func TestLiveKitV1IsolatedGroup(t *testing.T) {
 	for _, want := range []string{
 		// the isolated flow: fresh AgentTasks, results dict, typed return
 		"async def do_reserve(self, ctx: RunContext) -> dict:",
-		`task_results["find_slot"] = await FindSlot()`,
-		`task_results["confirm_booking"] = await ConfirmBooking()`,
-		"return task_results",
+		`task_results["find_slot"] = await FindSlot(chat_ctx=llm.ChatContext())`,
+		`task_results["confirm_booking"] = await ConfirmBooking(chat_ctx=llm.ChatContext())`,
+		"return _group_status(task_results)",
 		// do_event stays shared, so TaskGroup is still imported and used
 		"from livekit.agents.beta.workflows import TaskCompletedEvent, TaskGroup",
 	} {
@@ -1434,7 +1446,7 @@ func TestLiveKitV1HistoryResetAndToolCallShaping(t *testing.T) {
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		`return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_function_call=True, exclude_handoff=True))`,
+		`return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_function_call=True, exclude_handoff=True))`,
 		"# history: reset — the target starts fresh (a handoff marker still lands).",
 		"return Greeter()",
 	} {
@@ -2701,7 +2713,9 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	task.Result["details"] = ir.ResultField{Schema: map[string]any{"type": "object"}}
 	task.Tools = append(task.Tools, "browse_tables")
 	agent.Tasks["find_slot"] = task
-	agent.Controls["do_find"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "find_slot", Assign: []ir.AssignTo{{Var: "caller_phone", Field: "date"}}}
+	task.Assign = []ir.AssignTo{{Var: "caller_phone", Field: "date"}}
+	agent.Tasks["find_slot"] = task
+	agent.Controls["do_find"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "find_slot"}
 	resDef := agent.Agents["reservations"]
 	resDef.Tools = append(resDef.Tools, "do_find")
 	agent.Agents["reservations"] = resDef

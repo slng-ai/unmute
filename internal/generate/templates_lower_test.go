@@ -16,10 +16,9 @@ import (
 // a step, not the caller, was going to answer.
 func TestSupplierIndex(t *testing.T) {
 	t.Run("one supplier", func(t *testing.T) {
-		index := SupplierIndex(map[string]ir.Control{
-			"verify_customer": &ir.Delegate{Assign: []ir.AssignTo{{Var: "customer_phone", Field: "customer_phone"}}},
-			"manage_booking":  &ir.Delegate{},
-			"to_care":         &ir.AgentTransfer{},
+		index := SupplierIndex(map[string]ir.Task{
+			"verify_customer": {Assign: []ir.AssignTo{{Var: "customer_phone", Field: "customer_phone"}}},
+			"manage_booking":  {},
 		})
 		if index["customer_phone"] != "verify_customer" {
 			t.Errorf("supplier of customer_phone = %q, want verify_customer: %v", index["customer_phone"], index)
@@ -34,10 +33,10 @@ func TestSupplierIndex(t *testing.T) {
 	// compiles of an unchanged package and every golden file becomes a coin
 	// toss. Sorted control order is the tiebreak.
 	t.Run("several suppliers resolve deterministically", func(t *testing.T) {
-		controls := map[string]ir.Control{
-			"zulu":  &ir.Delegate{Assign: []ir.AssignTo{{Var: "phone", Field: "phone"}}},
-			"alpha": &ir.Delegate{Assign: []ir.AssignTo{{Var: "phone", Field: "phone"}}},
-			"mike":  &ir.Delegate{Assign: []ir.AssignTo{{Var: "phone", Field: "phone"}}},
+		controls := map[string]ir.Task{
+			"zulu":  {Assign: []ir.AssignTo{{Var: "phone", Field: "phone"}}},
+			"alpha": {Assign: []ir.AssignTo{{Var: "phone", Field: "phone"}}},
+			"mike":  {Assign: []ir.AssignTo{{Var: "phone", Field: "phone"}}},
 		}
 		for range 20 {
 			if got := SupplierIndex(controls)["phone"]; got != "alpha" {
@@ -47,11 +46,19 @@ func TestSupplierIndex(t *testing.T) {
 	})
 
 	t.Run("no supplier when the value comes from elsewhere", func(t *testing.T) {
-		index := SupplierIndex(map[string]ir.Control{"to_care": &ir.AgentTransfer{}})
+		index := SupplierIndex(map[string]ir.Task{})
 		if _, ok := index["caller_number"]; ok {
 			t.Errorf("a variable filled by source: or --var has no supplying control: %v", index)
 		}
 	})
+}
+
+func TestEmptyDefaultStillGuardsInjectedValue(t *testing.T) {
+	tool := ir.Tool{Inject: map[string]any{"phone": "{{phone}}"}}
+	got := neededVars(tool, map[string]ir.Variable{"phone": {Default: ""}}, nil)
+	if len(got) != 1 || got[0].Name != "phone" {
+		t.Fatalf("empty default bypasses missing-value guard: %v", got)
+	}
 }
 
 // TestNeededHintNamesTheRightStep is the Go-level unit test for the per-value
@@ -109,13 +116,17 @@ func TestRefusalNamesTheSupplyingStepAndAsksForTheRest(t *testing.T) {
 		Result:       map[string]ir.ResultField{"assigned_value": {Type: ir.PrimitiveString}},
 		Context:      ir.TaskContext{History: ir.HistoryFull},
 	}
+	noteTask := agent.Tasks["verify_customer"]
+	noteTask.Assign = []ir.AssignTo{{Var: "confirmed_value", Field: "confirmed_value"}}
+	agent.Tasks["verify_customer"] = noteTask
 	agent.Controls["verify_customer"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "verify_customer", When: "Identify the caller.",
-		Assign: []ir.AssignTo{{Var: "confirmed_value", Field: "confirmed_value"}},
 	}
+	noteTask = agent.Tasks["record_note"]
+	noteTask.Assign = []ir.AssignTo{{Var: "assigned_value", Field: "assigned_value"}}
+	agent.Tasks["record_note"] = noteTask
 	agent.Controls["record_note"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "record_note", When: "Record a note.",
-		Assign: []ir.AssignTo{{Var: "assigned_value", Field: "assigned_value"}},
 	}
 	agent.Variables["confirmed_value"] = ir.Variable{Type: ir.PrimitiveString, Confirm: "verify_customer"}
 	agent.Variables["assigned_value"] = ir.Variable{Type: ir.PrimitiveString}
@@ -153,5 +164,13 @@ func TestRefusalNamesTheSupplyingStepAndAsksForTheRest(t *testing.T) {
 		if strings.Contains(py, "Ask the caller first.") {
 			t.Errorf("%s: _refusal still carries the old blanket advice", provider)
 		}
+	}
+}
+
+func TestNeededGuardChecksTheReferencedField(t *testing.T) {
+	tool := ir.Tool{Inject: map[string]any{"date": "{{appointment.date}}"}}
+	got := neededVars(tool, map[string]ir.Variable{"appointment": {Default: "present", Confirm: "verify"}}, nil)
+	if len(got) != 1 || got[0].Name != "appointment__date" || got[0].Hint != "run verify first." {
+		t.Fatalf("field guard = %+v", got)
 	}
 }

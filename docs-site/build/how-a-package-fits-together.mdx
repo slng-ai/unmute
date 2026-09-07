@@ -67,18 +67,11 @@ agents:
         instructions: tasks/verify-customer.md
         assign:
           - customer_phone: result.customer_phone
-        result:
-          customer_phone: string
-        context:
-          history: full
       - name: manage_booking
         when: The caller wants to create, change, or cancel a booking, once the caller is identified.
         instructions: tasks/booking.md
-        result:
-          booking_id: string
-          summary: string
-        context:
-          history: full
+        assign:
+          - booking_id: result.booking_id
     handoffs:
       - to_complaints
     escalations:
@@ -105,8 +98,9 @@ which kind of thing each one is. That glance is the point of the five lists.
 
 **Step 3. Define the handoffs and escalations.**
 
-Each handoff says what travels with the caller. `history` is required.
-`variables:` is optional: left out, every declared value travels.
+Each handoff may choose how much conversation travels with the caller. Omitted
+history means `messages`. Saved values reach the receiving model only through
+placeholders in its prompt.
 
 ```yaml agent.yaml
 handoffs:

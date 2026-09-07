@@ -57,7 +57,7 @@ tasks in a task group. The server owns its dynamic order.
 | the model does things out of order | a [task group](/build/orchestration/task-groups): the order is declared, not requested |
 | the model calls a tool it should not have yet | move the tool. Lists are per agent and per task, so a tool the current step does not hold cannot be called at all |
 | a step runs before you have the value it needs | give the step's own `when:` the clause that names what has to be true first, "once the caller is identified" |
-| you need a value out of a step and want to keep it | a task with `result:`, saved to a variable with `assign:` |
+| you need a value out of a step and want to keep it | a task that saves a declared variable with `assign:` |
 | two phases need different tools or different permissions | a [handoff](/build/orchestration/handoffs) |
 | the caller needs a person | none of these: that is a [human transfer](/transfers/overview), and what it can do depends on the phone route |
 
@@ -86,10 +86,8 @@ agents:
       - name: check_customer     # runs, returns a typed result, the agent continues
         when: Identify the caller before handling an appointment request.
         instructions: tasks/check-customer.md
-        result:
-          customer_id: string
-        context:
-          history: full
+        assign:
+          - customer_id: result.customer_id
 
 handoffs:
   to_appointment_manager:        # hands the call over, nothing returns
@@ -106,9 +104,8 @@ Say the dependency on the step itself, in its own `when:`:
         when: The caller wants to make, change, or cancel a booking, once the caller is identified.
 ```
 
-The model reads that clause every time it considers the step, next to the
-`Conversation info:` block that shows whether an earlier step already
-recorded the value. See [Order steps with the
+The model reads that clause every time it considers the step. Reference the
+saved value in the owning prompt when the model needs to check it. See [Order steps with the
 prompt](/best-practices/step-scoping#order-steps-with-the-prompt) for what
 still catches a step run out of order anyway, and what the caller hears when
 it does.
@@ -122,7 +119,7 @@ first.
 | | `tasks:` | `handoffs:` |
 |---|---|---|
 | returns | yes | no |
-| typed result | yes, `result:` | no |
+| saved typed values | yes, through `assign:` | existing call state remains available to explicit prompt references |
 | targets | a task, run in place | another agent |
 | where context is set | `context:` on the task | `context:` on the handoff entry |
 

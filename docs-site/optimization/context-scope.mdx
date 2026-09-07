@@ -1,215 +1,121 @@
 ---
 title: "Scoping a step's context"
-description: "How to choose what each task and handoff receives, and what has to travel as a declared variable once a step stops reading the transcript."
+description: "Choose which conversation and saved values each task or handoff receives."
 sidebarTitle: "Context scope"
 ---
 
-Every model request in a call carries three things: the prompt for whatever is
-speaking, the conversation so far, and the values substituted into that prompt.
-The first is fixed by what you wrote. The third is small. The second grows for
-the whole call, and by the end of a long one it is most of the request.
+Each model request has three inputs: its own instructions, the conversation
+allowed at that boundary, and the saved values its prompt names. Unmute keeps
+those choices separate.
 
-A structured package gives you a place to cut it. Each task and each handoff
-declares its own `context.history`, so a step that does not need the
-conversation does not get it. This page is how to decide that per step, and what
-you have to declare once you have.
+## Start with `messages`
 
-## Start from what the step actually reads
+Omitting `context.history` means `messages`. The receiver keeps caller and
+agent speech while tool calls and replies are removed together.
 
-The question is not how much history to send. It is what the step's own
-instructions refer to.
+| Need | Choose |
+|---|---|
+| Normal continuity without old tool records | `messages` |
+| Earlier paired tool records too | `full` |
+| Only a recent bounded window | `last_n` with `max_messages` |
+| No earlier conversation | `reset` |
+| A generated summary on LiveKit | `summary` with `summarizer` |
 
-Read a task prompt and mark every sentence that points outward. "Confirm the
-service the caller asked for" points at the conversation. "Read the number back
-and get a yes" points at a value. A step whose every sentence points at values
-needs no conversation at all, and a step with one sentence pointing outward
-needs the part of the conversation that sentence means.
+`full` and `reset` both remove earlier instructions. The receiver always uses
+its own instructions.
 
-| The step | Give it | Because |
-|---|---|---|
-| reads a value back, takes a payment, or is handed what the caller asked for through `expect:` | `reset` | its instructions, its declared values and the values it expects are the whole story |
-| has to know what the caller asked for | `messages` | both sides of the conversation, without the tool records nobody re-reads |
-| only the recent turns matter, on a call that runs long | `last_n` with `max_messages` | the newest entries, and never a tool result whose call was cut |
-| has to interpret anything, including its own earlier work | `full` | the running transcript, tool records included |
-| a long call handed to a new specialist | `summary` | one summarizer turn in place of the transcript |
-
-`messages` is the one to reach for first. Tool records are the bulk of a long
-context and almost nothing reads them back: an availability list, a row of
-bookings, a chunk of a document. The step that needs one calls the tool itself.
-
-## Trimming makes a value into a declaration
-
-This is the part that catches people. Once a step cannot see the conversation, a
-value its prompt names has to come from somewhere, and "the model will have read
-it earlier" stops being true.
-
-So one step assigns the value, and the next step's own `when:` says so:
+## Declare once, save once, read where needed
 
 ```yaml agent.yaml
-shapes:
-  - name: Customer
-    description: Who the caller is, as the salon's records have them.
-    fields:
-      - customer_name: str
-      - customer_id: Id
-      - phone_number: Phone
-      - name: status
-        type: Literal["existing", "created", "invalid"]
-        description: >-
-          What the lookup found for the confirmed number: existing for a
-          record that was already there, created for one written during this
-          call, and invalid for a number the lookup could not use.
+variables:
+  appointment_id:
+    type: Id
+  appointment_date:
+    type: Date
+  appointment_time:
+    type: Time
 
 agents:
   concierge:
     tasks:
-      - name: verify_customer
-        when: Confirm who the caller is before any specialist work.
-        instructions: tasks/verify-customer.md
+      - name: choose_booking
+        instructions: tasks/choose-booking.md
         assign:
-          - customer_phone: result.customer_phone
-          - customer: result.customer
-        result:
-          customer_phone: Phone
-          customer: Customer
-          summary: string
+          - appointment_id: result.appointment_id
+          - appointment_date: result.appointment_date
+          - appointment_time: result.appointment_time
+
+      - name: reschedule_booking
+        instructions: tasks/reschedule-booking.md
         context:
           history: reset
-
-      - name: manage_booking
-        when: The caller wants to create, modify, or cancel a booking, once the caller is verified.
-        instructions: tasks/booking.md
-        result:
-          action: Literal["create", "modify", "cancel", "none"]
-          summary: string
-        context:
-          history: messages
 ```
 
-`assign:` writes one field of a step's own result into a declared variable.
-`manage_booking`'s own `when:` says it runs only once the caller is verified,
-so the order lives in the same sentence a reader already checks the prompt
-against.
-
-Any task's or agent's prompt may already name any declared variable, whether
-anything has assigned it yet or not, and an unset one renders as nothing
-rather than as a compile error. A value with a declared shape, like `customer`
-here, is already in the block above, so naming it again by hand in
-`tasks/booking.md` would be a second copy of the same thing rather than the
-only way to show it.
-
-<Warning>
-A variable with a `default:` never reads as empty. The `Conversation info:`
-block a later step's prompt reads shows the default from the first word, not
-a blank, so a `when:` clause that says "once the value exists" has nothing to
-notice: the model can read the step's own words as already satisfied. Give a
-value that must be produced during the call no default, so the block still
-shows nothing recorded until a step actually writes it.
-</Warning>
-
-## Declared state does not wait for `context.history`
-
-Any task's or agent's prompt may already write `{{name}}` for any declared
-variable. What a declared shape changes is what a step gets without writing
-any `{{...}}` at all.
-
-Give a variable a type that is more than a bare `string`, one built from
-[the type grammar](/reference/variables#the-type-grammar) such as `Phone`, a
-`Literal`, a `list[...]`, or a shape declared under `shapes:`, and the
-compiler appends its current value to every agent prompt and every task
-prompt on its own, after the authored text:
-
-```text
-Conversation info:
-What this call has established so far. Read it rather than re-reading the
-conversation, and never ask for something already recorded here.
-1. Customer: {"customer_name":"Robin","customer_id":"c-4192","phone_number":"+34600111222","status":"existing"}
+```markdown tasks/reschedule-booking.md
+Move appointment {{appointment_id}} to {{appointment_date}}
+at {{appointment_time}}.
 ```
 
-This does not go through `history:`. `manage_booking` gets `customer` in
-that block even with `history: reset`, and `tasks/booking.md` names it
-nowhere. This is also how `manage_booking`'s own `when:` clause can lean on
-"once the caller is verified": the model reads this same block and can see
-whether `customer` is there yet.
+The first task's assignments derive its typed finish arguments from the three
+variables. The reset task receives only the three values it names. It receives
+no automatic state block, request, summary, or triggering sentence.
 
-`customer_phone` carries `confirm: verify_customer`, so it renders only in
-`verify_customer`'s own block: a value awaiting the caller's agreement
-appears in no prompt but the confirming step's own.
+If a reset receiver needs a detail that was only spoken and never saved, it
+asks the caller again. This is the useful pressure of `reset`: the package must
+state which data crosses the boundary.
 
-An empty value renders as the words `none recorded yet.`, never `[]` or
-`null`, so a step can tell "not yet known" from "known to be nothing".
+## Dotted paths stay narrow
 
-## Two things a step loses with `reset`
+`{{appointment.date}}` sends the date field. It does not serialize the whole
+appointment. `{{appointment}}` sends the whole value as compact JSON.
 
-Both are worth knowing before you choose it, because no compiler error catches
-either. Declared state is not one of them: see above.
+An unset value renders as `none recorded yet.` Declaring a description never
+fills a value and never sends it to a prompt.
 
-**It does not receive the caller's triggering utterance.** It opens without
-knowing what was just asked. Give the step `expect:` for what the caller asked
-for, and the agent that heard the caller hands it in: the step then asks
-nothing it was handed. For a step that reads a number back nothing is lost
-either way, which is the test for choosing `reset` with no `expect:` list at all.
+## Tool injection is separate
 
-**It cannot tell that it already ran.** A prompt saying "if verification already
-succeeded, reuse it" only worked because the step could see the history. Move
-that judgment to the agent that runs the step: a finished task's call and its
-result stay in the owner's own context, so the owner is the one that can
-actually make it. This is a better place for it anyway. The step decides how to
-do its job; the agent decides whether the job needs doing.
+A tool can read saved values without showing those arguments to the model:
 
-## A handoff is not a task
+```yaml tools/modify_booking.yaml
+input:
+  type: object
+  properties:
+    confirmed:
+      type: boolean
+  required:
+    - confirmed
+inject:
+  - booking_id: "{{appointment_id}}"
+  - date: "{{appointment_date}}"
+  - time: "{{appointment_time}}"
+```
 
-They take the same `context.history` values and they are not the same decision.
+Injected keys are removed from both the model-visible `properties` and
+`required` lists. Exact placeholders keep their native type. Mixed text becomes
+text. A missing or unconfirmed injected value stops the tool before execution.
 
-A task's context is restored when the task returns, so a short window inside one
-costs nothing beyond that step. A handoff replaces what the receiving agent has
-for the rest of the call. Two truncations on top of each other is how an agent
-forgets a booking it made twenty turns ago, and no error is raised when it does.
+## Confirmation
 
-So on a handoff, prefer `messages`: it drops the tool records, which is most of
-the saving, and keeps the whole spoken thread. Reach for `last_n` on a handoff
-only when you have decided the earlier turns are genuinely finished business.
+A variable with `confirm: verify_customer` is a candidate until that named task
+saves it. The verifier may reference the candidate in its own prompt. Other
+prompts and guarded tool reads see it as unavailable.
 
-## What a package on both code targets cannot use
+When an input changes, values prefetched from the old input are invalidated.
+Unrelated values, such as the local date, remain.
 
-One of these values, and one companion field, compile on livekit only. A package
-that has to run on livekit and pipecat has two fewer options.
+## History is not redaction
 
-| Field | livekit | pipecat |
+`messages` keeps earlier speech, including a value the caller said aloud.
+Variable scoping controls explicit saved-state sharing. Use `reset` when the
+receiver should inherit no transcript.
+
+## Cross-target choices
+
+| Field | LiveKit | Pipecat |
 |---|---|---|
-| `history: full`, `messages`, `last_n`, `reset` | shapes | shapes |
-| `history: summary` | shapes | refused |
-| `include_tool_calls: false` | shapes | refused |
+| `full`, `messages`, `last_n`, `reset` | supported | supported |
+| `summary` | supported | refused |
+| `include_tool_calls: false` | supported | refused |
 
-None of them fails quietly. Each is a validation error naming the field, and the
-`summary` one lists the four values pipecat does shape. The practical
-consequence is that a two-target package narrows on the task side: reach for
-`reset` or `messages`, and order the steps through their own `when:` clauses,
-which work the same on both targets. A handoff carries every declared value on
-both targets regardless, so there is nothing to narrow there.
-
-## Two things this is not
-
-**It is not a privacy control.** Shortening a step's history does not unsay what
-the caller said out loud. A phone number read back aloud is in the transcript
-whether a variable holds it or not. `reset` plus a short `expect:` list gives a
-step a smaller request, not a redacted one.
-
-**It is not a reason to seed a value locally.** A variable that gets its value
-from a step declares no `source:`, and a variable with no `source:` can be filled
-from the dispatch payload, so the generated runbook lists it under input
-variables with a `--var` line. That line works. Using it hands a step the
-value before anything in the call actually produced it, which defeats the
-point of ordering steps by what has really happened. Seed the fact a real call
-carries instead:
-
-```sh
-unmute dev ./my-agent --source from_number=<a number in E.164>
-```
-
-## Where to look next
-
-[Tasks](/build/orchestration/tasks) is the reference for `context.history` and
-ordering steps with `when:`, [Variables](/reference/variables) for `assign:`,
-`confirm:`, `shapes:` and every `source:`, and
-[Handoffs](/build/orchestration/handoffs) for what crosses an agent change.
+[Tasks](/build/orchestration/tasks) covers task finishes and assignments.
+[Variables](/reference/variables) covers types, shapes, and references.

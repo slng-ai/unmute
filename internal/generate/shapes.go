@@ -90,56 +90,19 @@ var shapedOrder = []ir.ShapedText{ir.ShapedPhone, ir.ShapedDate, ir.ShapedTime, 
 // template's import block needs to know without re-deriving it.
 type TypedStateBlock struct {
 	Source string
-	// Structured names every declared value the state block renders as JSON and
-	// as words when empty, sorted. Emitted as a set the render path reads, so a
-	// package declaring nothing structured gets an empty one and every existing
-	// prompt renders exactly as it did.
+	// Structured names values that explicit references render as JSON, sorted.
 	Structured []string
-	// Values is every declared value the block renders, in the order the block
-	// numbers them, with the type its author wrote. The runbook prints it, which
-	// is the one place a reader finds out what the model is being told.
+	// Values is every declared value in authoring order, with its authored type.
+	// The runbook prints the declarations without claiming every prompt sees them.
 	Values []TypedStateValue
-	// Preview is the block as it stands in the entry agent's own prompt, so the
-	// runbook shows the real thing rather than a description of it. Composed by
-	// the one composer every prompt goes through, which is why it cannot drift
-	// from what the module actually carries.
-	Preview string
 	// Empty is what a value with no contents renders as, so the runbook quotes
 	// the string rather than paraphrasing it.
-	Empty string
-	// Inputs is every task and handoff declaring `input:`, with its fields, for
-	// the runbook and the gates. Empty for a package that hands nothing in.
-	Inputs []TypedInputSite
-	// InputEmpty is what an input with no value renders as.
-	InputEmpty     string
+	Empty          string
 	NeedsRe        bool
 	NeedsJSON      bool
 	NeedsAnnotated bool
+	NeedsField     bool
 	NeedsLiteral   bool
-}
-
-// TypedInputSite is one task or handoff declaring `input:`.
-type TypedInputSite struct {
-	// Site is the task name or the handoff name: the key the emitted type table
-	// and the tool that validates against it agree on.
-	Site string
-	// Kind is "task" or "handoff".
-	Kind string
-	// Receiver is the prompt the values reach: the task itself, or the agent
-	// the handoff targets.
-	Receiver string
-	Fields   []ir.InputField
-}
-
-// TypedInputField is one field the shared state object declares for an input:
-// one per distinct name across the package, so both drivers declare the same
-// field with the same annotation, and a name two seams share is one field.
-type TypedInputField struct {
-	Name string
-	Anno string
-	// Sites names the seams that hand the value in, for the reader of the
-	// generated module.
-	Sites string
 }
 
 // TypedStateValue is one declared value as the runbook names it.
@@ -176,14 +139,10 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 	}
 	finish := finishTypes(agent)
 	used := usedShapedText(agent)
-	inputs := inputSites(agent)
-	if len(classes) == 0 && len(block.Values) == 0 && len(finish) == 0 && len(inputs) == 0 {
+	if len(classes) == 0 && len(agent.Variables) == 0 && len(finish) == 0 && len(agent.Tasks) == 0 {
 		return TypedStateBlock{}, nil
 	}
-	block.Preview = agent.StateBlock(ir.AgentPromptSite(agent.EntryAgent))
 	block.Empty = ir.StateEmptyText()
-	block.Inputs = inputs
-	block.InputEmpty = ir.InputEmptyText()
 	block.NeedsRe = len(used) > 0
 	block.NeedsJSON = true
 	block.NeedsLiteral = declaresLiteral(agent)
@@ -192,8 +151,8 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 	// was missing, and the package that would have found it does not exist yet:
 	// every shipped one declaring a shaped type also declares one of the other
 	// two, so the import arrived for another reason.
-	block.NeedsAnnotated = block.NeedsRe || block.NeedsLiteral || fieldCarriesDescription(agent, classes) ||
-		inputCarriesDescription(inputs)
+	block.NeedsField = fieldCarriesDescription(agent, classes)
+	block.NeedsAnnotated = block.NeedsRe || block.NeedsField
 
 	var b strings.Builder
 	b.WriteString(`# --- declared state ----------------------------------------------------------
@@ -215,8 +174,8 @@ _SHAPE_%s = re.compile(%s)
 
 def _shape_%s(value: str) -> str:
     # Empty is not a wrong value, it is no value yet. It is what a declared
-    # variable holds before anything fills it, what the state block renders as
-    # words, and what a tool hands back for a field it could not fill. Refusing
+    # variable holds before anything fills it, what an empty prompt reference
+    # renders as words, and what a tool hands back for a field it could not fill. Refusing
     # it here deadlocked a live call on both targets: the model had nothing else
     # to send, so every retry was refused the same way and the step never
     # finished. A wrong value is still refused; an absent one is not wrong.
@@ -283,8 +242,8 @@ def _typed(field, adapter, value):
 def _append_entry(entries, value):
     """One entry onto a declared list, unless it is already on it.
 
-    A step re-entered mid-call can read a value out of its own state block and
-    hand it straight back, which is not a second thing happening. One live call
+    A step re-entered mid-call can read a value through an explicit prompt
+    reference and hand it straight back, which is not a second thing happening. One live call
     entered the booking step four times and finished three of them immediately,
     each with the same appointment it had recorded on the first, so one booking
     became four entries and the caller's recap listed a booking four times.
@@ -369,6 +328,14 @@ def _schema(adapter):
 	b.WriteString(`}
 
 
+def _task_status(values):
+    return {"status": "unserved" if values.get("unserved_request") else "completed"}
+
+
+def _group_status(results):
+    return {"status": "unserved" if any(value.get("unserved_request") for value in results.values()) else "completed"}
+
+
 def _typed_result(step, values):
     """Validate a step's declared results where they enter the state.
 
@@ -377,6 +344,8 @@ def _typed_result(step, values):
     happens to validate tool arguments: one of them validates through Pydantic
     and lets the model self-correct, the other splats raw JSON into the handler.
     """
+    if values.get("unserved_request"):
+        return {"unserved_request": values["unserved_request"]}
     adapters = _FINISH_TYPES.get(step)
     if not adapters:
         return values
@@ -394,9 +363,118 @@ def _typed_result(step, values):
         out[name] = _plain(_typed(name, adapter, out.get(name)))
     return out
 `)
-	if len(inputs) > 0 {
-		b.WriteString(typedInputsSource(inputs))
+	b.WriteString("\n\n_STATE_TYPES = {\n")
+	for _, name := range sortedKeys(agent.Variables) {
+		variable := agent.Variables[name]
+		anno := pyType(variable.Type)
+		if variable.Shape != nil {
+			anno = PyAnno(variable.Shape)
+		}
+		fmt.Fprintf(&b, "    %s: TypeAdapter(%s),\n", pyQuote(name), anno)
 	}
+	b.WriteString("}\n_TASK_ASSIGNMENTS = {\n")
+	for _, name := range sortedKeys(agent.Tasks) {
+		fmt.Fprintf(&b, "    %s: [\n", pyQuote(name))
+		for _, entry := range agent.Tasks[name].Assign {
+			fmt.Fprintf(&b, "        (%s, %s, %s),\n", pyQuote(entry.Var), pyQuote(entry.Field), pyLiteral(entry.Append))
+		}
+		b.WriteString("    ],\n")
+	}
+	b.WriteString("}\n_STATE_CONFIRM = {\n")
+	for _, name := range sortedKeys(agent.Variables) {
+		if confirmer := agent.Variables[name].Confirm; confirmer != "" {
+			fmt.Fprintf(&b, "    %s: %s,\n", pyQuote(name), pyQuote(confirmer))
+		}
+	}
+	b.WriteString("}\n_STATE_DEPENDENCIES = {\n")
+	for _, entry := range agent.Prefetch {
+		var roots []string
+		for _, input := range entry.Inputs {
+			root := ir.PathRoot(input)
+			if !slices.Contains(roots, root) {
+				roots = append(roots, root)
+			}
+		}
+		for _, pair := range entry.Assign {
+			if agent.Variables[pair.Key].ConfirmInherited {
+				fmt.Fprintf(&b, "    %s: %s,\n", pyQuote(pair.Key), pyLiteral(anyStrings(roots)))
+			}
+		}
+	}
+	b.WriteString(`}
+
+
+def _save_result(step, state, values):
+    """Validate all assignments before changing any call state."""
+    values = _typed_result(step, values)
+    if values.get("unserved_request"):
+        return values
+    pending = {}
+    for name, path, append in _TASK_ASSIGNMENTS.get(step, ()):
+        value = values
+        for part in path.split("."):
+            value = value.get(part) if isinstance(value, dict) else None
+        if append:
+            if value is None:
+                continue
+            entries = list(getattr(state, name, None) or [])
+            _append_entry(entries, value)
+            value = entries
+        pending[name] = _plain(_typed(name, _STATE_TYPES[name], value))
+    _save_batch(state, pending, step=step)
+    return values
+
+
+def _save_batch(state, values, *, step=None, inputs=None):
+    """Commit a validated batch and invalidate older results of changed inputs."""
+    if not values:
+        return
+    pending = {name: _plain(_typed(name, _STATE_TYPES[name], value)) for name, value in values.items()}
+    unconfirmed: set[str] = set(getattr(state, "_unconfirmed", ()))
+    provenance = dict(getattr(state, "_prefetch_provenance", {}))
+    affected = {name for name, value in pending.items() if getattr(state, name, None) != value}
+    while True:
+        more = {name for name, reads in provenance.items() if set(reads) & affected} - affected
+        if not more:
+            break
+        affected.update(more)
+    invalidated = affected - pending.keys()
+    for name in invalidated:
+        provenance.pop(name, None)
+    for name, value in pending.items():
+        if inputs is not None:
+            provenance[name] = tuple(inputs)
+        else:
+            provenance.pop(name, None)
+        if name in _STATE_CONFIRM:
+            if _STATE_CONFIRM[name] == step and value is not None and value != "":
+                unconfirmed.discard(name)
+            else:
+                unconfirmed.add(name)
+    def current(name):
+        return None if name in invalidated else pending.get(name, getattr(state, name, None))
+    # Dependencies are acyclic: prefetch can only read earlier entries.
+    for _ in range(len(_STATE_DEPENDENCIES) + 1):
+        before = set(unconfirmed)
+        for name, reads in _STATE_DEPENDENCIES.items():
+            if current(name) is not None and current(name) != "" and all(
+                source not in unconfirmed and current(source) is not None and current(source) != "" for source in reads
+            ):
+                unconfirmed.discard(name)
+            else:
+                unconfirmed.add(name)
+        if before == unconfirmed:
+            break
+    for name in invalidated:
+        setattr(state, name, None)
+    for name, value in pending.items():
+        setattr(state, name, value)
+    if hasattr(state, "_unconfirmed"):
+        state._unconfirmed = unconfirmed
+    if inputs is not None or hasattr(state, "_prefetch_provenance"):
+        state._prefetch_provenance = provenance
+
+`)
 	b.WriteString(`
 
 _STATE_STRUCTURED = {`)
@@ -409,22 +487,6 @@ _STATE_STRUCTURED = {`)
 	b.WriteString(`}
 _STATE_EMPTY = ` + pyQuote(ir.StateEmptyText()) + `
 `)
-	// The two lines of _state_text that know about inputs. Substituted rather
-	// than duplicated, so a package handing nothing in emits the function it
-	// always emitted, byte for byte.
-	worded, empty := "if name in _STATE_STRUCTURED:", "return _STATE_EMPTY"
-	if len(inputs) > 0 {
-		b.WriteString("_INPUT_NAMES = {")
-		for i, field := range InputStateFields(agent) {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			b.WriteString(pyQuote(field.Name))
-		}
-		b.WriteString("}\n_INPUT_EMPTY = " + pyQuote(ir.InputEmptyText()) + "\n")
-		worded = "if name in _STATE_STRUCTURED or name in _INPUT_NAMES:"
-		empty = "return _INPUT_EMPTY if name in _INPUT_NAMES else _STATE_EMPTY"
-	}
 	b.WriteString(`# The bound on one rendered value, in characters. The same number the router
 # bounds a template variable by, because this is the same value travelling the
 # same way, and one number cannot be two.
@@ -442,12 +504,11 @@ def _state_text(name, value):
     A value that was never declared structured renders exactly as it did before
     this existed, which is what keeps every package written before it unchanged.
     """
-    ` + worded + `
-        if value is None or value == "" or value == [] or value == {}:
-            ` + empty + `
-        if not isinstance(value, str):
-            value = json.dumps(_plain(value), separators=(",", ":"), ensure_ascii=False)
-    text = "" if value is None else str(value)
+    if value is None or value == "":
+        return _STATE_EMPTY
+    if not isinstance(value, str):
+        value = json.dumps(_plain(value), separators=(",", ":"), ensure_ascii=False)
+    text = str(value)
     if len(text) > _STATE_VALUE_MAX:
         # The length is only knowable here, at run time, so this cannot be a
         # compile-time refusal. What it must not be is silent: a shortened value
@@ -463,6 +524,13 @@ def _state_text(name, value):
     return text
 
 
+def _prompt_value(state, name, site=""):
+    root, value = _state_lookup(state, name)
+    if root in getattr(state, "_unconfirmed", ()) and site != "task:" + _STATE_CONFIRM.get(root, ""):
+        return root, None
+    return root, value
+
+
 def _state_lookup(state, name):
     """The value a placeholder names, and the declared name it belongs to.
 
@@ -472,8 +540,7 @@ def _state_lookup(state, name):
     each "__" after it starts a field, read as a dict key or an attribute and as
     None past an absent link, so a field of a record nobody has filled renders
     as the empty words and never raises. The root's name comes back with the
-    value because the words for an empty value are the root's: a field of a
-    variable reads as the state's, a field of a brief as the request's.
+    value because the words for an empty value belong to the root variable.
     """
     root, _, path = name.partition("__")
     value = getattr(state, root, None) if state is not None else None
@@ -487,147 +554,7 @@ def _state_lookup(state, name):
 	return block, nil
 }
 
-// typedInputsSource is the type table one delegate or handoff validates its
-// arguments against, and the helper that reads it. Emitted only when a package
-// hands something in, beside the finish table rather than folded into it: the
-// finish table's name is in every module a typed result already produced, and
-// a package handing nothing in has to keep emitting those bytes.
-func typedInputsSource(inputs []TypedInputSite) string {
-	var b strings.Builder
-	b.WriteString("\n\n_INPUT_TYPES = {\n")
-	for _, site := range inputs {
-		b.WriteString("    " + pyQuote(site.Site) + ": {\n")
-		for _, field := range site.Fields {
-			b.WriteString("        " + pyQuote(field.Name) + ": TypeAdapter(" + inputAnno(field) + "),\n")
-		}
-		b.WriteString("    },\n")
-	}
-	b.WriteString("}\n_INPUT_REQUIRED = {\n")
-	for _, site := range inputs {
-		var required []string
-		for _, field := range site.Fields {
-			if !field.Optional {
-				required = append(required, pyQuote(field.Name))
-			}
-		}
-		set := "set()"
-		if len(required) > 0 {
-			set = "{" + strings.Join(required, ", ") + "}"
-		}
-		b.WriteString("    " + pyQuote(site.Site) + ": " + set + ",\n")
-	}
-	b.WriteString(`}
-
-
-def _typed_inputs(site, values):
-    """Validate what a step or a receiving agent is handed, before it is entered.
-
-    Every declared input goes through its adapter, an absent one included: a
-    value the agent left out validates as None when its type allows that, and a
-    required one left out or left empty is refused naming the field, so the
-    agent that heard the caller asks rather than the step starting on nothing.
-    Refused before anything is written to the state, so the previous contents
-    stand and no step is ever entered on a value outside its type, on either
-    target: one framework validates tool arguments itself and the other splats
-    the model's JSON into the handler, and this is what makes them agree.
-    """
-    out = {}
-    required = _INPUT_REQUIRED.get(site, set())
-    for name, adapter in _INPUT_TYPES.get(site, {}).items():
-        value = values.get(name)
-        if name in required and (value is None or value == ""):
-            raise _StateRefused(f"{name}: required, and nothing was given")
-        out[name] = _plain(_typed(name, adapter, value))
-    return out
-`)
-	return b.String()
-}
-
-// inputSites is every task and handoff declaring `input:`, tasks first, each
-// group by name, so the emitted table reads the same way twice.
-func inputSites(agent *ir.Agent) []TypedInputSite {
-	var out []TypedInputSite
-	for _, name := range sortedKeys(agent.Tasks) {
-		if task := agent.Tasks[name]; len(task.Inputs) > 0 {
-			out = append(out, TypedInputSite{Site: name, Kind: "task", Receiver: name, Fields: task.Inputs})
-		}
-	}
-	for _, name := range sortedKeys(agent.Controls) {
-		if transfer, ok := agent.Controls[name].(*ir.AgentTransfer); ok && len(transfer.Inputs) > 0 {
-			out = append(out, TypedInputSite{Site: name, Kind: "handoff", Receiver: transfer.To, Fields: transfer.Inputs})
-		}
-	}
-	return out
-}
-
-// InputStateFields is one shared-state field per distinct input name, sorted,
-// each defaulting to None whatever its declared type: an input has no value
-// outside its visit. One function for both drivers, so the two state objects
-// cannot declare the same input two ways.
-func InputStateFields(agent *ir.Agent) []TypedInputField {
-	sites := map[string][]string{}
-	types := map[string]*ir.TypeRef{}
-	for _, site := range inputSites(agent) {
-		for _, field := range site.Fields {
-			sites[field.Name] = append(sites[field.Name], site.Kind+" "+site.Site)
-			types[field.Name] = field.Type
-		}
-	}
-	var out []TypedInputField
-	for _, name := range sortedKeys(sites) {
-		anno := PyAnno(types[name])
-		if !strings.HasSuffix(anno, " | None") {
-			anno += " | None"
-		}
-		out = append(out, TypedInputField{Name: name, Anno: anno, Sites: "input of " + strings.Join(sites[name], ", ")})
-	}
-	return out
-}
-
-// inputAnno is one input's Python annotation: the resolved type, wrapped with
-// its description when it has one so the model is told what to take from the
-// conversation without the task's `when:` repeating it. A shaped text type's
-// format phrase is appended for the reason pyFieldAnno gives.
-func inputAnno(field ir.InputField) string {
-	anno := PyAnno(field.Type)
-	if field.Description == "" {
-		return anno
-	}
-	description := field.Description
-	if kind := shapedKind(field.Type); kind != "" {
-		description = strings.TrimSuffix(description, " ") + " Expected " + shapedPatterns[kind].phrase + "."
-	}
-	return "Annotated[" + anno + ", Field(description=" + pyQuote(description) + ")]"
-}
-
-// inputBlockPreview is every seam's request block as the runbook shows it,
-// composed by the one composer the prompts go through, so the runbook cannot
-// drift from what the module carries.
-func inputBlockPreview(inputs []TypedInputSite) string {
-	blocks := make([]string, 0, len(inputs))
-	for _, site := range inputs {
-		heading := "# " + site.Kind + " " + site.Site
-		if site.Kind == "handoff" {
-			heading += ", read by " + site.Receiver
-		}
-		blocks = append(blocks, heading+"\n"+ir.InputBlock(site.Fields))
-	}
-	return strings.Join(blocks, "\n\n")
-}
-
-func inputCarriesDescription(inputs []TypedInputSite) bool {
-	for _, site := range inputs {
-		for _, field := range site.Fields {
-			if field.Description != "" {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// finishStep is one task's declared result fields that carry a type, in the
-// order the finish table emits them.
+// finishStep is one task's derived finish fields in emitted order.
 type finishStep struct {
 	Task   string
 	Fields []finishField
@@ -638,21 +565,16 @@ type finishField struct {
 	Anno string
 }
 
-// finishTypes is every task result field declaring more than a bare primitive,
-// which is exactly the set the finish handler has to validate.
+// finishTypes validates every domain field, including primitive outputs.
 func finishTypes(agent *ir.Agent) []finishStep {
 	var out []finishStep
 	for _, name := range sortedKeys(agent.Tasks) {
-		task := agent.Tasks[name]
 		step := finishStep{Task: name}
-		for _, field := range sortedKeys(task.Result) {
-			if ref := task.Result[field].Shape; ref != nil {
-				step.Fields = append(step.Fields, finishField{Name: field, Anno: PyAnno(ref)})
-			}
+		for _, field := range sortedKeys(agent.Tasks[name].Result) {
+			value := agent.Tasks[name].Result[field]
+			step.Fields = append(step.Fields, finishField{Name: field, Anno: pyAnno(resultPyType(value), value.Enum, value.Description)})
 		}
-		if len(step.Fields) > 0 {
-			out = append(out, step)
-		}
+		out = append(out, step)
 	}
 	return out
 }
@@ -812,12 +734,26 @@ func declaresLiteral(agent *ir.Agent) bool {
 			found = true
 		}
 	})
+	for _, task := range agent.Tasks {
+		for _, field := range task.Result {
+			if len(field.Enum) > 0 {
+				return true
+			}
+		}
+	}
 	return found
 }
 
 func fieldCarriesDescription(agent *ir.Agent, classes []ir.Shape) bool {
 	for _, class := range classes {
 		for _, field := range class.Fields {
+			if field.Description != "" {
+				return true
+			}
+		}
+	}
+	for _, task := range agent.Tasks {
+		for _, field := range task.Result {
 			if field.Description != "" {
 				return true
 			}
@@ -851,13 +787,7 @@ func walkTypeRefs(agent *ir.Agent, visit func(*ir.TypeRef)) {
 			walk(task.Result[field].Shape)
 		}
 	}
-	// And on every input, so a Literal or a shaped text that appears only at a
-	// seam still brings its import and its alias.
-	for _, site := range inputSites(agent) {
-		for _, field := range site.Fields {
-			walk(field.Type)
-		}
-	}
+
 }
 
 // stateField is one declared value as a shared-state dataclass declares it:
@@ -908,12 +838,18 @@ func StateNeedsDataclassField(agent *ir.Agent) bool {
 // One computed list rather than two conditional lines, because Field is wanted
 // by a tool argument description as well as by a shape field and importing it
 // twice is what a linter reads as a redefinition.
-func PydanticImports(needsField bool, typed bool) string {
-	if typed {
-		return "AfterValidator, BaseModel, Field, TypeAdapter, ValidationError"
+func PydanticImports(needsField bool, typed *TypedStateBlock) string {
+	var names []string
+	if typed != nil {
+		if typed.NeedsRe {
+			names = append(names, "AfterValidator")
+		}
+		names = append(names, "BaseModel", "TypeAdapter", "ValidationError")
+		needsField = needsField || typed.NeedsField
 	}
 	if needsField {
-		return "Field"
+		names = append(names, "Field")
 	}
-	return ""
+	slices.Sort(names)
+	return strings.Join(names, ", ")
 }

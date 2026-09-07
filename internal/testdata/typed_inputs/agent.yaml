@@ -1,21 +1,6 @@
-# The typed_inputs fixture: the smallest package that hands a step and a receiving
-# agent what the caller asked for.
-#
-# It exists because every other package in the tree gives a step nothing but the
-# conversation it inherits, so before this there was nothing to compile as proof
-# that an `expect:` resolves, reaches the step's tool schema on both targets, is
-# refused where it enters, and ends the receiving prompt as a block. Small on
-# purpose: two agents, two steps, two handoffs, one shape.
-#
-# The three values the step expects are one per thing the seam has to get right.
-# A required Literal is refused outside its set and required in both schemas. An
-# optional text renders as words when left out. An optional shape is the one the
-# Pipecat schema has to be spliced for, because that framework reads a schema off
-# a Python signature and a signature cannot say what a class holds.
-#
-# The router think profile is deliberate: what the step expects has to reach the
-# router's template-variable list, and this is the one path where a placeholder
-# the router cannot fill is a 422 mid-call rather than an empty string.
+# Legacy fixture name retained for golden stability. It now proves a task can
+# derive one shaped result from its destination variable while speech crosses
+# task and handoff boundaries through the default messages policy.
 version: 1
 
 name: typed-inputs
@@ -50,36 +35,16 @@ agents:
       - name: do_thing
         when: The caller wants a thing done.
         instructions: tasks/do_thing.md
-        expect:
-          - kind: Literal["a", "b"]
-          - name: note
-            type: str | None
-            description: Anything the caller added, in their own words. Leave it out if they added nothing.
-          - name: thing
-            type: Thing | None
-            description: The thing the caller named, if they named one.
         tools:
           - note_thing
-        # A handoff from inside the step, so the in-task path is compiled too:
-        # the brief is written on the way out and nothing of the step's own
-        # expected values is put back over it.
         handoffs:
           - to_specialist
         assign:
           - notes+: result.thing
-        result:
-          thing: Thing | None
-          summary: string
-        context:
-          history: reset
 
       - name: check
         when: The caller wants something checked.
         instructions: tasks/check.md
-        result:
-          summary: string
-        context:
-          history: reset
     handoffs:
       - to_specialist
 
@@ -94,21 +59,10 @@ handoffs:
   to_specialist:
     to: specialist
     when: The caller has a problem the front desk cannot solve.
-    expect:
-      - problem: str
-      - name: thing
-        type: Thing | None
-        description: The thing the problem is about, if the caller named one.
-    context:
-      history: reset
 
   to_front:
     to: front
     when: The caller wants the front desk again.
-    expect:
-      - outcome: str
-    context:
-      history: reset
 
 tools:
   - note_thing

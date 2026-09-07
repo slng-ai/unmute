@@ -2,7 +2,10 @@
 
 package generate
 
-import "testing"
+import (
+	"github.com/slng-ai/unmute/internal/ir"
+	"testing"
+)
 
 // The pre-fetch block, driven in the real emitted Python.
 //
@@ -64,7 +67,7 @@ assert resolved.booking_date.count("-") == 2, resolved.booking_date
 #    and the profile entry that reads what it would have assigned skips with it.
 assert resolved.customer_phone == "", resolved.customer_phone
 assert resolved.customer_name == "", resolved.customer_name
-assert resolved._unconfirmed == set(), resolved._unconfirmed
+assert resolved._unconfirmed == {"customer_phone", "customer_name", "customer_on_file"}, resolved._unconfirmed
 
 # 2b. And with a call context, the caller entry resolves and is marked unconfirmed.
 seeded = fresh()
@@ -83,7 +86,7 @@ for withheld in ("", "anonymous", "ANONYMOUS", "+266696687", "+8628245225"):
     hidden = fresh()
     asyncio.run(agent._prefetch(hidden, {"from_number": withheld}))
     assert hidden.customer_phone == "", (withheld, hidden.customer_phone)
-    assert hidden._unconfirmed == set(), (withheld, hidden._unconfirmed)
+    assert hidden._unconfirmed == {"customer_phone", "customer_name", "customer_on_file"}, (withheld, hidden._unconfirmed)
 
 # And a real number is still a real number, including one that begins with the
 # digits a placeholder spells. "unknown" spells 8656696, and +86 5669 6xxx is an
@@ -131,7 +134,7 @@ first, second = fresh(), fresh()
 asyncio.run(agent._prefetch(first, {"from_number": "+34600111222"}))
 asyncio.run(agent._prefetch(second, None))
 assert "customer_phone" in first._unconfirmed, first._unconfirmed
-assert second._unconfirmed == set(), second._unconfirmed
+assert second._unconfirmed == {"customer_phone", "customer_name", "customer_on_file"}, second._unconfirmed
 
 # And an unconfirmed value refuses any tool call that would inject it, which is
 # the whole point of marking it: the emitted _refusal helper is what a tool
@@ -164,7 +167,7 @@ resolved = fresh()
 asyncio.run(bot._prefetch(resolved, None))
 assert resolved.booking_date, "the clock entry resolved nothing"
 assert resolved.customer_phone == "", resolved.customer_phone
-assert resolved._unconfirmed == set(), resolved._unconfirmed
+assert resolved._unconfirmed == {"customer_phone", "customer_name", "customer_on_file"}, resolved._unconfirmed
 
 seeded = fresh()
 asyncio.run(bot._prefetch(seeded, {"from_number": "+34600111222"}))
@@ -250,3 +253,111 @@ os.environ.pop("UNMUTE_CALL_FACTS", None)
 
 print("prefetch zone check passed")
 `
+
+func provenanceFixture(agent *ir.Agent) {
+	variable := agent.Variables["customer_id"]
+	variable.Confirm = "verify_caller"
+	variable.ConfirmInherited = true
+	agent.Variables["customer_id"] = variable
+	agent.Prefetch = append(agent.Prefetch, ir.Prefetch{Name: "related_record", Tool: "lookup_customer", Inputs: []string{"caller_name"}, Args: []ir.Pair{{Key: "email", Value: "{{caller_name}}"}}, Assign: []ir.Pair{{Key: "customer_id", Value: "result.customer_id"}}, Confirm: "verify_caller"})
+}
+func TestSmokeConfirmationProvenanceLiveKit(t *testing.T) {
+	runLiveKitSmokeScript(t, "prefetch_core", nil, provenanceFixture, provenanceScript("agent", "Userdata()"))
+}
+func TestSmokeConfirmationProvenancePipecat(t *testing.T) {
+	runPipecatSmokeScript(t, "prefetch_core", nil, provenanceFixture, provenanceScript("bot", "build_state()"))
+}
+func provenanceScript(module, state string) string {
+	return `import os,json
+from copy import deepcopy
+for name in json.load(open("compile-report.json"))["required_env"]: os.environ.setdefault(name,"smoke-placeholder")
+import ` + module + ` as generated
+state=generated.` + state + `
+def seed():
+    generated._save_batch(state,{"caller_phone":"+34600111222"},inputs=())
+    generated._save_batch(state,{"caller_name":"OLD_PROFILE"},inputs=("caller_phone",))
+    generated._save_batch(state,{"customer_id":"OLD_RELATED"},inputs=("caller_name",))
+    generated._save_batch(state,{"booking_date":"2026-09-06"},inputs=())
+seed()
+assert generated._prompt_value(state,"caller_name")[1] is None
+assert generated._prompt_value(state,"caller_name","task:verify_caller")[1]=="OLD_PROFILE"
+generated._save_result("verify_caller",state,{"caller_phone":"+34600111222"})
+assert generated._prompt_value(state,"caller_name")[1]=="OLD_PROFILE"
+assert generated._prompt_value(state,"customer_id")[1]=="OLD_RELATED"
+generated._save_result("verify_caller",state,{"caller_phone":"+34600999888"})
+assert state.caller_name is None and state.customer_id is None
+assert state.booking_date=="2026-09-06"
+seed()
+before=deepcopy(vars(state))
+try: generated._save_batch(state,{"caller_phone":"+34600999888","verified":"invalid"},step="verify_caller")
+except generated._StateRefused: pass
+else: raise AssertionError("invalid batch saved")
+assert vars(state)==before
+# Explicit replacements in the same valid batch survive input invalidation.
+generated._save_batch(state,{"caller_phone":"+34600999888","caller_name":"NEW_PROFILE"},step="verify_caller")
+assert state.caller_name=="NEW_PROFILE" and state.customer_id is None
+assert "caller_name" not in state._prefetch_provenance
+# Another writer is not agreement, even when it repeats an agreed value.
+generated._save_batch(state,{"caller_phone":"+34600999888"},step="another_task")
+assert generated._prompt_value(state,"caller_phone")[1] is None
+assert generated._prompt_value(state,"caller_name")[1] is None
+fresh=generated.` + state + `
+assert fresh._unconfirmed is not state._unconfirmed
+assert not getattr(fresh,"_prefetch_provenance",{})
+print("confirmation provenance: same-value agreement, changed/transitive invalidation, atomic retry, replacement, other writer, fresh call")
+`
+}
+
+func deadlineFixture(agent *ir.Agent) {
+	for _, entry := range agent.Prefetch {
+		if entry.Tool != "" {
+			entry.Name = "second_lookup"
+			agent.Prefetch = append(agent.Prefetch, entry)
+			break
+		}
+	}
+}
+func TestSmokePrefetchDeadlineLiveKit(t *testing.T) {
+	runLiveKitSmokeScript(t, "salon-concierge", nil, deadlineFixture, deadlineScript("agent", "Userdata()"))
+}
+func TestSmokePrefetchDeadlinePipecat(t *testing.T) {
+	runPipecatSmokeScript(t, "salon-concierge", nil, deadlineFixture, deadlineScript("bot", "build_state()"))
+}
+func deadlineScript(module, state string) string {
+	return `import os,json,asyncio,time
+for name in json.load(open("compile-report.json"))["required_env"]: os.environ.setdefault(name,"smoke-placeholder")
+os.environ.pop("UNMUTE_CALL_FACTS",None)
+import ` + module + ` as generated
+generated._PREFETCH_BUDGET_S=0.12
+async def main():
+    calls=[]
+    async def slow(**kwargs):
+        calls.append(kwargs)
+        try: await asyncio.sleep(0.08)
+        except asyncio.CancelledError: await asyncio.sleep(0.1)
+        return {"name":"LATE_NAME","customer_id":"LATE_ID"}
+    generated.tools.look_up_customer.look_up_customer=slow
+    state=generated.` + state + `
+    start=time.monotonic()
+    await generated._prefetch(state,{"from_number":"+34600111222"})
+    elapsed=time.monotonic()-start
+    assert elapsed<0.16,("fresh budget or waited for cancellation",elapsed)
+    assert len(calls)==2,calls
+    before=dict(vars(state))
+    await asyncio.sleep(0.15)
+    assert vars(state)==before,"late task mutated saved state"
+    def blocking(**kwargs):
+        time.sleep(0.25)
+        return {"name":"BLOCKING_NAME","customer_id":"BLOCKING_ID"}
+    generated.tools.look_up_customer.look_up_customer=blocking
+    fresh=generated.` + state + `
+    start=time.monotonic()
+    await generated._prefetch(fresh,{"from_number":"+34600111222"})
+    assert time.monotonic()-start<0.18,"sync handler blocked greeting"
+    assert fresh.customer_name in (None,""),fresh.customer_name
+    await asyncio.sleep(0.3)
+    assert fresh.customer_name in (None,""),"late thread saved"
+asyncio.run(main())
+print("one startup deadline; sync offload; bounded cancellation; no late saves")
+`
+}

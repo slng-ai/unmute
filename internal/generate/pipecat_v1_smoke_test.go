@@ -264,6 +264,7 @@ from pipecat.frames.frames import (  # noqa: E402
     TTSSpeakFrame,
 )
 from pipecat.pipeline.worker import PipelineWorker  # noqa: E402
+from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
 
 
 class Params:
@@ -274,7 +275,7 @@ class Params:
 
 
 async def exercise_handoff():
-    source = bot.GreeterAgent()
+    source = bot.GreeterAgent(context=LLMContext())
     events = []
     original_queue = PipelineWorker.queue_frame
 
@@ -293,12 +294,7 @@ async def exercise_handoff():
         activation = kwargs["args"]
         assert activation.metadata is None
         assert activation.run_llm is True
-        assert activation.messages == [
-            {
-                "role": "developer",
-                "content": "Caller wants to book a table for a normal dine-in visit.",
-            }
-        ]
+        assert activation.messages == []
         assert name == "reservations"
         source._active = False
         events.append(("activate", name))
@@ -320,6 +316,8 @@ async def exercise_handoff():
         ("speak", "I am connecting you with our reservations desk now."),
         ("started",),
         ("stopped",),
+        ("replayed", "BotStartedSpeakingFrame"),
+        ("replayed", "BotStoppedSpeakingFrame"),
         ("activate", "reservations"),
     ], events
 
@@ -460,11 +458,11 @@ from pipecat.services.settings import LLMSettings  # noqa: E402
 from pipecat.workers.runner import WorkerRunner  # noqa: E402
 
 OWNER_PROMPT = None
-original_owner_builder = bot.build_appointment_desk_llm
+original_owner_builder = bot.build_reservations_llm
 
 
 class FakeLLM(LLMService):
-    def __init__(self) -> None:
+    def __init__(self, *_args, **_kwargs) -> None:
         super().__init__(settings=LLMSettings(model="smoke", system_instruction=OWNER_PROMPT))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
@@ -489,17 +487,16 @@ async def main() -> None:
     global OWNER_PROMPT
     OWNER_PROMPT = original_owner_builder()._settings.system_instruction
     context = LLMContext()
-    owner = bot.AppointmentDeskAgent(state=None, context=context, call_context=None)
-    target = bot.AftercareAgent(state=None, context=context, call_context=None)
+    owner = bot.ReservationsAgent(state=None, context=context, call_context=None)
     runner = WorkerRunner(handle_sigint=False)
-    await runner.add_workers(owner, target)
+    await runner.add_workers(owner)
     run_task = asyncio.create_task(runner.run(auto_end=False))
     await asyncio.wait_for(owner._pipeline_start_event.wait(), timeout=5)
-    await asyncio.wait_for(target._pipeline_start_event.wait(), timeout=5)
 
     owner._active = True
-    owner._manage_appointment_results = {}
-    owner._manage_appointment_snapshot = (
+    owner._do_reserve_results = {}
+    owner._do_reserve_active_step = "find_slot"
+    owner._do_reserve_snapshot = (
         [dict(message) for message in context.get_messages()],
         context.tools,
     )
@@ -508,22 +505,29 @@ async def main() -> None:
         context_aggregator=LLMContextAggregatorPair(context),
         worker=owner,
     )
-    node = owner._manage_appointment_node_identify_customer()
+    node = owner._do_reserve_node_find_slot()
     await flow.initialize(node)
     await owner.flush_pipeline()
     assert owner.llm._settings.system_instruction == node["role_message"]
     assert owner.llm._settings.system_instruction != OWNER_PROMPT
 
-    await owner._manage_appointment_finish_finalize_appointment(
-        {"action": "book", "status": "ok", "appointment_id": "apt-smoke"},
-        flow,
-    )
-    assert owner.llm._settings.system_instruction == OWNER_PROMPT
-    for _ in range(100):
-        if target.active:
-            break
-        await asyncio.sleep(0.01)
-    assert target.active, "then: transfer did not activate the target worker"
+    status, next_node = await owner._do_reserve_finish_find_slot({}, flow)
+    assert status == {"status": "completed"}
+    assert next_node["name"] == "confirm_booking"
+    restored = []
+
+    async def capture_restore(frame, *_args, **_kwargs):
+        restored.append(frame)
+
+    async def no_flush():
+        pass
+
+    owner.queue_frame = capture_restore
+    owner.flush_pipeline = no_flush
+    status, next_node = await owner._do_reserve_finish_confirm_booking({}, flow)
+    assert status == {"status": "ok"} and next_node is None
+    assert [type(frame).__name__ for frame in restored] == ["LLMUpdateSettingsFrame"]
+    assert restored[0].delta.system_instruction == OWNER_PROMPT
 
     await runner.cancel("task role smoke complete")
     await asyncio.wait_for(run_task, timeout=5)
@@ -1671,9 +1675,10 @@ async def main() -> None:
     assert requests["stt"].attributes["language"] == "en"
     assert requests["stt"].attributes["is_final"] is True
     assert requests["llm"].attributes["output"] == "traced."
-    assert requests["llm"].attributes["gen_ai.system_instructions"] == "You are the tracing probe."
+    expected_instructions = request_agent.llm._settings.system_instruction
+    assert requests["llm"].attributes["gen_ai.system_instructions"] == expected_instructions
     llm_input = json.loads(requests["llm"].attributes["langfuse.observation.input"])
-    assert llm_input[0] == {"role": "system", "content": "You are the tracing probe."}
+    assert llm_input[0] == {"role": "system", "content": expected_instructions}
     assert {"role": "user", "content": "trace this request"} in llm_input
     assert json.loads(requests["llm"].attributes["input"]) == llm_input
     assert requests["tts"].attributes["text"] == "traced."
@@ -1828,16 +1833,7 @@ func TestSmokePipecatRegionalInfrastructureInstantiates(t *testing.T) {
 // pinned Pipecat 1.8.0 and observes task-role replacement, owner-role restoration,
 // and transfer activation (V28).
 func TestSmokePipecatV1TaskGroupsInstantiate(t *testing.T) {
-	runPipecatSmokeScript(t, "remy", nil, func(agent *ir.Agent) {
-		aftercare := agent.Agents["reservations"]
-		aftercare.Instructions = "You are the aftercare agent."
-		aftercare.Tools = nil
-		agent.Agents["aftercare"] = aftercare
-		group := agent.TaskGroups["do_reserve"]
-		group.Then = ir.GroupTransfer
-		group.ThenTarget = "aftercare"
-		agent.TaskGroups["do_reserve"] = group
-	}, pipecatTaskRoleSmokeScript)
+	runPipecatSmokeScript(t, "remy", nil, nil, pipecatTaskRoleSmokeScript)
 }
 
 // TestSmokePipecatV1TaskTransferStopsFlow checks the generated handler against

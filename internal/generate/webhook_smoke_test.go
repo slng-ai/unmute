@@ -76,6 +76,7 @@ class _Params:
 state = bot.build_state()
 # Set here, not hydrated: this pipecat target has no telephony plane.
 state.dialed_number = "+15551230000"
+bot._save_result("verify_customer", state, {"customer_phone": state.customer_phone})
 agent = bot.ConciergeAgent(state=state, context=None, call_context=None, slng_session_id="smoke")
 
 # 1. A tool whose injected values are all available: the request goes out.
@@ -128,6 +129,9 @@ import agent as generated  # noqa: E402
 userdata = generated.Userdata()
 generated._hydrate_call_start(userdata, generated._dispatched_call_start({}))
 userdata.dialed_number = "+15551230000"
+generated._save_result(
+    "verify_customer", userdata, {"customer_phone": userdata.customer_phone}
+)
 ctx = SimpleNamespace(userdata=userdata)
 desk = generated.Concierge()
 
@@ -188,6 +192,7 @@ class _Params:
 state = bot.build_state()
 # Set here, not hydrated: this pipecat target has no telephony plane.
 state.dialed_number = "+15551230000"
+bot._save_result("verify_customer", state, {"customer_phone": state.customer_phone})
 agent = bot.ConciergeAgent(state=state, context=None, call_context=None, slng_session_id="smoke")
 asyncio.run(agent.confirm_appointment(_Params()))
 
@@ -224,6 +229,9 @@ import agent as generated  # noqa: E402
 userdata = generated.Userdata()
 generated._hydrate_call_start(userdata, generated._dispatched_call_start({}))
 userdata.dialed_number = "+15551230000"
+generated._save_result(
+    "verify_customer", userdata, {"customer_phone": userdata.customer_phone}
+)
 asyncio.run(generated.Concierge().confirm_appointment(SimpleNamespace(userdata=userdata)))
 
 assert captured["count"] == 1, captured

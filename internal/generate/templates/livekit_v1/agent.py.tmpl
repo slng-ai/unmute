@@ -248,7 +248,7 @@ load_dotenv()
 {{- if .NeedsLastN}}
 def _last_n(source: llm.ChatContext, n: int, *, exclude_function_call: bool = False) -> llm.ChatContext:
     """history: last_n — the newest n items; truncate() keeps call/output pairs."""
-    ctx = source.copy(exclude_instructions=True, exclude_function_call=exclude_function_call, exclude_handoff=True)
+    ctx = source.copy(exclude_instructions=True, exclude_config_update=True, exclude_function_call=exclude_function_call, exclude_handoff=True)
     ctx.truncate(max_items=n)
     return ctx
 {{end}}
@@ -611,9 +611,11 @@ def _slng_router_client() -> AsyncOpenAI:
 {{if .Slng.Variables}}
 
 _SLNG_VARIABLE_LIMIT = {{.Slng.Limit}}
+_SLNG_TEMPLATE_PATHS = {{.Slng.TemplatePaths}}
+_SLNG_SCOPE_SITES = {{.Slng.TemplateSites}}
 
 
-def _slng_template_variables(state, names) -> dict:
+def _slng_template_variables(state, names, *, scope="") -> dict:
     """The values the router substitutes into the prompt's placeholders.
 
     A name with no value yet sends the empty string, never None and never the text
@@ -628,7 +630,7 @@ def _slng_template_variables(state, names) -> dict:
         # the one that has to fit. _state_text carries its own bound and its own
         # warning, so a declared value is already shortened by here. A path
         # arrives as one flat name, and _state_lookup walks it.
-        text = _state_text(*_state_lookup(state, name))
+        text = _state_text(*_prompt_value(state, name, _SLNG_SCOPE_SITES.get(scope, "")))
 {{- else}}
         value = getattr(state, name, None) if state is not None else None
         text = "" if value is None else str(value)
@@ -666,7 +668,7 @@ def require_call_env() -> None:
 _TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
 
 
-def _render(text: str, userdata, *, quote_values: bool = False) -> str:
+def _render(text: str, userdata, *, quote_values: bool = False, site: str = "") -> str:
     """Substitute each variable token from the session userdata (SCHEMA 4.4).
     Only substituted values are URL-encoded, never the surrounding literal."""
     if userdata is None:
@@ -678,7 +680,7 @@ def _render(text: str, userdata, *, quote_values: bool = False) -> str:
         # _state_text, so a declared value renders as compact JSON and an empty
         # one as words. Anything not declared structured comes back exactly as
         # str() gave it.
-        value = _state_text(*_state_lookup(userdata, match.group(1)))
+        value = _state_text(*_prompt_value(userdata, match.group(1), site))
 {{- else}}
         value = getattr(userdata, match.group(1), None)
         value = "" if value is None else str(value)
@@ -695,12 +697,12 @@ def _refusal(tool: str, userdata, needed: list[tuple[str, str]]) -> str:
     unset = [
         (name, hint)
         for name, hint in needed
-        if getattr(userdata, name, None) in (None, "")
+        if _state_lookup(userdata, name)[1] in (None, "")
 {{- if .NeedsPrefetchUnconfirmed}}
         # A value the caller has not agreed to is present and not usable. Without
         # this, a pre-fetched number would reach somebody else's record: the
         # request would go out against a proposal rather than a fact.
-        or name in getattr(userdata, "_unconfirmed", ())
+        or _state_lookup(userdata, name)[0] in getattr(userdata, "_unconfirmed", ())
 {{- end}}
     ]
     if not unset:
@@ -721,6 +723,9 @@ def _refusal(tool: str, userdata, needed: list[tuple[str, str]]) -> str:
 # Typed session state (SCHEMA 4.4): tasks assign into it, transfers read it.
 @dataclass
 class Userdata:
+{{- if .NeedsPrefetchUnconfirmed}}
+    _unconfirmed: set[str] = field(default_factory=lambda: set(_STATE_CONFIRM))
+{{- end}}
 {{- range .Vars}}
     {{.Name}}: {{.Anno}} = {{.Default}}{{if .Description}}  # {{.Description}}{{end}}
 {{- end}}
@@ -936,7 +941,7 @@ class IgnorePhrasesMixin:
         shared_output.model_copy(
             update={
                 "output": json.dumps(
-                    {"task_id": event.task_id, "result": event.result},
+                    _task_status(event.result),
                     sort_keys=True,
                 )
             }
@@ -1050,15 +1055,13 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
             tools=[{{template "tools_list" .}}],
 {{- end}}
         )
+{{- if not $.SingleAgentMinimal}}
+        if isinstance(chat_ctx, llm.ChatContext):
+            self._chat_ctx = chat_ctx.copy()
+{{- end}}
 
 {{if .RefreshPrompt}}    async def _refresh_prompt(self) -> None:
-        """Render this agent's prompt again, after a step wrote declared state.
-
-        on_enter runs once per entry and this agent is entered once per call, so
-        without this the conversation state block keeps whatever it held before
-        the first step finished. Its own steps looked right the whole time,
-        because a step is entered per visit and renders on the way in.
-        """
+        """Render explicit saved-value references after a task writes state."""
         await self.update_instructions({{.PromptExpr}})
 
 {{end}}    async def on_enter(self) -> None:
@@ -1101,35 +1104,14 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- range .Tools}}{{template "method_tool" .}}{{end}}
 {{range .Transfers}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext{{range .Inputs}}, {{.Name}}: {{.Anno}}{{if not .Required}} = None{{end}}{{end}}):
+    async def {{.Method}}(self, ctx: RunContext):
         {{triple .When}}
-{{- if .Inputs}}
-        # The brief, validated before the receiver exists and before anything is
-        # spoken: a value outside its type is refused with the field named and
-        # nobody is handed over.
-        try:
-            _inputs = _typed_inputs({{pyq .Method}}, {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}}{{"}"}})
-        except _StateRefused as refused:
-            logger.warning("%s expects: %s", {{pyq .Method}}, refused.message)
-            return {"refused": f"Not started: {refused.message}. Ask the caller, then hand over again with a value that fits."}
-{{- end}}
+
 {{- if .Announce}}
         await ctx.session.say({{pyq .Announce}}, allow_interruptions=False)
 {{- end}}
-{{- if .ReceiverInputs}}
-        # The receiver's brief: every name its prompt reads is reset, then this
-        # handoff's own values are written, so it sees exactly what it was handed
-        # and nothing from an earlier visit. Written before the receiver exists,
-        # because its prompt renders on entry from the shared state, and left in
-        # place after: a brief stays with its agent until the next handoff.
-{{- range .ReceiverInputs}}
-        ctx.userdata.{{.}} = None
-{{- end}}
-{{- end}}
-{{- if .Inputs}}
-        for _name, _value in _inputs.items():
-            setattr(ctx.userdata, _name, _value)
-{{- end}}
+
+
 {{- if .Summary}}
         summary_ctx = await _summarize(self.chat_ctx, {{template "llmexpr" .Summary}})
         return {{.TargetClass}}(chat_ctx=summary_ctx)
@@ -1329,182 +1311,47 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- end}}
 {{end}}
 {{- range .Delegates}}
+    @function_tool
+    async def {{.Method}}(self, ctx: RunContext){{if or .Task (eq .Then "return")}} -> dict{{if .CanTaskTransfer}} | Agent{{end}}{{end}}:
+        {{triple .When}}{{template "delegate_announce" .}}
+        owner_ctx = self.chat_ctx.copy()
+        try:
 {{- if .Task}}
-    @function_tool
-    async def {{.Method}}(self, ctx: RunContext{{range .Inputs}}, {{.Name}}: {{.Anno}}{{if not .Required}} = None{{end}}{{end}}) -> dict{{if .CanTaskTransfer}} | Agent{{end}}:
-        {{triple .When}}{{template "delegate_announce" .}}
-{{- if .Inputs}}
-        # What the step is handed, validated before the step exists: refused the
-        # way finish refuses a bad result, so nothing is written and the message
-        # goes back to the model, which can correct itself or ask the caller.
-        try:
-            _inputs = _typed_inputs({{pyq .Task.ID}}, {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}}{{"}"}})
-        except _StateRefused as refused:
-            logger.warning("%s expects: %s", {{pyq .Task.ID}}, refused.message)
-            return {"refused": f"Not started: {refused.message}. Ask the caller, then run the step again with a value that fits."}
-        # Written to the shared state for this visit and put back after it. The
-        # step's prompt and the router's template variables both read the state
-        # object and nothing else, and an owner whose own brief shares a name
-        # gets it back rather than losing it to a clear.
-        _previous = {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: ctx.userdata.{{$a.Name}}{{end}}{{"}"}}
-        for _name, _value in _inputs.items():
-            setattr(ctx.userdata, _name, _value)
-{{- end}}
-        # N13: snapshot before the task, restore after. An awaited AgentTask
-        # merges its own turns into this agent's context when it returns
-        # (livekit/agents/voice/agent.py, merge on handoff-return), so without
-        # this the follow-up prompt ends on the task's last assistant line with
-        # no tool record of the work. That reads as unfinished, and the model
-        # runs the same flow again (B: multi-task delegated twice and booked
-        # nothing, 2026-08-15). The task-group branch below always did this.
-        owner_ctx = self.chat_ctx.copy()
-{{- if .CanTaskTransfer}}
-        try:
-{{- end}}
-{{- if .Task.Summary}}
-{{if .CanTaskTransfer}}    {{end}}        summary_ctx = await _summarize(self.chat_ctx, {{template "llmexpr" .Task.Summary}})
-{{if .CanTaskTransfer}}    {{end}}        result = await {{.Task.Class}}(chat_ctx=summary_ctx)
-{{- else if .Task.CtxExpr}}
-{{if .CanTaskTransfer}}    {{end}}        result = await {{.Task.Class}}(chat_ctx={{.Task.CtxExpr}})
-{{- else}}
-{{if .CanTaskTransfer}}    {{end}}        result = await {{.Task.Class}}()  # history: reset — the task starts fresh
-{{- end}}
-{{- if .CanTaskTransfer}}
-        except _TaskTransfer as transfer:
-            return transfer.agent
-{{- end}}
-{{- if .Inputs}}
-        # The visit is over: put back what the state held before it. Not in a
-        # finally, on purpose: on the handoff path above the receiver's brief
-        # was written on the way out, and a name it shares with this step's
-        # inputs would be erased by a restore that ran regardless.
-        for _name, _value in _previous.items():
-            setattr(ctx.userdata, _name, _value)
-{{- end}}
-        await self.update_chat_ctx(owner_ctx)
-{{- range .Task.Assign}}
-{{- if .Append}}
-        # An entry added, not the value replaced: only the step producing it
-        # knows whether the caller added an intent or swapped one, and the list
-        # starts empty so this never has to create it. The helper drops an
-        # absent entry and a structured one already on the list, so neither a
-        # step that concluded nothing nor a step re-entered mid-call grows it.
-        _append_entry(ctx.userdata.{{.Var}}, {{resultAccess "result" .Field}})
-{{- else}}
-        ctx.userdata.{{.Var}} = {{resultAccess "result" .Field}}
-{{- end}}
-{{- if .Confirms}}
-        # The step that confirms this value has just assigned it, so it is settled
-        # now and the emitted _refusal helper stops holding it back. Discarding
-        # here rather than in the step's prompt is the point: a model can be
-        # talked out of an instruction, not out of a set membership test.
-        #
-        # getattr with a default: the set is created by the pre-fetch, and this
-        # step can be reached on a path where the pre-fetch never ran. A bare
-        # attribute read there is an AttributeError inside a finish handler,
-        # which is a call that dies mid-step.
-        getattr(ctx.userdata, "_unconfirmed", set()).discard({{pyq .Var}})
-{{- end}}
-{{- end}}
-{{- if .RefreshOwnerPrompt}}
-        # The values above are in this agent's own prompt, which was rendered on
-        # entry and would otherwise still read as it did before this step ran.
-        await self._refresh_prompt()
-{{- end}}
-        # C4/N13: the task's turns are not propagated back; the typed result is
-        # the only return.
-        return result
+            result = await {{.Task.Class}}(chat_ctx=owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
 {{- else if .Isolated}}
-{{- $canTaskTransfer := .CanTaskTransfer}}
-    @function_tool
-    async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{if .CanTaskTransfer}} | Agent{{end}}{{end}}:
-        {{triple .When}}{{template "delegate_announce" .}}
-        # context_scope: isolated — each step is a standalone AgentTask starting
-        # fresh (C3/C4); the grouped form always shares context, so it is not used.
-        # Starting fresh says nothing about coming back: an AgentTask merges its
-        # own turns into this agent on return whatever context it began with, so
-        # the owner is snapshotted here and restored below, exactly as the
-        # single-task and grouped branches do.
-        owner_ctx = self.chat_ctx.copy()
-        task_results: dict = {}
-{{- if .CanTaskTransfer}}
-        try:
-{{- end}}
+            task_results = {}
 {{- range .Steps}}
-{{if $canTaskTransfer}}    {{end}}        task_results[{{pyq .ID}}] = await {{.Class}}()
-{{- end}}
-{{- if .CanTaskTransfer}}
-        except _TaskTransfer as transfer:
-            return transfer.agent
-{{- end}}
-{{- if eq .Then "return"}}
-        # N13: standalone tasks never merge their turns back; hand the owner the
-        # typed results only (merge: results).
-        await self.update_chat_ctx(owner_ctx)
-        return task_results
-{{- else if eq .Then "transfer"}}
-        # then: transfer — control moves on and does not return here.
-        return {{.ThenClass}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
-{{- else}}
-        # then: end — the flow is the last thing on the call; this does not return.
-        self.session.shutdown()
+            task_results[{{pyq .ID}}] = await {{.Class}}(chat_ctx=llm.ChatContext())
 {{- end}}
 {{- else}}
-    @function_tool
-    async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{if .CanTaskTransfer}} | Agent{{end}}{{end}}:
-        {{triple .When}}{{template "delegate_announce" .}}
-        group = TaskGroup(
-            chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
-            summarize_chat_ctx=False,
-            on_task_completed=lambda event: _share_task_result(group, event),
-        )
+            group = TaskGroup(
+                summarize_chat_ctx=False,
+                on_task_completed=lambda event: _share_task_result(group, event),
+            )
+            await group.update_chat_ctx(owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True), exclude_invalid_function_calls=False)
 {{- range .Steps}}
-        group.add(
-            lambda: {{.Class}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)),
-            id={{pyq .ID}},
-            description={{pyq .Desc}},
-        )
+            group.add(lambda: {{.Class}}(), id={{pyq .ID}}, description={{pyq .Desc}})
 {{- end}}
-{{- if eq .Then "return"}}
-        owner_ctx = self.chat_ctx.copy()
-{{- if .CanTaskTransfer}}
-        try:
             result = await group
+            task_results = result.task_results
+{{- end}}
+{{- if .CanTaskTransfer}}
         except _TaskTransfer as transfer:
             return transfer.agent
-{{- else}}
-        result = await group
 {{- end}}
-        # N13: the flow's own turns must not land in the owner's context. The
-        # TaskGroup merges them back on completion, so restore the pre-flow
-        # context and hand the owner only the typed results (merge: results).
-        await self.update_chat_ctx(owner_ctx)
-        return result.task_results
+        finally:
+            await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
+{{- if .RefreshOwnerPrompt}}
+            await self._refresh_prompt()
+{{- end}}
+{{- if .Task}}
+        return _task_status(result)
+{{- else if eq .Then "return"}}
+        return _group_status(task_results)
 {{- else if eq .Then "transfer"}}
-        owner_ctx = self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)
-{{- if .CanTaskTransfer}}
-        try:
-            await group
-        except _TaskTransfer as transfer:
-            return transfer.agent
+        return {{.ThenClass}}(chat_ctx=owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
 {{- else}}
-        await group
-{{- end}}
-        # then: transfer — control moves on and does not return here. N13: drop
-        # the flow's turns by handing the target the pre-flow context.
-        return {{.ThenClass}}(chat_ctx=owner_ctx)
-{{- else}}
-{{- if .CanTaskTransfer}}
-        try:
-            await group
-        except _TaskTransfer as transfer:
-            return transfer.agent
-{{- else}}
-        await group
-{{- end}}
-        # then: end — the flow is the last thing on the call; this does not return.
         self.session.shutdown()
-{{- end}}
 {{- end}}
 {{end}}
 {{end}}
@@ -1520,6 +1367,17 @@ def _task_result(values: dict, {{.Unserved.Name}}: str) -> dict:
 
 class _RetryEmptyTaskResponseMixin:
     _response_tool_call_ids: set[str]
+
+    async def update_chat_ctx(self, chat_ctx, *, exclude_invalid_function_calls=False):
+        # History policy owns old tool records, including tools this task cannot run.
+        assert isinstance(self, Agent)
+        await Agent.update_chat_ctx(self, chat_ctx, exclude_invalid_function_calls=exclude_invalid_function_calls)
+
+    async def update_tools(self, tools):
+        assert isinstance(self, Agent)
+        history = self.chat_ctx.copy()
+        await Agent.update_tools(self, tools)
+        await self.update_chat_ctx(history, exclude_invalid_function_calls=False)
 
     async def llm_node(self, chat_ctx, tools, model_settings):
         # Every generated user of this mixin is an AgentTask; narrow that
@@ -1695,6 +1553,8 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 
 {{end}}    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}}{{if or .Prebuilt .MCPServers}}, tools=[{{template "tools_list" .}}]{{end}})
+        if isinstance(chat_ctx, llm.ChatContext):
+            self._chat_ctx = chat_ctx.copy()
         self._response_tool_call_ids: set[str] = set()
 {{- if $.NeedsTaskGroups}}
         self._finish_call_id: str | None = None
@@ -1710,6 +1570,11 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 {{- end}}
 
     async def on_enter(self) -> None:
+{{- if .Summary}}
+        await self.update_chat_ctx(await _summarize(self.chat_ctx, {{template "llmexpr" .Summary}}))
+{{- else}}
+        await self.update_chat_ctx({{.CtxExpr}})
+{{- end}}
 {{- if .PromptExpr}}
         await self.update_instructions({{.PromptExpr}})
 {{- end}}
@@ -1722,36 +1587,17 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 {{range .Tools}}{{template "method_tool" .}}{{end}}
 {{range .Transfers}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext{{range .Inputs}}, {{.Name}}: {{.Anno}}{{if not .Required}} = None{{end}}{{end}}):
+    async def {{.Method}}(self, ctx: RunContext):
         {{triple .When}}
         if not self._claim_terminal():
             return
-{{- if .Inputs}}
-        # The brief, validated before the receiver exists. A refusal gives the
-        # terminal claim back, so the step can still finish or hand over once
-        # the model has corrected itself.
-        try:
-            _inputs = _typed_inputs({{pyq .Method}}, {{"{"}}{{range $i, $a := .Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}}{{"}"}})
-        except _StateRefused as refused:
-            self._terminal_claimed = False
-            logger.warning("%s expects: %s", {{pyq .Method}}, refused.message)
-            return {"refused": f"Not started: {refused.message}. Ask the caller, then hand over again with a value that fits."}
-{{- end}}
+
         try:
 {{- if .Announce}}
             await ctx.session.say({{pyq .Announce}}, allow_interruptions=False)
 {{- end}}
-{{- if .ReceiverInputs}}
-            # The receiver's brief: reset, then written, before the receiver
-            # exists, so its prompt renders exactly what it was handed.
-{{- range .ReceiverInputs}}
-            ctx.userdata.{{.}} = None
-{{- end}}
-{{- end}}
-{{- if .Inputs}}
-            for _name, _value in _inputs.items():
-                setattr(ctx.userdata, _name, _value)
-{{- end}}
+
+
 {{- if .Summary}}
             summary_ctx = await _summarize(self.chat_ctx, {{template "llmexpr" .Summary}})
             self.complete(_TaskTransfer({{.TargetClass}}(chat_ctx=summary_ctx)))
@@ -1765,47 +1611,25 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
             self._terminal_claimed = False
             raise
 {{end}}    @function_tool
-    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.Anno}}{{end}}, {{$.Unserved.Name}}: {{$.Unserved.Anno}} = ""){{if .Typed}} -> str | None{{else}} -> None{{end}}:
-        """Record the result of this step and finish. complete() is the sole
-        resolution; do not relay anything after it."""
-{{- if .Typed}}
-        # Validated before anything is recorded, and before the terminal claim:
-        # a value that does not fit its declared type never enters the state,
-        # the previous contents stand, and the message goes back to the model so
-        # it can correct itself on the next turn instead of the step recording
-        # something wrong.
+    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.Anno}} = None{{end}}, {{$.Unserved.Name}}: {{$.Unserved.Anno}} = "") -> str | None:
+        """Save this step's values and finish, or return unserved without saving."""
+        if self.done():
+            return
+{{- if .Transfers}}
+        if self._terminal_claimed:
+            return
+{{- end}}
         try:
-            _values = _typed_result({{pyq .Name}}, {{"{"}}{{range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end}}{{"}"}})
+            _values = _save_result({{pyq .Name}}, ctx.userdata, {{"{"}}{{range .Result}}{{pyq .Name}}: {{.Name}}, {{end}}{{pyq $.Unserved.Name}}: {{$.Unserved.Name}}{{"}"}})
         except _StateRefused as refused:
             logger.warning("finish %s: %s", {{pyq .Name}}, refused.message)
             return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
-{{- end}}
 {{- if .Transfers}}
-        if not self._claim_terminal():
-            return
-        try:
-{{- if $.NeedsTaskGroups}}
-            result = _task_result({{.ResultExpr}}, {{$.Unserved.Name}})
-            self.complete(result)
-            # Record only after complete() succeeds: a rejected duplicate cannot
-            # replace the winner, and there is no await for the callback to race.
-            self._finish_call_id = ctx.function_call.call_id
-{{- else}}
-            self.complete(_task_result({{.ResultExpr}}, {{$.Unserved.Name}}))
+        self._terminal_claimed = True
 {{- end}}
-        except BaseException:
-            self._terminal_claimed = False
-            raise
-{{- else}}
+        self.complete(_values)
 {{- if $.NeedsTaskGroups}}
-        result = _task_result({{.ResultExpr}}, {{$.Unserved.Name}})
-        self.complete(result)
-        # Record only after complete() succeeds: a rejected duplicate cannot
-        # replace the winner, and there is no await for the callback to race.
         self._finish_call_id = ctx.function_call.call_id
-{{- else}}
-        self.complete(_task_result({{.ResultExpr}}, {{$.Unserved.Name}}))
-{{- end}}
 {{- end}}
 {{end}}
 {{- end}}
@@ -1872,10 +1696,11 @@ async def entrypoint(ctx: JobContext) -> None:
     # This client is ours, so closing it is ours too: the plugin closes only a
     # client it built itself. Without this a worker leaks one connection pool per
     # call it serves.
-    slng_state.slng_client = _slng_router_client()
+    slng_client = _slng_router_client()
+    slng_state.slng_client = slng_client
 
     async def _close_slng_client() -> None:
-        await slng_state.slng_client.close()
+        await slng_client.close()
 
     ctx.add_shutdown_callback(_close_slng_client)
 {{- end}}

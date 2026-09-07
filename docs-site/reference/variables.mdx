@@ -9,27 +9,21 @@ reference. For a task-led introduction, start with [Variables](/build/variables)
 
 ## How a value moves
 
-Four keys write or read state, and it is easy to blur them together. This is
-the map: the rest of this page works through `variables:` and `prefetch:` in
-full, and [Tasks](/build/orchestration/tasks) does the same for `expect:`.
+Three surfaces write or read state:
 
 | Key | Think of it as | Lives | Read by |
 |---|---|---|---|
-| `variables:` | the call's state | the whole call | every prompt, through the block the compiler adds or `{{name}}` |
+| `variables:` | the call's typed state | the whole call | only prompts and tools that explicitly reference a value |
 | `prefetch:` + `assign:` | state filled before the first word | the whole call | the same |
-| `expect:` | what a step or a receiving agent is handed, filled by the calling model from the caller's words | one visit (a task), until the next handoff (an agent) | that prompt only, in its `Request:` block |
-| `result:` + `assign:` | what a step hands back, or one part of it, written into state at `finish` | the whole call from then on | every prompt |
+| task `assign:` | finish fields derived from destination variables and saved together | the whole call from then on | the same |
 
-State is written only at a seam: before the call, by `prefetch:`, and at
-`finish`, by a step's `result:` and `assign:`. The caller's own words enter a
-step through `expect:`. A step keeps what matters for later by putting it in
-its result.
+State is written only at a seam: before the call by `prefetch:`, and at a
+task finish by `assign:`. Conversation reaches a task or handoff according to
+`context.history`; omitted history means `messages`.
 
 `variables:` and `prefetch:` are the rest of this page.
 [Assigning a task result to a variable](#assigning-a-task-result-to-a-variable)
-below covers `result:` and `assign:`. `expect:` belongs to a task or a
-handoff, not to a variable: see [Hand the step what the caller asked
-for](/build/orchestration/tasks#hand-the-step-what-the-caller-asked-for).
+below covers task `assign:`.
 
 ```yaml agent.yaml
 variables:
@@ -50,9 +44,8 @@ variables:
 
 ## The type grammar
 
-`type` is a single line, written in Pydantic's own words. A task's or a
-handoff's `result:` field takes the same grammar, so a step can hand back a
-whole shape.
+`type` is a single line, written in Pydantic's own words. A task finish uses
+the same type through the destination named by its `assign:`.
 
 ```text
 type  := atom ("|" atom)*
@@ -351,11 +344,10 @@ as a webhook path. The five sites render at different times:
 
 ### Naming one part of a value
 
-A `{{name}}` placeholder can also name one field inside a variable or an
-expected value, with a dotted path: `{{customer.status}}`. The root, the name
-before the first dot, follows every rule a whole value already follows at
-that site: it has to be a declared variable or an expected value handed to
-that prompt, a value still awaiting confirmation renders only in its
+A `{{name}}` placeholder can also name one field inside a variable, with a
+dotted path: `{{customer.status}}`. The root, the name before the first dot,
+follows every rule a whole value already follows at that site: it has to be a
+declared variable, a value still awaiting confirmation renders only in its
 confirming step's prompt, the greeting may only name something that already
 has a value, and a secret never renders.
 
@@ -384,8 +376,7 @@ The caller is a {{customer.status}} customer, if the lookup has run.
 
 Written to read whole before the lookup has run: a part renders the same
 empty words the whole value would when the value, or a link on the way, is
-absent, `none recorded yet.` for a variable and `not given.` for an expected
-value, never `None`, never a hole, never an error. A field that is itself a
+absent, `none recorded yet.`, never `None`, never a hole, never an error. A field that is itself a
 shape or a list renders as compact JSON; any other field renders as plain
 text.
 
@@ -484,8 +475,8 @@ input:
     - slot_id
 
 inject:
-  customer_id: "{{customer_id}}"
-  service: "{{requested_service}}"
+  - customer_id: "{{customer_id}}"
+  - service: "{{requested_service}}"
 
 local:
   handler: tools/book_appointment.py
@@ -518,14 +509,10 @@ agents:
         instructions: tasks/check-customer.md
         assign:
           - customer_id: result.customer_id
-        result:
-          customer_id: string
-        context:
-          history: full
 ```
 
-The task's typed result lands in the variable, and the rest of the call can use
-it.
+The variable declaration supplies the finish field's type and description. The
+task validates the value and saves it atomically.
 
 A `+` on the key appends one entry instead of replacing the value:
 
@@ -553,14 +540,15 @@ can be `result.<field>`, or a dotted path into a declared shape,
 ```yaml agent.yaml
 tasks:
   - name: manage_booking
-    result:
-      appointment: Appointment | None
     assign:
       - appointments+: result.appointment
       - last_booking_day: result.appointment.scheduled_date
 ```
 
-with `last_booking_day` declared `type: Date | None`.
+with `appointments` declared `list[Appointment]` and `last_booking_day`
+declared `Date | None`. The whole-object assignment establishes the
+`appointment` result field as `Appointment | None`; the second line can then
+project its date.
 
 The picked part's type has to fit the variable it lands in: a `Date` field
 into a `Date` variable, a `Literal` into the same `Literal`, a whole shape
@@ -582,20 +570,18 @@ writing one into the list.
 The same path form works in a prompt placeholder too: see [Naming one part of
 a value](#naming-one-part-of-a-value).
 
-## A handoff keeps every declared value
+## A handoff can read selected declared values
 
-Every declared value is shared by every agent in the call, on both targets,
-with nothing to write and no field to set: a handoff carries all of them,
-always.
+Declared values stay in call state across a handoff. The receiving model sees
+only the ones its prompt names.
 
-```yaml
-    context:
-      history: full
+```markdown agents/appointment-manager.md
+You are handling appointment {{appointment_id}}.
 ```
 
-What the caller just asked for is not a declared value, so this does not cover
-it. Hand it to the receiving agent with `expect:` on the handoff instead, see
-[Handoffs](/build/orchestration/handoffs#hand-the-receiving-agent-a-brief).
+With `history: reset`, this explicit reference still resolves but no prior
+conversation is inherited. An unsaved detail from the triggering sentence is
+gone, so the receiving agent asks for it.
 
 ## Where to go next
 

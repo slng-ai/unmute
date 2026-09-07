@@ -28,8 +28,6 @@ agents:
         instructions: tasks/verify_caller.md
         assign:
           - caller_phone: result.caller_phone
-        result:
-          caller_phone: string
         context:
           history: full
     handoffs:

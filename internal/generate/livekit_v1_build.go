@@ -166,6 +166,8 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		}
 	}
 	for _, t := range data.Tasks {
+		data.NeedsLastN = data.NeedsLastN || strings.HasPrefix(t.CtxExpr, "_last_n(")
+		data.NeedsSummarize = data.NeedsSummarize || t.Summary != nil
 		for _, tool := range t.Tools {
 			scanArgs(tool.Args)
 		}
@@ -186,8 +188,8 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		needAnnotated = needAnnotated || typed.NeedsAnnotated
 		needLiteral = needLiteral || typed.NeedsLiteral
 	}
-	data.PydanticImports = PydanticImports(data.NeedsField, data.TypedState != nil)
-	data.NeedsDataclassField = StateNeedsDataclassField(agent)
+	data.PydanticImports = PydanticImports(data.NeedsField, data.TypedState)
+	data.NeedsDataclassField = StateNeedsDataclassField(agent) || PrefetchUnconfirmed(agent)
 	var typingNames []string
 	if needAnnotated {
 		typingNames = append(typingNames, "Annotated")
@@ -348,11 +350,6 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// One field per input name, defaulting to None: an input has no value
 	// outside its visit. The same list the Pipecat driver appends to its State,
 	// so the two objects declare the same fields.
-	for _, field := range InputStateFields(agent) {
-		data.Vars = append(data.Vars, livekitVar{
-			Name: field.Name, PyType: "str", Anno: field.Anno, Default: "None", Description: field.Sites,
-		})
-	}
 	data.HasVars = len(data.Vars) > 0
 	// A bare name in a compose environment block is forwarded when the host sets
 	// it and absent otherwise, which is exactly what the dev loop's measurement
@@ -407,7 +404,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	}
 	entryInstructions := agent.Agents[agent.EntryAgent].Instructions
 	if _, router := slngRouterBinding(agent, tgt, agent.Agents[agent.EntryAgent].Model); ir.HasTemplate(entryInstructions) && !router {
-		data.EntryPromptExpr = promptExpr(promptConst(agent.EntryAgent), entryInstructions, "session.userdata", false)
+		data.EntryPromptExpr = promptExpr(promptConst(agent.EntryAgent), entryInstructions, "session.userdata", false, "agent:"+agent.EntryAgent)
 	}
 
 	applyLiveKitConversation(agent.Conversation, &data)
@@ -828,7 +825,7 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 			targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name})
 	}
 	if ir.HasTemplate(def.Instructions) && !router {
-		built.PromptExpr = promptExpr(promptConst(name), def.Instructions, "self.session.userdata", false)
+		built.PromptExpr = promptExpr(promptConst(name), def.Instructions, "self.session.userdata", false, "agent:"+name)
 	}
 	if def.Model != entry.Model {
 		llm, err := livekitReasonLLM(agent, tgt, def.Model, env)
@@ -853,7 +850,7 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 				built.MCPServers = append(built.MCPServers, livekitMCPSource(ref, tool, env))
 				continue
 			}
-			lowered, err := buildLiveKitTool(ref, tool, agent.Variables, SupplierIndex(agent.Controls), env)
+			lowered, err := buildLiveKitTool(ref, tool, agent.Variables, SupplierIndex(agent.Tasks), env)
 			if err != nil {
 				return livekitAgent{}, fmt.Errorf("agent %q: %w", name, err)
 			}
@@ -914,12 +911,15 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 	// package whose steps assign nothing emits exactly what it did before.
 	if built.PromptExpr != "" {
 		for i := range built.Delegates {
-			task := built.Delegates[i].Task
-			if task == nil || len(task.Assign) == 0 {
-				continue
+			delegate := &built.Delegates[i]
+			writes := delegate.Task != nil && len(agent.Tasks[delegate.Task.ID].Assign) > 0
+			for _, step := range delegate.Steps {
+				writes = writes || len(agent.Tasks[step.ID].Assign) > 0
 			}
-			built.Delegates[i].RefreshOwnerPrompt = true
-			built.RefreshPrompt = true
+			if writes {
+				delegate.RefreshOwnerPrompt = true
+				built.RefreshPrompt = true
+			}
 		}
 	}
 	return built, nil
@@ -930,9 +930,7 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 func buildLiveKitTransfer(agent *ir.Agent, tgt ir.Target, ref string, control *ir.AgentTransfer, env *envSet) (livekitTransfer, error) {
 	transfer := livekitTransfer{
 		Method: ref, When: transferWhen(control), TargetClass: pyName(control.To),
-		Announce:       control.Announce,
-		Inputs:         inputArgs(control.Inputs),
-		ReceiverInputs: inputNames(agent.Agents[control.To].Inputs),
+		Announce: control.Announce,
 	}
 	if control.Context.History == ir.HistorySummary {
 		summarizer, err := livekitSummaryLLM(agent, tgt, control.Context.Summarizer, env)
@@ -993,24 +991,6 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 			return livekitDelegate{}, fmt.Errorf("delegate %q references unknown task %q", ref, c.Task)
 		}
 		single := &livekitSingleTask{Class: pyName(c.Task), ID: c.Task}
-		// The task's own context (N12) shapes its entry; group steps instead
-		// take the group's scope (SCHEMA 4.6), handled in the group path.
-		if task.Context.History == ir.HistorySummary {
-			summarizer, err := livekitSummaryLLM(agent, tgt, task.Context.Summarizer, env)
-			if err != nil {
-				return livekitDelegate{}, fmt.Errorf("delegate %q task %q summarizer: %w", ref, c.Task, err)
-			}
-			single.Summary = &summarizer
-		} else {
-			single.CtxExpr, _ = livekitCtxExpr(task.Context)
-		}
-		for _, entry := range c.Assign {
-			single.Assign = append(single.Assign, livekitAssign{
-				Var: entry.Var, Field: entry.Field, Append: entry.Append,
-				Confirms: agent.Variables[entry.Var].Confirm == c.Task,
-			})
-		}
-		sort.Slice(single.Assign, func(i, j int) bool { return single.Assign[i].Var < single.Assign[j].Var })
 		// A single task always returns to the owner (SCHEMA 4.7); the AgentTask
 		// hands back the typed result only (C4/N13). The finality guidance stops
 		// the owner LLM re-running the finished flow (B1/V1).
@@ -1020,7 +1000,6 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 			Then:            "return",
 			Announce:        c.Announce,
 			CanTaskTransfer: livekitTaskCanTransfer(agent, task),
-			Inputs:          inputArgs(task.Inputs),
 		}, nil
 	}
 	group, ok := agent.TaskGroups[c.Group]
@@ -1057,36 +1036,6 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 	return delegate, nil
 }
 
-// inputArgs lowers a seam's inputs to tool parameters: required first, because
-// Python forbids a parameter with no default after one with a default, and
-// authored order within each group so the signature reads like the package.
-// The annotation carries the description, which is how it reaches the model.
-func inputArgs(inputs []ir.InputField) []livekitArg {
-	var args []livekitArg
-	for _, optional := range []bool{false, true} {
-		for _, input := range inputs {
-			if input.Optional != optional {
-				continue
-			}
-			args = append(args, livekitArg{
-				Name: input.Name, PyType: PyAnno(input.Type), Required: !input.Optional,
-				Desc: input.Description, Anno: inputAnno(input),
-			})
-		}
-	}
-	return args
-}
-
-// inputNames is the names of a receiver's brief, for the reset a handoff does
-// before it writes its own values.
-func inputNames(inputs []ir.InputField) []string {
-	names := make([]string, 0, len(inputs))
-	for _, input := range inputs {
-		names = append(names, input.Name)
-	}
-	return names
-}
-
 func livekitTaskCanTransfer(agent *ir.Agent, task ir.Task) bool {
 	for _, ref := range task.Tools {
 		if _, ok := agent.Controls[ref].(*ir.AgentTransfer); ok {
@@ -1098,13 +1047,25 @@ func livekitTaskCanTransfer(agent *ir.Agent, task ir.Task) bool {
 
 func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *envSet) (livekitTask, error) {
 	built := livekitTask{Name: name, Class: pyName(name), PromptConst: promptConst(name)}
+	if task.Context.History == ir.HistorySummary {
+		summary, err := livekitSummaryLLM(agent, tgt, task.Context.Summarizer, env)
+		if err != nil {
+			return livekitTask{}, err
+		}
+		built.Summary = &summary
+	} else {
+		built.CtxExpr, _ = livekitCtxExpr(task.Context)
+		if built.CtxExpr == "" {
+			built.CtxExpr = "llm.ChatContext()"
+		}
+	}
 	profile, router := slngRouterBinding(agent, tgt, task.Model)
 	if router {
 		built.SlngScope = targetcap.SlngScope(tgt.Models.Reason[profile].AgentID,
 			targetcap.SlngSite{Kind: targetcap.SlngSiteTask, Name: name})
 	}
 	if ir.HasTemplate(task.Instructions) && !router {
-		built.PromptExpr = promptExpr(promptConst(name), task.Instructions, "self.session.userdata", false)
+		built.PromptExpr = promptExpr(promptConst(name), task.Instructions, "self.session.userdata", false, "task:"+name)
 	}
 	// Per-task model (B1): AgentTask takes its own llm=, resolved through the
 	// catalogue like any per-agent override. Same profile as the entry agent =
@@ -1124,12 +1085,10 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 		// description in the schema.
 		built.Result = append(built.Result, livekitArg{
 			Name: fname, PyType: base, Required: true, Enum: rf.Enum,
-			Anno: pyAnno(base, rf.Enum, ""),
+			Anno: pyAnno(nullableType(pyAnno(base, rf.Enum, "")), nil, rf.Description),
 		})
 	}
-	for _, field := range task.Result {
-		built.Typed = built.Typed || field.Shape != nil
-	}
+	built.Typed = true
 	built.ResultExpr = livekitResultExpr(built)
 	for _, ref := range task.Tools {
 		tool, ok := agent.Tools[ref]
@@ -1153,7 +1112,7 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 			built.MCPServers = append(built.MCPServers, livekitMCPSource(ref, tool, env))
 			continue
 		}
-		lowered, err := buildLiveKitTool(ref, tool, agent.Variables, SupplierIndex(agent.Controls), env)
+		lowered, err := buildLiveKitTool(ref, tool, agent.Variables, SupplierIndex(agent.Tasks), env)
 		if err != nil {
 			return livekitTask{}, fmt.Errorf("task %q: %w", name, err)
 		}
@@ -1380,7 +1339,7 @@ func livekitSlngSite(agent *ir.Agent, tgt ir.Target, profile string) slngSite {
 	}
 	site := slngSite{
 		SessionExpr:       livekitSessionIDExpr,
-		Names:             slngTemplateNames(agent, tgt, profile),
+		NamesExpr:         "_SLNG_TEMPLATE_PATHS.get(agent._slng_scope, ())",
 		ConfigFunc:        slngConfigFunc(profile),
 		HeadersPerRequest: true,
 		BodyPerRequest:    true,
@@ -1410,6 +1369,8 @@ func livekitSummarySite(agent *ir.Agent, tgt ir.Target, profile string) slngSite
 	if site.ConfigFunc == "" {
 		return site
 	}
+	site.NamesExpr = ""
+	site.Names = ir.TemplateRefs(ir.FlattenPaths(tgt.Models.Reason[profile].PromptSuffix))
 	site.HeadersPerRequest = false
 	// The body stays at construction here, and that is already current rather
 	// than frozen: this site is built inside an agent method at handoff time, so
@@ -1468,9 +1429,9 @@ func livekitCtxExpr(c ir.TaskContext) (expr string, needsLastN bool) {
 		// exclude_handoff drops stale AgentHandoff markers from the carried
 		// history (upstream recipe idiom).
 		if excludeCalls {
-			return "self.chat_ctx.copy(exclude_instructions=True, exclude_function_call=True, exclude_handoff=True)", false
+			return "self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_function_call=True, exclude_handoff=True)", false
 		}
-		return "self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)", false
+		return "self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True)", false
 	}
 }
 
@@ -1568,9 +1529,9 @@ func delegateWhen(c *ir.Delegate) string {
 }
 
 // delegateReturnFinality is appended to a then:return delegate docstring so the
-// owner LLM treats the returned result as the final outcome and does not re-run
+// owner LLM treats the returned status as final and does not re-run
 // the finished flow (B1/V1; mirrors the upstream flow-entry docstring idiom).
-const delegateReturnFinality = " When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request. " + unservedOwnerRule
+const delegateReturnFinality = " When this flow finishes it returns a status. Continue with the caller. Do not run this flow again for the same request. " + unservedOwnerRule
 
 func humanize(name string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(name, "_", " "), "-", " ")
@@ -1786,4 +1747,11 @@ func livekitDeps(data livekitData) []string {
 	}
 	slices.Sort(deps)
 	return deps
+}
+
+func nullableType(anno string) string {
+	if strings.HasSuffix(anno, " | None") {
+		return anno
+	}
+	return anno + " | None"
 }

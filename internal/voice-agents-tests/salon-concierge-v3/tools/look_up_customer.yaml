@@ -1,6 +1,6 @@
 description: >-
   Look up a customer by phone number. Reads only: it never creates a record and
-  never touches one. Returns an empty name when the number is not on file.
+  never touches one. Returns an empty name and ID when the number is not on file.
 
 input:
   type: object
@@ -17,9 +17,16 @@ output:
     name:
       type: string
       description: The name on the record, or empty when the number is not on file
+    id:
+      type: string
+      description: The customer ID, or empty when the number is not on file
     status:
       type: string
       description: existing or unknown
+  required:
+    - name
+    - id
+    - status
 
 local:
   handler: tools/salon.py

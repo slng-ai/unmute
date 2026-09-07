@@ -34,6 +34,10 @@ shapes:
         description: The service the caller asked for, in the salon's own words.
 
 variables:
+  count:
+    type: int
+  accepted:
+    type: bool
   caller_reason:
     type: list[Literal["create_booking", "cancel_booking"]]
     description: Why the caller rang. More than one, because one call can do more than one thing.
@@ -63,25 +67,34 @@ agents:
         instructions: tasks/confirm_number.md
         assign:
           - caller_phone: result.caller_phone
-        result:
-          caller_phone: Phone
-          summary: string
         context:
           history: reset
 
       - name: book
         when: The caller wants an appointment.
         instructions: tasks/book.md
+        tools:
+          - inspect_state
         assign:
           - caller_reason+: result.reason
           - appointments+: result.appointment
           - last_appointment: result.appointment
-        result:
-          reason: Literal["create_booking", "cancel_booking"]
-          appointment: Appointment
-          summary: string
         context:
           history: reset
+
+      - name: record_flags
+        when: Record the count and agreement.
+        instructions: tasks/flags.md
+        assign:
+          - count: result.count
+          - accepted: result.accepted
+        context:
+          history: messages
+      - name: no_output
+        when: Finish a task that saves nothing.
+        instructions: tasks/flags.md
+        context:
+          history: messages
 
 models:
   think:
@@ -126,3 +139,6 @@ capacity:
   peak_sessions: 5
   max_sessions: 10
   avg_session_duration: 5m
+
+tools:
+  - inspect_state

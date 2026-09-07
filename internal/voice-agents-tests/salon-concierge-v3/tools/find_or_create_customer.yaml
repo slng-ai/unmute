@@ -21,6 +21,18 @@ output:
       description: >-
         The confirmed number in E.164: a plus sign then digits, no spaces or
         punctuation. Return it exactly as it comes back, character for character.
+    customer_name:
+      type: string
+      description: The name on the record, or empty for a new customer
+    customer_id:
+      type: string
+      description: The stable customer ID returned or created by this call
+    customer_status:
+      type: string
+      enum:
+        - existing
+        - created
+        - invalid
     status:
       type: string
       enum:
@@ -31,6 +43,9 @@ output:
       type: string
   required:
     - customer_phone
+    - customer_name
+    - customer_id
+    - customer_status
     - status
     - summary
 

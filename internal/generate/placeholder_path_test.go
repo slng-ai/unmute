@@ -21,7 +21,7 @@ func TestPlaceholderPathIsWalkedOnBothTargets(t *testing.T) {
 		for _, want := range []string{
 			"def _state_lookup(state, name):",
 			`root, _, path = name.partition("__")`,
-			"_state_text(*_state_lookup(",
+			"_state_text(*_prompt_value(",
 			"{{last_appointment__appointment_type}}",
 			`"last_appointment__appointment_type"`,
 		} {
@@ -53,7 +53,7 @@ func TestInjectOfAPathLowersToTheLookup(t *testing.T) {
 	}
 	needed := neededVars(ir.Tool{Inject: map[string]any{"status": "{{customer__status}}", "phone": "{{customer__phone_number}}"}},
 		map[string]ir.Variable{"customer": {Description: "The record the lookup returned."}}, nil)
-	if len(needed) != 1 || needed[0].Name != "customer" {
-		t.Errorf("neededVars = %+v, want the one root customer", needed)
+	if len(needed) != 2 || needed[0].Name != "customer__phone_number" || needed[1].Name != "customer__status" {
+		t.Errorf("neededVars = %+v, want the two exact referenced fields", needed)
 	}
 }

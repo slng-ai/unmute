@@ -196,6 +196,7 @@ type ShapeField struct {
 }
 
 type Tool struct {
+	Inject      []spec.Pair
 	Name        string
 	Description string
 	Execution   string
@@ -289,14 +290,11 @@ func (a Agent) PromptPath() string {
 }
 
 type Handoff struct {
-	Name     string
-	Source   string
-	To       string
-	When     string
-	Announce string
-	// Input is the handoff's expect: list, the brief the receiving agent is handed; carried for the reason
-	// Task.Input is.
-	Input            []ShapeField
+	Name             string
+	Source           string
+	To               string
+	When             string
+	Announce         string
 	History          string
 	MaxMessages      int
 	Summarizer       string
@@ -310,14 +308,8 @@ type Task struct {
 	// Handoffs is the one other kind a task may attach. It has no Delegates and
 	// no Escalations for the same reason spec.Task does not: the illegal thing
 	// has nowhere to be written.
-	Handoffs []string
-	Model    string
-	// Input is the step's expect: list, one typed field each, written back the
-	// way a shape's fields are. Carried because the console rewrites agent.yaml
-	// from this struct, and a field it does not carry is a field `unmute
-	// maintain` deletes at exit 0.
-	Input            []ShapeField
-	Result           string // flat typed result as a JSON object
+	Handoffs         []string
+	Model            string
 	History          string
 	MaxMessages      int
 	Summarizer       string
@@ -327,7 +319,7 @@ type Task struct {
 	Agent    string
 	When     string
 	Announce string
-	Assign   string // optional JSON object mapping variables to result fields
+	Assign   []spec.Pair // ordered saved-variable assignments
 }
 
 func (t Task) PromptPath() string { return "tasks/" + t.Name + ".md" }
@@ -953,6 +945,13 @@ func parseTemplate(name string, raw []byte) (*template.Template, error) {
 		"quote":     strconv.Quote,
 		"yaml":      yamlScalar,
 		"yamlBlock": blockYAML,
+		"pairs": func(indent int, pairs []spec.Pair) (string, error) {
+			content, err := yaml.Marshal(pairs)
+			if err != nil {
+				return "", err
+			}
+			return blockYAML(indent, string(content))
+		},
 	}).Delims("[[", "]]").Parse(string(raw))
 }
 

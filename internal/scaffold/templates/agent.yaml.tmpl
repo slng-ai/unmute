@@ -39,20 +39,14 @@ agents:
         when: [[quote .When]]
         instructions: [[.PromptPath]]
 [[if .Announce]]        announce: [[quote .Announce]]
-[[end]][[if .Input]]        expect:
-[[range .Input]][[if .Description]]          - name: [[.Name]]
-            type: [[yaml .Type]]
-            description: [[yaml .Description]]
-[[else]]          - [[.Name]]: [[yaml .Type]]
-[[end]][[end]][[end]][[$taskTools := $.TaskTools .Name]][[if $taskTools]]        tools:
+[[end]][[$taskTools := $.TaskTools .Name]][[if $taskTools]]        tools:
 [[range $taskTools]]          - [[.]]
 [[end]][[end]][[$taskHandoffs := $.TaskHandoffs .Name]][[if $taskHandoffs]]        handoffs:
 [[range $taskHandoffs]]          - [[.]]
 [[end]][[end]][[if .Model]]        think: [[.Model]]
-[[end]][[if .Assign]]        assign:[[yamlBlock 10 .Assign]]
-[[end]]        result:[[yamlBlock 10 .Result]]
-        context:
-          history: [[.History]]
+[[end]][[if .Assign]]        assign:[[pairs 10 .Assign]]
+[[end]]        context:
+          history: [[if .History]][[.History]][[else]]messages[[end]]
 [[if .MaxMessages]]          max_messages: [[.MaxMessages]]
 [[end]][[if .Summarizer]]          summarizer: [[.Summarizer]]
 [[end]][[if .IncludeToolCalls]]          include_tool_calls: [[boolValue .IncludeToolCalls]]
@@ -69,13 +63,8 @@ agents:
     when: [[quote .When]]
 [[if .Announce]]    announce: [[quote .Announce]]
 [[end]]
-[[if .Input]]    expect:
-[[range .Input]][[if .Description]]      - name: [[.Name]]
-        type: [[yaml .Type]]
-        description: [[yaml .Description]]
-[[else]]      - [[.Name]]: [[yaml .Type]]
-[[end]][[end]][[end]]    context:
-      history: [[.History]]
+    context:
+      history: [[if .History]][[.History]][[else]]messages[[end]]
 [[if .MaxMessages]]      max_messages: [[.MaxMessages]]
 [[end]][[if .Summarizer]]      summarizer: [[.Summarizer]]
 [[end]][[if .IncludeToolCalls]]      include_tool_calls: [[boolValue .IncludeToolCalls]]

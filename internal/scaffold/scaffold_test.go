@@ -533,8 +533,7 @@ func TestPreflightTaskAndOrderedGroup(t *testing.T) {
 			data := Data{Name: "agent", Channel: "web"}
 			data.SetTarget(provider)
 			data.Tasks = []Task{{
-				Name: "collect", Instructions: "Return the caller tier.", Result: `{"tier":{"enum":["free","pro"]}}`,
-				History: "full", Agent: "assistant", When: "Classify the caller.",
+				Name: "collect", Instructions: "Return the caller tier.", History: "full", Agent: "assistant", When: "Classify the caller.",
 			}}
 			data.TaskGroups = []TaskGroup{{
 				Name: "triage", Steps: []string{"collect"}, ContextScope: "shared", Then: "return", Agent: "assistant", When: "Run triage.",

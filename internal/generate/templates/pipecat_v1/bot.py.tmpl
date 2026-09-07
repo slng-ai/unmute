@@ -25,7 +25,7 @@ PipelineWorker owns the transport + STT, each agent is an LLMWorker with its own
 LLM and voice, and agent_transfer is activate_worker(). Tasks and task groups
 run as Pipecat Flows on the owning agent: a delegate tool snapshots the shared
 context, a FlowManager walks the steps as nodes, and control returns with only
-the typed results.{{end}}
+a completed or unserved status.{{end}}
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnal
 {{end}}from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 {{if not .Inline}}from pipecat.bus import BusBridgeProcessor
-{{end}}{{if .HasFlows}}from pipecat.flows import {{if .NeedsContextStrategy}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig{{if .HasTaskTransfers}}, NO_RESPONSE{{end}}
+{{end}}{{if .HasFlows}}from pipecat.flows import {{if .NeedsContextStrategy}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig, NO_RESPONSE
 {{end}}{{if .FrameImports}}from pipecat.frames.frames import {{join .FrameImports ", "}}
 {{end}}from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -78,8 +78,8 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 {{if .NeedsFunctionCalls}}from pipecat.services.llm_service import FunctionCallParams
 {{end}}{{if .NeedsMCP}}from pipecat.services.mcp_service import MCPClient
-{{end}}{{if .HasFlows}}from pipecat.services.settings import LLMSettings
-{{end}}{{if .NeedsLanguage}}from pipecat.transcriptions.language import Language
+{{end}}from pipecat.services.settings import LLMSettings
+{{if .NeedsLanguage}}from pipecat.transcriptions.language import Language
 {{end}}from pipecat.transports.base_transport import BaseTransport, TransportParams
 {{if .DailyParams}}{{.DailyParams.Import}}
 {{end}}{{if .CloudWebsocket}}from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -262,19 +262,18 @@ class {{.Slng.RouterClass}}(OpenAILLMService):
     what makes the two targets refresh at the same point.
     """
 
-    def __init__(self, *args, slng_state=None, slng_variable_names=(), **kwargs):
+    def __init__(self, *args, slng_state=None, **kwargs):
         super().__init__(*args, **kwargs)
         self._slng_state = slng_state
-        self._slng_variable_names = slng_variable_names
 
     def build_chat_completion_params(self, params_from_context) -> dict:
         params = super().build_chat_completion_params(params_from_context)
-        if self._slng_variable_names:
-            body = dict(params.get("extra_body") or {})
-            body["template_variables"] = _slng_template_variables(
-                self._slng_state, self._slng_variable_names
-            )
-            params["extra_body"] = body
+        scope = (params.get("extra_headers") or {}).get("{{.Slng.AgentIDHeader}}", "")
+        body = dict(params.get("extra_body") or {})
+        body["template_variables"] = _slng_template_variables(
+            self._slng_state, _SLNG_TEMPLATE_PATHS.get(scope, ()), scope=scope
+        )
+        params["extra_body"] = body
         return params
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
@@ -294,9 +293,11 @@ class {{.Slng.RouterClass}}(OpenAILLMService):
 {{if .Slng.Variables}}
 
 _SLNG_VARIABLE_LIMIT = {{.Slng.Limit}}
+_SLNG_TEMPLATE_PATHS = {{.Slng.TemplatePaths}}
+_SLNG_SCOPE_SITES = {{.Slng.TemplateSites}}
 
 
-def _slng_template_variables(state, names) -> dict:
+def _slng_template_variables(state, names, *, scope="") -> dict:
     """The values the router substitutes into the prompt's placeholders.
 
     A name with no value yet sends the empty string, never None and never the text
@@ -311,7 +312,7 @@ def _slng_template_variables(state, names) -> dict:
         # the one that has to fit. _state_text carries its own bound and its own
         # warning, so a declared value is already shortened by here. A path
         # arrives as one flat name, and _state_lookup walks it.
-        text = _state_text(*_state_lookup(state, name))
+        text = _state_text(*_prompt_value(state, name, _SLNG_SCOPE_SITES.get(scope, "")))
 {{- else}}
         value = getattr(state, name, None) if state is not None else None
         text = "" if value is None else str(value)
@@ -677,6 +678,8 @@ async def _forward_carrier_call(call_sid: str, sip_uri: str) -> None:
 @dataclass
 class State:
     """Typed call variables (SCHEMA 4.4), shared across agents."""
+{{if .NeedsPrefetchUnconfirmed}}    _unconfirmed: set[str] = field(default_factory=lambda: set(_STATE_CONFIRM))
+{{end}}
 {{range .Variables}}    {{.Name}}: {{.PyType}} = {{.Default}}{{if .Description}}  # {{.Description}}{{end}}
 {{end}}
 {{if .CallStartVars}}
@@ -725,7 +728,7 @@ def build_state(call_context: dict | None = None) -> State:
 _TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
 
 
-def _render(text: str, state, *, quote_values: bool = False) -> str:
+def _render(text: str, state, *, quote_values: bool = False, site: str = "") -> str:
     """Substitute each variable token from the call state (SCHEMA 4.4 templates).
     Only substituted values are URL-encoded, never the surrounding literal."""
     if state is None:
@@ -737,7 +740,7 @@ def _render(text: str, state, *, quote_values: bool = False) -> str:
         # _state_text, so a declared value renders as compact JSON and an empty
         # one as words. Anything not declared structured comes back exactly as
         # str() gave it.
-        value = _state_text(*_state_lookup(state, match.group(1)))
+        value = _state_text(*_prompt_value(state, match.group(1), site))
 {{- else}}
         value = getattr(state, match.group(1), None)
         value = "" if value is None else str(value)
@@ -753,12 +756,12 @@ def _refusal(tool: str, state, needed: list[tuple[str, str]]) -> str:
     unset = [
         (name, hint)
         for name, hint in needed
-        if getattr(state, name, None) in (None, "")
+        if _state_lookup(state, name)[1] in (None, "")
 {{- if .NeedsPrefetchUnconfirmed}}
         # A value the caller has not agreed to is present and not usable. Without
         # this, a pre-fetched number would reach somebody else's record: the
         # request would go out against a proposal rather than a fact.
-        or name in getattr(state, "_unconfirmed", ())
+        or _state_lookup(state, name)[0] in getattr(state, "_unconfirmed", ())
 {{- end}}
     ]
     if not unset:
@@ -947,30 +950,14 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{range .MCPSources}}            {{template "mcp_client" .}},
 {{end}}        ]
         self._mcp_tools: list = []
-{{end}}{{if or .Delegates .Brief}}
-    async def on_activated(self, args) -> None:
-        # A Flow replaces this worker's system instruction with its task role.
-        # Re-entry restores the owning agent before tools/messages run.
-{{if .Brief}}        # And a worker with a brief renders it here: the handoff wrote the brief
-        # to the shared state just before activating this worker, and the prompt
-        # the constructor rendered predates it.
-{{end}}{{if .SlngHeaders}}        # And its cache scope with it: a task that handed the conversation on
-        # rather than returning left this service holding the task's scope, so
-        # re-entry has to take it back or this agent would answer as the task.
-        # Only the extra_headers key travels: a settings update merges the extra
-        # dict key by key, so the inline configuration and the reasoning setting
-        # survive untouched.
-        await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(
-                system_instruction={{.RuntimePromptExpr}},
-                extra={"extra_headers": {{.SlngHeaders}}},
-            ),
-        ))
-{{else}}        await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(system_instruction={{.RuntimePromptExpr}}),
-        ))
-{{end}}        await super().on_activated(args)
 {{end}}
+    async def on_activated(self, args) -> None:
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(system_instruction={{.RuntimePromptExpr}}{{if .SlngHeaders}},
+                extra={"extra_headers": {{.SlngHeaders}}}{{end}}),
+        ))
+        await super().on_activated(args)
+
 {{if .MCPSources}}    async def start_mcp(self) -> None:
         """Connect every source and register its tools on this agent's LLM."""
         self._mcp_tools = await _register_mcp_tools(
@@ -984,30 +971,9 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 
     async def close_mcp(self) -> None:
         await _close_mcp((client.close() for client in self._mcp_clients))
-{{if not .InputSchemas}}
-    def build_tools(self) -> list:
-        """The @tool methods plus this agent's MCP tools, so the server's tools
-        are advertised only while this agent is active."""
+
+    def build_tools(self):
         return super().build_tools() + self._mcp_tools
-{{end}}{{end}}{{if .InputSchemas}}
-    def build_tools(self) -> list:
-        """The @tool methods{{if .MCPSources}} plus this agent's MCP tools{{end}}, with an explicit
-        schema for every step or handoff that is handed typed inputs."""
-        tools = super().build_tools(){{if .MCPSources}} + self._mcp_tools{{end}}
-        # The framework reads a tool's schema off its Python signature, and a
-        # signature cannot say what a Literal allows or what a declared class
-        # holds. The handler stays the decorated method above, found by name, so
-        # the framework's own call tracking still wraps it; only what the model
-        # is shown changes.
-        explicit = {
-{{range .InputSchemas}}            {{pyq .Name}}: FunctionSchema(
-                name={{pyq .Name}},
-                description={{pyq .Description}},
-                properties={{.Props}},
-                required={{.Required}},
-            ),
-{{end}}        }
-        return [explicit.get(getattr(tool, "__name__", None), tool) for tool in tools]
 {{end}}{{if $.NeedsStateBind}}
     def _bind_state(self, handler):
         """Give a module-level flows handler this worker's call state, so a task
@@ -1020,35 +986,16 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}
 {{range .Transfers}}
     @_direct_tool(cancel_on_interruption=False)
-    async def {{.MethodName}}(self, params: FunctionCallParams{{range .Inputs}}, {{.Name}}: {{.PyType}}{{if not .Required}} = None{{end}}{{end}}):
+    async def {{.MethodName}}(self, params: FunctionCallParams):
         """{{.When}}"""
-{{if .Inputs}}        # The brief, validated before the receiver is activated and before
-        # anything is spoken: a value outside its type is refused with the field
-        # named and nobody is handed over. This framework validates no tool
-        # argument itself, which is why this runs on both targets.
-        try:
-            _inputs = _typed_inputs({{pyq .MethodName}}, params.arguments)
-        except _StateRefused as refused:
-            logger.warning("{} expects: {}", {{pyq .MethodName}}, refused.message)
-            await params.result_callback({"refused": f"Not started: {refused.message}. Ask the caller, then hand over again with a value that fits."})
-            return
-{{end}}{{if .Announce}}        await self._announce_handoff({{pyq .Announce}})
+{{if .Announce}}        await self._announce_handoff({{pyq .Announce}})
 {{end}}{{if .CtxExpr}}        # context.history on this handoff. One LLMContext is shared for the whole
         # call, so the receiver is given the shaped list rather than a copy.
         self.context.set_messages({{.CtxExpr}})
-{{end}}{{if .ReceiverInputs}}        # The receiver's brief: every name its prompt reads is reset, then this
-        # handoff's own values are written, so it sees exactly what it was handed
-        # and nothing from an earlier visit. Written before activation, because
-        # on_activated renders the receiver's prompt from the shared state, and
-        # left in place after: a brief stays with its worker until the next
-        # handoff.
-{{range .ReceiverInputs}}        self.state.{{.}} = None
-{{end}}{{end}}{{if .Inputs}}        for _name, _value in _inputs.items():
-            setattr(self.state, _name, _value)
 {{end}}        await self.activate_worker(
             {{pyq .To}},
             args=LLMWorkerActivationArgs(
-                messages=[{"role": "developer", "content": {{pyq .Reason}}}],
+                messages=[],
                 run_llm=True,
             ),
             deactivate_self=True,
@@ -1234,32 +1181,17 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}{{if and .EndsCall (not .ColdDestination)}}        await params.llm.push_frame(EndFrame())
 {{end}}{{end}}{{$agentPromptExpr := .RuntimePromptExpr}}{{$agentSlngHeaders := .SlngHeaders}}{{range $d := .Delegates}}
     @_direct_tool
-    async def {{$d.MethodName}}(self, params: FunctionCallParams{{range $d.Inputs}}, {{.Name}}: {{.PyType}}{{if not .Required}} = None{{end}}{{end}}):
+    async def {{$d.MethodName}}(self, params: FunctionCallParams):
         """{{$d.When}}"""
 {{if $d.Announce}}        # Cover the entry: two model requests pass between the caller finishing and
         # the step's first word, and this puts speech in them. TTSSpeakFrame is a
         # DataFrame, so it is queued and speech starts while the flow is built.
         # Queued at the very start of the method, before anything else runs.
         await self.queue_frame(TTSSpeakFrame({{pyq $d.Announce}}))
-{{end}}{{if $d.Inputs}}        # What the step is handed, validated before the flow exists: refused the
-        # way finish refuses a bad result, so nothing is written and the message
-        # goes back to the model. This framework validates no tool argument
-        # itself, which is why this runs on both targets.
-        try:
-            _inputs = _typed_inputs({{pyq $d.Task}}, params.arguments)
-        except _StateRefused as refused:
-            logger.warning("{} expects: {}", {{pyq $d.Task}}, refused.message)
-            await params.result_callback({"refused": f"Not started: {refused.message}. Ask the caller, then run the step again with a value that fits."})
-            return
-        # Written to the shared state for this visit and put back when the step
-        # finishes: the node's prompt renders from the state on the way in, and
-        # an owner whose own brief shares a name gets it back.
-        self._{{$d.MethodName}}_previous = {{"{"}}{{range $i, $a := $d.Inputs}}{{if $i}}, {{end}}{{pyq $a.Name}}: self.state.{{$a.Name}}{{end}}{{"}"}}
-        for _name, _value in _inputs.items():
-            setattr(self.state, _name, _value)
-{{end}}        self._{{$d.MethodName}}_results = {}
-{{if $d.HasTransfers}}        self._{{$d.MethodName}}_active_step = {{pyq (index $d.StepTasks 0).Name}}
-{{end}}        flow = FlowManager(
+{{end}}        self._{{$d.MethodName}}_visit = object()
+        self._{{$d.MethodName}}_results = {}
+        self._{{$d.MethodName}}_active_step = {{pyq (index $d.StepTasks 0).Name}}
+        flow = FlowManager(
             llm=self.llm,
             context_aggregator=LLMContextAggregatorPair(self.context),
             worker=self,
@@ -1289,7 +1221,9 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}        await flow.initialize(self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
 {{range $t := $d.StepTasks}}
     def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:
-        return NodeConfig(
+{{if $t.Reset}}        self.context.set_messages([])
+{{else if $t.CtxExpr}}        self.context.set_messages({{$t.CtxExpr}})
+{{end}}        return NodeConfig(
             name={{pyq $t.Name}},
             role_message={{$t.PromptExpr}},
             task_messages=[{"role": "developer", "content": "Begin this step."}],
@@ -1304,16 +1238,16 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}{{range $t.Transfers}}                FlowsFunctionSchema(
                     name={{pyq .MethodName}},
                     description={{pyq .When}},
-                    properties={{if .Inputs}}{{.InputProps}}{{else}}{}{{end}},
-                    required={{if .Inputs}}{{.InputRequired}}{{else}}[]{{end}},
-                    handler={{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq .MethodName}}, self._{{$d.MethodName}}_transfer_{{$t.Name}}_{{.MethodName}}){{else}}self._{{$d.MethodName}}_transfer_{{$t.Name}}_{{.MethodName}}{{end}},
+                    properties={},
+                    required=[],
+                    handler=_flow_visit(self, {{pyq $d.MethodName}}, {{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq .MethodName}}, self._{{$d.MethodName}}_transfer_{{$t.Name}}_{{.MethodName}}){{else}}self._{{$d.MethodName}}_transfer_{{$t.Name}}_{{.MethodName}}{{end}}),
                 ),
 {{end}}                FlowsFunctionSchema(
                     name={{pyq $t.FinishName}},
                     description="Record the result of this step and finish.",
                     properties={{$t.ResultProps}},
                     required={{$t.ResultRequired}},
-                    handler={{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq $t.FinishName}}, self._{{$d.MethodName}}_finish_{{$t.Name}}){{else}}self._{{$d.MethodName}}_finish_{{$t.Name}}{{end}},
+                    handler=_flow_visit(self, {{pyq $d.MethodName}}, {{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq $t.FinishName}}, self._{{$d.MethodName}}_finish_{{$t.Name}}){{else}}self._{{$d.MethodName}}_finish_{{$t.Name}}{{end}}),
                 ),
             ],
 {{if or $d.Isolated $t.Reset}}            context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
@@ -1322,14 +1256,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{range $x := $t.Transfers}}    async def _{{$d.MethodName}}_transfer_{{$t.Name}}_{{$x.MethodName}}(self, args, flow_manager):
         if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
             return {"status": "already handled"}, NO_RESPONSE
-{{if $x.Inputs}}        # The brief, validated before anything moves: a refusal leaves the step
-        # active and the message goes back to the model.
-        try:
-            _inputs = _typed_inputs({{pyq $x.MethodName}}, dict(args))
-        except _StateRefused as refused:
-            logger.warning("{} expects: {}", {{pyq $x.MethodName}}, refused.message)
-            return {"refused": f"Not started: {refused.message}. Ask the caller, then hand over again with a value that fits."}, None
-{{end}}        self._{{$d.MethodName}}_active_step = None
+        self._{{$d.MethodName}}_active_step = None
         flow_messages = None
         flow_tools = None
         try:
@@ -1337,13 +1264,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             flow_tools = self.context.tools
 {{if $x.Announce}}            await self._announce_handoff({{pyq $x.Announce}})
 {{end}}            messages, tools = self._{{$d.MethodName}}_snapshot
-            task_start = len(messages) if flow_messages[:len(messages)] == messages else 0
-            task_messages = [
-                dict(message)
-                for message in flow_messages[task_start:]
-                if message.get("role") in {"user", "assistant", "tool"}
-            ]
-            self.context.set_messages(messages + task_messages)
+            self.context.set_messages({{$x.CtxExpr}})
             self.context.set_tools(tools)
 {{if $agentSlngHeaders}}            # This worker is about to be deactivated with the step's cache scope
             # still on its service. Put the owner's back before handing over, so
@@ -1351,17 +1272,10 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             await self.queue_frame(LLMUpdateSettingsFrame(
                 delta=LLMSettings(extra={"extra_headers": {{$agentSlngHeaders}}}),
             ))
-{{end}}{{if $x.ReceiverInputs}}            # The receiver's brief: reset, then written, before activation, so its
-            # prompt renders exactly what it was handed. Nothing of this step's
-            # own inputs is put back on this path: the caller is leaving with the
-            # brief, and a name the two share would be erased by a restore.
-{{range $x.ReceiverInputs}}            self.state.{{.}} = None
-{{end}}{{end}}{{if $x.Inputs}}            for _name, _value in _inputs.items():
-                setattr(self.state, _name, _value)
 {{end}}            await self.activate_worker(
                 {{pyq $x.To}},
                 args=LLMWorkerActivationArgs(
-                    messages=[{"role": "developer", "content": {{pyq $x.Reason}}}],
+                    messages=[],
                     run_llm=True,
                 ),
                 deactivate_self=True,
@@ -1387,29 +1301,29 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         return {"transferred": True}, NO_RESPONSE
 
 {{end}}    async def _{{$d.MethodName}}_finish_{{$t.Name}}(self, args, flow_manager):
-{{if $d.HasTransfers}}        if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
+        if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
             return {"status": "already handled"}, NO_RESPONSE
-        self._{{$d.MethodName}}_active_step = {{if $t.NextName}}{{pyq $t.NextName}}{{else}}None{{end}}
-{{end}}{{if $t.Typed}}        # Validated before anything is recorded: a value that does not fit its
+{{if $t.Typed}}        # Validated before anything is recorded: a value that does not fit its
         # declared type never enters the state, the previous contents stand, and
         # the message goes back to the model so it can correct itself on the next
         # turn instead of the step recording something wrong. This framework
         # validates no tool argument itself, so without this the two targets
         # would behave differently on the same package.
         try:
-            _values = _typed_result({{pyq $t.Name}}, dict(args))
+            _values = _save_result({{pyq $t.Name}}, self.state, dict(args))
         except _StateRefused as refused:
             logger.warning("finish {}: {}", {{pyq $t.Name}}, refused.message)
             return {"refused": f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."}, None
         self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = _values
 {{else}}        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
-{{end}}{{if $t.NextName}}{{if $t.SlngNextHeaders}}        # The next step is a different prompt site, so it asks under a different
+{{end}}        self._{{$d.MethodName}}_active_step = {{if $t.NextName}}{{pyq $t.NextName}}{{else}}None{{end}}
+{{if $t.NextName}}{{if $t.SlngNextHeaders}}        # The next step is a different prompt site, so it asks under a different
         # cache scope. Queued before the node is handed back, for the same reason
         # the first step's was.
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(extra={"extra_headers": {{$t.SlngNextHeaders}}}),
         ))
-{{end}}        return {"status": "ok", "result": self._{{$d.MethodName}}_results[{{pyq $t.Name}}]}, self._{{$d.MethodName}}_node_{{$t.NextName}}()
+{{end}}        return _task_status(self._{{$d.MethodName}}_results[{{pyq $t.Name}}]), self._{{$d.MethodName}}_node_{{$t.NextName}}()
 {{else}}{{if and $d.HasTransfers (ne $d.Then "end")}}        flow_messages = None
         flow_tools = None
         completion_started = False
@@ -1419,8 +1333,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             completion_started = True
             return await self._{{$d.MethodName}}_complete_{{$t.Name}}()
         except BaseException as error:
-            self._{{$d.MethodName}}_active_step = {{pyq $t.Name}}
-            self._{{$d.MethodName}}_results.pop({{pyq $t.Name}}, None)
+            # The save already committed. Keep its terminal claim; a retry cannot save it twice.
             try:
                 if flow_messages is not None:
                     self.context.set_messages(flow_messages)
@@ -1440,21 +1353,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             raise
 
     async def _{{$d.MethodName}}_complete_{{$t.Name}}(self):
-{{end}}{{if not (and $d.HasTransfers (ne $d.Then "end"))}}{{range $d.Assign}}{{if .Append}}        # An entry added, not the value replaced: only the step producing it knows
-        # whether the caller added an intent or swapped one, and the list starts
-        # empty so this never has to create it. The helper drops an absent entry
-        # and a structured one already on the list, so neither a step that
-        # concluded nothing nor a step re-entered mid-call grows it.
-        _append_entry(self.state.{{.Var}}, {{resultAccess (printf "self._%s_results[%s]" $d.MethodName (pyq $d.Task)) .Field}})
-{{else}}        self.state.{{.Var}} = {{resultAccess (printf "self._%s_results[%s]" $d.MethodName (pyq $d.Task)) .Field}}
-{{end}}{{if .Confirms}}        # The step that confirms this value has just assigned it, so it is settled
-        # now and the emitted _refusal helper stops holding it back. Discarded
-        # here rather than in the step's prompt: a model can be talked out of an
-        # instruction, not out of a set membership test. getattr with a default:
-        # this step can be reached on a path where the pre-fetch never ran, and a
-        # bare read there is an AttributeError inside a finish handler.
-        getattr(self.state, "_unconfirmed", set()).discard({{pyq .Var}})
-{{end}}{{end}}{{end}}{{if eq $d.Then "end"}}{{if $agentSlngHeaders}}        # The terminal node's goodbye is spoken by this agent, not by the step,
+{{end}}{{if not (and $d.HasTransfers (ne $d.Then "end"))}}{{end}}{{if eq $d.Then "end"}}{{if $agentSlngHeaders}}        # The terminal node's goodbye is spoken by this agent, not by the step,
         # so the owner's cache scope goes back first.
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(extra={"extra_headers": {{$agentSlngHeaders}}}),
@@ -1462,13 +1361,8 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}        # then: end — hand to a terminal node whose end_conversation
         # post-action ends the call after the goodbye drains (V4/B2).
         return {"status": "ok"}, self._{{$d.MethodName}}_end_node()
-{{else}}{{if $d.Inputs}}        # The visit is over: put back what the state held before it, before the
-        # owner's prompt is rendered again below, so an owner whose own brief
-        # shares a name reads its own value and not the step's.
-        for _name, _value in self._{{$d.MethodName}}_previous.items():
-            setattr(self.state, _name, _value)
-{{end}}        # then: {{$d.Then}} — restore the owner's pre-flow context (messages and
-        # tools); only the typed results cross back (merge: results, N13).
+{{else}}        # then: {{$d.Then}} — restore the owner's pre-flow context (messages and
+        # tools); only a completed or unserved status crosses back.
         messages, tools = self._{{$d.MethodName}}_snapshot
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(system_instruction={{$agentPromptExpr}}{{if $agentSlngHeaders}},
@@ -1482,31 +1376,17 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         await self.activate_worker(
             {{pyq $d.ThenTarget}},
             args=LLMWorkerActivationArgs(
-                messages=[{"role": "developer", "content": "Task results: " + json.dumps(self._{{$d.MethodName}}_results) + {{pyq $.ResultsHint}}}],
+                messages=[{"role": "developer", "content": json.dumps(_group_status(self._{{$d.MethodName}}_results))}],
                 run_llm=True,
             ),
             deactivate_self=True,
         )
 {{else}}        self.context.set_messages(messages + [{
             "role": "developer",
-            "content": "Task results: " + json.dumps(self._{{$d.MethodName}}_results) + {{pyq $.ResultsHint}},
+            "content": json.dumps(_group_status(self._{{$d.MethodName}}_results)),
         }])
         self.context.set_tools(tools)
-{{end}}{{if and $d.HasTransfers (ne $d.Then "end")}}{{range $d.Assign}}{{if .Append}}        # An entry added, not the value replaced: only the step producing it knows
-        # whether the caller added an intent or swapped one, and the list starts
-        # empty so this never has to create it. The helper drops an absent entry
-        # and a structured one already on the list, so neither a step that
-        # concluded nothing nor a step re-entered mid-call grows it.
-        _append_entry(self.state.{{.Var}}, {{resultAccess (printf "self._%s_results[%s]" $d.MethodName (pyq $d.Task)) .Field}})
-{{else}}        self.state.{{.Var}} = {{resultAccess (printf "self._%s_results[%s]" $d.MethodName (pyq $d.Task)) .Field}}
-{{end}}{{if .Confirms}}        # The step that confirms this value has just assigned it, so it is settled
-        # now and the emitted _refusal helper stops holding it back. Discarded
-        # here rather than in the step's prompt: a model can be talked out of an
-        # instruction, not out of a set membership test. getattr with a default:
-        # this step can be reached on a path where the pre-fetch never ran, and a
-        # bare read there is an AttributeError inside a finish handler.
-        getattr(self.state, "_unconfirmed", set()).discard({{pyq .Var}})
-{{end}}{{end}}{{end}}        return {"status": "ok"}, None
+{{end}}{{if and $d.HasTransfers (ne $d.Then "end")}}{{end}}        return {"status": "ok"}, None
 {{end}}{{end}}{{end}}{{if eq $d.Then "end"}}
     def _{{$d.MethodName}}_end_node(self) -> NodeConfig:
         # Terminal node: speak a brief closing line, then end_conversation ends
@@ -1518,7 +1398,16 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             post_actions=[{"type": "end_conversation"}],
         )
 {{end}}{{end}}
-{{end}}{{end}}{{if .FlowTools}}
+{{end}}{{end}}{{if and (not .Inline) .HasFlows}}
+def _flow_visit(worker, delegate, handler):
+    visit = getattr(worker, "_" + delegate + "_visit", None)
+    async def invoke(args, flow_manager):
+        if getattr(worker, "_" + delegate + "_visit", None) is not visit:
+            return {"status": "already handled"}, NO_RESPONSE
+        return await handler(args, flow_manager)
+    return invoke
+
+{{end}}{{if .FlowTools}}
 # --- task tools (flows handlers) ----------------------------------------------
 # Tools available inside task steps; stable module-level handlers so a
 # re-registered function name always resolves to the same callable.

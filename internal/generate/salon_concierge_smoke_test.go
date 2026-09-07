@@ -181,10 +181,7 @@ def run_context(userdata, call_id):
 async def create_then_cancel(userdata):
     ctx = run_context(userdata, "booking-finish")
     task = recording_task(agent.ManageBooking)
-    # The date is pre-fetched now, not asked for: driving the block here is what
-    # proves it resolves in the emitted module rather than only in a Go string,
-    # and that the value it lands is the one the booking step then works from.
-    await agent._prefetch(userdata, None)
+    # The date was pre-fetched before caller verification, as it is on a real call.
     assert userdata.booking_date, "the pre-fetch landed no booking_date"
     requested = (
         date.fromisoformat(userdata.booking_date) + timedelta(days=1)
@@ -285,6 +282,10 @@ async def main():
     assert customer["status"] == "created"
     actions.clear()
     userdata = agent.Userdata(customer_phone=customer["customer_phone"])
+    await agent._prefetch(userdata, None)
+    agent._save_result(
+        "verify_customer", userdata, {"customer_phone": customer["customer_phone"]}
+    )
     booking_id, slot_id = await create_then_cancel(userdata)
     booking_actions = [name for name, _, _ in actions]
     # look_up_customer appears because the pre-fetch runs it: this journey sets a
@@ -403,9 +404,7 @@ async def booking_flow(worker, context, *, action, booking_id=""):
         context.tools,
     )
     if action == "create":
-        # Same as the LiveKit side: the date is pre-fetched, and driving the block
-        # here is what proves the emitted Pipecat module resolves it.
-        await bot._prefetch(worker.state, None)
+        # Same as the LiveKit side: the date was pre-fetched before verification.
         assert worker.state.booking_date, "the pre-fetch landed no booking_date"
         requested = (
             date.fromisoformat(worker.state.booking_date) + timedelta(days=1)
@@ -548,6 +547,10 @@ async def main():
     assert customer["status"] == "created"
     actions.clear()
     state = bot.State(customer_phone=customer["customer_phone"])
+    await bot._prefetch(state, None)
+    bot._save_result(
+        "verify_customer", state, {"customer_phone": customer["customer_phone"]}
+    )
     context = LLMContext()
     worker = bot.ConciergeAgent(
         state=state, context=context, call_context={}, slng_session_id="smoke-session"

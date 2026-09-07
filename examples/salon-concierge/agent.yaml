@@ -21,14 +21,6 @@ agents:
           - find_or_create_customer
         assign:
           - customer_phone: result.customer_phone
-        result:
-          customer_phone: string
-          status:
-            enum:
-              - existing
-              - created
-              - invalid
-          summary: string
         context:
           history: full
 
@@ -44,16 +36,6 @@ agents:
           - cancel_booking
         handoffs:
           - to_complaints
-        result:
-          action:
-            enum:
-              - create
-              - modify
-              - cancel
-              - none
-          booking_id: string
-          status: string
-          summary: string
         context:
           history: full
     handoffs:

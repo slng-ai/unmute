@@ -83,7 +83,7 @@ split this page and [targets.yaml](/reference/targets-yaml) hold between them.
 | `listen` | string | with 2 or more listen chain heads | sole chain head | declared `models.listen` name | listen entry to use |
 | `turn` | string | with 2 or more turn entries | sole entry | declared `models.turn` name | turn entry to use |
 | `variables` | map | no |  | lower snake case names | per-call values |
-| `shapes` | list | no |  | one or more named field groups, `CapWords` names | field groups a variable's, a result's, or an expected value's `type:` can refer to |
+| `shapes` | list | no |  | one or more named field groups, `CapWords` names | field groups a variable's `type:` can refer to |
 | `prefetch` | **list** | no |  | one entry per fact, each with a `name:` | facts resolved once per call, before the greeting, in the order written |
 | `secrets` | list of strings | no |  | UPPER_SNAKE names | environment values the generated project reads |
 | `destinations` | map of strings | when an escalation is used |  | lower snake case names to UPPER_SNAKE env names | phone destinations an escalation may use |
@@ -263,10 +263,10 @@ shapes:
       - scheduled_time: Time
 ```
 
-A top-level list. Each item names one group of fields a variable's, a task's
-`result:`, or an `expect:` field can then use as its `type:`. Full field
-reference, the type grammar it shares with `result:` and `expect:`, and what
-it takes to reach the model as structured data:
+A top-level list. Each item names one group of fields a variable can use as its
+`type:`. Task finish fields derive that type from their assignment
+destinations. Full field reference and what it takes to reach the model as
+structured data:
 [variables](/reference/variables#shapes-groups-fields-into-a-named-type).
 
 ## `prefetch`
@@ -434,15 +434,6 @@ agents:
           - lookup_customer
         assign:
           - customer_id: result.customer_id
-        result:
-          customer_id: string
-          record_status:
-            enum:
-              - existing
-              - created
-              - failed
-        context:
-          history: full
 
   billing_desk:
     # appointment_desk already defines customer_record. A bare name runs the
@@ -457,18 +448,15 @@ agents:
 | `instructions` | the task's own prompt file |
 | `when` | the situation the model reads to decide whether to run the task. Absent makes the task a definition only, valid solely as a step of a task group; an agent naming such a task by bare name is refused |
 | `announce` | optional exact spoken text, said as the task is entered |
-| `expect` | optional list of typed fields the step expects when the agent runs it, each `- name: type` or a block with `name`, `type` and `description`. The agent fills them from the conversation it heard; a type ending in `\| None` marks one the agent may leave out. The step's prompt ends with a block naming each, and only that prompt may read them |
-| `assign` | write-back: a list of one-key `variable: result.<field>` pairs; the right side may be a dotted path into a declared shape, picking one part of the result into a declared variable. See [variables](/reference/variables#assigning-a-task-result-to-a-variable) |
+| `assign` | a list of one-key `variable: result.<field>` pairs. It derives the finish field's type and description from the destination and saves valid values together. The right side may be a dotted path into a declared shape |
 | `tools` | tool files this task may call; definitions never go here |
 | `handoffs` | entries under [`handoffs:`](#handoffs-escalations) this task may trigger |
 | `think` | optional override of the thinking model |
-| `result` | the typed result returned by the whole task, not a tool's `output` schema |
-| `context` | what the task sees, see below |
+| `context` | optional history choice; omission means `messages` |
 
-`requires` is not a field here, on a task group, or on a handoff: a package
-that writes it is refused as an unknown field. Order a step with the agent's
-own numbered flow and the step's `when:` instead, see [Order steps with the
-prompt](/best-practices/step-scoping#order-steps-with-the-prompt).
+`result`, `expect`, and `requires` are retired task fields. A package that
+writes one gets a located migration error. Declare variables, save them with
+`assign:`, and reference only the values a receiving prompt needs.
 
 Two agents defining a task under the same name is refused:
 
@@ -478,22 +466,9 @@ agent.yaml:17: task "verify_customer" is defined by agent "concierge" and again 
   one definition and let the other agent name it, "- verify_customer"
 ```
 
-Every task needs a non-empty `result:`. Each field's type is the same
-one-line [type grammar](/reference/variables#the-type-grammar) a variable's
-`type:` takes: a scalar, `Literal["a", "b"]`, `list[...]`, or a shape declared
-under [`shapes:`](#shapes). `string`, `number`, `integer`, `boolean`, and an
-`{enum: [...]}` block still work, and mean what they always did.
-
-`unserved_request` is reserved and a result declaring it is a validation error.
-Every generated task finish already takes it, optional and empty by default, for
-a request the step could not serve. See
-[tasks](/build/orchestration/tasks).
-
-**Task `result:` and tool `output:` are different contracts.** A task result is
-enforced and describes what the calling agent receives after the task finishes.
-A tool's optional `output:` is only an author-side description of one call today;
-it is not sent to the model, emitted in the compile report, or enforced at run
-time.
+A task may omit `assign:` and still finish. Every generated finish also takes
+optional `unserved_request`; it returns only an `unserved` status to the owner.
+Ordinary tool `input:` and `output:` JSON Schemas are unchanged.
 
 ### `context`
 
@@ -501,7 +476,7 @@ Used by tasks and by handoffs.
 
 | Field | Values | Notes |
 |---|---|---|
-| `history` | `full`, `messages`, `last_n`, `summary`, `reset` | required. `summary` compiles on livekit only; slng refuses every value, see [tasks](/build/orchestration/tasks) |
+| `history` | `full`, `messages`, `last_n`, `summary`, `reset` | optional; omission means `messages`. `summary` compiles on livekit only; slng refuses every value |
 | `max_messages` | a positive number | legal with `last_n` only |
 | `summarizer` | a model entry name | legal with `summary` only |
 | `include_tool_calls` | `true` or `false` | whether tool calls travel too |
@@ -539,8 +514,9 @@ task_groups:
 | `then_target` | an agent name, required with `transfer`, illegal otherwise |
 | `merge` | `results`; omitted also means `results` |
 
-When a task runs inside a group, the group's `context_scope` governs it. The
-member task's own `context` does not override the group.
+The group decides whether members share the group's running conversation. Each
+member still applies its own `context.history`. An isolated group cannot be
+widened by a member's `full`.
 
 ## `handoffs`, `escalations`
 
@@ -557,12 +533,11 @@ The conversation becomes another agent, and never comes back.
 | `to` | required; names an entry under `agents:` |
 | `when` | the situation the model reads |
 | `announce` | optional exact spoken text |
-| `expect` | optional list of typed fields the receiving agent expects, the same shape a task's `expect` takes; its prompt ends with a block naming each |
-| `context` | payload: `history` |
+| `context` | optional history choice; omission means `messages` |
 
-A `context:` block needs `history`. Every declared variable travels with the
-caller already, with nothing to write: see
-[variables](/reference/variables#a-handoff-keeps-every-declared-value).
+Saved state stays with the call, but the receiving model sees only values its
+prompt references. A reset handoff gets no automatic briefing or triggering
+sentence.
 
 `announce` is exact spoken text, not a model instruction: write the short
 sentence the caller should hear. Omit it for a silent handoff.

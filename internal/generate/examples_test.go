@@ -51,7 +51,7 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 // single-agent shape the compiler tests need.
 func examplePackagePath(name string) string {
 	switch name {
-	case "remy", "safe_core", "daily_carrier", "simple-prompt", "typed_state", "typed_inputs":
+	case "remy", "safe_core", "daily_carrier", "simple-prompt", "typed_state", "typed_inputs", "prefetch_core":
 		return filepath.Join("..", "testdata", name)
 	case "salon-concierge-v2", "salon-concierge-v3":
 		// Not a shipped example. It is a package we run against real providers,
@@ -375,9 +375,8 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if _, ok := resolved.Tools["find_or_create_customer"]; !ok {
 		t.Error("find_or_create_customer is gone; it is the writing twin the pre-fetched lookup exists to avoid")
 	}
-	wantBookingResult := []string{"action", "booking_id", "status", "summary"}
-	if got := slices.Sorted(maps.Keys(booking.Result)); !slices.Equal(got, wantBookingResult) {
-		t.Errorf("booking result = %v, want %v", got, wantBookingResult)
+	if got := slices.Sorted(maps.Keys(booking.Result)); len(got) != 0 {
+		t.Errorf("booking result = %v, want none because this task saves no variables", got)
 	}
 	bookingDelegate, ok := resolved.Controls["manage_booking"].(*ir.Delegate)
 	if !ok || bookingDelegate.Task != "manage_booking" || bookingDelegate.Group != "" {
@@ -587,14 +586,14 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	}
 	requireText("verification delegate", verificationDelegate.When,
 		"reads the phone number back", "needs a yes before it looks anyone up")
-	if slices.Contains(ir.AssignedVars(verificationDelegate.Assign), "customer_name") {
+	if slices.Contains(ir.AssignedVars(verification.Assign), "customer_name") {
 		t.Error("verify_customer still assigns customer_name")
 	}
 	// Assigned from the result rather than captured from speech: a task result
 	// lands on both drivers by the same path customer_id already proves, while a
 	// conversation-sourced value depends on the capture tool firing, which is
 	// the write site Pipecat missed once already.
-	if got := assignedField(verificationDelegate.Assign, "customer_phone"); got != "customer_phone" {
+	if got := assignedField(verification.Assign, "customer_phone"); got != "customer_phone" {
 		t.Errorf("verify_customer assigns customer_phone from result.%q, want result.customer_phone", got)
 	}
 	lookup := resolved.Tools["find_or_create_customer"]
@@ -722,7 +721,7 @@ func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
 	if !ok {
 		t.Fatalf("verify_customer = %#v, want a delegate", resolved.Controls["verify_customer"])
 	}
-	if got := assignedField(verify.Assign, "customer"); got != "customer" {
+	if got := assignedField(resolved.Tasks[verify.Task].Assign, "customer"); got != "customer" {
 		t.Errorf("verify_customer assigns customer from result.%q, want result.customer: nothing else in the package supplies it", got)
 	}
 
@@ -830,7 +829,7 @@ func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
 		}
 		for _, variable := range variables {
 			appends := false
-			for _, entry := range delegate.Assign {
+			for _, entry := range resolved.Tasks[delegate.Task].Assign {
 				if entry.Var == variable {
 					appends = entry.Append
 				}
@@ -841,7 +840,7 @@ func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
 		}
 	}
 	// And the step that cannot see the conversation records nothing about it.
-	if got := ir.AssignedVars(verify.Assign); slices.Contains(got, "caller_reason") {
+	if got := ir.AssignedVars(resolved.Tasks[verify.Task].Assign); slices.Contains(got, "caller_reason") {
 		t.Errorf("verify_customer assigns %v; a reason recorded by a step running on a reset history can "+
 			"only be asked for, and asking is what this step must never do", got)
 	}

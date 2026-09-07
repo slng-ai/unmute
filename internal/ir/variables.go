@@ -95,27 +95,20 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 	for _, name := range sortedKeys(pkg.Tools) {
 		raw := pkg.Tools[name]
 		file := filepath.Join("tools", name+".yaml")
-		// The inputs this tool's hidden values may read: required, and handed to
-		// every site the tool is attached to. Decided once per tool, because the
-		// message has to name the site that is not handed the input, and the
-		// shared check below knows the tool only as a formatted site string.
-		inputs, err := checkToolInputReads(pkg, agent, name, raw)
-		if err != nil {
-			return err
-		}
-		for _, key := range sortedKeys(raw.Inject) {
-			value, ok := raw.Inject[key].(string)
+		for _, pair := range raw.Inject {
+			key := pair.Key
+			value, ok := pair.Value.(string)
 			if !ok {
 				continue
 			}
 			site := fmt.Sprintf("tool %q inject %q", name, key)
-			if err := checkTemplateSite(pkg, agent, file, key, site, value, false, false, inputs...); err != nil {
+			if err := checkTemplateSite(pkg, agent, file, key, site, value, false, false); err != nil {
 				return err
 			}
 		}
 		if raw.Webhook != nil && raw.Webhook.Path != "" {
 			site := fmt.Sprintf("tool %q webhook.path", name)
-			if err := checkTemplateSite(pkg, agent, file, "path:", site, raw.Webhook.Path, false, false, inputs...); err != nil {
+			if err := checkTemplateSite(pkg, agent, file, "path:", site, raw.Webhook.Path, false, false); err != nil {
 				return err
 			}
 		}
@@ -154,28 +147,6 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 		root, fields := PathRoot(ref), PathFields(ref)
 		variable, ok := agent.Variables[root]
 		if !ok {
-			// An expected value is read by the prompt it was handed to and nowhere else.
-			// At run time the value sits on the shared call state for its visit,
-			// so this refusal is the only thing keeping a step's request out of
-			// its parent's prompt. A tool's inject may read one when
-			// checkToolInputReads has allowed it.
-			if sites := inputSites(agent, root); len(sites) > 0 {
-				if !slices.Contains(sites, site) && !slices.Contains(alsoAllowed, root) {
-					what := "which is"
-					if len(fields) > 0 {
-						what = "and " + root + " is"
-					}
-					return fmt.Errorf("%s: %s references {{%s}}, %s a value %s expects to be handed. Only the prompt that "+
-						"expects it may read it: name it there, and here ask the caller or read a declared variable",
-						where, site, ref, what, strings.Join(sites, " and "))
-				}
-				if len(fields) > 0 {
-					if err := checkPathFields(agent.Shapes, root, "", inputType(agent, root), fields); err != nil {
-						return fmt.Errorf("%s: %s references {{%s}}: %w", where, site, ref, err)
-					}
-				}
-				continue
-			}
 			if slices.Contains(agent.Secrets, root) || envNamePattern.MatchString(root) {
 				return fmt.Errorf("%s: %s references {{%s}}, but secrets never flow through templates; a secret reaches a tool through its own *_env field", where, site, ref)
 			}
@@ -183,29 +154,6 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 		}
 		if requireNow && !hasSessionStartValue(agent, root, variable) && !slices.Contains(alsoAllowed, root) {
 			return fmt.Errorf("%s: %s references {{%s}}, which has no value when the prompt is built; give it source: call_start, a system source, or a default", where, site, ref)
-		}
-		// Refusal 16. A value awaiting confirmation renders in exactly one prompt:
-		// the one belonging to the step that confirms it. Everywhere else is a
-		// place the model would read a number nobody has agreed to, and the worst
-		// version is not a wrong booking, it is greeting a stranger by the account
-		// holder's name.
-		//
-		// Scoped to prompt sites, which is what prompt marks: the greeting, an
-		// agent's instructions and a task's instructions all pass true here, while
-		// `inject:` and a webhook path pass false. That is not a coincidence worth
-		// relying on silently, so: a prompt is a thing the model reads, and this
-		// rule is about what the model may read.
-		//
-		// An `inject:` value is never read by the model at all, it goes straight
-		// into a request, so the risk there is different: the request would reach
-		// somebody else's record. That one is held at run time by the emitted
-		// refusal helper, which treats an unconfirmed name as unset wherever the
-		// tool is attached. Refusing it here instead would have made the value
-		// unusable by any tool, which is most of what a confirmed number is for.
-		if step := variable.Confirm; prompt && step != "" && site != confirmingSite(step) {
-			return fmt.Errorf("%s: %s references {{%s}}, which the caller has not confirmed yet. It renders only in "+
-				"task %q, the step that confirms it. Read it back there, and name it here only after that step has "+
-				"assigned it", where, site, ref, step)
 		}
 		if len(fields) > 0 {
 			if err := checkPathFields(agent.Shapes, root, string(variable.Type), variable.Shape, fields); err != nil {
@@ -285,15 +233,25 @@ func checkInject(pkg *packagespec.Package) error {
 			}
 		}
 		properties, _ := raw.Input["properties"].(map[string]any)
-		for _, key := range sortedKeys(raw.Inject) {
+		seen := make(map[string]bool)
+		required, _ := stringSlice(raw.Input["required"])
+		for _, pair := range raw.Inject {
+			key := pair.Key
+			if seen[key] {
+				return fmt.Errorf("%s: inject names %q twice", pkg.Location(file, "inject:"), key)
+			}
+			seen[key] = true
+			if slices.Contains(required, key) {
+				return fmt.Errorf("%s: injected key %q must be absent from input.required", pkg.Location(file, "inject:"), key)
+			}
 			if _, ok := properties[key]; ok {
 				return fmt.Errorf("%s: tool %q injects %q, which is also an input property; an injected value is hidden from the model, so it cannot double as a parameter the model fills in",
 					pkg.Location(file, key), name, key)
 			}
-			if value, ok := raw.Inject[key].(map[string]any); ok && value != nil {
+			if value, ok := pair.Value.(map[string]any); ok && value != nil {
 				return fmt.Errorf("%s: tool %q inject %q must be a scalar", pkg.Location(file, key), name, key)
 			}
-			if value, ok := raw.Inject[key].([]any); ok && value != nil {
+			if value, ok := pair.Value.([]any); ok && value != nil {
 				return fmt.Errorf("%s: tool %q inject %q must be a scalar", pkg.Location(file, key), name, key)
 			}
 		}

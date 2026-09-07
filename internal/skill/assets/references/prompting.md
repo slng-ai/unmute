@@ -387,23 +387,22 @@ agents sharing one file is a sign they should be one agent.
 
 ### A task's instructions
 
-Shorter and narrower. A task has one job, its own tool list, and a typed
-`result:` it has to come back with.
+Shorter and narrower. A task has one job, its own tool list, and any typed
+finish fields derived from its `assign:` destinations.
 
 - **Skip identity and personality.** The caller is still hearing the same voice,
   and repeating a personality block in every task gives you five places to
   change it.
 - **Keep output rules only if the task speaks.** Most do.
-- **State the result contract in words.** The schema makes the shape mandatory;
-  the prompt makes the meaning clear. Say what `record_status: failed` means and
-  when to use it.
+- **State saved-value meaning in words.** Variable descriptions shape the
+  finish schema; the prompt says when each outcome applies.
 - **Say what to do when it cannot finish.** A task with no failure path invents
   one.
 - **Skip the finish contract and the off-topic escape.** The compiler appends
   both to every task prompt: which fields `finish` takes, and to call it with
   the caller's request in `unserved_request` instead of refusing when the step's
-  tools cannot serve it. `unserved_request` is reserved; do not put it in
-  `result:`.
+  tools cannot serve it. `unserved_request` is reserved and added by the
+  compiler.
 
 ```markdown
 Find out who is calling.

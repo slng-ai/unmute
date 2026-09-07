@@ -13,6 +13,44 @@ import (
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
+func TestGroupOnlyTaskValidatesAssignments(t *testing.T) {
+	pkg := loadSafeCore(t)
+	attachStep(pkg, "intake", packagespec.Task{
+		Name: "collect", Instructions: "collect.md",
+		Assign: []packagespec.Pair{{Key: "undeclared", Value: "result.id"}},
+	}, "Collect the customer ID.")
+	delete(pkg.Callables, "collect")
+	pkg.Agent.TaskGroups = map[string]packagespec.TaskGroup{"collect_group": {
+		Steps: []string{"collect"}, When: "Collect", ContextScope: "shared", Then: "return",
+	}}
+	owner := pkg.Agent.Agents["intake"]
+	owner.TaskGroups = []string{"collect_group"}
+	pkg.Agent.Agents["intake"] = owner
+	pkg.Callables["collect_group"] = packagespec.Callable{Group: "collect_group", When: "Collect"}
+	_, err := Build(pkg)
+	if err == nil || !strings.Contains(err.Error(), "undeclared") {
+		t.Fatalf("group-only assignment must be checked, got %v", err)
+	}
+	task := pkg.Tasks["collect"]
+	task.Assign[0].Key = "customer_id"
+	pkg.Tasks["collect"] = task
+	resolved, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resolved.Tasks["collect"].Assign; len(got) != 1 || got[0].Var != "customer_id" {
+		t.Fatalf("group-only task lost assignments: %v", got)
+	}
+	pkg.Callables["collect"] = packagespec.Callable{Task: "collect", When: "Collect"}
+	resolved, err = Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resolved.Tasks[resolved.Controls["collect"].(*Delegate).Task].Assign; len(got) != 1 {
+		t.Fatalf("reused task lost its assignments: %v", got)
+	}
+}
+
 func TestBuildBuiltinToolResolvesRegistryDefaults(t *testing.T) {
 	pkg := loadSafeCore(t)
 	tool := pkg.Tools["lookup_customer"]
@@ -1093,7 +1131,6 @@ func addTask(pkg *packagespec.Package, name string) {
 	pkg.Tasks[name] = packagespec.Task{
 		Name:         name,
 		Instructions: "instructions.md",
-		Result:       map[string]any{"balance": "string"},
 		Context:      packagespec.TaskContext{History: "full"},
 	}
 }
@@ -1110,8 +1147,7 @@ func addTask(pkg *packagespec.Package, name string) {
 func TestDelegateAnnounceIsAFieldOfItsOwn(t *testing.T) {
 	pkg := loadSafeCore(t)
 	task := packagespec.Task{
-		Name: "collect", Instructions: "instructions.md", Result: map[string]any{"ok": "boolean"},
-		When: "Collect the details.", Announce: "  One moment.  ",
+		Name: "collect", Instructions: "instructions.md", When: "Collect the details.", Announce: "  One moment.  ",
 	}
 	def := pkg.Agent.Agents["intake"]
 	def.Tasks = append(def.Tasks, packagespec.TaskItem{Task: &task})
@@ -1678,7 +1714,6 @@ func TestBuildAssignRefusalNamesTheVariablesBlock(t *testing.T) {
 		Name: "verify_customer", Instructions: "tasks/verify.md",
 		When:    "Confirm who the caller is.",
 		Assign:  []packagespec.Pair{{Key: "customer_status", Value: "result.status"}},
-		Result:  map[string]any{"status": "string"},
 		Context: packagespec.TaskContext{History: "full"},
 	}, "Read the number back.")
 
@@ -1691,6 +1726,23 @@ func TestBuildAssignRefusalNamesTheVariablesBlock(t *testing.T) {
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal is missing %q:\n%v", want, err)
+		}
+	}
+}
+
+func TestOmittedHistoryMeansMessages(t *testing.T) {
+	if got := buildTaskContext(packagespec.TaskContext{}).History; got != HistoryMessages {
+		t.Errorf("task default %q", got)
+	}
+	for _, raw := range []*packagespec.TransferContext{nil, {}} {
+		got, err := buildTransferContext(&packagespec.Package{}, raw, &Agent{})
+		if err != nil || got.History != HistoryMessages {
+			t.Errorf("handoff default %+v, %v", got, err)
+		}
+	}
+	for _, history := range []History{HistoryReset, HistoryMessages, HistoryFull, HistoryLastN, HistorySummary} {
+		if got := buildTaskContext(packagespec.TaskContext{History: string(history)}).History; got != history {
+			t.Errorf("%q became %q", history, got)
 		}
 	}
 }

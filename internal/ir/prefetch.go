@@ -47,6 +47,9 @@ func buildPrefetch(pkg *packagespec.Package, agent *Agent) error {
 	if err := refuseRetiredTimezone(pkg); err != nil {
 		return err
 	}
+	if err := checkConfirmSteps(pkg, agent); err != nil {
+		return err
+	}
 	if len(pkg.Agent.Prefetch) == 0 {
 		return nil
 	}
@@ -85,7 +88,7 @@ func buildPrefetch(pkg *packagespec.Package, agent *Agent) error {
 		}
 		agent.Prefetch = append(agent.Prefetch, entry)
 	}
-	return checkConfirmSteps(pkg, agent)
+	return nil
 }
 
 // refuseRetiredTimezone catches a package still carrying the old package-level
@@ -228,30 +231,49 @@ func buildPrefetchEntry(pkg *packagespec.Package, agent *Agent, raw packagespec.
 // checkPrefetchArgs resolves `args:` into Inputs and refuses rules 13 and 14.
 func checkPrefetchArgs(pkg *packagespec.Package, agent *Agent, raw packagespec.Prefetch, entry *Prefetch, where string,
 	assignedBy func(string) (string, bool), later map[string]string) error {
+	var texts []string
 	for _, pair := range raw.Args {
 		entry.Args = append(entry.Args, Pair{Key: pair.Key, Value: pair.Value})
-		text, ok := pair.Value.(string)
-		if !ok {
-			continue
+		if text, ok := pair.Value.(string); ok {
+			texts = append(texts, text)
 		}
+	}
+	tool := agent.Tools[entry.Tool]
+	for _, key := range sortedKeys(tool.Inject) {
+		if text, ok := tool.Inject[key].(string); ok {
+			texts = append(texts, text)
+		}
+	}
+	texts = append(texts, tool.Path)
+	for _, text := range texts {
 		for _, ref := range TemplateRefs(text) {
-			if _, declared := agent.Variables[ref]; !declared {
-				return fmt.Errorf("%s: prefetch %q reads {{%s}}, which is not a declared variable. Declare it in the "+
-					"variables: block of agent.yaml", where, raw.Name, ref)
+			root := PathRoot(ref)
+			if _, vault := VaultToken(ref); vault {
+				if err := checkTemplateSite(pkg, agent, "agent.yaml", "prefetch:", "prefetch "+raw.Name, text, false, false); err != nil {
+					return err
+				}
+				continue
 			}
-			// Rule 14. Reading a value an *earlier* entry assigned is the intended
-			// shape and is why the block is ordered at all. Reading one a *later*
-			// entry assigns is the same author's same intent written upside down,
-			// so the refusal says which line to move rather than reordering for them.
-			if _, earlier := assignedBy(ref); !earlier {
-				if supplier, ok := later[ref]; ok {
-					return fmt.Errorf("%s: prefetch %q reads {{%s}}, which prefetch %q assigns further down the list. "+
-						"Entries resolve in the order you wrote them: move %q above %q",
-						where, raw.Name, ref, supplier, supplier, raw.Name)
+			variable, declared := agent.Variables[root]
+			if !declared {
+				if slices.Contains(agent.Secrets, root) || envNamePattern.MatchString(root) {
+					return fmt.Errorf("%s: prefetch %q reads {{%s}}, but secrets never flow through templates; a secret reaches a tool through its own *_env field", where, raw.Name, ref)
+				}
+				return fmt.Errorf("%s: prefetch %q reads {{%s}}, which is not a declared variable", where, raw.Name, ref)
+			}
+			if fields := PathFields(ref); len(fields) > 0 {
+				if err := checkPathFields(agent.Shapes, root, string(variable.Type), variable.Shape, fields); err != nil {
+					return fmt.Errorf("%s: prefetch %q reads {{%s}}: %w", where, raw.Name, ref, err)
 				}
 			}
-			if !slices.Contains(entry.Inputs, ref) {
-				entry.Inputs = append(entry.Inputs, ref)
+			if _, earlier := assignedBy(root); !earlier {
+				if supplier, ok := later[root]; ok {
+					return fmt.Errorf("%s: prefetch %q reads {{%s}}, which prefetch %q assigns further down the list. Entries resolve in the order you wrote them: move %q above %q", where, raw.Name, ref, supplier, supplier, raw.Name)
+				}
+			}
+			flat := strings.ReplaceAll(ref, ".", emittedPathSep)
+			if !slices.Contains(entry.Inputs, flat) {
+				entry.Inputs = append(entry.Inputs, flat)
 			}
 		}
 	}
@@ -328,7 +350,7 @@ func checkPrefetchAssign(pkg *packagespec.Package, agent *Agent, raw packagespec
 func deriveConfirmation(pkg *packagespec.Package, agent *Agent, entry *Prefetch, where string) error {
 	var carriers, steps []string
 	for _, name := range entry.Inputs {
-		if step := agent.Variables[name].Confirm; step != "" {
+		if step := agent.Variables[PathRoot(name)].Confirm; step != "" {
 			carriers = append(carriers, "{{"+name+"}}")
 			if !slices.Contains(steps, step) {
 				steps = append(steps, step)
@@ -338,7 +360,7 @@ func deriveConfirmation(pkg *packagespec.Package, agent *Agent, entry *Prefetch,
 	switch len(steps) {
 	case 0:
 		// A directly-assigned variable still carries its own confirm:, which the
-		// emitted block reads off the variable rather than off the entry.
+		// emitted guards read off the variable rather than off the entry.
 	case 1:
 		entry.Confirm = steps[0]
 	default:
@@ -350,12 +372,13 @@ func deriveConfirmation(pkg *packagespec.Package, agent *Agent, entry *Prefetch,
 		return nil
 	}
 	// The inherited step lands on the variable, because that is where every reader
-	// of confirmation looks: the render restriction, the composed state block and
-	// the emitted `_refusal` helper all read Variable.Confirm.
+	// of confirmation looks: prompt rendering, router scoping and the emitted
+	// `_refusal` helper all read Variable.Confirm.
 	for _, pair := range entry.Assign {
 		variable := agent.Variables[pair.Key]
 		if variable.Confirm == "" {
 			variable.Confirm = entry.Confirm
+			variable.ConfirmInherited = true
 			agent.Variables[pair.Key] = variable
 		}
 	}
@@ -375,6 +398,9 @@ func checkConfirmSteps(pkg *packagespec.Package, agent *Agent) error {
 			return fmt.Errorf("%s: variable %q names confirm: %s, and no step by that name runs. Name a task an "+
 				"agent runs, such as %s", pkg.Location("agent.yaml", name), name, step,
 				firstOr(runnableTasks(agent), "verify_customer"))
+		}
+		if !agent.Variables[name].ConfirmInherited && !slices.Contains(AssignedVars(agent.Tasks[step].Assign), name) {
+			return fmt.Errorf("%s: confirming task %q must assign variable %q after the caller agrees", pkg.Location("agent.yaml", name), step, name)
 		}
 	}
 	return nil
@@ -498,7 +524,7 @@ func prefetchReaders(agent *Agent, assigned []string) []string {
 	var names []string
 	for _, entry := range agent.Prefetch {
 		for _, input := range entry.Inputs {
-			if slices.Contains(assigned, input) {
+			if slices.Contains(assigned, PathRoot(input)) {
 				names = append(names, fmt.Sprintf("%q", entry.Name))
 				break
 			}

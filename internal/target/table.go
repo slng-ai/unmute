@@ -58,25 +58,25 @@ const (
 type Field string
 
 const (
-	FieldListenLocal           Field = "pipeline.listen.placement.local"
-	FieldSpeakLocal            Field = "pipeline.speak.placement.local"
-	FieldSpeakEndpoint         Field = "bindings.speak.endpoint_env"
-	FieldReasonLocal           Field = "models.placement.local"
-	FieldTurnPlacement         Field = "pipeline.turn.placement"
-	FieldSemanticEndpointing   Field = "pipeline.turn.semantic_endpointing"
-	FieldEndpointingDelay      Field = "pipeline.turn.endpointing_delay"
-	FieldPace                  Field = "pipeline.turn.pace"
-	FieldFallback              Field = "models.fallback"
-	FieldListenFallback        Field = "models.listen.fallback"
-	FieldTask                  Field = "tasks"
-	FieldTaskModel             Field = "tasks.model"
-	FieldTaskNestedResult      Field = "tasks.result.nested"
-	FieldTaskGroup             Field = "task_groups"
-	FieldTaskGroupReturn       Field = "task_groups.then.return"
-	FieldContextIsolated       Field = "task_groups.context_scope.isolated"
-	FieldTransferAnnounce      Field = "controls.agent_transfer.announce"
-	FieldContextNoToolCalls    Field = "context.include_tool_calls.false"
-	FieldInput                 Field = "expect"
+	FieldListenLocal         Field = "pipeline.listen.placement.local"
+	FieldSpeakLocal          Field = "pipeline.speak.placement.local"
+	FieldSpeakEndpoint       Field = "bindings.speak.endpoint_env"
+	FieldReasonLocal         Field = "models.placement.local"
+	FieldTurnPlacement       Field = "pipeline.turn.placement"
+	FieldSemanticEndpointing Field = "pipeline.turn.semantic_endpointing"
+	FieldEndpointingDelay    Field = "pipeline.turn.endpointing_delay"
+	FieldPace                Field = "pipeline.turn.pace"
+	FieldFallback            Field = "models.fallback"
+	FieldListenFallback      Field = "models.listen.fallback"
+	FieldTask                Field = "tasks"
+	FieldTaskModel           Field = "tasks.model"
+	FieldTaskNestedResult    Field = "tasks.result.nested"
+	FieldTaskGroup           Field = "task_groups"
+	FieldTaskGroupReturn     Field = "task_groups.then.return"
+	FieldContextIsolated     Field = "task_groups.context_scope.isolated"
+	FieldTransferAnnounce    Field = "controls.agent_transfer.announce"
+	FieldContextNoToolCalls  Field = "context.include_tool_calls.false"
+
 	FieldTransferBriefing      Field = "controls.human_transfer.warm.briefing"
 	FieldGreetingUserFirst     Field = "conversation.greeting.user"
 	FieldGreetingModelWritten  Field = "conversation.greeting.model_written"
@@ -372,13 +372,6 @@ func Default() Table {
 			// composed state block to be.
 			FieldTypedState: field(deny(Slng, slngNoModule("a value with a declared shape"))),
 			FieldShapedText: field(deny(Slng, slngNoModule("a value whose text has a validated shape"))),
-			// An expected value is validated where it enters and written into the
-			// receiving prompt for one visit, and both happen inside the module
-			// the two code drivers write. This target writes none, so there is
-			// nothing to hand a value to.
-			FieldInput: field(deny(Slng, "slng target pushes a spec and emits no module of its own, so an expect: list "+
-				"has nowhere to be handed in, checked or written into a prompt: remove the expect: lists, or compile to "+
-				"livekit or pipecat, which validate each value where it enters and hand it to the receiving prompt")),
 			FieldContextNoToolCalls: field(
 				deny(Pipecat, "the Pipecat driver does not shape transfer context (include_tool_calls) yet"),
 				deny(Slng, slngNoHandoff("include_tool_calls: false")),

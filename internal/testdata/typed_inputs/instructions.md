@@ -13,10 +13,9 @@ Everything you say is rendered as audio.
 ## What to do
 
 1. Find out what the caller wants.
-2. When they want a thing done, run the step for it, handing in what they said.
+2. When they want a thing done, run the step for it. It keeps their speech.
    If they have not said which kind, ask before you run it.
-3. When they have a problem you cannot solve, hand them to the specialist with
-   the problem in their own words.
+3. When they have a problem you cannot solve, hand them to the specialist.
 
-When you come back from the specialist, continue from what you were handed
-below. Do not greet the caller again.
+When you come back from the specialist, continue the conversation. Do not greet
+the caller again.

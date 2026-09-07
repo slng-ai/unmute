@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"go/parser"
 	"go/token"
@@ -812,34 +813,32 @@ func TestV19TaskShowsExistingToolsAsChoices(t *testing.T) {
 	}
 }
 
-func TestV22TaskResultExplainsPrefilledShape(t *testing.T) {
+func TestTaskEditorDerivesOutputs(t *testing.T) {
 	data := scaffold.Data{}
 	data.SetTarget("pipecat")
 	var output bytes.Buffer
-	err := editTasks(newRunner(strings.NewReader("1\ncollect\n4\n"), &output, true), &data)
-	if !errors.Is(err, errAborted) {
-		t.Fatalf("editTasks() error = %v, want ErrUserAborted", err)
+	_ = editTasks(newRunner(strings.NewReader("1\ncollect\n"), &output, true), &data)
+	if strings.Contains(output.String(), "Typed result") {
+		t.Fatal("task editor still asks for a second type declaration")
 	}
-	for _, want := range []string{`{"result":"string"}`, "Each key becomes one returned field"} {
-		if !strings.Contains(output.String(), want) {
-			t.Errorf("task result help missing %q:\n%s", want, output.String())
-		}
+	if !strings.Contains(output.String(), "Result assignments") {
+		t.Fatal("task editor lost saving")
 	}
 }
 
 func TestV19TaskAssignmentPicksSavedVariableAndResultField(t *testing.T) {
 	data := scaffold.Data{Variables: []scaffold.Variable{{Name: "verified", Type: "boolean"}, {Name: "tier", Type: "string"}}}
-	task := scaffold.Task{Result: `{"verified":"boolean","tier":{"enum":["free","pro"]}}`}
+	task := scaffold.Task{}
 	var output bytes.Buffer
-	back, err := editTaskAssignments(newRunner(strings.NewReader("1\n3\n1\n2\n2\n"), &output, true), &data, &task)
+	back, err := editTaskAssignments(newRunner(strings.NewReader("1\n3\n2\n"), &output, true), &data, &task)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if back {
 		t.Fatal("editTaskAssignments() unexpectedly went back")
 	}
-	if task.Assign != `{"verified":"result.verified"}` {
-		t.Fatalf("task assignment = %s", task.Assign)
+	if len(task.Assign) != 1 || assignmentField(task.Assign, "verified") != "verified" {
+		t.Fatalf("task assignment = %v", task.Assign)
 	}
 	for _, want := range []string{"verified", "tier"} {
 		if !strings.Contains(output.String(), want) {
@@ -856,7 +855,7 @@ func TestV39TaskResultAssignmentCanBeRemoved(t *testing.T) {
 		{
 			name: "remaining map", result: `{"company":"string","customer_name":"string"}`,
 			assign: `{"company":"result.company","customer_name":"result.customer_name"}`,
-			input:  "3\n1\n3\n2\n", want: `{"customer_name":"result.customer_name"}`,
+			input:  "3\n1\n2\n2\n", want: `{"customer_name":"result.customer_name"}`,
 			variables: []scaffold.Variable{{Name: "company", Type: "string"}, {Name: "customer_name", Type: "string"}},
 		},
 		{
@@ -867,7 +866,16 @@ func TestV39TaskResultAssignmentCanBeRemoved(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			data := scaffold.Data{Variables: test.variables}
-			task := scaffold.Task{Result: test.result, Assign: test.assign}
+			var entries map[string]string
+			if err := json.Unmarshal([]byte(test.assign), &entries); err != nil {
+				t.Fatal(err)
+			}
+			task := scaffold.Task{}
+			for _, variable := range test.variables {
+				if value, ok := entries[variable.Name]; ok {
+					task.Assign = append(task.Assign, spec.Pair{Key: variable.Name, Value: value})
+				}
+			}
 			var output bytes.Buffer
 			back, err := editTaskAssignments(newRunner(strings.NewReader(test.input), &output, true), &data, &task)
 			if err != nil {
@@ -876,8 +884,18 @@ func TestV39TaskResultAssignmentCanBeRemoved(t *testing.T) {
 			if back {
 				t.Fatal("removing an assignment unexpectedly went back")
 			}
-			if task.Assign != test.want {
-				t.Fatalf("task assignment = %q, want %q", task.Assign, test.want)
+			want := map[string]string{}
+			if test.want != "" {
+				if err := json.Unmarshal([]byte(test.want), &want); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got := map[string]string{}
+			for _, pair := range task.Assign {
+				got[pair.Key] = pair.Value.(string)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("task assignment = %v, want %q", task.Assign, test.want)
 			}
 			if !strings.Contains(output.String(), "Remove assignment") {
 				t.Fatalf("field editor omitted Remove assignment:\n%s", output.String())
@@ -979,7 +997,7 @@ func TestRunTaskGroupsRequireTasks(t *testing.T) {
 func TestRunAddTaskAndOrderedGroup(t *testing.T) {
 	t.Chdir(t.TempDir())
 	input := "1\nagent\n" +
-		"5\n3\n1\ncollect\n7\nClassify the caller.\n10\n3\n" +
+		"5\n3\n1\ncollect\n6\nClassify the caller.\n9\n3\n" +
 		"5\n4\n1\ntriage\n6\nRun triage.\n8\n3\n" +
 		"7\n\n"
 	got, err := RunConsole(strings.NewReader(input), &bytes.Buffer{}, true, nil)
@@ -1284,7 +1302,7 @@ func TestV25SavedResourcesOfferDelete(t *testing.T) {
 		data.Tools = []scaffold.Tool{{Name: "lookup_customer", Description: "Lookup", Input: `{}`}}
 		data.Agents = []scaffold.Agent{{Name: "billing", Instructions: "Billing", Reason: data.Reason, Speak: data.Speak}}
 		data.Handoffs = []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing", When: "Billing", History: "full"}}
-		data.Tasks = []scaffold.Task{{Name: "collect", Instructions: "Collect", Result: `{"result":"string"}`, History: "full", Agent: "assistant", When: "Collect"}}
+		data.Tasks = []scaffold.Task{{Name: "collect", Instructions: "Collect", History: "full", Agent: "assistant", When: "Collect"}}
 		data.TaskGroups = []scaffold.TaskGroup{{Name: "flow", Steps: []string{"collect"}, ContextScope: "shared", Then: "return", Agent: "assistant", When: "Flow"}}
 		data.Channels = []scaffold.Channel{{Name: "phone", Kind: "telephony", Inbound: true}}
 		data.HumanTransfers = []scaffold.HumanTransfer{{Name: "to_human", Agent: "assistant", When: "Human", Destination: "support", Value: "SUPPORT_PHONE_NUMBER", Mode: "cold"}}
@@ -1327,7 +1345,7 @@ func TestV25DeleteResourceCleansReferences(t *testing.T) {
 	data.Variables = []scaffold.Variable{{Name: "customer_id", Type: "string"}}
 	data.Tools = []scaffold.Tool{{Name: "lookup", AttachTo: []string{"billing"}, AttachTasks: []string{"collect"}}}
 	data.Handoffs = []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing"}}
-	data.Tasks = []scaffold.Task{{Name: "collect", Tools: []string{"lookup"}, Model: "billing_model", Assign: `{"customer_id":"result.result"}`, Agent: "billing"}}
+	data.Tasks = []scaffold.Task{{Name: "collect", Tools: []string{"lookup"}, Model: "billing_model", Assign: []spec.Pair{{Key: "customer_id", Value: "result.result"}}, Agent: "billing"}}
 	data.TaskGroups = []scaffold.TaskGroup{{Name: "flow", Steps: []string{"collect"}, Agent: "billing"}}
 	data.HumanTransfers = []scaffold.HumanTransfer{{Name: "human", Agent: "billing"}}
 	data.Fallbacks = []scaffold.ModelFallback{{Name: "backup", Profile: "billing_model"}}
@@ -1411,22 +1429,6 @@ func TestValidateVariableDefault(t *testing.T) {
 	}
 }
 
-func TestValidateTaskResult(t *testing.T) {
-	for _, value := range []string{`{"ok":"boolean"}`, `{"tier":{"enum":["free","pro"]}}`} {
-		if err := validateTaskResult(value); err != nil {
-			t.Errorf("validateTaskResult(%s) = %v", value, err)
-		}
-	}
-	for _, value := range []string{`{}`, `{"nested":{"type":"object"}}`, `{"score":"float"}`} {
-		if err := validateTaskResult(value); err == nil {
-			t.Errorf("validateTaskResult(%s) accepted", value)
-		}
-	}
-}
-
-// A destination names an environment variable and nothing else. The literal
-// forms the wizard used to accept are refused, because the value it collects
-// lands in agent.yaml, the portable half of a package (spec FR-004d).
 func TestValidateDestination(t *testing.T) {
 	for _, value := range []string{"SUPPORT_PHONE_NUMBER", "BILLING_LINE", "L2"} {
 		if err := validateDestination(value); err != nil {

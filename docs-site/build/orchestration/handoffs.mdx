@@ -1,29 +1,16 @@
 ---
 title: "Handoffs"
-description: "One agent gives the caller to another, with different rules and different tools."
+description: "Move the caller to an agent with different instructions and tools."
 ---
 
-A handoff moves the caller from one agent to another. The new agent has its own
-prompt, its own tools, and the call for good: nothing comes back.
+A handoff moves the caller from one agent to another. The receiving agent owns
+the rest of the call. Nothing returns automatically.
 
-Reach for it when two jobs have genuinely different rules, not just different
-paragraphs. One prompt can only get so long before it starts contradicting itself.
+Use a handoff when two roles need different instructions, tools, or
+permissions. Use a [task](/build/orchestration/tasks) when a focused step should
+return control.
 
-Use a handoff instead of the other shapes when:
-
-- nothing should come back. A [task](/build/orchestration/tasks) returns with
-  a result; a handoff never does.
-- the split is between two roles with different tools or permissions, not a
-  fixed sequence of steps one role runs through in order, which is what a
-  [task group](/build/orchestration/task-groups) is for.
-- the same conversation might need to come back later. That is a second
-  handoff in the other direction, not an automatic return.
-
-The YAML on this page is one worked pair of agents. For a shipped package that
-does it, read `examples/salon-concierge`: `concierge` handles bookings and
-`complaint_specialist` handles complaints, with a control in each direction.
-
-## Two agents in one package
+## Declare and attach a handoff
 
 ```yaml agent.yaml
 entry_agent: booking_desk
@@ -40,155 +27,76 @@ agents:
     instructions: agents/appointment-manager.md
     think: reasoning
     speak: voice
-    handoffs:
-      - to_booking_desk
+
+handoffs:
+  to_appointment_manager:
+    to: appointment_manager
+    when: The caller wants to change an existing appointment.
+    announce: I’m connecting you with our appointment manager now.
 ```
 
-`entry_agent` decides who answers. Each agent has its own prompt file. They can
-share models, or not.
+`when` tells the model when to use the handoff. `announce` is an optional fixed
+sentence spoken before the new agent starts.
 
-## The handoff
+## Share only intentional saved values
 
-You declare a handoff once under `handoffs:`, then put its name in the
-`handoffs:` list of the agent or task that may use it. That pairing is the
-model most lists share: a top-level catalog holds the definition, an
-agent-level list holds the name, and you attach by name. Tasks are the one
-exception, defined right where they are first used; see [How a package fits
-together](/build/how-a-package-fits-together).
+Declare a value once and reference it in the receiving prompt:
+
+```yaml agent.yaml
+variables:
+  appointment_id:
+    type: Id
+    description: The appointment selected during this call.
+```
+
+```markdown agents/appointment-manager.md
+You are handling appointment {{appointment_id}}.
+Ask what the caller wants to change.
+```
+
+The receiving agent gets `appointment_id` because its prompt names it. It does
+not receive other variables automatically. A dotted placeholder sends only
+that field.
+
+## Choose conversation history
+
+History defaults to `messages` when `context` or `history` is omitted.
 
 ```yaml agent.yaml
 handoffs:
   to_appointment_manager:
     to: appointment_manager
-    when: The caller wants to reschedule or cancel an existing appointment.
-    announce: "I’m connecting you with our appointment manager now."
-    context:
-      history: full
-
-  to_booking_desk:
-    to: booking_desk
-    when: The caller wants to make a new appointment instead.
-    announce: "I’m connecting you back to the booking desk for your new appointment."
-    context:
-      history: full
-```
-
-`when` is the condition the model reads. Write it as the situation, not as an
-instruction to call a tool.
-
-`announce` is optional. Write the exact short sentence the active agent should
-speak. It is spoken once and finishes before the new agent takes over; the
-model does not paraphrase it. Leave it out for a silent handoff.
-
-Order still matters on a handoff the same way it matters on a task: say the
-dependency in the agent's own flow and in the handoff's `when:`, not with a
-gate. See [Order steps with the
-prompt](/best-practices/step-scoping#order-steps-with-the-prompt). Never
-hold up the way to a person, though. A caller who asks for a manager should
-not be interviewed before anyone will route them.
-
-Prefer a silent handoff when agents are internal roles behind one service. The
-caller can keep talking to the same salon, clinic, or support desk without
-hearing implementation details such as “I’m connecting you to another agent.”
-
-`context` decides how much of the conversation the new agent sees:
-
-| Field | What it does |
-|---|---|
-| `history: full` | the new agent sees the conversation so far |
-
-Every declared value travels with the caller regardless, on every target,
-with nothing to write: see
-[Variables](/reference/variables#a-handoff-keeps-every-declared-value).
-
-When a task lists the handoff control, invoking it ends that task and any
-remaining task-group steps before the receiving agent takes over. It never
-returns through the agent that ran the task. This is the direct path for
-a caller who changes intent while a focused task is active.
-
-On LiveKit, a receiving agent's own handoffs are hidden only during its first
-automatic turn; every other tool stays available, and the handoffs are back on
-the next caller turn. See [The opening turn cannot hand off
-again](#the-opening-turn-cannot-hand-off-again) below for why, and why
-reciprocal handoffs cannot bounce a caller on older carried intent before they
-say anything new.
-
-## Hand the receiving agent a brief
-
-A handoff on `history: reset` gives the new agent nothing but its own prompt,
-so it would open at the start of a conversation that is already in the middle.
-`expect:` on the handoff is the brief: typed fields the agent handing over fills
-from what it heard, and the receiving agent reads from the end of its prompt.
-
-```yaml agent.yaml
-handoffs:
-  to_complaints:
-    to: complaint_specialist
-    when: The verified caller has a complaint or service problem.
-    expect:
-      - problem: str
-      - name: about
-        type: Appointment | None
-        description: The booking the complaint concerns, if the caller named one.
+    when: The caller wants to change an existing appointment.
     context:
       history: reset
 ```
 
-The fields take the same two forms and the same types as a task's `expect:`;
-see [Hand the step what the caller asked for](/build/orchestration/tasks#hand-the-step-what-the-caller-asked-for).
-`| None` marks a field the agent may leave out. A required field the agent has
-no value for stops the handoff, so the agent that heard the caller asks before
-handing over.
+| `history` | The receiving agent gets |
+|---|---|
+| `messages` | Earlier caller and agent speech, without tool records. |
+| `full` | Earlier speech and paired tool records, without old instructions. |
+| `last_n` | The newest bounded entries. |
+| `reset` | No earlier conversation. |
+| `summary` | A generated summary on LiveKit only. |
 
-The receiving agent's prompt ends with the brief, after the conversation state
-block:
+With `reset`, no trigger sentence or automatic briefing is added. Save the
+needed facts before the handoff and reference them in the receiving prompt. If
+a needed fact was not saved, the receiver asks the caller.
 
-```text
-Request:
-What you were handed for this visit. It does not change while you run.
-1. Problem: the colour came out wrong
-2. About: {"scheduled_date":"2026-03-19","scheduled_time":"09:30","appointment_type":"haircolor","action":"create","booking_id":"bk_12"}
-```
+`messages` keeps spoken content. It is useful context sharing, not transcript
+redaction.
 
-The brief stays with the receiving agent until the next handoff, so it is still
-in the prompt after that agent has run its own steps. When two handoffs target
-the same agent, its block lists what both expect, and a handoff that carries
-no value for one of them leaves it reading `not given.`. A value outside its
-type is refused before anyone is handed over, and the message reaches the agent
-that supplied it.
+## A handoff does not return
 
-## A handoff does not come back
+The second agent owns the call from that point. Returning to the first agent is
+another declared handoff in the opposite direction.
 
-The second agent owns the call from that point. Nothing returns to the first
-agent, and no result is passed back. That is the cost of this shape, and it is why
-the example declares a control in each direction: coming back is another handoff,
-not a return. The call-start greeting is only for the first entry; a handoff back
-continues from the conversation instead of greeting again.
+When a task invokes a handoff, that task and the remaining task-group steps end
+before the receiving agent starts.
 
-If you want a step that runs and hands control back with an answer, that is a
-[task](/build/orchestration/tasks).
-
-## The tool lists are the guardrail
-
-In `examples/salon-concierge`, only `complaint_specialist` has `record_complaint`
-and the refund policy. A caller cannot talk the concierge into filing a complaint
-or quoting a refund rule, because the concierge has no way to do either.
-Splitting agents is as much about splitting capability as it is about splitting
-prose.
-
-## The opening turn cannot hand off again
-
-A receiving agent speaks first, and that opening reply is offered every tool it
-has except its own handoffs. Without that, two agents whose prompts both say
-"send this elsewhere" bounce the call between them before the caller hears
-anything.
-
-It applies to the opening turn only. Every turn after it, the agent has its full
-list back, including the handoffs. That distinction is load-bearing: an earlier
-version leaned on LiveKit's own on-enter tool flag, whose filter follows the
-context of everything the opening reply starts, so an agent whose opening reply
-ran a task never saw its handoffs again, stranding a live caller who asked
-for another specialist for ten turns.
+On LiveKit, the receiving agent's own handoffs are hidden for its first
+automatic turn. They return on the next caller turn. This prevents two agents
+from bouncing the call before the caller hears anything.
 
 ## Try it
 
@@ -197,11 +105,6 @@ unmute validate examples/salon-concierge
 unmute dev examples/salon-concierge --target pipecat
 ```
 
-Say you have a complaint about a service you paid for. The voice keeps going,
-but the agent behind it changes.
-
-## Where to go next
-
 <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
-  Run a step, get a typed result back, and carry on.
+  Run a step, save typed values, and return control.
 </Card>

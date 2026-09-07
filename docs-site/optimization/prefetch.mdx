@@ -114,20 +114,17 @@ controls decide how far each value travels.
 - **`{{ }}` placeholders** give a prompt only the values it names. Two
   placeholders, two values. The greeting names none, so it gets none, however
   many variables the call has collected by then.
-- **`result:` and `assign:`** do the same for a step's own return. A task can
-  come back with several typed fields, and its own `assign:` keeps only the
-  ones it writes to a variable. The rest did their job inside the step and
-  stop there. One line decides whether a value lives for one step or the whole
-  call. See [Tasks](/build/orchestration/tasks).
+- **Task `assign:`** derives each finish field from its destination variable
+  and saves it. Values that are not assigned never enter call state. See
+  [Tasks](/build/orchestration/tasks).
 
 ### Why this beats a prompt instruction
 
 None of this is a rule written in a prompt and hoped for. Paste a confirmed
 value into the greeting and you do not get a bad call, you get a build error.
-A `prefetch:` entry pointed at a tool that is not `read_only: true` is
-refused the same way. The default flips from "every value sits in front of
-every prompt, because that was easier" to "a value goes where the file says
-it goes, and the build checks".
+A `prefetch:` tool entry without an explicit `writes: true` or
+`writes: false` is refused the same way. A value goes only where the file
+says it goes.
 
 A `prefetch:` entry itself is not held to that bar. An entry whose input is
 empty for this call is skipped with a warning, and the call carries on with the

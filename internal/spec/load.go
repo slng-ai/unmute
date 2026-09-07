@@ -154,7 +154,6 @@ func (p *Package) flattenTasks() error {
 				Task:     task.Name,
 				When:     task.When,
 				Announce: task.Announce,
-				Assign:   task.Assign,
 			}
 		}
 	}

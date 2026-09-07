@@ -78,7 +78,7 @@ func TestDictionaryDebtNeverGrows(t *testing.T) {
 	// ToolWebhook.Headers were already gone before that refactor; this allowlist
 	// had simply never been swept for them. The number this test pins is still
 	// the one reflection reports, not a hand count.
-	const settled = 20
+	const settled = 19
 	if len(dictionaryDebt) > settled {
 		t.Errorf("dictionaryDebt has %d entries, and it had %d when the rule was written. "+
 			"This section may shrink and never grow: write the new field as a list instead",
@@ -96,7 +96,6 @@ func TestDictionaryDebtNeverGrows(t *testing.T) {
 var permanentDictionaries = map[string]string{
 	"Tool.Input":  "`input:` is JSON Schema. The model reads it as an object; a list would not be one.",
 	"Tool.Output": "`output:` is JSON Schema, same reason.",
-	"Task.Result": "`result:` is the task's own output schema, read the same way.",
 	"ModelDef.Params": "`params:` is provider passthrough: the keys are whatever the " +
 		"provider accepts, and unmute deliberately does not know them.",
 }
@@ -125,7 +124,6 @@ var dictionaryDebt = map[string]string{
 	"ModelSections.Listen": "same.",
 	"ModelSections.Turn":   "same.",
 
-	"Tool.Inject":            "request key to scalar. Migrate to a pair list, the shape Task.Assign already uses.",
 	"Connection.Environment": "route setting to env var name. Migrate to a pair list.",
 	"Target.Models":          "per-target override, keyed like ModelSections. Migrate with them.",
 	"Target.Destinations":    "per-target override of AgentFile.Destinations. Migrate with it, or the two shapes disagree.",

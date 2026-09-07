@@ -185,7 +185,7 @@ class ProbeLLM(llm.LLM):
     def __init__(self):
         super().__init__()
         self.step = 0
-        self.shared_result_seen = False
+        self.neutral_status_seen = False
         self.agent_turns = []
 
     @property
@@ -228,13 +228,7 @@ class ProbeLLM(llm.LLM):
                 tool_calls=[
                     llm.FunctionToolCall(
                         name="finish",
-                        arguments=json.dumps(
-                            {
-                                "date": "2026-08-19",
-                                "party_size": "2",
-                                "time": "15:00",
-                            }
-                        ),
+                        arguments="{}",
                         call_id="find-slot-finish",
                     )
                 ],
@@ -245,22 +239,17 @@ class ProbeLLM(llm.LLM):
             )
             finish_schema = llm.utils.build_legacy_openai_schema(finish_tool)
             finish_params = finish_schema["function"]["parameters"]
-            assert set(finish_params["properties"]) == {"sent", "unserved_request"}
+            assert set(finish_params["properties"]) == {"unserved_request"}
             # The reserved escape field stays optional through the SDK's own
             # schema builder: a required one would have the model invent a
             # request on every finish.
             assert "unserved_request" not in finish_params.get("required", [])
-            expected = {
-                "date": "2026-08-19",
-                "party_size": 2,
-                "time": "15:00",
-            }
-            expected_envelope = {"task_id": "find_slot", "result": expected}
-            self.shared_result_seen = any(
+            expected_status = {"status": "completed"}
+            self.neutral_status_seen = any(
                 isinstance(item, llm.FunctionCallOutput)
                 and item.name == "finish"
                 and item.output
-                and json.loads(item.output) == expected_envelope
+                and json.loads(item.output) == expected_status
                 for item in chat_ctx.items
             )
             entries, format_data = chat_ctx.to_provider_format(format="mistralai")
@@ -272,9 +261,9 @@ class ProbeLLM(llm.LLM):
                     if entry["type"] == "function.result"
                     and entry["tool_call_id"] == "find-slot-finish"
                 )
-            ) == expected_envelope
-            assert self.shared_result_seen, (
-                "the second shared task did not receive the first task's exact result: "
+            ) == expected_status
+            assert self.neutral_status_seen, (
+                "the second shared task did not receive the first task's neutral status: "
                 + repr(
                     [
                         (type(item).__name__, getattr(item, "name", None))
@@ -287,7 +276,7 @@ class ProbeLLM(llm.LLM):
                 tool_calls=[
                     llm.FunctionToolCall(
                         name="finish",
-                        arguments=json.dumps({"sent": True}),
+                        arguments="{}",
                         call_id="confirm-finish",
                     )
                 ],
@@ -333,12 +322,7 @@ async def main():
         transfer_first.back_to_greeter(transfer_ctx)
     )
     await transfer_session.started.wait()
-    await transfer_first.finish(
-        transfer_ctx,
-        date="2026-08-18",
-        party_size=2,
-        time="15:00",
-    )
+    await transfer_first.finish(transfer_ctx)
     assert not transfer_first.completions
     transfer_session.release.set()
     await pending_transfer
@@ -352,16 +336,9 @@ async def main():
         function_call=SimpleNamespace(call_id="first-finish"),
     )
     finish_first = RecordingFindSlot()
-    await finish_first.finish(
-        finish_ctx,
-        date="2026-08-18",
-        party_size=2,
-        time="15:00",
-    )
+    await finish_first.finish(finish_ctx)
     await finish_first.back_to_greeter(finish_ctx)
-    assert finish_first.completions == [
-        {"date": "2026-08-18", "party_size": 2, "time": "15:00"}
-    ]
+    assert finish_first.completions == [{"unserved_request": ""}]
     assert finish_session.announcements == 0
 
     failed_ctx = SimpleNamespace(
@@ -376,15 +353,8 @@ async def main():
         assert str(error) == "announcement failed"
     else:
         raise AssertionError("failed announcement did not escape")
-    await failed_transfer.finish(
-        failed_ctx,
-        date="2026-08-18",
-        party_size=2,
-        time="15:00",
-    )
-    assert failed_transfer.completions == [
-        {"date": "2026-08-18", "party_size": 2, "time": "15:00"}
-    ]
+    await failed_transfer.finish(failed_ctx)
+    assert failed_transfer.completions == [{"unserved_request": ""}]
 
     observed = []
 
@@ -439,7 +409,7 @@ async def main():
             await session.run(user_input="Reserve the prepared slot.")
     finally:
         agent.slng.TTS = original_tts
-    assert probe_llm.shared_result_seen
+    assert probe_llm.neutral_status_seen
     assert probe_llm.agent_turns == ["owner", "task", "task"], (
         f"unexpected LLM turns: {probe_llm.agent_turns}"
     )
@@ -499,10 +469,7 @@ async def main():
     patched_output = duplicate_group.chat_ctx.get_by_id(successful_output.id)
     assert isinstance(patched_output, llm.FunctionCallOutput)
     assert patched_output.name == "finish"
-    assert json.loads(patched_output.output) == {
-        "task_id": "confirm",
-        "result": result,
-    }
+    assert json.loads(patched_output.output) == {"status": "completed"}
     assert patched_output.model_copy(update={"output": ""}) == successful_output
     patched_call = duplicate_group.chat_ctx.get_by_id("successful-call")
     assert isinstance(patched_call, llm.FunctionCall)
@@ -544,7 +511,7 @@ from livekit.agents import (  # noqa: E402
 )
 
 
-PREPARED = {"date": "2026-08-19", "party_size": 2, "time": "15:00"}
+PREPARED = {"unserved_request": ""}
 RETRY_INSTRUCTIONS = (
     "The previous response was empty. Follow the current task instructions "
     "and produce its next valid response now. The caller's turns are already "
@@ -697,10 +664,7 @@ class ProbeFindSlot(agent.FindSlot):
 
 def prepared_context():
     exact = json.dumps(PREPARED, sort_keys=True)
-    shared = json.dumps(
-        {"task_id": "prepare_booking", "result": PREPARED},
-        sort_keys=True,
-    )
+    shared = json.dumps({"status": "completed"}, sort_keys=True)
     chat_ctx = llm.ChatContext(
         [
             llm.FunctionCall(
@@ -727,10 +691,7 @@ def assert_prepared(chat_ctx):
         and item.call_id == "prepared-result"
     ]
     assert len(outputs) == 1
-    assert json.loads(outputs[0].output) == {
-        "task_id": "prepare_booking",
-        "result": PREPARED,
-    }
+    assert json.loads(outputs[0].output) == {"status": "completed"}
 
 
 active_case = None

@@ -503,7 +503,7 @@ func TestBuildResolvesTheDeclaredShapes(t *testing.T) {
 		t.Errorf("appointments Type = %q, want the primitive a prompt renders", got)
 	}
 	// And the order the block will number them in is the authored order.
-	want := []string{"caller_reason", "appointments", "caller_phone", "last_appointment"}
+	want := []string{"count", "accepted", "caller_reason", "appointments", "caller_phone", "last_appointment"}
 	if len(agent.VariableOrder) != len(want) {
 		t.Fatalf("VariableOrder = %v, want %v", agent.VariableOrder, want)
 	}
@@ -568,15 +568,12 @@ func TestBuildRefusesAnAppendOnSomethingThatIsNotAList(t *testing.T) {
         instructions: instructions.md
         assign:
           - caller_phone+: result.caller_phone
-        result:
-          caller_phone: Phone
-          summary: string
 `)
 	_, err := Build(pkg)
 	if err == nil {
 		t.Fatal("an append onto a Phone built, and the value would have been replaced by a one-item list")
 	}
-	for _, phrase := range []string{"appends to", "caller_phone", "rather than a list", "list[...]"} {
+	for _, phrase := range []string{"appends to", "caller_phone", "declare a list", "remove +"} {
 		if !strings.Contains(err.Error(), phrase) {
 			t.Errorf("refusal %q does not say %q", err.Error(), phrase)
 		}
@@ -593,6 +590,8 @@ func TestBuildAssignAcceptsASubFieldOfAShapedResult(t *testing.T) {
     fields:
       - scheduled_date: Date
 variables:
+  last_appointment:
+    type: Appointment
   last_booking_day:
     type: Date
 `, `    tasks:
@@ -600,9 +599,8 @@ variables:
         when: The caller wants an appointment.
         instructions: instructions.md
         assign:
+          - last_appointment: result.appointment
           - last_booking_day: result.appointment.scheduled_date
-        result:
-          appointment: Appointment
 `)
 	if _, err := Build(pkg); err != nil {
 		t.Fatalf("assign into a sub-field of a shaped result was refused: %v", err)
@@ -620,6 +618,8 @@ func TestBuildRefusesAnAssignPathIntoAList(t *testing.T) {
       - name: services
         type: list[str]
 variables:
+  last_appointment:
+    type: Appointment
   last_booking_day:
     type: Date
 `, `    tasks:
@@ -627,9 +627,8 @@ variables:
         when: The caller wants an appointment.
         instructions: instructions.md
         assign:
+          - last_appointment: result.appointment
           - last_booking_day: result.appointment.services.name
-        result:
-          appointment: Appointment
 `)
 	_, err := Build(pkg)
 	if err == nil {
@@ -651,6 +650,8 @@ func TestBuildRefusesAnAssignPathToAnUnknownField(t *testing.T) {
     fields:
       - scheduled_date: Date
 variables:
+  last_appointment:
+    type: Appointment
   last_booking_day:
     type: Date
 `, `    tasks:
@@ -658,9 +659,8 @@ variables:
         when: The caller wants an appointment.
         instructions: instructions.md
         assign:
+          - last_appointment: result.appointment
           - last_booking_day: result.appointment.appointment_time
-        result:
-          appointment: Appointment
 `)
 	_, err := Build(pkg)
 	if err == nil {
@@ -678,6 +678,8 @@ variables:
 // Schema field, has no declared shape, so it has no fields for a path to name.
 func TestBuildRefusesAnAssignPathThroughAnEnumField(t *testing.T) {
 	pkg := typedPackageWithTasks(t, `variables:
+  status:
+    type: Literal["pending", "confirmed"]
   last_booking_day:
     type: Date
 `, `    tasks:
@@ -685,18 +687,14 @@ func TestBuildRefusesAnAssignPathThroughAnEnumField(t *testing.T) {
         when: The caller wants an appointment.
         instructions: instructions.md
         assign:
+          - status: result.status
           - last_booking_day: result.status.label
-        result:
-          status:
-            enum:
-              - pending
-              - confirmed
 `)
 	_, err := Build(pkg)
 	if err == nil {
 		t.Fatal("an assign path through an enum field built, and it has no fields to walk into")
 	}
-	for _, phrase := range []string{`"status" is an enum`, "has no fields to name"} {
+	for _, phrase := range []string{`Literal["pending", "confirmed"]`, "has no fields to name"} {
 		if !strings.Contains(err.Error(), phrase) {
 			t.Errorf("refusal %q does not say %q", err.Error(), phrase)
 		}
@@ -719,12 +717,13 @@ func TestBuildAssignPropagatesOptionalAlongAPath(t *testing.T) {
         when: The caller wants an appointment.
         instructions: instructions.md
         assign:
+          - appointment: result.appointment
           - last_booking_day: result.appointment.scheduled_date
-        result:
-          appointment: Appointment | None
 `
 	t.Run("refused into a variable declared without | None", func(t *testing.T) {
 		pkg := typedPackageWithTasks(t, shapes+`variables:
+  appointment:
+    type: Appointment | None
   last_booking_day:
     type: Date
 `, tasks)
@@ -740,6 +739,8 @@ func TestBuildAssignPropagatesOptionalAlongAPath(t *testing.T) {
 	})
 	t.Run("accepted once the variable is declared | None", func(t *testing.T) {
 		pkg := typedPackageWithTasks(t, shapes+`variables:
+  appointment:
+    type: Appointment | None
   last_booking_day:
     type: Date | None
 `, tasks)
@@ -783,5 +784,71 @@ func TestTypeRefSchemaPublishesEveryField(t *testing.T) {
 	}
 	if !strings.Contains(string(encoded), typeRefPointer) {
 		t.Errorf("the derived schema carries no reference to %s", typeRefPointer)
+	}
+}
+
+func TestTaskResultDerivesFromAssignments(t *testing.T) {
+	pkg := loadSafeCore(t)
+	pkg.Agent.Variables["appointment_date"] = packagespec.Variable{Type: "Date", Description: "The day the caller chose."}
+	pkg.Agent.Variables["same_date"] = packagespec.Variable{Type: "Date", Description: "A different description."}
+	attachStep(pkg, "intake", packagespec.Task{
+		Name: "choose_day", When: "Choose a day", Instructions: "choose.md",
+		Assign: []packagespec.Pair{{Key: "appointment_date", Value: "result.date"}, {Key: "same_date", Value: "result.date"}},
+	}, "Choose the requested date.")
+	got, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	field, ok := got.Tasks["choose_day"].Result["date"]
+	if !ok || field.Shape == nil || field.Shape.String() != "Date" {
+		t.Fatalf("destination Date did not reach finish: %+v", field)
+	}
+	encoded, err := json.Marshal(field)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), "The day the caller chose.") || strings.Contains(string(encoded), "A different description.") {
+		t.Fatalf("destination description did not reach finish: %s", encoded)
+	}
+}
+
+func TestTaskResultDerivationPaths(t *testing.T) {
+	for _, tc := range []struct {
+		name, whole string
+		pairs       []packagespec.Pair
+		want        string
+	}{
+		{"projection before anchor", "Appointment", []packagespec.Pair{{Key: "date", Value: "result.appointment.date"}, {Key: "record", Value: "result.appointment"}}, ""},
+		{"missing anchor", "Appointment", []packagespec.Pair{{Key: "date", Value: "result.appointment.date"}}, "whole"},
+		{"optional parent", "Appointment | None", []packagespec.Pair{{Key: "date", Value: "result.appointment.date"}, {Key: "record", Value: "result.appointment"}}, "does not fit"},
+		{"unknown field", "Appointment", []packagespec.Pair{{Key: "date", Value: "result.appointment.missing"}, {Key: "record", Value: "result.appointment"}}, "missing"},
+		{"conflicting root", "Appointment", []packagespec.Pair{{Key: "date", Value: "result.value"}, {Key: "record", Value: "result.value"}}, "conflict"},
+		{"duplicate destination", "Appointment", []packagespec.Pair{{Key: "records", Value: "result.all"}, {Key: "records+", Value: "result.one"}}, "twice"},
+		{"optional append copy", "Appointment", []packagespec.Pair{{Key: "records+", Value: "result.one"}}, ""},
+		{"no output", "Appointment", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg := loadSafeCore(t)
+			pkg.Agent.Shapes = []packagespec.Shape{{Name: "Appointment", Fields: []packagespec.Field{{Name: "date", Type: "Date"}}}}
+			pkg.Agent.Variables["record"] = packagespec.Variable{Type: tc.whole}
+			pkg.Agent.Variables["records"] = packagespec.Variable{Type: "list[Appointment]"}
+			pkg.Agent.Variables["date"] = packagespec.Variable{Type: "Date"}
+			attachStep(pkg, "intake", packagespec.Task{Name: "choose", When: "Choose", Instructions: "choose.md", Assign: tc.pairs}, "Choose.")
+			got, err := Build(pkg)
+			if tc.want != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("got %v, want %q", err, tc.want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.name == "optional append copy" {
+				if !got.Tasks["choose"].Result["one"].Shape.Optional || got.Variables["records"].Shape.List.Optional {
+					t.Fatal("append must use an optional copy of the item type")
+				}
+			}
+		})
 	}
 }

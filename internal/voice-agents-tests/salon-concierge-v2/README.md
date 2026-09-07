@@ -13,14 +13,12 @@ every step gets the smallest context that still does its job, and what it no
 longer reads off the transcript travels as declared state instead.
 
 Declared state is typed. The facts a call accumulates are groups of named
-fields, written in Pydantic's own words, and the compiler puts a block naming
-them at the end of every agent prompt and every task prompt. So a step reads
-what the call has established rather than re-reading the call, and a later
-step's prompt stops growing with the length of the conversation.
+fields, written in Pydantic's own words. Each prompt names only the saved
+values it needs with `{{variable}}` placeholders.
 
 Same tools, same knowledge bases, same voice, same models, same targets, same
 carriers and the same agents. The `shapes:` block, the `variables:` block, the
-`context:` blocks and each step's `result:` are what differ, plus one step the
+`context:` blocks and each step's `assign:` are what differ, plus one step the
 other salon does not have.
 
 ## What it contains
@@ -83,8 +81,8 @@ me check." One of them had to go, and the step's own line is the one that knows
 what it is about to do.
 
 `customer` declares no `default:` on purpose. A default is a value the
-variable holds before the first word, so a defaulted record would render in
-the conversation info as a real-looking caller nobody had looked up. Ordering
+variable holds before the first word, so a defaulted record could render as a
+real-looking caller nobody had looked up. Ordering
 the booking step after verification is the concierge's own instructions' job,
 not a code gate.
 
@@ -95,8 +93,8 @@ The files:
 - `targets.yaml` holds the targets, one per telephony plane.
 - `instructions.md` is the concierge prompt, `agents/complaint-specialist.md`
   the customer care prompt, and `tasks/` the three task prompts. None of them
-  contains the conversation info block: the compiler appends that, so adding a
-  field to a shape reaches every prompt with no prompt file edited.
+  receives an automatic state block. Each prompt explicitly names the values it
+  needs.
 - `tools/` is one file per tool, all local Python over one in-memory store.
 - `knowledge/refunds/` and `knowledge/services/` are two document sets, each
   with its own index.
@@ -169,15 +167,15 @@ fill it and the generated runbook lists it with a `--var` line. That line works,
 and using it hands the booking step a record before anything looked the caller
 up, which is the one thing this package is arranged to prevent.
 
-To see the declared state as the model sees it, read the block the compiler put
-at the end of each prompt:
+To inspect the saved values a prompt receives, read the generated prompt and
+its rendered placeholders:
 
 ```sh
-grep -A7 'Conversation info:' internal/voice-agents-tests/salon-concierge-v2/build/livekit/agent.py
+rg 'none recorded yet|customer|appointments|complaints' internal/voice-agents-tests/salon-concierge-v2/build/livekit/agent.py
 ```
 
-It is the same text on both targets, and the generated classes beside it are
-what the steps validate their results against.
+The generated classes beside the prompts validate task finishes on both
+targets.
 
 ## Testing the pre-fetch on a call
 

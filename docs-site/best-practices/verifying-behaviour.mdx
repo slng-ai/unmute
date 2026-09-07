@@ -12,20 +12,17 @@ reading it is not checking.
 A call that reads well can still have written nothing to declared state. The
 case that shows why: an agent booked two appointments, and when the caller asked
 for a recap it named both correctly. That looked like proof the state was right.
-It was not. The agent could have read either the state block or the
-conversation, and from the transcript alone there is no way to tell which.
+It was not. The agent could have read either an explicit saved-value
+placeholder or the conversation, and from the transcript alone there is no way
+to tell which.
 
 What settles it is the rendered prompt. With tracing enabled, each model request
-carries the prompt it was sent, including the conversation state block:
+shows which saved values its authored placeholders rendered:
 
 ```text
-Conversation info:
-1. Booking date: 2026-09-04
-2. Caller reason: ["create_booking","create_booking"]
-3. Customer: {"phone_number":"+34600111222","status":"created"}
-4. Appointments: [{"scheduled_date":"2026-09-05","scheduled_time":"15:00", ...},
-                  {"scheduled_date":"2026-09-06","scheduled_time":"09:00", ...}]
-5. Complaints: none recorded yet.
+Review these appointments with the caller:
+[{"scheduled_date":"2026-09-05","scheduled_time":"15:00", ...},
+ {"scheduled_date":"2026-09-06","scheduled_time":"09:00", ...}]
 ```
 
 Now you know. Two appointments, distinct, and nothing recorded against
@@ -38,28 +35,15 @@ The same technique is the only real check on context scoping and on `confirm:`.
 Both are promises about what a given prompt does not contain, and the only place
 to verify a negative is the prompt itself.
 
-Pull the state block from each step's request and compare. A value marked
-`confirm:` should appear in exactly one of them, the confirming step's. If it
-shows up in the agent's block, or in a later step's, the mark is not doing what
-you think.
+Read each complete model request and compare it. A candidate marked `confirm:`
+should render only in the confirming task's prompt until that task saves
+agreement. It should be absent from other prompt and router payloads.
 
-## Read the blocks in time order, and do not collapse duplicates
+## Read requests in time order
 
-A state block that repeats across many requests invites you to show each
-distinct one and skip the rest. Do not. Collapsing duplicates hides the one
-failure this check exists to catch, which is a value going backwards.
-
-The blocks a call produces come from different prompts: each step's, and each
-agent's. They render at different times, so at any moment two of them can
-legitimately differ. What is never legitimate is one prompt's block losing a
-value it already had. That shows up only when you list every request in time
-order, with its prompt site beside it, and read down the column.
-
-A regression found exactly this way: an agent's own block read `none recorded
-yet` for seventy seconds after the step that filled the value had finished,
-while every step's block in the same window was correct. Deduplicating the
-output had shown one correct block and one stale one and made both look like
-normal variation between sites.
+Do not collapse repeated model requests. A saved value may be absent before a
+task finishes and present afterwards. Listing each request in order shows when
+the value was saved and exactly which prompt received it through a placeholder.
 
 ## Count tool spans, not call rows
 
@@ -105,8 +89,9 @@ the parts nobody heard.
 
 <Tip>
 The two questions worth asking of every call: did every step that should have
-run reach its finish, and does the final state block match what the caller was
-told. A gap in either one is a defect the conversation did not reveal.
+run reach its finish, and did each explicit placeholder render the saved value
+the caller was told. A gap in either one is a defect the conversation did not
+reveal.
 </Tip>
 
 ## Where the mechanics live

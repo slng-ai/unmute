@@ -111,12 +111,12 @@ type livekitTransfer struct {
 	Summary     *livekitChain // set for history: summary — _summarize before handoff
 	// Inputs is the brief this handoff carries, one typed parameter each,
 	// validated before the receiver is built.
-	Inputs []livekitArg
+
 	// ReceiverInputs is every input name the receiving agent's prompt reads,
 	// reset before this handoff's own values are written so the receiver sees
 	// exactly this brief and nothing from an earlier visit. Set whenever the
 	// receiver has a brief at all, even by a handoff that carries none.
-	ReceiverInputs []string
+
 }
 
 // livekitHumanTransfer lowers a human_transfer control (V6, SCHEMA N25): cold is
@@ -216,7 +216,7 @@ type livekitDelegate struct {
 	// body before the task exists, written to the userdata for the visit and
 	// put back after it. Empty for a step declaring none, which emits the
 	// method it always emitted.
-	Inputs []livekitArg
+
 }
 
 // livekitSingleTask is the task side of a single-task delegate: the AgentTask
@@ -270,6 +270,8 @@ type livekitStep struct {
 }
 
 type livekitTask struct {
+	CtxExpr     string
+	Summary     *livekitChain
 	Name        string
 	Class       string
 	PromptConst string
@@ -597,7 +599,7 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTemplates:             true, // update_instructions/_render at session start
 	targetcap.FieldTypedState:            true, // a generated Pydantic class per shape, validated at each finish
 	targetcap.FieldShapedText:            true, // str plus an AfterValidator, never a schema keyword
-	targetcap.FieldInput:                 true, // typed delegate and handoff parameters, validated before entry, written to Userdata for the visit
+
 }
 
 var livekitEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
@@ -850,12 +852,12 @@ func renderLiveKitV1(name string, data livekitData) ([]byte, error) {
 		return nil, fmt.Errorf("livekit template %s: %w", name, err)
 	}
 	tmpl, err := template.New(name).Funcs(template.FuncMap{
-		"pyq":               pyQuote,
-		"resultAccess":      resultAccess,
-		"join":              strings.Join,
-		"inputBlockPreview": inputBlockPreview,
-		"triple":            pyTriple,
-		"mcpTimeout":        func() int { return mcpTimeoutSeconds },
+		"pyq":          pyQuote,
+		"resultAccess": resultAccess,
+		"join":         strings.Join,
+
+		"triple":     pyTriple,
+		"mcpTimeout": func() int { return mcpTimeoutSeconds },
 		// SLNG's contract for a hosted code tool, named once in Go so the
 		// template cannot drift from what internal/generate/hosted_tool.go says
 		// the platform guarantees.

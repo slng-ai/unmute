@@ -204,6 +204,7 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		value := scaffold.Tool{
 			Name: name, Description: tool.Description, Execution: tool.ExecutionKind(),
 			Input: jsonText(tool.Input), Output: jsonText(tool.Output),
+			Inject: append([]packagespec.Pair(nil), tool.Inject...),
 		}
 		switch {
 		case tool.Webhook != nil:
@@ -254,13 +255,12 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		data.Tasks = append(data.Tasks, scaffold.Task{
 			Name: name, Instructions: pkg.Markdown[task.Instructions], Tools: append([]string(nil), task.Tools...),
 			Handoffs: append([]string(nil), task.Handoffs...),
-			Input:    shapeFields(task.Input),
-			Model:    task.Think, Result: jsonText(task.Result), History: task.Context.History,
+			Model:    task.Think, History: task.Context.History,
 			MaxMessages: task.Context.MaxMessages, Summarizer: task.Context.Summarizer,
 			IncludeToolCalls: task.Context.IncludeToolCalls,
 			Agent:            cmp.Or(definers[name], "assistant"),
 			When:             task.When, Announce: task.Announce,
-			Assign: pairsText(task.Assign),
+			Assign: append([]packagespec.Pair(nil), task.Assign...),
 		})
 	}
 	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.TaskGroups)) {
@@ -278,7 +278,6 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		if handoff.Announce != nil {
 			value.Announce = *handoff.Announce
 		}
-		value.Input = shapeFields(handoff.Input)
 		if handoff.Context != nil {
 			value.History, value.MaxMessages, value.Summarizer = handoff.Context.History, handoff.Context.MaxMessages, handoff.Context.Summarizer
 			value.IncludeToolCalls = handoff.Context.IncludeToolCalls
@@ -431,17 +430,6 @@ func shapeFields(fields []packagespec.Field) []scaffold.ShapeField {
 		out = append(out, scaffold.ShapeField{Name: field.Name, Type: field.Type, Description: field.Description})
 	}
 	return out
-}
-
-func pairsText(pairs []packagespec.Pair) string {
-	if len(pairs) == 0 {
-		return ""
-	}
-	out := make(map[string]any, len(pairs))
-	for _, pair := range pairs {
-		out[pair.Key] = pair.Value
-	}
-	return jsonText(out)
 }
 
 func boolValue(value *bool) bool { return value != nil && *value }

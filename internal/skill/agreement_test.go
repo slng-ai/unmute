@@ -103,9 +103,8 @@ func TestToolsReferenceMatchesExecutionBlocks(t *testing.T) {
 	}
 }
 
-// TestToolOwnershipRuleStaysExplicit holds the two surfaces a coding agent can
-// follow against the public pages an author reads. Tool and task output schemas
-// are both maps, so prose is the only guard against copying one into the other.
+// TestToolOwnershipRuleStaysExplicit holds the task-save and tool-output split
+// on the two references a coding agent uses to choose between them.
 func TestToolOwnershipRuleStaysExplicit(t *testing.T) {
 	definitionRule := "Define each tool once."
 	for name, content := range map[string]string{
@@ -119,14 +118,10 @@ func TestToolOwnershipRuleStaysExplicit(t *testing.T) {
 		}
 	}
 
-	resultRule := "Task `result:` and tool `output:` are different contracts."
+	resultRule := "Task `assign:` and tool `output:` are different contracts."
 	for name, content := range map[string]string{
-		"SKILL.md":                                bundleFile(t, "SKILL.md"),
-		"references/orchestration.md":             bundleFile(t, "references/orchestration.md"),
-		"references/tools.md":                     bundleFile(t, "references/tools.md"),
-		"docs-site/build/orchestration/tasks.mdx": trackedFile(t, "docs-site/build/orchestration/tasks.mdx"),
-		"docs-site/build/tools/overview.mdx":      trackedFile(t, "docs-site/build/tools/overview.mdx"),
-		"docs-site/reference/agent-yaml.mdx":      trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
+		"SKILL.md":            bundleFile(t, "SKILL.md"),
+		"references/tools.md": bundleFile(t, "references/tools.md"),
 	} {
 		if !strings.Contains(content, resultRule) {
 			t.Errorf("%s does not state %q", name, resultRule)
@@ -135,15 +130,49 @@ func TestToolOwnershipRuleStaysExplicit(t *testing.T) {
 }
 
 func TestTaskAuthoringContractStaysExplicit(t *testing.T) {
-	const rule = "Every task, including a task inside a group, needs a non-empty `result:` and `context.history`."
-	for name, content := range map[string]string{
-		"SKILL.md":                                      bundleFile(t, "SKILL.md"),
+	for name, check := range map[string]struct {
+		content string
+		want    []string
+	}{
+		"SKILL.md":                                      {bundleFile(t, "SKILL.md"), []string{"finish fields come from", "Omitted task and handoff history means `messages`"}},
+		"references/orchestration.md":                   {bundleFile(t, "references/orchestration.md"), []string{"compiler derives each finish field's type", "optional; omitted means `messages`"}},
+		"docs-site/build/orchestration/tasks.mdx":       {trackedFile(t, "docs-site/build/orchestration/tasks.mdx"), []string{"destination variable already owns the type", "When omitted, it is `messages`"}},
+		"docs-site/build/orchestration/task-groups.mdx": {trackedFile(t, "docs-site/build/orchestration/task-groups.mdx"), []string{"Omitted history means", "results are private"}},
+	} {
+		for _, want := range check.want {
+			if !strings.Contains(check.content, want) {
+				t.Errorf("%s does not state %q", name, want)
+			}
+		}
+	}
+}
+
+func TestAuthorGuidanceRejectsRetiredSharingForms(t *testing.T) {
+	files := map[string]string{
 		"references/orchestration.md":                   bundleFile(t, "references/orchestration.md"),
 		"docs-site/build/orchestration/tasks.mdx":       trackedFile(t, "docs-site/build/orchestration/tasks.mdx"),
 		"docs-site/build/orchestration/task-groups.mdx": trackedFile(t, "docs-site/build/orchestration/task-groups.mdx"),
+		"docs-site/build/orchestration/handoffs.mdx":    trackedFile(t, "docs-site/build/orchestration/handoffs.mdx"),
+	}
+	retired := regexp.MustCompile(`(?m)^\s+(?:expect|requires|result):\s*(?:#.*)?$`)
+	for name, content := range files {
+		if hit := retired.FindString(content); hit != "" {
+			t.Errorf("%s teaches retired task or handoff authoring: %s", name, strings.TrimSpace(hit))
+		}
+	}
+
+	mapInject := regexp.MustCompile(`(?m)^inject:\s*\n\s{2,}[a-z_][a-z0-9_]*:`)
+	for name, content := range map[string]string{
+		"references/variables.md":            bundleFile(t, "references/variables.md"),
+		"references/tools.md":                bundleFile(t, "references/tools.md"),
+		"docs-site/reference/variables.mdx":  trackedFile(t, "docs-site/reference/variables.mdx"),
+		"docs-site/reference/agent-yaml.mdx": trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
+		"docs-site/build/variables.mdx":      trackedFile(t, "docs-site/build/variables.mdx"),
+		"docs-site/build/tools/webhook.mdx":  trackedFile(t, "docs-site/build/tools/webhook.mdx"),
+		"docs-site/build/tools/python.mdx":   trackedFile(t, "docs-site/build/tools/python.mdx"),
 	} {
-		if !strings.Contains(content, rule) {
-			t.Errorf("%s does not state %q", name, rule)
+		if mapInject.MatchString(content) {
+			t.Errorf("%s teaches map-style inject; inject is an ordered pair list", name)
 		}
 	}
 }
@@ -167,19 +196,11 @@ func TestTaskTransferAndSharedResultDocsStayAligned(t *testing.T) {
 		}
 	}
 	for name, content := range map[string]string{
-		"references/orchestration.md":                      transferDocs["references/orchestration.md"],
-		"docs-site/build/orchestration/task-groups.mdx":    transferDocs["docs-site/build/orchestration/task-groups.mdx"],
-		"internal/generate/templates/livekit_v1/README.md": transferDocs["internal/generate/templates/livekit_v1/README.md"],
-		"internal/generate/templates/pipecat_v1/README.md": transferDocs["internal/generate/templates/pipecat_v1/README.md"],
+		"docs-site/build/orchestration/tasks.mdx":       transferDocs["docs-site/build/orchestration/tasks.mdx"],
+		"docs-site/build/orchestration/task-groups.mdx": transferDocs["docs-site/build/orchestration/task-groups.mdx"],
 	} {
-		for rule, pattern := range map[string]*regexp.Regexp{
-			"intermediate result timing": regexp.MustCompile(`exact\s+typed\s+result\s+enters\s+(?:the\s+)?shared\s+context\s+before\s+the\s+next\s+task\s+starts`),
-			"final result map":           regexp.MustCompile("final\\s+`merge: results`\\s+map\\s+is\\s+keyed\\s+by\\s+task\\s+name"),
-			"isolated result boundary":   regexp.MustCompile(`(?i)isolated\s+group\s+carries\s+no\s+results\s+between\s+steps`),
-		} {
-			if !pattern.MatchString(content) {
-				t.Errorf("%s does not state the %s rule", name, rule)
-			}
+		if !strings.Contains(content, "status") || !strings.Contains(content, "private") {
+			t.Errorf("%s does not state that task details stay private and only status returns", name)
 		}
 	}
 }

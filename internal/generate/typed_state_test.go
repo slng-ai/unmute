@@ -3,7 +3,6 @@ package generate
 import (
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,7 +12,7 @@ import (
 	"github.com/slng-ai/unmute/internal/target"
 )
 
-// typedStateMarkers is every distinctive line the declared-state block emits.
+// typedStateMarkers is every distinctive line the shared declared-state code emits.
 // Exhaustive on purpose: the byte-identical gate below asserts that a package
 // declaring nothing structured carries none of them, so a marker missing from
 // this list is a hole in that gate.
@@ -53,7 +52,7 @@ func loadTypedState(t *testing.T) *ir.Agent {
 
 func loadShapeless(t *testing.T) *ir.Agent {
 	t.Helper()
-	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "simple-prompt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +213,7 @@ func TestTypedStateCarriesEveryDeclaredDescription(t *testing.T) {
 }
 
 // TestTypedStateBlockIsByteIdenticalOnBothTargets is FR-006 where it is
-// cheapest to hold: the declared-state block is rendered once, in shapes.go,
+// cheapest to hold: the declared-state code is rendered once, in shapes.go,
 // and inserted into both modules verbatim. Rendering it twice is how the two
 // targets would drift, and this is what notices.
 func TestTypedStateBlockIsByteIdenticalOnBothTargets(t *testing.T) {
@@ -261,7 +260,7 @@ func TestLiveKitFinishParameterIsTheGeneratedClass(t *testing.T) {
 	if finish == "" {
 		t.Fatal("no finish handler emitted")
 	}
-	if !strings.Contains(module, "appointment: Appointment,") {
+	if !strings.Contains(module, "appointment: Annotated[Appointment | None,") {
 		t.Errorf("the finish parameter for a shaped result is not the generated class:\n%s", finish)
 	}
 	// And no bare dict anywhere a shaped result is annotated.
@@ -272,7 +271,7 @@ func TestLiveKitFinishParameterIsTheGeneratedClass(t *testing.T) {
 	}
 	// A Literal result field keeps its closed set on the parameter too, so the
 	// model is told what it may hand back.
-	if !strings.Contains(module, `reason: Literal["create_booking", "cancel_booking"],`) {
+	if !strings.Contains(module, `reason: Annotated[Literal["create_booking", "cancel_booking"] | None,`) {
 		t.Errorf("the finish parameter for a Literal result is not the closed set:\n%s", finish)
 	}
 }
@@ -298,21 +297,23 @@ func TestDottedAssignWalksIntoAShapedResultAtEmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assignedTask := agent.Tasks["find_slot"]
+	assignedTask.Assign = []ir.AssignTo{{Var: "caller_phone", Field: "appointment.scheduled_date"}}
+	agent.Tasks["find_slot"] = assignedTask
 	agent.Controls["do_find"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "find_slot",
-		When:   "The caller only wants to check for a slot, not book yet.",
-		Assign: []ir.AssignTo{{Var: "caller_phone", Field: "appointment.scheduled_date"}},
+		When: "The caller only wants to check for a slot, not book yet.",
 	}
 	def := agent.Agents["reservations"]
 	def.Tools = append(def.Tools, "do_find")
 	agent.Agents["reservations"] = def
 
-	const want = `.get("appointment") or {}).get("scheduled_date")`
+	const want = `("caller_phone", "appointment.scheduled_date", False)`
 	livekit, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
 	if err != nil {
 		t.Fatalf("generate livekit: %v", err)
 	}
-	if got := artifactFile(t, livekit, "agent.py"); !strings.Contains(got, `ctx.userdata.caller_phone = (result`+want) {
+	if got := artifactFile(t, livekit, "agent.py"); !strings.Contains(got, want) || !strings.Contains(got, `for part in path.split("."):`) {
 		t.Errorf("livekit does not walk the dotted assign path:\n%s", got)
 	}
 
@@ -320,7 +321,7 @@ func TestDottedAssignWalksIntoAShapedResultAtEmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate pipecat: %v", err)
 	}
-	if got := artifactFile(t, pipecat, "bot.py"); !strings.Contains(got, want) {
+	if got := artifactFile(t, pipecat, "bot.py"); !strings.Contains(got, want) || !strings.Contains(got, `for part in path.split("."):`) {
 		t.Errorf("pipecat does not walk the dotted assign path:\n%s", got)
 	}
 }
@@ -336,15 +337,11 @@ func TestTwoAppendedEntriesAreBothRecorded(t *testing.T) {
 	agent := loadTypedState(t)
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		module := emitted(t, agent, provider)
-		holder := "ctx.userdata"
-		if provider == ir.ProviderPipecat {
-			holder = "self.state"
-		}
 		for _, want := range []string{
-			// An entry added, never the value replaced. Through the helper,
-			// which is also what drops an entry already on the list.
-			"_append_entry(" + holder + ".appointments, ",
-			"_append_entry(" + holder + ".caller_reason, ",
+			// Both authored append destinations reach the shared staged writer.
+			`("appointments", "appointment", True)`,
+			`("caller_reason", "reason", True)`,
+			"_append_entry(entries, value)",
 			// And the list is there to append to before the first step runs.
 			"appointments: list[Appointment] = field(default_factory=list)",
 		} {
@@ -429,7 +426,7 @@ func TestAValueOutsideALiteralSetIsRefusedWhereItEnters(t *testing.T) {
 // test can say the validation came first.
 func recordIndex(t *testing.T, module string, provider ir.Provider) int {
 	t.Helper()
-	marker := "self.complete(_task_result("
+	marker := "self.complete(_values)"
 	if provider == ir.ProviderPipecat {
 		marker = "_results[\"book\"] = _values"
 	}
@@ -439,71 +436,6 @@ func recordIndex(t *testing.T, module string, provider ir.Provider) int {
 	}
 	return at
 }
-
-// TestComposedStateBlockIsIdenticalOnBothTargets is FR-006 over the thing an
-// author actually reads: the block inside each prompt.
-//
-// One composer above both drivers is what makes this true, and it is the
-// property a second composer in a driver would break. The block is per site, so
-// the comparison is per site too: a step whose block differs between targets is
-// a step reading a different state on each.
-func TestComposedStateBlockIsIdenticalOnBothTargets(t *testing.T) {
-	agent := loadTypedState(t)
-	livekit := stateBlocksIn(t, emitted(t, agent, ir.ProviderLiveKit))
-	pipecat := stateBlocksIn(t, emitted(t, agent, ir.ProviderPipecat))
-	if len(livekit) == 0 {
-		t.Fatal("no composed block found in the emitted module, so this gate proves nothing")
-	}
-	// Compared as sets, because the two drivers write their prompt constants in
-	// different orders and one of them escapes the newlines. Neither is a
-	// difference in the block: what has to match is which blocks exist and what
-	// each one says.
-	slices.Sort(livekit)
-	slices.Sort(pipecat)
-	if !slices.Equal(livekit, pipecat) {
-		t.Errorf("the composed blocks differ between the targets:\nlivekit: %q\npipecat: %q", livekit, pipecat)
-	}
-	// Every block also carries the heading and the note, so a reader of either
-	// module finds the same thing in the same words.
-	for _, block := range append(livekit, pipecat...) {
-		if !strings.Contains(block, ir.StateBlockNote) {
-			t.Errorf("a composed block carries no note saying what it is for: %q", block)
-		}
-	}
-}
-
-// stateBlocksIn is every composed block in an emitted module, in the order the
-// module writes them.
-func stateBlocksIn(t *testing.T, module string) []string {
-	t.Helper()
-	// One driver writes a prompt as a triple-quoted literal and the other as a
-	// single-quoted one with escaped newlines. Unescaping first is what lets one
-	// extractor read both.
-	module = strings.ReplaceAll(module, `\n`, "\n")
-	var blocks []string
-	rest := module
-	for {
-		at := strings.Index(rest, ir.StateBlockHeading)
-		if at < 0 {
-			return blocks
-		}
-		rest = rest[at:]
-		var lines []string
-		for _, line := range strings.Split(rest, "\n") {
-			// A block ends at the first line that is neither its heading, its
-			// note nor one of its numbered values.
-			if len(lines) > 0 && !strings.HasPrefix(line, ir.StateBlockNote) && !numberedStateLine.MatchString(line) {
-				break
-			}
-			lines = append(lines, line)
-		}
-		blocks = append(blocks, strings.Join(lines, "\n"))
-		rest = rest[len(ir.StateBlockHeading):]
-	}
-}
-
-// numberedStateLine matches one value's line in a composed block.
-var numberedStateLine = regexp.MustCompile(`^\d+\. .*\{\{[a-z_]+\}\}`)
 
 // TestPipecatFinishSchemaResolvesEveryRef is the gate under the one thing no
 // unit test could settle, now that a real request has settled it.
@@ -528,7 +460,7 @@ func TestPipecatFinishSchemaResolvesEveryRef(t *testing.T) {
 		t.Errorf("pipecat calls json_schema() %d times, want 1 (the resolver's own): a $ref inside one tool "+
 			"property is a 200 the model answers with invented field names", got)
 	}
-	if !strings.Contains(module, "_schema(_FINISH_TYPES[") {
+	if !strings.Contains(module, "_schema(TypeAdapter(") {
 		t.Errorf("pipecat's finish schema does not go through the resolver:\n%s", module)
 	}
 	block, err := TypedState(agent)
@@ -585,7 +517,7 @@ func TestAnAbsentEntryAppendsNothing(t *testing.T) {
 		// And no append reaches the list without going through it.
 		if strings.Contains(module, ".appointments.append(") || strings.Contains(module, ".caller_reason.append(") {
 			t.Errorf("%s appends straight onto a declared list, so a step re-entered mid-call adds the "+
-				"entry it read out of its own state block", provider)
+				"entry it read through an explicit prompt reference", provider)
 		}
 	}
 	// And the type is what makes it legal: the element type with its
@@ -604,7 +536,7 @@ func TestAnAbsentEntryAppendsNothing(t *testing.T) {
 // and the reason it is not a hole.
 //
 // Empty is not a wrong value, it is no value yet: it is what a declared
-// variable holds before anything fills it, what the state block renders as
+// variable holds before anything fills it, what an empty reference renders as
 // words, and what a tool hands back for a field it could not fill. Refusing it
 // deadlocked a live call on both targets and did so differently, which is why
 // the assertion is on the emitted text rather than on one framework's
@@ -700,6 +632,19 @@ func TestAnOmittedResultFieldValidatesRatherThanVanishing(t *testing.T) {
 		if strings.Contains(source, "if name in out:") {
 			t.Errorf("%s skips validation for a field the model left out, so an absent one vanishes "+
 				"instead of validating as None", provider)
+		}
+	}
+}
+
+func TestTaskFinishAllowsEscapeWithoutDomainArguments(t *testing.T) {
+	agent := loadTypedState(t)
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		source := emitted(t, agent, provider)
+		if provider == ir.ProviderLiveKit && !regexp.MustCompile(`caller_phone: [^\n]*Phone \| None[^\n]* = None`).MatchString(source) {
+			t.Error("finish must accept an unserved exit without inventing a phone number")
+		}
+		if !strings.Contains(source, `values.get("unserved_request")`) {
+			t.Error("unserved must bypass validation and save no domain values")
 		}
 	}
 }

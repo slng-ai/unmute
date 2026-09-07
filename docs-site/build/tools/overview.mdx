@@ -361,10 +361,6 @@ agents:
         instructions: tasks/find-slot.md
         tools:
           - check_availability
-        result:
-          summary: string
-        context:
-          history: full
 ```
 
 The agent and task lists are visibility scopes. Attach a tool only where it is
@@ -372,14 +368,9 @@ called; do not grant it to both unless both really call it. Never replace a
 name with an inline mapping of `description`, `input`, `output`, `local`, or
 `webhook`.
 
-**Task `result:` and tool `output:` are different contracts.** A tool's optional
-`output:` is an author-side description of one tool call. No generator sends it
-to the model or puts it in the compile report, and the code targets never
-enforce it at run time; SLNG enforces it, and only for a `local:` tool's own
-handler. A task's required `result:` is enforced and describes what the whole
-task returns to its caller after any tool calls. It may select or
-combine tool data, so design it for what the caller needs instead of copying a
-tool output schema by default.
+A tool's optional `output:` remains its own JSON Schema. A task does not copy
+that schema. Its `assign:` list derives finish fields from destination
+variables and saves only the values needed later.
 
 A file in `tools/` that the package level list does not name is not loaded at all,
 and nothing complains. If a tool you wrote never seems to be offered, check that

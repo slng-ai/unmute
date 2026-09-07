@@ -138,11 +138,10 @@ uv run --project internal/voice-agents-tests/salon-concierge-v3/build/livekit \
 ```
 
 After every caller line it prints the tool calls, the handoffs, the assistant
-lines, the active agent, the request block as that agent's prompt holds it, and
-the declared state. Read the block down the column the way you would read a
-trace: a value that appears in no earlier caller line was invented, and a step
-that asks for a value its block holds is the defect `expect:` exists to
-remove.
+lines, the active agent, that agent's complete rendered prompt, and declared
+state. Read the requests in order. A value that appears in no caller line or
+saved variable was invented, and a reset task that asks again for a value its
+prompt explicitly includes has a prompt defect.
 
 Two minutes and a few cents per run, so run it three times before believing a
 claim, the same rule as a call. What it cannot see: audio, turn taking, the

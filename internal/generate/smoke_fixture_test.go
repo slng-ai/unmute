@@ -356,12 +356,6 @@ func TestSmokeStubbedNamesExistInTheEmittedModule(t *testing.T) {
 		"LocalSmartTurnAnalyzerV3": true,
 		"LLMContextAggregatorPair": false,
 		"WorkerRunner":             false,
-		// The pre-fetch smoke scripts replace the pre-fetched lookup with a slow
-		// stub and then with an exploding one, to drive the budget and the except
-		// arm. Both stubs take **kwargs, so the emitted call has to pass some: a
-		// generator that started calling it positionally would make both stubs
-		// pass for the wrong reason.
-		"tools.look_up_customer.look_up_customer": true,
 	} {
 		if !strings.Contains(emitted, name) {
 			t.Errorf("bot.py no longer names %q, so the smoke script that patches bot.%s patches nothing", name, name)
@@ -385,6 +379,14 @@ func TestSmokeStubbedNamesExistInTheEmittedModule(t *testing.T) {
 		}
 		if strings.HasPrefix(strings.TrimSpace(rest[:end]), ")") {
 			t.Errorf("bot.py calls %s() with no arguments; the smoke stub expects kwargs, so update one or the other deliberately", name)
+		}
+	}
+	for _, want := range []string{
+		"handler = tools.look_up_customer.look_up_customer",
+		"await asyncio.to_thread(handler, phone=state.customer_phone)",
+	} {
+		if !strings.Contains(emitted, want) {
+			t.Errorf("bot.py no longer emits %q, so the prefetch smoke stub is not exercised", want)
 		}
 	}
 }

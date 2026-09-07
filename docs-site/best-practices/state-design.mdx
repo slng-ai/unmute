@@ -97,8 +97,8 @@ assign:
   - appointments+: result.appointment
 ```
 
-A step re-entered mid-call reads the current value out of its own state block,
-and models hand it straight back. One call entered a booking step four times,
+A step re-entered mid-call may read the current value through an explicit
+placeholder and hand it straight back. One call entered a booking step four times,
 finished three of them at once with the appointment the first visit had saved,
 and the caller's recap listed one booking four times.
 

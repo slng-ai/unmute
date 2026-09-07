@@ -29,9 +29,9 @@ input:
   properties: {}
 
 inject:
-  customer_id: "{{customer_id}}"
-  dialed_number: "{{dialed_number}}"
-  channel: phone
+  - customer_id: "{{customer_id}}"
+  - dialed_number: "{{dialed_number}}"
+  - channel: phone
 
 webhook:
   url_env: SALON_API_URL
@@ -155,9 +155,9 @@ input:
   properties: {}
 
 inject:
-  customer_id: "{{customer_id}}"
-  dialed_number: "{{dialed_number}}"
-  channel: phone
+  - customer_id: "{{customer_id}}"
+  - dialed_number: "{{dialed_number}}"
+  - channel: phone
 ```
 
 Injected values are merged into the call and **never shown to the model**, so it

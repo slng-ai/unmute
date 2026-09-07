@@ -36,10 +36,6 @@ agents:
         instructions: tasks/find_slot.md
         tools:
           - check_availability
-        result:
-          date: string
-          time: string
-          party_size: integer
         context:
           history: full
 
@@ -47,8 +43,6 @@ agents:
         instructions: tasks/confirm_booking.md
         tools:
           - send_confirmation
-        result:
-          sent: boolean
         context:
           history: full
     task_groups:
@@ -63,10 +57,6 @@ agents:
     tasks:
       - name: qualify_event
         instructions: tasks/qualify_event.md
-        result:
-          occasion: string
-          headcount: integer
-          date: string
         context:
           history: full
     task_groups:

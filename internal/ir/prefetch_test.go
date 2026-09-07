@@ -492,25 +492,16 @@ func TestBuildPrefetchRefusesConfirmation(t *testing.T) {
 			"Name a task an agent runs", "verify_caller")
 	})
 
-	// The greeting is the worst case and the clearest one: a stranger ringing from
-	// a number the salon has on file would be greeted with somebody else's
-	// details before anyone had agreed to anything (SC-006b).
-	t.Run("rule 16: an unconfirmed value in the greeting", func(t *testing.T) {
+	t.Run("an unconfirmed value may be referenced in the greeting", func(t *testing.T) {
 		err := patchPrefetchCore(t,
 			`    text: "Hi, you have reached Acme Support. How can I help you today?"`,
 			`    text: "Hi, calling from {{caller_phone}}?"`)
-		if err == nil {
-			t.Fatal("an unconfirmed value rendered outside its confirming step")
+		if err != nil {
+			t.Fatalf("a legal reference was refused: %v", err)
 		}
-		// The message names all three things FR-027 asks for: the value, the site,
-		// and the step that confirms it.
-		assertRefusal(t, err, "{{caller_phone}}", "the caller has not confirmed yet",
-			"conversation.greeting.text", `task "verify_caller"`, "the step that confirms it")
 	})
 
-	// An agent prompt is the same class of site, and it is the one an author
-	// reaches for first, so it gets its own case rather than riding the greeting's.
-	t.Run("rule 16: an unconfirmed value in an agent prompt", func(t *testing.T) {
+	t.Run("an unconfirmed value may be referenced in an agent prompt", func(t *testing.T) {
 		dir := copyPrefetchCore(t)
 		path := filepath.Join(dir, "instructions.md")
 		body, err := os.ReadFile(path)
@@ -524,20 +515,8 @@ func TestBuildPrefetchRefusesConfirmation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Build(pkg); err == nil {
-			t.Fatal("an unconfirmed value rendered into an agent prompt")
-		} else {
-			// The location here is the prompt file, not agent.yaml, which is what
-			// every existing template refusal already reports for a prompt site.
-			got := err.Error()
-			for _, want := range []string{
-				"instructions.md", "{{caller_phone}}", "the caller has not confirmed yet",
-				`agent "intake" instructions`,
-			} {
-				if !strings.Contains(got, want) {
-					t.Errorf("the refusal is missing %q:\n%s", want, got)
-				}
-			}
+		if _, err := Build(pkg); err != nil {
+			t.Fatalf("a legal reference was refused: %v", err)
 		}
 	})
 
@@ -556,6 +535,7 @@ func TestBuildPrefetchRefusesConfirmation(t *testing.T) {
 		pkg.Agent.Variables["customer_id"] = variable
 		task := pkg.Tasks["verify_caller"]
 		task.Name, task.When = "verify_account", "Confirm the account."
+		task.Assign = append(task.Assign, packagespec.Pair{Key: "customer_id", Value: "result.customer_id"})
 		pkg.Tasks["verify_account"] = task
 		pkg.Callables["verify_account"] = packagespec.Callable{Task: "verify_account", When: task.When}
 		intake := pkg.Agent.Agents["intake"]
@@ -850,6 +830,68 @@ func TestBuildPrefetchFillsShapedText(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := patchPrefetchCore(t, tc.from, tc.to); err != nil {
 				t.Fatalf("a pre-fetch was refused a variable it can fill: %v", err)
+			}
+		})
+	}
+}
+
+func TestConfirmationWithoutPrefetch(t *testing.T) {
+	for _, tc := range []struct {
+		name, confirmer string
+		removeAssign    bool
+		want            string
+	}{
+		{"missing task", "missing", false, "no step"},
+		{"task does not save", "confirm_number", true, "must assign"},
+		{"later readers legal", "confirm_number", false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg, err := packagespec.Load(filepath.Join("..", "testdata", "typed_state"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			variable := pkg.Agent.Variables["caller_phone"]
+			variable.Confirm = tc.confirmer
+			pkg.Agent.Variables["caller_phone"] = variable
+			if tc.removeAssign {
+				task := pkg.Tasks["confirm_number"]
+				task.Assign = nil
+				pkg.Tasks["confirm_number"] = task
+			}
+			pkg.Markdown["instructions.md"] += "\nPhone {{caller_phone}}."
+			_, err = Build(pkg)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestPrefetchTracksHiddenDependencies(t *testing.T) {
+	for _, site := range []string{"inject", "path"} {
+		t.Run(site, func(t *testing.T) {
+			pkg := loadPrefetchCore(t)
+			pkg.Agent.Prefetch[2].Args = nil
+			tool := pkg.Tools["lookup_customer"]
+			if site == "inject" {
+				tool.Inject = []packagespec.Pair{{Key: "hidden_phone", Value: "{{caller_phone}}"}}
+			} else {
+				tool.Webhook.Path = "/{{caller_phone}}"
+			}
+			pkg.Tools["lookup_customer"] = tool
+			agent, err := Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := agent.Prefetch[2].Inputs; len(got) != 1 || got[0] != "caller_phone" {
+				t.Fatalf("hidden dependencies = %v", got)
+			}
+			if !agent.Variables["caller_name"].ConfirmInherited {
+				t.Fatal("hidden candidate did not restrict output")
 			}
 		})
 	}

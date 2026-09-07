@@ -8,9 +8,8 @@ import (
 // VariableOrder is the order the author declared the variables in.
 //
 // `variables:` is a name-keyed block and stays one: it is on the dictionary
-// debt list and nothing about it moves in this feature. But a map has no order,
-// and the composed state block numbers its lines in declaration order, because
-// sorting is what makes a numbered list move under a reader who adds a field.
+// debt list. A map has no order, while generated declarations and runbooks keep
+// the order an author chose.
 //
 // So the order is read off the authored file, once, from the same bytes the
 // decoder read. Through goccy's parser rather than a line scan: comments,

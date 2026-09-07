@@ -24,7 +24,7 @@ input:
     - confirmed
 
 inject:
-  customer_phone: "{{customer_phone}}"
+  - customer_phone: "{{customer_phone}}"
 
 output:
   type: object

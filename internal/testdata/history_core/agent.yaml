@@ -34,8 +34,6 @@ agents:
         instructions: tasks/confirm_number.md
         assign:
           - caller_phone: result.caller_phone
-        result:
-          caller_phone: string
         context:
           history: reset
 
@@ -44,8 +42,6 @@ agents:
       - name: read_back
         when: The caller wants to hear back what has been agreed so far.
         instructions: tasks/read_back.md
-        result:
-          summary: string
         context:
           history: messages
 
@@ -58,9 +54,6 @@ agents:
         instructions: tasks/sort_invoice.md
         tools:
           - get_invoice
-        result:
-          resolved: boolean
-          summary: string
         context:
           history: last_n
           max_messages: 6
@@ -69,8 +62,6 @@ agents:
       - name: take_message
         when: The caller wants to leave a message for somebody.
         instructions: tasks/take_message.md
-        result:
-          summary: string
         context:
           history: full
     handoffs:

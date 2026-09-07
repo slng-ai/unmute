@@ -294,9 +294,6 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 		}
 	}
 	for name, task := range agent.Tasks {
-		if len(task.Result) == 0 {
-			errors = add(errors, fmt.Sprintf("task %q result must not be empty", name))
-		}
 		// "A task may attach handoffs only" used to be checked here, because a task
 		// had one mixed list that could hold any kind. A task now has `tools:` and
 		// `handoffs:` and no other key, so the illegal thing has nowhere to be
@@ -643,9 +640,8 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 // never entered, its `assign:` never runs, and the declared state disagrees with
 // what happened on the call. Found on a live call (trace 9aa92e09, 2026-09-04):
 // `record_complaint` sat on the complaint specialist as well as on its
-// `handle_complaint` step, the specialist recorded the complaint itself, and the
-// state block still read "Complaints: none recorded yet" at the end of a call
-// that had recorded one. The prompt already said to run the step. A tool in
+// `handle_complaint` step, the specialist recorded the complaint itself, and
+// the task's assignment never ran. The prompt already said to run the step. A tool in
 // reach beat the prompt, which is why this is a refusal and not a line of
 // authoring advice.
 //
@@ -880,9 +876,6 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		if task.Model != "" {
 			applyCapability(caps, targetcap.FieldTaskModel, provider, row)
 		}
-		if len(task.Inputs) > 0 {
-			applyCapability(caps, targetcap.FieldInput, provider, row)
-		}
 		if taskContexts[name] {
 			validateContext(task.Context, provider, caps, row)
 		}
@@ -910,9 +903,6 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		case *AgentTransfer:
 			if control.Announce != "" {
 				applyCapability(caps, targetcap.FieldTransferAnnounce, provider, row)
-			}
-			if len(control.Inputs) > 0 {
-				applyCapability(caps, targetcap.FieldInput, provider, row)
 			}
 			validateContext(control.Context.TaskContext, provider, caps, row)
 		case *HumanTransfer:
@@ -1784,16 +1774,6 @@ func taskContextUsage(agent *Agent) map[string]bool {
 	usesOwnContext := make(map[string]bool, len(agent.Tasks))
 	for name := range agent.Tasks {
 		usesOwnContext[name] = true
-	}
-	for _, group := range agent.TaskGroups {
-		for _, task := range group.Steps {
-			usesOwnContext[task] = false
-		}
-	}
-	for _, control := range agent.Controls {
-		if delegate, ok := control.(*Delegate); ok && delegate.Task != "" {
-			usesOwnContext[delegate.Task] = true
-		}
 	}
 	return usesOwnContext
 }

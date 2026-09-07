@@ -51,15 +51,15 @@ func TestValidateLanguage(t *testing.T) { // N16: language is validated per mode
 	}
 }
 
-func TestValidateTaskRequiresResultAndHistory(t *testing.T) {
+func TestValidateTaskRequiresResolvedHistory(t *testing.T) {
 	agent := safeAgent(t)
 	agent.Tasks["incomplete"] = Task{Instructions: "incomplete"}
 	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
 	if err == nil {
-		t.Fatal("task with no result or history must fail validation")
+		t.Fatal("task with unresolved history must fail validation")
 	}
 	errors := strings.Join(report.PerTarget[0].Errors, "\n")
-	for _, want := range []string{`task "incomplete" result must not be empty`, `"incomplete" context.history is required`} {
+	for _, want := range []string{`"incomplete" context.history is required`} {
 		if !strings.Contains(errors, want) {
 			t.Errorf("validation errors missing %q:\n%s", want, errors)
 		}
@@ -229,7 +229,7 @@ func TestValidateLiveKitSpeakEndpointGate(t *testing.T) {
 // driver gates something — see TestValidateBuiltinUnknownIDRejected and the
 // per-target rows in TestCompilerGolden.
 
-func TestValidateTaskGroupOverridesMemberContext(t *testing.T) {
+func TestValidateTaskGroupKeepsMemberContext(t *testing.T) {
 	agent := safeAgent(t)
 	agent.Models["group_only_summarizer"] = ModelDef{Kind: KindThink, Placement: PlacementAPI}
 	agent.Tasks["collect"] = Task{
@@ -240,7 +240,7 @@ func TestValidateTaskGroupOverridesMemberContext(t *testing.T) {
 		Steps: []string{"collect"}, ContextScope: ContextShared, Then: GroupEnd, Merge: GroupMergeResults,
 	}
 	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
-	if err != nil || strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "missing reason binding") {
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "missing reason binding") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
 	}
 }

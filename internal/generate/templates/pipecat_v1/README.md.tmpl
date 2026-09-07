@@ -332,32 +332,13 @@ environment variable when the payload carries none.
 {{if .TypedState}}
 ## Declared state
 
-Every agent prompt and every task prompt in this project ends with a block the
-compiler wrote:
+Variables declare types once. A task's `assign` derives its finish fields and
+saves validated values. A failed or unserved finish saves nothing.
 
-```text
-{{.TypedState.Preview}}
-```
-
-No prompt file contains it. Adding a field to a shape in the source package
-changes every prompt here with no prompt file edited, so the model is told what
-the call has established rather than being left to re-read the conversation.
-
-The values it names:
-
-{{range .TypedState.Values}}- `{{.Name}}` (`{{.Type}}`){{if .Confirm}}, which the caller has to agree to in the `{{.Confirm}}` step{{end}}
-{{end}}
-What to expect when you read a prompt or a trace:
-
-- A value with no contents renders as the words `{{.TypedState.Empty}}`, never as
-  an empty list or a null. A step reading an empty structure cannot tell "not
-  yet known" from "known to be nothing".
-- A value with contents renders as compact JSON, never as a Python repr.
-- A value the caller has not agreed to renders in its confirming step's prompt
-  and nowhere else on the call.
-- No declared secret renders in the block at all.
-- One value is bounded at `_STATE_VALUE_MAX` characters. A longer one is
-  shortened and logged, never dropped and never allowed to end the call.
+A prompt reads only its own `{{"{{variable}}"}}` or `{{"{{variable.field}}"}}`
+references. Missing values render as `{{.TypedState.Empty}}`; false, zero and
+empty lists keep their values. Referencing an object shares the whole object.
+History is a separate choice and does not clear saved values.
 
 Each declared shape is a generated Pydantic class in this module. A step's
 result is validated against it before anything is recorded, so a value outside a
@@ -369,34 +350,7 @@ A text type with a validated shape (`Phone`, `Date`, `Time`, `Id`) is a `str` in
 the schema the model is sent, with its shape checked by a validator. That is
 deliberate: a `pattern` in the schema survives the strict tool-schema converter
 and the provider rejects it, so the shape is checked here instead.
-{{end}}{{if and .TypedState .TypedState.Inputs}}
-
-## Request block
-
-A step or a receiving agent that declares `expect:` is handed those values by
-the agent that ran it or handed the caller over, and its prompt ends with a
-second block the compiler wrote, after the conversation state:
-
-```text
-{{inputBlockPreview .TypedState.Inputs}}
-```
-
-The values are validated before the step is entered or the receiver is
-activated. A value outside its type is refused with the field named, nothing is
-started, and the message reaches the agent that supplied it, which can correct
-itself or ask the caller. A required value the agent left out is refused the
-same way. An optional value left out renders as `{{.TypedState.InputEmpty}}`,
-and the step may ask for that one thing.
-
-The values live on the shared state for one visit. A step's are put back when
-it finishes, and a receiving agent's stay until the next handoff, so a brief
-survives the receiver's own steps. Nothing about an expected value is recorded
-unless the step's result carries it.
-
-What each seam is handed:
-
-{{range .TypedState.Inputs}}- `{{.Site}}` ({{if eq .Kind "task"}}step{{else}}handoff, read by `{{.Receiver}}`{{end}}):{{range .Fields}} `{{.Name}}` ({{.Type}}{{if .Optional}}, optional{{end}}){{end}}
-{{end}}{{end}}
+{{end}}
 ## Required environment
 
 Set these before running (values are never written into the project):

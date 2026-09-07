@@ -41,7 +41,7 @@ the value comes from, and it changes what you can do with the variable.
 | Source | Who sets it | When |
 |---|---|---|
 | `call_start` | whatever starts the call | before the first word |
-| left out | nothing yet; a task's own `result:` and `assign:` can fill it later | once a step records it |
+| left out | nothing yet; a task's `assign:` can fill it later | once a step records it |
 | system sources such as `from_number`, `direction`, `call_id` | the phone adapter | on a phone call, when the route grants that fact. LiveKit's two routes grant the most; Pipecat's two Twilio routes grant a smaller set, each in one direction only for a phone number |
 
 A system source works the same way whether you put it straight on a variable's
@@ -50,8 +50,8 @@ read the same route table, so the fact hydrates on whichever route grants it.
 See the [Variables reference](/reference/variables#sources) for the full grid.
 
 `requested_service` above declares no `source:`, so it starts at its default
-and stays there until a task records it. A task hears the caller, and its own
-`result:` and `assign:` write the value; see
+and stays there until a task records it. A task's `assign:` derives its finish
+field from this declaration and writes the value; see
 [Tasks](/build/orchestration/tasks) for how a step does that.
 
 ## Use one in the greeting
@@ -115,8 +115,8 @@ input:
     - slot_id
 
 inject:
-  customer_id: "{{customer_id}}"
-  service: "{{requested_service}}"
+  - customer_id: "{{customer_id}}"
+  - service: "{{requested_service}}"
 ```
 
 The model is offered a one parameter function, `book_appointment(slot_id)`.
@@ -181,34 +181,21 @@ booking in the same call does not erase the first:
         instructions: tasks/book.md
         assign:
           - appointments+: result.appointment
-        result:
-          appointment: Appointment
-          summary: string
         context:
           history: reset
 ```
 
-## Read the block the compiler adds
+## Read a value where it is needed
 
-Every agent prompt and every task prompt gets one more thing after your own
-text, written by the compiler and never by you:
+Put a placeholder in each prompt that needs the value:
 
-```text
-Conversation info:
-What this call has established so far. Read it rather than re-reading the
-conversation, and never ask for something already recorded here.
-1. Appointments: [{"scheduled_date":"2026-09-10","scheduled_time":"10:00","appointment_type":"haircut"}]
+```markdown tasks/review-booking.md
+Review these appointments with the caller: {{appointments}}.
 ```
 
-Before anything is booked, the same line renders as:
-
-```text
-1. Appointments: none recorded yet.
-```
-
-never as `[]` or `null`, so a step can tell "not yet known" from "known to be
-nothing". Add a field to the shape and every prompt shows it, with no prompt
-file touched.
+The whole shape renders as compact JSON. An unset value renders as
+`none recorded yet.` A prompt with no placeholder receives no saved value,
+even when the call holds many of them.
 
 For the full type grammar a shape's fields and a variable's `type:` can use,
 see the [Variables reference](/reference/variables).

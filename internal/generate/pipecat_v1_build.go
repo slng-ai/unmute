@@ -53,7 +53,6 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		// Tracing is on for either provider now, and TracingProvider says which.
 		Tracing:         agent.Tracing != nil,
 		TracingProvider: tracingProviderOf(agent),
-		ResultsHint:     pipecatResultsHint,
 		Pace:            resolvePaceView(targetcap.Pipecat, target.Models.Turn),
 		SemanticOff:     semanticEndpointingOff(target.Models.Turn),
 	}
@@ -198,18 +197,6 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	if err != nil {
 		return pipecatData{}, err
 	}
-	// Every input site is reached through some worker's tool, and each of those
-	// advertises an explicit schema, so the import is wanted exactly when the
-	// package hands something in.
-	data.NeedsFunctionSchema = len(inputSites(agent)) > 0
-	// One field per input name, defaulting to None: an input has no value
-	// outside its visit. The same list the LiveKit driver appends to its
-	// Userdata, so the two objects declare the same fields.
-	for _, field := range InputStateFields(agent) {
-		data.Variables = append(data.Variables, pipecatVariable{
-			Name: field.Name, PyType: field.Anno, Default: "None", Description: field.Sites,
-		})
-	}
 	if typed.Source != "" {
 		data.TypedState = &typed
 		var typingNames []string
@@ -221,8 +208,8 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		}
 		data.TypingImports = strings.Join(typingNames, ", ")
 	}
-	data.PydanticImports = PydanticImports(false, data.TypedState != nil)
-	data.NeedsDataclassField = StateNeedsDataclassField(agent)
+	data.PydanticImports = PydanticImports(false, data.TypedState)
+	data.NeedsDataclassField = StateNeedsDataclassField(agent) || PrefetchUnconfirmed(agent)
 	data.NeedsPrefetchUnconfirmed = PrefetchUnconfirmed(agent)
 	if block, needed := Prefetch(agent, prefetchStateExpr, func(entry ir.Prefetch) PrefetchRequest {
 		return prefetchRequestFor(agent, entry)
@@ -635,6 +622,10 @@ func setImportNeeds(data *pipecatData) {
 				data.NeedsLastN = data.NeedsLastN || strings.HasPrefix(step.CtxExpr, "_last_n(")
 				data.NeedsSpeechOnly = data.NeedsSpeechOnly || strings.HasPrefix(step.CtxExpr, "_speech_only(")
 				data.NeedsHistoryRunbook = data.NeedsHistoryRunbook || step.CtxExpr != ""
+				for _, transfer := range step.Transfers {
+					data.NeedsLastN = data.NeedsLastN || strings.HasPrefix(transfer.CtxExpr, "_last_n(")
+					data.NeedsSpeechOnly = data.NeedsSpeechOnly || strings.HasPrefix(transfer.CtxExpr, "_speech_only(")
+				}
 				for _, t := range step.Tools {
 					if t.Local {
 						data.NeedsInspect = true
@@ -671,6 +662,8 @@ func setImportNeeds(data *pipecatData) {
 	sort.Slice(data.LocalTools, func(i, j int) bool { return data.LocalTools[i].Name < data.LocalTools[j].Name })
 	data.MCPParamsImports = sortedKeys(paramsClasses)
 
+	data.FrameImports = append(data.FrameImports, "LLMUpdateSettingsFrame")
+
 	// pipecat.frames.frames names ride one merged import (V2), sorted at the end
 	// so the merged import matches isort whatever order the flags are read in.
 	if data.NeedsEndFrame {
@@ -679,7 +672,7 @@ func setImportNeeds(data *pipecatData) {
 	if data.HasFlows {
 		// The delegate call resolves with run_llm=False (V7), and every
 		// activation resets an agent that owns Flows to its owner prompt.
-		data.FrameImports = append(data.FrameImports, "FunctionCallResultProperties", "LLMUpdateSettingsFrame")
+		data.FrameImports = append(data.FrameImports, "FunctionCallResultProperties")
 	}
 	if data.NeedsAppendFrame {
 		data.FrameImports = append(data.FrameImports, "LLMMessagesAppendFrame")
@@ -858,7 +851,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	// A templated prompt is rendered per session from the call state; an untouched
 	// one stays the bare module constant it always was.
 	profile, router := slngRouterBinding(agent, target, def.Model)
-	prompt := promptExpr(promptConst, def.Instructions, pipecatStateExpr, router)
+	prompt := promptExpr(promptConst, def.Instructions, pipecatStateExpr, router, "agent:"+name)
 	llm, err := resolvePipecatService(targetcap.Reason, target.Models.Reason[def.Model], env,
 		pipecatSlngSite(agent, target, profile, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name}),
 		pyKV{Key: "system_instruction", Value: prompt})
@@ -872,7 +865,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	built := pipecatAgent{
 		Name: name, Class: pyName(name) + "Agent", Prompt: def.Instructions,
 		PromptConst: promptConst, PromptExpr: prompt,
-		RuntimePromptExpr: promptExpr(promptConst, def.Instructions, "self.state", router),
+		RuntimePromptExpr: promptExpr(promptConst, def.Instructions, "self.state", router, "agent:"+name),
 		SlngHeaders:       pipecatRuntimeHeaders(target, profile, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name}),
 		LLM:               llm, TTS: tts,
 	}
@@ -886,7 +879,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 				built.MCPSources = append(built.MCPSources, buildMCPSource(ref, tool, env))
 				continue
 			}
-			lowered, err := buildTool(ref, tool, agent.Variables, SupplierIndex(agent.Controls), env)
+			lowered, err := buildTool(ref, tool, agent.Variables, SupplierIndex(agent.Tasks), env)
 			if err != nil {
 				return pipecatAgent{}, err
 			}
@@ -903,12 +896,8 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 			// namespace, D8), so the LLM invokes the tool by its spec name.
 			transfer := pipecatTransfer{
 				MethodName: ref, To: c.To, When: transferReason(c),
-				Announce:       c.Announce,
-				Reason:         transferReason(c),
-				Inputs:         pipecatInputArgs(c.Inputs),
-				InputProps:     inputPropsExpr(ref, c.Inputs),
-				InputRequired:  inputRequiredExpr(c.Inputs),
-				ReceiverInputs: inputNames(agent.Agents[c.To].Inputs),
+				Announce: c.Announce,
+				Reason:   transferReason(c),
 			}
 			transfer.CtxExpr, _ = pipecatCtxExpr(c.Context.TaskContext)
 			built.Transfers = append(built.Transfers, transfer)
@@ -939,72 +928,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 		}
 	}
 	built.FlowFunctionNames = sortedKeys(flowNames)
-	built.Brief = inputNames(def.Inputs)
-	for _, delegate := range built.Delegates {
-		if len(delegate.Inputs) > 0 {
-			built.InputSchemas = append(built.InputSchemas, pipecatInputSchema{
-				Name: delegate.MethodName, Description: delegate.When,
-				Props: delegate.InputProps, Required: delegate.InputRequired,
-			})
-		}
-	}
-	for _, transfer := range built.Transfers {
-		if len(transfer.Inputs) > 0 {
-			built.InputSchemas = append(built.InputSchemas, pipecatInputSchema{
-				Name: transfer.MethodName, Description: transfer.When,
-				Props: transfer.InputProps, Required: transfer.InputRequired,
-			})
-		}
-	}
 	return built, nil
-}
-
-// pipecatInputArgs lowers a seam's inputs to handler parameters, required
-// first: the framework invokes a direct function with the model's arguments as
-// keyword arguments, so the signature has to name every one even though the
-// schema the model sees is spliced elsewhere.
-func pipecatInputArgs(inputs []ir.InputField) []pipecatArg {
-	var args []pipecatArg
-	for _, optional := range []bool{false, true} {
-		for _, input := range inputs {
-			if input.Optional != optional {
-				continue
-			}
-			args = append(args, pipecatArg{
-				Name: input.Name, PyType: inputAnno(input), PyDefault: "None",
-				Required: !input.Optional, Description: input.Description,
-			})
-		}
-	}
-	return args
-}
-
-// inputPropsExpr is the properties dict of one seam's explicit schema: each
-// entry the declared type's own schema, read through the adapter the input
-// table already holds, with the refs resolved the way finish's are. One owner
-// for the type: the adapter, its validator and the schema the model is sent
-// cannot drift.
-func inputPropsExpr(site string, inputs []ir.InputField) string {
-	if len(inputs) == 0 {
-		return "{}"
-	}
-	entries := make([]string, 0, len(inputs))
-	for _, input := range inputs {
-		entries = append(entries, fmt.Sprintf("%s: _schema(_INPUT_TYPES[%s][%s])",
-			pyQuote(input.Name), pyQuote(site), pyQuote(input.Name)))
-	}
-	return "{" + strings.Join(entries, ", ") + "}"
-}
-
-// inputRequiredExpr is the required list of one seam's explicit schema.
-func inputRequiredExpr(inputs []ir.InputField) string {
-	var required []string
-	for _, input := range inputs {
-		if !input.Optional {
-			required = append(required, input.Name)
-		}
-	}
-	return pyLiteral(anyStrings(required))
 }
 
 // pipecatCtxExpr lowers a context block's history shaping to the Python list a
@@ -1035,8 +959,8 @@ func pipecatCtxExpr(c ir.TaskContext) (expr string, needsLastN bool) {
 		return "_speech_only(self.context.get_messages())", false
 	case ir.HistoryLastN:
 		return fmt.Sprintf("_last_n(self.context.get_messages(), %d)", c.MaxMessages), true
-	default: // full
-		return "", false
+	default: // full keeps speech and paired tool records, never prior instructions.
+		return `[dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")]`, false
 	}
 }
 
@@ -1053,11 +977,7 @@ func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, e
 	if c.Task != "" {
 		delegate.Task = c.Task
 		delegate.Then = "return" // a single task always returns (SCHEMA 4.7)
-		inputs := agent.Tasks[c.Task].Inputs
-		delegate.Inputs = pipecatInputArgs(inputs)
-		delegate.InputProps = inputPropsExpr(c.Task, inputs)
-		delegate.InputRequired = inputRequiredExpr(inputs)
-		for _, entry := range c.Assign {
+		for _, entry := range agent.Tasks[c.Task].Assign {
 			delegate.Assign = append(delegate.Assign, pipecatAssign{
 				Var: entry.Var, Field: entry.Field, Append: entry.Append,
 				Confirms: agent.Variables[entry.Var].Confirm == c.Task,
@@ -1084,20 +1004,12 @@ func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, e
 		delegate.StepTasks[i].NextName = delegate.StepTasks[i+1].Name
 		delegate.StepTasks[i].SlngNextHeaders = delegate.StepTasks[i+1].SlngHeaders
 	}
-	// The task's own context shapes its entry, and only for a single-task
-	// delegate: a group step takes the group's `context_scope` instead, which is
-	// where Isolated above comes from and which this must not override. Same
-	// split as livekitCtxExpr's two call sites.
-	//
-	// reset takes the RESET strategy rather than an empty list, because that
-	// line already exists on the node and RESET governs the transition itself.
-	if c.Task != "" {
-		if context := agent.Tasks[c.Task].Context; context.History == ir.HistoryReset {
-			delegate.StepTasks[0].Reset = true
-		} else {
-			delegate.StepTasks[0].CtxExpr, _ = pipecatCtxExpr(context)
-		}
+	for i := range delegate.StepTasks {
+		context := agent.Tasks[delegate.StepTasks[i].Name].Context
+		delegate.StepTasks[i].Reset = delegate.Isolated || context.History == ir.HistoryReset
+		delegate.StepTasks[i].CtxExpr, _ = pipecatCtxExpr(context)
 	}
+
 	return delegate, nil
 }
 
@@ -1122,10 +1034,10 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 		// A router-bound task ships its placeholders intact like any other router
 		// prompt site: the flow node's role_message goes to the router as the
 		// system message, through the owning agent's LLM.
-		PromptExpr:     promptExpr(pyQuote(prompt), prompt, "self.state", taskRouter),
+		PromptExpr:     promptExpr(pyQuote(prompt), prompt, "self.state", taskRouter, "task:"+name),
 		ResultProps:    resultPropsExpr(name, task.Result),
-		Typed:          resultDeclaresShape(task.Result),
-		ResultRequired: pyLiteral(anyStrings(sortedResultNames(task.Result))),
+		Typed:          true,
+		ResultRequired: "[]",
 		// A task's prompt is not its owner's, so its cache scope is not its
 		// owner's either. This is the value the emitted handlers swap in on the
 		// way into the node and out of on every way back.
@@ -1142,14 +1054,12 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 			if !supported {
 				return pipecatTask{}, fmt.Errorf("task %q references unsupported control %q: tasks support agent_transfer controls only", name, ref)
 			}
+			ctxExpr, _ := pipecatCtxExpr(transfer.Context.TaskContext)
 			built.Transfers = append(built.Transfers, pipecatTransfer{
+				CtxExpr:    ctxExpr,
 				MethodName: ref, To: transfer.To, When: transferReason(transfer),
-				Announce:       transfer.Announce,
-				Reason:         transferReason(transfer),
-				Inputs:         pipecatInputArgs(transfer.Inputs),
-				InputProps:     inputPropsExpr(ref, transfer.Inputs),
-				InputRequired:  inputRequiredExpr(transfer.Inputs),
-				ReceiverInputs: inputNames(agent.Agents[transfer.To].Inputs),
+				Announce: transfer.Announce,
+				Reason:   transferReason(transfer),
 			})
 			continue
 		}
@@ -1159,7 +1069,7 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 		if tool.Execution == ir.ToolMCP {
 			return pipecatTask{}, fmt.Errorf("task %q lists the MCP tool source %q: a Flows node advertises only its own function schemas, so list the source on the agent instead", name, ref)
 		}
-		lowered, err := buildTool(ref, tool, agent.Variables, SupplierIndex(agent.Controls), env)
+		lowered, err := buildTool(ref, tool, agent.Variables, SupplierIndex(agent.Tasks), env)
 		if err != nil {
 			return pipecatTask{}, err
 		}
@@ -1200,17 +1110,6 @@ func resultProperties(result map[string]ir.ResultField) map[string]any {
 	return properties
 }
 
-// resultDeclaresShape reports whether a step hands back anything with a
-// declared shape, which is what decides whether its finish validates.
-func resultDeclaresShape(result map[string]ir.ResultField) bool {
-	for _, field := range result {
-		if field.Shape != nil {
-			return true
-		}
-	}
-	return false
-}
-
 // resultPropsExpr is the Python expression for one step's finish properties.
 //
 // A declared shape's entry is the generated class's own schema, read through
@@ -1220,25 +1119,13 @@ func resultDeclaresShape(result map[string]ir.ResultField) bool {
 //
 // A step declaring no shape gets the literal it always got, byte for byte.
 func resultPropsExpr(task string, result map[string]ir.ResultField) string {
-	if !resultDeclaresShape(result) {
-		return pyLiteral(resultProperties(result))
-	}
-	plain := map[string]ir.ResultField{}
-	var entries []string
+	entries := []string{pyQuote(ir.UnservedResultField) + ": " + pyLiteral(resultProperties(nil)[ir.UnservedResultField])}
 	for _, name := range sortedResultNames(result) {
 		field := result[name]
-		if field.Shape == nil {
-			plain[name] = field
-			continue
-		}
-		// Through _schema rather than json_schema(): this target nests the
-		// schema inside one tool property and sends no strict flag, and a $ref
-		// there is a 200 whose nested object the model invents the field names
-		// for. Measured on a real request; the emitted helper says so.
-		entries = append(entries, fmt.Sprintf("%s: _schema(_FINISH_TYPES[%s][%s])",
-			pyQuote(name), pyQuote(task), pyQuote(name)))
+		anno := pyAnno(nullableType(pyAnno(resultPyType(field), field.Enum, "")), nil, field.Description)
+		entries = append(entries, fmt.Sprintf("%s: _schema(TypeAdapter(%s))", pyQuote(name), anno))
 	}
-	return "{**" + pyLiteral(resultProperties(plain)) + ", " + strings.Join(entries, ", ") + "}"
+	return "{" + strings.Join(entries, ", ") + "}"
 }
 
 // anyStrings widens a string slice for pyLiteral rendering.
@@ -1285,11 +1172,6 @@ func transferReason(c *ir.AgentTransfer) string {
 func delegateReason(c *ir.Delegate) string {
 	return orDefault(c.When, "Run this flow. It returns its result to you when it finishes.")
 }
-
-// pipecatResultsHint is the developer message that hands a delegate's results
-// back to the owning agent. LiveKit says the same thing in the delegate tool's
-// docstring; here there is no tool to describe, so it rides the handback.
-const pipecatResultsHint = " Continue with the caller in one short line. " + unservedOwnerRule
 
 // pipecatStateExpr is how emitted Pipecat code reaches the call state: an agent
 // @tool method has it on self, a flows handler receives it as a bound kwarg.
@@ -1769,7 +1651,6 @@ func pipecatSlngSite(agent *ir.Agent, tgt ir.Target, profile string, site target
 	return slngSite{
 		SessionExpr: pipecatSessionIDExpr,
 		StateExpr:   pipecatStateExpr,
-		Names:       slngTemplateNames(agent, tgt, profile),
 		ConfigFunc:  slngConfigFunc(profile),
 		Scope:       targetcap.SlngScope(tgt.Models.Reason[profile].AgentID, site),
 		// The framework offers a per-request seam after all:

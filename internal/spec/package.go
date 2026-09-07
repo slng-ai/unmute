@@ -399,15 +399,8 @@ type Task struct {
 	Handoffs []string `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
 	// Think names an entry of `models.think`, overriding the profile the task
 	// would otherwise inherit. Spelled the way every other think pointer is.
-	Think string `json:"think,omitempty" yaml:"think,omitempty"`
-	// Input, authored as `expect:`, is what the step expects to be handed when the agent runs it: one typed field
-	// per value, in the words a result field uses, filled by the agent from the
-	// conversation it heard. Fixed for the visit and gone after it. A list and
-	// not a map, because the order written is the order the step's prompt shows
-	// them in, and because the Field decoder already reads both authored forms.
-	Input   []Field        `json:"expect,omitempty" yaml:"expect,omitempty"`
-	Result  map[string]any `json:"result" yaml:"result"`
-	Context TaskContext    `json:"context" yaml:"context"`
+	Think   string      `json:"think,omitempty" yaml:"think,omitempty"`
+	Context TaskContext `json:"context,omitempty" yaml:"context,omitempty"`
 }
 
 // TaskGroup is one entry under `task_groups:`: an ordered run of task steps. It
@@ -424,14 +417,14 @@ type TaskGroup struct {
 }
 
 type TaskContext struct {
-	History          string `json:"history" yaml:"history"`
+	History          string `json:"history,omitempty" yaml:"history,omitempty"`
 	MaxMessages      int    `json:"max_messages,omitempty" yaml:"max_messages,omitempty"`
 	Summarizer       string `json:"summarizer,omitempty" yaml:"summarizer,omitempty"`
 	IncludeToolCalls *bool  `json:"include_tool_calls,omitempty" yaml:"include_tool_calls,omitempty"`
 }
 
 type TransferContext struct {
-	History          string `json:"history" yaml:"history"`
+	History          string `json:"history,omitempty" yaml:"history,omitempty"`
 	MaxMessages      int    `json:"max_messages,omitempty" yaml:"max_messages,omitempty"`
 	Summarizer       string `json:"summarizer,omitempty" yaml:"summarizer,omitempty"`
 	IncludeToolCalls *bool  `json:"include_tool_calls,omitempty" yaml:"include_tool_calls,omitempty"`
@@ -451,7 +444,6 @@ type Callable struct {
 	Group    string
 	When     string
 	Announce string
-	Assign   []Pair
 }
 
 // Handoff is one entry under `handoffs:`. The conversation becomes another
@@ -461,14 +453,10 @@ type Callable struct {
 // missing one is the empty string and is refused by the same check that refuses
 // a `to:` naming an agent that does not exist.
 type Handoff struct {
-	To       string  `json:"to" yaml:"to"`
-	When     string  `json:"when,omitempty" yaml:"when,omitempty"`
-	Announce *string `json:"announce,omitempty" yaml:"announce,omitempty"`
-	// Input, authored as `expect:`, is the brief the receiving agent is handed: the same list a task
-	// takes, filled by the agent handing over. It stays with the receiver until
-	// the next handoff.
-	Input   []Field          `json:"expect,omitempty" yaml:"expect,omitempty"`
-	Context *TransferContext `json:"context,omitempty" yaml:"context,omitempty"`
+	To       string           `json:"to" yaml:"to"`
+	When     string           `json:"when,omitempty" yaml:"when,omitempty"`
+	Announce *string          `json:"announce,omitempty" yaml:"announce,omitempty"`
+	Context  *TransferContext `json:"context,omitempty" yaml:"context,omitempty"`
 }
 
 // Escalation is one entry under `escalations:`. The caller goes through to a
@@ -544,7 +532,7 @@ type Tool struct {
 	// never advertised to the model: a value may carry {{variable}} tokens.
 	// Legal on webhook and local only: an mcp server owns its own call shape,
 	// so there is nothing here to merge into (validate.go, SCHEMA N40).
-	Inject map[string]any `json:"inject,omitempty" yaml:"inject,omitempty"`
+	Inject []Pair `json:"inject,omitempty" yaml:"inject,omitempty"`
 
 	Webhook        *ToolWebhook   `json:"webhook,omitempty" yaml:"webhook,omitempty"`
 	Local          *ToolLocal     `json:"local,omitempty" yaml:"local,omitempty"`

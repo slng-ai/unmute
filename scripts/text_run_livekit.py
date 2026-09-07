@@ -3,8 +3,8 @@
 The emitted agent runs inside LiveKit's own test harness (AgentSession.run) with
 the package's real think model and its real local tools, and no STT or TTS. After
 every caller line the script prints the events (messages, tool calls, tool
-outputs, handoffs), the active agent, the request block as that agent's prompt
-holds it, and the declared state. It is the layer a prompt or a seam defect lives
+outputs, handoffs), the active agent, that agent's complete rendered prompt,
+and the declared state. It is the layer a prompt or a seam defect lives
 in, so it is where to reproduce one before asking anybody for a call.
 
 Run it from the repository root, inside the emitted project's own environment so
@@ -80,14 +80,8 @@ def events_of(result) -> list:
         i += 1
 
 
-def request_block(agent_obj) -> str:
-    text = getattr(agent_obj, "instructions", "") or ""
-    at = text.find("Request:")
-    return (
-        text[at:].replace("\n", " | ")
-        if at >= 0
-        else "(no request block in this prompt)"
-    )
+def prompt_of(agent_obj) -> str:
+    return (getattr(agent_obj, "instructions", "") or "").replace("\n", " | ")
 
 
 def state_of(userdata) -> str:
@@ -146,7 +140,7 @@ async def run(args: argparse.Namespace) -> None:
                 print("  ", describe(ev))
             current = session.current_agent
             print("   active agent:", type(current).__name__)
-            print("   request block:", request_block(current))
+            print("   active prompt:", prompt_of(current))
             print("   state:", state_of(session.userdata))
         print("\n=== final state")
         print(state_of(session.userdata))

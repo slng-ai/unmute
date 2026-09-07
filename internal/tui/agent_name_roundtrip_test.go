@@ -63,7 +63,7 @@ func TestMaintainKeepsATasksHandoffs(t *testing.T) {
 		Tasks: []scaffold.Task{{
 			Name: "collect", Instructions: "Collect the details.", Agent: "assistant",
 			When: "Collect first.", Handoffs: []string{"to_billing"},
-			Result: `{"done": "boolean"}`, History: "full",
+			History: "full",
 		}},
 	}
 	data.SetTarget("livekit")
@@ -113,7 +113,7 @@ func TestMaintainKeepsATasksAnnounce(t *testing.T) {
 		Tasks: []scaffold.Task{{
 			Name: "collect", Instructions: "Collect the details.", Agent: "assistant",
 			When: "Collect first.", Announce: "One moment while I check.",
-			Result: `{"done": "boolean"}`, History: "full",
+			History: "full",
 		}},
 	}
 	data.SetTarget("livekit")

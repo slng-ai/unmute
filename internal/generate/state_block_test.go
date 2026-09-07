@@ -22,8 +22,8 @@ func TestStateBlockRendersJSONAndNotARepr(t *testing.T) {
 		for _, want := range []string{
 			`json.dumps(_plain(value), separators=(",", ":"), ensure_ascii=False)`,
 			"_STATE_VALUE_MAX",
-			"value = _state_text(*_state_lookup(",
-			"text = _state_text(*_state_lookup(state, name))",
+			"value = _state_text(*_prompt_value(",
+			"text = _state_text(*_prompt_value(state, name,",
 		} {
 			if !strings.Contains(module, want) {
 				t.Errorf("%s does not emit %q, so a declared value reaches a prompt as a Python repr",
@@ -56,9 +56,8 @@ func TestStateBlockRendersJSONAndNotARepr(t *testing.T) {
 // feature), a plain str/int/bool/float variable with nothing in it yet is a
 // realistic render, not only a structured one. _state_text's own fallback
 // already covers it unconditionally, for a name outside _STATE_STRUCTURED as
-// much as for one inside it: `text = "" if value is None else str(value)` runs
-// last regardless, so a bare primitive holding Python None renders as an empty
-// string and never the word "None". This holds it so a future change to the
+// much as for one inside it. A bare primitive holding Python None renders the
+// shared missing-value words and never the word "None". This holds it so a future change to the
 // structured branch cannot silently reintroduce a repr for the bare case.
 func TestStateTextRendersEmptyNotNoneForABarePrimitive(t *testing.T) {
 	agent := loadTypedState(t)
@@ -73,8 +72,8 @@ func TestStateTextRendersEmptyNotNoneForABarePrimitive(t *testing.T) {
 	// At the function's own indent, not nested inside `if name in
 	// _STATE_STRUCTURED:`, so it runs whether or not the name is declared
 	// structured.
-	if !strings.Contains(body, "\n    text = \"\" if value is None else str(value)\n") {
-		t.Errorf("_state_text does not unconditionally fall back to an empty string for None:\n%s", body)
+	if !strings.Contains(body, "\n    if value is None or value == \"\":\n        return _STATE_EMPTY\n") {
+		t.Errorf("_state_text does not unconditionally render a missing value as the shared empty text:\n%s", body)
 	}
 }
 

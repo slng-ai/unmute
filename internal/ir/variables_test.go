@@ -57,7 +57,7 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			mutet: func(pkg *packagespec.Package) {
 				pkg.Agent.Variables["reschedule_to"] = packagespec.Variable{Type: "string"}
 				tool := pkg.Tools["lookup_customer"]
-				tool.Inject = map[string]any{"slot": "{{reschedule_to}}"}
+				tool.Inject = []packagespec.Pair{{Key: "slot", Value: "{{reschedule_to}}"}}
 				pkg.Tools["lookup_customer"] = tool
 			},
 			want: "",
@@ -66,7 +66,7 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			name: "an injected key cannot double as a model parameter",
 			mutet: func(pkg *packagespec.Package) {
 				tool := pkg.Tools["lookup_customer"]
-				tool.Inject = map[string]any{"phone": "{{customer_id}}"}
+				tool.Inject = []packagespec.Pair{{Key: "phone", Value: "{{customer_id}}"}}
 				pkg.Tools["lookup_customer"] = tool
 			},
 			want: "which is also an input property",
@@ -76,7 +76,7 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			mutet: func(pkg *packagespec.Package) {
 				tool := pkg.Tools["lookup_customer"]
 				tool.Webhook, tool.MCP = nil, &packagespec.ToolMCP{URLEnv: "MCP_URL"}
-				tool.Inject = map[string]any{"caller": "{{customer_id}}"}
+				tool.Inject = []packagespec.Pair{{Key: "caller", Value: "{{customer_id}}"}}
 				pkg.Tools["lookup_customer"] = tool
 			},
 			want: "inject is legal on webhook, local and slng tools",
@@ -392,7 +392,7 @@ func attachStep(pkg *packagespec.Package, agent string, task packagespec.Task, b
 	pkg.Agent.Agents[agent] = def
 	pkg.Tasks[task.Name] = task
 	pkg.Callables[task.Name] = packagespec.Callable{
-		Task: task.Name, When: task.When, Assign: task.Assign,
+		Task: task.Name, When: task.When,
 	}
 	pkg.Markdown[task.Instructions] = body
 }
@@ -412,16 +412,26 @@ func TestTaskPromptMayNameAVariableOnlyAnotherStepAssigns(t *testing.T) {
 		Name: "verify_customer", Instructions: "tasks/verify.md",
 		When:    "Confirm who the caller is.",
 		Assign:  []packagespec.Pair{{Key: "customer_status", Value: "result.status"}},
-		Result:  map[string]any{"status": "string"},
 		Context: packagespec.TaskContext{History: "full"},
 	}, "Read the number back and wait for a yes.")
 	attachStep(pkg, "intake", packagespec.Task{
 		Name: "manage_booking", Instructions: "tasks/booking.md",
 		When:    "The caller wants a booking.",
-		Result:  map[string]any{"summary": "string"},
 		Context: packagespec.TaskContext{History: "full"},
 	}, "Serve the {{customer_status}} customer.")
 	if _, err := Build(pkg); err != nil {
 		t.Fatalf("a task prompt naming a variable only another step assigns was refused: %v", err)
+	}
+}
+
+func TestInjectedKeyCannotBeModelRequired(t *testing.T) {
+	pkg := loadSafeCore(t)
+	tool := pkg.Tools["lookup_customer"]
+	tool.Input = map[string]any{"type": "object", "properties": map[string]any{}, "required": []any{"phone"}}
+	tool.Inject = []packagespec.Pair{{Key: "phone", Value: "{{customer_id}}"}}
+	pkg.Tools["lookup_customer"] = tool
+	_, err := Build(pkg)
+	if err == nil || !strings.Contains(err.Error(), "required") {
+		t.Fatalf("required injected key accepted: %v", err)
 	}
 }

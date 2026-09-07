@@ -305,8 +305,8 @@ input:
   properties: {}
 
 inject:
-  customer_id: "{{customer_id}}"
-  channel: phone
+  - customer_id: "{{customer_id}}"
+  - channel: phone
 
 webhook:
   url_env: SALON_API_URL
@@ -401,7 +401,7 @@ input:
   properties: {}
 
 inject:
-  customer_id: "{{customer_id}}"
+  - customer_id: "{{customer_id}}"
 
 output:
   type: object
@@ -533,11 +533,11 @@ for exactly that reason.
 
 ```yaml
 inject:
-  customer_id: "{{customer_id}}"
-  channel: phone
+  - customer_id: "{{customer_id}}"
+  - channel: phone
 ```
 
-`inject` is a flat map merged into the call and never advertised to the model,
+`inject` is an ordered list of one-key items merged into the call and never advertised to the model,
 so the model can neither see the value nor overwrite it. An `inject` key that
 also names an `input` property is a compile error, for that reason.
 
@@ -660,10 +660,6 @@ agents:
         instructions: tasks/find-slot.md
         tools:
           - check_availability
-        result:
-          summary: string
-        context:
-          history: full
 ```
 
 The agent and task lists are visibility scopes. Attach a tool only where it is
@@ -671,11 +667,10 @@ called; do not grant it to both unless both really call it. Never replace a
 name with an inline mapping of `description`, `input`, `output`, `local`, or
 `webhook`.
 
-**Task `result:` and tool `output:` are different contracts.** A tool's optional
+**Task `assign:` and tool `output:` are different contracts.** A tool's optional
 `output:` describes one tool call and stays in `tools/<name>.yaml`. A task's
-required `result:` describes what the whole task returns to its caller after
-any tool calls. It may select or combine tool data, so design it for what the
-caller needs instead of copying a tool output schema by default.
+finish fields come from the destination variables in its `assign:` list. A task
+that saves nothing needs neither an assignment nor an invented summary.
 
 A file in `tools/` that the package level list does not name is not loaded at
 all, and nothing complains. When a tool is never offered, check that list first.

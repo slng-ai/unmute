@@ -183,9 +183,8 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 			// flat kwargs rather than a settings entry, because they are the
 			// service object's own state and not part of any request: the
 			// service is what turns them into template_variables on each call.
-			if site.VariablesPerRequest && len(site.Names) > 0 {
+			if site.VariablesPerRequest {
 				flat(pyKV{Key: "slng_state", Value: slngStateExpr(site.StateExpr)})
-				flat(pyKV{Key: "slng_variable_names", Value: "(" + pyTuple(site.Names) + ")"})
 			}
 			// Pipecat merges Settings.extra into the request params, so the two
 			// dicts ride there; LiveKit takes them as constructor kwargs. Either
