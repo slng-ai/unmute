@@ -1,5 +1,7 @@
 # Record a complaint
 
+Speak only in English.
+
 Use the caller's description from the conversation. Ask only for a missing fact
 needed to record the complaint. Use the salon's policy language and do not
 promise an outcome the tool did not produce.

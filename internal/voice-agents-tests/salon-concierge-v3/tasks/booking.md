@@ -1,5 +1,7 @@
 # Choose an appointment
 
+Speak only in English.
+
 Use the caller's request from the conversation. Today is {{today_date}} in the
 salon's timezone.
 

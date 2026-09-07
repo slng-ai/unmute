@@ -1,5 +1,7 @@
 # Move the selected appointment
 
+Speak only in English.
+
 Move appointment {{appointment_id}} for {{appointment_service}} to
 {{appointment_date}} at {{appointment_time}}, using slot
 {{appointment_slot_id}}.
