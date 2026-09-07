@@ -1066,7 +1066,7 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 		t.Fatal("bot.py not emitted")
 	}
 	for _, want := range []string{
-		"from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMUpdateSettingsFrame, TTSSpeakFrame",
+		"from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMRunFrame, LLMUpdateSettingsFrame, TTSSpeakFrame",
 		"from pipecat.services.settings import LLMSettings",
 		// The compiler appends its finish contract, so this matches the
 		// authored opening only.
@@ -1095,6 +1095,10 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	activateBase := strings.Index(activationBody, "await super().on_activated(args)")
 	if restoreOnEntry < 0 || activateBase < restoreOnEntry {
 		t.Error("flow owner must restore its agent role before base activation installs tools and messages")
+	}
+	requestReply := strings.Index(activationBody, "await self.queue_frame(LLMRunFrame())")
+	if requestReply < activateBase || !strings.Contains(activationBody, `if args and args.get("run_llm") and not args.get("messages"):`) {
+		t.Error("an activation with no new messages must request a reply after installing the receiver's prompt and tools")
 	}
 	if got := strings.Count(bot, "await self.flush_pipeline()"); got != 4 {
 		t.Errorf("bot.py drains delegate results and owner role updates %d times, want 4", got)

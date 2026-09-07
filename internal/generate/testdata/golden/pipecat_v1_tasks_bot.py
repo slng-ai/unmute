@@ -33,7 +33,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.bus import BusBridgeProcessor
 from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, FlowsFunctionSchema, NodeConfig, NO_RESPONSE
-from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMUpdateSettingsFrame, TTSSpeakFrame
+from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMRunFrame, LLMUpdateSettingsFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -591,6 +591,11 @@ class BillingAgent(TracedLLMWorker):
             delta=LLMSettings(system_instruction=BILLING_PROMPT),
         ))
         await super().on_activated(args)
+        # Pipecat 1.8 only runs on activation when messages are nonempty.
+        # A handoff already shaped the shared context; request the reply
+        # without adding a synthetic message or waiting for the caller.
+        if args and args.get("run_llm") and not args.get("messages"):
+            await self.queue_frame(LLMRunFrame())
 
 
 
@@ -646,6 +651,11 @@ class IntakeAgent(TracedLLMWorker):
             delta=LLMSettings(system_instruction=INTAKE_PROMPT),
         ))
         await super().on_activated(args)
+        # Pipecat 1.8 only runs on activation when messages are nonempty.
+        # A handoff already shaped the shared context; request the reply
+        # without adding a synthetic message or waiting for the caller.
+        if args and args.get("run_llm") and not args.get("messages"):
+            await self.queue_frame(LLMRunFrame())
 
 
 

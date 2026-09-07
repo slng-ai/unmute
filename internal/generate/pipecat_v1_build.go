@@ -261,6 +261,10 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		}
 	}
 	data.Inline = inlineEligible(&data)
+	if !data.Inline {
+		data.FrameImports = append(data.FrameImports, "LLMRunFrame")
+	}
+	slices.Sort(data.FrameImports)
 	knowledge, err := loweredKnowledge(agent, env)
 	if err != nil {
 		return pipecatData{}, err
@@ -720,7 +724,6 @@ func setImportNeeds(data *pipecatData) {
 	if needsTTSSpeakFrame {
 		data.FrameImports = append(data.FrameImports, "TTSSpeakFrame")
 	}
-	slices.Sort(data.FrameImports)
 	setDailyParams(data)
 }
 

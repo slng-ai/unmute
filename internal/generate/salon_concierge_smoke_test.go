@@ -16,6 +16,65 @@ func TestSmokeSalonConciergePipecatJourneys(t *testing.T) {
 	runPipecatSmokeScript(t, "salon-concierge", nil, nil, salonPipecatJourneysSmokeScript)
 }
 
+func TestSmokePipecatHandoffActivationRunsWithoutNewMessages(t *testing.T) {
+	runPipecatSmokeScript(t, "salon-concierge", nil, nil, pipecatHandoffActivationSmokeScript)
+}
+
+const pipecatHandoffActivationSmokeScript = `"""An empty handoff payload still starts the receiving worker's reply."""
+import asyncio
+import json
+import os
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import bot  # noqa: E402
+from pipecat.frames.frames import (  # noqa: E402
+    LLMMessagesAppendFrame,
+    LLMRunFrame,
+    LLMSetToolsFrame,
+    LLMUpdateSettingsFrame,
+)
+from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+
+
+async def main():
+    # Exercise the generated override AND the real SDK superclass. The old
+    # handoff test replaced activate_worker and only checked its arguments.
+    for worker_type in (bot.ConciergeAgent, bot.ComplaintSpecialistAgent):
+        worker = worker_type(state=bot.build_state(), context=LLMContext())
+        for messages, run_llm, expected in (
+            ([], True, 1),
+            (None, True, 1),
+            ([], False, 0),
+            ([], None, 0),
+            ([{"role": "developer", "content": "completed"}], True, 1),
+            ([{"role": "developer", "content": "completed"}], False, 0),
+        ):
+            frames = []
+
+            async def capture(frame, *_args, **_kwargs):
+                frames.append(frame)
+
+            worker.queue_frame = capture
+            await worker.on_activated({"messages": messages, "run_llm": run_llm})
+            requests = [f for f in frames if isinstance(f, LLMRunFrame) or (
+                isinstance(f, LLMMessagesAppendFrame) and f.run_llm
+            )]
+            assert len(requests) == expected, (worker_type, messages, run_llm, frames)
+            if requests:
+                before = frames[:frames.index(requests[0])]
+                assert any(isinstance(f, LLMUpdateSettingsFrame) for f in before)
+                assert any(isinstance(f, LLMSetToolsFrame) for f in before)
+            if not messages:
+                assert not any(isinstance(f, LLMMessagesAppendFrame) for f in frames), frames
+        await worker.on_activated(None)
+
+
+asyncio.run(main())
+print("handoff activation smoke ok: both workers, empty/nonempty payloads, enabled/disabled replies")
+`
+
 // Replay the v3 call's failure through the real finish validator, saved state,
 // and injected tool arguments. A slot is opaque text: changing its separators
 // to satisfy an Id validator makes the booking tool reject it.

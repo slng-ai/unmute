@@ -957,6 +957,11 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                 extra={"extra_headers": {{.SlngHeaders}}}{{end}}),
         ))
         await super().on_activated(args)
+        # Pipecat 1.8 only runs on activation when messages are nonempty.
+        # A handoff already shaped the shared context; request the reply
+        # without adding a synthetic message or waiting for the caller.
+        if args and args.get("run_llm") and not args.get("messages"):
+            await self.queue_frame(LLMRunFrame())
 
 {{if .MCPSources}}    async def start_mcp(self) -> None:
         """Connect every source and register its tools on this agent's LLM."""

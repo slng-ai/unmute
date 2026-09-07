@@ -36,7 +36,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.bus import BusBridgeProcessor
 from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, FlowsFunctionSchema, NodeConfig, NO_RESPONSE
-from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMUpdateSettingsFrame, TTSSpeakFrame
+from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMRunFrame, LLMUpdateSettingsFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -769,6 +769,11 @@ class BillingAgent(LLMWorker):
                 extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:billing", "X-Slng-Session-Id": self._slng_session_id}}),
         ))
         await super().on_activated(args)
+        # Pipecat 1.8 only runs on activation when messages are nonempty.
+        # A handoff already shaped the shared context; request the reply
+        # without adding a synthetic message or waiting for the caller.
+        if args and args.get("run_llm") and not args.get("messages"):
+            await self.queue_frame(LLMRunFrame())
 
 
 
@@ -831,6 +836,11 @@ class IntakeAgent(LLMWorker):
                 extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": self._slng_session_id}}),
         ))
         await super().on_activated(args)
+        # Pipecat 1.8 only runs on activation when messages are nonempty.
+        # A handoff already shaped the shared context; request the reply
+        # without adding a synthetic message or waiting for the caller.
+        if args and args.get("run_llm") and not args.get("messages"):
+            await self.queue_frame(LLMRunFrame())
 
 
 
