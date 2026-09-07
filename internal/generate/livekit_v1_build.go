@@ -1730,7 +1730,11 @@ func livekitDeps(data livekitData) []string {
 	}, sortedKeys(packages)...)
 	switch data.TracingProvider {
 	case "langfuse":
-		deps = append(deps, "langfuse>=3", "opentelemetry-sdk>=1.33,<2")
+		// langfuse 4 is the observations-first data model. It is a major with
+		// breaking changes tracing.py depends on (propagate_attributes, the
+		// default span filter), so the floor is 4 and the ceiling stops the
+		// next major arriving unannounced.
+		deps = append(deps, "langfuse>=4,<5", "opentelemetry-sdk>=1.33,<2")
 	case "coval":
 		// livekit-agents brings the OTel API and SDK in through its own
 		// telemetry module, but nothing in the LiveKit stack pulls the OTLP HTTP

@@ -911,6 +911,16 @@ attribute, which makes every tool call in a trace look the same, so the name is
 put back on the way out. A task's structured result is the arguments of its
 `finish` call, on that call's span.
 
+Traces follow the Langfuse v4 data model. One call is one trace. Open it and
+the root observation holds the whole conversation, so the top of the trace reads
+as the call rather than as an envelope. Inside it each exchange is a `turn` span
+you can open on its own: what the caller said, what the agent replied, and every
+model and tool call in between.
+
+The session ID and the trace name are on every observation, not only on the top
+one, so filtering by session or adding up what a call cost covers all of it.
+Langfuse trace input and output are deprecated and this project writes neither.
+
 Traces can contain caller speech, model input and output, and tool arguments and results.
 Use only fake identities and fake customer data for release tests. Use a separate
 Langfuse project for those tests, and do not send real customer data until its

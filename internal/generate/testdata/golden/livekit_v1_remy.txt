@@ -376,6 +376,16 @@ attribute, which makes every tool call in a trace look the same, so the name is
 put back on the way out. A task's structured result is the arguments of its
 `finish` call, on that call's span.
 
+Traces follow the Langfuse v4 data model. One call is one trace. Open it and
+the root observation holds the whole conversation, so the top of the trace reads
+as the call rather than as an envelope. Inside it each exchange is a `turn` span
+you can open on its own: what the caller said, what the agent replied, and every
+model and tool call in between.
+
+The session ID and the trace name are on every observation, not only on the top
+one, so filtering by session or adding up what a call cost covers all of it.
+Langfuse trace input and output are deprecated and this project writes neither.
+
 Traces can contain caller speech, model input and output, and tool arguments and results.
 Use only fake identities and fake customer data for release tests. Use a separate
 Langfuse project for those tests, and do not send real customer data until its
@@ -1885,7 +1895,7 @@ description = "Generated LiveKit Agents project (unmute livekit driver)"
 requires-python = ">=3.10"
 dependencies = [
     "httpx",
-    "langfuse>=3",
+    "langfuse>=4,<5",
     "livekit-agents[openai]==1.6.10",
     "livekit-plugins-silero>=1.6.1",
     "livekit-plugins-slng>=1.6.1",
@@ -1907,16 +1917,155 @@ dev = [
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Sequence
+from contextlib import contextmanager
 
 from langfuse import Langfuse
 from livekit.agents import AgentSession, JobContext
 from livekit.agents.metrics import STTMetrics, TTSMetrics
 from livekit.agents.telemetry import set_tracer_provider
 from livekit.agents.voice import ConversationItemAddedEvent, MetricsCollectedEvent
-from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
+from opentelemetry import trace
+from opentelemetry.context import Context
+from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor, TracerProvider
 from opentelemetry.util.types import AttributeValue
+
+
+# The livekit spans that mean a turn is underway. A name that is not here is
+# left alone, so a livekit-agents that renames them loses the turn grouping
+# rather than losing spans or misparenting them.
+TURN_SPANS = ("user_turn", "agent_turn")
+
+
+class CallTrace(SpanProcessor):
+    """One trace for the whole call, with a turn span you can open inside it.
+
+    Three jobs, in one class because they are the same bookkeeping.
+
+    It copies the call's correlating attributes onto every span, because
+    Langfuse v4 filters and sums over observations and an attribute that sits
+    only on the top span cannot group the spans underneath it. On 1.6.10
+    livekit's own metadata= does this too, but 1.8.0 rewrote that processor to
+    stamp the job's room and job id instead, so this does not rely on it.
+
+    It groups each exchange under a `turn` span. livekit has no span covering
+    one: `user_turn` closes when the caller stops speaking, and `agent_turn` is
+    its sibling rather than its child, so without this there is no level at
+    which you can read one exchange. The turn stays inside the call's trace,
+    because a trace per turn leaves the top of the call empty and there is then
+    nowhere to see the conversation whole or add it up.
+
+    And it records the conversation on the call's root observation, so opening
+    the trace shows what was said rather than an envelope of lifecycle spans.
+    """
+
+    def __init__(
+        self, tracer: trace.Tracer, attributes: dict[str, AttributeValue]
+    ) -> None:
+        self._tracer = tracer
+        self._attributes = attributes
+        self._call: Span | None = None
+        self._call_context: Context | None = None
+        self._turn: Span | None = None
+        self._turn_context: Context | None = None
+        self._transcript: list[dict[str, str]] = []
+
+    def on_start(self, span: Span, parent_context: Context | None = None) -> None:
+        span.set_attributes(self._attributes)
+        # livekit's session span covers the call and is the only parentless one,
+        # so the first span with no parent is the root of the call's trace.
+        if span.parent is None and self._call is None:
+            self._call = span
+            self._call_context = trace.set_span_in_context(span)
+
+    def begin(self) -> Context | None:
+        """Open a turn, inside the call's trace rather than starting a new one."""
+        self.end()
+        self._turn = self._tracer.start_span("turn", context=self._call_context)
+        self._turn.set_attributes(self._attributes)
+        self._turn_context = trace.set_span_in_context(self._turn)
+        return self._turn_context
+
+    def end(self) -> None:
+        """Close the turn, so its duration is the turn and not the silence after it."""
+        if self._turn is not None:
+            self._turn.end()
+        self._turn, self._turn_context = None, None
+
+    def context(self) -> Context | None:
+        return self._turn_context
+
+    def ensure(self) -> Context | None:
+        """Open a turn if none is open, so a line always lands inside one.
+
+        On a real call livekit opens `user_turn` on voice activity, before the
+        transcript exists, so a turn is already running by the time anything is
+        said. A text-driven session has no voice activity and so no `user_turn`,
+        and without this the caller's line would land beside the turns instead
+        of in one.
+        """
+        return self._turn_context if self._turn_context is not None else self.begin()
+
+    def context_for(self, name: str, context: Context | None) -> Context | None:
+        """The context a livekit span should be started in."""
+        return self.ensure() if name in TURN_SPANS else context
+
+    def said(self, role: str, text: str) -> None:
+        """Record one line, on its own turn and on the call as a whole."""
+        self._transcript.append({"role": role, "content": text})
+        if self._turn is not None and self._turn.is_recording():
+            side = "input" if role == "user" else "output"
+            self._turn.set_attribute(f"langfuse.observation.{side}", text)
+        if self._call is not None and self._call.is_recording():
+            # The whole conversation goes on the root, because that is the one
+            # place a reader opens to see the call rather than one turn of it.
+            self._call.set_attribute(
+                "langfuse.observation.input", json.dumps(self._transcript)
+            )
+            if role != "user":
+                self._call.set_attribute("langfuse.observation.output", text)
+
+
+class TurnTracer:
+    """A tracer that puts livekit's turn spans inside the turn span above."""
+
+    def __init__(self, inner: trace.Tracer, call: CallTrace) -> None:
+        self._inner, self._call = inner, call
+
+    def __getattr__(self, name: str):
+        return getattr(self._inner, name)
+
+    def start_span(self, name, context=None, **kwargs):
+        return self._inner.start_span(name, self._call.context_for(name, context), **kwargs)
+
+    @contextmanager
+    def start_as_current_span(self, name, context=None, **kwargs):
+        with self._inner.start_as_current_span(
+            name, self._call.context_for(name, context), **kwargs
+        ) as span:
+            yield span
+
+
+def install_turn_spans(provider: TracerProvider, call: CallTrace) -> None:
+    """Group each exchange under a turn span.
+
+    The patch goes on the provider, which is the seam livekit documents: it is
+    handed the provider by set_tracer_provider below, resolves one tracer out of
+    it, and reads that tracer fresh on every span. So every call site in the
+    package goes through this wrapper.
+
+    Patching livekit's tracer object instead would look like it worked and would
+    not. Its `llm_node`, `tts_node` and `function_tool` spans are decorated at
+    import time, which captured the bound method before any of this code ran,
+    and those decorators would keep calling the original.
+    """
+    if getattr(provider, "__unmute_turn_spans__", False):
+        return
+    get_tracer = provider.get_tracer
+    provider.get_tracer = lambda *a, **kw: TurnTracer(get_tracer(*a, **kw), call)
+    provider.__unmute_turn_spans__ = True
 
 
 def _name_tool_spans(span: ReadableSpan) -> bool:
@@ -1965,16 +2114,39 @@ def setup_langfuse(
         )
 
     trace_provider = TracerProvider()
+    # Our own processor, not livekit-agents' metadata= below. On 1.6.10 that
+    # argument does stamp every span, but 1.8.0 rewrote its processor to stamp
+    # the job's own room_id and job_id instead and return early, so from 1.8.0
+    # on the metadata= route reaches nothing inside a job. This one is the same
+    # on both.
+    # The tracer is taken before the patch so this module's own spans are not
+    # wrapped by it. They name no turn span, so it would change nothing, but a
+    # tracer that wraps itself is a bad thing to leave for the next reader.
+    call = CallTrace(trace_provider.get_tracer("unmute"), dict(metadata or {}))
+    trace_provider.add_span_processor(call)
+    install_turn_spans(trace_provider, call)
+    # This is what hands the patched provider to livekit.
     set_tracer_provider(trace_provider, metadata=metadata)
     Langfuse(
         public_key=public_key,
         secret_key=secret_key,
         base_url=base_url,
         tracer_provider=trace_provider,
+        # The SDK's own exporter sends auth and its version and nothing else, so
+        # without this header the spans arrive on the legacy ingestion path. The
+        # Pipecat target sets the same header on its exporter.
+        additional_headers={"x-langfuse-ingestion-version": "4"},
+        # The hook has to be set, and not only for the naming it does: every
+        # span here comes from livekit-agents or from this module, and neither
+        # is a scope the v4 default filter recognises, so leaving the default in
+        # place drops the whole call before it reaches the exporter.
         should_export_span=_name_tool_spans,
     )
 
     async def flush_trace() -> None:
+        # Close the turn in progress first. A caller who hangs up mid-turn
+        # leaves it open, and an unended span is never exported.
+        call.end()
         trace_provider.force_flush()
 
     ctx.add_shutdown_callback(flush_trace)
@@ -1995,24 +2167,35 @@ def setup_langfuse(
         role = getattr(ev.item, "role", None)
         if not text or role is None:
             return
-        if role == "user" and pending_stt_metrics:
-            trace_speech_metrics(
-                trace_provider,
-                pending_stt_metrics,
-                input_value="audio",
-                output_value=text,
-                ended_at=ev.created_at,
-            )
-            pending_stt_metrics.clear()
-        elif role == "assistant" and pending_tts_metrics:
-            trace_speech_metrics(
-                trace_provider,
-                pending_tts_metrics,
-                input_value=text,
-                output_value="audio",
-                ended_at=ev.created_at,
-            )
-            pending_tts_metrics.clear()
+        if role == "user":
+            call.ensure()
+            call.said("user", text)
+            if pending_stt_metrics:
+                trace_speech_metrics(
+                    trace_provider,
+                    pending_stt_metrics,
+                    input_value="audio",
+                    output_value=text,
+                    ended_at=ev.created_at,
+                    context=call.context(),
+                )
+                pending_stt_metrics.clear()
+        elif role == "assistant":
+            call.said("assistant", text)
+            if pending_tts_metrics:
+                trace_speech_metrics(
+                    trace_provider,
+                    pending_tts_metrics,
+                    input_value=text,
+                    output_value="audio",
+                    ended_at=ev.created_at,
+                    context=call.context(),
+                )
+                pending_tts_metrics.clear()
+            # The reply has landed, so the turn is over. Ending it here rather
+            # than when the next one opens keeps its duration the turn itself
+            # instead of the turn plus the silence that followed.
+            call.end()
 
     return trace_provider
 
@@ -2024,6 +2207,7 @@ def trace_speech_metrics(
     input_value: str,
     output_value: str,
     ended_at: float,
+    context: Context | None = None,
 ) -> None:
     if not speech_metrics:
         return
@@ -2043,10 +2227,6 @@ def trace_speech_metrics(
         "metrics.streamed": any(item.streamed for item in speech_metrics),
         "metrics.segment_count": len(speech_metrics),
     }
-    if operation == "stt":
-        attributes["langfuse.trace.input"] = output_value
-    else:
-        attributes["langfuse.trace.output"] = input_value
     metadata = next((item.metadata for item in reversed(speech_metrics) if item.metadata), None)
     if metadata and metadata.model_name:
         attributes["gen_ai.request.model"] = metadata.model_name
@@ -2071,8 +2251,12 @@ def trace_speech_metrics(
         * 1_000_000_000
     )
     end_time = int(max(ended_at, max(item.timestamp for item in speech_metrics)) * 1_000_000_000)
+    # These are started from an event handler, where the current context is the
+    # session rather than the turn, so the turn is passed in explicitly. Without
+    # it the transcript lands in a different trace from the turn it belongs to.
     span = trace_provider.get_tracer("unmute").start_span(
         operation,
+        context=context,
         attributes=attributes,
         start_time=start_time,
     )

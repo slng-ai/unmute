@@ -222,11 +222,33 @@ It needs the package to set `tracing.provider: langfuse`.
 python3 scripts/read_langfuse_trace.py --env examples/salon-concierge/.env
 ```
 
-With no other argument that takes the newest trace in the last two hours,
-which is the call that just finished. It prints the transcript, the tool calls
+With no other argument that takes the newest call in the last two hours, which
+is the one that just finished. A call is one trace and also one session, with a
+`turn` span per exchange inside it. It prints the transcript, the tool calls
 with their results, and per-span latency. `--sessions` lists what is there
-first, `--trace-id` pins one, and `--local-only` keeps just the `unmute dev`
-rooms.
+first, `--session-id` and `--trace-id` pin one call, and `--local-only` keeps
+just the `unmute dev` rooms.
+
+`--check-v4` adds a pass or fail on the Langfuse v4 contract and exits non-zero
+when it fails:
+
+```sh
+python3 scripts/read_langfuse_trace.py --env examples/salon-concierge/.env --check-v4
+```
+
+It checks that the call is one trace with one root, that the root carries the
+conversation rather than being an empty envelope, that each `turn` span holds
+what the caller said and what the agent replied, and that the session ID and
+trace name are on every observation including the ones that carry cost. A turn
+that recorded the caller and not the reply is the failure worth watching for: it
+means the turn span closed before the reply was known. Only the last turn is
+allowed to look like that, because a caller can hang up mid-turn.
+
+Run it after a call on any build that changed tracing. None of this is visible
+in the Langfuse UI when it breaks: a span with no session ID still appears under
+its trace, it just stops counting towards the session, and an export that missed
+the v4 ingestion header still arrives. Reading the observations back is the only
+way to see it.
 
 **Read the transcript from the speech spans, not the model spans.** `stt`
 output is what the caller said and `tts` input is what the agent said, so the

@@ -12,14 +12,83 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 
 from opentelemetry import trace
+from opentelemetry.context import Context
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace import Span, SpanProcessor, TracerProvider
+from opentelemetry.util.types import AttributeValue
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.workers.llm import LLMWorker
 from pipecat.utils.tracing.setup import setup_tracing
 
 TRACE_NAME = {{pyq .EntryAgent}} + "-" + {{pyq .AgentName}}
 _TRACE_PROVIDER: TracerProvider | None = None
+
+
+# pipecat's two structural spans: `conversation` wraps the call and `turn` wraps
+# one exchange, the caller's line and the reply to it. A name that is not here
+# still traces, it just does not get read back as the call or as a turn.
+CALL_SPAN = "conversation"
+TURN_SPAN = "turn"
+
+
+class CallTrace(SpanProcessor):
+    """One trace for the whole call, with pipecat's turn spans inside it.
+
+    Two jobs, in one class because they are the same bookkeeping.
+
+    It copies the call's correlating attributes onto every span, because
+    Langfuse v4 filters and sums over observations and an attribute that sits
+    only on the top span cannot group the spans underneath it. pipecat's own
+    additional_span_attributes reach the conversation span alone, so they do not
+    do this.
+
+    And it records the conversation twice over: each line on the turn it
+    belongs to, and the whole thing on the call's root observation, so opening
+    the trace shows what was said rather than an empty envelope.
+
+    pipecat's tree is already the shape we want, `conversation` over `turn` over
+    the service spans, so nothing here re-parents anything.
+    """
+
+    # ponytail: one call at a time, because the tracer provider is installed once
+    # per process and a warm Pipecat Cloud container reuses it for the next call.
+    # Give each call its own context object if a container ever runs two at once.
+    def __init__(self) -> None:
+        self._attributes: dict[str, AttributeValue] = {}
+        self._call: Span | None = None
+        self._turn: Span | None = None
+        self._transcript: list[dict[str, str]] = []
+
+    def start_call(self, attributes: dict[str, AttributeValue]) -> None:
+        """Point tracing at this call, forgetting the one the container ran before."""
+        self._attributes = dict(attributes)
+        self._call, self._turn = None, None
+        self._transcript = []
+
+    def on_start(self, span: Span, parent_context: Context | None = None) -> None:
+        span.set_attributes(self._attributes)
+        if span.name == CALL_SPAN:
+            self._call = span
+        elif span.name == TURN_SPAN:
+            self._turn = span
+
+    def said(self, role: str, text: str) -> None:
+        """Record one line, on its own turn and on the call as a whole."""
+        self._transcript.append({"role": role, "content": text})
+        if self._turn is not None and self._turn.is_recording():
+            side = "input" if role == "user" else "output"
+            self._turn.set_attribute(f"langfuse.observation.{side}", json.dumps(text))
+        if self._call is not None and self._call.is_recording():
+            # The whole conversation goes on the root, because that is the one
+            # place a reader opens to see the call rather than one turn of it.
+            self._call.set_attribute(
+                "langfuse.observation.input", json.dumps(self._transcript)
+            )
+            if role != "user":
+                self._call.set_attribute("langfuse.observation.output", json.dumps(text))
+
+
+CALL = CallTrace()
 
 
 def _patch_pipecat_tracing() -> None:
@@ -40,10 +109,10 @@ def _patch_pipecat_tracing() -> None:
                 encoded = json.dumps(value, default=str)
                 if kind == "stt" and key == "transcript":
                     set_attribute("langfuse.observation.output", encoded)
-                    set_attribute("langfuse.trace.input", encoded)
+                    CALL.said("user", value)
                 elif kind == "tts" and key == "text":
                     set_attribute("langfuse.observation.input", encoded)
-                    set_attribute("langfuse.trace.output", encoded)
+                    CALL.said("assistant", value)
                 elif key == "metrics.ttfb":
                     set_attribute("langfuse.observation.metadata.ttfb_seconds", value)
                     set_attribute(
@@ -120,8 +189,14 @@ def setup_langfuse_tracing() -> TracerProvider:
     provider = trace.get_tracer_provider()
     if not isinstance(provider, TracerProvider):
         raise RuntimeError("Pipecat did not install an SDK tracer provider")
+    provider.add_span_processor(CALL)
     _TRACE_PROVIDER = provider
     return provider
+
+
+def start_call(attributes: dict[str, AttributeValue]) -> None:
+    """Name this call before its conversation span opens."""
+    CALL.start_call(attributes)
 
 
 def enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:

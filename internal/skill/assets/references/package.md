@@ -323,7 +323,12 @@ in SLNG's own dashboard.
 Those names go in `secrets:` like any others.
 
 LiveKit uses the room name as the Langfuse session ID. Pipecat uses the runner
-session ID as both its conversation ID and the Langfuse session ID.
+session ID as both its conversation ID and the Langfuse session ID. Either way
+one call is one trace, its root observation holds the whole conversation, and
+each exchange inside it is a `turn` span holding what the caller said and what
+the agent replied, which is the pair an evaluator reads. The session ID and
+trace name are on every observation, because Langfuse v4 filters and adds up
+over observations rather than over traces.
 Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
 
 With `coval`, each trace is attached to the Coval simulation that placed the

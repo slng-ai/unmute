@@ -1436,6 +1436,14 @@ async def main() -> None:
 
     runner = WorkerRunner()
     session_id = "session-smoke"
+    # bot.py names the call before the worker exists, so the conversation span
+    # and everything under it carry the same correlating attributes.
+    tracing_config.start_call(
+        {
+            "langfuse.trace.name": tracing_config.TRACE_NAME,
+            "langfuse.session.id": session_id,
+        }
+    )
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
     main_worker = PipelineWorker(
@@ -1653,8 +1661,20 @@ async def main() -> None:
     assert json.loads(requests["stt"].attributes["langfuse.observation.output"]) == "trace this request"
     assert json.loads(requests["tts"].attributes["langfuse.observation.input"]) == "traced."
     assert json.loads(requests["tts"].attributes["langfuse.observation.output"]) == "audio"
-    assert json.loads(requests["stt"].attributes["langfuse.trace.input"]) == "trace this request"
-    assert json.loads(requests["tts"].attributes["langfuse.trace.output"]) == "traced."
+    # Langfuse v4 has no trace input or output. The turn carries its own pair,
+    # and the conversation carries the whole transcript so the top of the trace
+    # reads as the call rather than as an empty envelope.
+    assert json.loads(turn.attributes["langfuse.observation.input"]) == "trace this request"
+    assert json.loads(turn.attributes["langfuse.observation.output"]) == "traced."
+    transcript = json.loads(conversation.attributes["langfuse.observation.input"])
+    assert [m["role"] for m in transcript] == ["user", "assistant"], transcript
+    assert transcript[0]["content"] == "trace this request"
+    assert json.loads(conversation.attributes["langfuse.observation.output"]) == "traced."
+    assert not any(
+        key.startswith("langfuse.trace.input") or key.startswith("langfuse.trace.output")
+        for span in spans
+        for key in span.attributes
+    )
     assert requests["stt"].attributes["langfuse.observation.metadata.ttfb_seconds"] >= 0
     assert requests["stt"].attributes["langfuse.observation.completion_start_time"]
     assert requests["tts"].attributes["langfuse.observation.metadata.character_count"] == len("traced.")
@@ -1664,9 +1684,20 @@ async def main() -> None:
     assert conversation.attributes["langfuse.trace.name"] == tracing_config.TRACE_NAME
     assert conversation.attributes["conversation.id"] == session_id
     assert conversation.attributes["langfuse.session.id"] == session_id
+    # v4 filters and sums over observations, so the session ID and trace name
+    # have to be on every span, the cost-bearing generations most of all.
+    # Pipecat's own additional_span_attributes reach the conversation span alone.
+    for span in (conversation, turn, tool_call, *requests.values()):
+        assert span.attributes["langfuse.session.id"] == session_id, span.name
+        assert span.attributes["langfuse.trace.name"] == tracing_config.TRACE_NAME, span.name
     assert conversation.resource.attributes["service.name"] == tracing_config.TRACE_NAME
+    # The whole call is one trace: pipecat already nests turn under
+    # conversation, so nothing re-parents anything and nothing splits.
     assert all(span.context.trace_id == conversation.context.trace_id for span in requests.values())
     assert tool_call.context.trace_id == conversation.context.trace_id
+    assert turn.context.trace_id == conversation.context.trace_id
+    assert conversation.parent is None
+    assert turn.parent is not None and turn.parent.span_id == conversation.context.span_id
     assert tool_call.parent.span_id == turn.context.span_id
     assert json.loads(tool_call.attributes["langfuse.observation.input"]) == tool_probe["arguments"]
     traced_result = json.loads(tool_call.attributes["langfuse.observation.output"])

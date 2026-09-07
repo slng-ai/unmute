@@ -59,6 +59,7 @@ from tracing import (
     enable_agent_tracing,
     flush_tracing,
     setup_langfuse_tracing,
+    start_call,
 )
 
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -922,6 +923,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     trace_attributes = {"langfuse.trace.name": TRACE_NAME}
     if runner_args.session_id is not None:
         trace_attributes["langfuse.session.id"] = runner_args.session_id
+    # Pipecat puts these on the conversation span only. Langfuse v4 filters and
+    # sums over observations, so they have to reach every span under it too, and
+    # this is also where the container forgets the call it ran before.
+    start_call(trace_attributes)
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
