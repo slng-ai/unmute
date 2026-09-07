@@ -100,6 +100,10 @@
     {
       "source": "/models/regional-infrastructure",
       "destination": "/optimization/regional-infrastructure"
+    },
+    {
+      "source": "/optimization/context-scope",
+      "destination": "/best-practices/context-scope"
     }
   ],
   "navigation": {
@@ -157,6 +161,7 @@
         "icon": "award",
         "pages": [
           "best-practices/state-design",
+          "best-practices/context-scope",
           "best-practices/step-scoping",
           "best-practices/prompt-writing",
           "best-practices/verifying-behaviour"
@@ -181,7 +186,6 @@
           "optimization/overview",
           "optimization/latency",
           "optimization/prefetch",
-          "optimization/context-scope",
           "optimization/turn-taking",
           "optimization/execution-layer",
           "optimization/context-router",

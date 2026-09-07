@@ -31,6 +31,30 @@ This prevents a failed change from looking like a confirmed booking. It also
 gives later tasks a clear answer when the conversation mentions both the old
 and new times.
 
+## Group fields that describe one result
+
+Start with separate variables for independent facts, such as a caller's name
+and preferred language. Use a shape when the fields describe the same record
+and should be saved together.
+
+For a booking flow:
+
+1. Look at the successful booking tool result. Identify the fields later
+   tasks need, such as its ID, service, date, and time.
+2. Declare an `Appointment` shape with those fields. Use `Id` only if the
+   actual booking ID fits its limits, and `Date` and `Time` for the saved time.
+3. Declare `appointment` with `type: Appointment`. Give it a description such
+   as "The latest appointment successfully saved by the booking tool."
+4. Assign `appointment: result.appointment` in the booking task. Tell the task
+   to copy the successful result and finish immediately.
+5. Reference `{{appointment}}` in the owner, or just `{{appointment.date}}`
+   in a prompt that needs only the date.
+
+This keeps the booking ID and its current time together. Do not add unrelated
+caller details to the shape just because the booking task can see them.
+The [Variables guide](/build/variables#group-related-fields-into-a-shape)
+shows the YAML declaration and field descriptions.
+
 ## Match the type to the actual value
 
 Use a shape for fields that belong together. Include fields your tools return
@@ -111,5 +135,5 @@ question, who saves the answer, and who speaks after completion. Then inspect
 a trace to confirm that each receiving prompt contains the facts it needs.
 
 For a practical walkthrough, see [Reduce context sharing step by
-step](/optimization/context-scope). For task structure and tool placement,
+step](/best-practices/context-scope). For task structure and tool placement,
 see [Making a step actually run](/best-practices/step-scoping).

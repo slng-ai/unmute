@@ -5,7 +5,7 @@ sidebarTitle: "Variables"
 ---
 
 A variable is a named value that lives for one call. This is the complete field
-reference. For a task-led introduction, start with [Variables](/build/variables).
+reference. For an introduction, start with [Variables](/build/variables).
 
 ## How a value moves
 
@@ -120,6 +120,7 @@ successful `Id` result.
 | `Union[A, B]`, `A \| B` | One concrete type; only `\| None` is supported as a union |
 | `date`, `time`, `datetime` | `Date` and `Time`; keep the timezone separately |
 | `UUID` | `Id` for text that fits its limits |
+| `Email`, `EmailStr` | `str`; validate the email address in your tool |
 | `Any` | The actual type of the value |
 | `SecretStr` | A [secret](/reference/secrets) supplied through a tool's environment field |
 | `PaymentCardNumber` | Card numbers are outside the supported state types |
@@ -438,7 +439,7 @@ runtime guard described below.
 
 Conversation sharing is a separate choice. With `messages`, a receiver can
 still read a value somebody said aloud. See [Reduce context sharing step by
-step](/optimization/context-scope) to choose exactly what crosses a boundary.
+step](/best-practices/context-scope) to choose exactly what crosses a boundary.
 
 ## Seeding values locally
 

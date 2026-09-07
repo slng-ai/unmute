@@ -3,7 +3,7 @@
 A test package, not a shipped example. It lives here because we compile it,
 deploy it and talk to it; nobody is pointed at it as a starting shape. The
 public write-up of what it does is
-[Scoping a step's context](../../../docs-site/optimization/context-scope.mdx).
+[Scoping a step's context](../../../docs-site/best-practices/context-scope.mdx).
 
 ## What it is
 
