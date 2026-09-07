@@ -1,0 +1,316 @@
+version: 1
+
+name: salon-concierge-v3
+
+entry_agent: concierge
+
+
+agents:
+  concierge:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tools:
+      - look_up_salon_info
+    tasks:
+      - name: verify_customer
+        when: >-
+          Confirm who the caller is before any specialist handoff. The task reads
+          the phone number back and needs a yes before it looks anyone up.
+        instructions: tasks/verify-customer.md
+        tools:
+          - find_or_create_customer
+        assign:
+          - customer_phone: result.customer_phone
+          - customer_name: result.customer_name
+          - customer_id: result.customer_id
+          - customer_status: result.customer_status
+        context:
+          history: reset
+
+      - name: manage_booking
+        when: >-
+          The verified caller wants to create a booking, or needs an
+          existing booking and a new slot selected before it can be moved.
+        instructions: tasks/booking.md
+        tools:
+          - list_bookings
+          - check_availability
+          - create_booking
+        handoffs:
+          - to_complaints
+        assign:
+          - appointment_id: result.appointment_id
+          - appointment_date: result.appointment_date
+          - appointment_time: result.appointment_time
+          - appointment_slot_id: result.appointment_slot_id
+          - appointment_service: result.appointment_service
+
+      - name: reschedule_booking
+        when: >-
+          Apply the move after manage_booking has saved the exact appointment,
+          new slot, date, time, and service.
+        instructions: tasks/reschedule-booking.md
+        tools:
+          - modify_booking
+        context:
+          history: reset
+    handoffs:
+      - to_complaints
+    escalations:
+      - to_manager
+
+  complaint_specialist:
+    instructions: agents/complaint-specialist.md
+    think: reasoning
+    speak: voice
+    # `record_complaint` is deliberately NOT here. A tool on the agent as well
+    # as on its step is a step the model never enters: it took the short route,
+    # recorded the complaint itself, and `complaints` stayed empty on a call
+    # that recorded one (trace 9aa92e09, 2026-09-04). The prompt already said
+    # to run the step; the tool being in reach beat the prompt.
+    tools:
+      - look_up_refund_policy
+    # The concierge defines verify_customer. A bare name runs the same task from
+    # here, so there is one definition and both agents can offer it.
+    tasks:
+      - verify_customer
+
+      - name: handle_complaint
+        when: The verified caller is unhappy about something and wants it recorded.
+        instructions: tasks/complaint.md
+        tools:
+          - record_complaint
+        assign:
+          - complaints+: result.complaint
+    handoffs:
+      - to_concierge
+    escalations:
+      - to_manager
+
+handoffs:
+  to_complaints:
+    to: complaint_specialist
+    when: The verified caller has a complaint or service problem.
+
+  to_concierge:
+    to: concierge
+    when: The caller changes to a request owned by another specialist.
+
+escalations:
+  to_manager:
+    when: The caller explicitly asks for a manager or is clearly and strongly frustrated.
+    cold:
+      destination: manager_line
+      ring_timeout: 30s
+      on_unavailable: hangup
+
+shapes:
+  - name: Appointment
+    description: One thing being booked, moved or cancelled.
+    fields:
+      - scheduled_date: Date
+      - scheduled_time: Time
+      - name: appointment_type
+        type: Literal["haircut", "haircolor", "haircut_and_haircolor", "dry_cut"]
+        description: The service the caller asked for, in the salon's own words.
+      - name: action
+        type: Literal["create", "modify", "cancel"]
+        description: What this call did to this appointment.
+      - name: booking_id
+        type: Id | None
+        description: >-
+          The diary's own id for the booking, once one exists. Absent while the
+          caller is still choosing a time.
+
+  - name: Complaint
+    description: One thing the caller is unhappy about.
+    fields:
+      - complaint_id: Id
+      - name: reason
+        type: Literal["service_quality", "waiting_time", "price", "staff", "other"]
+        description: What the complaint is about, in the salon's own categories.
+      - name: about
+        type: Appointment | None
+        description: >-
+          The appointment the complaint concerns, when it concerns one. A
+          complaint about the salon in general has none.
+      - name: resolution
+        type: Literal["refund_offered", "rebooking_offered", "escalated", "noted"]
+        description: >-
+          What was offered or done about it on this call. Three of these are
+          offers and not outcomes: a refund offered is not a refund approved, a
+          rebooking offered is not a rebooking confirmed, and escalated means
+          somebody will look, not that they agreed. Only what a tool did is
+          done. Say this value out loud in the tense it is written in.
+
+variables:
+  today_date:
+    type: Date
+    default: ""
+    description: Today's date in the salon's timezone, in YYYY-MM-DD form.
+
+  complaints:
+    type: list[Complaint]
+    description: Complaints recorded during this call.
+
+  customer_phone:
+    type: Phone
+    default: ""
+    confirm: verify_customer
+    description: The phone number the caller agreed to use, in E.164 form.
+
+  customer_name:
+    type: string
+    default: ""
+    description: The name returned by the customer lookup.
+
+  customer_id:
+    type: Id
+    description: The customer ID returned by the customer lookup.
+
+  customer_status:
+    type: Literal["existing", "created", "invalid"]
+    description: Whether the customer was found, created, or invalid.
+
+  appointment_id:
+    type: Id
+    description: The exact appointment ID returned by the booking tool.
+
+  appointment_date:
+    type: Date
+    description: The exact date selected with the caller.
+
+  appointment_time:
+    type: Time
+    description: The exact time selected with the caller.
+
+  appointment_slot_id:
+    type: string
+    description: The exact slot ID returned by availability, including its separators.
+
+  appointment_service:
+    type: Literal["haircut", "haircolor", "haircut_and_haircolor", "dry_cut"]
+    description: The service selected with the caller.
+
+prefetch:
+  - name: today
+    clock: now
+    # The zone sits beside the reading it governs, not on the package: two
+    # entries could honestly want two zones. Not the container's clock, which
+    # is UTC and would name the wrong day for anybody who is not on it.
+    timezone: Europe/Madrid
+    assign:
+      - today_date: result.date
+
+  - name: caller
+    source: from_number
+    assign:
+      - customer_phone: result.value
+
+  - name: profile
+    tool: look_up_customer
+    # Does running this unasked, on every call including wrong numbers, change
+    # anything? No: look_up_customer reads. Its twin find_or_create_customer
+    # would answer true, which is why this entry points at this one.
+    writes: false
+    args:
+      - phone: "{{customer_phone}}"
+    assign:
+      - customer_name: result.name
+      - customer_id: result.id
+
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+  - LANGFUSE_SECRET_KEY
+  - LANGFUSE_PUBLIC_KEY
+  - LANGFUSE_BASE_URL
+  - MANAGER_PHONE_NUMBER
+  - TWILIO_ACCOUNT_SID
+  - TWILIO_AUTH_TOKEN
+  - TWILIO_PHONE_NUMBER
+  - SIP_TRUNK_HOSTNAME
+  - SIP_AUTH_USERNAME
+  - SIP_AUTH_PASSWORD
+  - SIP_FROM_NUMBER
+
+destinations:
+  manager_line: MANAGER_PHONE_NUMBER
+
+knowledge:
+  refunds:
+    documents: knowledge/refunds
+  services:
+    documents: knowledge/services
+    chunk_size: 220
+    chunk_overlap: 40
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-luna
+      params:
+        reasoning_effort: "none"
+  speak:
+    voice:
+      provider: slng
+      model: "cartesia/sonic:3.5"
+      voice: "62ae83ad-4f6a-430b-af41-a9bede9286ca"
+      language: en
+      params:
+        world_part_override: eu
+        warm_standby_enabled: true
+  listen:
+    transcriber:
+      provider: slng
+      model: "soniox/speech-ai:rt-v5"
+      language: en
+      params:
+        world_part_override: eu
+  turn:
+    detector:
+      provider: local
+      model: silero
+      pace: balanced
+      endpointing_delay: 400ms
+
+tools:
+  - find_or_create_customer
+  - look_up_customer
+  - look_up_refund_policy
+  - look_up_salon_info
+  - list_bookings
+  - check_availability
+  - create_booking
+  - modify_booking
+  - record_complaint
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, you've reached Sage and Stone. Robin speaking, what can I do for you?"
+  interruption:
+    enabled: true
+  inactivity:
+    nudge_after: 15s
+    end_after: 45s
+  max_duration: 15m
+
+tracing:
+  provider: langfuse
+
+channels:
+  web:
+    kind: realtime_audio
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: false
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  peak_starts_per_second: 1
+  avg_session_duration: 5m

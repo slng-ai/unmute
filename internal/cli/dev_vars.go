@@ -42,9 +42,6 @@ func callFactsPayload(flags []string) (string, error) {
 		source := ir.VariableSource(name)
 		if !ir.IsSystemSource(source) {
 			switch source {
-			case ir.VariableSourceConversation:
-				return "", fmt.Errorf("--source %s: a conversation value is one the model saves mid-call, "+
-					"so there is nothing for a call to carry; talk to the agent instead", flag)
 			case ir.VariableSourceCallStart:
 				return "", fmt.Errorf("--source %s: call_start arrives with the dispatch, not from the carrier; "+
 					"seed it with --var %s=... instead", flag, name)
@@ -93,16 +90,22 @@ func callStartPayload(agent *ir.Agent, flags []string) (string, error) {
 		if !declared {
 			return "", fmt.Errorf("--var %s: no variable %q is declared in agent.yaml", flag, name)
 		}
-		// Only call_start reads the dispatch payload. A runtime-owned source
-		// arrives from the telephony route and a conversation source is captured
-		// mid-call, so seeding either would be accepted here and then dropped in
-		// build_state — the silent no-op V13 forbids.
-		if variable.Source != ir.VariableSourceCallStart {
-			reason := fmt.Sprintf("the model saves it mid-call through %s", ir.CaptureToolName)
-			if ir.IsSystemSource(variable.Source) {
-				reason = "the runtime supplies it"
+		// Two kinds of variable read the dispatch payload, and the flag takes
+		// both: `source: call_start`, and a variable that declares no source at
+		// all. Both drivers hydrate the same pair (`v.Source ==
+		// ir.VariableSourceCallStart || v.Source == ""` in livekit_v1_build.go
+		// and pipecat_v1_build.go), and both emitted runbooks print a
+		// `--var <name>=...` line for each of them, so refusing the sourceless
+		// half made the flag contradict the runbook it appears in.
+		//
+		// A runtime-owned source still arrives from the telephony route, so
+		// seeding it here would be accepted and then dropped in build_state,
+		// which is the silent no-op V13 forbids.
+		if variable.Source != ir.VariableSourceCallStart && variable.Source != "" {
+			if !ir.IsSystemSource(variable.Source) {
+				return "", fmt.Errorf("--var %s: %q has source %s, which is not a source unmute recognizes", flag, name, variable.Source)
 			}
-			return "", fmt.Errorf("--var %s: %q has source %s, so %s, not you", flag, name, variable.Source, reason)
+			return "", fmt.Errorf("--var %s: %q has source %s, so the runtime supplies it, not you", flag, name, variable.Source)
 		}
 		value, err := parseVarValue(variable.Type, raw)
 		if err != nil {

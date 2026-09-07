@@ -51,15 +51,15 @@ func TestValidateLanguage(t *testing.T) { // N16: language is validated per mode
 	}
 }
 
-func TestValidateTaskRequiresResultAndHistory(t *testing.T) {
+func TestValidateTaskRequiresResolvedHistory(t *testing.T) {
 	agent := safeAgent(t)
 	agent.Tasks["incomplete"] = Task{Instructions: "incomplete"}
 	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
 	if err == nil {
-		t.Fatal("task with no result or history must fail validation")
+		t.Fatal("task with unresolved history must fail validation")
 	}
 	errors := strings.Join(report.PerTarget[0].Errors, "\n")
-	for _, want := range []string{`task "incomplete" result must not be empty`, `"incomplete" context.history is required`} {
+	for _, want := range []string{`"incomplete" context.history is required`} {
 		if !strings.Contains(errors, want) {
 			t.Errorf("validation errors missing %q:\n%s", want, errors)
 		}
@@ -229,7 +229,7 @@ func TestValidateLiveKitSpeakEndpointGate(t *testing.T) {
 // driver gates something — see TestValidateBuiltinUnknownIDRejected and the
 // per-target rows in TestCompilerGolden.
 
-func TestValidateTaskGroupOverridesMemberContext(t *testing.T) {
+func TestValidateTaskGroupKeepsMemberContext(t *testing.T) {
 	agent := safeAgent(t)
 	agent.Models["group_only_summarizer"] = ModelDef{Kind: KindThink, Placement: PlacementAPI}
 	agent.Tasks["collect"] = Task{
@@ -240,7 +240,7 @@ func TestValidateTaskGroupOverridesMemberContext(t *testing.T) {
 		Steps: []string{"collect"}, ContextScope: ContextShared, Then: GroupEnd, Merge: GroupMergeResults,
 	}
 	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
-	if err != nil || strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "missing reason binding") {
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "missing reason binding") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
 	}
 }
@@ -252,13 +252,24 @@ func TestValidateTaskGroupOverridesMemberContext(t *testing.T) {
 // below, against a real route. Do not reintroduce a synthetic field to "restore
 // coverage" that was never missing.
 
+// A history value its target cannot shape is refused, and the refusal names
+// what that target does shape (V8).
+//
+// `summary` rather than `messages`, because Pipecat shapes `messages` now. The
+// pair is the whole of the check: the value refused, and the value accepted
+// next to it, so a table that refuses everything would not pass either.
 func TestValidateContextPolicy(t *testing.T) { // V8
 	agent := safeAgent(t)
 	transfer := agent.Controls["to_billing"].(*AgentTransfer)
-	transfer.Context.History = HistoryMessages
+	transfer.Context.History = HistorySummary
 	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
-	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "history: full only") {
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "does not summarize a context yet") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+	transfer.Context.History = HistoryMessages
+	report, err = Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	if err != nil {
+		t.Fatalf("history: messages is shaped on pipecat and must validate: err=%v report=%#v", err, report.PerTarget)
 	}
 }
 
@@ -969,12 +980,11 @@ func TestValidatePipecatMaturityGates(t *testing.T) { // driver-pipecat T1, C9
 			// else; other errors from the bare task are not what is asserted.
 			a.Tasks["confirm_booking"] = Task{Tools: []string{"lookup_customer"}}
 		}, "cannot scope an MCP tool source to a task"},
+		// summary, because it is the last history value Pipecat refuses: the
+		// driver shapes messages, last_n and reset now.
 		{"transfer_history", func(a *Agent) {
-			a.Controls["to_billing"].(*AgentTransfer).Context.History = HistoryMessages
-		}, "history: full only"},
-		{"transfer_variable_subset", func(a *Agent) {
-			a.Controls["to_billing"].(*AgentTransfer).Context.Variables = VariableSelection{Names: []string{"customer_id"}}
-		}, "variables subset"},
+			a.Controls["to_billing"].(*AgentTransfer).Context.History = HistorySummary
+		}, "does not summarize a context yet"},
 		{"transfer_no_tool_calls", func(a *Agent) {
 			no := false
 			a.Controls["to_billing"].(*AgentTransfer).Context.IncludeToolCalls = &no
@@ -1097,6 +1107,20 @@ func TestValueChecksFailAtValidate(t *testing.T) {
 				pkg.Targets["livekit"].Models["front_desk"] = override
 			},
 			want: `livekit speak binding provider "deepgram": voice has no slot here`,
+		},
+		{
+			// A structured variable's Type is always the primitive it renders as
+			// in a prompt (compiler.go), never its declared shape, so the old
+			// message ("default does not match type \"string\"") named a type the
+			// author never wrote. The fix names the shape instead and says there
+			// is no fix but removal: a structured value starts empty and a
+			// default is not a thing it can hold.
+			name:     "structured variable with a default",
+			provider: "livekit",
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Variables["reasons"] = packagespec.Variable{Type: "list[string]", Default: []any{}}
+			},
+			want: `variable "reasons" is list[str], which starts empty and takes no default: remove default:`,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -1599,47 +1623,62 @@ func TestValidatePipecatDailyCarrierServiceSet(t *testing.T) {
 	}
 }
 
-// T016a / FR-004, research D11: the route grants no telephony call sources,
-// because the code that fills them is the carrier-websocket adapter this route
-// does not emit. The refusal is the feature, and it has to name where the source
-// does work, so an author learns the fix rather than only the no.
-func TestValidatePipecatDailyCarrierRefusesCallSources(t *testing.T) {
-	for _, source := range []VariableSource{
-		VariableSourceFromNumber, VariableSourceToNumber,
-		VariableSourceCallID, VariableSourceDirection,
+// T016a / FR-004: which call sources this route grants, and which it still does
+// not. Inverted rather than deleted, because the subject is unchanged: a source
+// resolves exactly where emitted code fills it, and the refusal for one that is
+// not filled has to name where it is.
+//
+// The helper answering the carrier's inbound webhook holds the whole POST form,
+// so From and CallSid ride the body it posts and the bot lifts them. What is
+// still absent is to_number: the outbound body carries a SIP URI, not a number,
+// and turning one into the other is parsing this compiler does not do.
+func TestValidatePipecatDailyCarrierCallSources(t *testing.T) {
+	for _, tc := range []struct {
+		source  VariableSource
+		granted bool
+	}{
+		{VariableSourceFromNumber, true},
+		{VariableSourceCallID, true},
+		{VariableSourceDirection, true},
+		{VariableSourceToNumber, false},
+		{VariableSourceSessionID, false},
 	} {
-		t.Run(string(source), func(t *testing.T) {
+		t.Run(string(tc.source), func(t *testing.T) {
 			pkg := dailyCarrierPackage(t)
 			pkg.Agent.Variables = map[string]packagespec.Variable{}
-			pkg.Agent.Variables["caller_fact"] = packagespec.Variable{Type: "string", Source: string(source)}
+			pkg.Agent.Variables["caller_fact"] = packagespec.Variable{Type: "string", Source: string(tc.source)}
 			agent, err := Build(pkg)
 			if err != nil {
 				t.Fatal(err)
 			}
 			report, _ := Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
 			joined := strings.Join(report.PerTarget[0].Errors, "\n")
-			if !strings.Contains(joined, "source."+string(source)) {
-				t.Fatalf("a %s variable must fail by the source's name on this route, got:\n%s", source, joined)
+			if tc.granted {
+				if strings.Contains(joined, "source."+string(tc.source)) {
+					t.Fatalf("the route fills %s now, so it must not be refused there:\n%s", tc.source, joined)
+				}
+				return
+			}
+			if !strings.Contains(joined, "source."+string(tc.source)) {
+				t.Fatalf("a %s variable must fail by the source's name on this route, got:\n%s", tc.source, joined)
 			}
 			if !strings.Contains(joined, "daily-sip") {
 				t.Errorf("the refusal must name the route, got:\n%s", joined)
 			}
-			// Where it does work. No Pipecat route fills call sources, so the
-			// only useful answer is a LiveKit one, and the message has to give it
-			// rather than leaving the author to go looking.
-			if !strings.Contains(joined, "livekit, connector") {
+			// Where it does work. The list is read off the route table rather than
+			// written into the message, which is what stopped it being wrong: it
+			// used to say the LiveKit routes, flatly, and would have gone on saying
+			// so after two Pipecat routes started filling call sources.
+			if !strings.Contains(joined, "is supplied on ") || !strings.Contains(joined, "livekit") {
 				t.Errorf("the refusal must name where the source does work, got:\n%s", joined)
 			}
 
-			// The same declaration passes where the fill path exists. That used to
-			// be the Pipecat carrier-websocket adapter. With that route gone, no
-			// Pipecat route fills call sources at all, so the contrast is the
-			// LiveKit Twilio connector: the surviving route whose bridge reads the
-			// carrier's stream and writes these attributes.
+			// The same declaration passes where the fill path exists, which for
+			// these two is still LiveKit only.
 			cwPkg := loadSafeCore(t)
 			enableTelephony(cwPkg)
 			cwPkg.Agent.Variables = map[string]packagespec.Variable{}
-			cwPkg.Agent.Variables["caller_fact"] = packagespec.Variable{Type: "string", Source: string(source)}
+			cwPkg.Agent.Variables["caller_fact"] = packagespec.Variable{Type: "string", Source: string(tc.source)}
 			routeTarget(cwPkg, "livekit", "primary_phone", "connector", "twilio")
 			cwPkg.Connections["primary_phone"] = packagespec.Connection{
 				Transport: "connector", Carrier: "twilio", Environment: map[string]string{
@@ -1652,8 +1691,8 @@ func TestValidatePipecatDailyCarrierRefusesCallSources(t *testing.T) {
 				t.Fatal(err)
 			}
 			report, _ = Validate(cwAgent, []Target{cwAgent.Targets["livekit"]}, targetcap.Default())
-			if joined = strings.Join(report.PerTarget[0].Errors, "\n"); strings.Contains(joined, "source."+string(source)) {
-				t.Fatalf("the connector route fills %s, so it must not be refused there:\n%s", source, joined)
+			if joined = strings.Join(report.PerTarget[0].Errors, "\n"); strings.Contains(joined, "source."+string(tc.source)) {
+				t.Fatalf("the connector route fills %s, so it must not be refused there:\n%s", tc.source, joined)
 			}
 		})
 	}
@@ -2003,22 +2042,47 @@ func TestValidatePipecatCloudWebsocketHostsNothing(t *testing.T) {
 	}
 }
 
-// The route refuses telephony call sources by name, for the same reason the Daily
-// carrier route does: the code that fills them is the carrier-websocket adapter
-// neither route emits.
-func TestValidatePipecatCloudWebsocketRefusesCallSources(t *testing.T) {
-	pkg := cloudWebsocketPackage(t)
-	pkg.Agent.Variables["caller_fact"] = packagespec.Variable{Type: "string", Source: string(VariableSourceFromNumber)}
-	agent, err := Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	report, _ := Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
-	joined := strings.Join(report.PerTarget[0].Errors, "\n")
-	for _, want := range []string{"source.from_number", "cloud-websocket", "livekit, connector"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("the refusal is missing %q, got:\n%s", want, joined)
-		}
+// The same on the cloud-websocket route, which grants the most of any Pipecat
+// row: the carrier's handshake is parsed into a call id and a stream id, and the
+// TwiML markup carries the rest.
+//
+// Inverted rather than deleted, and its subject is the same: a source resolves
+// exactly where emitted code fills one. session_id is the contrast that keeps
+// this test honest, because it is a compile-time literal on LiveKit and nobody
+// has asked for it here.
+func TestValidatePipecatCloudWebsocketCallSources(t *testing.T) {
+	for _, tc := range []struct {
+		source  VariableSource
+		granted bool
+	}{
+		{VariableSourceFromNumber, true},
+		{VariableSourceToNumber, true},
+		{VariableSourceCallID, true},
+		{VariableSourceStreamID, true},
+		{VariableSourceDirection, true},
+		{VariableSourceSessionID, false},
+	} {
+		t.Run(string(tc.source), func(t *testing.T) {
+			pkg := cloudWebsocketPackage(t)
+			pkg.Agent.Variables["caller_fact"] = packagespec.Variable{Type: "string", Source: string(tc.source)}
+			agent, err := Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report, _ := Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
+			joined := strings.Join(report.PerTarget[0].Errors, "\n")
+			if tc.granted {
+				if strings.Contains(joined, "source."+string(tc.source)) {
+					t.Fatalf("the route fills %s now, so it must not be refused there:\n%s", tc.source, joined)
+				}
+				return
+			}
+			for _, want := range []string{"source." + string(tc.source), "cloud-websocket", "is supplied on "} {
+				if !strings.Contains(joined, want) {
+					t.Errorf("the refusal is missing %q, got:\n%s", want, joined)
+				}
+			}
+		})
 	}
 }
 
@@ -2332,7 +2396,7 @@ func TestValidateSlngRouterOneAgentIDPerPackage(t *testing.T) {
 	pkg.Agent.Models.Think["careful_reasoning"] = router("safe-core-careful-v1")
 	pkg.Agent.Agents["billing"] = func() packagespec.AgentDef {
 		def := pkg.Agent.Agents["billing"]
-		def.Model = "fast_reasoning"
+		def.Think = "fast_reasoning"
 		return def
 	}()
 	unused, err := Build(pkg)

@@ -76,6 +76,7 @@ class _Params:
 state = bot.build_state()
 # Set here, not hydrated: this pipecat target has no telephony plane.
 state.dialed_number = "+15551230000"
+bot._save_result("verify_customer", state, {"customer_phone": state.customer_phone})
 agent = bot.ConciergeAgent(state=state, context=None, call_context=None, slng_session_id="smoke")
 
 # 1. A tool whose injected values are all available: the request goes out.
@@ -92,7 +93,7 @@ assert captured["body"] == {
 }, captured["body"]
 assert params.result["ok"] is True, params.result
 
-# 2. A tool injecting an unset conversation variable: refused, nothing sent.
+# 2. A tool injecting an unset variable: refused, nothing sent.
 assert state.reschedule_to is None
 refused = _Params()
 asyncio.run(agent.reschedule_appointment(refused))
@@ -100,8 +101,8 @@ assert captured["count"] == 1, "a refused call must not reach the network"
 assert "refused" in refused.result, refused.result
 assert "reschedule_to" in refused.result["refused"], refused.result
 
-# 3. Once the model saves it, the same tool sends it in the body.
-asyncio.run(agent.update_variables(_Params(), reschedule_to="Friday at 4"))
+# 3. Once the value is set, the same tool sends it in the body.
+state.reschedule_to = "Friday at 4"
 allowed = _Params()
 asyncio.run(agent.reschedule_appointment(allowed))
 assert captured["count"] == 2, captured
@@ -128,6 +129,9 @@ import agent as generated  # noqa: E402
 userdata = generated.Userdata()
 generated._hydrate_call_start(userdata, generated._dispatched_call_start({}))
 userdata.dialed_number = "+15551230000"
+generated._save_result(
+    "verify_customer", userdata, {"customer_phone": userdata.customer_phone}
+)
 ctx = SimpleNamespace(userdata=userdata)
 desk = generated.Concierge()
 
@@ -144,16 +148,15 @@ assert captured["body"] == {
 }, captured["body"]
 assert result["ok"] is True, result
 
-# 2. An unset conversation variable refuses before any request is made.
+# 2. An unset variable refuses before any request is made.
 assert userdata.reschedule_to is None
 refused = asyncio.run(desk.reschedule_appointment(ctx))
 assert captured["count"] == 1, "a refused call must not reach the network"
 assert "refused" in refused, refused
 assert "reschedule_to" in refused["refused"], refused
 
-# 3. The capture tool sets it, then the body carries it.
-asyncio.run(desk.update_variables(ctx, reschedule_to="Friday at 4"))
-assert userdata.reschedule_to == "Friday at 4", userdata.reschedule_to
+# 3. Once the value is set, the same tool sends it in the body.
+userdata.reschedule_to = "Friday at 4"
 allowed = asyncio.run(desk.reschedule_appointment(ctx))
 assert captured["count"] == 2, captured
 assert captured["body"] == {
@@ -189,6 +192,7 @@ class _Params:
 state = bot.build_state()
 # Set here, not hydrated: this pipecat target has no telephony plane.
 state.dialed_number = "+15551230000"
+bot._save_result("verify_customer", state, {"customer_phone": state.customer_phone})
 agent = bot.ConciergeAgent(state=state, context=None, call_context=None, slng_session_id="smoke")
 asyncio.run(agent.confirm_appointment(_Params()))
 
@@ -225,6 +229,9 @@ import agent as generated  # noqa: E402
 userdata = generated.Userdata()
 generated._hydrate_call_start(userdata, generated._dispatched_call_start({}))
 userdata.dialed_number = "+15551230000"
+generated._save_result(
+    "verify_customer", userdata, {"customer_phone": userdata.customer_phone}
+)
 asyncio.run(generated.Concierge().confirm_appointment(SimpleNamespace(userdata=userdata)))
 
 assert captured["count"] == 1, captured

@@ -1,0 +1,18 @@
+description: Return the deliberately selected values for the sharing check.
+input:
+  type: object
+  properties:
+    note:
+      type: string
+  required:
+    - note
+inject:
+  - appointment: "{{last_appointment}}"
+  - date: "{{last_appointment.scheduled_date}}"
+  - accepted: "{{accepted}}"
+  - count: "{{count}}"
+  - label: "Date {{last_appointment.scheduled_date}}"
+local:
+  handler: tools/inspect_state.py
+interruption: provider_default
+effect: returns_data

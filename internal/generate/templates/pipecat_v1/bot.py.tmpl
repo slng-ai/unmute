@@ -25,7 +25,7 @@ PipelineWorker owns the transport + STT, each agent is an LLMWorker with its own
 LLM and voice, and agent_transfer is activate_worker(). Tasks and task groups
 run as Pipecat Flows on the owning agent: a delegate tool snapshots the shared
 context, a FlowManager walks the steps as nodes, and control returns with only
-the typed results.{{end}}
+a completed or unserved status.{{end}}
 """
 
 from __future__ import annotations
@@ -35,13 +35,14 @@ from __future__ import annotations
 {{end}}{{if .HasFlows}}import copy
 {{end}}{{if .NeedsFunctionCalls}}import functools
 {{end}}{{if or .NeedsInspect .NeedsFunctionCalls}}import inspect
-{{end}}{{if or .HasFlows .CallStartVars .Slng.Vertex .NeedsPrefetchSeed}}import json
+{{end}}{{if or .HasFlows .CallStartVars .Slng.Vertex .NeedsPrefetchSeed .TypedState}}import json
 {{end}}import os
-{{if .NeedsRender}}import re
+{{if or .NeedsRender (and .TypedState .TypedState.NeedsRe)}}import re
 {{end}}import sys
 {{if .Slng.Any}}import uuid
-{{end}}{{if .Variables}}from dataclasses import dataclass
+{{end}}{{if .Variables}}from dataclasses import {{if .NeedsDataclassField}}dataclass, field{{else}}dataclass{{end}}
 {{end}}{{if .NeedsPrefetchClock}}from datetime import datetime
+{{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
 {{end}}{{if .NeedsPrefetchClock}}from zoneinfo import ZoneInfo
 {{end}}{{if .DailyCarrier}}{{if .DailyCarrier.HasInbound}}
@@ -54,15 +55,17 @@ import httpx
 {{end}}{{if .Knowledge.Knowledge}}import knowledge
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}from dotenv import load_dotenv
-from loguru import logger
+from loguru import logger{{if .PydanticImports}}
+from pydantic import {{.PydanticImports}}{{end}}
 {{if .NeedsMCP}}from mcp.client.session_group import {{join .MCPParamsImports ", "}}
 {{end}}
-{{if not .SemanticOff}}from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+{{if .NeedsFunctionSchema}}from pipecat.adapters.schemas.function_schema import FunctionSchema
+{{end}}{{if not .SemanticOff}}from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 {{end}}from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 {{if not .Inline}}from pipecat.bus import BusBridgeProcessor
-{{end}}{{if .HasFlows}}from pipecat.flows import {{if .HasIsolated}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig{{if .HasTaskTransfers}}, NO_RESPONSE{{end}}
+{{end}}{{if .HasFlows}}from pipecat.flows import {{if .NeedsContextStrategy}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig, NO_RESPONSE
 {{end}}{{if .FrameImports}}from pipecat.frames.frames import {{join .FrameImports ", "}}
 {{end}}from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -75,8 +78,8 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 {{if .NeedsFunctionCalls}}from pipecat.services.llm_service import FunctionCallParams
 {{end}}{{if .NeedsMCP}}from pipecat.services.mcp_service import MCPClient
-{{end}}{{if .HasFlows}}from pipecat.services.settings import LLMSettings
-{{end}}{{if .NeedsLanguage}}from pipecat.transcriptions.language import Language
+{{end}}from pipecat.services.settings import LLMSettings
+{{if .NeedsLanguage}}from pipecat.transcriptions.language import Language
 {{end}}from pipecat.transports.base_transport import BaseTransport, TransportParams
 {{if .DailyParams}}{{.DailyParams.Import}}
 {{end}}{{if .CloudWebsocket}}from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -237,17 +240,41 @@ async def _slng_log_provenance(response) -> None:
 {{if .Slng.RouterClass}}
 
 class {{.Slng.RouterClass}}(OpenAILLMService):
-    """The router's LLM service, plus a response hook on the client it builds.
+    """The router's LLM service: a response hook, and per-request variables.
 
-    Overriding create_client is the only seam this framework offers for it: the
-    service builds its own AsyncOpenAI and hands us neither the raw response nor
-    its headers, and the router states where an answer came from only in headers.
+    Two overrides, two different seams, and the second one is why this class
+    holds any state.
 
+    create_client is the only seam for reading the response headers: the service
+    builds its own AsyncOpenAI and hands us neither the raw response nor its
+    headers, and the router states where an answer came from only in a header.
     The connection limits restate the base class's own (pipecat
     services/openai/base_llm.py create_client at the pinned version). Restating
     them is deliberate. Anything different here would change connection reuse,
     which is a latency change nobody asked for and nothing would report.
+
+    build_chat_completion_params is the seam for the request body. The base
+    class's last statement before returning is params.update(self._settings.extra),
+    which reads a settings snapshot mutated only by an explicit update: nothing
+    re-evaluates the expression that filled it, so a value written part way
+    through a step reached the model one turn late. This override reads the live
+    state instead, on the streaming path and the one-shot path both, which is
+    what makes the two targets refresh at the same point.
     """
+
+    def __init__(self, *args, slng_state=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._slng_state = slng_state
+
+    def build_chat_completion_params(self, params_from_context) -> dict:
+        params = super().build_chat_completion_params(params_from_context)
+        scope = (params.get("extra_headers") or {}).get("{{.Slng.AgentIDHeader}}", "")
+        body = dict(params.get("extra_body") or {})
+        body["template_variables"] = _slng_template_variables(
+            self._slng_state, _SLNG_TEMPLATE_PATHS.get(scope, ()), scope=scope
+        )
+        params["extra_body"] = body
+        return params
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         return AsyncOpenAI(
@@ -266,9 +293,11 @@ class {{.Slng.RouterClass}}(OpenAILLMService):
 {{if .Slng.Variables}}
 
 _SLNG_VARIABLE_LIMIT = {{.Slng.Limit}}
+_SLNG_TEMPLATE_PATHS = {{.Slng.TemplatePaths}}
+_SLNG_SCOPE_SITES = {{.Slng.TemplateSites}}
 
 
-def _slng_template_variables(state, names) -> dict:
+def _slng_template_variables(state, names, *, scope="") -> dict:
     """The values the router substitutes into the prompt's placeholders.
 
     A name with no value yet sends the empty string, never None and never the text
@@ -277,8 +306,17 @@ def _slng_template_variables(state, names) -> dict:
     """
     values = {}
     for name in names:
+{{- if .TypedState}}
+        # The bound is measured on the JSON rendering, not on the repr of the
+        # object: they are different lengths, and the one the router receives is
+        # the one that has to fit. _state_text carries its own bound and its own
+        # warning, so a declared value is already shortened by here. A path
+        # arrives as one flat name, and _state_lookup walks it.
+        text = _state_text(*_prompt_value(state, name, _SLNG_SCOPE_SITES.get(scope, "")))
+{{- else}}
         value = getattr(state, name, None) if state is not None else None
         text = "" if value is None else str(value)
+{{- end}}
         if len(text) > _SLNG_VARIABLE_LIMIT:
             logger.warning(
                 "template variable {} is {} characters; truncating to {} for the router",
@@ -634,10 +672,14 @@ async def _forward_carrier_call(call_sid: str, sip_uri: str) -> None:
                     f"carrier call update failed with {response.status}: {await response.text()}"
                 )
 {{end}}{{end}}{{end}}
-{{if .Variables}}
+{{if .TypedState}}
+{{.TypedState.Source}}
+{{end}}{{if .Variables}}
 @dataclass
 class State:
     """Typed call variables (SCHEMA 4.4), shared across agents."""
+{{if .NeedsPrefetchUnconfirmed}}    _unconfirmed: set[str] = field(default_factory=lambda: set(_STATE_CONFIRM))
+{{end}}
 {{range .Variables}}    {{.Name}}: {{.PyType}} = {{.Default}}{{if .Description}}  # {{.Description}}{{end}}
 {{end}}
 {{if .CallStartVars}}
@@ -667,22 +709,42 @@ def build_state(call_context: dict | None = None) -> State:
         setattr(state, {{pyq .Name}}, call_start[{{pyq .Name}}])
 {{if .Required}}    else:
         missing.append({{pyq .Name}})
-{{end}}{{end}}{{end}}    if missing:
+{{end}}{{end}}{{end}}{{if .SystemSourceVars}}    # A variable declaring `source: <call fact>` reads the fact the route lifted
+    # into call_context above. Shaped like the call_start loop, and separate from
+    # it for the reason the two doors are separate: the dispatch payload and the
+    # carrier's own facts are different things arriving from different places.
+    #
+    # This exists because the route table grants a fact to two readers, not one:
+    # `variables: source:` and `prefetch: source:` both resolve through it, so a
+    # grant made for the pre-fetch alone would let a variable compile green here
+    # and hold an empty string on every live call.
+{{range .SystemSourceVars}}    _value = (call_context or {}).get({{pyq .Source}})
+    if _value:
+        setattr(state, {{pyq .Name}}, _value)
+{{end}}{{end}}    if missing:
         raise RuntimeError(f"Missing call context fields: {', '.join(missing)}")
     return state
 {{end}}{{if .NeedsRender}}
 _TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
 
 
-def _render(text: str, state, *, quote_values: bool = False) -> str:
+def _render(text: str, state, *, quote_values: bool = False, site: str = "") -> str:
     """Substitute each variable token from the call state (SCHEMA 4.4 templates).
     Only substituted values are URL-encoded, never the surrounding literal."""
     if state is None:
         return text
 
     def _one(match: re.Match[str]) -> str:
+{{- if .TypedState}}
+        # Through _state_lookup, which walks a path emitted as one flat name, and
+        # _state_text, so a declared value renders as compact JSON and an empty
+        # one as words. Anything not declared structured comes back exactly as
+        # str() gave it.
+        value = _state_text(*_prompt_value(state, match.group(1), site))
+{{- else}}
         value = getattr(state, match.group(1), None)
         value = "" if value is None else str(value)
+{{- end}}
         return quote(value, safe="") if quote_values else value
 
     return _TEMPLATE.sub(_one, text)
@@ -690,30 +752,23 @@ def _render(text: str, state, *, quote_values: bool = False) -> str:
 
 def _refusal(tool: str, state, needed: list[tuple[str, str]]) -> str:
     """Refuse a call whose injected variables are still unset (V4): the model is
-    told what to ask for, and no half-formed request is ever sent."""
+    told what to do about each one, and no half-formed request is ever sent."""
     unset = [
         (name, hint)
         for name, hint in needed
-        if getattr(state, name, None) in (None, "")
+        if _state_lookup(state, name)[1] in (None, "")
 {{- if .NeedsPrefetchUnconfirmed}}
         # A value the caller has not agreed to is present and not usable. Without
         # this, a pre-fetched number would reach somebody else's record: the
         # request would go out against a proposal rather than a fact.
-        or name in getattr(state, "_unconfirmed", ())
+        or _state_lookup(state, name)[0] in getattr(state, "_unconfirmed", ())
 {{- end}}
     ]
     if not unset:
         return ""
     names = ", ".join(name for name, _ in unset)
     hints = " ".join(f"{name}: {hint}" for name, hint in unset if hint)
-    return f"cannot call {tool} yet: {names} not set. Ask the caller first. {hints}".strip()
-{{end}}{{if .NeedsPrerequisiteGuard}}
-
-{{.PrerequisiteGuard}}
-# One counter per guarded control per session. Held on the module rather than the
-# worker because activating another worker replaces the object and a caller who
-# keeps refusing across a handoff has not started over.
-_prerequisite_refusals: dict[str, int] = {}
+    return f"cannot call {tool} yet: {names} not set. {hints}".strip()
 {{end}}{{if .NeedsPrefetch}}
 
 {{.Prefetch}}
@@ -744,6 +799,54 @@ def _mcp_params(url: str, headers: dict[str, str] | None = None):
     """
     params_cls = StreamableHttpParameters if url.rstrip("/").endswith("/mcp") else SseServerParameters
     return params_cls(url=url, headers=headers, timeout={{mcpTimeout}})
+{{end}}
+{{- if or .NeedsLastN .NeedsSpeechOnly}}
+# --- context shaping ---------------------------------------------------------
+{{end}}
+{{- if .NeedsSpeechOnly}}
+def _speech_only(messages: list[dict]) -> list[dict]:
+    """history: messages, what was said out loud and no tool record.
+
+    A tool record cannot be half-dropped. LLMContext holds provider-shaped
+    dicts, so a tool call is a `tool_calls` key on an assistant message while
+    only its reply carries role "tool". Filtering by role alone therefore keeps
+    every call and drops everything answering it, and the provider rejects that
+    request: "An assistant message with 'tool_calls' must be followed by tool
+    messages responding to each 'tool_call_id'". Measured on a live call, mid
+    step, on a package whose every unit test passed.
+
+    So the call goes with its reply. An assistant turn that both spoke and
+    called a tool keeps what it said, because that half is what this value is
+    for. LiveKit needs none of this: .messages() holds no function-call items,
+    so its filter drops both halves already.
+    """
+    kept: list[dict] = []
+    for message in messages:
+        if message.get("role") not in ("user", "assistant"):
+            continue
+        if not message.get("tool_calls"):
+            kept.append(message)
+            continue
+        spoken = {key: value for key, value in message.items() if key != "tool_calls"}
+        if spoken.get("content"):
+            kept.append(spoken)
+    return kept
+{{end}}
+{{- if .NeedsLastN}}
+def _last_n(messages: list[dict], limit: int) -> list[dict]:
+    """history: last_n, the newest `limit` entries with no orphaned tool result.
+
+    LLMContext holds plain provider-shaped dicts and has no truncate() and no
+    exclusion filter, so this is list work. The window is cut at the front, so
+    the tail is whole and the only orphan possible is a tool result whose
+    assistant call fell outside it. A tool message with no matching call is a
+    request the provider rejects, so it goes. An assistant message carrying
+    tool calls is safe at the front: its results follow it.
+    """
+    window = messages[-limit:] if limit > 0 else []
+    while window and window[0].get("role") == "tool":
+        window = window[1:]
+    return window
 {{end}}
 # --- prompts ----------------------------------------------------------------
 # Agent system instructions as module constants: one copy each, referenced by
@@ -847,27 +950,19 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{range .MCPSources}}            {{template "mcp_client" .}},
 {{end}}        ]
         self._mcp_tools: list = []
-{{end}}{{if .Delegates}}
-    async def on_activated(self, args) -> None:
-        # A Flow replaces this worker's system instruction with its task role.
-        # Re-entry restores the owning agent before tools/messages run.
-{{if .SlngHeaders}}        # And its cache scope with it: a task that handed the conversation on
-        # rather than returning left this service holding the task's scope, so
-        # re-entry has to take it back or this agent would answer as the task.
-        # Only the extra_headers key travels: a settings update merges the extra
-        # dict key by key, so the inline configuration and the reasoning setting
-        # survive untouched.
-        await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(
-                system_instruction={{.RuntimePromptExpr}},
-                extra={"extra_headers": {{.SlngHeaders}}},
-            ),
-        ))
-{{else}}        await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(system_instruction={{.RuntimePromptExpr}}),
-        ))
-{{end}}        await super().on_activated(args)
 {{end}}
+    async def on_activated(self, args) -> None:
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(system_instruction={{.RuntimePromptExpr}}{{if .SlngHeaders}},
+                extra={"extra_headers": {{.SlngHeaders}}}{{end}}),
+        ))
+        await super().on_activated(args)
+        # Pipecat 1.8 only runs on activation when messages are nonempty.
+        # A handoff already shaped the shared context; request the reply
+        # without adding a synthetic message or waiting for the caller.
+        if args and args.get("run_llm") and not args.get("messages"):
+            await self.queue_frame(LLMRunFrame())
+
 {{if .MCPSources}}    async def start_mcp(self) -> None:
         """Connect every source and register its tools on this agent's LLM."""
         self._mcp_tools = await _register_mcp_tools(
@@ -882,9 +977,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
     async def close_mcp(self) -> None:
         await _close_mcp((client.close() for client in self._mcp_clients))
 
-    def build_tools(self) -> list:
-        """The @tool methods plus this agent's MCP tools, so the server's tools
-        are advertised only while this agent is active."""
+    def build_tools(self):
         return super().build_tools() + self._mcp_tools
 {{end}}{{if $.NeedsStateBind}}
     def _bind_state(self, handler):
@@ -895,47 +988,19 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             return await handler(args, flow_manager, state=self.state)
 
         return _bound
-{{end}}{{if $.Capture}}
-    @_direct_tool(cancel_on_interruption=False)
-    async def {{$.Capture.Name}}(self, params: FunctionCallParams{{range $.Capture.Args}}, {{.Name}}: {{.PyType}} = {{.PyDefault}}{{end}}):
-        """{{$.Capture.Description}}
-
-        Args:
-{{range $.Capture.Args}}            {{.Name}} ({{.PyType}}):{{if .Description}} {{.Description}}{{end}}
-{{end}}        """
-        saved = []
-{{range $.Capture.Fields}}        if {{.}} is not None:
-            self.state.{{.}} = {{.}}
-            saved.append({{pyq .}})
-{{end}}{{if .SlngBody}}        if saved:
-            # The third place this call writes a variable, and the one that made
-            # the other two insufficient: a value the caller offers arrives here,
-            # not at a task result. The router substitutes these into the prompt's
-            # placeholders, so the value has to reach it before the next turn
-            # asks. Body only, so the speaking site's cache scope stays put.
-            await self.queue_frame(LLMUpdateSettingsFrame(
-                delta=LLMSettings(extra={"extra_body": {{.SlngBody}}}),
-            ))
-{{end}}        await params.result_callback({"saved": saved})
 {{end}}
 {{range .Transfers}}
     @_direct_tool(cancel_on_interruption=False)
     async def {{.MethodName}}(self, params: FunctionCallParams):
         """{{.When}}"""
-{{if .Requires}}        _unmet = _unmet_prerequisites(self.state, [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
-        if _unmet:
-            logger.info(
-                "prerequisite guard: handoff {} refused, unmet {}".format(
-                    {{pyq .MethodName}}, ", ".join(_unmet)
-                )
-            )
-            await params.result_callback({"refused": _prerequisite_refusal(_unmet, False)})
-            return
-{{end}}{{if .Announce}}        await self._announce_handoff({{pyq .Announce}})
+{{if .Announce}}        await self._announce_handoff({{pyq .Announce}})
+{{end}}{{if .CtxExpr}}        # context.history on this handoff. One LLMContext is shared for the whole
+        # call, so the receiver is given the shaped list rather than a copy.
+        self.context.set_messages({{.CtxExpr}})
 {{end}}        await self.activate_worker(
             {{pyq .To}},
             args=LLMWorkerActivationArgs(
-                messages=[{"role": "developer", "content": {{pyq .Reason}}}],
+                messages=[],
                 run_llm=True,
             ),
             deactivate_self=True,
@@ -1119,46 +1184,19 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             response.raise_for_status()
             await params.result_callback(response.json())
 {{end}}{{if and .EndsCall (not .ColdDestination)}}        await params.llm.push_frame(EndFrame())
-{{end}}{{end}}{{$agentPromptExpr := .RuntimePromptExpr}}{{$agentSlngHeaders := .SlngHeaders}}{{$agentSlngBody := .SlngBody}}{{range $d := .Delegates}}
+{{end}}{{end}}{{$agentPromptExpr := .RuntimePromptExpr}}{{$agentSlngHeaders := .SlngHeaders}}{{range $d := .Delegates}}
     @_direct_tool
     async def {{$d.MethodName}}(self, params: FunctionCallParams):
         """{{$d.When}}"""
-{{if $d.Requires}}        _unmet = _unmet_prerequisites(self.state, [{{range $i, $r := $d.Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
-        if _unmet:
-            # requires guard (machine-checked): no flow starts, so nothing else
-            # in this process is going to speak. The call is resolved WITHOUT
-            # run_llm=False on purpose. The success path below sets it because
-            # the flow's first node is the sole responder; copying that here
-            # would leave a live call silent with nothing in the trace, because
-            # there is no first node to respond.
-            _tries = _prerequisite_refusals.get({{pyq $d.MethodName}}, 0) + 1
-            _prerequisite_refusals[{{pyq $d.MethodName}}] = _tries
-            _at_limit = _tries >= _PREREQUISITE_LIMIT
-            if _at_limit:
-                logger.info(
-                    "prerequisite guard: step {} refused, unmet {}, retry limit reached; asking the caller".format(
-                        {{pyq $d.MethodName}}, ", ".join(_unmet)
-                    )
-                )
-            else:
-                logger.info(
-                    "prerequisite guard: step {} refused, unmet {}".format(
-                        {{pyq $d.MethodName}}, ", ".join(_unmet)
-                    )
-                )
-            await params.result_callback({"refused": _prerequisite_refusal(_unmet, _at_limit)})
-            return
-        _prerequisite_refusals[{{pyq $d.MethodName}}] = 0
-{{end}}{{if $d.Announce}}        # Cover the entry: two model requests pass between the caller finishing and
+{{if $d.Announce}}        # Cover the entry: two model requests pass between the caller finishing and
         # the step's first word, and this puts speech in them. TTSSpeakFrame is a
         # DataFrame, so it is queued and speech starts while the flow is built.
-        # Queued after the guard, so a refused step stays silent: the caller
-        # hearing "let me pull up the diary" and then being asked for a phone
-        # number is worse than hearing nothing.
+        # Queued at the very start of the method, before anything else runs.
         await self.queue_frame(TTSSpeakFrame({{pyq $d.Announce}}))
-{{end}}        self._{{$d.MethodName}}_results = {}
-{{if $d.HasTransfers}}        self._{{$d.MethodName}}_active_step = {{pyq (index $d.StepTasks 0).Name}}
-{{end}}        flow = FlowManager(
+{{end}}        self._{{$d.MethodName}}_visit = object()
+        self._{{$d.MethodName}}_results = {}
+        self._{{$d.MethodName}}_active_step = {{pyq (index $d.StepTasks 0).Name}}
+        flow = FlowManager(
             llm=self.llm,
             context_aggregator=LLMContextAggregatorPair(self.context),
             worker=self,
@@ -1182,10 +1220,15 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(extra={"extra_headers": {{(index $d.StepTasks 0).SlngHeaders}}}),
         ))
+{{end}}{{if (index $d.StepTasks 0).CtxExpr}}        # context.history on this task. Shaped after the snapshot above, so the
+        # finish path restores the owner's own context whatever this step saw.
+        self.context.set_messages({{(index $d.StepTasks 0).CtxExpr}})
 {{end}}        await flow.initialize(self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
 {{range $t := $d.StepTasks}}
     def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:
-        return NodeConfig(
+{{if $t.Reset}}        self.context.set_messages([])
+{{else if $t.CtxExpr}}        self.context.set_messages({{$t.CtxExpr}})
+{{end}}        return NodeConfig(
             name={{pyq $t.Name}},
             role_message={{$t.PromptExpr}},
             task_messages=[{"role": "developer", "content": "Begin this step."}],
@@ -1202,31 +1245,23 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                     description={{pyq .When}},
                     properties={},
                     required=[],
-                    handler={{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq .MethodName}}, self._{{$d.MethodName}}_transfer_{{$t.Name}}_{{.MethodName}}){{else}}self._{{$d.MethodName}}_transfer_{{$t.Name}}_{{.MethodName}}{{end}},
+                    handler=_flow_visit(self, {{pyq $d.MethodName}}, {{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq .MethodName}}, self._{{$d.MethodName}}_transfer_{{$t.Name}}_{{.MethodName}}){{else}}self._{{$d.MethodName}}_transfer_{{$t.Name}}_{{.MethodName}}{{end}}),
                 ),
 {{end}}                FlowsFunctionSchema(
                     name={{pyq $t.FinishName}},
                     description="Record the result of this step and finish.",
                     properties={{$t.ResultProps}},
                     required={{$t.ResultRequired}},
-                    handler={{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq $t.FinishName}}, self._{{$d.MethodName}}_finish_{{$t.Name}}){{else}}self._{{$d.MethodName}}_finish_{{$t.Name}}{{end}},
+                    handler=_flow_visit(self, {{pyq $d.MethodName}}, {{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq $t.FinishName}}, self._{{$d.MethodName}}_finish_{{$t.Name}}){{else}}self._{{$d.MethodName}}_finish_{{$t.Name}}{{end}}),
                 ),
             ],
-{{if $d.Isolated}}            context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
+{{if or $d.Isolated $t.Reset}}            context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
 {{end}}        )
 
 {{range $x := $t.Transfers}}    async def _{{$d.MethodName}}_transfer_{{$t.Name}}_{{$x.MethodName}}(self, args, flow_manager):
         if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
             return {"status": "already handled"}, NO_RESPONSE
-{{if $x.Requires}}        _unmet = _unmet_prerequisites(self.state, [{{range $i, $r := $x.Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}])
-        if _unmet:
-            logger.info(
-                "prerequisite guard: handoff {} refused, unmet {}".format(
-                    {{pyq $x.MethodName}}, ", ".join(_unmet)
-                )
-            )
-            return {"refused": _prerequisite_refusal(_unmet, False)}, None
-{{end}}        self._{{$d.MethodName}}_active_step = None
+        self._{{$d.MethodName}}_active_step = None
         flow_messages = None
         flow_tools = None
         try:
@@ -1234,13 +1269,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             flow_tools = self.context.tools
 {{if $x.Announce}}            await self._announce_handoff({{pyq $x.Announce}})
 {{end}}            messages, tools = self._{{$d.MethodName}}_snapshot
-            task_start = len(messages) if flow_messages[:len(messages)] == messages else 0
-            task_messages = [
-                dict(message)
-                for message in flow_messages[task_start:]
-                if message.get("role") in {"user", "assistant", "tool"}
-            ]
-            self.context.set_messages(messages + task_messages)
+            self.context.set_messages({{$x.CtxExpr}})
             self.context.set_tools(tools)
 {{if $agentSlngHeaders}}            # This worker is about to be deactivated with the step's cache scope
             # still on its service. Put the owner's back before handing over, so
@@ -1251,7 +1280,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}            await self.activate_worker(
                 {{pyq $x.To}},
                 args=LLMWorkerActivationArgs(
-                    messages=[{"role": "developer", "content": {{pyq $x.Reason}}}],
+                    messages=[],
                     run_llm=True,
                 ),
                 deactivate_self=True,
@@ -1277,17 +1306,29 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         return {"transferred": True}, NO_RESPONSE
 
 {{end}}    async def _{{$d.MethodName}}_finish_{{$t.Name}}(self, args, flow_manager):
-{{if $d.HasTransfers}}        if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
+        if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
             return {"status": "already handled"}, NO_RESPONSE
-        self._{{$d.MethodName}}_active_step = {{if $t.NextName}}{{pyq $t.NextName}}{{else}}None{{end}}
-{{end}}        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
+{{if $t.Typed}}        # Validated before anything is recorded: a value that does not fit its
+        # declared type never enters the state, the previous contents stand, and
+        # the message goes back to the model so it can correct itself on the next
+        # turn instead of the step recording something wrong. This framework
+        # validates no tool argument itself, so without this the two targets
+        # would behave differently on the same package.
+        try:
+            _values = _save_result({{pyq $t.Name}}, self.state, dict(args))
+        except _StateRefused as refused:
+            logger.warning("finish {}: {}", {{pyq $t.Name}}, refused.message)
+            return {"refused": f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."}, None
+        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = _values
+{{else}}        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
+{{end}}        self._{{$d.MethodName}}_active_step = {{if $t.NextName}}{{pyq $t.NextName}}{{else}}None{{end}}
 {{if $t.NextName}}{{if $t.SlngNextHeaders}}        # The next step is a different prompt site, so it asks under a different
         # cache scope. Queued before the node is handed back, for the same reason
         # the first step's was.
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(extra={"extra_headers": {{$t.SlngNextHeaders}}}),
         ))
-{{end}}        return {"status": "ok", "result": self._{{$d.MethodName}}_results[{{pyq $t.Name}}]}, self._{{$d.MethodName}}_node_{{$t.NextName}}()
+{{end}}        return _task_status(self._{{$d.MethodName}}_results[{{pyq $t.Name}}]), self._{{$d.MethodName}}_node_{{$t.NextName}}()
 {{else}}{{if and $d.HasTransfers (ne $d.Then "end")}}        flow_messages = None
         flow_tools = None
         completion_started = False
@@ -1297,8 +1338,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             completion_started = True
             return await self._{{$d.MethodName}}_complete_{{$t.Name}}()
         except BaseException as error:
-            self._{{$d.MethodName}}_active_step = {{pyq $t.Name}}
-            self._{{$d.MethodName}}_results.pop({{pyq $t.Name}}, None)
+            # The save already committed. Keep its terminal claim; a retry cannot save it twice.
             try:
                 if flow_messages is not None:
                     self.context.set_messages(flow_messages)
@@ -1318,27 +1358,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             raise
 
     async def _{{$d.MethodName}}_complete_{{$t.Name}}(self):
-{{end}}{{if not (and $d.HasTransfers (ne $d.Then "end"))}}{{range $d.Assign}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
-{{if .Confirms}}        # The step that confirms this value has just assigned it, so it is settled
-        # now and the guard stops holding it back. Discarded here rather than in the
-        # step's prompt: a model can be talked out of an instruction, not out of a
-        # set membership test. getattr with a default, matching the guard: this step
-        # can be reached on a path where the pre-fetch never ran, and a bare read
-        # there is an AttributeError inside a finish handler.
-        getattr(self.state, "_unconfirmed", set()).discard({{pyq .Var}})
-{{end}}{{end}}{{if and $d.Assign $agentSlngBody}}        # The router substitutes these into the prompt's placeholders, so the value
-        # this step just learned has to reach it before the next turn asks. A
-        # settings delta merges `extra` key by key, so this body-only one leaves
-        # the speaking site's cache scope exactly where it is.
-        #
-        # Here rather than per request because this framework offers no
-        # per-request seam, and here is enough: the only writes are at call start
-        # and at a step finishing, and each is followed by a turn. A tool that
-        # wrote state mid-turn would carry the previous value for that one turn.
-        await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(extra={"extra_body": {{$agentSlngBody}}}),
-        ))
-{{end}}{{end}}{{if eq $d.Then "end"}}{{if $agentSlngHeaders}}        # The terminal node's goodbye is spoken by this agent, not by the step,
+{{end}}{{if not (and $d.HasTransfers (ne $d.Then "end"))}}{{end}}{{if eq $d.Then "end"}}{{if $agentSlngHeaders}}        # The terminal node's goodbye is spoken by this agent, not by the step,
         # so the owner's cache scope goes back first.
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(extra={"extra_headers": {{$agentSlngHeaders}}}),
@@ -1347,8 +1367,9 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         # post-action ends the call after the goodbye drains (V4/B2).
         return {"status": "ok"}, self._{{$d.MethodName}}_end_node()
 {{else}}        # then: {{$d.Then}} — restore the owner's pre-flow context (messages and
-        # tools); only the typed results cross back (merge: results, N13).
+        # tools); only a completed or unserved status crosses back.
         messages, tools = self._{{$d.MethodName}}_snapshot
+        _settle_task_call(messages, {{pyq $d.MethodName}}, _group_status(self._{{$d.MethodName}}_results))
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(system_instruction={{$agentPromptExpr}}{{if $agentSlngHeaders}},
                 # The owner's cache scope goes back with its prompt. A leaked
@@ -1361,30 +1382,17 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         await self.activate_worker(
             {{pyq $d.ThenTarget}},
             args=LLMWorkerActivationArgs(
-                messages=[{"role": "developer", "content": "Task results: " + json.dumps(self._{{$d.MethodName}}_results) + {{pyq $.ResultsHint}}}],
+                messages=[{"role": "developer", "content": json.dumps(_group_status(self._{{$d.MethodName}}_results))}],
                 run_llm=True,
             ),
             deactivate_self=True,
         )
 {{else}}        self.context.set_messages(messages + [{
             "role": "developer",
-            "content": "Task results: " + json.dumps(self._{{$d.MethodName}}_results) + {{pyq $.ResultsHint}},
+            "content": json.dumps(_group_status(self._{{$d.MethodName}}_results)),
         }])
         self.context.set_tools(tools)
-{{end}}{{if and $d.HasTransfers (ne $d.Then "end")}}{{range $d.Assign}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
-{{if .Confirms}}        # The step that confirms this value has just assigned it, so it is settled
-        # now and the guard stops holding it back. Discarded here rather than in the
-        # step's prompt: a model can be talked out of an instruction, not out of a
-        # set membership test. getattr with a default, matching the guard: this step
-        # can be reached on a path where the pre-fetch never ran, and a bare read
-        # there is an AttributeError inside a finish handler.
-        getattr(self.state, "_unconfirmed", set()).discard({{pyq .Var}})
-{{end}}{{end}}{{if and $d.Assign $agentSlngBody}}        # Same refresh as the other assignment path: the value reaches the router
-        # before the next turn asks under it.
-        await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(extra={"extra_body": {{$agentSlngBody}}}),
-        ))
-{{end}}{{end}}        return {"status": "ok"}, None
+{{end}}{{if and $d.HasTransfers (ne $d.Then "end")}}{{end}}        return {"status": "ok"}, None
 {{end}}{{end}}{{end}}{{if eq $d.Then "end"}}
     def _{{$d.MethodName}}_end_node(self) -> NodeConfig:
         # Terminal node: speak a brief closing line, then end_conversation ends
@@ -1396,7 +1404,27 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             post_actions=[{"type": "end_conversation"}],
         )
 {{end}}{{end}}
-{{end}}{{end}}{{if .FlowTools}}
+{{end}}{{end}}{{if and (not .Inline) .HasFlows}}
+def _settle_task_call(messages, name, status):
+    """Replace this invocation's running reply before restoring the owner."""
+    for message in reversed(messages):
+        for call in message.get("tool_calls", []):
+            if call.get("function", {}).get("name") == name:
+                for reply in messages:
+                    if reply.get("role") == "tool" and reply.get("tool_call_id") == call["id"]:
+                        reply["content"] = json.dumps(status)
+                return
+
+
+def _flow_visit(worker, delegate, handler):
+    visit = getattr(worker, "_" + delegate + "_visit", None)
+    async def invoke(args, flow_manager):
+        if getattr(worker, "_" + delegate + "_visit", None) is not visit:
+            return {"status": "already handled"}, NO_RESPONSE
+        return await handler(args, flow_manager)
+    return invoke
+
+{{end}}{{if .FlowTools}}
 # --- task tools (flows handlers) ----------------------------------------------
 # Tools available inside task steps; stable module-level handlers so a
 # re-registered function name always resolves to the same callable.
@@ -1588,12 +1616,30 @@ def build_stt():
     # name rather than mid-call. None means this is not a phone session.
     carrier_call = _carrier_session(runner_args)
     call_context["_daily_sip_session"] = carrier_call is not None
+    # The call's own facts, under the flat names a `source:` reads. The helper
+    # answering the carrier's webhook is the only process that sees the POST
+    # form, so what it put in the body is all there is.
+    if carrier_call is not None:
+        call_context["call_id"] = carrier_call.get("call_sid") or ""
+        call_context["direction"] = carrier_call.get("direction") or "inbound"
+        call_context["from_number"] = carrier_call.get("from_number") or ""
 {{end}}{{if .CloudWebsocket}}    # Decided once, right after the transport exists: is this a phone call at all?
     # Everything a call needs is checked here, before the caller hears anything.
     # None means browser or console, which behave exactly as they do on a package
     # with no telephony.
     phone_call = _phone_session(runner_args)
     call_context["_phone_call"] = phone_call
+    # The call's own facts, under the flat names a `source:` reads. The call id
+    # and stream id are parsed out of the carrier's handshake; the rest are the
+    # <Parameter> set the TwiML markup dictated, which is why the runbook says
+    # what each one is for and what happens when an existing Bin lacks it.
+    if phone_call is not None:
+        _markup = phone_call.get("body") or {}
+        call_context["call_id"] = phone_call.get("call_id") or ""
+        call_context["stream_id"] = phone_call.get("stream_id") or ""
+        call_context["direction"] = _markup.get("direction") or "inbound"
+        call_context["from_number"] = _markup.get("from_number") or ""
+        call_context["to_number"] = _markup.get("to_number") or ""
 {{end}}{{if .Tracing}}{{if eq .TracingProvider "coval"}}
     trace_provider = setup_coval_tracing()
     trace_attributes = {"agent.name": TRACE_NAME}

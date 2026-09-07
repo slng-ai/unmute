@@ -370,21 +370,31 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 	if len(runtime.LocallySuppliedEnvironment) != 0 {
 		t.Fatalf("nothing is supplied locally on this route: %v", runtime.LocallySuppliedEnvironment)
 	}
-	// The Daily carrier leg (SCHEMA N37): five provisional features, no call
-	// sources, and every granted feature carries its docs and its date.
+	// The Daily carrier leg (SCHEMA N37): eight provisional features, and every
+	// granted one carries its docs and its date.
+	//
+	// Three of those eight are call sources, and they are the three the helper
+	// answering the carrier's inbound webhook actually holds. What is still gated
+	// is to_number, because the outbound body carries a SIP URI and not a number.
 	dailyCarrier := TelephonyKey{Provider: Pipecat, Transport: "daily-sip", Carrier: "twilio"}
 	for _, feature := range []TelephonyFeature{
 		TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound,
 		TelephonyFeature(ColdTransfer), TelephonyFeature(Hangup),
+		"source.call_id", "source.direction", "source.from_number",
 	} {
 		got := ResolveTelephonyFeature(dailyCarrier, feature)
 		if got.Tag != Provisional || got.Docs == "" || got.Verified == "" || got.Smoke {
 			t.Fatalf("daily carrier feature %s = %#v, want provisional with docs and a date", feature, got)
 		}
 	}
+	if got := ResolveTelephonyFeature(dailyCarrier, "source.from_number"); len(got.Directions) != 1 ||
+		got.Directions[0] != TelephonyInbound {
+		t.Fatalf("source.from_number directions = %v, want inbound only: it comes off the inbound webhook", got.Directions)
+	}
 	for _, feature := range []TelephonyFeature{
 		TelephonyFeature(WarmTransfer), TelephonyFeature(VoicemailDetection),
-		"source.from_number", "source.to_number", "source.call_id", "source.direction",
+		"source.to_number", "source.stream_id", "source.session_id",
+		"source.carrier", "source.connection",
 	} {
 		if got := ResolveTelephonyFeature(dailyCarrier, feature); got.Tag != Gated {
 			t.Fatalf("daily carrier feature %s = %#v, want gated", feature, got)
@@ -720,5 +730,57 @@ func TestEmbeddingServiceTable(t *testing.T) {
 	}
 	if _, ok := LookupEmbeddingService("cohere"); ok {
 		t.Error("an unsupported service resolved")
+	}
+}
+
+// The Pipecat history row, per value, and the one refusal left on it.
+//
+// Pinned per value rather than left to the completeness loop above, because
+// the loop only asks that a cell holds something. Which cell holds what is the
+// whole of what an author can express: before the driver read
+// ir.TaskContext.History at all, four of the five values failed here as a
+// maturity gate, and that gate is what this row stops being.
+//
+// `summary` still fails, and its note has to name what Pipecat does support.
+// The old note covered four failing values with "emits history: full only",
+// which stopped being true the moment three of them started working.
+func TestPipecatHistoryRowIsPerValue(t *testing.T) {
+	table := Default()
+	for history, want := range map[History]HistoryKind{
+		HistoryFull:     HistoryOK,
+		HistoryMessages: HistoryOK,
+		HistoryLastN:    HistoryOK,
+		HistoryReset:    HistoryOK,
+		HistorySummary:  HistoryFail,
+	} {
+		if got := table.HistorySupport(history, Pipecat).Kind; got != want {
+			t.Errorf("history %s on pipecat = %s, want %s", history, got, want)
+		}
+	}
+	// Every livekit value keeps working, because Story 2 is Pipecat catching up
+	// and a table edit is one place to break both.
+	for history, want := range map[History]HistoryKind{
+		HistoryFull:     HistoryOK,
+		HistoryMessages: HistoryOK,
+		HistoryLastN:    HistoryOK,
+		HistoryReset:    HistoryOK,
+		HistorySummary:  HistoryGenerated,
+	} {
+		if got := table.HistorySupport(history, LiveKit).Kind; got != want {
+			t.Errorf("history %s on livekit = %s, want %s", history, got, want)
+		}
+	}
+	note := table.HistorySupport(HistorySummary, Pipecat).Note
+	for _, want := range []string{"messages", "last_n", "reset", "full"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("the pipecat summary refusal does not name %q, so it says what fails and not what works: %q", want, note)
+		}
+	}
+	// A value that passes carries no note: a note on a passing row reads as a
+	// warning the author cannot act on.
+	for _, history := range []History{HistoryFull, HistoryMessages, HistoryLastN, HistoryReset} {
+		if note := table.HistorySupport(history, Pipecat).Note; note != "" {
+			t.Errorf("history %s passes on pipecat and still carries a note: %q", history, note)
+		}
 	}
 }

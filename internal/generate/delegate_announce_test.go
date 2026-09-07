@@ -8,9 +8,8 @@ import (
 	"github.com/slng-ai/unmute/internal/target"
 )
 
-// announcingAgent is the fixture with a cover line and a prerequisite on the same
-// step, which is the only shape that can distinguish "spoken on entry" from
-// "spoken whatever happens".
+// announcingAgent is the fixture with a delegate cover line, so a test can check
+// where in the method it lands.
 func announcingAgent(t *testing.T) *ir.Agent {
 	t.Helper()
 	agent := prefetchFixture(t)
@@ -21,22 +20,22 @@ func announcingAgent(t *testing.T) *ir.Agent {
 	if delegate.Announce == "" {
 		t.Fatal("the fixture stopped carrying a delegate announcement")
 	}
-	delegate.Requires = []string{"customer_id"}
 	return agent
 }
 
-// FR-034. The line is spoken on entry and not when the step is refused: a caller
-// who hears "one moment while I check" and is then asked for a phone number has
-// been told something untrue. The two orderings differ by one line in a template,
-// so this is the gate that holds them apart.
-func TestDelegateAnnounceComesAfterTheGuard(t *testing.T) {
+// FR-034. Ordering steps is the prompt's job now, not a code gate, so nothing
+// stands in front of a delegate's cover line any more: it is the first thing the
+// method does, before the step's own work starts. The two orderings differ by
+// one line in a template, so this is the gate that holds them apart.
+func TestDelegateAnnounceComesAtTheStartOfTheDelegate(t *testing.T) {
 	for _, tc := range []struct {
 		provider ir.Provider
 		file     string
 		say      string
+		starts   string // marks the step's own work, which must come after say
 	}{
-		{ir.ProviderLiveKit, "agent.py", `self.session.say("One moment while I check.")`},
-		{ir.ProviderPipecat, "bot.py", `TTSSpeakFrame("One moment while I check.")`},
+		{ir.ProviderLiveKit, "agent.py", `self.session.say("One moment while I check.")`, "owner_ctx = self.chat_ctx.copy()"},
+		{ir.ProviderPipecat, "bot.py", `TTSSpeakFrame("One moment while I check.")`, "self._verify_caller_results = {}"},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			agent := announcingAgent(t)
@@ -48,13 +47,10 @@ func TestDelegateAnnounceComesAfterTheGuard(t *testing.T) {
 			if got := strings.Count(py, tc.say); got != 1 {
 				t.Fatalf("the cover line is emitted %d times, want exactly 1", got)
 			}
-			// The guard returns before reaching the line, so a refused step is
-			// silent. Read from the start of the delegate's own method, because the
-			// module carries other guards and other announcements.
+			// Read from the start of the delegate's own method, because the module
+			// carries other announcements.
 			method := delegateMethodOf(t, py, "verify_caller")
-			assertBefore(t, method, "_unmet_prerequisites(", tc.say)
-			// And the refusal really does return before the line.
-			assertBefore(t, method, "_prerequisite_refusal(", tc.say)
+			assertBefore(t, method, tc.say, tc.starts)
 		})
 	}
 }

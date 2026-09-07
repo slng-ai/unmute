@@ -11,11 +11,11 @@ down complaints, and puts a caller through to a manager when they ask for one.
 
 | Path | What it holds |
 |---|---|
-| `agent.yaml` | the package: agents, tasks, delegates, handoffs, escalations, variables, pre-fetch, knowledge and secrets |
+| `agent.yaml` | the package: agents and the tasks they run, handoffs, escalations, variables, pre-fetch, knowledge and secrets |
 | `targets.yaml` | the two targets, one per telephony plane |
 | `instructions.md` | the concierge prompt |
 | `agents/complaint-specialist.md` | the customer care prompt |
-| `tasks/` | the two task prompts, verification and booking |
+| `tasks/` | the verification, booking and complaint task prompts |
 | `tools/` | one file per tool, all local Python over one in-memory store |
 | `knowledge/refunds/`, `knowledge/services/` | two document sets, each its own index |
 | `connections/` | the two carrier connections |
@@ -25,17 +25,42 @@ call. Customer care is a second agent because it holds a document set and a
 permission the concierge must not have: the refund policy and the complaint
 record.
 
-**Two tasks.** Verification confirms who is calling. Booking does create, modify
-and cancel in one step.
+**Three tasks, one of them shared.** Verification confirms who is calling.
+Booking does create, modify and cancel in one task and saves a typed Appointment.
+Customer care records complaints in its own task and appends typed Complaint
+values. Customer care offers verification too, and
+it does that with a bare name in its own `tasks:` list rather than a second copy:
 
-**A guarded step.** `manage_booking` declares `requires: [customer_phone]`, so
-booking cannot start before the caller is identified. The compiler refuses the
-step to the model rather than to the caller, so nobody hears the guard.
+```yaml
+  complaint_specialist:
+    tasks:
+      - verify_customer
+```
 
-**Facts resolved before the greeting.** The `prefetch:` block reads today's date
-off the clock and the caller's number off the call, then looks up the name on
-that record. Nothing in the block can fail a call: an entry whose inputs are
-empty is skipped and the values keep their defaults.
+so there is one definition, one prompt, and one name in the emitted project.
+
+**Spoken messages across every task and handoff.** Each context block declares
+`history: messages`, also the framework default. The receiver gets the caller
+and assistant speech available at entry, without tool calls and results.
+Returning from a task restores the owner's earlier conversation and gives only
+a completed or unserved status. It does not copy the task's conversation back.
+
+**Typed values shared on purpose.** Verification saves `customer_status` so both
+agents know it already happened. Booking saves `appointment` only after a create,
+move or cancellation succeeds. The owner and customer care read those values
+through explicit prompt references, including `{{appointment}}`, so a later
+complaint can refer to the updated date without asking again. Tools inject the
+confirmed phone number. No value is automatically added to a prompt.
+
+**Ordering carried by the prompt.** `manage_booking` runs after verification,
+but not because the compiler holds it back: the concierge's own instructions
+say to run verification first and never start booking until it has succeeded.
+
+**Facts resolved before the greeting.** The `prefetch:` block reads the date,
+the weekday and the salon's local time off one clock reading, and the caller's
+number off the call, then looks up the caller's name and whether they are on
+file, both from that one lookup. Nothing in the block can fail a call: an
+entry whose inputs are empty is skipped and the values keep their defaults.
 
 **A cold manager transfer.** Both agents hold it. Asking for a person is never
 gated on identifying yourself first.
@@ -58,7 +83,7 @@ the package.
 
 | Name | Purpose |
 |---|---|
-| `OPENAI_API_KEY` | the reasoning model's upstream, and the knowledge embeddings at startup |
+| `OPENAI_API_KEY` | the OpenAI reasoning model and the knowledge embeddings at startup |
 | `SLNG_API_KEY` | the Context Router, the voice, and the transcription. One key for all three |
 | `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` | trace ingest. All three together, or startup fails |
 | `MANAGER_PHONE_NUMBER` | the transfer destination, in E.164. Needed only for a phone call |

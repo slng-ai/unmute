@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/slng-ai/unmute/internal/scaffold"
+	"github.com/slng-ai/unmute/internal/spec"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
@@ -1557,7 +1558,7 @@ func editHandoffs(runner *fieldRunner, data *scaffold.Data) error {
 		}
 
 		agents := data.AllAgents()
-		handoff := scaffold.Handoff{Source: agents[0].Name, To: agents[1].Name, History: "full", AllVariables: true}
+		handoff := scaffold.Handoff{Source: agents[0].Name, To: agents[1].Name, History: "messages"}
 		handoff.Name = "to_" + handoff.To
 		back, err := runner.input("Handoff name", "Lowercase snake_case; tools, delegates, handoffs and escalations share one namespace.", &handoff.Name, func(value string) error {
 			if err := validateIdentifier(value); err != nil {
@@ -1585,13 +1586,6 @@ func editHandoffs(runner *fieldRunner, data *scaffold.Data) error {
 	}
 }
 
-func handoffVariablesLabel(handoff scaffold.Handoff) string {
-	if handoff.AllVariables {
-		return "all"
-	}
-	return cmp.Or(strings.Join(handoff.Variables, ", "), "none")
-}
-
 func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) error {
 	for {
 		var handoff *scaffold.Handoff
@@ -1608,8 +1602,7 @@ func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) e
 			newChoice("Source agent  ·  "+handoff.Source, "source"),
 			newChoice("Target agent  ·  "+handoff.To, "target"),
 			newChoice("Trigger  ·  "+oneLine(handoff.When), "trigger"),
-			newChoice("Required variables  ·  "+cmp.Or(strings.Join(handoff.Requires, ", "), "none"), "requires"),
-			newChoice("Context  ·  "+cmp.Or(handoff.History, "full")+" · variables "+handoffVariablesLabel(*handoff), "context"),
+			newChoice("Context  ·  "+cmp.Or(handoff.History, "messages"), "context"),
 			newChoice("Announcement  ·  "+cmp.Or(oneLine(handoff.Announce), "silent"), "announce"),
 			newChoice("Delete handoff", "delete"),
 			newChoice("← Back", actionBack),
@@ -1642,14 +1635,6 @@ func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) e
 			if _, err := runner.input("When to hand off", "Plain-language trigger shown to the model.", &handoff.When, validateRequiredText); err != nil {
 				return err
 			}
-		case "requires":
-			selected, back, err := pickReferences(runner, "Required variables (optional)", "The handoff is available only after every selected variable has a value.", variableNames(data), handoff.Requires, true)
-			if err != nil {
-				return err
-			}
-			if !back {
-				handoff.Requires = selected
-			}
 		case "context":
 			if err := editHandoffContextDetails(runner, data, handoff); err != nil {
 				return err
@@ -1672,16 +1657,10 @@ func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) e
 
 func editHandoffContextDetails(runner *fieldRunner, data *scaffold.Data, handoff *scaffold.Handoff) error {
 	for {
-		history := cmp.Or(handoff.History, "full")
+		history := cmp.Or(handoff.History, "messages")
 		tools := "provider default"
 		if handoff.IncludeToolCalls != nil {
 			tools = map[bool]string{true: "include", false: "exclude"}[*handoff.IncludeToolCalls]
-		}
-		scope := "none"
-		if handoff.AllVariables {
-			scope = "all"
-		} else if len(handoff.Variables) > 0 {
-			scope = "selected"
 		}
 		options := []menuChoice{newChoice("History  ·  "+history, "history")}
 		if history == "last_n" {
@@ -1691,12 +1670,6 @@ func editHandoffContextDetails(runner *fieldRunner, data *scaffold.Data, handoff
 			options = append(options, newChoice("Summarizer model  ·  "+cmp.Or(handoff.Summarizer, data.AllAgents()[0].ModelProfile()), "summarizer"))
 		}
 		options = append(options, newChoice("Tool calls  ·  "+tools, "tools"))
-		if len(data.Variables) > 0 {
-			options = append(options, newChoice("Variable scope  ·  "+scope, "scope"))
-			if scope == "selected" {
-				options = append(options, newChoice("Selected variables  ·  "+strings.Join(handoff.Variables, ", "), "variables"))
-			}
-		}
 		options = append(options, newChoice("← Back", actionBack))
 		choice, _, err := runner.selectOne("Handoff context", "Edit one field, then return here.", options, true)
 		if err != nil || choice == actionBack {
@@ -1759,27 +1732,6 @@ func editHandoffContextDetails(runner *fieldRunner, data *scaffold.Data, handoff
 					handoff.IncludeToolCalls = &include
 				}
 			}
-		case "scope":
-			selected, back, err := runner.selectOne("Variables in context", "Available variables: "+strings.Join(variableNames(data), ", "), []menuChoice{newChoice("All variables", "all"), newChoice("Selected variables", "selected"), newChoice("No variables", "none"), newChoice("← Back", actionBack)}, true)
-			if err != nil {
-				return err
-			}
-			if !back {
-				handoff.AllVariables = selected == "all"
-				if selected == "selected" && len(handoff.Variables) == 0 {
-					handoff.Variables = []string{data.Variables[0].Name}
-				} else if selected != "selected" {
-					handoff.Variables = nil
-				}
-			}
-		case "variables":
-			selected, back, err := pickReferences(runner, "Variables to include", "Choose which saved variables enter the target agent's context.", variableNames(data), handoff.Variables, false)
-			if err != nil {
-				return err
-			}
-			if !back {
-				handoff.Variables = selected
-			}
 		}
 	}
 }
@@ -1803,8 +1755,7 @@ func editTasks(runner *fieldRunner, data *scaffold.Data) error {
 		}
 		task := scaffold.Task{
 			Instructions: "Complete this focused task and return only the structured result.",
-			Result:       `{"result":"string"}`,
-			History:      "full",
+			History:      "messages",
 			Agent:        cmp.Or(data.EntryAgent, "assistant"),
 		}
 		back, err := runner.input("Task name", "Lowercase snake_case; its delegate is named run_<task>.", &task.Name, func(value string) error {
@@ -1829,7 +1780,7 @@ func editTasks(runner *fieldRunner, data *scaffold.Data) error {
 }
 
 func taskLabel(task scaffold.Task) string {
-	return fmt.Sprintf("%s  ·  %s  ·  %s", task.Name, cmp.Or(task.Agent, "entry agent"), task.Result)
+	return fmt.Sprintf("%s  ·  %s", task.Name, cmp.Or(task.Agent, "entry agent"))
 }
 
 func editTaskDetails(runner *fieldRunner, data *scaffold.Data, name string) error {
@@ -1848,8 +1799,7 @@ func editTaskDetails(runner *fieldRunner, data *scaffold.Data, name string) erro
 			newChoice("Prompt  ·  "+oneLine(task.Instructions), "prompt"),
 			newChoice("Tools  ·  "+cmp.Or(strings.Join(task.Tools, ", "), "none"), "tools"),
 			newChoice("Model  ·  "+cmp.Or(task.Model, "entry agent model"), "model"),
-			newChoice("Typed result  ·  "+task.Result, "result"),
-			newChoice("Context  ·  "+cmp.Or(task.History, "full"), "context"),
+			newChoice("Context  ·  "+cmp.Or(task.History, "messages"), "context"),
 			newChoice("Delegating agent  ·  "+cmp.Or(task.Agent, "assistant"), "agent"),
 			newChoice("Trigger  ·  "+oneLine(task.When), "trigger"),
 			newChoice("Result assignments  ·  "+cmp.Or(strings.Join(assignmentVariables(task.Assign), ", "), "none"), "assign"),
@@ -1887,10 +1837,6 @@ func editTaskDetails(runner *fieldRunner, data *scaffold.Data, name string) erro
 				if selected == "default" {
 					task.Model = ""
 				}
-			}
-		case "result":
-			if _, err := runner.input("Typed result", `Prefilled default: {"result":"string"}. Each key becomes one returned field. Use string, number, boolean, integer, or a nonempty enum.`, &task.Result, validateTaskResult); err != nil {
-				return err
 			}
 		case "context":
 			if _, err := editTaskContext(runner, data, task); err != nil {
@@ -1934,7 +1880,7 @@ func editTaskDetails(runner *fieldRunner, data *scaffold.Data, name string) erro
 
 func editTaskContext(runner *fieldRunner, data *scaffold.Data, task *scaffold.Task) (bool, error) {
 	for {
-		history := cmp.Or(task.History, "full")
+		history := cmp.Or(task.History, "messages")
 		tools := "provider default"
 		if task.IncludeToolCalls != nil {
 			tools = map[bool]string{true: "include", false: "exclude"}[*task.IncludeToolCalls]
@@ -2014,20 +1960,25 @@ func editTaskContext(runner *fieldRunner, data *scaffold.Data, task *scaffold.Ta
 
 func editTaskAssignments(runner *fieldRunner, data *scaffold.Data, task *scaffold.Task) (bool, error) {
 	current := assignmentVariables(task.Assign)
-	selected, back, err := pickReferences(runner, "Save result to variables (optional)", "Choose which saved variables receive a field from this task result.", variableNames(data), current, true)
+	choices := variableNames(data)
+	for i, name := range choices {
+		if slices.Contains(current, name+"+") {
+			choices[i] = name + "+"
+		}
+	}
+	selected, back, err := pickReferences(runner, "Save result to variables (optional)", "Choose which saved variables receive a field from this task result.", choices, current, true)
 	if err != nil || back {
 		return back, err
 	}
 	if len(selected) == 0 {
-		task.Assign = ""
+		task.Assign = nil
 		return false, nil
 	}
-	fields := taskResultNames(task.Result)
 	assignments := make(map[string]string, len(selected))
 	for _, variable := range selected {
 		field := assignmentField(task.Assign, variable)
-		if !slices.Contains(fields, field) {
-			field = fields[0]
+		if field == "" {
+			field = strings.TrimSuffix(variable, "+")
 		}
 		assignments[variable] = "result." + field
 	}
@@ -2046,63 +1997,73 @@ func editTaskAssignments(runner *fieldRunner, data *scaffold.Data, task *scaffol
 		}
 		if choice == "done" {
 			if len(assignments) == 0 {
-				task.Assign = ""
+				task.Assign = nil
 				return false, nil
 			}
-			raw, err := json.Marshal(assignments)
-			if err != nil {
-				return false, err
+			var saved []spec.Pair
+			for _, old := range task.Assign {
+				if value, ok := assignments[old.Key]; ok {
+					saved = append(saved, spec.Pair{Key: old.Key, Value: value})
+					delete(assignments, old.Key)
+				}
 			}
-			task.Assign = string(raw)
+			for _, name := range selected {
+				if value, ok := assignments[name]; ok {
+					saved = append(saved, spec.Pair{Key: name, Value: value})
+				}
+			}
+			task.Assign = saved
 			return false, nil
 		}
-		fieldOptions := make([]menuChoice, 0, len(fields)+2)
-		for _, name := range fields {
-			fieldOptions = append(fieldOptions, newChoice(name, name))
+		field := strings.TrimPrefix(assignments[choice], "result.")
+		action, back, err := runner.selectOne("Result field for "+choice, "Its type comes from the saved variable.", []menuChoice{
+			newChoice("Edit field  ·  "+field, "edit"), newChoice("Remove assignment", "remove"), newChoice("← Back", actionBack),
+		}, true)
+		if err != nil {
+			return false, err
 		}
-		fieldOptions = append(fieldOptions, newChoice("Remove assignment", "remove"))
-		fieldOptions = append(fieldOptions, newChoice("← Back", actionBack))
-		field, back, err := runner.selectOne("Result field for "+choice, "", fieldOptions, true)
+		if back {
+			continue
+		}
+		if action == "remove" {
+			delete(assignments, choice)
+			selected = slices.DeleteFunc(selected, func(n string) bool { return n == choice })
+			continue
+		}
+		back, err = runner.input("Result field", "A field name, or a path into a whole assigned object.", &field, func(value string) error {
+			for _, part := range strings.Split(value, ".") {
+				if err := validateIdentifier(part); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 		if err != nil {
 			return false, err
 		}
 		if !back {
-			if field == "remove" {
-				delete(assignments, choice)
-				selected = slices.DeleteFunc(selected, func(n string) bool { return n == choice })
-				continue
-			}
 			assignments[choice] = "result." + field
 		}
+
 	}
 }
 
-func taskResultNames(result string) []string {
-	var fields map[string]any
-	_ = json.Unmarshal([]byte(result), &fields)
-	names := make([]string, 0, len(fields))
-	for name := range fields {
-		names = append(names, name)
+func assignmentVariables(pairs []spec.Pair) []string {
+	var names []string
+	for _, pair := range pairs {
+		names = append(names, pair.Key)
 	}
-	slices.Sort(names)
 	return names
 }
 
-func assignmentVariables(raw string) []string {
-	var assignments map[string]string
-	_ = json.Unmarshal([]byte(raw), &assignments)
-	names := make([]string, 0, len(assignments))
-	for name := range assignments {
-		names = append(names, name)
+func assignmentField(pairs []spec.Pair, variable string) string {
+	for _, pair := range pairs {
+		if pair.Key == variable {
+			value, _ := pair.Value.(string)
+			return strings.TrimPrefix(value, "result.")
+		}
 	}
-	slices.Sort(names)
-	return names
-}
-
-func assignmentField(raw, variable string) string {
-	var assignments map[string]string
-	_ = json.Unmarshal([]byte(raw), &assignments)
-	return strings.TrimPrefix(assignments[variable], "result.")
+	return ""
 }
 
 func editTaskGroups(runner *fieldRunner, data *scaffold.Data) error {
@@ -2942,7 +2903,7 @@ func validateDestination(value string) error {
 	return nil
 }
 
-// validateControlName refuses a name any of the four kinds already uses. They
+// validateControlName refuses a name any of the five kinds already uses. They
 // all become callable function names at runtime, so they share one namespace and
 // the check has to see all of them.
 func validateControlName(data *scaffold.Data, name string) error {
@@ -2957,13 +2918,13 @@ func validateControlName(data *scaffold.Data, name string) error {
 		}
 	}
 	for _, task := range data.Tasks {
-		if task.RunName() == name {
-			return errors.New("name already used by a delegate that runs a task")
+		if task.Name == name {
+			return errors.New("name already used by a task")
 		}
 	}
 	for _, group := range data.TaskGroups {
-		if group.RunName() == name {
-			return errors.New("name already used by a delegate that runs a task group")
+		if group.Name == name {
+			return errors.New("name already used by a task group")
 		}
 	}
 	for _, transfer := range data.HumanTransfers {
@@ -2988,37 +2949,6 @@ func taskNames(data *scaffold.Data) []string {
 		names = append(names, task.Name)
 	}
 	return names
-}
-
-func validateTaskResult(value string) error {
-	var result map[string]any
-	if err := json.Unmarshal([]byte(value), &result); err != nil || len(result) == 0 {
-		return errors.New("result must be a nonempty JSON object")
-	}
-	for name, field := range result {
-		if err := validateIdentifier(name); err != nil {
-			return fmt.Errorf("result field %q: %w", name, err)
-		}
-		switch typed := field.(type) {
-		case string:
-			if typed != "string" && typed != "number" && typed != "boolean" && typed != "integer" {
-				return fmt.Errorf("result field %q has unknown type %q", name, typed)
-			}
-		case map[string]any:
-			values, ok := typed["enum"].([]any)
-			if !ok || len(typed) != 1 || len(values) == 0 {
-				return fmt.Errorf("result field %q must be a primitive type or nonempty enum", name)
-			}
-			for _, value := range values {
-				if _, ok := value.(string); !ok {
-					return fmt.Errorf("result field %q enum values must be strings", name)
-				}
-			}
-		default:
-			return fmt.Errorf("result field %q must be a primitive type or enum", name)
-		}
-	}
-	return nil
 }
 
 func agentOptions(agents []scaffold.Agent, except string) []menuChoice {
@@ -3095,10 +3025,6 @@ func deleteResource(data *scaffold.Data, kind, name string) error {
 	switch kind {
 	case "variable":
 		data.Variables = slices.DeleteFunc(data.Variables, func(item scaffold.Variable) bool { return item.Name == name })
-		for i := range data.Handoffs {
-			data.Handoffs[i].Requires = slices.DeleteFunc(data.Handoffs[i].Requires, func(n string) bool { return n == name })
-			data.Handoffs[i].Variables = slices.DeleteFunc(data.Handoffs[i].Variables, func(n string) bool { return n == name })
-		}
 		for i := range data.Tasks {
 			removeAssignment(&data.Tasks[i], name)
 		}
@@ -3141,7 +3067,7 @@ func deleteResource(data *scaffold.Data, kind, name string) error {
 		}
 		for i := range data.Handoffs {
 			if data.Handoffs[i].Summarizer == profile {
-				data.Handoffs[i].History = "full"
+				data.Handoffs[i].History = "messages"
 				data.Handoffs[i].Summarizer = ""
 			}
 		}
@@ -3183,22 +3109,9 @@ func deleteResource(data *scaffold.Data, kind, name string) error {
 }
 
 func removeAssignment(task *scaffold.Task, variable string) {
-	if task.Assign == "" {
-		return
-	}
-	var assignments map[string]any
-	if json.Unmarshal([]byte(task.Assign), &assignments) != nil {
-		return
-	}
-	delete(assignments, variable)
-	if len(assignments) == 0 {
-		task.Assign = ""
-		return
-	}
-	encoded, err := json.Marshal(assignments)
-	if err == nil {
-		task.Assign = string(encoded)
-	}
+	task.Assign = slices.DeleteFunc(task.Assign, func(pair spec.Pair) bool {
+		return strings.TrimSuffix(pair.Key, "+") == variable
+	})
 }
 
 func oneLine(value string) string {

@@ -16,20 +16,155 @@ func TestSmokeSalonConciergePipecatJourneys(t *testing.T) {
 	runPipecatSmokeScript(t, "salon-concierge", nil, nil, salonPipecatJourneysSmokeScript)
 }
 
-// TestSmokeSalonConciergePipecatBound drives the prerequisite guard to its limit
-// in the real emitted Python.
-//
-// It exists because a live call could not reach this. On a browser call on
-// 2026-08-27 a caller refused to give a phone number four times and the guard
-// never fired once: the forward declaration on the tool description was enough
-// that the model never called the guarded step at all. That is the mechanism
-// working, and it is the outcome we want, but it means the bound underneath is
-// unreachable by talking to the agent.
-//
-// So it gets driven directly. The guard is the net for a model that ignores the
-// description, and a net nobody has ever tested is a net nobody should trust.
-func TestSmokeSalonConciergePipecatBound(t *testing.T) {
-	runPipecatSmokeScript(t, "salon-concierge", nil, nil, salonPipecatBoundSmokeScript)
+func TestSmokePipecatHandoffActivationRunsWithoutNewMessages(t *testing.T) {
+	runPipecatSmokeScript(t, "salon-concierge", nil, nil, pipecatHandoffActivationSmokeScript)
+}
+
+const pipecatHandoffActivationSmokeScript = `"""An empty handoff payload still starts the receiving worker's reply."""
+import asyncio
+import json
+import os
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import bot  # noqa: E402
+from pipecat.frames.frames import (  # noqa: E402
+    LLMMessagesAppendFrame,
+    LLMRunFrame,
+    LLMSetToolsFrame,
+    LLMUpdateSettingsFrame,
+)
+from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+
+
+async def main():
+    # Exercise the generated override AND the real SDK superclass. The old
+    # handoff test replaced activate_worker and only checked its arguments.
+    for worker_type in (bot.ConciergeAgent, bot.ComplaintSpecialistAgent):
+        worker = worker_type(state=bot.build_state(), context=LLMContext())
+        for messages, run_llm, expected in (
+            ([], True, 1),
+            (None, True, 1),
+            ([], False, 0),
+            ([], None, 0),
+            ([{"role": "developer", "content": "completed"}], True, 1),
+            ([{"role": "developer", "content": "completed"}], False, 0),
+        ):
+            frames = []
+
+            async def capture(frame, *_args, **_kwargs):
+                frames.append(frame)
+
+            worker.queue_frame = capture
+            await worker.on_activated({"messages": messages, "run_llm": run_llm})
+            requests = [f for f in frames if isinstance(f, LLMRunFrame) or (
+                isinstance(f, LLMMessagesAppendFrame) and f.run_llm
+            )]
+            assert len(requests) == expected, (worker_type, messages, run_llm, frames)
+            if requests:
+                before = frames[:frames.index(requests[0])]
+                assert any(isinstance(f, LLMUpdateSettingsFrame) for f in before)
+                assert any(isinstance(f, LLMSetToolsFrame) for f in before)
+            if not messages:
+                assert not any(isinstance(f, LLMMessagesAppendFrame) for f in frames), frames
+        await worker.on_activated(None)
+
+
+asyncio.run(main())
+print("handoff activation smoke ok: both workers, empty/nonempty payloads, enabled/disabled replies")
+`
+
+// Replay the v3 call's failure through the real finish validator, saved state,
+// and injected tool arguments. A slot is opaque text: changing its separators
+// to satisfy an Id validator makes the booking tool reject it.
+func TestSmokeSalonV3RescheduleLiveKit(t *testing.T) {
+	runLiveKitSmokeScript(t, "salon-concierge-v3", nil, nil, salonV3RescheduleScript("agent", "Userdata()"))
+}
+
+func TestSmokeSalonV3ReschedulePipecat(t *testing.T) {
+	runPipecatSmokeScript(t, "salon-concierge-v3", nil, nil, salonV3RescheduleScript("bot", "build_state()"))
+}
+
+func salonV3RescheduleScript(module, stateExpr string) string {
+	return `"""Smoke check: preserve a salon slot through finish and a reset move."""
+import asyncio
+import json
+import os
+from datetime import timedelta
+from functools import partial
+from types import SimpleNamespace
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import ` + module + ` as generated  # noqa: E402
+from tools import check_availability, create_booking, find_or_create_customer, list_bookings  # noqa: E402
+
+
+async def main():
+    state = generated.` + stateExpr + `
+    customer = find_or_create_customer.find_or_create_customer("+15005550006")
+    generated._save_result("verify_customer", state, customer)
+    tomorrow = check_availability._booking_today() + timedelta(days=1)
+    first = check_availability.check_availability("haircut", tomorrow.isoformat())["slots"][-1]
+    booking = create_booking.create_booking(state.customer_phone, "haircut", first["slot_id"], True)
+    assert booking["status"] == "booked", booking
+
+    async def ignore(*args, **kwargs):
+        pass
+
+    ctx = SimpleNamespace(userdata=state)
+    worker = None
+    if generated.__name__ == "bot":
+        worker = SimpleNamespace(
+            state=state, context=generated.LLMContext(), queue_frame=ignore, flush_pipeline=ignore,
+            _manage_booking_snapshot=([], []),
+        )
+        worker._manage_booking_complete_manage_booking = partial(
+            generated.ConciergeAgent._manage_booking_complete_manage_booking, worker
+        )
+
+    async def save_slot(slot):
+        day, service, time = slot["slot_id"].split("|")
+        values = dict(appointment_id=booking["booking_id"], appointment_date=day,
+                      appointment_service=service, appointment_slot_id=slot["slot_id"],
+                      appointment_time=time, unserved_request=None)
+        if generated.__name__ == "agent":
+            from livekit.agents.llm.utils import validated_arguments
+            task = generated.ManageBooking()
+            await task.finish(ctx, **validated_arguments(task.finish, values))
+            assert task.done(), "finish did not save the exact tool result"
+        else:
+            worker._manage_booking_active_step = "manage_booking"
+            worker._manage_booking_results = {}
+            result, _ = await generated.ConciergeAgent._manage_booking_finish_manage_booking(worker, values, None)
+            assert result == {"status": "ok"}, result
+        assert state.appointment_slot_id == slot["slot_id"]
+        prompt = generated._render(generated.CONCIERGE_PROMPT, state, site="agent:concierge")
+        assert day in prompt and time in prompt and service in prompt, prompt
+
+    await save_slot(first)
+    second_day = (tomorrow + timedelta(days=1)).isoformat()
+    second = check_availability.check_availability("haircut", second_day)["slots"][0]
+    await save_slot(second)
+    if generated.__name__ == "agent":
+        task = generated.RescheduleBooking()
+        task._activity = SimpleNamespace(session=SimpleNamespace(say=lambda *_a, **_k: None))
+        result = await task.modify_booking(ctx, confirmed=True)
+    else:
+        result = await generated._flow_tool_modify_booking(
+            {"confirmed": True}, SimpleNamespace(worker=worker), state
+        )
+    assert result["status"] == "modified", result
+    rows = list_bookings.list_bookings(state.customer_phone)["bookings"]
+    assert len(rows) == 1 and rows[0]["booking_id"] == booking["booking_id"], rows
+    assert rows[0]["start_time"] == second["start_time"], rows
+    print("Exact slot survived finish, state, and injection; booking moved.")
+
+
+asyncio.run(main())
+`
 }
 
 // The tools/salon.py handler is copied once per tool (see its own module
@@ -88,6 +223,7 @@ for tool_name in (
     "check_availability",
     "create_booking",
     "list_bookings",
+    "modify_booking",
     "cancel_booking",
     "record_complaint",
 ):
@@ -111,6 +247,20 @@ def digits(phone):
     fixture that confuses the two passes for the wrong reason.
     """
     return "".join(character for character in str(phone) if character.isdigit())
+
+
+def appointment_value(action, booking_id, slot_id):
+    day, service, time = slot_id.split("|")
+    return dict(booking_id=booking_id, service=service, date=day, time=time, action=action)
+
+
+def check_saved_appointment(module, state, appointment):
+    assert state.appointment == appointment, state.appointment
+    for name, site in (("CONCIERGE_PROMPT", "agent:concierge"),
+                       ("COMPLAINT_SPECIALIST_PROMPT", "agent:complaint_specialist")):
+        prompt = module._render(getattr(module, name), state, site=site)
+        assert appointment["date"] in prompt and appointment["time"] in prompt, prompt
+        assert state.customer_status in prompt, prompt
 
 
 def booking_rows():
@@ -159,7 +309,20 @@ for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
 import agent  # noqa: E402
-from livekit.agents import llm  # noqa: E402
+from livekit.agents import AgentServer, llm  # noqa: E402
+import ast  # noqa: E402
+
+source = ast.parse(open("agent.py").read())
+local_options = next(node for node in source.body if isinstance(node, ast.If)
+                     and "UNMUTE_LOCAL_RUN" in ast.unparse(node.test))
+for local in ("", "0", "1"):
+    server = AgentServer()
+    before = (server._num_idle_processes, server._initialize_process_timeout)
+    os.environ["UNMUTE_LOCAL_RUN"] = local
+    exec(compile(ast.Module(body=[local_options], type_ignores=[]), "agent.py", "exec"),
+         {"os": os, "server": server})
+    after = (server._num_idle_processes, server._initialize_process_timeout)
+    assert after == ((1, 60.0) if local == "1" else before), after
 ` + salonStoreSmokePrelude + `
 
 def quiet_activity():
@@ -196,11 +359,8 @@ def run_context(userdata, call_id):
 
 async def create_then_cancel(userdata):
     ctx = run_context(userdata, "booking-finish")
-    task = recording_task(agent.Booking)
-    # The date is pre-fetched now, not asked for: driving the block here is what
-    # proves it resolves in the emitted module rather than only in a Go string,
-    # and that the value it lands is the one the booking step then works from.
-    await agent._prefetch(userdata, None)
+    task = recording_task(agent.ManageBooking)
+    # The date was pre-fetched before caller verification, as it is on a real call.
     assert userdata.booking_date, "the pre-fetch landed no booking_date"
     requested = (
         date.fromisoformat(userdata.booking_date) + timedelta(days=1)
@@ -211,33 +371,36 @@ async def create_then_cancel(userdata):
         ctx, confirmed=True, service="haircut", slot_id=slot_id
     )
     assert created["status"] == "booked", created
-    applied = {
-        "action": "create",
-        "booking_id": created["booking_id"],
-        "status": created["status"],
-        "summary": created["summary"],
-    }
-    await task.finish(ctx, **applied)
-    assert task.completions == [applied]
+    appointment = appointment_value("create", created["booking_id"], slot_id)
+    await task.finish(ctx, appointment=appointment)
+    assert task.completions == [{"appointment": appointment, "unserved_request": ""}]
+    check_saved_appointment(agent, userdata, appointment)
 
-    task = recording_task(agent.Booking)
+    task = recording_task(agent.ManageBooking)
+    requested = (date.fromisoformat(requested) + timedelta(days=1)).isoformat()
+    available = await task.check_availability(ctx, date=requested, service="haircut")
+    slot_id = available["slots"][0]["slot_id"]
+    moved = await task.modify_booking(ctx, booking_id=created["booking_id"],
+                                      service="haircut", slot_id=slot_id, confirmed=True)
+    assert moved["status"] == "modified", moved
+    appointment = appointment_value("modify", created["booking_id"], slot_id)
+    await task.finish(ctx, appointment=appointment)
+    check_saved_appointment(agent, userdata, appointment)
+
+    task = recording_task(agent.ManageBooking)
     listed = await task.list_bookings(ctx)
     assert [item["booking_id"] for item in listed["bookings"]] == [
-        applied["booking_id"]
+        created["booking_id"]
     ]
     cancelled = await task.cancel_booking(
-        ctx, booking_id=applied["booking_id"], confirmed=True
+        ctx, booking_id=created["booking_id"], confirmed=True
     )
     assert cancelled["status"] == "cancelled", cancelled
-    finished = {
-        "action": "cancel",
-        "booking_id": cancelled["booking_id"],
-        "status": cancelled["status"],
-        "summary": cancelled["summary"],
-    }
-    await task.finish(ctx, **finished)
-    assert task.completions == [finished]
-    return applied["booking_id"], slot_id
+    appointment = appointment_value("cancel", created["booking_id"], slot_id)
+    await task.finish(ctx, appointment=appointment)
+    assert task.completions == [{"appointment": appointment, "unserved_request": ""}]
+    check_saved_appointment(agent, userdata, appointment)
+    return created["booking_id"], slot_id
 
 
 async def split_verification_then_intent_change():
@@ -255,21 +418,19 @@ async def split_verification_then_intent_change():
     )
 
     userdata = agent.Userdata()
-    verification = recording_task(agent.CustomerVerification, chat_ctx)
+    verification = recording_task(agent.VerifyCustomer, chat_ctx)
     ctx = run_context(userdata, "verification-finish")
     verified = await verification.find_or_create_customer(ctx, phone="3035550199")
-    finish_result = {
-        "customer_phone": verified["customer_phone"],
-        "status": verified["status"],
-        "summary": verified["summary"],
-    }
+    finish_result = {"customer_phone": verified["customer_phone"], "customer_status": verified["status"]}
     await verification.finish(ctx, **finish_result)
-    assert verification.completions == [finish_result]
+    assert verification.completions == [
+        {**finish_result, "unserved_request": ""}
+    ]
     userdata.customer_phone = verified["customer_phone"]
 
     complaint = "Actually, I need to complain about my last visit."
     chat_ctx.add_message(role="user", content=complaint)
-    interrupted = recording_task(agent.Booking, chat_ctx)
+    interrupted = recording_task(agent.ManageBooking, chat_ctx)
     await interrupted.to_complaints(run_context(userdata, "intent-change"))
     assert len(interrupted.completions) == 1
     transfer = interrupted.completions[0]
@@ -285,12 +446,18 @@ async def split_verification_then_intent_change():
         and item.raw_text_content == complaint
     ]
     assert complaint_messages == [complaint]
-    recorded = await transfer.agent.record_complaint(
+    complaint_task = recording_task(agent.HandleComplaint, transfer.agent.chat_ctx)
+    recorded = await complaint_task.record_complaint(
         run_context(userdata, "record-complaint"),
         requested_resolution="A manager callback",
         summary="The last visit did not meet expectations.",
     )
     assert recorded["status"] == "recorded"
+    value = dict(complaint_id=recorded["complaint_id"],
+                 summary="The last visit did not meet expectations.",
+                 requested_resolution="A manager callback")
+    await complaint_task.finish(run_context(userdata, "complaint-finish"), complaint=value)
+    assert userdata.complaints == [value]
     return verified
 
 
@@ -301,6 +468,10 @@ async def main():
     assert customer["status"] == "created"
     actions.clear()
     userdata = agent.Userdata(customer_phone=customer["customer_phone"])
+    await agent._prefetch(userdata, None)
+    agent._save_result(
+        "verify_customer", userdata, {"customer_phone": customer["customer_phone"], "customer_status": customer["status"]}
+    )
     booking_id, slot_id = await create_then_cancel(userdata)
     booking_actions = [name for name, _, _ in actions]
     # look_up_customer appears because the pre-fetch runs it: this journey sets a
@@ -310,6 +481,8 @@ async def main():
         "look_up_customer",
         "check_availability",
         "create_booking",
+        "check_availability",
+        "modify_booking",
         "list_bookings",
         "cancel_booking",
     ]
@@ -364,7 +537,7 @@ from pipecat.processors.frame_processor import (  # noqa: E402
     FrameDirection,
     FrameProcessor,
 )
-from pipecat.services.llm_service import FunctionCallParams, LLMService  # noqa: E402
+from pipecat.services.llm_service import LLMService  # noqa: E402
 from pipecat.services.settings import LLMSettings  # noqa: E402
 
 
@@ -413,15 +586,13 @@ async def booking_flow(worker, context, *, action, booking_id=""):
     # just that worker is enough.
     flow_manager = SimpleNamespace(worker=worker)
     worker._manage_booking_results = {}
-    worker._manage_booking_active_step = "booking"
+    worker._manage_booking_active_step = "manage_booking"
     worker._manage_booking_snapshot = (
         [dict(message) for message in context.get_messages()],
         context.tools,
     )
     if action == "create":
-        # Same as the LiveKit side: the date is pre-fetched, and driving the block
-        # here is what proves the emitted Pipecat module resolves it.
-        await bot._prefetch(worker.state, None)
+        # Same as the LiveKit side: the date was pre-fetched before verification.
         assert worker.state.booking_date, "the pre-fetch landed no booking_date"
         requested = (
             date.fromisoformat(worker.state.booking_date) + timedelta(days=1)
@@ -436,29 +607,36 @@ async def booking_flow(worker, context, *, action, booking_id=""):
             state=worker.state,
         )
         booking_id = result["booking_id"]
+    elif action == "modify":
+        requested = (date.fromisoformat(worker.state.appointment["date"]) + timedelta(days=1)).isoformat()
+        available = await bot._flow_tool_check_availability(
+            {"service": "haircut", "date": requested}, flow_manager)
+        slot_id = available["slots"][0]["slot_id"]
+        result = await bot._flow_tool_modify_booking(
+            {"booking_id": booking_id, "confirmed": True, "service": "haircut", "slot_id": slot_id},
+            flow_manager, state=worker.state)
     else:
         listed = await bot._flow_tool_list_bookings(
             {}, flow_manager, state=worker.state
         )
         assert [item["booking_id"] for item in listed["bookings"]] == [booking_id]
-        slot_id = ""
+        slot_id = shared_state.bookings[booking_id]["slot_id"]
         result = await bot._flow_tool_cancel_booking(
             {"booking_id": booking_id, "confirmed": True},
             flow_manager,
             state=worker.state,
         )
 
-    expected_status = "booked" if action == "create" else "cancelled"
+    expected_status = {"create": "booked", "modify": "modified", "cancel": "cancelled"}[action]
     assert result["status"] == expected_status, result
-    applied = {
-        "action": action,
-        "booking_id": booking_id,
-        "status": result["status"],
-        "summary": result["summary"],
-    }
-    finished, next_node = await worker._manage_booking_finish_booking(applied, None)
+    appointment = appointment_value(action, booking_id, slot_id)
+    result_fields = {"appointment": appointment, "unserved_request": ""}
+    finished, next_node = await worker._manage_booking_finish_manage_booking(
+        result_fields, None
+    )
     assert finished == {"status": "ok"} and next_node is None
-    assert worker._manage_booking_results == {"booking": applied}
+    assert worker._manage_booking_results == {"manage_booking": result_fields}
+    check_saved_appointment(bot, worker.state, appointment)
     return booking_id, slot_id
 
 
@@ -472,10 +650,11 @@ async def split_verification_then_intent_change():
     ]
     state = bot.State()
     concierge = bot.ConciergeAgent(
-        state=state, context=context, call_context={}, slng_session_id="smoke-session"
+        state=state, context=context, call_context={}
     )
     await quiet(concierge)
     concierge._verify_customer_results = {}
+    concierge._verify_customer_active_step = "verify_customer"
     concierge._verify_customer_snapshot = (
         [dict(message) for message in context.get_messages()],
         context.tools,
@@ -483,9 +662,8 @@ async def split_verification_then_intent_change():
     verified = await bot._flow_tool_find_or_create_customer(
         {"phone": "3035550199"}, SimpleNamespace(worker=concierge)
     )
-    finished, next_node = await concierge._verify_customer_finish_customer_verification(
-        verified, None
-    )
+    saved = {"customer_phone": verified["customer_phone"], "customer_status": verified["status"]}
+    finished, next_node = await concierge._verify_customer_finish_verify_customer(saved, None)
     assert finished == {"status": "ok"} and next_node is None
     assert state.customer_phone == verified["customer_phone"]
     # E.164, not raw digits and not spoken groups. The step returns the number in
@@ -501,7 +679,7 @@ async def split_verification_then_intent_change():
     snapshot = [dict(message) for message in context.get_messages()]
     context.add_message({"role": "user", "content": complaint})
     specialist = bot.ConciergeAgent(
-        state=state, context=context, call_context={}, slng_session_id="smoke-session"
+        state=state, context=context, call_context={}
     )
     await quiet(specialist)
     activations = []
@@ -511,10 +689,10 @@ async def split_verification_then_intent_change():
 
     specialist.activate_worker = activate
     specialist._manage_booking_results = {}
-    specialist._manage_booking_active_step = "booking"
+    specialist._manage_booking_active_step = "manage_booking"
     specialist._manage_booking_snapshot = (snapshot, context.tools)
     transferred, next_node = (
-        await specialist._manage_booking_transfer_booking_to_complaints({}, None)
+        await specialist._manage_booking_transfer_manage_booking_to_complaints({}, None)
     )
     assert transferred == {"transferred": True} and next_node is NO_RESPONSE
     assert len(activations) == 1
@@ -529,31 +707,22 @@ async def split_verification_then_intent_change():
     assert complaint_messages == [complaint]
 
     complaint_worker = bot.ComplaintSpecialistAgent(
-        state=state, context=context, call_context={}, slng_session_id="smoke-session"
+        state=state, context=context, call_context={}
     )
     await quiet(complaint_worker)
-    callbacks = []
-
-    async def result_callback(result, **_kwargs):
-        callbacks.append(result)
-
-    await complaint_worker.record_complaint(
-        FunctionCallParams(
-            function_name="record_complaint",
-            tool_call_id="record-complaint",
-            arguments={
-                "requested_resolution": "A manager callback",
-                "summary": "The last visit did not meet expectations.",
-            },
-            llm=complaint_worker.llm,
-            pipeline_worker=complaint_worker,
-            context=context,
-            result_callback=result_callback,
-        ),
-        requested_resolution="A manager callback",
-        summary="The last visit did not meet expectations.",
-    )
-    assert len(callbacks) == 1 and callbacks[0]["status"] == "recorded"
+    value = dict(summary="The last visit did not meet expectations.",
+                 requested_resolution="A manager callback")
+    recorded = await bot._flow_tool_record_complaint(
+        value, SimpleNamespace(worker=complaint_worker), state=state)
+    assert recorded["status"] == "recorded"
+    value["complaint_id"] = recorded["complaint_id"]
+    complaint_worker._handle_complaint_active_step = "handle_complaint"
+    complaint_worker._handle_complaint_results = {}
+    complaint_worker._handle_complaint_snapshot = (context.get_messages(), context.tools)
+    result, _ = await complaint_worker._handle_complaint_finish_handle_complaint(
+        {"complaint": value}, None)
+    assert result == {"status": "ok"}, result
+    assert state.complaints == [value], state.complaints
     return verified
 
 
@@ -564,12 +733,18 @@ async def main():
     assert customer["status"] == "created"
     actions.clear()
     state = bot.State(customer_phone=customer["customer_phone"])
+    await bot._prefetch(state, None)
+    bot._save_result(
+        "verify_customer", state, {"customer_phone": customer["customer_phone"], "customer_status": customer["status"]}
+    )
     context = LLMContext()
     worker = bot.ConciergeAgent(
-        state=state, context=context, call_context={}, slng_session_id="smoke-session"
+        state=state, context=context, call_context={}
     )
     await quiet(worker)
     booking_id, slot_id = await booking_flow(worker, context, action="create")
+    moved_id, slot_id = await booking_flow(worker, context, action="modify", booking_id=booking_id)
+    assert moved_id == booking_id
     cancelled_id, _ = await booking_flow(
         worker, context, action="cancel", booking_id=booking_id
     )
@@ -582,6 +757,8 @@ async def main():
         "look_up_customer",
         "check_availability",
         "create_booking",
+        "check_availability",
+        "modify_booking",
         "list_bookings",
         "cancel_booking",
     ]
@@ -611,109 +788,4 @@ async def main():
 
 asyncio.run(main())
 print("pipecat salon journeys smoke ok")
-`
-
-const salonPipecatBoundSmokeScript = `"""Smoke check: the prerequisite guard's bound, in emitted Python."""
-import asyncio
-import importlib
-import json
-import os
-import sys
-from types import SimpleNamespace
-
-for name in json.load(open("compile-report.json"))["required_env"]:
-    os.environ.setdefault(name, "smoke-placeholder")
-
-import bot  # noqa: E402
-from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
-from pipecat.services.llm_service import FunctionCallParams  # noqa: E402
-
-
-async def quiet(worker):
-    async def noop(*_args, **_kwargs):
-        return None
-
-    worker.queue_frame = noop
-    worker.queue_frames = noop
-    worker.flush_pipeline = noop
-    worker.push_frame = noop
-
-
-async def main():
-    context = LLMContext()
-    # customer_phone unset: exactly the state the guard exists for.
-    concierge = bot.ConciergeAgent(
-        state=bot.State(), context=context, call_context={},
-        slng_session_id="smoke-session",
-    )
-    await quiet(concierge)
-
-    results = []
-
-    async def result_callback(result, **kwargs):
-        results.append((result, kwargs))
-
-    def params(call_id):
-        return FunctionCallParams(
-            function_name="manage_booking",
-            tool_call_id=call_id,
-            arguments={},
-            llm=concierge.llm,
-            pipeline_worker=concierge,
-            context=context,
-            result_callback=result_callback,
-        )
-
-    limit = bot._PREREQUISITE_LIMIT
-    assert limit == 5, limit
-
-    for attempt in range(1, limit + 1):
-        await concierge.manage_booking(params(f"bound-{attempt}"))
-
-    assert len(results) == limit, results
-
-    # Every attempt is refused while the value is missing, and none of them ever
-    # starts the flow.
-    for result, kwargs in results:
-        assert "refused" in result, result
-        assert "customer_phone" in result["refused"], result
-        assert "verify_customer" in result["refused"], (
-            "the refusal must name the control that supplies the value, or the "
-            "model has nothing to act on"
-        )
-        assert "Do not say any of this out loud" in result["refused"], result
-        # THE line. A refused step starts no flow, so nothing else in the
-        # process will speak. Resolving with run_llm=False here leaves a live
-        # call silent with nothing in the trace.
-        properties = kwargs.get("properties")
-        assert properties is None or getattr(properties, "run_llm", None) is not False, (
-            "a refusal must give the model its turn back", kwargs
-        )
-
-    # Below the bound: recover silently on the same turn.
-    for result, _ in results[: limit - 1]:
-        assert "call this again in the same turn" in result["refused"], result
-        assert "ask the caller" not in result["refused"], result
-
-    # At the bound: stop recovering quietly and ask the caller out loud.
-    final = results[limit - 1][0]["refused"]
-    assert "ask the caller for it directly now" in final, final
-    assert "stay in the conversation" in final, final
-    assert "call this again in the same turn" not in final, final
-
-    # The counter is per control and resets when the step actually starts.
-    assert bot._prerequisite_refusals["manage_booking"] == limit
-    concierge.state.customer_phone = "555 010 1010"
-    await concierge.manage_booking(params("bound-recovered"))
-    assert bot._prerequisite_refusals["manage_booking"] == 0, (
-        "a step that starts must reset its counter, or one bad patch early in a "
-        "call makes every later refusal shout at the caller"
-    )
-    started = results[-1][0]
-    assert "refused" not in started, started
-
-    print("pipecat prerequisite bound smoke ok")
-
-
-asyncio.run(main())
 `

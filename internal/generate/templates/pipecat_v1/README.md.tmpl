@@ -31,8 +31,8 @@ Read them with `grep UNMUTE_METRIC` on the run's output. Times are seconds.
 `e2e` is from the caller falling silent to the agent starting to speak, `stages`
 carries the time to first byte for each service, and `tools` carries how long
 each tool took, including tools reached through a remote tool source. Controls
-are not listed there: a delegate or a transfer hands the conversation somewhere
-else rather than doing a unit of work, and a delegate does not return until the
+are not listed there: a task or a transfer hands the conversation somewhere else
+rather than doing a unit of work, and a task does not return until the
 flow it started has finished, so its duration is that flow's, not a tool's.
 
 A measurement Pipecat does not report is left out of the line rather than sent
@@ -43,50 +43,13 @@ reports no total streaming time per service here, only time to first byte.
 ## Agent handoffs
 
 A handoff with `announce:` gives the exact sentence spoken once by
-the active agent. Pipecat waits for that speech to stop before it activates the
-receiving worker. The `requires:` guard runs first, so a refused handoff never
-speaks the announcement. Without `announce`, the handoff stays silent.
+the active agent, after any brief the handoff carries has been validated, so a
+handoff refused for a bad brief never speaks it. Pipecat waits for that speech
+to stop before it activates the receiving worker. Without `announce`, the
+handoff stays silent.
 
 The opening greeting belongs to call start only. A later handoff back to the
 entry agent continues from the shared context and never repeats it.
-{{- end}}
-{{- if .NeedsPrerequisiteGuard}}
-
-## Guarded steps and handoffs
-
-A control that declares `requires:` does not run until every named variable holds
-a value. The refusal goes to the model, never to the caller: it names the unmet
-variable and the control that supplies it, so the model fetches the value and
-calls the control again in the same turn. The caller hears the next natural
-question and never learns a guard fired.
-
-Each guarded control also carries its requirement in its own description, so the
-model usually collects the value during the earlier turns and the guard is never
-reached at all.
-
-**What you see in the log.** A refused control writes one line at normal level:
-
-```text
-prerequisite guard: step manage_booking refused, unmet customer_phone
-```
-
-and, on the attempt that reaches the retry limit:
-
-```text
-prerequisite guard: step manage_booking refused, unmet customer_phone, retry limit reached; asking the caller
-```
-
-Variable names and step names only. No caller speech and no variable value is
-ever written, which matters when the identifier is something like a phone number.
-
-After the limit the agent stops recovering quietly and asks the caller for the
-missing value out loud, in its own words. It does not fall silent and it does not
-end the call. That limit lives in this generated code, not in a prompt: a model
-can be argued out of an instruction, and the guard exists for the case where it
-already has been.
-
-A repeated refusal with nothing in the log is not this guard. Look for a model
-that is not calling the control at all.
 {{- end}}
 {{- if .NeedsPrefetch}}
 {{.PrefetchRunbook}}
@@ -185,19 +148,19 @@ end-of-turn analyzer, which it used to.
 ## Task returns
 
 When a task returns, its internal turns stay out of the owner's conversation.
-The completed delegate call stays in that conversation with the typed result,
+The completed task call stays in that conversation with the typed result,
 so the same caller request does not start the task again.
 
 A task may list a handoff in its own `handoffs:`. Calling it ends the active
 task and any remaining task-group steps, then hands the caller directly to the
 receiving agent. It does not return through the task owner. A task definition
-has `tools:` and `handoffs:` and no other list, so a delegate or an escalation
-on a task is unwritable rather than rejected: there is no key to put one in.
+has `tools:` and `handoffs:` and no other list, so a task or an escalation on a
+task is unwritable rather than rejected: there is no key to put one in.
 
 A task that lists no handoff still has a way out. Every node's
 `role_message` here ends with one generated rule: when the caller asks for
 something none of the step's tools can do, and no handoff on the step covers it,
-call that node's `finish_<delegate>_<step>` function right away with the closest
+call that node's `finish_<task>_<step>` function right away with the closest
 result, naming that request in `unserved_request`. Every finish schema here
 declares that field and never requires it, and a filled one rides the results
 handback that tells the owning agent to take the request next. The rule does not
@@ -207,6 +170,42 @@ it.
 In a group with `context_scope: shared`, each exact typed result enters the
 shared context before the next task starts. An isolated group carries no
 results between steps. The final `merge: results` map is keyed by task name.
+{{- end}}
+{{- if .NeedsHistoryRunbook}}
+
+## Context a step or handoff starts with
+
+A task or a handoff can set `context.history` to something other than
+`full`. That changes what the step, or the agent taking the handoff, starts
+with.
+
+`history: full` needs no line here: one `LLMContext` is shared for the whole
+call, so a step with nothing authored already has the running transcript,
+tool records included.
+
+`history: messages` keeps what the caller and the agent said out loud. Every
+tool record is dropped, and a call leaves with its result: on this target the
+call is a field on an assistant message and only the reply is its own entry, so
+keeping one without the other is a request the provider rejects mid-call. A turn
+that both spoke and called a tool keeps what it said.
+
+`history: last_n` keeps the newest `max_messages` entries, tool records
+kept. The cut lands at the front, so a leading tool result whose matching
+call fell outside the window is dropped with it: a tool message with no
+matching call is a request the provider rejects mid-call.
+
+`history: reset` gives the step only its own instructions and its declared
+variables. That is the floor: a reset step does not receive the call that
+triggered it, the caller's own words included. Write a reset step to be
+fully described by its declared values, like confirming a number or taking a
+payment. A step that has to interpret what was just asked does not fit
+`reset`, and there is no compiler error for getting this wrong.
+
+`history: summary` is refused on this target. It exists only on LiveKit.
+
+The ceiling is the same at every value: no `history:` setting is a privacy
+control. Shortening what a step sees does not unsay what the caller already
+said out loud.
 {{- end}}
 
 `uv` installs the pinned dependencies on first run. The Pipecat dev runner
@@ -330,7 +329,28 @@ In production the same values ride the runner's call-start payload as one flat
 JSON object, and the bot also reads them from the `UNMUTE_CALL_START`
 environment variable when the payload carries none.
 {{- end}}
+{{if .TypedState}}
+## Declared state
 
+Variables declare types once. A task's `assign` derives its finish fields and
+saves validated values. A failed or unserved finish saves nothing.
+
+A prompt reads only its own `{{"{{variable}}"}}` or `{{"{{variable.field}}"}}`
+references. Missing values render as `{{.TypedState.Empty}}`; false, zero and
+empty lists keep their values. Referencing an object shares the whole object.
+History is a separate choice and does not clear saved values.
+
+Each declared shape is a generated Pydantic class in this module. A step's
+result is validated against it before anything is recorded, so a value outside a
+declared set never enters the state: the previous contents stay as they were and
+the model is told which field and what was allowed, which is what lets it
+correct itself on the next turn.
+
+A text type with a validated shape (`Phone`, `Date`, `Time`, `Id`) is a `str` in
+the schema the model is sent, with its shape checked by a validator. That is
+deliberate: a `pattern` in the schema survives the strict tool-schema converter
+and the provider rejects it, so the shape is checked here instead.
+{{end}}
 ## Required environment
 
 Set these before running (values are never written into the project):
@@ -1033,12 +1053,13 @@ Do these in the [Twilio Console](https://console.twilio.com), in this order.
      <Connect>
        <Stream url="{{.CloudWebsocket.StreamURL}}">
          <Parameter name="_pipecatCloudServiceHost" value="{{.AgentName}}.YOUR_ORGANIZATION"/>
+         <Parameter name="from_number" value="{{`{{From}}`}}"/>
        </Stream>
      </Connect>
    </Response>
    ```
 
-   Four things in there are deliberate:
+   Five things in there are deliberate:
 
    - **The spoken line comes first.** Starting this agent takes a few seconds
      from cold, and a caller who hears nothing hangs up. Delete the `<Say>` line
@@ -1048,10 +1069,27 @@ Do these in the [Twilio Console](https://console.twilio.com), in this order.
      one from a guide.
    - **The agent name is already filled in.** `YOUR_ORGANIZATION` is the only
      substitution you make.
+   - **`{{`{{From}}`}}` is the caller's number**, and Twilio substitutes it as it
+     builds the Bin's response. That is the only place this agent can learn it:
+     the platform terminates the carrier's stream itself, so nothing else in this
+     package ever sees the call's own details. It is what `source: from_number`
+     reads.
    - **There is nothing else in it.** A `<Parameter>` reaches this agent only if
-     the emitted code reads one by that name, and on an inbound call that is the
-     service host alone. Adding the caller's number here is a common suggestion
-     and it does nothing: no module in this package reads it.
+     the emitted code reads one by that name, and a parameter nothing reads is
+     markup you paste and then trust. Only the two above are read here.
+
+   **If you already have a Bin, add the `from_number` line to it.** An older Bin
+   without it is not an error and does not fail the build: nothing checks your
+   Bin, because reading it back would need carrier credentials this command does
+   not ask for. What happens instead is that the number arrives empty, every
+   entry reading it is skipped, and the agent's log says so by name:
+
+   ```text
+   prefetch caller: skipped, the call carries no from_number
+   ```
+
+   That is also what a caller who withholds their number produces, which is the
+   point: the agent behaves the same either way, and asks.
 
 4. **Point the number at that Bin.** Phone Numbers, Manage, Active Numbers,
    your number, Voice Configuration, "A call comes in", choose TwiML Bin, pick
@@ -1133,12 +1171,23 @@ create in the console and nothing of yours for the call to come back to:
 ```sh
 curl -X POST "https://api.twilio.com/2010-04-01/Accounts/$TWILIO_ACCOUNT_SID/Calls.json" \
   -u "$TWILIO_ACCOUNT_SID:$TWILIO_AUTH_TOKEN" \
-  --data-urlencode "To=+15551230000" \
+  --data-urlencode "To=$DEST" \
   --data-urlencode "From=${{.CloudWebsocket.FromNumberEnv}}" \
-  --data-urlencode 'Twiml=<Response><Connect><Stream url="{{.CloudWebsocket.StreamURL}}"><Parameter name="_pipecatCloudServiceHost" value="{{.AgentName}}.'"$PIPECAT_CLOUD_ORGANIZATION"'"/><Parameter name="direction" value="outbound"/></Stream></Connect></Response>'
+  --data-urlencode 'Twiml=<Response><Connect><Stream url="{{.CloudWebsocket.StreamURL}}"><Parameter name="_pipecatCloudServiceHost" value="{{.AgentName}}.'"$PIPECAT_CLOUD_ORGANIZATION"'"/><Parameter name="direction" value="outbound"/><Parameter name="to_number" value="'"$DEST"'"/></Stream></Connect></Response>'
 ```
 
-Change `To`; everything else is read from your environment. Expected: the phone
+Set `DEST` first, to the number you are calling:
+
+```sh
+export DEST=+15551230000
+```
+
+It goes in twice on purpose. `To` is what Twilio dials; the `to_number`
+parameter is what this agent reads as `source: to_number`, and Twilio
+substitutes nothing inside an inline `Twiml=`. A Bin gets `{{`{{To}}`}}` filled
+in for it; a command like this one does not, so the shell fills it instead.
+
+Change `DEST`; everything else is read from your environment. Expected: the phone
 rings showing your own number, and this agent speaks when it is answered. There
 is no `<Say>` before the stream here on purpose, because a person is already
 listening by then and the agent's greeting should be the first thing they hear.

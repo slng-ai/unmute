@@ -10,6 +10,9 @@ examples/*/build/
 # copies the fixture would otherwise copy the leftovers too, which makes a
 # "nothing was written" assertion pass for the wrong reason.
 internal/testdata/*/build/
+# Same reason for the voice-agent test packages, which are compiled and run by
+# hand against real providers rather than asserted against a golden.
+internal/voice-agents-tests/*/build/
 
 # Release artifacts: GoReleaser writes every build, archive, checksum and SBOM here
 dist/

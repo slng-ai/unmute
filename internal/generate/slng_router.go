@@ -35,17 +35,8 @@ type slngSite struct {
 	// StateExpr is the expression for the variable state object, empty when the
 	// package declares no variables.
 	StateExpr string
-	// Names is the union of template variable names the router-bound prompts on
-	// this think profile reference, in order.
-	//
-	// Per profile rather than per prompt site, because that is the granularity
-	// the two targets actually give: on Pipecat a task's prompt reaches the
-	// router through the owning agent's LLM object as a flow role_message, so a
-	// per-site snapshot could not reach it. A union can only ever carry a name
-	// some sibling prompt on the same profile references, never a name no prompt
-	// references at all, and FR-016's rule is that a referenced name is never
-	// missing.
-	Names []string
+	Names     []string
+	NamesExpr string // active scope lookup, when the site changes per request
 	// ConfigFunc is the emitted helper returning this profile's inline
 	// configuration.
 	ConfigFunc string
@@ -83,7 +74,7 @@ type slngSite struct {
 	// True on LiveKit, and the mechanism is the same trap as the header one
 	// field over: the plugin copies the per-request extra_kwargs first and then
 	// overwrites extra_body from its own options (livekit-plugins-openai
-	// llm.py:956-959, read at the pinned version). So a constructor body does
+	// llm.py:961-968, read at the pinned version). So a constructor body does
 	// not merely win, it wins in silence while the emitted per-request source
 	// still reads correctly.
 	//
@@ -96,6 +87,17 @@ type slngSite struct {
 	// built inside an agent method at handoff time, so its construction is the
 	// moment of its request and its snapshot is current already.
 	BodyPerRequest bool
+	// VariablesPerRequest says the template variables are read from live state
+	// on every request rather than snapshotted into the construction.
+	//
+	// Narrower than BodyPerRequest on purpose. The rest of the body never
+	// changes during a call, so snapshotting it costs nothing and keeps the
+	// construction readable; the variables are the one part that does change,
+	// and a snapshot of them is a value written part way through a step that
+	// reaches the model one turn late. Set on both targets, reached two ways:
+	// LiveKit renders the whole body inside its llm node, Pipecat overrides the
+	// framework's own per-request parameter seam.
+	VariablesPerRequest bool
 }
 
 // slngConfigFunc names the emitted configuration helper for one think profile.
@@ -128,7 +130,9 @@ type slngHelpers struct {
 	Configs []slngConfigHelper
 	// Variables is set when any router prompt references a template variable, so
 	// the snapshot helper is worth emitting.
-	Variables bool
+	Variables     bool
+	TemplatePaths string
+	TemplateSites string
 	// Vertex is set when any router upstream is vertex, so the credential helper
 	// is worth emitting.
 	Vertex bool
@@ -207,9 +211,7 @@ func slngHelpersFor(agent *ir.Agent, tgt ir.Target) (slngHelpers, error) {
 			return slngHelpers{}, fmt.Errorf("think.%s: %w", profile, err)
 		}
 		helpers.Configs = append(helpers.Configs, slngConfigHelper{Func: slngConfigFunc(profile), Body: body})
-		if len(slngTemplateNames(agent, tgt, profile)) > 0 {
-			helpers.Variables = true
-		}
+		helpers.Variables = true
 		if binding.Upstream != nil && binding.Upstream.Provider == "vertex" {
 			helpers.Vertex = true
 		}
@@ -228,6 +230,19 @@ func slngHelpersFor(agent *ir.Agent, tgt ir.Target) (slngHelpers, error) {
 		}
 	}
 	helpers.Scopes = slngPackageScopes(agent, tgt)
+	paths := map[string]any{}
+	for scope, refs := range slngTemplatePaths(agent, tgt) {
+		paths[scope] = anyStrings(refs)
+	}
+	helpers.TemplatePaths = pyLiteral(paths)
+	sites := map[string]any{}
+	for name, task := range agent.Tasks {
+		if profile, ok := slngRouterBinding(agent, tgt, task.Model); ok {
+			scope := targetcap.SlngScope(tgt.Models.Reason[profile].AgentID, targetcap.SlngSite{Kind: targetcap.SlngSiteTask, Name: name})
+			sites[scope] = "task:" + name
+		}
+	}
+	helpers.TemplateSites = pyLiteral(sites)
 	return helpers, nil
 }
 
@@ -305,34 +320,27 @@ func slngBindingCredentialEnvs(binding ir.Binding) []string {
 	return names
 }
 
-// slngTemplateNames is the union of template variable names every router-bound
-// prompt resolving to this think profile references, deduped and ordered.
-//
-// The name list comes from ir.TemplateRefs, the same function the validator
-// uses, so the request can never reference a name it does not supply and the
-// router's 422 is unreachable from emitted output (FR-016).
-func slngTemplateNames(agent *ir.Agent, tgt ir.Target, profile string) []string {
-	var names []string
-	add := func(body string) {
-		for _, name := range ir.TemplateRefs(body) {
-			if !slices.Contains(names, name) {
-				names = append(names, name)
-			}
+// slngTemplatePaths uses the same scope as the active prompt's cache identity.
+func slngTemplatePaths(agent *ir.Agent, tgt ir.Target) map[string][]string {
+	paths := map[string][]string{}
+	add := func(model, body string, site targetcap.SlngSite) {
+		profile, router := slngRouterBinding(agent, tgt, model)
+		if !router {
+			return
 		}
-	}
-	entry := agent.Agents[agent.EntryAgent].Model
-	for _, name := range slices.Sorted(maps.Keys(agent.Agents)) {
-		if def := agent.Agents[name]; slngProfileOf(tgt, def.Model, entry) == profile {
-			add(def.Instructions)
+		refs := ir.TemplateRefs(ir.FlattenPaths(body))
+		if refs == nil {
+			refs = []string{}
 		}
+		paths[targetcap.SlngScope(tgt.Models.Reason[profile].AgentID, site)] = refs
 	}
-	for _, name := range slices.Sorted(maps.Keys(agent.Tasks)) {
-		if task := agent.Tasks[name]; slngProfileOf(tgt, task.Model, entry) == profile {
-			add(task.Instructions)
-		}
+	for name, def := range agent.Agents {
+		add(def.Model, def.Instructions, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name})
 	}
-	slices.Sort(names)
-	return names
+	for name, task := range agent.Tasks {
+		add(task.Model, task.Instructions, targetcap.SlngSite{Kind: targetcap.SlngSiteTask, Name: name})
+	}
+	return paths
 }
 
 // slngProfileOf resolves which think profile a prompt site runs on: its own if
@@ -413,9 +421,20 @@ func slngRequestBody(site slngSite, binding ir.Binding) map[string]any {
 	if slngPureProxy(binding) {
 		body[slngPureProxyParam] = true
 	}
-	if len(site.Names) > 0 {
-		body["template_variables"] = pyExpr(fmt.Sprintf("_slng_template_variables(%s, (%s))",
-			slngStateExpr(site.StateExpr), pyTuple(site.Names)))
+	// Omitted when the variables travel per request: two spellings of the same
+	// dict is how one of them comes to send a stale snapshot, and a snapshot
+	// beside the live read is a reader's question with no answer.
+	if (len(site.Names) > 0 || site.NamesExpr != "") && !site.VariablesPerRequest {
+		names := site.NamesExpr
+		if names == "" {
+			names = "(" + pyTuple(site.Names) + ")"
+		}
+		scope := pyQuote(site.Scope)
+		if site.HeadersPerRequest {
+			scope = "agent._slng_scope"
+		}
+		body["template_variables"] = pyExpr(fmt.Sprintf("_slng_template_variables(%s, %s, scope=%s)",
+			slngStateExpr(site.StateExpr), names, scope))
 	}
 	// The folded fields stay out: they are unmute's own typed model fields, they
 	// name a real slot on every entry that has them, and moving them would change

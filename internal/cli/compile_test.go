@@ -215,6 +215,65 @@ func TestCompileWritesBindingsAndSizingToTheReport(t *testing.T) {
 	}
 }
 
+// FR-011. A prefetch entry whose author said it writes is named where the rest
+// of what the compiler acted on is named, and nowhere else.
+//
+// Both halves matter, and the second is the one that keeps stdout readable. The
+// key is required, so every tool entry carries an answer: a warning for the
+// `true` ones would fire on every compile of every package that legitimately
+// writes, forever, which is the noise this command was quietened to remove.
+func TestCompileNamesAWritingPrefetchEntryInTheReportAndNotOnStdout(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent")
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "prefetch_core"))); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "agent.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := mustReplace(t, string(raw), "    writes: false\n", "    writes: true\n")
+	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := runCompileCommand(t, "--target", "pipecat", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stream := range []struct{ name, text string }{{"stdout", stdout}, {"stderr", stderr}} {
+		if strings.Contains(stream.text, "writes") {
+			t.Errorf("%s mentions writes:, and a required key is not news:\n%s", stream.name, stream.text)
+		}
+	}
+
+	report, err := os.ReadFile(filepath.Join(dir, "build", "pipecat", "compile-report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"prefetch_writes"`, `"profile"`, `"lookup_customer"`} {
+		if !strings.Contains(string(report), want) {
+			t.Errorf("compile-report.json missing %q:\n%s", want, report)
+		}
+	}
+
+	// And an entry that reads is named nowhere: the report lists what writes, not
+	// every entry with the answer printed beside it.
+	if err := os.WriteFile(path, []byte(mustReplace(t, source, "    writes: true\n", "    writes: false\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runCompileCommand(t, "--target", "pipecat", dir); err != nil {
+		t.Fatal(err)
+	}
+	report, err = os.ReadFile(filepath.Join(dir, "build", "pipecat", "compile-report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(report), `"prefetch_writes"`) {
+		t.Errorf("the report lists prefetch_writes for a package where nothing writes:\n%s", report)
+	}
+}
+
 // gap #1: a gated target surfaces the provider-vocabulary diagnostic on the
 // compile path, not just "validation failed for N target(s)".
 func TestCompileSurfacesPerTargetDiagnostics(t *testing.T) {

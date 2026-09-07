@@ -4,7 +4,7 @@ Read this when the brief is "make it faster", "it feels slow", "reduce latency",
 or "optimize the agent".
 
 These are the settings we recommend, from building and calling these agents
-ourselves. Where a setting looked promising and did not work out, it says so — a
+ourselves. Where a setting looked promising and did not work out, it says so: a
 rejected knob is worth as much as an accepted one, because it saves the next
 person a round of testing.
 
@@ -73,7 +73,7 @@ it as a default rather than a law.
 The turn detector reads the transcript to decide whether the caller finished, so
 a transcriber that has not finalised yet holds the whole turn open. The metric is
 time from end of speech to the final transcript, and it varies widely between
-models that score alike on accuracy — two models can return identical words with
+models that score alike on accuracy. Two models can return identical words with
 very different waits.
 
 Send the user to https://benchmarks.coval.ai/overview to compare, then confirm on
@@ -144,8 +144,8 @@ for a caller reading out digits. `pace` takes no per-target override:
 rejects it, but even a legal-but-short value splits utterances: a caller who
 paused mid-sentence had "tomorrow" committed as one turn and "afternoon" as the
 next, and the agent asked twice. Come down from the default in steps and listen
-for interruptions. **The defaults differ per target** — LiveKit uses Silero's
-window, Pipecat uses `stop_secs`, and they are not the same — so set it
+for interruptions. **The defaults differ per target** (LiveKit uses Silero's
+window, Pipecat uses `stop_secs`, and they are not the same), so set it
 explicitly if the package runs on both.
 
 **On Pipecat this window is one of three stages, not the whole wait.** Silero
@@ -216,7 +216,7 @@ is, and a figure in the hundreds means whatever you set was ignored.
 
 ### 6. Speak before a tool runs
 
-The tool is usually not the wait — a local handler returns in milliseconds. The
+The tool is usually not the wait: a local handler returns in milliseconds. The
 caller is waiting through the second LLM round trip plus the speech after it.
 
 ```yaml

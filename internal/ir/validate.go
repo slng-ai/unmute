@@ -81,7 +81,6 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	globalWarnings = add(globalWarnings, unusedKnowledgeWarning(agent))
 	globalWarnings = add(globalWarnings, knowledgeBudgetWarning(agent))
 	globalWarnings = add(globalWarnings, knowledgeCutoffWarning(agent))
-	globalWarnings = append(globalWarnings, orphanReadOnlyWarnings(agent)...)
 	report := ValidateReport{PerTarget: make([]TargetValidation, 0, len(targets))}
 	failed := 0
 	for _, resolved := range targets {
@@ -287,13 +286,14 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			errors = add(errors, fmt.Sprintf("variable %q has invalid source %q", name, variable.Source))
 		}
 		if variable.Default != nil && !defaultMatches(variable.Type, variable.Default) {
-			errors = add(errors, fmt.Sprintf("variable %q default does not match type %q", name, variable.Type))
+			if variable.Shape != nil {
+				errors = add(errors, fmt.Sprintf("variable %q is %s, which starts empty and takes no default: remove default:", name, variable.Shape.String()))
+			} else {
+				errors = add(errors, fmt.Sprintf("variable %q default does not match type %q", name, variable.Type))
+			}
 		}
 	}
 	for name, task := range agent.Tasks {
-		if len(task.Result) == 0 {
-			errors = add(errors, fmt.Sprintf("task %q result must not be empty", name))
-		}
 		// "A task may attach handoffs only" used to be checked here, because a task
 		// had one mixed list that could hold any kind. A task now has `tools:` and
 		// `handoffs:` and no other key, so the illegal thing has nowhere to be
@@ -344,9 +344,6 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 		switch control := control.(type) {
 		case *AgentTransfer:
 			errors = append(errors, validateContextShape(name, control.Context.TaskContext)...)
-			if !control.Context.Variables.All && len(control.Context.Variables.Names) == 0 {
-				errors = add(errors, fmt.Sprintf("control %q context.variables is required", name))
-			}
 		case *HumanTransfer:
 			if control.Mode != TransferCold && control.Mode != TransferWarm {
 				errors = add(errors, fmt.Sprintf("control %q mode must be cold or warm", name))
@@ -626,12 +623,69 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			}
 		}
 	}
+	warnings = append(warnings, warnOnStepsThatOfferNothing(agent)...)
 	// schemas.notes and warnings are both structural warnings. Notes come first
 	// because they came first historically and the report's order is golden-stable.
 	// Before 2026-08-27 the named `warnings` return was dead: everything added to it
 	// was collected and then discarded here, so a warning could look wired up and
 	// reach nobody.
 	return errors, append(schemas.notes, warnings...)
+}
+
+// warnOnStepsThatOfferNothing names a step the model has little reason to enter:
+// one whose every tool the parent agent already holds.
+//
+// The model sees the step's entry function and the agent's own tools in the same
+// list. When the step adds no tool, the short route does the job, so the step is
+// never entered, its `assign:` never runs, and the declared state disagrees with
+// what happened on the call. Found on a live call (trace 9aa92e09, 2026-09-04):
+// `record_complaint` sat on the complaint specialist as well as on its
+// `handle_complaint` step, the specialist recorded the complaint itself, and
+// the task's assignment never ran. The prompt already said to run the step. A tool in
+// reach beat the prompt, which is why this is a refusal and not a line of
+// authoring advice.
+//
+// A step declaring no tools at all is left alone: its prompt, its history scope
+// and its result are reasons to enter it that have nothing to do with tools.
+//
+// A warning and not a refusal, because whether the model takes the short route
+// is decided by the prompt and the `when:`, neither of which the compiler reads.
+// The shape is a risk the author judges, so this names the risk and what it
+// cost once, and leaves the call to them.
+func warnOnStepsThatOfferNothing(agent *Agent) []string {
+	var warnings []string
+	for _, agentName := range sortedKeys(agent.Agents) {
+		own := make(map[string]bool)
+		for _, ref := range agent.Agents[agentName].Tools {
+			if _, isTool := agent.Tools[ref]; isTool {
+				own[ref] = true
+			}
+		}
+		for _, ref := range agent.Agents[agentName].Tools {
+			delegate, ok := agent.Controls[ref].(*Delegate)
+			if !ok || delegate.Task == "" {
+				continue
+			}
+			task, ok := agent.Tasks[delegate.Task]
+			if !ok || len(task.Tools) == 0 {
+				continue
+			}
+			var shared []string
+			for _, toolRef := range task.Tools {
+				if own[toolRef] {
+					shared = append(shared, toolRef)
+				}
+			}
+			if len(shared) < len(task.Tools) {
+				continue
+			}
+			warnings = add(warnings, fmt.Sprintf(
+				"agent %q holds every tool of its step %q (%s), so it can do the step's work without entering it and the "+
+					"step's assign may never run: drop %s from agent %q tools and leave them on the step",
+				agentName, delegate.Task, strings.Join(shared, ", "), strings.Join(shared, ", "), agentName))
+		}
+	}
+	return warnings
 }
 
 // validateDriverValues asks the value questions a driver used to ask alone.
@@ -843,9 +897,6 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 			if control.Task != "" {
 				applyCapability(caps, targetcap.FieldTask, provider, row)
 			}
-			if len(control.Requires) > 0 {
-				applyCapability(caps, targetcap.FieldDelegateRequires, provider, row)
-			}
 			if control.Announce != "" {
 				applyCapability(caps, targetcap.FieldDelegateAnnounce, provider, row)
 			}
@@ -853,13 +904,7 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 			if control.Announce != "" {
 				applyCapability(caps, targetcap.FieldTransferAnnounce, provider, row)
 			}
-			if len(control.Requires) > 0 {
-				applyCapability(caps, targetcap.FieldTransferRequires, provider, row)
-			}
 			validateContext(control.Context.TaskContext, provider, caps, row)
-			if !control.Context.Variables.All {
-				applyCapability(caps, targetcap.FieldContextVariableSubset, provider, row)
-			}
 		case *HumanTransfer:
 			validateHumanTransfer(control, resolved, provider, caps, row)
 		}
@@ -1730,16 +1775,6 @@ func taskContextUsage(agent *Agent) map[string]bool {
 	for name := range agent.Tasks {
 		usesOwnContext[name] = true
 	}
-	for _, group := range agent.TaskGroups {
-		for _, task := range group.Steps {
-			usesOwnContext[task] = false
-		}
-	}
-	for _, control := range agent.Controls {
-		if delegate, ok := control.(*Delegate); ok && delegate.Task != "" {
-			usesOwnContext[delegate.Task] = true
-		}
-	}
 	return usesOwnContext
 }
 
@@ -1940,21 +1975,36 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 	}
 }
 
-// validateVariables gates the two per-target variable features: capturing a
-// value mid-call, and rendering a template into a prompt or greeting before the
-// call starts (V5).
+// validateVariables gates rendering a template into a prompt or greeting
+// before the call starts (V5).
 func validateVariables(agent *Agent, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
-	for _, variable := range agent.Variables {
-		if variable.Source == VariableSourceConversation {
-			applyCapability(caps, targetcap.FieldVariableConversation, provider, row)
-			break
-		}
-	}
 	for _, name := range sortedKeys(agent.Variables) {
 		if agent.Variables[name].Confirm != "" {
 			applyCapability(caps, targetcap.FieldVariableConfirm, provider, row)
 			break
 		}
+	}
+	// A declared shape and a text type with a validated shape are gated apart,
+	// because they are refused for the same reason but fixed differently: one
+	// asks the author to flatten a group of fields, the other to give up a
+	// check. Reported through the capability table like every other per-target
+	// difference, so one target's refusal cannot drift from its row.
+	declaresShape, declaresShaped := len(agent.Shapes) > 0, false
+	for _, name := range sortedKeys(agent.Variables) {
+		shape := agent.Variables[name].Shape
+		if shape == nil {
+			continue
+		}
+		declaresShaped = declaresShaped || reaches(shape, func(ref *TypeRef) bool { return ref.Shaped != "" })
+		declaresShape = declaresShape || reaches(shape, func(ref *TypeRef) bool {
+			return ref.Shape != "" || len(ref.Literal) > 0 || ref.List != nil || ref.Optional
+		})
+	}
+	if declaresShape {
+		applyCapability(caps, targetcap.FieldTypedState, provider, row)
+	}
+	if declaresShaped {
+		applyCapability(caps, targetcap.FieldShapedText, provider, row)
 	}
 	if len(agent.Prefetch) > 0 {
 		applyCapability(caps, targetcap.FieldPrefetch, provider, row)
@@ -2911,8 +2961,7 @@ func validVariableSource(value VariableSource) bool {
 	switch value {
 	case VariableSourceCallStart, VariableSourceSessionID, VariableSourceCarrier,
 		VariableSourceConnection, VariableSourceCallID, VariableSourceStreamID,
-		VariableSourceDirection, VariableSourceFromNumber, VariableSourceToNumber,
-		VariableSourceConversation:
+		VariableSourceDirection, VariableSourceFromNumber, VariableSourceToNumber:
 		return true
 	default:
 		return false

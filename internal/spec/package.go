@@ -31,7 +31,22 @@ type Package struct {
 	// exactly this shape and says why (no_dictionaries_test.go).
 	Mirrors     map[string]Mirror `json:"-" yaml:"-"`
 	MirrorBytes map[string][]byte `json:"-" yaml:"-"`
-	files       map[string][]byte
+	// Tasks and Callables are derived by Load from the nested shape and never
+	// authored, beside the derived fields above, and are untagged for the same
+	// load-bearing reason.
+	//
+	// Tasks holds every task any agent defines, keyed by its name, which is unique
+	// across the package. Callables holds everything an agent can decide to run
+	// that is not a tool, a handoff or an escalation: a task carrying a `when:`,
+	// or a task group an agent names.
+	Tasks     map[string]Task     `json:"-" yaml:"-"`
+	Callables map[string]Callable `json:"-" yaml:"-"`
+	// variableOrder is the order agent.yaml declared the variables in, read off
+	// the file because a map cannot carry it. Unexported and reached through
+	// VariableOrder(), because it is derived from bytes this struct already
+	// holds and nothing should be able to set it to something else.
+	variableOrder []string
+	files         map[string][]byte
 }
 
 // Location returns the first source line containing token in a package file.
@@ -60,16 +75,26 @@ type AgentFile struct {
 	// Listen/Turn select one entry of the matching models section by name.
 	// Optional when the section has at most one entry (the sole entry selects
 	// itself); required with 2+ entries (N15 palette).
-	Listen    string              `json:"listen,omitempty" yaml:"listen,omitempty"`
-	Turn      string              `json:"turn,omitempty" yaml:"turn,omitempty"`
+	Listen string `json:"listen,omitempty" yaml:"listen,omitempty"`
+	Turn   string `json:"turn,omitempty" yaml:"turn,omitempty"`
+	// Shapes declares the named groups of fields a variable's `type:` refers to.
+	// A list, not a name-keyed catalog, for the reason every authored block in
+	// this file is a list: a map has no order a reader can see and no place for a
+	// per-entry comment (CLAUDE.md, no dictionaries in the authoring surface).
+	// `models:` was unavailable for the name as well, because it already holds
+	// the think/speak/listen/turn catalog.
+	//
+	// Declared before Variables because a variable's type reads a shape's name,
+	// and struct order is what the derived schema publishes.
+	Shapes    []Shape             `json:"shapes,omitempty" yaml:"shapes,omitempty"`
 	Variables map[string]Variable `json:"variables,omitempty" yaml:"variables,omitempty"`
-	// Timezone is the IANA zone every clock reading in this package is taken in.
-	// Required before a clock can be pre-fetched, and required rather than
-	// defaulted because the wrong answer here is silent: a container clock is
-	// UTC, so a salon in Spain taking a booking for "tomorrow" at 23:30 local
-	// would confidently name the wrong day. Package-level, beside Variables,
-	// because it is a fact about the business rather than about one target.
-	Timezone string `json:"timezone,omitempty" yaml:"timezone,omitempty"`
+	// Timezone is retired. The zone lives on the clock entry that reads it, so
+	// two entries can read two zones and so the key sits beside the thing it
+	// governs. This field survives only so a file still carrying the old key is
+	// refused with a sentence naming where to move it, rather than with a strict
+	// decoder complaining about an unknown field. `json:"-"` keeps it out of the
+	// derived authoring schema, so nothing offers it to a new author.
+	Timezone string `json:"-" yaml:"timezone,omitempty"`
 	// Prefetch names the facts resolved once per call, before the greeting, and
 	// where each one lands. An ordered list: entries resolve top to bottom, so
 	// the order the file shows is the order the agent uses, and an entry reading
@@ -88,15 +113,14 @@ type AgentFile struct {
 	// the tool would re-index the same documents once per tool reading them.
 	Knowledge map[string]KnowledgeDef `json:"knowledge,omitempty" yaml:"knowledge,omitempty"`
 	Agents    map[string]AgentDef     `json:"agents" yaml:"agents"`
-	// The three catalogs. Every agent-level list has a same-named top-level
-	// catalog, and the block an entry is written in IS its kind, so there is no
-	// `kind:` field that could disagree with where the entry sits. Declared here,
-	// after Agents and before Tasks, because struct order is what the derived
+	// The two catalogs. Every agent-level list of a name written elsewhere has a
+	// same-named top-level catalog, and the block an entry is written in IS its
+	// kind, so there is no `kind:` field that could disagree with where the entry
+	// sits. Tasks are the exception and are written inside the agent that defines
+	// them. Declared here, after Agents, because struct order is what the derived
 	// schema publishes and the canonical section order starts from the reader.
-	Delegates    map[string]Delegate   `json:"delegates,omitempty" yaml:"delegates,omitempty"`
 	Handoffs     map[string]Handoff    `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
 	Escalations  map[string]Escalation `json:"escalations,omitempty" yaml:"escalations,omitempty"`
-	Tasks        map[string]Task       `json:"tasks,omitempty" yaml:"tasks,omitempty"`
 	TaskGroups   map[string]TaskGroup  `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
 	Tools        []string              `json:"tools,omitempty" yaml:"tools,omitempty"`
 	Conversation *Conversation         `json:"conversation,omitempty" yaml:"conversation,omitempty"`
@@ -275,7 +299,7 @@ type Variable struct {
 	Default any    `json:"default,omitempty" yaml:"default,omitempty"`
 	Source  string `json:"source,omitempty" yaml:"source,omitempty"`
 	// Confirm names the step that must hear the caller agree before anything acts
-	// on this value. Until then the value satisfies no prerequisite and renders
+	// on this value. Until then the value stays marked unconfirmed and renders
 	// only in that step's own prompt. Empty means the value is settled the moment
 	// it arrives, which is true of every variable that existed before this field.
 	Confirm     string `json:"confirm,omitempty" yaml:"confirm,omitempty"`
@@ -300,10 +324,31 @@ type Prefetch struct {
 	// an order a reader can see. It is also what makes a per-entry comment land
 	// somewhere a reader will find it, and what lets a refusal or a log line say
 	// which entry it means.
-	Name   string `json:"name" yaml:"name"`
-	Clock  string `json:"clock,omitempty" yaml:"clock,omitempty"`
-	Source string `json:"source,omitempty" yaml:"source,omitempty"`
-	Tool   string `json:"tool,omitempty" yaml:"tool,omitempty"`
+	Name  string `json:"name" yaml:"name"`
+	Clock string `json:"clock,omitempty" yaml:"clock,omitempty"`
+	// Timezone is the IANA zone this clock entry is read in, and it sits on the
+	// entry rather than on the package for two reasons. A zone beside the reading
+	// it governs is a zone a reader finds; and two entries may honestly want two
+	// zones, which one package-level key cannot express. Required rather than
+	// defaulted because the wrong answer is silent: a container clock is UTC, so
+	// a salon in Spain taking a booking for "tomorrow" at 23:30 local would
+	// confidently name the wrong day.
+	Timezone string `json:"timezone,omitempty" yaml:"timezone,omitempty"`
+	Source   string `json:"source,omitempty" yaml:"source,omitempty"`
+	Tool     string `json:"tool,omitempty" yaml:"tool,omitempty"`
+	// Writes is the author's answer to "does running this unasked, on every call
+	// including wrong numbers, change anything". Required on a tool entry.
+	//
+	// It sits on the entry rather than on the tool because it is a fact about
+	// this use of the tool, not about the tool. The same backend operation may be
+	// safe to run before a greeting and unsafe to run twice, and asking the
+	// question at the call site is what stopped one operation needing two tool
+	// declarations to answer it.
+	//
+	// A pointer so an absent key is distinguishable from `writes: false`. The
+	// refusal for an absent one is the whole feature: the compiler cannot check
+	// either answer, so it makes the author state one rather than inferring it.
+	Writes *bool  `json:"writes,omitempty" yaml:"writes,omitempty"`
 	Args   []Pair `json:"args,omitempty" yaml:"args,omitempty"`
 	Assign []Pair `json:"assign,omitempty" yaml:"assign,omitempty"`
 }
@@ -311,34 +356,60 @@ type Prefetch struct {
 // Secret declares one runtime environment value the package needs. The map key
 // IS the environment variable name (UPPER_SNAKE), so there is no field a value
 // could ever be written into (variable_secrets_specs.md C3, V9).
-// AgentDef is one entry under `agents:`. The four lists are what this agent can
-// do, one list per kind, each naming entries in the same-named catalog. All four
-// are optional: an agent with no delegates omits the key.
+// AgentDef is one entry under `agents:`. Its lists are what this agent can do:
+// tools do work and come back, tasks are sub-conversations it runs and returns
+// from, task groups are ordered runs of task steps, handoffs make the
+// conversation somebody else's, and escalations put the caller through to a
+// person. All are optional.
+//
+// `think:` and `speak:` name entries in the same-named `models:` sections, so the
+// four model kinds are spelled one way everywhere they are referred to.
 type AgentDef struct {
-	Instructions string   `json:"instructions" yaml:"instructions"`
-	Model        string   `json:"model" yaml:"model"`
-	Voice        string   `json:"voice" yaml:"voice"`
-	Tools        []string `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Delegates    []string `json:"delegates,omitempty" yaml:"delegates,omitempty"`
-	Handoffs     []string `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
-	Escalations  []string `json:"escalations,omitempty" yaml:"escalations,omitempty"`
+	Instructions string     `json:"instructions" yaml:"instructions"`
+	Think        string     `json:"think" yaml:"think"`
+	Speak        string     `json:"speak" yaml:"speak"`
+	Tools        []string   `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Tasks        []TaskItem `json:"tasks,omitempty" yaml:"tasks,omitempty"`
+	TaskGroups   []string   `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
+	Handoffs     []string   `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
+	Escalations  []string   `json:"escalations,omitempty" yaml:"escalations,omitempty"`
 }
 
-// Task is one entry under `tasks:`. It has `tools:` and `handoffs:` and no
-// `delegates:` and no `escalations:`, which is how "a task may attach handoffs
-// only" stops being a validation rule and becomes structure: there is no key to
-// write the illegal thing in.
+// Task is one entry of an agent's `tasks:` list. It carries both what the task is
+// and when its agent runs it, which is the whole point of the nesting: there is
+// one name and one place to read.
+//
+// It has `tools:` and `handoffs:` and no task, group or escalation key, which is
+// how "a task may attach handoffs only" stays structure rather than a rule: there
+// is no key to write the illegal thing in.
+//
+// `When` is the trigger and is what makes a task something its agent can decide
+// to run. A task with no `When` is a definition only, valid solely as a step of a
+// task group.
 type Task struct {
-	Instructions string         `json:"instructions" yaml:"instructions"`
-	Tools        []string       `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Handoffs     []string       `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
-	Model        string         `json:"model,omitempty" yaml:"model,omitempty"`
-	Result       map[string]any `json:"result" yaml:"result"`
-	Context      TaskContext    `json:"context" yaml:"context"`
+	Name         string `json:"name" yaml:"name"`
+	Instructions string `json:"instructions" yaml:"instructions"`
+	When         string `json:"when,omitempty" yaml:"when,omitempty"`
+	// Announce is one fixed sentence the agent speaks as the task is entered, so
+	// the two model requests it takes to enter one are not silence. Spoken at
+	// the very start of the step, before anything else runs.
+	Announce string   `json:"announce,omitempty" yaml:"announce,omitempty"`
+	Assign   []Pair   `json:"assign,omitempty" yaml:"assign,omitempty"`
+	Tools    []string `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Handoffs []string `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
+	// Think names an entry of `models.think`, overriding the profile the task
+	// would otherwise inherit. Spelled the way every other think pointer is.
+	Think   string      `json:"think,omitempty" yaml:"think,omitempty"`
+	Context TaskContext `json:"context,omitempty" yaml:"context,omitempty"`
 }
 
+// TaskGroup is one entry under `task_groups:`: an ordered run of task steps. It
+// carries its own trigger, because an agent names a group and nothing else sits
+// between the two to hold one.
 type TaskGroup struct {
 	Steps        []string `json:"steps" yaml:"steps"`
+	When         string   `json:"when,omitempty" yaml:"when,omitempty"`
+	Announce     string   `json:"announce,omitempty" yaml:"announce,omitempty"`
 	ContextScope string   `json:"context_scope" yaml:"context_scope"`
 	Then         string   `json:"then" yaml:"then"`
 	ThenTarget   string   `json:"then_target,omitempty" yaml:"then_target,omitempty"`
@@ -346,41 +417,33 @@ type TaskGroup struct {
 }
 
 type TaskContext struct {
-	History          string `json:"history" yaml:"history"`
+	History          string `json:"history,omitempty" yaml:"history,omitempty"`
 	MaxMessages      int    `json:"max_messages,omitempty" yaml:"max_messages,omitempty"`
 	Summarizer       string `json:"summarizer,omitempty" yaml:"summarizer,omitempty"`
 	IncludeToolCalls *bool  `json:"include_tool_calls,omitempty" yaml:"include_tool_calls,omitempty"`
 }
 
 type TransferContext struct {
-	History          string `json:"history" yaml:"history"`
+	History          string `json:"history,omitempty" yaml:"history,omitempty"`
 	MaxMessages      int    `json:"max_messages,omitempty" yaml:"max_messages,omitempty"`
 	Summarizer       string `json:"summarizer,omitempty" yaml:"summarizer,omitempty"`
 	IncludeToolCalls *bool  `json:"include_tool_calls,omitempty" yaml:"include_tool_calls,omitempty"`
-	Variables        any    `json:"variables" yaml:"variables"`
 }
 
-// Delegate is one entry under `delegates:`. It runs a task or a task group and
-// then control comes back to the agent that ran it.
+// Callable is one thing an agent can decide to run: a task carrying a `when:`,
+// or a task group the agent names. Control comes back to the agent afterwards.
 //
-// Task and Group stay pointers because exactly one of them must be present,
-// which no struct can express, so the check survives in Build and needs to tell
-// an absent key from one written empty.
-type Delegate struct {
-	Task  *string `json:"task,omitempty" yaml:"task,omitempty"`
-	Group *string `json:"group,omitempty" yaml:"group,omitempty"`
-	When  string  `json:"when,omitempty" yaml:"when,omitempty"`
-	// Announce is one fixed sentence the agent speaks as the step is entered, so
-	// the two model requests it takes to enter one are not silence. Not spoken
-	// when the step is refused for unmet prerequisites: the caller hearing "let
-	// me pull up the diary" and then being asked for a phone number is worse than
-	// hearing nothing.
-	//
-	// A plain string, matching Tool.Announce. Handoff.Announce is a *string for
-	// its own historical reason and is not the model to copy here.
-	Announce string            `json:"announce,omitempty" yaml:"announce,omitempty"`
-	Requires []string          `json:"requires,omitempty" yaml:"requires,omitempty"`
-	Assign   map[string]string `json:"assign,omitempty" yaml:"assign,omitempty"`
+// Derived by Load from the nested shape and never authored, so the checks that
+// used to read the `delegates:` catalog keep reading one name-keyed map.
+//
+// Task and Group are plain strings, not pointers. Exactly one is set by
+// construction, because a callable comes from either a nested task or a
+// `task_groups:` entry, so the refusal that used to check it is unwritable.
+type Callable struct {
+	Task     string
+	Group    string
+	When     string
+	Announce string
 }
 
 // Handoff is one entry under `handoffs:`. The conversation becomes another
@@ -393,7 +456,6 @@ type Handoff struct {
 	To       string           `json:"to" yaml:"to"`
 	When     string           `json:"when,omitempty" yaml:"when,omitempty"`
 	Announce *string          `json:"announce,omitempty" yaml:"announce,omitempty"`
-	Requires []string         `json:"requires,omitempty" yaml:"requires,omitempty"`
 	Context  *TransferContext `json:"context,omitempty" yaml:"context,omitempty"`
 }
 
@@ -470,7 +532,7 @@ type Tool struct {
 	// never advertised to the model: a value may carry {{variable}} tokens.
 	// Legal on webhook and local only: an mcp server owns its own call shape,
 	// so there is nothing here to merge into (validate.go, SCHEMA N40).
-	Inject map[string]any `json:"inject,omitempty" yaml:"inject,omitempty"`
+	Inject []Pair `json:"inject,omitempty" yaml:"inject,omitempty"`
 
 	Webhook        *ToolWebhook   `json:"webhook,omitempty" yaml:"webhook,omitempty"`
 	Local          *ToolLocal     `json:"local,omitempty" yaml:"local,omitempty"`
@@ -484,27 +546,12 @@ type Tool struct {
 	//
 	// A pointer, like every other block, because both execution-block agreement
 	// tests read every pointer field on Tool as an execution block. That is the
-	// same reason Announce and ReadOnly below are deliberately plain values, and
-	// here it is what is wanted rather than what has to be worked around.
+	// same reason Announce below is deliberately a plain value, and here it is
+	// what is wanted rather than what has to be worked around.
 	Slng *ToolSlng `json:"slng,omitempty" yaml:"slng,omitempty"`
 
 	Interruption string `json:"interruption,omitempty" yaml:"interruption,omitempty"`
 	Effect       string `json:"effect,omitempty" yaml:"effect,omitempty"`
-
-	// ReadOnly is the author's promise that this tool writes nothing. Required
-	// before a prefetch entry may run it, because a prefetch runs unasked on
-	// every call: a tool that writes would write on every call, wrong numbers
-	// included.
-	//
-	// Deliberately distinct from Effect, which describes what the tool does to
-	// the conversation rather than what it does to data. The compiler cannot
-	// check either claim, so this is a declaration and not a guarantee, and both
-	// the docs and the skill say so in those words.
-	//
-	// ponytail: a plain bool, not a pointer, for the same reason Announce is a
-	// plain string: both execution-block agreement tests read every pointer field
-	// on Tool as an execution block.
-	ReadOnly bool `json:"read_only,omitempty" yaml:"read_only,omitempty"`
 
 	// Announce is one fixed sentence the agent speaks as the tool starts, so a
 	// slow call is not silence. Legal on webhook and local only: every other

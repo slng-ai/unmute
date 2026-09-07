@@ -59,11 +59,11 @@ func TestMaintainKeepsATasksHandoffs(t *testing.T) {
 	data := scaffold.Data{
 		Name: "pkg", AgentName: "acme-support",
 		Agents:   []scaffold.Agent{{Name: "billing", Instructions: "Handle billing."}},
-		Handoffs: []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing", When: "Billing.", History: "full", AllVariables: true}},
+		Handoffs: []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing", When: "Billing.", History: "full"}},
 		Tasks: []scaffold.Task{{
 			Name: "collect", Instructions: "Collect the details.", Agent: "assistant",
 			When: "Collect first.", Handoffs: []string{"to_billing"},
-			Result: `{"done": "boolean"}`, History: "full",
+			History: "full",
 		}},
 	}
 	data.SetTarget("livekit")
@@ -95,5 +95,51 @@ func TestMaintainKeepsATasksHandoffs(t *testing.T) {
 	// And it must not have leaked into tools:, which is where it used to live.
 	if slices.Contains(booking.Tools, "to_billing") {
 		t.Error("to_billing is in the task's tools: list; a handoff rides handoffs:")
+	}
+}
+
+// TestMaintainKeepsATasksAnnounce guards the same silent data loss over
+// another key this feature added.
+//
+// A task's announce: is the line it speaks as the step is entered, so the two
+// model requests it takes to enter one are not silence. A scaffold.Task without
+// an Announce field would have made `unmute maintain` delete the salon
+// package's "Let me pull up the diary." on the way out, quietly and at exit 0.
+func TestMaintainKeepsATasksAnnounce(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "pkg")
+	data := scaffold.Data{
+		Name: "pkg", AgentName: "acme-support",
+		Agents: []scaffold.Agent{{Name: "billing", Instructions: "Handle billing."}},
+		Tasks: []scaffold.Task{{
+			Name: "collect", Instructions: "Collect the details.", Agent: "assistant",
+			When: "Collect first.", Announce: "One moment while I check.",
+			History: "full",
+		}},
+	}
+	data.SetTarget("livekit")
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+
+	agent, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, loss := range agent.losses {
+		if strings.Contains(loss, "announce") {
+			t.Errorf("the console cannot preserve %q, so maintain would delete it", loss)
+		}
+	}
+	var collect *scaffold.Task
+	for i := range agent.data.Tasks {
+		if agent.data.Tasks[i].Name == "collect" {
+			collect = &agent.data.Tasks[i]
+		}
+	}
+	if collect == nil {
+		t.Fatal("the task did not survive the round trip at all")
+	}
+	if collect.Announce != "One moment while I check." {
+		t.Errorf("task announce = %q, want it carried through", collect.Announce)
 	}
 }

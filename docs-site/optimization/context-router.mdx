@@ -125,10 +125,10 @@ What the compiler does add is the name of whoever is speaking. Each agent and
 task sends the `agent_id`, a colon, then its own name:
 
 ```
-optimized-salon-concierge-v12:concierge
-optimized-salon-concierge-v12:complaint_specialist
-optimized-salon-concierge-v12:task.customer_verification
-optimized-salon-concierge-v12:task.booking
+optimized-salon-concierge-v13:concierge
+optimized-salon-concierge-v13:complaint_specialist
+optimized-salon-concierge-v13:task.verify_customer
+optimized-salon-concierge-v13:task.manage_booking
 ```
 
 That is not decoration. The cache key is the last exchange, and it does not
@@ -325,19 +325,18 @@ itself. Every call sends the same prompt, so turns can still repeat. This
 applies to the system prompt only; greetings, tool arguments, injected
 values, and webhook paths keep rendering locally.
 
-Values are read again for every request, not once when the call started, so
-a value learned partway through is in the prompt from the next turn on. A
-router-bound prompt may also name a variable with no value yet, where a
-direct-provider prompt may not: a direct prompt renders once and an unset
-variable leaves a hole compiling refuses, while a router-bound prompt is
-never rendered here at all.
+Only variables referenced by the current prompt are sent. Declaring a shape
+or saving a task result does not add all call state to a router request.
+Dotted references such as `{{appointment.date}}` select that field alone.
 
-Three details worth knowing: a variable with no value sends an empty string,
-never "None", and is still sent, so a placeholder the router got no value for
-is a 422 that ends the call; a value over 4000 characters is truncated with a
-warning on stderr and the call continues; and on Pipecat the refresh happens
-where the call writes the value rather than on every request, since that
-framework offers no per-request hook.
+On LiveKit, values are read again for every request. On Pipecat, they refresh
+when the call saves state. Direct-provider agent prompts refresh when their
+tasks save values, and task prompts render on entry.
+
+An unset referenced value is sent as `none recorded yet.`, never `None`.
+Shapes and lists use compact JSON. A rendered value over 4000 characters is
+shortened with a warning. Prefetch has its own smaller input limit; see
+[Variables](/reference/variables#what-happens-when-it-cannot-resolve).
 
 ### Which values belong in a placeholder
 

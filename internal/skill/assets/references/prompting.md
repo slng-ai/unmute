@@ -4,8 +4,11 @@ Every instructions file, greeting, task prompt, and tool description in a
 package is read out loud or acted on mid-call. A prompt written for chat fails
 in voice, in three specific ways.
 
-No documentation page owns this content yet, so this file has no pointer line.
-When a page lands, this file points at it and stops being the authority.
+The public page is <https://unmute.mintlify.app/best-practices/prompt-writing>,
+which is what a reader lands on. That page is the authority on the rules; this
+file is the longer version a coding agent reads before it writes a package, so
+the two must agree. A rule added here that changes emitted behaviour goes on
+that page in the same commit.
 
 ## Why voice prompts are different
 
@@ -116,13 +119,22 @@ confirmation code, a reference, an ID. Delimit the characters.
 Never put full stops between single characters. NATO words, Alpha and Bravo, help
 where a letter has to be unambiguous.
 
-**A phone number is not one of these.** It is a conventional format, so write it
-the way it is written on a phone and let normalization read it: `+34 111 111 111`,
-`(415) 555-1212`. Delimiting one instead is a live-call failure already paid for
-here. A verification prompt asked for `plus 3 4, 1 1 1, 1 1 1, 1 1 1`; the voice
-said "plus three four" and never spoke the rest of the number, and the caller
+**A phone number is not one of these.** It is a conventional format, so tell the
+model to write it the way it is written on a phone, a plus sign then the country
+code then groups of two to four digits, and let normalization read it.
+Delimiting one instead is a live-call failure already paid for here. A
+verification prompt asked for `plus 3 4, 1 1 1, 1 1 1, 1 1 1`; the voice said
+"plus three four" and never spoke the rest of the number, and the caller
 confirmed digits they had not heard. Commas inside a run of digits are the thing
 that breaks it.
+
+**And never write a specimen number into a prompt.** Describe the grouping in
+words instead. A model cannot tell your illustration from a value it is holding,
+so it reads the illustration out: an agent whose prompt said never to say the
+caller's number read back the example number in its own speech rules, because
+the example was the only number in front of it. That is also how a `confirm:`
+value leaks. The compiler refuses `{{a_confirmed_value}}` in every prompt but
+its confirming step's, and a hardcoded number walks straight past that refusal.
 
 ### Conversational flow
 
@@ -202,8 +214,16 @@ agent's name, and opening hours that never change go inline as text. Every
 template is a chance for a misconfigured deployment to say "customer_name" out
 loud.
 
-A prompt renders once at session start, so it can only name a variable that
-already has a value. See `variables.md`.
+An agent's prompt renders on entry and again once one of its own steps records
+a value. It may already name any declared variable, whether or not anything
+has assigned it yet: an unset one renders as nothing, so write the sentence to
+read whole either way. See `variables.md`.
+
+A placeholder may also name one field of a structured value with a dotted
+path, such as `{{customer.status}}`. That part renders the same empty words
+as a whole value when it is missing, so the sentence still has to read
+whole. A placeholder carries no logic: no conditions, no filters, nothing
+computed, just the value written into the sentence.
 
 ## Making it sound human
 
@@ -365,25 +385,24 @@ The full structure above. This is the only surface that carries identity,
 personality, and guardrails, and every agent in the package needs its own. Two
 agents sharing one file is a sign they should be one agent.
 
-### A delegated task's instructions
+### A task's instructions
 
-Shorter and narrower. A task has one job, its own tool list, and a typed
-`result:` it has to come back with.
+Shorter and narrower. A task has one job, its own tool list, and any typed
+finish fields derived from its `assign:` destinations.
 
 - **Skip identity and personality.** The caller is still hearing the same voice,
   and repeating a personality block in every task gives you five places to
   change it.
 - **Keep output rules only if the task speaks.** Most do.
-- **State the result contract in words.** The schema makes the shape mandatory;
-  the prompt makes the meaning clear. Say what `record_status: failed` means and
-  when to use it.
+- **State saved-value meaning in words.** Variable descriptions shape the
+  finish schema; the prompt says when each outcome applies.
 - **Say what to do when it cannot finish.** A task with no failure path invents
   one.
 - **Skip the finish contract and the off-topic escape.** The compiler appends
   both to every task prompt: which fields `finish` takes, and to call it with
   the caller's request in `unserved_request` instead of refusing when the step's
-  tools cannot serve it. `unserved_request` is reserved; do not put it in
-  `result:`.
+  tools cannot serve it. `unserved_request` is reserved and added by the
+  compiler.
 
 ```markdown
 Find out who is calling.

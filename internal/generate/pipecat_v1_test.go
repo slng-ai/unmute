@@ -345,7 +345,7 @@ func TestV32PipecatGreetingModes(t *testing.T) {
 				Text:        "Hi, this is Sage and Stone Salon.",
 			},
 			want: []string{
-				"from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, TTSSpeakFrame",
+				"TTSSpeakFrame",
 				`TTSSpeakFrame("Hi, this is Sage and Stone Salon.")`,
 				"next(agent for agent in agents",
 				"args=LLMWorkerActivationArgs(run_llm=False)",
@@ -881,8 +881,9 @@ func TestPipecatV1MCPReservesFlowFunctionNames(t *testing.T) {
 			t.Errorf("bot.py does not reserve Flow function %q against MCP collisions:\n%s", want, bot)
 		}
 	}
-	initAt := strings.Index(bot, "self._mcp_clients = [")
-	activationAt := strings.Index(bot, "async def on_activated(self, args) -> None:")
+	worker := pipecatMethodBody(t, bot, "class IntakeAgent(", "\nclass BillingAgent(")
+	initAt := strings.Index(worker, "self._mcp_clients = [")
+	activationAt := strings.Index(worker, "async def on_activated(self, args) -> None:")
 	if initAt < 0 || activationAt < 0 || initAt > activationAt {
 		t.Error("a Flow-owning MCP worker must construct its clients before on_activated")
 	}
@@ -911,7 +912,6 @@ func addPipecatTaskTransferFixture(agent *ir.Agent) {
 		Kind: ir.ControlDelegate, Group: "verification", When: "Verify the caller.",
 	}
 	transfer := agent.Controls["to_billing"].(*ir.AgentTransfer)
-	transfer.Requires = []string{"customer_id"}
 	transfer.Announce = "I’ll connect you with billing now."
 	intake := agent.Agents["intake"]
 	intake.Instructions += "\nCurrent customer: {{customer_id}}."
@@ -944,24 +944,20 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 	for _, want := range []string{
 		"from pipecat.flows import FlowManager, FlowsFunctionSchema, NodeConfig, NO_RESPONSE",
 		`name="to_billing"`,
-		"handler=self._run_verify_transfer_verify_to_billing",
+		"handler=_flow_visit(self, \"run_verify\"",
 		"async def _run_verify_transfer_verify_to_billing(self, args, flow_manager):",
 		`self._run_verify_active_step = "verify"`,
-		`_unmet = _unmet_prerequisites(self.state, ["customer_id"])`,
 		`if self._run_verify_active_step != "verify":`,
 		`return {"status": "already handled"}, NO_RESPONSE`,
 		`async def on_activated(self, args) -> None:`,
-		`delta=LLMSettings(system_instruction=_render(INTAKE_PROMPT, self.state))`,
-		`task_start = len(messages) if flow_messages[:len(messages)] == messages else 0`,
-		`if message.get("role") in {"user", "assistant", "tool"}`,
+		`self.context.set_messages([dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")])`,
 		`return {"transferred": True}, NO_RESPONSE`,
-		`return {"status": "ok", "result": self._run_verify_results["verify"]}, self._run_verify_node_complete()`,
+		`return _task_status(self._run_verify_results["verify"]), self._run_verify_node_complete()`,
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing task-transfer invariant %q", want)
 		}
 	}
-
 	transferAt := strings.Index(bot, "async def _run_verify_transfer_verify_to_billing")
 	finishAt := strings.Index(bot, "async def _run_verify_finish_verify")
 	nextFinishAt := strings.Index(bot, "async def _run_verify_finish_complete")
@@ -969,7 +965,6 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 		t.Fatalf("task transfer/finish chain missing: transfer=%d finish=%d next=%d", transferAt, finishAt, nextFinishAt)
 	}
 	transferBody := bot[transferAt:finishAt]
-	requiresAt := strings.Index(transferBody, "_unmet = _unmet_prerequisites(")
 	stepClaimAt := strings.Index(transferBody, "self._run_verify_active_step = None")
 	tryAt := strings.Index(transferBody, "try:")
 	announceAt := strings.Index(transferBody, "await self._announce_handoff")
@@ -980,11 +975,8 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 		restoreMessagesAt = strings.Index(transferBody[releaseAt:], "self.context.set_messages(flow_messages)")
 		restoreToolsAt = strings.Index(transferBody[releaseAt:], "self.context.set_tools(flow_tools)")
 	}
-	if requiresAt < 0 || stepClaimAt < requiresAt || tryAt < stepClaimAt || announceAt < tryAt || activateAt < announceAt || releaseAt < activateAt || restoreMessagesAt < 0 || restoreToolsAt < restoreMessagesAt {
-		t.Fatalf("task transfer must refuse, claim, attempt, then restore and release on failure: requires=%d step_claim=%d try=%d announce=%d activate=%d release=%d restore_messages=%d restore_tools=%d\n%s", requiresAt, stepClaimAt, tryAt, announceAt, activateAt, releaseAt, restoreMessagesAt, restoreToolsAt, transferBody)
-	}
-	if !strings.Contains(transferBody[:stepClaimAt], `return {"refused": _prerequisite_refusal(_unmet, False)}, None`) {
-		t.Error("a recoverable requires refusal must stay on the task and let its LLM respond")
+	if stepClaimAt < 0 || tryAt < stepClaimAt || announceAt < tryAt || activateAt < announceAt || releaseAt < activateAt || restoreMessagesAt < 0 || restoreToolsAt < restoreMessagesAt {
+		t.Fatalf("task transfer must claim, attempt, then restore and release on failure: step_claim=%d try=%d announce=%d activate=%d release=%d restore_messages=%d restore_tools=%d\n%s", stepClaimAt, tryAt, announceAt, activateAt, releaseAt, restoreMessagesAt, restoreToolsAt, transferBody)
 	}
 	finishBody := bot[finishAt:nextFinishAt]
 	stepGuardAt := strings.Index(finishBody, `if self._run_verify_active_step != "verify":`)
@@ -1001,8 +993,6 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 	for _, want := range []string{
 		`return await self._run_verify_complete_complete()`,
 		`async def _run_verify_complete_complete(self):`,
-		`self._run_verify_active_step = "complete"`,
-		`self._run_verify_results.pop("complete", None)`,
 		// The prompt continues with the compiler's finish contract, so match its
 		// opening rather than the whole literal.
 		`delta=LLMSettings(system_instruction="Complete verification.`,
@@ -1051,9 +1041,11 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	agent.TaskGroups["triage"] = ir.TaskGroup{
 		Steps: []string{"collect"}, ContextScope: ir.ContextIsolated, Then: ir.GroupReturn, Merge: ir.GroupMergeResults,
 	}
+	assignedTask := agent.Tasks["collect"]
+	assignedTask.Assign = []ir.AssignTo{{Var: "verified", Field: "verified_flag"}}
+	agent.Tasks["collect"] = assignedTask
 	agent.Controls["run_collect"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "collect", When: "Collect the caller's account details.",
-		Assign: map[string]string{"verified": "result.verified_flag"},
 	}
 	agent.Controls["run_triage"] = &ir.Delegate{Kind: ir.ControlDelegate, Group: "triage", When: "Run the triage group."}
 	intake := agent.Agents["intake"]
@@ -1074,7 +1066,7 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 		t.Fatal("bot.py not emitted")
 	}
 	for _, want := range []string{
-		"from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMUpdateSettingsFrame, TTSSpeakFrame",
+		"from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMRunFrame, LLMUpdateSettingsFrame, TTSSpeakFrame",
 		"from pipecat.services.settings import LLMSettings",
 		// The compiler appends its finish contract, so this matches the
 		// authored opening only.
@@ -1086,6 +1078,7 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 		// The agent prompt is one module constant, referenced by builder + restore (V2).
 		`INTAKE_PROMPT = """# Intake agent`,
 		`delta=LLMSettings(system_instruction=INTAKE_PROMPT)`,
+		`_settle_task_call(messages, "run_collect", _group_status(self._run_collect_results))`,
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing task role boundary %q", want)
@@ -1103,6 +1096,10 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	activateBase := strings.Index(activationBody, "await super().on_activated(args)")
 	if restoreOnEntry < 0 || activateBase < restoreOnEntry {
 		t.Error("flow owner must restore its agent role before base activation installs tools and messages")
+	}
+	requestReply := strings.Index(activationBody, "await self.queue_frame(LLMRunFrame())")
+	if requestReply < activateBase || !strings.Contains(activationBody, `if args and args.get("run_llm") and not args.get("messages"):`) {
+		t.Error("an activation with no new messages must request a reply after installing the receiver's prompt and tools")
 	}
 	if got := strings.Count(bot, "await self.flush_pipeline()"); got != 4 {
 		t.Errorf("bot.py drains delegate results and owner role updates %d times, want 4", got)
@@ -1369,7 +1366,6 @@ func TestV2PipecatV1AgentTransferAnnouncementWaitsForSourcePlayout(t *testing.T)
 		t.Fatal(err)
 	}
 	transfer := agent.Controls["to_billing"].(*ir.AgentTransfer)
-	transfer.Requires = []string{"customer_id"}
 	transfer.Announce = "I’ll connect you with billing now."
 	agent.Conversation.Greeting = &ir.Greeting{SpeaksFirst: ir.SpeaksFirstUser}
 
@@ -1386,14 +1382,13 @@ func TestV2PipecatV1AgentTransferAnnouncementWaitsForSourcePlayout(t *testing.T)
 	if end := strings.Index(body[1:], "\n    async def "); end >= 0 {
 		body = body[:end+1]
 	}
-	requiresAt := strings.Index(body, "_unmet = _unmet_prerequisites(")
 	announcementAt := strings.Index(body, `await self._announce_handoff("I’ll connect you with billing now.")`)
 	activateAt := strings.Index(body, "await self.activate_worker(")
-	if requiresAt < 0 || activateAt < 0 || announcementAt < 0 {
-		t.Fatalf("transfer method missing requires / exact source announcement / target activation:\n%s", body)
+	if activateAt < 0 || announcementAt < 0 {
+		t.Fatalf("transfer method missing exact source announcement / target activation:\n%s", body)
 	}
-	if requiresAt >= announcementAt || announcementAt >= activateAt {
-		t.Errorf("transfer must guard, finish the exact source announcement, then activate the receiver:\n%s", body)
+	if announcementAt >= activateAt {
+		t.Errorf("transfer must finish the exact source announcement, then activate the receiver:\n%s", body)
 	}
 	if strings.Contains(body[:activateAt], "messages=[") {
 		t.Errorf("the source announcement must not start a second LLM turn:\n%s", body)
@@ -1420,8 +1415,11 @@ func TestV2PipecatV1AgentTransferAnnouncementWaitsForSourcePlayout(t *testing.T)
 	if !strings.Contains(body, "run_llm=True") {
 		t.Error("receiver must answer normally after source playout completes")
 	}
-	if !strings.Contains(body, `"content": "Caller asks about billing, an invoice, or a refund."`) {
-		t.Error("target activation lost its existing transfer reason")
+	if !strings.Contains(body, "messages=[]") {
+		t.Error("target activation does not keep the handoff payload empty")
+	}
+	if strings.Contains(body, `"content": "Caller asks about billing, an invoice, or a refund."`) {
+		t.Error("target activation leaks an implicit source-side briefing")
 	}
 
 	transfer.Announce = ""
@@ -2872,123 +2870,343 @@ func pipecatDirectToolBody(t *testing.T, bot string) string {
 	return body
 }
 
-// TestPipecatV1RefusedDelegateGivesTheModelItsTurnBack exists for one line, and
-// nothing else.
+// pipecatHistoryBot compiles the history fixture and returns its bot.py.
 //
-// The success path resolves the delegate's tool call with run_llm=False on
-// purpose: the flow's first node is the sole responder, and a second completion
-// makes the caller hear the opening line twice. A refused delegate starts no
-// flow, so there is no first node and nothing else in the process is going to
-// speak. Copying run_llm=False onto the refusal leaves a live call in silence,
-// with no exception, no error, and nothing in the trace to find it by.
+// The fixture exists because no other package in the tree authors a non-`full`
+// history on Pipecat, so before it there was nothing to compile as proof that
+// the driver reads ir.TaskContext.History at all.
+func pipecatHistoryBot(t *testing.T) string {
+	t.Helper()
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "history_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate history fixture: %v", err)
+	}
+	return artifactFile(t, artifact, "bot.py")
+}
+
+// Each `context.history` value lowers to its own message list at the task
+// entry, and `full` lowers to nothing at all (FR-007, FR-008, FR-009, FR-013).
 //
-// That failure is invisible to every other test in this file, which is why this
-// one is separate from them and is not allowed to ride on a golden diff.
-func TestPipecatV1RefusedDelegateGivesTheModelItsTurnBack(t *testing.T) {
-	bot := emitFor(t, guardedFixture(t), ir.ProviderPipecat, "bot.py")
+// Pipecat keeps one LLMContext for the whole call and hands every worker the
+// same object, so shaping means replacing that object's message list rather
+// than handing over a copy. LLMContext at pipecat-ai 1.8.0 has no copy(), no
+// truncate() and no exclusion filter, so this is plain list work and the
+// framework provides no safety.
+func TestPipecatLowersEveryTaskHistoryValue(t *testing.T) {
+	bot := pipecatHistoryBot(t)
 
-	start := strings.Index(bot, "    async def manage_booking(self, params: FunctionCallParams):")
-	if start < 0 {
-		t.Fatal("bot.py has no manage_booking method")
+	// reset drives the ContextStrategyConfig line the template already has for
+	// context_scope: isolated. On a node transition RESET replaces the message
+	// list with that node's own task_messages, which is what reset means, so
+	// there is no new emitted code path.
+	if !strings.Contains(bot, "context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET)") {
+		t.Error("history: reset emits no ContextStrategy.RESET on the task node")
 	}
-	method := bot[start:]
-	if end := strings.Index(method[1:], "\n    async def "); end >= 0 {
-		method = method[:end+1]
+	// messages keeps what the caller and the agent said out loud. Tool records
+	// go, which is what LiveKit's `messages` does: .messages() returns message
+	// items only, so a tool result carrying a value is not in it either. On this
+	// target that takes a helper rather than a role filter, for the reason
+	// TestPipecatMessagesLeavesNoOrphanedToolCall holds.
+	if !containsCollapsed(bot, "self.context.set_messages(_speech_only(self.context.get_messages()))") {
+		t.Error("history: messages does not shape the task entry through _speech_only")
 	}
-
-	refusalAt := strings.Index(method, `{"refused": _prerequisite_refusal(`)
-	flowStartAt := strings.Index(method, `properties=FunctionCallResultProperties(run_llm=False)`)
-	if refusalAt < 0 || flowStartAt < 0 {
-		t.Fatalf("expected both a refusal path and a flow-start path:\n%s", method)
+	// last_n bounds the window by the authored max_messages, through the helper
+	// that drops a leading orphan.
+	if !containsCollapsed(bot, "self.context.set_messages(_last_n(self.context.get_messages(), 6))") {
+		t.Error("history: last_n does not bound the task entry by the authored max_messages")
 	}
-	if refusalAt >= flowStartAt {
-		t.Fatalf("the refusal must come before the flow-start resolution:\n%s", method)
-	}
-
-	// Read the refusal branch itself: from `if _unmet:` to the `return` that
-	// leaves it. Comparing against the flow-start offset instead would sweep in
-	// the comment that explains run_llm=False, and the test would fail on prose.
-	branchAt := strings.Index(method, "        if _unmet:")
-	if branchAt < 0 {
-		t.Fatalf("no refusal branch:\n%s", method)
-	}
-	branch := method[branchAt:]
-	if end := strings.Index(branch, "\n            return\n"); end >= 0 {
-		branch = branch[:end]
-	} else {
-		t.Fatalf("the refusal branch must return:\n%s", branch)
+	// full keeps speech and paired tool records while dropping old instructions.
+	entry := pipecatMethodBody(t, bot, "self._take_message_snapshot = (", "await flow.initialize(")
+	if !strings.Contains(entry, `m.get("role") in ("user", "assistant", "tool")`) {
+		t.Errorf("history: full does not remove prior instructions:\n%s", entry)
 	}
 
-	// The refusal must resolve its call, or the model never gets its turn back.
-	if !strings.Contains(branch, "await params.result_callback(") {
-		t.Errorf("the refusal must resolve the tool call:\n%s", branch)
-	}
-
-	// And it must resolve it WITHOUT run_llm=False.
-	if strings.Contains(branch, "run_llm=False") && !strings.Contains(branch, "# ") {
-		t.Error("the refusal path resolves with run_llm=False. A refused delegate starts no flow, so nothing else will speak and the call goes silent with nothing in the trace")
-	}
-	for _, line := range strings.Split(branch, "\n") {
-		code := line
-		if hash := strings.Index(code, "#"); hash >= 0 {
-			code = code[:hash]
+	// The emitted module has to parse. The shaping sites add a helper, two call
+	// sites and an import gated on two conditions, and a missed import is a
+	// NameError at worker start rather than anything a string assertion sees.
+	// Skipped where python3 is absent, so the default suite still needs none.
+	if _, err := exec.LookPath("python3"); err == nil {
+		path := filepath.Join(t.TempDir(), "bot.py")
+		if err := os.WriteFile(path, []byte(bot), 0o644); err != nil {
+			t.Fatal(err)
 		}
-		if strings.Contains(code, "run_llm=False") {
-			t.Errorf("the refusal path resolves with run_llm=False, which leaves a live call silent with nothing in the trace: %s", line)
+		if out, err := exec.Command("python3", "-m", "py_compile", path).CombinedOutput(); err != nil {
+			t.Fatalf("the shaped bot.py is not valid Python:\n%s", out)
 		}
-	}
-	_ = refusalAt
-
-	// The flow-start path must keep it, or the caller hears the opening line
-	// twice. Both halves of the asymmetry, held together.
-	if !strings.Contains(method[flowStartAt-400:flowStartAt], "run_llm=False: the flow's first node") {
-		t.Error("the flow-start path must keep run_llm=False and say why")
 	}
 }
 
-// TestPipecatV1DelegateRequiresGuard is the Pipecat side of the same list the
-// LiveKit test holds: guard before any work, counter, bound, reset, both log
-// lines with names only, and the forward declaration on the description.
-func TestPipecatV1DelegateRequiresGuard(t *testing.T) {
-	bot := emitFor(t, guardedFixture(t), ir.ProviderPipecat, "bot.py")
-
-	start := strings.Index(bot, "    async def manage_booking(self, params: FunctionCallParams):")
-	if start < 0 {
-		t.Fatal("bot.py has no manage_booking method")
+// The last_n helper cuts at the front and then drops what the cut orphaned
+// (FR-009, SC-005).
+//
+// This is the load-bearing assertion of the story. A `tool` message with no
+// matching `tool_call_id` is not a cosmetic problem: it is a request the
+// provider rejects, mid-call, on a step that worked in every test that did not
+// happen to leave one. The front is the only cut being made, so the tail is
+// intact and the sole orphan possible is a leading tool result whose assistant
+// call fell outside the window. LiveKit gets this free from truncate().
+func TestPipecatLastNLeavesNoOrphanedToolResult(t *testing.T) {
+	bot := pipecatHistoryBot(t)
+	if !strings.Contains(bot, "def _last_n(") {
+		t.Fatal("no _last_n helper is emitted, so nothing bounds a last_n window")
 	}
-	method := bot[start:]
-	if end := strings.Index(method[1:], "\n    async def "); end >= 0 {
-		method = method[:end+1]
-	}
-
-	guardAt := strings.Index(method, `_unmet = _unmet_prerequisites(self.state, ["customer_id"])`)
-	resultsAt := strings.Index(method, "_results = {}")
-	flowAt := strings.Index(method, "flow = FlowManager(")
-	if guardAt < 0 || resultsAt < 0 || flowAt < 0 || guardAt >= resultsAt || resultsAt >= flowAt {
-		t.Fatalf("the guard must run before the results dict and before the flow is built:\n%s", method)
-	}
-
+	helper := pipecatMethodBody(t, bot, "def _last_n(", "\n\n\n")
 	for _, want := range []string{
-		`_tries = _prerequisite_refusals.get("manage_booking", 0) + 1`,
-		"_at_limit = _tries >= _PREREQUISITE_LIMIT",
-		`_prerequisite_refusals["manage_booking"] = 0`,
+		`messages[-limit:]`,
+		`while window and window[0].get("role") == "tool":`,
 	} {
-		if !strings.Contains(method, want) {
-			t.Errorf("emitted guard missing %q:\n%s", want, method)
+		if !containsCollapsed(helper, want) {
+			t.Errorf("the _last_n helper is missing %q:\n%s", want, helper)
+		}
+	}
+	sliceAt := strings.Index(helper, "messages[-limit:]")
+	dropAt := strings.Index(helper, `window[0].get("role") == "tool"`)
+	if sliceAt < 0 || dropAt < sliceAt {
+		t.Errorf("the orphan drop must follow the cut that can create one:\n%s", helper)
+	}
+}
+
+// `messages` drops a tool call together with its reply, because half of one is
+// a request the provider refuses.
+//
+// This is the live-call defect the value shipped with, and it is worth being
+// exact about why every test passed anyway. `messages` was a role filter:
+// keep "user" and "assistant", drop the rest. On LiveKit that is complete,
+// because .messages() holds no function-call items, so a call and its result
+// are both already outside it. On Pipecat the context is provider-shaped
+// dicts, where a call is a `tool_calls` key on a message whose role is
+// "assistant" and only the reply carries role "tool". So the filter kept every
+// call and dropped everything answering it, and the step's first request came
+// back 400: "An assistant message with 'tool_calls' must be followed by tool
+// messages responding to each 'tool_call_id'". A string assertion about a role
+// filter cannot see that; running the filter can.
+func TestPipecatMessagesLeavesNoOrphanedToolCall(t *testing.T) {
+	bot := pipecatHistoryBot(t)
+	if !strings.Contains(bot, "def _speech_only(") {
+		t.Fatal("no _speech_only helper is emitted, so history: messages shapes nothing")
+	}
+	helper := pipecatMethodBody(t, bot, "def _speech_only(", "\n\n\n")
+	for _, want := range []string{
+		`message.get("role") not in ("user", "assistant")`,
+		`if not message.get("tool_calls"):`,
+		`if key != "tool_calls"`,
+		`if spoken.get("content"):`,
+	} {
+		if !containsCollapsed(helper, want) {
+			t.Errorf("the _speech_only helper is missing %q:\n%s", want, helper)
 		}
 	}
 
-	resetAt := strings.Index(method, `_prerequisite_refusals["manage_booking"] = 0`)
-	if resetAt < guardAt || resetAt > resultsAt {
-		t.Errorf("the counter must reset where the step starts, not in the refusal branch:\n%s", method)
+	// What the provider checks, checked by running the emitted helper over the
+	// context that failed. Skipped where python3 is absent, so the default
+	// suite still needs none.
+	if _, err := exec.LookPath("python3"); err != nil {
+		return
 	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "helper.py"), []byte(helper), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The live context, in order: the greeting, the caller, the delegate call,
+	// its running marker, the task result, and the second delegate call.
+	if err := os.WriteFile(filepath.Join(dir, "check.py"), []byte(`
+from helper import _speech_only
 
-	doc := method[:guardAt]
-	for _, want := range []string{"customer_id", "verify_customer"} {
-		if !strings.Contains(doc, want) {
-			t.Errorf("the function description must name %q so the model collects it earlier:\n%s", want, doc)
+live = [
+    {"role": "assistant", "content": "greeting"},
+    {"role": "user", "content": "I want to book a haircut."},
+    {"role": "assistant", "tool_calls": [{"id": "call_a", "function": {"name": "verify_customer"}}]},
+    {"role": "tool", "content": "{\"status\": \"running\"}", "tool_call_id": "call_a"},
+    {"role": "developer", "content": "Task results: ..."},
+    {"role": "assistant", "tool_calls": [{"id": "call_b", "function": {"name": "manage_booking"}}]},
+]
+kept = _speech_only(live)
+
+orphans = [c["id"] for m in kept for c in m.get("tool_calls", [])]
+assert not orphans, f"a tool call survives with nothing answering it: {orphans}"
+assert not [m for m in kept if m.get("role") == "tool"], "a tool reply survives with no call"
+assert [m.get("content") for m in kept] == ["greeting", "I want to book a haircut."], kept
+
+# An assistant turn that spoke and called a tool keeps what it said: the words
+# are the half this value exists to carry.
+mixed = _speech_only([{"role": "assistant", "content": "Let me look.", "tool_calls": [{"id": "x"}]}])
+assert mixed == [{"role": "assistant", "content": "Let me look."}], mixed
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("python3", "check.py")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("the emitted _speech_only leaves a request the provider refuses:\n%s", out)
+	}
+}
+
+// A non-`full` value on a handoff shapes the receiving worker's context, and
+// does it before the worker is activated (FR-019, FR-020).
+//
+// Not an extra: the capability lookup takes a value and a provider and nothing
+// else, and the same validateContext runs for a task and for a transfer. So
+// the moment `reset` stops being refused on Pipecat it is legal on a Pipecat
+// handoff too. A handoff hands the receiving worker the same shared
+// LLMContext plus one developer message, so leaving this path alone would mean
+// accepting a value and ignoring it, which is the silent downgrade Principle
+// II forbids by name.
+func TestPipecatShapesAHandoffByTheSameValues(t *testing.T) {
+	bot := pipecatHistoryBot(t)
+	handoff := pipecatMethodBody(t, bot, "async def to_billing(self, params: FunctionCallParams):", "\n    @_direct_tool")
+	shapeAt := strings.Index(handoff, "self.context.set_messages([])")
+	activateAt := strings.Index(handoff, "await self.activate_worker(")
+	if shapeAt < 0 {
+		t.Fatalf("history: reset on a handoff shapes nothing, so the receiver gets the whole call:\n%s", handoff)
+	}
+	if activateAt < 0 || shapeAt > activateAt {
+		t.Errorf("the handoff must shape the context before it activates the receiver:\n%s", handoff)
+	}
+}
+
+// The owner's context comes back whatever the step saw (FR-010).
+//
+// The snapshot is taken before the shaping, so the finish path restores the
+// full owner context even from a step that ran on an empty one. Nothing about
+// the finish path changes, and that is the claim: only the typed result crosses
+// back.
+func TestPipecatRestoresTheOwnerContextAtEveryHistoryValue(t *testing.T) {
+	bot := pipecatHistoryBot(t)
+	for _, method := range []string{"_confirm_number", "_read_back", "_sort_invoice", "_take_message"} {
+		snapshot := method + "_snapshot = (copy.deepcopy(self.context.get_messages()), self.context.tools)"
+		if !strings.Contains(bot, "self."+snapshot) {
+			t.Errorf("%s takes no owner snapshot, so its finish has nothing to restore", method)
+		}
+		if !strings.Contains(bot, "messages, tools = self."+method+"_snapshot") {
+			t.Errorf("%s never restores the owner's messages and tools", method)
 		}
 	}
+	// The snapshot has to precede the shaping, or the owner's context is
+	// restored from whatever the step was given rather than from what it had.
+	// read_back is the case that can get this wrong: it is the one whose entry
+	// both snapshots and shapes.
+	entry := pipecatMethodBody(t, bot, "async def read_back(self, params: FunctionCallParams):", "def _read_back_node_read_back")
+	snapshotAt := strings.Index(entry, "self._read_back_snapshot = (")
+	shapeAt := strings.Index(entry, "self.context.set_messages(")
+	if snapshotAt < 0 || shapeAt < 0 || snapshotAt > shapeAt {
+		t.Errorf("the owner snapshot must be taken before the step's context is shaped: snapshot=%d shape=%d\n%s", snapshotAt, shapeAt, entry)
+	}
+}
 
-	assertGuardLogsNamesOnly(t, method, "pipecat")
+// containsCollapsed asks whether the emitted module contains a fragment, with
+// every run of whitespace treated as one space.
+//
+// The emitted bot.py goes through a Python formatter, so a one-line template
+// expression can arrive wrapped over five lines. Matching the collapsed form
+// keeps an assertion about behaviour from failing on a change of line width.
+func containsCollapsed(text, want string) bool {
+	return strings.Contains(strings.Join(strings.Fields(text), " "), strings.Join(strings.Fields(want), " "))
+}
+
+// pipecatMethodBody returns the emitted text from one marker up to the next, so
+// an assertion can say "inside this method" rather than "somewhere in the file".
+func pipecatMethodBody(t *testing.T, bot, from, to string) string {
+	t.Helper()
+	start := strings.Index(bot, from)
+	if start < 0 {
+		t.Fatalf("emitted bot.py has no %q", from)
+	}
+	rest := bot[start:]
+	if end := strings.Index(rest[len(from):], to); end >= 0 {
+		return rest[:len(from)+end]
+	}
+	return rest
+}
+
+// A shared task group keeps its shared context while each member applies its
+// own history policy.
+//
+// This is behaviour at HEAD that the change must not disturb, and the way it
+// holds is structural: the driver reads a task's context only on a single-task
+// delegate, which is the same split LiveKit makes. A group step reaching for
+// its own `history:` would mean two settings deciding one thing, with the
+// group's the one the author wrote down.
+func TestPipecatTaskGroupStillGovernsItsMembersContext(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addPipecatTaskTransferFixture(agent)
+	// A member asking for the shortest context there is inside a shared group.
+	verify := agent.Tasks["verify"]
+	verify.Context = ir.TaskContext{History: ir.HistoryReset}
+	agent.Tasks["verify"] = verify
+	complete := agent.Tasks["complete"]
+	complete.Context = ir.TaskContext{History: ir.HistoryLastN, MaxMessages: 2}
+	agent.Tasks["complete"] = complete
+
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate task group: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	if !strings.Contains(bot, "_last_n(self.context.get_messages(), 2)") {
+		t.Error("the later group member does not apply its own last_n policy")
+	}
+	if !strings.Contains(bot, "ContextStrategy.RESET") {
+		t.Error("the first group member does not apply its own reset policy")
+	}
+}
+
+// A Pipecat package where every task and handoff authors `history: full` drops
+// prior instructions while retaining speech and tool pairs.
+//
+// This is what makes the change safe to land: `full` on this target is not a
+// setting the driver implements, it is what one shared LLMContext per call
+// already does. So the whole of `full` is the absence of a shaping call, and
+// every existing Pipecat golden in the tree stays where it is. The goldens hold
+// that too; this says it in one place with the reason attached.
+func TestPipecatFullOnlyPackageEmitsNoShaping(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addPipecatTaskTransferFixture(agent)
+	single := &ir.Delegate{Kind: ir.ControlDelegate, Task: "complete", When: "Finish up."}
+	agent.Controls["run_complete"] = single
+	intake := agent.Agents["intake"]
+	intake.Tools = append(intake.Tools, "run_complete")
+	agent.Agents["intake"] = intake
+
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate full-only package: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	if strings.Contains(bot, "def _last_n(") {
+		t.Error("a full-only package emits the _last_n helper, so the gate on it is not working")
+	}
+	if strings.Contains(bot, "ContextStrategy") {
+		t.Error("a full-only package imports or names ContextStrategy")
+	}
+	// The single-task delegate applies full's role filter.
+	entry := pipecatMethodBody(t, bot, "self._run_complete_snapshot = (", "await flow.initialize(")
+	if !strings.Contains(entry, `m.get("role") in ("user", "assistant", "tool")`) {
+		t.Errorf("history: full does not strip old instructions on task entry:\n%s", entry)
+	}
+	handoff := pipecatMethodBody(t, bot, "async def to_billing(self, params: FunctionCallParams):", "\n    @_direct_tool")
+	if !strings.Contains(handoff, `m.get("role") in ("user", "assistant", "tool")`) {
+		t.Errorf("history: full does not strip old instructions on handoff:\n%s", handoff)
+	}
 }

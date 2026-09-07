@@ -13,6 +13,44 @@ import (
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
+func TestGroupOnlyTaskValidatesAssignments(t *testing.T) {
+	pkg := loadSafeCore(t)
+	attachStep(pkg, "intake", packagespec.Task{
+		Name: "collect", Instructions: "collect.md",
+		Assign: []packagespec.Pair{{Key: "undeclared", Value: "result.id"}},
+	}, "Collect the customer ID.")
+	delete(pkg.Callables, "collect")
+	pkg.Agent.TaskGroups = map[string]packagespec.TaskGroup{"collect_group": {
+		Steps: []string{"collect"}, When: "Collect", ContextScope: "shared", Then: "return",
+	}}
+	owner := pkg.Agent.Agents["intake"]
+	owner.TaskGroups = []string{"collect_group"}
+	pkg.Agent.Agents["intake"] = owner
+	pkg.Callables["collect_group"] = packagespec.Callable{Group: "collect_group", When: "Collect"}
+	_, err := Build(pkg)
+	if err == nil || !strings.Contains(err.Error(), "undeclared") {
+		t.Fatalf("group-only assignment must be checked, got %v", err)
+	}
+	task := pkg.Tasks["collect"]
+	task.Assign[0].Key = "customer_id"
+	pkg.Tasks["collect"] = task
+	resolved, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resolved.Tasks["collect"].Assign; len(got) != 1 || got[0].Var != "customer_id" {
+		t.Fatalf("group-only task lost assignments: %v", got)
+	}
+	pkg.Callables["collect"] = packagespec.Callable{Task: "collect", When: "Collect"}
+	resolved, err = Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resolved.Tasks[resolved.Controls["collect"].(*Delegate).Task].Assign; len(got) != 1 {
+		t.Fatalf("reused task lost its assignments: %v", got)
+	}
+}
+
 func TestBuildBuiltinToolResolvesRegistryDefaults(t *testing.T) {
 	pkg := loadSafeCore(t)
 	tool := pkg.Tools["lookup_customer"]
@@ -556,7 +594,7 @@ func TestBuildTracingSecretsAreProviderSpecific(t *testing.T) {
 func TestBuildReportsUnresolvedReferenceAtSource(t *testing.T) { // V1
 	pkg := loadSafeCore(t)
 	intake := pkg.Agent.Agents["intake"]
-	intake.Model = "missing_model"
+	intake.Think = "missing_model"
 	pkg.Agent.Agents["intake"] = intake
 	_, err := Build(pkg)
 	if err == nil || !strings.Contains(err.Error(), "agent.yaml") || !strings.Contains(err.Error(), "missing_model") {
@@ -677,14 +715,14 @@ func TestBuildRefusesAFieldFromAnotherKind(t *testing.T) {
 		},
 		{
 			name: "delegates: inside a task definition",
-			from: "\nhandoffs:\n  to_billing:",
-			to:   "\ntasks:\n  collect:\n    instructions: instructions.md\n    delegates:\n      - run_it\n\nhandoffs:\n  to_billing:",
+			from: "    tools:\n      - lookup_customer\n    handoffs:\n      - to_billing",
+			to:   "    tools:\n      - lookup_customer\n    tasks:\n      - name: collect\n        instructions: instructions.md\n        delegates:\n          - run_it\n    handoffs:\n      - to_billing",
 			want: "delegates",
 		},
 		{
 			name: "escalations: inside a task definition",
-			from: "\nhandoffs:\n  to_billing:",
-			to:   "\ntasks:\n  collect:\n    instructions: instructions.md\n    escalations:\n      - to_manager\n\nhandoffs:\n  to_billing:",
+			from: "    tools:\n      - lookup_customer\n    handoffs:\n      - to_billing",
+			to:   "    tools:\n      - lookup_customer\n    tasks:\n      - name: collect\n        instructions: instructions.md\n        escalations:\n          - to_manager\n    handoffs:\n      - to_billing",
 			want: "escalations",
 		},
 	} {
@@ -739,7 +777,7 @@ func TestBuildEnforcesModelReferenceContract(t *testing.T) { // V22
 			name: "wrong section reference",
 			mutate: func(pkg *packagespec.Package) {
 				intake := pkg.Agent.Agents["intake"]
-				intake.Voice = "fast_reasoning" // a think entry used as a voice
+				intake.Speak = "fast_reasoning" // a think entry used as a speak model
 				pkg.Agent.Agents["intake"] = intake
 			},
 			want: "is a think model, not a speak model",
@@ -954,15 +992,6 @@ func TestUnreachableControlIsRefused(t *testing.T) {
 			want:   `handoff "to_billing" is declared but no agent reaches it`,
 		},
 		{
-			name: "unattached delegate",
-			mutate: func(pkg *packagespec.Package) {
-				addTask(pkg, "check_balance")
-				task := "check_balance"
-				pkg.Agent.Delegates = map[string]packagespec.Delegate{"run_check": {Task: &task}}
-			},
-			want: `delegate "run_check" is declared but no agent reaches it`,
-		},
-		{
 			name: "unreferenced destination",
 			mutate: func(pkg *packagespec.Package) {
 				pkg.Agent.Destinations["front_desk_line"] = "FRONT_DESK_PHONE_NUMBER"
@@ -977,7 +1006,7 @@ func TestUnreachableControlIsRefused(t *testing.T) {
 		{
 			name:   "unreachable task",
 			mutate: func(pkg *packagespec.Package) { addTask(pkg, "check_balance") },
-			want:   `task "check_balance" is declared but nothing reaches it`,
+			want:   `task "check_balance" has no when: and no task group lists it in steps:`,
 		},
 		{
 			name: "unreachable task group",
@@ -988,13 +1017,13 @@ func TestUnreachableControlIsRefused(t *testing.T) {
 					Steps: []string{"check_balance"}, ContextScope: "shared", Then: "return",
 				}
 			},
-			want: `task group "closing" is declared but nothing reaches it`,
+			want: `task group "closing" is declared but no agent reaches it`,
 		},
 		{
 			name: "unreachable agent",
 			mutate: func(pkg *packagespec.Package) {
 				pkg.Agent.Agents["specialist"] = packagespec.AgentDef{
-					Instructions: "instructions.md", Model: "careful_reasoning", Voice: "specialist",
+					Instructions: "instructions.md", Think: "careful_reasoning", Speak: "specialist",
 				}
 			},
 			want: `agent "specialist" is declared but the entry agent "intake" cannot reach it`,
@@ -1039,15 +1068,16 @@ func TestUnreachableControlIsRefused(t *testing.T) {
 func TestTaskScopedAgentTransferIsReachable(t *testing.T) {
 	pkg := loadSafeCore(t)
 	detach(pkg, "intake", "to_billing")
-	addTask(pkg, "route_billing")
-	task := pkg.Agent.Tasks["route_billing"]
-	task.Handoffs = []string{"to_billing"}
-	pkg.Agent.Tasks["route_billing"] = task
-	taskName := "route_billing"
-	pkg.Agent.Delegates = map[string]packagespec.Delegate{"start_routing": {Task: &taskName}}
+	task := packagespec.Task{
+		Name: "route_billing", Instructions: "instructions.md",
+		When:     "The caller needs billing.",
+		Handoffs: []string{"to_billing"},
+	}
 	intake := pkg.Agent.Agents["intake"]
-	intake.Delegates = append(intake.Delegates, "start_routing")
+	intake.Tasks = append(intake.Tasks, packagespec.TaskItem{Task: &task})
 	pkg.Agent.Agents["intake"] = intake
+	pkg.Tasks["route_billing"] = task
+	pkg.Callables["route_billing"] = packagespec.Callable{Task: "route_billing", When: task.When}
 
 	if _, err := Build(pkg); err != nil {
 		t.Fatalf("task-scoped agent transfer must reach its target: %v", err)
@@ -1079,18 +1109,28 @@ func detach(pkg *packagespec.Package, agent, name string) {
 		return slices.DeleteFunc(slices.Clone(list), func(entry string) bool { return entry == name })
 	}
 	def := pkg.Agent.Agents[agent]
-	def.Tools, def.Delegates = drop(def.Tools), drop(def.Delegates)
+	def.Tasks = slices.DeleteFunc(slices.Clone(def.Tasks), func(item packagespec.TaskItem) bool {
+		if item.Task != nil {
+			return item.Task.Name == name
+		}
+		return item.Ref == name
+	})
+	def.Tools, def.TaskGroups = drop(def.Tools), drop(def.TaskGroups)
 	def.Handoffs, def.Escalations = drop(def.Handoffs), drop(def.Escalations)
 	pkg.Agent.Agents[agent] = def
 }
 
+// addTask declares a task with no when:, so it is reachable by nothing: not
+// attached to any agent's tasks: list, and not a task group's step.
+// Package.Tasks is derived by flattenTasks from the nested authoring shape, so
+// an orphaned declaration is set here directly rather than through an agent.
 func addTask(pkg *packagespec.Package, name string) {
-	if pkg.Agent.Tasks == nil {
-		pkg.Agent.Tasks = map[string]packagespec.Task{}
+	if pkg.Tasks == nil {
+		pkg.Tasks = map[string]packagespec.Task{}
 	}
-	pkg.Agent.Tasks[name] = packagespec.Task{
+	pkg.Tasks[name] = packagespec.Task{
+		Name:         name,
 		Instructions: "instructions.md",
-		Result:       map[string]any{"balance": "string"},
 		Context:      packagespec.TaskContext{History: "full"},
 	}
 }
@@ -1106,23 +1146,22 @@ func addTask(pkg *packagespec.Package, name string) {
 // time this shipped.
 func TestDelegateAnnounceIsAFieldOfItsOwn(t *testing.T) {
 	pkg := loadSafeCore(t)
-	task := packagespec.Task{Instructions: "instructions.md", Result: map[string]any{"ok": "boolean"}}
-	pkg.Agent.Tasks = map[string]packagespec.Task{"collect": task}
-	name := "collect"
-	pkg.Agent.Delegates = map[string]packagespec.Delegate{
-		"run_it": {Task: &name, When: "Collect the details.", Announce: "  One moment.  "},
+	task := packagespec.Task{
+		Name: "collect", Instructions: "instructions.md", When: "Collect the details.", Announce: "  One moment.  ",
 	}
 	def := pkg.Agent.Agents["intake"]
-	def.Delegates = []string{"run_it"}
+	def.Tasks = append(def.Tasks, packagespec.TaskItem{Task: &task})
 	pkg.Agent.Agents["intake"] = def
+	pkg.Tasks["collect"] = task
+	pkg.Callables["collect"] = packagespec.Callable{Task: "collect", When: task.When, Announce: task.Announce}
 
 	agent, err := Build(pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegate, ok := agent.Controls["run_it"].(*Delegate)
+	delegate, ok := agent.Controls["collect"].(*Delegate)
 	if !ok {
-		t.Fatalf("run_it is not a delegate: %T", agent.Controls["run_it"])
+		t.Fatalf("collect is not a delegate: %T", agent.Controls["collect"])
 	}
 	// One TrimSpace, matching buildTool: a blank or whitespace-only line reads as
 	// no announcement, so every driver sees a settled value and none of them has
@@ -1414,78 +1453,6 @@ func TestBuildGivesTheSIPPlaneRouteThePlanesGraph(t *testing.T) {
 	}
 }
 
-// A delegate may declare `requires:`, and the same rules apply to it as to a
-// handoff: every name must resolve to a declared variable, and the field stays
-// illegal on a human transfer.
-//
-// The gap this closes is worth stating, because the shape of the release example
-// was built around it. Before this, a returning step could not say what it
-// needed, so an author who wanted a machine-checked prerequisite had to put an
-// agent in front of the step purely to hold the guard. That agent then had to be
-// spoken through, which cost a turn and taught readers a structure they did not
-// need.
-func TestBuildDelegateRequires(t *testing.T) {
-	load := func(t *testing.T) *packagespec.Package {
-		t.Helper()
-		pkg, err := packagespec.Load(filepath.Join("..", "testdata", "remy"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return pkg
-	}
-
-	t.Run("declared variable builds", func(t *testing.T) {
-		pkg := load(t)
-		control := pkg.Agent.Delegates["do_reserve"]
-		control.Requires = []string{"caller_phone"}
-		pkg.Agent.Delegates["do_reserve"] = control
-
-		agent, err := Build(pkg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		delegate, ok := agent.Controls["do_reserve"].(*Delegate)
-		if !ok {
-			t.Fatalf("control union = %T", agent.Controls["do_reserve"])
-		}
-		if !slices.Equal(delegate.Requires, []string{"caller_phone"}) {
-			t.Errorf("delegate requires = %v, want [caller_phone]", delegate.Requires)
-		}
-	})
-
-	t.Run("undeclared variable fails with a location", func(t *testing.T) {
-		pkg := load(t)
-		control := pkg.Agent.Delegates["do_reserve"]
-		control.Requires = []string{"not_a_variable"}
-		pkg.Agent.Delegates["do_reserve"] = control
-
-		_, err := Build(pkg)
-		if err == nil {
-			t.Fatal("a requires name that resolves to no variable must fail at compile")
-		}
-		// The author needs to find the line, not just learn that something is
-		// wrong: a guard on a name nothing sets can never pass at runtime, and
-		// the symptom there is a step that silently never starts.
-		if !strings.Contains(err.Error(), "not_a_variable") || !strings.Contains(err.Error(), "agent.yaml") {
-			t.Errorf("error must name the value and the file: %v", err)
-		}
-	})
-
-	// Widening the field to delegates must not widen it to everything. An
-	// escalation hands the call to a person and has no result to withhold, so a
-	// prerequisite on one would describe a guard nothing implements.
-	//
-	// It is now unwritable rather than rejected: spec.Escalation has no Requires
-	// field, so the refusal happens at decode and carries a line and a column.
-	t.Run("still illegal on an escalation", func(t *testing.T) {
-		err := patchSafeCore(t, "\nhandoffs:\n  to_billing:",
-			"\nescalations:\n  to_manager:\n    requires:\n      - customer_id\n    cold:\n      destination: manager_line\n\nhandoffs:\n  to_billing:")
-		if err == nil || !strings.Contains(err.Error(), "requires") {
-			t.Fatalf("requires on an escalation must stay illegal: %v", err)
-		}
-	})
-}
-
 // The prompt directive reaches every prompt site on its own think profile, and
 // no site on any other profile.
 //
@@ -1507,20 +1474,26 @@ func TestBuildPromptSuffixReachesItsProfileAndNoOther(t *testing.T) {
 		pkg.Markdown["tasks/inherits.md"] = "Collect the caller's account details."
 		pkg.Markdown["tasks/names_other.md"] = "Read the invoice back to the caller."
 		// intake is the entry agent and runs on fast_reasoning, so a task naming no
-		// model of its own inherits that profile and must carry the directive too.
-		pkg.Agent.Tasks = map[string]packagespec.Task{
-			"inherits":    {Instructions: "tasks/inherits.md"},
-			"names_other": {Instructions: "tasks/names_other.md", Model: "careful_reasoning"},
+		// think profile of its own inherits that profile and must carry the
+		// directive too.
+		inherits := packagespec.Task{
+			Name: "inherits", Instructions: "tasks/inherits.md",
+			When: "Collect the caller's account details.",
 		}
-		// A declared task nothing reaches is refused, so both get a delegate and
-		// intake gets both delegates.
-		inherits, namesOther := "inherits", "names_other"
-		pkg.Agent.Delegates = map[string]packagespec.Delegate{
-			"run_inherits":    {Task: &inherits, When: "Collect the caller's account details."},
-			"run_names_other": {Task: &namesOther, When: "Read the invoice back."},
+		namesOther := packagespec.Task{
+			Name: "names_other", Instructions: "tasks/names_other.md", Think: "careful_reasoning",
+			When: "Read the invoice back.",
+		}
+		pkg.Tasks = map[string]packagespec.Task{"inherits": inherits, "names_other": namesOther}
+		// A declared task nothing reaches is refused, so both get a when: and
+		// intake's tasks: list names both.
+		pkg.Callables = map[string]packagespec.Callable{
+			"inherits":    {Task: "inherits", When: inherits.When},
+			"names_other": {Task: "names_other", When: namesOther.When},
 		}
 		intake := pkg.Agent.Agents["intake"]
-		intake.Delegates = append(intake.Delegates, "run_inherits", "run_names_other")
+		intake.Tasks = append(intake.Tasks,
+			packagespec.TaskItem{Task: &inherits}, packagespec.TaskItem{Task: &namesOther})
 		pkg.Agent.Agents["intake"] = intake
 		agent, err := Build(pkg)
 		if err != nil {
@@ -1595,7 +1568,7 @@ func TestBuildPromptSuffixMovesNoCacheScope(t *testing.T) {
 			Params: map[string]any{"world_part_override": "eu"},
 		}
 		billing := pkg.Agent.Agents["billing"]
-		billing.Model = "fast_reasoning"
+		billing.Think = "fast_reasoning"
 		pkg.Agent.Agents["billing"] = billing
 		agent, err := Build(pkg)
 		if err != nil {
@@ -1619,7 +1592,7 @@ func TestBuildPromptSuffixMovesNoCacheScope(t *testing.T) {
 
 // TestBuildRefusesANameInTheWrongList (FR-014, FR-032). The single mixed list
 // could not ask this question: any name that resolved to anything was accepted.
-// Four lists make "which list is this in" answerable, so the answer carries the
+// Five lists make "which list is this in" answerable, so the answer carries the
 // fix, and the message names both halves of it.
 func TestBuildRefusesANameInTheWrongList(t *testing.T) {
 	for _, test := range []struct {
@@ -1639,33 +1612,31 @@ func TestBuildRefusesANameInTheWrongList(t *testing.T) {
 			defines: "handoff", belongs: "handoffs:",
 		},
 		{
-			name: "a delegate listed under handoffs",
+			name: "a task listed under handoffs",
 			mutate: func(pkg *packagespec.Package) {
 				addTask(pkg, "check_balance")
-				task := "check_balance"
-				pkg.Agent.Delegates = map[string]packagespec.Delegate{"run_check": {Task: &task}}
 				def := pkg.Agent.Agents["intake"]
-				def.Handoffs = append(def.Handoffs, "run_check")
+				def.Handoffs = append(def.Handoffs, "check_balance")
 				pkg.Agent.Agents["intake"] = def
 			},
-			defines: "delegate", belongs: "delegates:",
+			defines: "task", belongs: "tasks:",
 		},
 		{
-			name: "an escalation listed under delegates",
+			name: "an escalation listed under task_groups",
 			mutate: func(pkg *packagespec.Package) {
 				def := pkg.Agent.Agents["billing"]
 				def.Escalations = nil
-				def.Delegates = append(def.Delegates, "to_human")
+				def.TaskGroups = append(def.TaskGroups, "to_human")
 				pkg.Agent.Agents["billing"] = def
 			},
 			defines: "escalation", belongs: "escalations:",
 		},
 		{
-			name: "a tool listed under delegates",
+			name: "a tool listed under task_groups",
 			mutate: func(pkg *packagespec.Package) {
 				def := pkg.Agent.Agents["billing"]
 				def.Tools = nil
-				def.Delegates = append(def.Delegates, "get_invoice")
+				def.TaskGroups = append(def.TaskGroups, "get_invoice")
 				pkg.Agent.Agents["billing"] = def
 			},
 			defines: "tool", belongs: "tools:",
@@ -1673,16 +1644,10 @@ func TestBuildRefusesANameInTheWrongList(t *testing.T) {
 		{
 			name: "a handoff listed under a task's tools",
 			mutate: func(pkg *packagespec.Package) {
-				detach(pkg, "intake", "to_billing")
 				addTask(pkg, "routing")
-				task := pkg.Agent.Tasks["routing"]
+				task := pkg.Tasks["routing"]
 				task.Tools = []string{"to_billing"}
-				pkg.Agent.Tasks["routing"] = task
-				delegate := "routing"
-				pkg.Agent.Delegates = map[string]packagespec.Delegate{"run_routing": {Task: &delegate}}
-				def := pkg.Agent.Agents["intake"]
-				def.Delegates = append(def.Delegates, "run_routing")
-				pkg.Agent.Agents["intake"] = def
+				pkg.Tasks["routing"] = task
 			},
 			defines: "handoff", belongs: "handoffs:",
 		},
@@ -1736,17 +1701,48 @@ func TestBuildRefusesUnattachedAndCollidingCatalogEntries(t *testing.T) {
 			t.Errorf("message does not say why it collides: %v", err)
 		}
 	})
-	t.Run("requires names a variable, and says so", func(t *testing.T) {
-		pkg := loadSafeCore(t)
-		handoff := pkg.Agent.Handoffs["to_billing"]
-		handoff.Requires = []string{"get_invoice"} // a tool, not a variable
-		pkg.Agent.Handoffs["to_billing"] = handoff
-		_, err := Build(pkg)
-		if err == nil || !strings.Contains(err.Error(), "requires names variables") {
-			t.Fatalf("got %v", err)
+}
+
+// An `assign:` naming a variable that is not declared says so, and says where
+// to declare it (FR-015).
+//
+// It used to say `assign variable "x" does not resolve`, which names neither
+// the block to edit nor what "resolve" means.
+func TestBuildAssignRefusalNamesTheVariablesBlock(t *testing.T) {
+	pkg := loadSafeCore(t)
+	attachStep(pkg, "intake", packagespec.Task{
+		Name: "verify_customer", Instructions: "tasks/verify.md",
+		When:    "Confirm who the caller is.",
+		Assign:  []packagespec.Pair{{Key: "customer_status", Value: "result.status"}},
+		Context: packagespec.TaskContext{History: "full"},
+	}, "Read the number back.")
+
+	_, err := Build(pkg)
+	if err == nil {
+		t.Fatal("an assign to an undeclared variable must fail at compile")
+	}
+	for _, want := range []string{
+		"customer_status", "not declared under the variables: block", "agent.yaml",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal is missing %q:\n%v", want, err)
 		}
-		if !strings.Contains(err.Error(), "variables:") {
-			t.Errorf("message does not name the block to declare it in: %v", err)
+	}
+}
+
+func TestOmittedHistoryMeansMessages(t *testing.T) {
+	if got := buildTaskContext(packagespec.TaskContext{}).History; got != HistoryMessages {
+		t.Errorf("task default %q", got)
+	}
+	for _, raw := range []*packagespec.TransferContext{nil, {}} {
+		got, err := buildTransferContext(&packagespec.Package{}, raw, &Agent{})
+		if err != nil || got.History != HistoryMessages {
+			t.Errorf("handoff default %+v, %v", got, err)
 		}
-	})
+	}
+	for _, history := range []History{HistoryReset, HistoryMessages, HistoryFull, HistoryLastN, HistorySummary} {
+		if got := buildTaskContext(packagespec.TaskContext{History: string(history)}).History; got != history {
+			t.Errorf("%q became %q", history, got)
+		}
+	}
 }

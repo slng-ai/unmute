@@ -1,0 +1,184 @@
+---
+title: "Writing prompts for a voice"
+description: "A text to speech voice reads what you write, exactly as you write it. The rules that follow from that, and the one that a model will read out loud if you break it."
+---
+
+Instructions guide the model; the voice speaks its replies and the configured
+greeting. Write instructions that produce clear spoken replies, including
+when a task or another agent takes over.
+
+## Write speech, not text
+
+The voice reads your formatting. Asterisks, bullet points, headings and emoji
+all get pronounced or produce strange pauses. So the model's output has to be
+plain spoken sentences, and the way to get that is to say so:
+
+```md instructions.md
+A text to speech voice reads out everything you write, exactly as you write it.
+So write speech, not text.
+
+- Whole sentences in ordinary capitalization. No markdown, no asterisks, no
+  bullet points, no headings, no emoji, no symbols: the voice reads them out
+  loud.
+- Never send a bare fragment. A number or an amount sits inside a sentence.
+- Capitals are read letter by letter, so use them only when that is what you
+  want, like ATM.
+- One or two short sentences a turn, one question at a time.
+```
+
+Two of those are less obvious than they look. Capitals really are spelled out,
+so a prompt that writes a service name in caps gets it spelled. And a bare
+fragment is the most common failure in practice: a model answering "what time"
+with "11:30." gives the voice nothing to work with, where "Friday at 11:30 AM
+works." reads naturally.
+
+## Never write a specimen value
+
+This is the rule with the worst failure, and it looks harmless.
+
+A prompt explained how to format a phone number and gave an example number to
+show the grouping. On a live call the agent opened with "I've got your number as
+plus three four, one one one, one one one, one one one, is that right?" before
+any tool had run. It had no number, and the example in its own formatting rule
+was the only one in front of it. The caller said yes to a number that was not
+theirs.
+
+<Warning>
+A model cannot tell an illustration from a value it is holding. Describe the
+shape in words instead of showing one.
+</Warning>
+
+```md
+Write a phone number the way it is written on a phone: a plus sign, then the
+country code, then the rest in groups of two to four digits.
+```
+
+This is also the one way around `confirm:`. The compiler keeps an unconfirmed
+value out of every prompt except the step that asks the caller to agree to it,
+and a number typed in as an example is not a value the compiler can see. The
+protection is real and a hardcoded example defeats it.
+
+The same applies to any identifier a caller might mistake for their own: account
+numbers, booking references, addresses, dates of birth.
+
+## Say the format, do not show it
+
+A typed value has one correct spelling and the model needs to know it. Put the
+format in the type's description, where it travels with the value into every
+schema the model sees:
+
+```yaml agent.yaml
+- name: scheduled_time
+  type: Time
+  description: The time the caller agreed to.
+```
+
+Shaped types carry their own format phrase automatically, so the model is told
+that a `Time` is "a time of day on the 24-hour clock, like 09:30 or 17:45"
+whether or not you write a description of your own.
+
+Without it, a model sends the spelling its own prompt requires out loud. One
+step was told to say times as "11:30 AM" to the caller, and it sent
+`"scheduled_time": "11:30 AM"` to a field wanting `11:30`. The step's finish was
+refused, the model corrected itself on the next request, and the caller heard a
+pause for no reason.
+
+<Note>
+Say the format once, in the type. A prompt that repeats it can drift from the
+validator, and then the two tell the model different things.
+</Note>
+
+## Name only the values this prompt needs
+
+Saved values reach a prompt only through placeholders you write. Keep those
+references close to the instruction that uses them:
+
+```md
+Move appointment {{appointment_id}} to {{appointment_date}} at
+{{appointment_time}}.
+```
+
+Choose who confirms success. A simple pattern is for the task to finish
+immediately after the tool succeeds and for the owner to confirm once:
+
+```markdown tasks/booking.md
+After the booking tool reports success, finish with the saved appointment.
+Let the owning agent confirm it to the caller.
+```
+
+```markdown instructions.md
+Latest saved appointment: {{appointment}}
+When the booking task completes, confirm this appointment once in plain speech.
+```
+
+The owner needs the placeholder because a task's private conversation does
+not return with its completion status.
+
+Do not add saved values just because they exist. Every placeholder is an
+intentional context grant to that prompt.
+
+## Set the spoken language in every role
+
+Set the listening and speaking model language, then put the desired language
+in every agent and task prompt that can speak:
+
+```markdown
+Speak English throughout the call, including phone-number readback and
+confirmation. Use short spoken sentences without Markdown formatting.
+```
+
+The speech model's `language: en` setting does not by itself tell the thinking
+model which language to write. A phone number's country code should not decide
+the conversation language. A receiving task or agent has its own instructions,
+so it needs the language rule too.
+
+## Avoid repeated waiting lines
+
+Tools, tasks, and handoffs can have an optional `announce:` line. Omit it when
+there is no useful wait to explain. If you use one, tell the model to let that
+line cover the wait and avoid another "let me check" before or after it.
+
+Check adjacent steps as well. A tool announcement followed by a task
+announcement can sound like repetition even when each is short.
+
+## Tell the model to vary, and it will
+
+Repetition is the thing callers notice first and the easiest to fix. A prompt
+that only says what to do produces the same opener every turn.
+
+```md
+Vary your opener, and never open two turns in a row the same way. "Right, ...",
+"Okay, so ...", "Mhm, ...", "Ah, ...", or no opener at all.
+```
+
+For a missed reply, ask plainly: "I missed that, could you say it again?"
+Use a waiting line only when it helps the caller understand a noticeable pause.
+
+What to leave out: apologies for the process, thanking the caller for their
+patience, and "I completely understand". They read as polite and land as filler.
+
+## Keep the rules load bearing
+
+A prompt grows every time something goes wrong on a call, and an agent whose
+prompt has accumulated forty rules starts obeying the wrong ones. One package's
+prompts reached seven hundred lines and the agent's behaviour got worse, not
+better, because the two rules that mattered were buried in thirty that recorded
+past incidents.
+
+When you fix something with a prompt rule, check whether it can be a code guard
+instead. A duplicate entry, a missing field, a value in the wrong format: those
+are guards. They run every time, and they cost no tokens on any turn.
+
+Keep the rule in the prompt when it is genuinely a judgment call, and delete the
+archaeology.
+
+## Where the mechanics live
+
+<CardGroup cols={2}>
+  <Card title="Designing declared state" icon="brackets-curly" href="/best-practices/state-design">
+    What to declare, and why an empty value has to read as words.
+  </Card>
+  <Card title="Choosing a voice" icon="waveform" href="/models/tts">
+    Vendors, models and the settings that change how a voice sounds.
+  </Card>
+</CardGroup>

@@ -158,15 +158,22 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 	owners := map[string]string{}
 	for _, name := range agentNames {
 		agent := pkg.Agent.Agents[name]
-		// All four lists, because an owner is whoever attached the thing, and that
+		// Every list, because an owner is whoever attached the thing, and that
 		// question does not care which kind it is.
-		for _, list := range [][]string{agent.Tools, agent.Delegates, agent.Handoffs, agent.Escalations} {
+		for _, list := range [][]string{agent.Tools, agent.TaskGroups, agent.Handoffs, agent.Escalations} {
 			for _, attached := range list {
 				if owners[attached] == "" {
 					owners[attached] = name
 				}
 			}
 		}
+	}
+	// Shapes first, in the order the author wrote them: it is a list, so the
+	// order is the author's and nothing here sorts it.
+	for _, shape := range pkg.Agent.Shapes {
+		data.Shapes = append(data.Shapes, scaffold.Shape{
+			Name: shape.Name, Description: shape.Description, Fields: shapeFields(shape.Fields),
+		})
 	}
 	for name, variable := range pkg.Agent.Variables {
 		data.Variables = append(data.Variables, scaffold.Variable{Name: name, Type: variable.Type, Default: jsonText(variable.Default), Source: variable.Source})
@@ -176,10 +183,10 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 	for _, name := range agentNames {
 		definition := pkg.Agent.Agents[name]
 		agent := scaffold.Agent{Name: name, Instructions: pkg.Markdown[definition.Instructions]}
-		if def, ok := effectiveModelDef(pkg, tgt, definition.Model); ok {
+		if def, ok := effectiveModelDef(pkg, tgt, definition.Think); ok {
 			agent.Reason = scaffoldBinding(def)
 		}
-		if def, ok := effectiveModelDef(pkg, tgt, definition.Voice); ok {
+		if def, ok := effectiveModelDef(pkg, tgt, definition.Speak); ok {
 			agent.Speak = scaffoldBinding(def)
 		}
 		if name == "assistant" {
@@ -197,6 +204,7 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		value := scaffold.Tool{
 			Name: name, Description: tool.Description, Execution: tool.ExecutionKind(),
 			Input: jsonText(tool.Input), Output: jsonText(tool.Output),
+			Inject: append([]packagespec.Pair(nil), tool.Inject...),
 		}
 		switch {
 		case tool.Webhook != nil:
@@ -222,7 +230,7 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 				value.AttachTo = append(value.AttachTo, agentName)
 			}
 		}
-		for taskName, task := range pkg.Agent.Tasks {
+		for taskName, task := range pkg.Tasks {
 			if slices.Contains(task.Tools, name) {
 				value.AttachTasks = append(value.AttachTasks, taskName)
 			}
@@ -232,32 +240,36 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		data.Tools = append(data.Tools, value)
 	}
 
-	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.Tasks)) {
-		task := pkg.Agent.Tasks[name]
-		value := scaffold.Task{
+	// A task's agent is where the task is written, so the pairing is a read rather
+	// than a lookup through a naming convention.
+	definers := map[string]string{}
+	for _, agentName := range agentNames {
+		for _, item := range pkg.Agent.Agents[agentName].Tasks {
+			if item.Task != nil {
+				definers[item.Task.Name] = agentName
+			}
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(pkg.Tasks)) {
+		task := pkg.Tasks[name]
+		data.Tasks = append(data.Tasks, scaffold.Task{
 			Name: name, Instructions: pkg.Markdown[task.Instructions], Tools: append([]string(nil), task.Tools...),
 			Handoffs: append([]string(nil), task.Handoffs...),
-			Model:    task.Model, Result: jsonText(task.Result), History: task.Context.History,
+			Model:    task.Think, History: task.Context.History,
 			MaxMessages: task.Context.MaxMessages, Summarizer: task.Context.Summarizer,
-			IncludeToolCalls: task.Context.IncludeToolCalls, Agent: "assistant",
-		}
-		// A task named X is run by the delegate named run_X. That convention is
-		// what pairs the two back up on the way out; it is unchanged by the
-		// re-spelling and only the catalog it reads from moved.
-		if delegate, ok := pkg.Agent.Delegates["run_"+name]; ok {
-			value.When, value.Assign = delegate.When, jsonText(delegate.Assign)
-			value.Agent = cmp.Or(owners["run_"+name], "assistant")
-		}
-		data.Tasks = append(data.Tasks, value)
+			IncludeToolCalls: task.Context.IncludeToolCalls,
+			Agent:            cmp.Or(definers[name], "assistant"),
+			When:             task.When, Announce: task.Announce,
+			Assign: append([]packagespec.Pair(nil), task.Assign...),
+		})
 	}
 	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.TaskGroups)) {
 		group := pkg.Agent.TaskGroups[name]
-		value := scaffold.TaskGroup{Name: name, Steps: append([]string(nil), group.Steps...), ContextScope: group.ContextScope, Then: group.Then, ThenTarget: group.ThenTarget, Agent: "assistant"}
-		if delegate, ok := pkg.Agent.Delegates["run_"+name]; ok {
-			value.When = delegate.When
-			value.Agent = cmp.Or(owners["run_"+name], "assistant")
-		}
-		data.TaskGroups = append(data.TaskGroups, value)
+		data.TaskGroups = append(data.TaskGroups, scaffold.TaskGroup{
+			Name: name, Steps: append([]string(nil), group.Steps...), ContextScope: group.ContextScope,
+			Then: group.Then, ThenTarget: group.ThenTarget, When: group.When, Announce: group.Announce,
+			Agent: cmp.Or(owners[name], "assistant"),
+		})
 	}
 
 	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.Handoffs)) {
@@ -266,20 +278,9 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		if handoff.Announce != nil {
 			value.Announce = *handoff.Announce
 		}
-		value.Requires = append([]string(nil), handoff.Requires...)
 		if handoff.Context != nil {
 			value.History, value.MaxMessages, value.Summarizer = handoff.Context.History, handoff.Context.MaxMessages, handoff.Context.Summarizer
 			value.IncludeToolCalls = handoff.Context.IncludeToolCalls
-			switch variables := handoff.Context.Variables.(type) {
-			case string:
-				value.AllVariables = variables == "all"
-			case []any:
-				for _, item := range variables {
-					if text, ok := item.(string); ok {
-						value.Variables = append(value.Variables, text)
-					}
-				}
-			}
 		}
 		data.Handoffs = append(data.Handoffs, value)
 	}
@@ -415,6 +416,20 @@ func jsonText(value any) string {
 		return ""
 	}
 	return string(encoded)
+}
+
+// pairsText flattens an authored pair list into the JSON object the console
+// carries it as. Order is the author's, which the console does not preserve
+// anyway: it writes the pairs back sorted by key.
+// shapeFields carries an authored field list, a shape's or an expect: list,
+// into the console's own shape of it: the same three keys, so both authored
+// forms are written back the way they were read.
+func shapeFields(fields []packagespec.Field) []scaffold.ShapeField {
+	out := make([]scaffold.ShapeField, 0, len(fields))
+	for _, field := range fields {
+		out = append(out, scaffold.ShapeField{Name: field.Name, Type: field.Type, Description: field.Description})
+	}
+	return out
 }
 
 func boolValue(value *bool) bool { return value != nil && *value }

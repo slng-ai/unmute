@@ -206,12 +206,39 @@ func TestCloudWebsocketMarkupCarriesNoUnreadParameter(t *testing.T) {
 	if len(names) == 0 {
 		t.Fatal("no markup parameter is dictated anywhere, so this is asserting nothing")
 	}
+	// A reader, not a mention. `strings.Contains(bot, name)` passed on the
+	// strength of the pre-fetch's own emitted comment, which names every source
+	// it reads: markup could be dictated, never read, and the gate would agree it
+	// was fine. What counts is a line that takes the name out of the markup the
+	// carrier sent, which is `_markup.get("<name>")` and nothing else.
 	for _, match := range names {
 		if match[1] == "_pipecatCloudServiceHost" {
 			continue
 		}
-		if !strings.Contains(bot, match[1]) {
-			t.Errorf("the dictated markup carries %q and no emitted module reads it", match[1])
+		reader := `_markup.get("` + match[1] + `")`
+		if !strings.Contains(bot, reader) {
+			t.Errorf("the dictated markup carries %q and no emitted module reads it: looked for %s",
+				match[1], reader)
+		}
+	}
+}
+
+// FR-017. The facts the carrier's own handshake carries, under the flat names a
+// `source:` reads. Two come out of the parsed handshake and three out of the
+// markup the runbook dictates.
+func TestCloudWebsocketLiftsTheCallsFactsIntoTheContext(t *testing.T) {
+	bot := artifactFile(t, cloudWebsocketArtifact(t, cloudWebsocketOptions{
+		inbound: true, outbound: true, transfer: true, connection: true,
+	}), "bot.py")
+	for _, want := range []string{
+		`call_context["call_id"] = phone_call.get("call_id") or ""`,
+		`call_context["stream_id"] = phone_call.get("stream_id") or ""`,
+		`call_context["direction"] = _markup.get("direction") or "inbound"`,
+		`call_context["from_number"] = _markup.get("from_number") or ""`,
+		`call_context["to_number"] = _markup.get("to_number") or ""`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py does not lift the call fact: %s", want)
 		}
 	}
 }

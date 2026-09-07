@@ -103,9 +103,8 @@ func TestToolsReferenceMatchesExecutionBlocks(t *testing.T) {
 	}
 }
 
-// TestToolOwnershipRuleStaysExplicit holds the two surfaces a coding agent can
-// follow against the public pages an author reads. Tool and task output schemas
-// are both maps, so prose is the only guard against copying one into the other.
+// TestToolOwnershipRuleStaysExplicit holds the task-save and tool-output split
+// on the two references a coding agent uses to choose between them.
 func TestToolOwnershipRuleStaysExplicit(t *testing.T) {
 	definitionRule := "Define each tool once."
 	for name, content := range map[string]string{
@@ -119,14 +118,10 @@ func TestToolOwnershipRuleStaysExplicit(t *testing.T) {
 		}
 	}
 
-	resultRule := "Task `result:` and tool `output:` are different contracts."
+	resultRule := "Task `assign:` and tool `output:` are different contracts."
 	for name, content := range map[string]string{
-		"SKILL.md":                                bundleFile(t, "SKILL.md"),
-		"references/orchestration.md":             bundleFile(t, "references/orchestration.md"),
-		"references/tools.md":                     bundleFile(t, "references/tools.md"),
-		"docs-site/build/orchestration/tasks.mdx": trackedFile(t, "docs-site/build/orchestration/tasks.mdx"),
-		"docs-site/build/tools/overview.mdx":      trackedFile(t, "docs-site/build/tools/overview.mdx"),
-		"docs-site/reference/agent-yaml.mdx":      trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
+		"SKILL.md":            bundleFile(t, "SKILL.md"),
+		"references/tools.md": bundleFile(t, "references/tools.md"),
 	} {
 		if !strings.Contains(content, resultRule) {
 			t.Errorf("%s does not state %q", name, resultRule)
@@ -135,15 +130,49 @@ func TestToolOwnershipRuleStaysExplicit(t *testing.T) {
 }
 
 func TestTaskAuthoringContractStaysExplicit(t *testing.T) {
-	const rule = "Every task, including a task inside a group, needs a non-empty `result:` and `context.history`."
-	for name, content := range map[string]string{
-		"SKILL.md":                                      bundleFile(t, "SKILL.md"),
+	for name, check := range map[string]struct {
+		content string
+		want    []string
+	}{
+		"SKILL.md":                                      {bundleFile(t, "SKILL.md"), []string{"finish fields come from", "Omitted task and handoff history means `messages`"}},
+		"references/orchestration.md":                   {bundleFile(t, "references/orchestration.md"), []string{"compiler derives each finish field's type", "optional; omitted means `messages`"}},
+		"docs-site/build/orchestration/tasks.mdx":       {trackedFile(t, "docs-site/build/orchestration/tasks.mdx"), []string{"destination variable already owns the type", "When omitted, it is `messages`"}},
+		"docs-site/build/orchestration/task-groups.mdx": {trackedFile(t, "docs-site/build/orchestration/task-groups.mdx"), []string{"Omitted history means", "results are private"}},
+	} {
+		for _, want := range check.want {
+			if !strings.Contains(check.content, want) {
+				t.Errorf("%s does not state %q", name, want)
+			}
+		}
+	}
+}
+
+func TestAuthorGuidanceRejectsRetiredSharingForms(t *testing.T) {
+	files := map[string]string{
 		"references/orchestration.md":                   bundleFile(t, "references/orchestration.md"),
 		"docs-site/build/orchestration/tasks.mdx":       trackedFile(t, "docs-site/build/orchestration/tasks.mdx"),
 		"docs-site/build/orchestration/task-groups.mdx": trackedFile(t, "docs-site/build/orchestration/task-groups.mdx"),
+		"docs-site/build/orchestration/handoffs.mdx":    trackedFile(t, "docs-site/build/orchestration/handoffs.mdx"),
+	}
+	retired := regexp.MustCompile(`(?m)^\s+(?:expect|requires|result):\s*(?:#.*)?$`)
+	for name, content := range files {
+		if hit := retired.FindString(content); hit != "" {
+			t.Errorf("%s teaches retired task or handoff authoring: %s", name, strings.TrimSpace(hit))
+		}
+	}
+
+	mapInject := regexp.MustCompile(`(?m)^inject:\s*\n\s{2,}[a-z_][a-z0-9_]*:`)
+	for name, content := range map[string]string{
+		"references/variables.md":            bundleFile(t, "references/variables.md"),
+		"references/tools.md":                bundleFile(t, "references/tools.md"),
+		"docs-site/reference/variables.mdx":  trackedFile(t, "docs-site/reference/variables.mdx"),
+		"docs-site/reference/agent-yaml.mdx": trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
+		"docs-site/build/variables.mdx":      trackedFile(t, "docs-site/build/variables.mdx"),
+		"docs-site/build/tools/webhook.mdx":  trackedFile(t, "docs-site/build/tools/webhook.mdx"),
+		"docs-site/build/tools/python.mdx":   trackedFile(t, "docs-site/build/tools/python.mdx"),
 	} {
-		if !strings.Contains(content, rule) {
-			t.Errorf("%s does not state %q", name, rule)
+		if mapInject.MatchString(content) {
+			t.Errorf("%s teaches map-style inject; inject is an ordered pair list", name)
 		}
 	}
 }
@@ -167,19 +196,11 @@ func TestTaskTransferAndSharedResultDocsStayAligned(t *testing.T) {
 		}
 	}
 	for name, content := range map[string]string{
-		"references/orchestration.md":                      transferDocs["references/orchestration.md"],
-		"docs-site/build/orchestration/task-groups.mdx":    transferDocs["docs-site/build/orchestration/task-groups.mdx"],
-		"internal/generate/templates/livekit_v1/README.md": transferDocs["internal/generate/templates/livekit_v1/README.md"],
-		"internal/generate/templates/pipecat_v1/README.md": transferDocs["internal/generate/templates/pipecat_v1/README.md"],
+		"docs-site/build/orchestration/tasks.mdx":       transferDocs["docs-site/build/orchestration/tasks.mdx"],
+		"docs-site/build/orchestration/task-groups.mdx": transferDocs["docs-site/build/orchestration/task-groups.mdx"],
 	} {
-		for rule, pattern := range map[string]*regexp.Regexp{
-			"intermediate result timing": regexp.MustCompile(`exact\s+typed\s+result\s+enters\s+(?:the\s+)?shared\s+context\s+before\s+the\s+next\s+task\s+starts`),
-			"final result map":           regexp.MustCompile("final\\s+`merge: results`\\s+map\\s+is\\s+keyed\\s+by\\s+task\\s+name"),
-			"isolated result boundary":   regexp.MustCompile(`(?i)isolated\s+group\s+carries\s+no\s+results\s+between\s+steps`),
-		} {
-			if !pattern.MatchString(content) {
-				t.Errorf("%s does not state the %s rule", name, rule)
-			}
+		if !strings.Contains(content, "status") || !strings.Contains(content, "private") {
+			t.Errorf("%s does not state that task details stay private and only status returns", name)
 		}
 	}
 }
@@ -683,34 +704,31 @@ func TestOrchestrationGuidanceMatchesCodeOwnedFacts(t *testing.T) {
 		t.Error("references/variables.md must say task instructions render when the task starts")
 	}
 
-	// The single delegate row became a per-block table when `controls:` split into
-	// three catalogs, so the assertion moved with it: the reference must still
-	// name every field a delegate takes, and the shape it names them in is the
-	// page's business rather than this test's.
-	delegateSection := regexp.MustCompile(`(?s)### ` + "`delegates`" + `(.*?)### `).FindStringSubmatch(agentReference)
-	if delegateSection == nil {
-		t.Fatal("docs-site/reference/agent-yaml.mdx has no delegates section")
+	// The single delegate row became a per-agent `tasks:` section once the
+	// `delegates:` catalog was retired: a task is nested inside the agent that
+	// runs it, so the reference now documents every field a task takes under
+	// its own top-level `## `tasks`` heading, and the shape it names them in is
+	// the page's business rather than this test's.
+	tasksSection := regexp.MustCompile(`(?s)## ` + "`tasks`" + `\n(.*?)\n## `).FindStringSubmatch(agentReference)
+	if tasksSection == nil {
+		t.Fatal("docs-site/reference/agent-yaml.mdx has no tasks section")
 	}
-	for _, field := range []string{"`task`", "`group`", "`when`", "`assign`", "`requires`"} {
-		if !strings.Contains(delegateSection[1], field) {
-			t.Errorf("docs-site/reference/agent-yaml.mdx delegates section does not document %s", field)
+	for _, field := range []string{"`when`", "`assign`"} {
+		if !strings.Contains(tasksSection[1], field) {
+			t.Errorf("docs-site/reference/agent-yaml.mdx tasks section does not document %s", field)
 		}
 	}
 
-	// This assertion used to run the other way: it failed when the reference put
-	// `requires:` on a delegate, because the compiler allowed it on an
-	// agent_transfer only. The compiler now allows it on both, so the gate is
-	// inverted rather than deleted. A coding assistant that never sees the
-	// guarded shape will keep writing the agent-in-front-of-a-step workaround
-	// this feature exists to remove.
-	guarded := false
+	// requires: is retired: ordering between steps is the prompt's job now (a
+	// step's `when:` sentence and the owning agent's instructions), not a code
+	// gate, and the compiler refuses the key wherever it is written. A coding
+	// assistant that still saw it modeled here would write a package that no
+	// longer decodes, which is the opposite of what this assertion used to
+	// guard against.
 	for _, match := range regexp.MustCompile("(?s)```yaml[^\\n]*\\n(.*?)```").FindAllStringSubmatch(orchestration, -1) {
-		if strings.Contains(match[1], "delegates:") && strings.Contains(match[1], "requires:") {
-			guarded = true
+		if strings.Contains(match[1], "requires:") {
+			t.Error("references/orchestration.md still shows requires:, which the compiler no longer accepts anywhere")
 		}
-	}
-	if !guarded {
-		t.Error("references/orchestration.md shows no guarded delegate; code allows requires: on a delegate and the skill must teach it")
 	}
 
 	historyRow := regexp.MustCompile("(?m)^\\| `pipecat` \\| (.*) \\| (.*) \\|$").FindStringSubmatch(orchestration)
@@ -1487,9 +1505,10 @@ func TestCovalCorrelationRoutesStayDocumented(t *testing.T) {
 // `make build` were all green. One of them, in the emitted runbook, was a direct
 // instruction to write a package that no longer decodes.
 //
-// `delegate` is deliberately NOT in the retired set. It was a `kind:` value and
-// it is now the authoring word for an entry under `delegates:`, so flagging it
-// would flag the correct spelling.
+// `delegate` joined the retired set once the `delegates:` catalog was
+// removed: a task is now nested inside the agent that runs it, or named
+// directly in another agent's `tasks:` list, and the word is never an
+// authoring word again.
 //
 // Three exclusions, each with its reason:
 //
@@ -1506,7 +1525,7 @@ func TestCovalCorrelationRoutesStayDocumented(t *testing.T) {
 //     Only the emitted README templates are walked here, because those are the
 //     runbook a human reads.
 func TestNoReaderFacingSurfaceTeachesARetiredKindName(t *testing.T) {
-	retired := regexp.MustCompile(`agent_transfer|human_transfer`)
+	retired := regexp.MustCompile(`agent_transfer|human_transfer|delegat\w*`)
 
 	surfaces := map[string]string{}
 
@@ -1573,7 +1592,7 @@ func TestNoReaderFacingSurfaceTeachesARetiredKindName(t *testing.T) {
 	for name, content := range surfaces {
 		for i, line := range strings.Split(content, "\n") {
 			if found := retired.FindString(line); found != "" {
-				t.Errorf("%s:%d teaches the retired kind name %q: the authoring words are delegates:, handoffs: and escalations:, and which block an entry sits in is its kind\n    %s",
+				t.Errorf("%s:%d teaches the retired kind name %q: the authoring words are tasks:, task_groups:, handoffs: and escalations:, and which block an entry sits in is its kind\n    %s",
 					name, i+1, found, strings.TrimSpace(line))
 			}
 		}
@@ -1655,7 +1674,24 @@ func catalogFences(t *testing.T) map[string][]string {
 // It reads only what a file defines itself, so a fragment naming something
 // declared on another page is left alone rather than guessed at.
 func TestDocumentedExamplesAttachUnderTheRightKey(t *testing.T) {
-	const catalogs = "delegates handoffs escalations"
+	// task_groups replaces delegates as the third top-level catalog: an agent
+	// attaches a task group by name, the same way it attaches a handoff or an
+	// escalation.
+	//
+	// tasks is deliberately not tracked here, even though it is a fifth kind.
+	// A task is nested inside the agent that runs it rather than declared in a
+	// same-named top-level catalog, so there is no separate declaration site to
+	// check an attachment against: the nesting IS the attachment. Tracking task
+	// names the same way as the other three would also misfire on a task
+	// group's own `steps:` list, which legitimately names tasks by bare string
+	// at the same indent a mis-attached catalog entry would sit at.
+	//
+	// The four fixed-width regexes below need no column change for the nested
+	// shape: a task's own fields, and its own `tools:`/`handoffs:` lists, sit
+	// two levels deeper than an agent's, so they fall outside the exact 4- and
+	// 6-space widths these patterns match and are silently skipped rather than
+	// misread.
+	const catalogs = "task_groups handoffs escalations"
 	topLevel := regexp.MustCompile(`^(\w+):\s*$`)
 	entry := regexp.MustCompile(`^ {2}(\w+):\s*$`)
 	listKey := regexp.MustCompile(`^ {4}(\w+):\s*$`)

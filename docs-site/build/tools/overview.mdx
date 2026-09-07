@@ -230,7 +230,7 @@ The contract fields are shared, with one exception that matters:
 | `description` | yes, except on `builtin:` and `mcp:` | optional on `builtin:`, illegal on `mcp:`, legal everywhere else |
 | `input` | yes on tool contracts | illegal on `builtin:`, `mcp:` and `knowledge:`, required everywhere else |
 | `output` | no | illegal on `builtin:`, `mcp:` and `knowledge:`; author-side only elsewhere, not sent to the model, not included in the compile report, and not enforced at run time on the code targets |
-| `inject` | no | `webhook:` and `local:` only; values must be scalars |
+| `inject` | no | `webhook:`, `local:`, and hosted `slng:`; authored values are scalars or placeholder strings. See [Variables](/reference/variables#passing-a-value-into-a-tool) |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` and `knowledge:` |
 | `announce` | no | `webhook:`, `local:` and `knowledge:` only; a fixed sentence, no `{{variables}}` |
@@ -333,7 +333,7 @@ Every `tools:` entry in `agent.yaml` is a string name:
 
 - the top-level list loads `tools/<name>.yaml`,
 - `agents.<name>.tools` grants an agent access, and
-- `tasks.<name>.tools` grants a task access.
+- `agents.<name>.tasks[].tools` grants one nested task access.
 
 ```yaml agent.yaml
 tools:
@@ -343,25 +343,24 @@ tools:
 agents:
   appointment_desk:
     instructions: instructions.md
-    model: reasoning
-    voice: voice
+    think: reasoning
+    speak: voice
     tools:
       - check_availability
       - cancel_booking
 ```
 
-For a task-scoped tool, attach the same loaded name to the task instead:
+For a task-scoped tool, attach the same loaded name to the task instead,
+where the task is nested inside its agent:
 
 ```yaml agent.yaml
-tasks:
-  find_slot:
-    instructions: tasks/find-slot.md
-    tools:
-      - check_availability
-    result:
-      summary: string
-    context:
-      history: full
+agents:
+  appointment_desk:
+    tasks:
+      - name: find_slot
+        instructions: tasks/find-slot.md
+        tools:
+          - check_availability
 ```
 
 The agent and task lists are visibility scopes. Attach a tool only where it is
@@ -369,14 +368,9 @@ called; do not grant it to both unless both really call it. Never replace a
 name with an inline mapping of `description`, `input`, `output`, `local`, or
 `webhook`.
 
-**Task `result:` and tool `output:` are different contracts.** A tool's optional
-`output:` is an author-side description of one tool call. No generator sends it
-to the model or puts it in the compile report, and the code targets never
-enforce it at run time; SLNG enforces it, and only for a `local:` tool's own
-handler. A task's required `result:` is enforced and describes what the whole
-delegated task returns to its caller after any tool calls. It may select or
-combine tool data, so design it for what the caller needs instead of copying a
-tool output schema by default.
+A tool's optional `output:` remains its own JSON Schema. A task does not copy
+that schema. Its `assign:` list derives finish fields from destination
+variables and saves only the values needed later.
 
 A file in `tools/` that the package level list does not name is not loaded at all,
 and nothing complains. If a tool you wrote never seems to be offered, check that

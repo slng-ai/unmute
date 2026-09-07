@@ -38,9 +38,9 @@ Read them with `grep UNMUTE_METRIC` on the run's output. Times are seconds.
 entry in `stages` carries the time to first byte for that service and, for the
 voice, the total time the reply took to stream out. `tools` carries how long each
 tool took, including tools reached through a remote tool source. Controls are not
-listed there: a delegate or a transfer hands the conversation somewhere else
-rather than doing a unit of work, and a delegate does not return until the flow
-it started has finished, so its duration is that flow's, not a tool's.
+listed there: a task or a transfer hands the conversation somewhere else rather
+than doing a unit of work, and a task does not return until the flow it started
+has finished, so its duration is that flow's, not a tool's.
 
 A measurement LiveKit does not report is left out of the line rather than sent as
 zero, so a field you do not see was not measured, not instant.
@@ -61,52 +61,15 @@ call. Use that field instead of a raw `reasoning` map.
 ## Agent handoffs
 
 A handoff with `announce:` gives the exact sentence spoken once by
-the active agent. LiveKit finishes it before it activates the receiving agent. The
-`requires:` guard runs first, so a refused handoff never speaks the
-announcement. Without `announce`, the handoff stays silent.
+the active agent, after any brief the handoff carries has been validated, so a
+handoff refused for a bad brief never speaks it. LiveKit finishes the line
+before it activates the receiving agent. Without `announce`, the handoff stays
+silent.
 
 The opening greeting belongs to call start only. A later handoff back to the
 entry agent continues from the carried context and never repeats it. Transfer
 tools become available after that entry turn, so carried history cannot send
 the call straight back before the caller speaks again.
-{{- end}}
-{{- if .NeedsPrerequisiteGuard}}
-
-## Guarded steps and handoffs
-
-A control that declares `requires:` does not run until every named variable holds
-a value. The refusal goes to the model, never to the caller: it names the unmet
-variable and the control that supplies it, so the model fetches the value and
-calls the control again in the same turn. The caller hears the next natural
-question and never learns a guard fired.
-
-Each guarded control also carries its requirement in its own description, so the
-model usually collects the value during the earlier turns and the guard is never
-reached at all.
-
-**What you see in the log.** A refused control writes one line at normal level:
-
-```text
-prerequisite guard: step manage_booking refused, unmet customer_phone
-```
-
-and, on the attempt that reaches the retry limit:
-
-```text
-prerequisite guard: step manage_booking refused, unmet customer_phone, retry limit reached; asking the caller
-```
-
-Variable names and step names only. No caller speech and no variable value is
-ever written, which matters when the identifier is something like a phone number.
-
-After the limit the agent stops recovering quietly and asks the caller for the
-missing value out loud, in its own words. It does not fall silent and it does not
-end the call. That limit lives in this generated code, not in a prompt: a model
-can be argued out of an instruction, and the guard exists for the case where it
-already has been.
-
-A repeated refusal with nothing in the log is not this guard. Look for a model
-that is not calling the control at all.
 {{- end}}
 {{- if .NeedsPrefetch}}
 {{.PrefetchRunbook}}
@@ -157,16 +120,16 @@ turn has the full list back.
 A task may list a handoff in its own `handoffs:`. Calling it ends the active
 task and any remaining task-group steps, then hands the caller directly to the
 receiving agent. It does not return through the task owner. A task definition
-has `tools:` and `handoffs:` and no other list, so a delegate or an escalation
-on a task is unwritable rather than rejected: there is no key to put one in.
+has `tools:` and `handoffs:` and no other list, so a task or an escalation on a
+task is unwritable rather than rejected: there is no key to put one in.
 
 A task that lists no handoff still has a way out. Every task prompt here
 ends with one generated rule: when the caller asks for something none of the
 step's tools can do, and no handoff on the step covers it, call `finish` right
 away with the closest result, naming that request in `unserved_request`. Every
 `finish` here takes that field, optional and empty by default, and a filled one
-rides the returned result: a `then: return` delegate's docstring tells the owner
-to take that request next. The rule does not excuse skipping the step's own
+rides the returned result: a `then: return` group's docstring tells the owner to
+take that request next. The rule does not excuse skipping the step's own
 work, and a handoff the step declares wins over it.
 
 In a group with `context_scope: shared`, each exact typed result enters the
@@ -176,8 +139,8 @@ results between steps. The final `merge: results` map is keyed by task name.
 
 ## Empty task responses
 
-Before it generates anything, a generated task drops the delegate call that
-started it from its own copy of the conversation. That call is still running
+Before it generates anything, a generated task drops the call that started it
+from its own copy of the conversation. That call is still running
 while the task runs, so LiveKit adds it plus a placeholder result reading "The
 tool call is still in progress." This is right for the agent that made the call:
 it stops the model re-issuing a call already in flight. It is wrong for a task,
@@ -219,10 +182,10 @@ browser worker at startup. The browser loop is the shortest one this project has
 A tool with `announce:` speaks that exact sentence as it starts, so the caller
 is not waiting in silence while the call is in flight. The line is started, not
 awaited: the tool's own work starts straight away and the caller hears the
-answer no later than they would without the line. Any `requires:` guard runs
-first, so a refused call stays silent. If the caller speaks over the line,
-LiveKit still runs the tool to completion, which is what its per-tool
-`interruption:` warning is about.
+answer no later than they would without the line. A tool whose injected values
+are still unset is refused first, so a refused call stays silent. If the caller
+speaks over the line, LiveKit still runs the tool to completion, which is what
+its per-tool `interruption:` warning is about.
 {{- end}}
 
 {{- if .Knowledge.Knowledge}}
@@ -320,7 +283,28 @@ lk dispatch create --room <room> --agent-name {{.AgentName}} \
   --metadata '{"call_start": { {{range $i, $v := .CallStartVars}}{{if $i}}, {{end}}"{{$v.Name}}": "..."{{end}} }}'
 ```
 {{- end}}
+{{if .TypedState}}
+## Declared state
 
+Variables declare types once. A task's `assign` derives its finish fields and
+saves validated values. A failed or unserved finish saves nothing.
+
+A prompt reads only its own `{{"{{variable}}"}}` or `{{"{{variable.field}}"}}`
+references. Missing values render as `{{.TypedState.Empty}}`; false, zero and
+empty lists keep their values. Referencing an object shares the whole object.
+History is a separate choice and does not clear saved values.
+
+Each declared shape is a generated Pydantic class in this module. A step's
+result is validated against it before anything is recorded, so a value outside a
+declared set never enters the state: the previous contents stay as they were and
+the model is told which field and what was allowed, which is what lets it
+correct itself on the next turn.
+
+A text type with a validated shape (`Phone`, `Date`, `Time`, `Id`) is a `str` in
+the schema the model is sent, with its shape checked by a validator. That is
+deliberate: a `pattern` in the schema survives the strict tool-schema converter
+and the provider rejects it, so the shape is checked here instead.
+{{end}}
 {{if .Slng.Any}}
 ## SLNG Context Router
 
@@ -920,6 +904,12 @@ Starting the worker or exporting a synthetic span proves connectivity only.
 Complete at least one user turn before reviewing the trace. A traced request
 contains `llm_node` and `llm_request` generation observations in addition to
 the session and agent spans.
+
+Each tool call is its own span, named `tool:<name>` after the tool that ran. The
+framework names all of them `function_tool` and carries the real name in an
+attribute, which makes every tool call in a trace look the same, so the name is
+put back on the way out. A task's structured result is the arguments of its
+`finish` call, on that call's span.
 
 Traces can contain caller speech, model input and output, and tool arguments and results.
 Use only fake identities and fake customer data for release tests. Use a separate

@@ -100,6 +100,10 @@
     {
       "source": "/models/regional-infrastructure",
       "destination": "/optimization/regional-infrastructure"
+    },
+    {
+      "source": "/optimization/context-scope",
+      "destination": "/best-practices/context-scope"
     }
   ],
   "navigation": {
@@ -149,6 +153,18 @@
               "build/orchestration/choosing-a-structure"
             ]
           }
+        ]
+      },
+      {
+        "group": "Best practices",
+        "public": true,
+        "icon": "award",
+        "pages": [
+          "best-practices/state-design",
+          "best-practices/context-scope",
+          "best-practices/step-scoping",
+          "best-practices/prompt-writing",
+          "best-practices/verifying-behaviour"
         ]
       },
       {

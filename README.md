@@ -66,8 +66,8 @@ entry_agent: assistant
 agents:
   assistant:
     instructions: instructions.md
-    model: assistant_model
-    voice: assistant_voice
+    think: assistant_model
+    speak: assistant_voice
     tools:
       - end_call
 
@@ -236,9 +236,10 @@ time by adding `.md` to its URL. See
 [`examples/`](examples/) holds three packages.
 
 - [`salon-concierge`](examples/salon-concierge/) is the one to read: two agents,
-  two tasks, handoffs, a guarded delegate, a cold manager transfer, tracing, and
-  inbound phone on both code targets. Every tool is local Python, so nothing
-  remote has to be up before the greeting.
+  two tasks, one of them shared by both agents from a single definition, handoffs,
+  a guarded task, a cold manager transfer, tracing, and inbound phone on both code
+  targets. Every tool is local Python, so nothing remote has to be up before the
+  greeting.
 - [`salon-concierge-single-prompt`](examples/salon-concierge-single-prompt/) is
   the same salon with the structural features taken back out, so the one above
   can be read against something.

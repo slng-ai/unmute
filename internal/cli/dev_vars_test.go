@@ -60,7 +60,7 @@ func TestCallFactsPayload(t *testing.T) {
 	}{
 		{"not name=value", "from_number", "must be name=value"},
 		{"not a call fact", "caller_name=Ada", "not a fact a call carries"},
-		{"the model's own", "conversation=x", "the model saves mid-call"},
+		{"conversation is not a call fact either", "conversation=x", "not a fact a call carries"},
 		{"the dispatch payload", "call_start=x", "seed it with --var"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -70,6 +70,57 @@ func TestCallFactsPayload(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("the refusal does not say %q: %v", tc.want, err)
+			}
+		})
+	}
+}
+
+// --var seeds the dispatch payload, and the set it accepts is the set the two
+// drivers hydrate from it: `source: call_start`, and a variable declaring no
+// source at all. Both emitted runbooks print a `--var <name>=...` line for
+// every one of them, so a name the runbook prints and the flag refuses is a
+// runbook teaching a command that does not work.
+func TestCallStartPayload(t *testing.T) {
+	agent := &ir.Agent{Variables: map[string]ir.Variable{
+		"dispatched":     {Type: ir.PrimitiveString, Source: ir.VariableSourceCallStart},
+		"sourceless":     {Type: ir.PrimitiveString},
+		"unrecognized":   {Type: ir.PrimitiveString, Source: ir.VariableSource("conversation")},
+		"from_the_route": {Type: ir.PrimitiveString, Source: ir.VariableSourceFromNumber},
+	}}
+
+	for _, name := range []string{"dispatched", "sourceless"} {
+		got, err := callStartPayload(agent, []string{name + "=Ada"})
+		if err != nil {
+			t.Errorf("--var %s: %v; both drivers hydrate this variable off the dispatch payload and both runbooks print the flag for it", name, err)
+			continue
+		}
+		if got != `{"`+name+`":"Ada"}` {
+			t.Errorf("--var %s payload = %s", name, got)
+		}
+	}
+
+	for _, tc := range []struct {
+		name string
+		flag string
+		want string
+	}{
+		{"not name=value", "dispatched", "must be name=value"},
+		{"undeclared", "nobody=Ada", "no variable"},
+		{"an unrecognized source", "unrecognized=Ada", "not a source unmute recognizes"},
+		{"the route's own", "from_the_route=Ada", "the runtime supplies it"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := callStartPayload(agent, []string{tc.flag})
+			if err == nil {
+				t.Fatalf("--var %s was accepted", tc.flag)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("the refusal does not say %q: %v", tc.want, err)
+			}
+			// A refusal that reaches this point has a source to name, so it can
+			// never render the empty one the sourceless branch used to print.
+			if strings.Contains(err.Error(), "has source ,") {
+				t.Errorf("the refusal names an empty source: %v", err)
 			}
 		})
 	}

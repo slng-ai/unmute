@@ -264,6 +264,7 @@ from pipecat.frames.frames import (  # noqa: E402
     TTSSpeakFrame,
 )
 from pipecat.pipeline.worker import PipelineWorker  # noqa: E402
+from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
 
 
 class Params:
@@ -274,7 +275,7 @@ class Params:
 
 
 async def exercise_handoff():
-    source = bot.GreeterAgent()
+    source = bot.GreeterAgent(context=LLMContext())
     events = []
     original_queue = PipelineWorker.queue_frame
 
@@ -293,12 +294,7 @@ async def exercise_handoff():
         activation = kwargs["args"]
         assert activation.metadata is None
         assert activation.run_llm is True
-        assert activation.messages == [
-            {
-                "role": "developer",
-                "content": "Caller wants to book a table for a normal dine-in visit.",
-            }
-        ]
+        assert activation.messages == []
         assert name == "reservations"
         source._active = False
         events.append(("activate", name))
@@ -451,20 +447,19 @@ for name in json.load(open("compile-report.json"))["required_env"]:
 
 import bot  # noqa: E402
 from pipecat.flows import FlowManager  # noqa: E402
-from pipecat.frames.frames import Frame  # noqa: E402
+from pipecat.frames.frames import Frame, LLMUpdateSettingsFrame  # noqa: E402
 from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair  # noqa: E402
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor  # noqa: E402
 from pipecat.services.llm_service import LLMService  # noqa: E402
 from pipecat.services.settings import LLMSettings  # noqa: E402
-from pipecat.workers.runner import WorkerRunner  # noqa: E402
 
 OWNER_PROMPT = None
-original_owner_builder = bot.build_appointment_desk_llm
+original_owner_builder = bot.build_reservations_llm
 
 
 class FakeLLM(LLMService):
-    def __init__(self) -> None:
+    def __init__(self, *_args, **_kwargs) -> None:
         super().__init__(settings=LLMSettings(model="smoke", system_instruction=OWNER_PROMPT))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
@@ -489,17 +484,11 @@ async def main() -> None:
     global OWNER_PROMPT
     OWNER_PROMPT = original_owner_builder()._settings.system_instruction
     context = LLMContext()
-    owner = bot.AppointmentDeskAgent(state=None, context=context, call_context=None)
-    target = bot.AftercareAgent(state=None, context=context, call_context=None)
-    runner = WorkerRunner(handle_sigint=False)
-    await runner.add_workers(owner, target)
-    run_task = asyncio.create_task(runner.run(auto_end=False))
-    await asyncio.wait_for(owner._pipeline_start_event.wait(), timeout=5)
-    await asyncio.wait_for(target._pipeline_start_event.wait(), timeout=5)
-
+    owner = bot.ReservationsAgent(state=None, context=context, call_context=None)
     owner._active = True
-    owner._manage_appointment_results = {}
-    owner._manage_appointment_snapshot = (
+    owner._do_reserve_results = {}
+    owner._do_reserve_active_step = "find_slot"
+    owner._do_reserve_snapshot = (
         [dict(message) for message in context.get_messages()],
         context.tools,
     )
@@ -508,25 +497,40 @@ async def main() -> None:
         context_aggregator=LLMContextAggregatorPair(context),
         worker=owner,
     )
-    node = owner._manage_appointment_node_identify_customer()
+    node = owner._do_reserve_node_find_slot()
+    initialized = []
+
+    async def capture_initialize(frames, *_args, **_kwargs):
+        initialized.extend(frames)
+
+    original_queue_frames = owner.queue_frames
+    owner.queue_frames = capture_initialize
     await flow.initialize(node)
-    await owner.flush_pipeline()
-    assert owner.llm._settings.system_instruction == node["role_message"]
-    assert owner.llm._settings.system_instruction != OWNER_PROMPT
+    owner.queue_frames = original_queue_frames
+    role_updates = [
+        frame for frame in initialized if isinstance(frame, LLMUpdateSettingsFrame)
+    ]
+    assert role_updates[-1].delta.system_instruction == node["role_message"]
+    assert role_updates[-1].delta.system_instruction != OWNER_PROMPT
 
-    await owner._manage_appointment_finish_finalize_appointment(
-        {"action": "book", "status": "ok", "appointment_id": "apt-smoke"},
-        flow,
-    )
-    assert owner.llm._settings.system_instruction == OWNER_PROMPT
-    for _ in range(100):
-        if target.active:
-            break
-        await asyncio.sleep(0.01)
-    assert target.active, "then: transfer did not activate the target worker"
+    status, next_node = await owner._do_reserve_finish_find_slot({}, flow)
+    assert status == {"status": "completed"}
+    assert next_node["name"] == "confirm_booking"
+    restored = []
 
-    await runner.cancel("task role smoke complete")
-    await asyncio.wait_for(run_task, timeout=5)
+    async def capture_restore(frame, *_args, **_kwargs):
+        restored.append(frame)
+
+    async def no_flush():
+        pass
+
+    owner.queue_frame = capture_restore
+    owner.flush_pipeline = no_flush
+    status, next_node = await owner._do_reserve_finish_confirm_booking({}, flow)
+    assert status == {"status": "ok"} and next_node is None
+    assert [type(frame).__name__ for frame in restored] == ["LLMUpdateSettingsFrame"]
+    assert restored[0].delta.system_instruction == OWNER_PROMPT
+
     print("task role smoke ok")
 
 
@@ -625,15 +629,6 @@ async def main() -> None:
         owner._run_verify_active_step = "verify"
 
     reset_task_context()
-    refused, next_node = await owner._run_verify_transfer_verify_to_billing({}, flow)
-    # The wording is generated once by internal/generate/guard.go and rendered
-    # into both targets, so this asserts the shared sentence rather than a
-    # Pipecat-only one. It used to read "still need", which LiveKit never said.
-    assert "Not started. Missing: customer_id" in refused["refused"], refused
-    assert "Do not say any of this out loud" in refused["refused"], refused
-    assert next_node is None, "recoverable refusal must keep the task LLM active"
-    assert owner._run_verify_active_step == "verify"
-
     announcements = []
 
     async def announce(text):
@@ -789,8 +784,7 @@ async def main() -> None:
         context=context,
         result_callback=result_callback,
     ))
-    expected = {"status": "ok", "result": exact_result}
-    assert callbacks[-1][0] == expected, "registered Flow handler changed the typed result"
+    assert callbacks[-1][0] == {"status": "completed"}
     assert callbacks[-1][1].run_llm is False, "next task must own the next LLM turn"
     assert callbacks[-1][1].on_context_updated is not None
     assert owner._run_verify_results["verify"] == exact_result
@@ -810,8 +804,8 @@ async def main() -> None:
     assert callbacks[-1][1].run_llm is False
     assert len(activations) == 1, "a stale transfer activated after finish claimed the step"
 
-    # A failed final completion restores the task prompt and releases its claim
-    # only after messages, tools, and prompt are safe for a model retry.
+    # Saving is terminal even when restoring the owner prompt fails. The state
+    # remains committed and a repeated finish cannot save it twice.
     prompt_restores = []
     flush_count = 0
 
@@ -834,47 +828,19 @@ async def main() -> None:
         assert str(error) == "role restore failed"
     else:
         raise AssertionError("final completion failure was swallowed")
-    assert owner._run_verify_active_step == "complete"
-    assert "complete" not in owner._run_verify_results
+    assert owner._run_verify_active_step is None
+    assert owner._run_verify_results["complete"] == {"complete": True}
     assert context.get_messages() == before_final_messages
     assert context.tools is before_final_tools
     assert prompt_restores[0].endswith("Current customer: cus-smoke.")
     # The step's prompt continues with the compiler's finish contract.
     assert prompt_restores[1].startswith("Complete verification.")
 
-    prompt_restores.clear()
-    flush_count = 0
-
-    async def fail_restore_and_rollback():
-        nonlocal flush_count
-        flush_count += 1
-        if flush_count == 1:
-            raise RuntimeError("owner prompt restore failed")
-        raise RuntimeError("task prompt rollback failed")
-
-    owner.flush_pipeline = fail_restore_and_rollback
-    try:
-        await owner._run_verify_finish_complete({"complete": True}, flow)
-    except RuntimeError as error:
-        assert str(error) == "owner prompt restore failed"
-        assert str(error.__cause__) == "task prompt rollback failed"
-    else:
-        raise AssertionError("rollback failure hid the original completion error")
-    assert owner._run_verify_active_step == "complete"
-    assert "complete" not in owner._run_verify_results
-
-    prompt_restores.clear()
-
-    async def flush_ok():
-        pass
-
-    owner.flush_pipeline = flush_ok
-    completed, next_node = await owner._run_verify_finish_complete({"complete": True}, flow)
-    assert completed == {"status": "ok"}
-    assert next_node is None
-    assert owner._run_verify_active_step is None
-    assert owner._run_verify_results["complete"] == {"complete": True}
-    assert prompt_restores[0].endswith("Current customer: cus-smoke.")
+    completed, next_node = await owner._run_verify_finish_complete(
+        {"complete": True}, flow
+    )
+    assert completed == {"status": "already handled"}
+    assert next_node is NO_RESPONSE
     owner.queue_frame = original_queue_frame
     owner.flush_pipeline = original_flush_pipeline
     subprocess.run(["ruff", "check", "bot.py"], check=True)
@@ -1054,8 +1020,11 @@ async def main() -> None:
     # over the same form reaches the start exactly once.
     starts = []
 
-    async def fake_start_agent(_request, *, caller, call_sid):
-        starts.append((caller, call_sid))
+    async def fake_start_agent(_request, *, caller, from_number, call_sid):
+        # from_number is the raw form value and caller is the room display name,
+        # which substitutes the word "caller" when the number was withheld. Both
+        # are recorded so a future change that collapses them fails here.
+        starts.append((caller, from_number, call_sid))
         return {"sessionId": "session-smoke"}
 
     helper._start_agent = fake_start_agent
@@ -1072,7 +1041,7 @@ async def main() -> None:
     )
     accepted = await helper.inbound_call(HelperRequest(form, signature))
     assert accepted.status_code == 200
-    assert starts == [("+14155550100", "CA-smoke")]
+    assert starts == [("+14155550100", "+14155550100", "CA-smoke")]
 
     # The supported SDK itself requires an existing phone session. This exact
     # return is the premise behind rejecting browser and removed carrierless
@@ -1668,9 +1637,10 @@ async def main() -> None:
     assert requests["stt"].attributes["language"] == "en"
     assert requests["stt"].attributes["is_final"] is True
     assert requests["llm"].attributes["output"] == "traced."
-    assert requests["llm"].attributes["gen_ai.system_instructions"] == "You are the tracing probe."
+    expected_instructions = request_agent.llm._settings.system_instruction
+    assert requests["llm"].attributes["gen_ai.system_instructions"] == expected_instructions
     llm_input = json.loads(requests["llm"].attributes["langfuse.observation.input"])
-    assert llm_input[0] == {"role": "system", "content": "You are the tracing probe."}
+    assert llm_input[0] == {"role": "system", "content": expected_instructions}
     assert {"role": "user", "content": "trace this request"} in llm_input
     assert json.loads(requests["llm"].attributes["input"]) == llm_input
     assert requests["tts"].attributes["text"] == "traced."
@@ -1825,16 +1795,7 @@ func TestSmokePipecatRegionalInfrastructureInstantiates(t *testing.T) {
 // pinned Pipecat 1.8.0 and observes task-role replacement, owner-role restoration,
 // and transfer activation (V28).
 func TestSmokePipecatV1TaskGroupsInstantiate(t *testing.T) {
-	runPipecatSmokeScript(t, "remy", nil, func(agent *ir.Agent) {
-		aftercare := agent.Agents["reservations"]
-		aftercare.Instructions = "You are the aftercare agent."
-		aftercare.Tools = nil
-		agent.Agents["aftercare"] = aftercare
-		group := agent.TaskGroups["reserve_group"]
-		group.Then = ir.GroupTransfer
-		group.ThenTarget = "aftercare"
-		agent.TaskGroups["reserve_group"] = group
-	}, pipecatTaskRoleSmokeScript)
+	runPipecatSmokeScript(t, "remy", nil, nil, pipecatTaskRoleSmokeScript)
 }
 
 // TestSmokePipecatV1TaskTransferStopsFlow checks the generated handler against

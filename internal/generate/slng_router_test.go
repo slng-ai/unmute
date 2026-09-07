@@ -49,7 +49,7 @@ func routerFixture(t *testing.T) *ir.Agent {
 	// livekit every router profile has to be the entry agent's, because that is
 	// the only place the call's session id and state are in scope.
 	billing := pkg.Agent.Agents["billing"]
-	billing.Model = "fast_reasoning"
+	billing.Think = "fast_reasoning"
 	pkg.Agent.Agents["billing"] = billing
 	agent, err := ir.Build(pkg)
 	if err != nil {
@@ -59,12 +59,11 @@ func routerFixture(t *testing.T) *ir.Agent {
 	// files. It is what makes this fixture exercise the raw-prompt seam too.
 	//
 	// Two variables, and the second one is here because its absence hid a defect.
-	// customer_id is written when a task finishes; caller_alias is written by the
-	// generated capture tool when the caller offers it. Those are different write
-	// sites, and a fixture with only the first let a refresh that covered only the
-	// first look complete.
+	// customer_id is written when a task finishes; caller_alias carries no source
+	// at all, so a fixture with only the first let a name tuple that was
+	// accidentally scoped to variables a task assigns look complete.
 	agent.Variables["caller_alias"] = ir.Variable{
-		Type: ir.PrimitiveString, Source: ir.VariableSourceConversation,
+		Type:        ir.PrimitiveString,
 		Description: "What the caller says to call them.",
 	}
 	for _, name := range []string{"intake", "billing"} {
@@ -274,9 +273,19 @@ func TestSlngRouterSendsTheWholeBodyPerRequest(t *testing.T) {
 	agent := routerFixture(t)
 	for _, tc := range routerTargets() {
 		source, _ := emitAgentSource(t, agent, tc.provider, tc.module)
-		for _, want := range []string{`"slng_config": _slng_config_fast_reasoning()`, `"template_variables": _slng_template_variables(`} {
-			if !strings.Contains(source, want) {
-				t.Errorf("%s: the request body does not carry %s", tc.provider, want)
+		want := []string{`"slng_config": _slng_config_fast_reasoning()`}
+		// The variables reach the request through each target's own per-request
+		// seam. LiveKit renders the whole body inside its llm node; Pipecat
+		// overrides the framework's parameter builder and writes the key there.
+		// Two spellings of one requirement, and neither target may snapshot it.
+		if tc.provider == ir.ProviderLiveKit {
+			want = append(want, `"template_variables": _slng_template_variables(`)
+		} else {
+			want = append(want, `body["template_variables"] = _slng_template_variables(`)
+		}
+		for _, one := range want {
+			if !strings.Contains(source, one) {
+				t.Errorf("%s: the request body does not carry %s", tc.provider, one)
 			}
 		}
 		if tc.provider != ir.ProviderLiveKit {
@@ -365,14 +374,13 @@ func TestSlngRouterSuppliesEveryNameAndTruncates(t *testing.T) {
 		// Every referenced name is passed, whether or not the call knows it yet,
 		// and both write kinds are represented: one a task assigns, one the caller
 		// offers.
-		if !strings.Contains(source, `("caller_alias", "customer_id")`) {
+		if !strings.Contains(source, `["customer_id", "caller_alias"]`) || !strings.Contains(source, `_SLNG_TEMPLATE_PATHS = {`) {
 			t.Errorf("%s: the snapshot does not supply every referenced name; an unsupplied name is a 422 mid-call", tc.provider)
 		}
-		// And the values come from the helper, which is what fills an unset name
-		// with "" and truncates an over-long one.
+		// And the values come from the shared prompt lookup and truncation helper.
 		for _, want := range []string{
 			`values[name] = text`,
-			`text = "" if value is None else str(value)`,
+			`text = _state_text(*_prompt_value(state, name,`,
 			`if len(text) > _SLNG_VARIABLE_LIMIT:`,
 			`text = text[:_SLNG_VARIABLE_LIMIT]`,
 		} {
@@ -392,29 +400,56 @@ func TestSlngRouterSuppliesEveryNameAndTruncates(t *testing.T) {
 // present in the delta overwrite keys in the target"), so a body-only delta
 // leaves the site's scope alone, and a delta that named extra_headers as well
 // would replace the scope of whichever site is speaking.
-func TestSlngRouterPipecatRefreshesTheBodyOnEveryWrite(t *testing.T) {
+func TestSlngRouterPipecatReadsTheVariablesPerRequest(t *testing.T) {
 	agent := routerFixture(t)
 	// The fixture's delegates assign nothing, so give one an assignment: that is
 	// the only way a call writes a variable mid-conversation, and it is the whole
-	// case this gate is about. The pairing is arbitrary because the compiler does
-	// not care which field feeds which variable, only that a write is followed by
-	// a refresh.
+	// case this gate is about. Two fields, both off the one task result: the
+	// pairing is arbitrary because the compiler does not care which field feeds
+	// which variable, only that a write is followed by a refresh, and one write
+	// proves nothing about counting.
+	collect := agent.Tasks["collect"]
+	collect.Result["alias"] = ir.ResultField{Type: ir.PrimitiveString}
+	agent.Tasks["collect"] = collect
+	assignedTask := agent.Tasks["collect"]
+	assignedTask.Assign = []ir.AssignTo{{Var: "customer_id", Field: "tier"}, {Var: "caller_alias", Field: "alias"}}
+	agent.Tasks["collect"] = assignedTask
 	agent.Controls["run_collect"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "collect", When: "Collect the caller's account details.",
-		Assign: map[string]string{"customer_id": "result.tier"},
 	}
 	source, _ := emitAgentSource(t, agent, ir.ProviderPipecat, "bot.py")
-	// Every place the emitted module assigns into the call state, not just the
-	// ones this test remembered to think of. A task result is one; the generated
-	// capture tool is another, and it is the one a caller-offered name arrives
-	// through. Counting the writes rather than naming them is what makes a fourth
-	// write site fail here instead of shipping.
-	writes := regexp.MustCompile(`self\.state\.[a-z_]+ = `).FindAllString(source, -1)
-	if len(writes) < 2 {
-		t.Fatalf("the fixture exercises %d state write sites, want at least the task result and the capture tool: %v", len(writes), writes)
+	for _, want := range []string{
+		`("customer_id", "tier", False)`,
+		`("caller_alias", "alias", False)`,
+		`_save_batch(state, pending, step=step)`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("the fixture does not exercise the shared state save %q", want)
+		}
 	}
-	if got := strings.Count(source, `extra={"extra_body":`); got < len(writes) {
-		t.Errorf("%d state writes (%v) and %d body refreshes; a value written where nothing refreshes never reaches the router", len(writes), writes, got)
+	// The refresh count that stood here is gone, and so are the refreshes it
+	// counted. Three settings frames used to carry the body after a write, one
+	// per write site, and the count was what caught a fourth write site landing
+	// with no refresh. The service now reads the variables from live state on
+	// every request, so there is nothing to count and nothing to forget: a write
+	// anywhere reaches the next request, including one made mid-turn, which is
+	// the gap the three frames left open.
+	if !strings.Contains(source, "def build_chat_completion_params(self, params_from_context) -> dict:") {
+		t.Errorf("pipecat emits no per-request parameter override, so a value written mid-turn is one turn late:\n%s",
+			source)
+	}
+	if !strings.Contains(source, `body["template_variables"] = _slng_template_variables(`) {
+		t.Error("the override does not rebuild the template variables, so it refreshes nothing")
+	}
+	for _, line := range strings.Split(source, "\n") {
+		if strings.Contains(line, "LLMUpdateSettingsFrame") && strings.Contains(line, "extra_body") {
+			t.Errorf("a settings frame still carries the body, which is now a second owner of it:\n%s", line)
+		}
+	}
+	// And no snapshot in the construction, for the same reason: a value beside
+	// the live read is a reader's question with no answer.
+	if strings.Contains(source, `"template_variables": _slng_template_variables(`) {
+		t.Error("the pipecat construction still snapshots the template variables beside the per-request read")
 	}
 	// The refresh dict names the body only. Anything that also named the headers
 	// would hand the speaking site somebody else's scope.
@@ -446,14 +481,19 @@ func TestSlngRouterSummarizerKeepsConstructionExtras(t *testing.T) {
 	if !strings.Contains(source, ":summary") {
 		t.Fatalf("no summarizer scope in the emitted module, so this gate is watching nothing:\n%s", source)
 	}
-	// Its extras stay at construction, and they carry the whole body.
+	// Its stable configuration and scope stay at construction. Its own prompt
+	// references no saved state, so it receives no template-variable payload.
 	for _, want := range []string{
-		"_slng_template_variables(self.session.userdata,",
 		"_slng_config_fast_reasoning()",
 		`"X-Slng-Agent-Id": "` + routerAgentID + `:summary"`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("the summarizer construction does not carry %s; moving every body per request left this site with nothing:\n%s", want, source)
+		}
+	}
+	for _, line := range strings.Split(source, "\n") {
+		if strings.Contains(line, `:summary"`) && strings.Contains(line, "_slng_template_variables") {
+			t.Errorf("the summarizer receives state it does not reference: %s", line)
 		}
 	}
 }
@@ -656,7 +696,7 @@ func routerFixtureWithUpstream(t *testing.T, upstream *spec.Upstream, secrets []
 	// One router profile, the entry agent's, which is what livekit allows. The
 	// second profile stays where it is and simply goes unused.
 	billing := pkg.Agent.Agents["billing"]
-	billing.Model = "fast_reasoning"
+	billing.Think = "fast_reasoning"
 	pkg.Agent.Agents["billing"] = billing
 	agent, err := ir.Build(pkg)
 	if err != nil {
@@ -1088,7 +1128,7 @@ func TestSlngRouterLiveKitClosesTheClientItOwns(t *testing.T) {
 	if !strings.Contains(source, "ctx.add_shutdown_callback") {
 		t.Error("the emitted entrypoint registers no shutdown callback, so the client it owns is never closed")
 	}
-	if !strings.Contains(source, ".slng_client.close()") {
+	if !strings.Contains(source, "await slng_client.close()") {
 		t.Error("nothing closes the router client; the plugin closes only a client it built itself")
 	}
 }
@@ -1119,5 +1159,29 @@ func TestSlngRouterSummarizerCarriesThePromptDirective(t *testing.T) {
 	}
 	if !strings.Contains(body, "/no_think") {
 		t.Errorf("the summarizer prompt does not carry the authored directive:\n%s", body)
+	}
+}
+
+func TestRouterPathsBelongToActiveScope(t *testing.T) {
+	agent := &ir.Agent{EntryAgent: "desk", Agents: map[string]ir.AgentDef{
+		"desk":    {Model: "main", Instructions: "Name {{customer.name}}"},
+		"private": {Model: "main", Instructions: "Private {{secret}}"},
+		"empty":   {Model: "main", Instructions: "Hello"},
+	}, Tasks: map[string]ir.Task{"apply": {Instructions: "Date {{date}}"}}}
+	tgt := ir.Target{Models: ir.Bindings{Reason: map[string]ir.Binding{"main": {Provider: ir.ProviderSlngRouter, AgentID: "scope"}}}}
+	paths := slngTemplatePaths(agent, tgt)
+	for _, tc := range []struct {
+		kind       target.SlngSiteKind
+		name, want string
+	}{
+		{target.SlngSiteAgent, "desk", "customer__name"},
+		{target.SlngSiteAgent, "private", "secret"},
+		{target.SlngSiteAgent, "empty", ""},
+		{target.SlngSiteTask, "apply", "date"},
+	} {
+		scope := target.SlngScope("scope", target.SlngSite{Kind: tc.kind, Name: tc.name})
+		if got := strings.Join(paths[scope], ","); got != tc.want {
+			t.Errorf("%s = %q, want %q", scope, got, tc.want)
+		}
 	}
 }

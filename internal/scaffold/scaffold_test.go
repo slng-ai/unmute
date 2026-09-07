@@ -502,7 +502,7 @@ func TestPreflightAdditionalAgentAndHandoff(t *testing.T) {
 				Name: "billing", Instructions: "You are the billing specialist.", Reason: data.Reason, Speak: data.Speak,
 			}}
 			data.Handoffs = []Handoff{{
-				Name: "to_billing", Source: "assistant", To: "billing", When: "The caller needs billing help.", Announce: "I’ll connect you to billing now.", History: "full", AllVariables: true,
+				Name: "to_billing", Source: "assistant", To: "billing", When: "The caller needs billing help.", Announce: "I’ll connect you to billing now.", History: "full",
 			}}
 			dir := filepath.Join(t.TempDir(), "agent")
 			if _, err := Write(dir, data); err != nil {
@@ -512,7 +512,7 @@ func TestPreflightAdditionalAgentAndHandoff(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range []string{"billing:", "to_billing:", `announce: "I’ll connect you to billing now."`, "history: full", "variables: all"} {
+			for _, want := range []string{"billing:", "to_billing:", `announce: "I’ll connect you to billing now."`, "history: full"} {
 				if !strings.Contains(string(agentYAML), want) {
 					t.Errorf("agent.yaml missing %q:\n%s", want, agentYAML)
 				}
@@ -533,8 +533,7 @@ func TestPreflightTaskAndOrderedGroup(t *testing.T) {
 			data := Data{Name: "agent", Channel: "web"}
 			data.SetTarget(provider)
 			data.Tasks = []Task{{
-				Name: "collect", Instructions: "Return the caller tier.", Result: `{"tier":{"enum":["free","pro"]}}`,
-				History: "full", Agent: "assistant", When: "Classify the caller.",
+				Name: "collect", Instructions: "Return the caller tier.", History: "full", Agent: "assistant", When: "Classify the caller.",
 			}}
 			data.TaskGroups = []TaskGroup{{
 				Name: "triage", Steps: []string{"collect"}, ContextScope: "shared", Then: "return", Agent: "assistant", When: "Run triage.",
@@ -547,7 +546,7 @@ func TestPreflightTaskAndOrderedGroup(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range []string{"tasks:", "run_collect:", "task_groups:", "- collect", "run_triage:"} {
+			for _, want := range []string{"tasks:", "name: collect", "task_groups:", "- collect", "triage:"} {
 				if !strings.Contains(string(agentYAML), want) {
 					t.Errorf("agent.yaml missing %q:\n%s", want, agentYAML)
 				}

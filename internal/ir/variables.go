@@ -9,11 +9,6 @@ import (
 	packagespec "github.com/slng-ai/unmute/internal/spec"
 )
 
-// CaptureToolName is the generated tool the drivers emit when a package declares
-// any source: conversation variable. The name is reserved: a package tool or
-// control claiming it would shadow the generated one (V7).
-const CaptureToolName = "update_variables"
-
 // UnservedResultField is the one result field the drivers add themselves. Every
 // generated task finish takes it, optional and empty by default, so a step can
 // name the request it could not serve on its way out instead of refusing in
@@ -63,78 +58,57 @@ func checkSecrets(pkg *packagespec.Package) error {
 }
 
 // checkTemplates walks every template site and resolves each token against the
-// declared variables (V1). Greeting and instructions render once at session
-// start, so they may only name a variable that has a value by then (V2, C11);
-// inject and path render per call, so a conversation variable is fine there.
+// declared variables (V1).
+//
+// The greeting is the one site rendered before the call begins, so it may only
+// name a variable that already has a value by then (V2, C11): a hole in a
+// prompt nobody built yet is silent, and the greeting is the only render with
+// no later turn to catch up on. Every other site renders mid-call: an agent
+// prompt on entry (and again after one of its own steps writes state), a task
+// prompt when the step is entered, inject and a webhook path on every call.
+// So each of those may name any declared variable, including one only a later
+// step ever assigns — that is the whole point of assign: reading it back
+// somewhere with no message history. A variable with nothing in it yet renders
+// as words, never as a hole (_state_text and _render's plain fallback, both in
+// generate), so naming one early is never silent.
 func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 	if pkg.Agent.Conversation != nil && pkg.Agent.Conversation.Greeting != nil {
 		text := pkg.Agent.Conversation.Greeting.Text
-		if err := checkTemplateSite(pkg, agent, "agent.yaml", "text:", "conversation.greeting.text", text, true); err != nil {
+		if err := checkTemplateSite(pkg, agent, "agent.yaml", "text:", "conversation.greeting.text", text, true, true); err != nil {
 			return err
 		}
 	}
-	// An agent prompt is a session-start site, with one exception: a router-bound
-	// one is never rendered here at all. It travels to the SLNG Context Router
-	// with its placeholders intact and the router substitutes them, once per
-	// request, from the values sent beside it. So "no value when the prompt is
-	// built" does not describe that site: there is no build, and the value the
-	// request carries is the one the call holds at that moment.
-	//
-	// Which makes a value the call learns later exactly the case worth authoring
-	// there: a name the caller offers mid-conversation, or a field a task
-	// assigns. Before this exception the only way to write either was to render
-	// the value into the prompt text, which is the thing that stops the answer
-	// being cached at all.
-	//
-	// So the allowance is every declared variable rather than a chosen subset.
-	// The restriction exists because a session-start render of an unset variable
-	// produces a prompt with a hole in it; a router-bound prompt has no
-	// session-start render to produce one.
-	assigned := assignedVariables(agent)
-	allVariables := sortedKeys(agent.Variables)
 	for _, name := range sortedKeys(pkg.Agent.Agents) {
 		raw := pkg.Agent.Agents[name]
-		site := fmt.Sprintf("agent %q instructions", name)
-		var lateBound []string
-		if routerPrompt(pkg, agent, name) {
-			lateBound = allVariables
-		}
-		if err := checkTemplateSite(pkg, agent, raw.Instructions, "", site, pkg.Markdown[raw.Instructions], true, lateBound...); err != nil {
+		site := AgentPromptSite(name)
+		if err := checkTemplateSite(pkg, agent, raw.Instructions, "", site, pkg.Markdown[raw.Instructions], true, false); err != nil {
 			return err
 		}
 	}
-	// A task prompt is not a session-start site. Both drivers render it when the
-	// task is entered, which is mid-call and after any earlier task has written
-	// its result into the variables (livekit_v1_build.go promptExpr on the task,
-	// pipecat's per-worker render). So a task may name a variable a task assigns:
-	// that is the whole point of `assign:`, and forbidding it left the mapping
-	// with no reader anywhere in the package. A variable still unset at that
-	// moment renders empty, never the word "None", so the prompt can say what
-	// empty means (B: multi-task booked nothing because the appointment task
-	// could not see the customer id, 2026-08-15).
-	for _, name := range sortedKeys(pkg.Agent.Tasks) {
-		raw := pkg.Agent.Tasks[name]
-		site := fmt.Sprintf("task %q instructions", name)
-		if err := checkTemplateSite(pkg, agent, raw.Instructions, "", site, pkg.Markdown[raw.Instructions], true, assigned...); err != nil {
+	for _, name := range sortedKeys(pkg.Tasks) {
+		raw := pkg.Tasks[name]
+		site := TaskPromptSite(name)
+		if err := checkTemplateSite(pkg, agent, raw.Instructions, "", site, pkg.Markdown[raw.Instructions], true, false); err != nil {
 			return err
 		}
 	}
 	for _, name := range sortedKeys(pkg.Tools) {
 		raw := pkg.Tools[name]
 		file := filepath.Join("tools", name+".yaml")
-		for _, key := range sortedKeys(raw.Inject) {
-			value, ok := raw.Inject[key].(string)
+		for _, pair := range raw.Inject {
+			key := pair.Key
+			value, ok := pair.Value.(string)
 			if !ok {
 				continue
 			}
 			site := fmt.Sprintf("tool %q inject %q", name, key)
-			if err := checkTemplateSite(pkg, agent, file, key, site, value, false); err != nil {
+			if err := checkTemplateSite(pkg, agent, file, key, site, value, false, false); err != nil {
 				return err
 			}
 		}
 		if raw.Webhook != nil && raw.Webhook.Path != "" {
 			site := fmt.Sprintf("tool %q webhook.path", name)
-			if err := checkTemplateSite(pkg, agent, file, "path:", site, raw.Webhook.Path, false); err != nil {
+			if err := checkTemplateSite(pkg, agent, file, "path:", site, raw.Webhook.Path, false, false); err != nil {
 				return err
 			}
 		}
@@ -142,44 +116,12 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 	return nil
 }
 
-// routerPrompt reports whether this agent's think profile sends its prompt to the
-// SLNG Context Router, which is what makes the prompt a late-bound site rather
-// than a session-start one.
-//
-// Read from the package's own models block rather than from a resolved target,
-// because this check runs once for the package. A per-target override that turns
-// the profile into a direct provider makes the prompt render locally again, and
-// an unset variable there renders empty rather than failing, the same way a task
-// prompt has always behaved.
-func routerPrompt(pkg *packagespec.Package, agent *Agent, name string) bool {
-	profile := pkg.Agent.Agents[name].Model
-	if profile == "" {
-		profile = pkg.Agent.Agents[agent.EntryAgent].Model
-	}
-	return pkg.Agent.Models.Think[profile].Provider == ProviderSlngRouter
-}
-
-// assignedVariables lists every variable a delegate control writes from a task
-// result. They hold no value at session start and a value later in the call.
-func assignedVariables(agent *Agent) []string {
-	var names []string
-	for _, control := range agent.Controls {
-		delegate, ok := control.(*Delegate)
-		if !ok {
-			continue
-		}
-		for variable := range delegate.Assign {
-			names = append(names, variable)
-		}
-	}
-	slices.Sort(names)
-	return slices.Compact(names)
-}
-
-// checkTemplateSite resolves one site's tokens. sessionStart marks a site
-// rendered once before the call begins; alsoAllowed names variables that are
-// legal at this site even though they hold no value at session start.
-func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site, value string, sessionStart bool, alsoAllowed ...string) error {
+// checkTemplateSite resolves one site's tokens. prompt marks a site the model
+// reads, which scopes refusal 16 to the sites it exists to protect. requireNow
+// marks the one site rendered before the call begins, where a variable with no
+// value yet would leave a hole in the text rather than a later turn to fill it
+// in; alsoAllowed names variables that are legal there even so.
+func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site, value string, prompt, requireNow bool, alsoAllowed ...string) error {
 	for _, ref := range TemplateRefs(value) {
 		where := pkg.Location(file, firstNonBlank(token, "{{"))
 		// A {{$NAME}} token is a SLNG Vault variable, not a package variable, and
@@ -197,41 +139,55 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 			}
 			continue
 		}
-		variable, ok := agent.Variables[ref]
+		// A reference is a root and, when it carries a path, the fields the path
+		// walks: {{customer.status}} is the variable customer read at its field
+		// status. Every rule here is about the root, because the root is the
+		// value the site reads; the path is resolved last, against the root's
+		// declared shape, and only decides which part is rendered.
+		root, fields := PathRoot(ref), PathFields(ref)
+		variable, ok := agent.Variables[root]
 		if !ok {
-			if slices.Contains(agent.Secrets, ref) || envNamePattern.MatchString(ref) {
+			if slices.Contains(agent.Secrets, root) || envNamePattern.MatchString(root) {
 				return fmt.Errorf("%s: %s references {{%s}}, but secrets never flow through templates; a secret reaches a tool through its own *_env field", where, site, ref)
 			}
 			return fmt.Errorf("%s: %s references {{%s}}, which is not a declared variable", where, site, ref)
 		}
-		if sessionStart && !hasSessionStartValue(agent, ref, variable) && !slices.Contains(alsoAllowed, ref) {
+		if requireNow && !hasSessionStartValue(agent, root, variable) && !slices.Contains(alsoAllowed, root) {
 			return fmt.Errorf("%s: %s references {{%s}}, which has no value when the prompt is built; give it source: call_start, a system source, or a default", where, site, ref)
 		}
-		// Refusal 16. A value awaiting confirmation renders in exactly one prompt:
-		// the one belonging to the step that confirms it. Everywhere else is a
-		// place the model would read a number nobody has agreed to, and the worst
-		// version is not a wrong booking, it is greeting a stranger by the account
-		// holder's name.
-		//
-		// Scoped to prompt sites, which is what sessionStart marks: the greeting,
-		// an agent's instructions and a task's instructions all pass true here,
-		// while `inject:` and a webhook path pass false. That is not a coincidence
-		// worth relying on silently, so: a prompt is a thing the model reads, and
-		// this rule is about what the model may read.
-		//
-		// An `inject:` value is never read by the model at all, it goes straight
-		// into a request, so the risk there is different: the request would reach
-		// somebody else's record. That one is held at run time by the emitted
-		// refusal helper, which treats an unconfirmed name as unset wherever the
-		// tool is attached. Refusing it here instead would have made the value
-		// unusable by any tool, which is most of what a confirmed number is for.
-		if step := variable.Confirm; sessionStart && step != "" && site != fmt.Sprintf("task %q instructions", step) {
-			return fmt.Errorf("%s: %s references {{%s}}, which the caller has not confirmed yet. It renders only in "+
-				"task %q, the step that confirms it. Read it back there, and name it here only after that step has "+
-				"assigned it", where, site, ref, step)
+		if len(fields) > 0 {
+			if err := checkPathFields(agent.Shapes, root, string(variable.Type), variable.Shape, fields); err != nil {
+				return fmt.Errorf("%s: %s references {{%s}}: %w", where, site, ref, err)
+			}
 		}
 	}
 	return nil
+}
+
+// checkPathFields resolves the fields a placeholder walks after its root. The
+// root's own type decides whether there is anything to walk: a plain type, a
+// text type such as Phone, a literal set and a list have no fields, and each is
+// refused naming the type and the whole name to write instead. The list case is
+// caught here rather than left to FieldPath so the message can name the root,
+// which FieldPath never sees. Past the root, FieldPath's own messages apply: an
+// unknown field lists the fields the shape declares, a list partway down says
+// nothing names its entry, and a plain field partway down says it has no fields.
+// A token carrying anything but names and dots ends up here too, and is refused
+// as an unknown field with the text as written: a placeholder carries no logic.
+func checkPathFields(shapes map[string]Shape, root, plain string, typ *TypeRef, fields []string) error {
+	switch {
+	case typ == nil:
+		return fmt.Errorf("%s is a plain %s with no fields to name; write {{%s}}", root, plain, root)
+	case typ.IsList():
+		return fmt.Errorf("%s is %s, and a path cannot name a field inside a list: nothing says which entry it "+
+			"means. Record the entry you need into its own variable with assign: on the step that records it, "+
+			"and name that variable here", root, typ.String())
+	}
+	if _, ok := shapes[typ.Shape]; !ok {
+		return fmt.Errorf("%s is %s, which has no fields to name; write {{%s}}", root, typ.String(), root)
+	}
+	_, err := FieldPath(shapes, typ, fields)
+	return err
 }
 
 // hasSessionStartValue reports whether a variable holds a value before the first
@@ -277,15 +233,25 @@ func checkInject(pkg *packagespec.Package) error {
 			}
 		}
 		properties, _ := raw.Input["properties"].(map[string]any)
-		for _, key := range sortedKeys(raw.Inject) {
+		seen := make(map[string]bool)
+		required, _ := stringSlice(raw.Input["required"])
+		for _, pair := range raw.Inject {
+			key := pair.Key
+			if seen[key] {
+				return fmt.Errorf("%s: inject names %q twice", pkg.Location(file, "inject:"), key)
+			}
+			seen[key] = true
+			if slices.Contains(required, key) {
+				return fmt.Errorf("%s: injected key %q must be absent from input.required", pkg.Location(file, "inject:"), key)
+			}
 			if _, ok := properties[key]; ok {
 				return fmt.Errorf("%s: tool %q injects %q, which is also an input property; an injected value is hidden from the model, so it cannot double as a parameter the model fills in",
 					pkg.Location(file, key), name, key)
 			}
-			if value, ok := raw.Inject[key].(map[string]any); ok && value != nil {
+			if value, ok := pair.Value.(map[string]any); ok && value != nil {
 				return fmt.Errorf("%s: tool %q inject %q must be a scalar", pkg.Location(file, key), name, key)
 			}
-			if value, ok := raw.Inject[key].([]any); ok && value != nil {
+			if value, ok := pair.Value.([]any); ok && value != nil {
 				return fmt.Errorf("%s: tool %q inject %q must be a scalar", pkg.Location(file, key), name, key)
 			}
 		}

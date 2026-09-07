@@ -1,0 +1,108 @@
+# Legacy fixture name retained for golden stability. It now proves a task can
+# derive one shaped result from its destination variable while speech crosses
+# task and handoff boundaries through the default messages policy.
+version: 1
+
+name: typed-inputs
+
+entry_agent: front
+
+secrets:
+  - OPENAI_API_KEY
+  - DEEPGRAM_API_KEY
+  - SLNG_API_KEY
+
+shapes:
+  - name: Thing
+    description: One thing the caller named.
+    fields:
+      - label: str
+      - name: count
+        type: int
+        description: How many of it.
+
+variables:
+  notes:
+    type: list[Thing]
+    description: What this call has recorded so far.
+
+agents:
+  front:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tasks:
+      - name: do_thing
+        when: The caller wants a thing done.
+        instructions: tasks/do_thing.md
+        tools:
+          - note_thing
+        handoffs:
+          - to_specialist
+        assign:
+          - notes+: result.thing
+
+      - name: check
+        when: The caller wants something checked.
+        instructions: tasks/check.md
+    handoffs:
+      - to_specialist
+
+  specialist:
+    instructions: agents/specialist.md
+    think: reasoning
+    speak: voice
+    handoffs:
+      - to_front
+
+handoffs:
+  to_specialist:
+    to: specialist
+    when: The caller has a problem the front desk cannot solve.
+
+  to_front:
+    to: front
+    when: The caller wants the front desk again.
+
+tools:
+  - note_thing
+
+models:
+  think:
+    reasoning:
+      provider: slng
+      model: openai/gpt-4o-mini
+      agent_id: typed-inputs-v1
+      upstream:
+        provider: openai
+        key_env: OPENAI_API_KEY
+      params:
+        world_part_override: eu
+        reasoning_effort: "none"
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: deepgram
+      model: nova-3
+  turn:
+    vad:
+      provider: local
+      model: silero
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, this is the front desk. How can I help?"
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m

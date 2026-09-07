@@ -1,0 +1,44 @@
+description: >-
+  Atomically move one confirmed active booking owned by the verified customer
+  to an exact available slot.
+
+input:
+  type: object
+  properties:
+    confirmed:
+      type: boolean
+      description: True only after the caller agrees to this exact move
+  required:
+    - confirmed
+
+inject:
+  - customer_phone: "{{customer_phone}}"
+  - booking_id: "{{appointment_id}}"
+  - service: "{{appointment_service}}"
+  - slot_id: "{{appointment_slot_id}}"
+
+output:
+  type: object
+  properties:
+    booking_id:
+      type: string
+    status:
+      type: string
+      enum:
+        - modified
+        - not_confirmed
+        - invalid
+        - not_found
+        - slot_unavailable
+    summary:
+      type: string
+  required:
+    - booking_id
+    - status
+    - summary
+
+local:
+  handler: tools/salon.py
+
+interruption: provider_default
+effect: returns_data

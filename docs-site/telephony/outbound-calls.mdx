@@ -128,10 +128,21 @@ System sources include `to_number`, `from_number`, `direction`, `call_id`,
 `stream_id`, `session_id`, `carrier`, and `connection`. Seeding one with
 `--var` is refused, because the runtime owns it.
 
-**Only the LiveKit routes supply them.** The value is filled by an emitted
-carrier adapter, and no Pipecat route emits one, so naming a system source on a
-Pipecat target is a validation error rather than an empty string at call time.
-The [Variables reference](/reference/variables) has the per-source table.
+**Which routes supply them, and in which direction, differs per fact.** Both
+LiveKit routes supply every system source, on both directions. The two
+Pipecat Twilio routes supply a smaller set: `pipecat cloud-websocket` fills
+`to_number` on an outbound call, which is exactly the `dialed_number` example
+above, while `pipecat daily-sip` supplies no `to_number` at all. A route that
+does not grant a fact refuses the declaration at validation, rather than
+leaving an empty string at call time. [The full grid](/build/prefetch#where-it-works)
+in the pre-fetch reference has every fact, route and direction.
+
+Declaring the fact as a `prefetch:` entry instead keeps one package compiling
+on every route: where the route supplies nothing the entry is skipped and the
+variable keeps its default, rather than the package being refused.
+[Reading the dialled number](/build/prefetch#the-number-an-outbound-call-carries)
+shows that shape, and what a `cloud-websocket` call has to carry for it to
+arrive.
 
 ## Where to go next
 

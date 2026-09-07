@@ -95,10 +95,14 @@ func thenReturnGolden(t *testing.T) compilerGoldenCase {
 	return compilerGoldenCase{"then_return", agent, []Target{targetFor(agent, ProviderPipecat)}, false}
 }
 
+// The case is `summary` because `messages` stopped failing: the Pipecat driver
+// shapes it now, along with last_n and reset, so this case validated clean and
+// tested nothing. `summary` is the one value still refused there, and it is
+// what keeps a golden on the refusal text at all.
 func historyGolden(t *testing.T) compilerGoldenCase {
 	agent := safeAgent(t)
-	agent.Controls["to_billing"].(*AgentTransfer).Context.History = HistoryMessages
-	return compilerGoldenCase{"history_messages", agent, []Target{targetFor(agent, ProviderPipecat)}, true}
+	agent.Controls["to_billing"].(*AgentTransfer).Context.History = HistorySummary
+	return compilerGoldenCase{"history_summary", agent, []Target{targetFor(agent, ProviderPipecat)}, true}
 }
 
 func localPlacementGolden(t *testing.T) compilerGoldenCase {

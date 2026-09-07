@@ -1,0 +1,24 @@
+description: Write one note about the thing being done.
+
+input:
+  type: object
+  properties:
+    text:
+      type: string
+      description: The note, in one sentence.
+  required:
+    - text
+
+output:
+  type: object
+  properties:
+    saved:
+      type: boolean
+  required:
+    - saved
+
+local:
+  handler: tools/note_thing.py
+
+interruption: provider_default
+effect: returns_data

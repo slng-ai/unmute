@@ -118,20 +118,15 @@ func TestEmittedFinishCarriesTheUnservedRequest(t *testing.T) {
 			continue
 		}
 		finishes++
-		if !strings.Contains(line, ", "+ir.UnservedResultField+": ") || !strings.HasSuffix(line, `= "") -> None:`) {
+		if !strings.Contains(line, ir.UnservedResultField+": ") || !strings.HasSuffix(line, `= "") -> str | None:`) {
 			t.Errorf("agent.py: finish must take an optional %s: %s", ir.UnservedResultField, strings.TrimSpace(line))
 		}
 	}
 	if finishes == 0 {
 		t.Fatal("agent.py: no task finish emitted")
 	}
-	// One call per finish: a task that built its result dict directly would
-	// take the field and drop it on the floor.
-	if !strings.Contains(livekit, "def _task_result(values: dict") {
-		t.Error("agent.py: no _task_result helper")
-	}
-	if got := strings.Count(livekit, "_task_result({"); got != finishes {
-		t.Errorf("agent.py: %d of %d finishes route their result through _task_result", got, finishes)
+	if got := strings.Count(livekit, `_save_result(`) - 1; got != finishes {
+		t.Errorf("agent.py: %d of %d finishes route their arguments through _save_result", got, finishes)
 	}
 	if !strings.Contains(livekit, unservedOwnerRule) {
 		t.Error("agent.py: no delegate tells its owner to read the handed-back request")
@@ -149,7 +144,10 @@ func TestEmittedFinishCarriesTheUnservedRequest(t *testing.T) {
 	if required := regexp.MustCompile(`required=\[[^]]*` + ir.UnservedResultField).FindString(pipecat); required != "" {
 		t.Errorf("bot.py: %s must stay optional: %s", ir.UnservedResultField, required)
 	}
-	if !strings.Contains(pipecat, unservedOwnerRule) {
-		t.Error("bot.py: the results handback does not tell the owner to read the handed-back request")
+	if strings.Contains(pipecat, `"unserved_request": self._`) {
+		t.Error("bot.py: a private unserved request crosses back to the owner")
+	}
+	if !strings.Contains(pipecat, `return {"status": "unserved" if values.get("unserved_request") else "completed"}`) {
+		t.Error("bot.py: neutral task handback does not reduce private values to completed/unserved")
 	}
 }

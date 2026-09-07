@@ -14,8 +14,8 @@ entry_agent: front_desk
 agents:
   front_desk:
     instructions: instructions.md
-    model: reasoning
-    voice: voice
+    think: reasoning
+    speak: voice
     escalations:
       - send_to_billing
 

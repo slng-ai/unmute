@@ -40,15 +40,16 @@ entry_agent: assistant
 # to say what your agent actually does; the greeting below is separate, and it
 # is spoken word for word without going through the model at all.
 #
-# What an agent can do is four lists, one per kind, and each one names entries
-# in the catalog of the same name further down: tools do work and come back,
-# delegates run a task and come back, handoffs make the conversation somebody
-# else's, and escalations put the caller through to a person.
+# What an agent can do is its own lists: tools do work and come back, tasks are
+# sub-conversations it runs and returns from, task groups are ordered runs of
+# task steps, handoffs make the conversation somebody else's, and escalations put
+# the caller through to a person. A task is written here, inside the agent that
+# defines it, so one block says what the agent can do and when it does it.
 agents:
   assistant:
     instructions: instructions.md
-    model: assistant_model
-    voice: assistant_voice
+    think: assistant_model
+    speak: assistant_voice
     tools:
       - end_call
 

@@ -22,9 +22,8 @@ import (
 
 // addReminderVariables gives the package one variable per source the smokes
 // care about: two that arrive with the dispatch, one the runtime owns, and one
-// the model saves mid-call through the generated update_variables tool. The
-// greeting gains a template because a session-start template is what makes the
-// _render helper exist at all (renderNeeds).
+// with no source at all. The greeting gains a template because a session-start
+// template is what makes the _render helper exist at all (renderNeeds).
 //
 // The two dispatch variables carry a default because the salon takes inbound
 // calls, and nothing dispatches values into an inbound one: a call_start
@@ -48,8 +47,7 @@ func addReminderVariables(agent *ir.Agent) {
 	}
 	agent.Variables["reschedule_to"] = ir.Variable{
 		Type:        ir.PrimitiveString,
-		Source:      ir.VariableSourceConversation,
-		Description: "New slot the customer asks for, in spoken form. Save it as soon as the customer names one.",
+		Description: "New slot the customer asks for, in spoken form.",
 	}
 	if agent.Conversation != nil && agent.Conversation.Greeting != nil {
 		agent.Conversation.Greeting.Text = "Hi {{name}}! This is Sage and Stone Salon about your appointment {{appointment_time}}."
@@ -69,7 +67,7 @@ func useWebhookTools(agent *ir.Agent) {
 		map[string]any{"customer_phone": "{{customer_phone}}", "dialed_number": "{{dialed_number}}", "channel": "phone"},
 	)
 	agent.Tools["reschedule_appointment"] = webhookTool(
-		"Move the appointment to the slot the customer asked for. Save the slot with update_variables first; this tool reads it on its own.",
+		"Move the appointment to the slot the customer asked for.",
 		"/customers/{{customer_phone}}/appointments",
 		map[string]any{"customer_phone": "{{customer_phone}}", "new_time": "{{reschedule_to}}"},
 	)
@@ -148,7 +146,7 @@ func TestSmokeFixturesGenerateAndKeepTheirPythonSurface(t *testing.T) {
 					t.Fatalf("fixture %s no longer generates: %v", fixture.name, err)
 				}
 				emitted := artifactFile(t, artifact, driver.file)
-				for _, symbol := range []string{driver.entry, "def _render(", "update_variables"} {
+				for _, symbol := range []string{driver.entry, "def _render("} {
 					if !strings.Contains(emitted, symbol) {
 						t.Errorf("%s is missing %q, so the smoke script that names it cannot run", driver.file, symbol)
 					}
@@ -279,7 +277,7 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 		symbols  []string
 	}{
 		{ir.ProviderLiveKit, "agent.py", []string{
-			"class Userdata:", "class Booking(", "class CustomerVerification(",
+			"class Userdata:", "class ManageBooking(", "class VerifyCustomer(",
 			"class ComplaintSpecialist(", "class _TaskTransfer(",
 			"async def record_complaint(", "async def to_complaints(",
 			// The smoke scripts drive the pre-fetch directly, because that is the
@@ -293,10 +291,10 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 			"def _flow_tool_create_booking(", "def _flow_tool_find_or_create_customer(",
 			"def _flow_tool_list_bookings(", "async def _prefetch(",
 			"_manage_booking_active_step", "_manage_booking_results",
-			"_manage_booking_snapshot", "_manage_booking_finish_booking",
-			"_manage_booking_transfer_booking_to_complaints",
+			"_manage_booking_snapshot", "_manage_booking_finish_manage_booking",
+			"_manage_booking_transfer_manage_booking_to_complaints",
 			"_verify_customer_results", "_verify_customer_snapshot",
-			"_verify_customer_finish_customer_verification",
+			"_verify_customer_finish_verify_customer",
 		}},
 	} {
 		t.Run(string(driver.provider), func(t *testing.T) {
@@ -358,12 +356,6 @@ func TestSmokeStubbedNamesExistInTheEmittedModule(t *testing.T) {
 		"LocalSmartTurnAnalyzerV3": true,
 		"LLMContextAggregatorPair": false,
 		"WorkerRunner":             false,
-		// The pre-fetch smoke scripts replace the pre-fetched lookup with a slow
-		// stub and then with an exploding one, to drive the budget and the except
-		// arm. Both stubs take **kwargs, so the emitted call has to pass some: a
-		// generator that started calling it positionally would make both stubs
-		// pass for the wrong reason.
-		"tools.look_up_customer.look_up_customer": true,
 	} {
 		if !strings.Contains(emitted, name) {
 			t.Errorf("bot.py no longer names %q, so the smoke script that patches bot.%s patches nothing", name, name)
@@ -387,6 +379,14 @@ func TestSmokeStubbedNamesExistInTheEmittedModule(t *testing.T) {
 		}
 		if strings.HasPrefix(strings.TrimSpace(rest[:end]), ")") {
 			t.Errorf("bot.py calls %s() with no arguments; the smoke stub expects kwargs, so update one or the other deliberately", name)
+		}
+	}
+	for _, want := range []string{
+		"handler = tools.look_up_customer.look_up_customer",
+		"await asyncio.to_thread(handler, phone=state.customer_phone)",
+	} {
+		if !strings.Contains(emitted, want) {
+			t.Errorf("bot.py no longer emits %q, so the prefetch smoke stub is not exercised", want)
 		}
 	}
 }

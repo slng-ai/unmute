@@ -55,6 +55,64 @@ func TestLiveKitTaskRetryDoesNotRestartTheScript(t *testing.T) {
 	}
 }
 
+// A tool span carries the name of the tool that ran (V5).
+//
+// livekit-agents starts every one of them as the literal "function_tool" and
+// puts the tool's name in an attribute inside the span, so a trace lists one
+// identical row per tool call and reading a call means opening each row to
+// find out which tool it was. Pipecat names the same span `tool:<name>`, so
+// this is also what makes one call comparable across the two targets.
+//
+// The rename is only possible at the end of the span, where the hook gets a
+// ReadableSpan with no update_name(), so it writes `_name`. That is a private
+// attribute of a dependency, which is exactly the kind of thing that stops
+// working quietly, so this asserts the guard as well as the rename: a missing
+// attribute leaves the name alone, an AttributeError is swallowed, and the
+// hook always exports, because its answer decides whether the span is kept.
+func TestLiveKitNamesAToolSpanAfterItsTool(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enableLangfuse(agent)
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracing := artifactFile(t, artifact, "tracing.py")
+
+	for _, want := range []string{
+		`def _name_tool_spans(span: ReadableSpan) -> bool:`,
+		`tool = (span.attributes or {}).get("lk.function_tool.name")`,
+		`if tool and span.name == "function_tool":`,
+		`span._name = f"tool:{tool}"`,
+		`except AttributeError:`,
+		"should_export_span=_name_tool_spans",
+		"from opentelemetry.sdk.trace import ReadableSpan, TracerProvider",
+	} {
+		if !strings.Contains(tracing, want) {
+			t.Errorf("tracing.py missing %q", want)
+		}
+	}
+
+	hook := pipecatMethodBody(t, tracing, "def _name_tool_spans(", "\n\n\ndef ")
+	if !strings.HasSuffix(strings.TrimSpace(hook), "return True") {
+		t.Errorf("the filter hook must end by exporting the span, or a rename drops it:\n%s", hook)
+	}
+	if strings.Contains(hook, "return False") {
+		t.Errorf("this hook renames, it never drops:\n%s", hook)
+	}
+	guardAt := strings.Index(hook, "except AttributeError:")
+	renameAt := strings.Index(hook, `span._name = f"tool:{tool}"`)
+	if guardAt < 0 || renameAt < 0 || guardAt < renameAt {
+		t.Errorf("the private write must be guarded, so a renamed attribute upstream is not a crash mid-call:\n%s", hook)
+	}
+}
+
 func TestLiveKitV1RemyGolden(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
@@ -160,7 +218,7 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 		"def setup_langfuse(",
 		"def trace_speech_metrics(",
 		"set_tracer_provider(trace_provider, metadata=metadata)",
-		"should_export_span=lambda span: True",
+		"should_export_span=_name_tool_spans",
 		"ctx.add_shutdown_callback(flush_trace)",
 		`@session.on("conversation_item_added")`,
 	} {
@@ -702,13 +760,13 @@ func TestLiveKitV1DelegateThenTransferAndEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// do_reserve -> reserve_group (transfer to the greeter); do_event -> events_group (end).
-	reserve := agent.TaskGroups["reserve_group"]
+	// do_reserve transfers to the greeter; do_event ends the call.
+	reserve := agent.TaskGroups["do_reserve"]
 	reserve.Then, reserve.ThenTarget = ir.GroupTransfer, "greeter"
-	agent.TaskGroups["reserve_group"] = reserve
-	events := agent.TaskGroups["events_group"]
+	agent.TaskGroups["do_reserve"] = reserve
+	events := agent.TaskGroups["do_event"]
 	events.Then, events.ThenTarget = ir.GroupEnd, ""
-	agent.TaskGroups["events_group"] = events
+	agent.TaskGroups["do_event"] = events
 	confirm := agent.Tasks["confirm_booking"]
 	confirm.Tools = append(confirm.Tools, "back_to_greeter")
 	agent.Tasks["confirm_booking"] = confirm
@@ -730,7 +788,7 @@ func TestLiveKitV1DelegateThenTransferAndEnd(t *testing.T) {
 	for _, want := range []string{
 		// transfer: hands off to the target, does not return; no typed-result return.
 		"async def do_reserve(self, ctx: RunContext):",
-		"return Greeter(chat_ctx=owner_ctx)",
+		"return Greeter(chat_ctx=owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))",
 		"when it finishes the caller is handed to the greeter.",
 		// end: shuts the session down, does not return.
 		"self.session.shutdown()",
@@ -765,10 +823,13 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assignedTask := agent.Tasks["find_slot"]
+	assignedTask.Assign = []ir.AssignTo{{Var: "caller_phone", Field: "date"}}
+	assignedTask.Result = map[string]ir.ResultField{"date": {Type: ir.PrimitiveString}}
+	agent.Tasks["find_slot"] = assignedTask
 	agent.Controls["do_find"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "find_slot",
-		When:   "The caller only wants to check for a slot, not book yet.",
-		Assign: map[string]string{"caller_phone": "result.date"},
+		When: "The caller only wants to check for a slot, not book yet.",
 	}
 	def := agent.Agents["reservations"]
 	def.Tools = append(def.Tools, "do_find")
@@ -781,8 +842,8 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
 		"async def do_find(self, ctx: RunContext) -> dict:",
-		"result = await FindSlot(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))",
-		`ctx.userdata.caller_phone = result["date"]`,
+		"result = await FindSlot(chat_ctx=owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))",
+		`_values = _save_result("find_slot", ctx.userdata, {"date": date, "unserved_request": unserved_request})`,
 		"@dataclass\nclass Userdata:",
 		"caller_phone: str | None = None",
 		"session = AgentSession[Userdata](",
@@ -797,7 +858,7 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 		// and the model runs the whole flow a second time. The docstring above
 		// asks for that; only these two lines enforce it.
 		"owner_ctx = self.chat_ctx.copy()",
-		"await self.update_chat_ctx(owner_ctx)",
+		"await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -805,10 +866,10 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 	}
 	// The restore must land between the task and the assignment, or the owner
 	// keeps the merged turns.
-	restore := strings.Index(botpy, "await self.update_chat_ctx(owner_ctx)")
-	assign := strings.Index(botpy, `ctx.userdata.caller_phone = result["date"]`)
-	if restore < 0 || assign < 0 || restore > assign {
-		t.Errorf("the owner context is restored at %d, after the assignment at %d", restore, assign)
+	restore := strings.Index(botpy, "await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)")
+	result := strings.Index(botpy, "return _task_status(result)")
+	if restore < 0 || result < 0 || restore > result {
+		t.Errorf("the owner context is restored at %d, after the neutral result at %d", restore, result)
 	}
 	if strings.Contains(botpy, "_terminal_claimed") {
 		t.Error("a task without transfers must not emit terminal-claim state")
@@ -828,7 +889,6 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 	}
 	transfer := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
 	transfer.Announce = "I will take you back to Remy."
-	transfer.Requires = []string{"caller_phone"}
 	task := agent.Tasks["find_slot"]
 	task.Tools = append(task.Tools, "back_to_greeter")
 	agent.Tasks["find_slot"] = task
@@ -851,10 +911,8 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 		"def _claim_terminal(self) -> bool:",
 		"async def back_to_greeter(self, ctx: RunContext):",
 		"if not self._claim_terminal():\n            return",
-		`_unmet = _unmet_prerequisites(ctx.userdata, ["caller_phone"])`,
-		"if _unmet:\n            self._terminal_claimed = False",
 		`await ctx.session.say("I will take you back to Remy.", allow_interruptions=False)`,
-		"self.complete(_TaskTransfer(Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))))",
+		"self.complete(_TaskTransfer(Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))))",
 		"except BaseException:\n            self._terminal_claimed = False\n            raise",
 		"except _TaskTransfer as transfer:",
 		"return transfer.agent",
@@ -872,8 +930,8 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 		t.Fatal("could not bound FindSlot task")
 	}
 	taskBlock := botpy[taskStart : taskStart+taskEnd]
-	if got := strings.Count(taskBlock, "if not self._claim_terminal():"); got != 2 {
-		t.Errorf("transfer and finish claim the terminal %d times, want 2", got)
+	if got := strings.Count(taskBlock, "if not self._claim_terminal():"); got != 1 {
+		t.Errorf("transfer claims the terminal %d times, want 1", got)
 	}
 	transferMethod := strings.Index(taskBlock, "async def back_to_greeter")
 	claim := -1
@@ -895,11 +953,9 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 	}
 
 	// The task path reuses the complete agent-transfer contract, including
-	// summary history and variable selection.
+	// summary history.
 	transfer.Context.History = ir.HistorySummary
 	transfer.Context.Summarizer = "reasoning"
-	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
-	transfer.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}}
 	summaryArtifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
 	if err != nil {
 		t.Fatalf("generate summary transfer: %v", err)
@@ -907,7 +963,6 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 	summaryBot := artifactFile(t, summaryArtifact, "agent.py")
 	for _, want := range []string{
 		"async def _summarize(source: llm.ChatContext",
-		"ctx.userdata.visit_count = None  # context.variables: not carried on this transfer",
 		"self.complete(_TaskTransfer(Greeter(chat_ctx=summary_ctx)))",
 	} {
 		if !strings.Contains(summaryBot, want) {
@@ -947,7 +1002,8 @@ func TestLiveKitV1SharedGroupTaskTransferAndResults(t *testing.T) {
 		"group = TaskGroup(",
 		"summarize_chat_ctx=False,",
 		"on_task_completed=lambda event: _share_task_result(group, event),",
-		"try:\n            result = await group",
+		"try:\n            group = TaskGroup(",
+		"result = await group",
 		"except _TaskTransfer as transfer:\n            return transfer.agent",
 	} {
 		if !strings.Contains(block, want) {
@@ -978,9 +1034,9 @@ func TestLiveKitV1IsolatedGroupTaskAgentTransfer(t *testing.T) {
 	task := agent.Tasks["find_slot"]
 	task.Tools = append(task.Tools, "back_to_greeter")
 	agent.Tasks["find_slot"] = task
-	group := agent.TaskGroups["reserve_group"]
+	group := agent.TaskGroups["do_reserve"]
 	group.ContextScope = ir.ContextIsolated
-	agent.TaskGroups["reserve_group"] = group
+	agent.TaskGroups["do_reserve"] = group
 
 	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
 	if err != nil {
@@ -993,7 +1049,9 @@ func TestLiveKitV1IsolatedGroupTaskAgentTransfer(t *testing.T) {
 	}
 	block := botpy[start:]
 	for _, want := range []string{
-		"try:\n            task_results[\"find_slot\"] = await FindSlot()\n            task_results[\"confirm_booking\"] = await ConfirmBooking()",
+		"try:\n            task_results = {}",
+		`task_results["find_slot"] = await FindSlot(chat_ctx=llm.ChatContext())`,
+		`task_results["confirm_booking"] = await ConfirmBooking(chat_ctx=llm.ChatContext())`,
 		"except _TaskTransfer as transfer:\n            return transfer.agent",
 	} {
 		if !strings.Contains(block, want) {
@@ -1001,7 +1059,7 @@ func TestLiveKitV1IsolatedGroupTaskAgentTransfer(t *testing.T) {
 		}
 	}
 	catch := strings.Index(block, "except _TaskTransfer as transfer:")
-	second := strings.Index(block, `task_results["confirm_booking"] = await ConfirmBooking()`)
+	second := strings.Index(block, `task_results["confirm_booking"] = await ConfirmBooking(chat_ctx=llm.ChatContext())`)
 	if catch < second {
 		t.Fatalf("catch at %d must wrap the later step at %d", catch, second)
 	}
@@ -1077,8 +1135,14 @@ func TestV1LiveKitCompletedFlowEndsOnce(t *testing.T) {
 			break
 		}
 	}
-	if finishLine == "" || !strings.HasSuffix(finishLine, ") -> None:") {
-		t.Error("finish must be typed -> None (complete() is the sole resolution)")
+	for _, line := range strings.Split(botpy, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "async def finish(") {
+			finishLine = line
+			break
+		}
+	}
+	if finishLine == "" {
+		t.Error("finish tool is missing")
 	}
 	if strings.Contains(botpy, `return "Done."`) {
 		t.Error(`finish must not return a value after self.complete() (stray post-completion output)`)
@@ -1147,7 +1211,7 @@ func TestV2LiveKitToolCarriesSchema(t *testing.T) {
 
 	for _, want := range []string{
 		"from typing import Annotated, Literal",
-		"from pydantic import Field",
+		"Field, TypeAdapter",
 		// enum → Literal, description → Annotated[..., Field(...)]
 		`service: Annotated[Literal["haircut", "hair-color", "blowout"], Field(description="The service requested")]`,
 		// non-enum described args still carry the description
@@ -1228,9 +1292,9 @@ func TestLiveKitV1IsolatedGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reserve := agent.TaskGroups["reserve_group"]
+	reserve := agent.TaskGroups["do_reserve"]
 	reserve.ContextScope = ir.ContextIsolated
-	agent.TaskGroups["reserve_group"] = reserve
+	agent.TaskGroups["do_reserve"] = reserve
 
 	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
 	if err != nil {
@@ -1240,10 +1304,10 @@ func TestLiveKitV1IsolatedGroup(t *testing.T) {
 	for _, want := range []string{
 		// the isolated flow: fresh AgentTasks, results dict, typed return
 		"async def do_reserve(self, ctx: RunContext) -> dict:",
-		`task_results["find_slot"] = await FindSlot()`,
-		`task_results["confirm_booking"] = await ConfirmBooking()`,
-		"return task_results",
-		// events_group stays shared, so TaskGroup is still imported and used
+		`task_results["find_slot"] = await FindSlot(chat_ctx=llm.ChatContext())`,
+		`task_results["confirm_booking"] = await ConfirmBooking(chat_ctx=llm.ChatContext())`,
+		"return _group_status(task_results)",
+		// do_event stays shared, so TaskGroup is still imported and used
 		"from livekit.agents.beta.workflows import TaskCompletedEvent, TaskGroup",
 	} {
 		if !strings.Contains(botpy, want) {
@@ -1255,9 +1319,9 @@ func TestLiveKitV1IsolatedGroup(t *testing.T) {
 	}
 
 	// With every group isolated, the TaskGroup import must disappear.
-	events := agent.TaskGroups["events_group"]
+	events := agent.TaskGroups["do_event"]
 	events.ContextScope = ir.ContextIsolated
-	agent.TaskGroups["events_group"] = events
+	agent.TaskGroups["do_event"] = events
 	artifact, err = Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
 	if err != nil {
 		t.Fatalf("generate all-isolated: %v", err)
@@ -1306,8 +1370,8 @@ func TestLiveKitV1PerTaskModel(t *testing.T) {
 }
 
 // TestLiveKitV1HistoryShapingAndFallback covers the T5 lowerings (V4/V5):
-// every history value compiles, include_tool_calls and variables subsets
-// shape the handoff, and a fallback chain lowers to llm.FallbackAdapter.
+// every history value compiles, include_tool_calls shapes the handoff, and a
+// fallback chain lowers to llm.FallbackAdapter.
 func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
@@ -1323,10 +1387,8 @@ func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
 	agent.Models["reasoning"] = profile
 	agent.Models["backup"] = ir.ModelDef{Kind: ir.KindThink, Placement: ir.PlacementAPI}
 	// Shape each transfer differently.
-	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
 	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
 	toRes.Context.History = ir.HistoryMessages
-	toRes.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}} // visit_count not carried
 	toEvents := agent.Controls["to_events"].(*ir.AgentTransfer)
 	toEvents.Context.History = ir.HistoryLastN
 	toEvents.Context.MaxMessages = 6
@@ -1352,8 +1414,6 @@ func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
 		`summary_ctx = await _summarize(self.chat_ctx, openai.LLM(api_key=os.environ["OPENAI_API_KEY"], model="gpt-4o"))`,
 		"return Greeter(chat_ctx=summary_ctx)",
 		"async def _summarize(source: llm.ChatContext",
-		// D7: an uncarried variable resets on the transfer.
-		"ctx.userdata.visit_count = None  # context.variables: not carried on this transfer",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -1386,7 +1446,7 @@ func TestLiveKitV1HistoryResetAndToolCallShaping(t *testing.T) {
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		`return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_function_call=True, exclude_handoff=True))`,
+		`return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_function_call=True, exclude_handoff=True))`,
 		"# history: reset — the target starts fresh (a handoff marker still lands).",
 		"return Greeter()",
 	} {
@@ -1407,9 +1467,6 @@ func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
 	}
 	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
 	toRes.Announce = "I’ll connect you to reservations now."
-	toRes.Requires = []string{"caller_phone"}
-	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
-	toRes.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}}
 	back := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
 	back.Context.History = ir.HistoryReset
 
@@ -1427,13 +1484,10 @@ func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
 		t.Fatal("agent.py missing the end of to_reservations")
 	}
 	method := botpy[start : start+1+end]
-	guardAt := strings.Index(method, "        if _unmet:")
 	announceAt := strings.Index(method, `        await ctx.session.say("I’ll connect you to reservations now.", allow_interruptions=False)`)
-	resetAt := strings.Index(method, "        ctx.userdata.visit_count = None")
 	returnAt := strings.Index(method, "        return Reservations(")
-	if guardAt < 0 || announceAt < 0 || resetAt < 0 || returnAt < 0 ||
-		guardAt >= announceAt || announceAt >= resetAt || resetAt >= returnAt {
-		t.Errorf("transfer must guard, finish its announcement, shape context, then hand off:\n%s", method)
+	if announceAt < 0 || returnAt < 0 || announceAt >= returnAt {
+		t.Errorf("transfer must finish its announcement, then hand off:\n%s", method)
 	}
 	if strings.Contains(method, "generate_reply(instructions=") {
 		t.Errorf("the exact announcement must not start another LLM turn:\n%s", method)
@@ -1824,35 +1878,6 @@ func TestLiveKitV1HumanTransferHangupAlwaysShutsDown(t *testing.T) {
 				t.Errorf("%s hangup can skip shutdown when goodbye generation fails; missing:\n%s", name, want)
 			}
 		})
-	}
-}
-
-// TestLiveKitV1RequiresGuard covers V7: a transfer with requires: emits a
-// machine-checked guard that refuses unset and empty values.
-func TestLiveKitV1RequiresGuard(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, err := ir.Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
-	toRes.Requires = []string{"caller_phone"}
-
-	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
-	if err != nil {
-		t.Fatalf("generate: %v", err)
-	}
-	botpy := artifactFile(t, artifact, "agent.py")
-	for _, want := range []string{
-		`_unmet = _unmet_prerequisites(ctx.userdata, ["caller_phone"])`,
-		`return {"refused": _prerequisite_refusal(_unmet, False)}`,
-	} {
-		if !strings.Contains(botpy, want) {
-			t.Errorf("agent.py missing %q", want)
-		}
 	}
 }
 
@@ -2635,17 +2660,14 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	enabled, noCalls := true, false
 	agent.Conversation.Interruption = &ir.Interruption{Enabled: &enabled, MinimumWords: 2, IgnorePhrases: []string{"uh-huh"}}
 	agent.Conversation.ThinkingAudio = ir.ThinkingSubtle
-	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
 	agent.Models["backup"] = ir.ModelDef{Kind: ir.KindThink, Placement: ir.PlacementAPI}
 	profile := agent.Models["reasoning"]
 	profile.Fallback = []string{"backup"}
 	agent.Models["reasoning"] = profile
 	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
-	toRes.Requires = []string{"caller_phone"}
 	toRes.Context.History = ir.HistoryLastN
 	toRes.Context.MaxMessages = 6
 	toRes.Context.IncludeToolCalls = &noCalls
-	toRes.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}}
 	back := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
 	back.Context.History = ir.HistorySummary
 	back.Context.Summarizer = "backup"
@@ -2683,15 +2705,17 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	def := agent.Agents["greeter"]
 	def.Tools = append(def.Tools, "to_human", "to_human_cold", "fetch_notes", "book_table")
 	agent.Agents["greeter"] = def
-	reserve := agent.TaskGroups["reserve_group"]
+	reserve := agent.TaskGroups["do_reserve"]
 	reserve.ContextScope = ir.ContextIsolated
-	agent.TaskGroups["reserve_group"] = reserve
+	agent.TaskGroups["do_reserve"] = reserve
 	task := agent.Tasks["find_slot"]
 	task.Model = "backup"
 	task.Result["details"] = ir.ResultField{Schema: map[string]any{"type": "object"}}
 	task.Tools = append(task.Tools, "browse_tables")
 	agent.Tasks["find_slot"] = task
-	agent.Controls["do_find"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "find_slot", Assign: map[string]string{"caller_phone": "result.date"}}
+	task.Assign = []ir.AssignTo{{Var: "caller_phone", Field: "date"}}
+	agent.Tasks["find_slot"] = task
+	agent.Controls["do_find"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "find_slot"}
 	resDef := agent.Agents["reservations"]
 	resDef.Tools = append(resDef.Tools, "do_find")
 	agent.Agents["reservations"] = resDef
@@ -3138,93 +3162,5 @@ func TestLiveKitV1TaskDropsParentInFlightCall(t *testing.T) {
 	}
 	if strings.Contains(got, "running_placeholders") {
 		t.Error("a package with no tasks emits the in-flight strip anyway")
-	}
-}
-
-// TestLiveKitV1DelegateRequiresGuard covers the emitted guard on a returning
-// step: it runs before the step starts, refuses while a value is unset, resets
-// on a successful start, speaks at the bound, logs both paths, and declares its
-// requirement on the tool description so the model rarely reaches the guard.
-func TestLiveKitV1DelegateRequiresGuard(t *testing.T) {
-	agent := guardedFixture(t)
-	py := emitFor(t, agent, ir.ProviderLiveKit, "agent.py")
-
-	start := strings.Index(py, "    async def manage_booking(self, ctx: RunContext)")
-	if start < 0 {
-		t.Fatal("agent.py has no manage_booking method")
-	}
-	method := py[start:]
-	if end := strings.Index(method[1:], "\n    @function_tool"); end >= 0 {
-		method = method[:end+1]
-	}
-
-	guardAt := strings.Index(method, `_unmet = _unmet_prerequisites(ctx.userdata, ["customer_id"])`)
-	workAt := strings.Index(method, "owner_ctx = self.chat_ctx.copy()")
-	if guardAt < 0 || workAt < 0 || guardAt >= workAt {
-		t.Fatalf("the guard must run before the step does any work:\n%s", method)
-	}
-
-	for _, want := range []string{
-		`_tries = _prerequisite_refusals.get("manage_booking", 0) + 1`,
-		"_at_limit = _tries >= _PREREQUISITE_LIMIT",
-		`return {"refused": _prerequisite_refusal(_unmet, _at_limit)}`,
-		`_prerequisite_refusals["manage_booking"] = 0`,
-	} {
-		if !strings.Contains(method, want) {
-			t.Errorf("emitted guard missing %q:\n%s", want, method)
-		}
-	}
-
-	// The reset must be on the path that actually starts the step, not inside
-	// the refusal branch, or the counter never advances and the bound never
-	// fires.
-	resetAt := strings.Index(method, `_prerequisite_refusals["manage_booking"] = 0`)
-	if resetAt < guardAt || resetAt > workAt {
-		t.Errorf("the counter must reset where the step starts, not in the refusal branch:\n%s", method)
-	}
-
-	// FR-003b: the requirement is declared where the model sees it before it
-	// gets here.
-	docEnd := strings.Index(method, `_unmet = _unmet_prerequisites`)
-	doc := method[:docEnd]
-	for _, want := range []string{"customer_id", "verify_customer"} {
-		if !strings.Contains(doc, want) {
-			t.Errorf("the tool description must name %q so the model collects it earlier:\n%s", want, doc)
-		}
-	}
-
-	assertGuardLogsNamesOnly(t, method, "livekit")
-}
-
-// assertGuardLogsNamesOnly holds FR-003f and SC-005d.
-//
-// The identifier in the release example is a caller's phone number. A log line
-// that formats a variable's value writes real phone numbers into an operator's
-// log, which is a privacy defect and not a formatting slip. Every argument to
-// the guard's log calls must be a name or a step, never a lookup of a value.
-func assertGuardLogsNamesOnly(t *testing.T, method, label string) {
-	t.Helper()
-	logged := 0
-	for _, line := range strings.Split(method, "\n") {
-		if !strings.Contains(line, "prerequisite guard:") {
-			continue
-		}
-		logged++
-		if !strings.Contains(line, "refused") {
-			t.Errorf("%s: a refusal log line must say the step was refused: %s", label, line)
-		}
-	}
-	if logged < 2 {
-		t.Errorf("%s: both the ordinary refusal and the one that reaches the bound must be logged, found %d", label, logged)
-	}
-
-	// The only values that may reach a log argument. ctx.userdata.<name> and
-	// self.state.<name> are the two ways a value could get there.
-	for _, forbidden := range []string{"ctx.userdata.", "self.state.", "getattr(ctx.userdata", "getattr(self.state"} {
-		for _, line := range strings.Split(method, "\n") {
-			if strings.Contains(line, "logger.") && strings.Contains(line, forbidden) {
-				t.Errorf("%s: a log line reads a variable's value (%q); the identifier is a phone number, so only names may be logged: %s", label, forbidden, line)
-			}
-		}
 	}
 }

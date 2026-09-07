@@ -3,6 +3,8 @@ description: >-
   Use only after the digit readback got a clear yes. Reuse the record that
   already owns the number, or create one for a number that is new. Never guess
   a number or pass one the caller has not confirmed.
+  A caller giving a replacement number is not confirmation. Ask the readback
+  question first; call this tool only after a later caller message agrees to it.
 
 input:
   type: object

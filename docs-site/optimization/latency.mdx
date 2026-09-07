@@ -194,9 +194,9 @@ grep '"kind":"turn"' build/livekit/dev.log
 | `interrupted` | The reply was cut off because you spoke over it. LiveKit only. |
 | `first_speech` | A session number, not a turn number: how long from connecting to the agent's first word. |
 
-Controls do not get a tool row. A delegate or a transfer reaches the framework
-as a function call, so it would otherwise be timed like a tool, and a delegate
-does not return until the flow it started has finished. A three-turn task would
+Controls do not get a tool row. A task, a task group, or a transfer reaches the
+framework as a function call, so it would otherwise be timed like a tool, and a
+task or task group does not return until the flow it started has finished. A three-turn task would
 appear as one very slow tool, which is the opposite of what the numbers are for.
 
 ## Reading a slow turn

@@ -1,0 +1,258 @@
+---
+title: "Reduce context sharing step by step"
+description: "Start with conversation continuity, then let each task read only the facts it needs."
+sidebarTitle: "Context scope"
+---
+
+Use less context when a task should receive only selected facts, or when old
+conversation distracts it from a focused job. Start with the default,
+`messages`, and reduce sharing at a boundary only after deciding what the
+receiver needs to know.
+
+The snippets below are additions or updates to an existing package. Merge them
+into its current `variables:`, `agents:`, and `handoffs:` blocks.
+
+There are two independent choices:
+
+| Choice | How you control it |
+|---|---|
+| Earlier conversation | `context.history` on a task or handoff |
+| Saved variables | `{{variable}}` or `{{variable.field}}` in the receiving prompt |
+
+A variable is never added to a prompt automatically. A task with `reset` can
+still read the values its prompt names. A task with no placeholders can still
+learn facts from the conversation when its history includes messages.
+
+## 1. Start with messages
+
+Omitting `context` or `history` means `messages`. You can write it explicitly:
+
+```yaml agent.yaml
+agents:
+  concierge:
+    tasks:
+      - name: reschedule_booking
+        when: The caller wants to move a booking.
+        instructions: tasks/reschedule-booking.md
+        tools:
+          - modify_booking
+        context:
+          history: messages
+```
+
+The task receives caller and agent speech, including the request that caused
+the task to start. Previous tool calls and replies are removed together.
+The receiver uses its own instructions.
+
+This is a good starting point for conversational tasks. The caller can say
+"Move my haircut to Friday afternoon" and the task can read that sentence.
+Do not reduce history just because the option exists.
+
+## 2. Decide what must survive
+
+Before switching to `reset`, list the facts needed to complete the job. For a
+booking change, that might be:
+
+- Which appointment to change.
+- The new date and time the caller selected.
+- Whether identity verification has already succeeded, if this task needs it.
+
+A spoken request is not a saved value. An earlier task must save those facts
+through `assign:`, or they must already come from the call's initial values
+or prefetch. Describing a variable does not fill it.
+
+Keep requested details separate from the latest successful booking. A failed
+move must not overwrite the saved appointment with an unbooked time.
+
+## 3. Save the selected details
+
+This example assumes the selection task has the tools needed to find the
+booking and check available times. Add the following fields and assignments
+to that task in your package:
+
+```yaml agent.yaml
+variables:
+  appointment_id:
+    type: Id
+  appointment_date:
+    type: Date
+    description: The requested new date selected for this move.
+  appointment_time:
+    type: Time
+    description: The requested new time selected for this move.
+
+agents:
+  concierge:
+    tasks:
+      - name: choose_booking
+        when: Select the existing booking and its requested new time.
+        instructions: tasks/choose-booking.md
+        assign:
+          - appointment_id: result.appointment_id
+          - appointment_date: result.appointment_date
+          - appointment_time: result.appointment_time
+```
+
+```markdown tasks/choose-booking.md
+Use the caller's request to identify the appointment and check available times.
+Ask only for details that are missing. Once the caller selects a new time,
+finish with the appointment ID and the selected new date and time.
+```
+
+The three variable declarations provide the finish argument types. The
+selection task uses `messages` by default, so it can use "Friday afternoon"
+from the caller's request. If several times are available, it asks the caller
+to choose before saving an exact `Time`.
+
+In the owning agent's instructions, make the order clear:
+
+```markdown instructions.md
+For a new request to move a booking, run choose_booking to select its new
+date and time. When that task completes, run reschedule_booking.
+```
+
+## 4. Reset the next task and name its inputs
+
+Update `reschedule_booking` under the same agent so it runs after selection:
+
+```yaml agent.yaml
+agents:
+  concierge:
+    tasks:
+      - name: reschedule_booking
+        when: Move the selected appointment after its new date and time are saved.
+        instructions: tasks/reschedule-booking.md
+        tools:
+          - modify_booking
+        context:
+          history: reset
+```
+
+```markdown tasks/reschedule-booking.md
+Appointment to move: {{appointment_id}}
+Requested new date: {{appointment_date}}
+Requested new time: {{appointment_time}}
+
+If any value is missing, ask the caller for it. Otherwise use these values.
+Confirm the exact change before calling modify_booking.
+If the requested time is unavailable, ask the caller to choose another time.
+After a successful change, finish immediately.
+```
+
+The task receives its own prompt with those three values. It receives no
+previous messages, tool results, summary, or sentence that triggered it.
+There is no automatic request passed by the owning agent.
+
+For **no prior conversation and no saved values in the prompt**, use `reset`
+and omit variable placeholders. The task can collect what it needs from the
+caller. Review its tools too: `inject:` and tool results are separate ways
+data can reach a task's work.
+
+## 5. Save the outcome and let the owner read it
+
+Task history controls what goes **into** the task. On return, the owner gets
+its pre-task conversation back plus `completed` or `unserved`. It does not
+receive the task's private messages or tool results, even with `messages`.
+
+For continuity after a move, save the successful result separately. Declare
+an `Appointment` shape with the fields your booking tool returns, as shown in
+[Variables](/build/variables#group-related-fields-into-a-shape), and add:
+
+```yaml agent.yaml
+variables:
+  appointment:
+    type: Appointment
+    description: The latest appointment successfully saved by the booking tool.
+```
+
+```yaml
+assign:
+  - appointment: result.appointment
+```
+
+Add the assignment to `reschedule_booking` and change its final instruction:
+
+```markdown tasks/reschedule-booking.md
+After modify_booking reports success, copy the saved appointment from its
+result and finish immediately with appointment. Do not wait for another
+caller request. Let the owning agent confirm the change.
+```
+
+The owning agent and any later agent that needs the booking should read it:
+
+```markdown instructions.md
+Latest saved appointment: {{appointment}}
+When a booking task completes, confirm this appointment once.
+Use it instead of older dates mentioned in the conversation.
+```
+
+Follow the same pattern for verification. Save a status such as
+`Literal["existing", "created", "invalid"]` in the verification task, then
+reference it in each prompt that should reuse verification. Tell those
+prompts when verification must run again, such as a corrected phone number.
+
+Finishing with a non-empty `unserved_request` saves no assignments. It also
+does not undo a booking tool that already succeeded. Finish promptly after
+success so a new caller request is handled by the owner, not mistaken for
+unfinished booking work.
+
+## 6. Apply the same choice to handoffs
+
+A handoff applies its history choice to the receiving agent:
+
+```yaml agent.yaml
+handoffs:
+  to_customer_care:
+    to: customer_care
+    when: The caller needs help with a complaint.
+    context:
+      history: reset
+```
+
+Put any needed placeholders in `customer_care`'s instructions. For example,
+read the latest saved appointment so the caller does not have to identify it
+again. An unsaved complaint from the previous conversation will not cross a
+reset handoff; save the needed facts first or keep `messages` for that handoff.
+
+There is no automatic return from a handoff. See
+[Handoffs](/build/orchestration/handoffs).
+
+## 7. Check both the helpful and the empty case
+
+Validate and compile before testing the conversation:
+
+```sh
+unmute validate my-agent
+unmute compile my-agent --target livekit
+unmute dev my-agent --target livekit
+```
+
+Try these cases and inspect the model input in your trace:
+
+| Test | Expected result |
+|---|---|
+| Caller gives the new day before a `messages` task | The task uses that speech without asking for the day again |
+| Selection task saves values, then a `reset` task starts | The reset prompt contains the referenced values and no old conversation |
+| Caller gives a detail that was never saved before `reset` | The task asks for the missing detail |
+| A later agent needs the verified status and moved appointment | Its prompt references both, and it uses the latest saved facts |
+| A reset prompt references no variables | No saved values are added to its prompt |
+
+The public [salon-concierge example](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)
+uses `messages` for all tasks and handoffs. It shows how explicit saved values
+support continuity alongside spoken context. The internal
+[salon-concierge-v3 example](https://github.com/slng-ai/unmute/tree/main/internal/voice-agents-tests/salon-concierge-v3)
+shows selected reset boundaries.
+
+## Other history options
+
+| Need | Choice | Tradeoff |
+|---|---|---|
+| Spoken continuity | `messages` (default) | Earlier speech may contain facts you did not reference as variables |
+| Previous tool records too | `full` | More context, including older tool results |
+| A recent window | `last_n` with `max_messages` | Older requests may fall outside the window |
+| No previous conversation | `reset` | Needed facts must be explicitly saved and referenced, or asked again |
+| A summary | `summary` with `summarizer`, LiveKit only | Another model request; the summary still shares prior information |
+
+The [context reference](/reference/agent-yaml#context) covers every field and
+target restriction. A summary or a short history is not a substitute for
+`reset` when the receiver should inherit no conversation.

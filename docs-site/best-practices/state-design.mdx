@@ -1,0 +1,139 @@
+---
+title: "Designing declared state"
+description: "Choose facts that help the next task, keep requested changes separate from saved outcomes, and avoid repeated questions."
+---
+
+Declare a variable when another part of the call needs a reliable fact.
+Then reference it only in the prompts or tools that need it. Keeping a value
+in call state does not put it in every model request.
+
+## Start with the next reader
+
+For each value, identify who saves it and who needs it later:
+
+| Value | Who saves it | Who reads it |
+|---|---|---|
+| Verification status | The verification task | Agents that should reuse verification |
+| Requested new booking time | The selection task | A reset task that performs the move |
+| Successfully saved appointment | The booking task | The owner and customer care |
+| Recorded complaint | The complaint task | Customer care when summarizing or checking for a repeat |
+
+If nothing reads a value, you probably do not need it. If a later prompt needs
+it, add the placeholder there. A description alone does not share the value.
+
+## Separate a request from an outcome
+
+A caller asking for Friday does not mean Friday is booked. Keep the requested
+date separate from the successfully saved appointment. Update the saved
+appointment only after the booking tool reports success.
+
+This prevents a failed change from looking like a confirmed booking. It also
+gives later tasks a clear answer when the conversation mentions both the old
+and new times.
+
+## Group fields that describe one result
+
+Start with separate variables for independent facts, such as a caller's name
+and preferred language. Use a shape when the fields describe the same record
+and should be saved together.
+
+For a booking flow:
+
+1. Look at the successful booking tool result. Identify the fields later
+   tasks need, such as its ID, service, date, and time.
+2. Declare an `Appointment` shape with those fields. Use `Id` only if the
+   actual booking ID fits its limits, and `Date` and `Time` for the saved time.
+3. Declare `appointment` with `type: Appointment`. Give it a description such
+   as "The latest appointment successfully saved by the booking tool."
+4. Assign `appointment: result.appointment` in the booking task. Tell the task
+   to copy the successful result and finish immediately.
+5. Reference `{{appointment}}` in the owner, or just `{{appointment.date}}`
+   in a prompt that needs only the date.
+
+This keeps the booking ID and its current time together. Do not add unrelated
+caller details to the shape just because the booking task can see them.
+The [Variables guide](/build/variables#group-related-fields-into-a-shape)
+shows the YAML declaration and field descriptions.
+
+## Match the type to the actual value
+
+Use a shape for fields that belong together. Include fields your tools return
+or the caller can supply. Do not require an ID that no tool produces.
+
+Use `T | None` when a successful result may legitimately have no value. A
+required `Id` cannot be replaced by an empty string just to finish the task.
+
+An external identifier may need `str`. For example, a booking slot containing
+`|` does not fit `Id`. Preserve the exact value the tool returned. The
+[type reference](/reference/variables#text-types-and-their-limits) lists the
+format checks and their limits.
+
+## Choose a current value or a list
+
+Use one shaped variable for the latest successful appointment. Replacing it
+makes the new date the current one.
+
+Use a list when later steps need several records. Append with `+`:
+
+```yaml
+assign:
+  - complaints+: result.complaint
+```
+
+This needs a variable declared as `list[Complaint]`. An identical structured
+item is not added twice. A changed item is added separately; append does not
+find and replace an earlier record with the same ID. Plain values may repeat.
+
+## Finish as soon as the work succeeds
+
+A task that performs an action and then waits for another caller turn can
+accidentally absorb a new request. For example, a booking task might complete
+a move, hear a complaint, and return `unserved` instead of saving the move.
+
+Write the task prompt to save the successful result and finish immediately.
+Let the owner read the saved value and confirm it once. For a task designed
+to save one record, finish after that record; run it again for another request.
+
+A non-empty `unserved_request` saves no assignments and returns only a status.
+It does not undo an action already completed by a tool.
+
+## Reuse verification deliberately
+
+Save a verification status when the verification task succeeds. Reference it
+in the owner and in any receiving agent that should avoid asking again:
+
+```markdown
+Verification status: {{customer_status}}
+If the status is existing or created, continue without verifying again.
+Verify again if the caller corrects the account details.
+```
+
+Use [`confirm:`](/build/prefetch#always-check-a-value-with-the-caller) for a
+candidate value that must be checked with the caller. When that candidate
+changes, prefetched values derived from the old candidate are cleared. A
+separate status assigned by a task is not automatically a dependency of the
+phone number: the verification task must save the correct status too.
+
+## Write for a missing value
+
+Prefer a label and a clear fallback:
+
+```markdown
+Latest saved appointment: {{appointment}}
+Use it to identify the booking the caller just made. If no appointment is
+recorded, ask which booking they mean and look it up.
+```
+
+An unset value renders as `none recorded yet.` An empty list renders as `[]`.
+Neither proves that your booking system has no records; it means the call
+has not saved that information.
+
+## Check the whole path
+
+Read the task prompt and the owner's prompt together. Check who asks the
+question, who saves the answer, and who speaks after completion. Then inspect
+a trace to confirm that each receiving prompt contains the facts it needs.
+
+For a practical walkthrough, see [Reduce context sharing step by
+step](/best-practices/context-scope). For task structure and tool placement,
+see [Making a step actually run](/best-practices/step-scoping).

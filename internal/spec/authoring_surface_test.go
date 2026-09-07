@@ -231,6 +231,12 @@ func TestAuthoringSchemaCarriesTheRouterFields(t *testing.T) {
 // The three catalogs are on the derived schema, because the schema derives
 // itself from the structs and this is the check that the derivation actually
 // happened. A hand-authored schema file is what this replaces.
+//
+// handoffs and escalations are unchanged; task_groups is the third since the
+// tasks/delegates refactor: an agent's own task_groups: list now points
+// directly at it, the same way a handoffs: or escalations: list points at
+// their catalogs, so there is no need for a separate delegates: catalog to
+// reach it through.
 func TestAuthoringSchemaCarriesTheThreeCatalogs(t *testing.T) {
 	schema, err := Schema()
 	if err != nil {
@@ -244,14 +250,14 @@ func TestAuthoringSchemaCarriesTheThreeCatalogs(t *testing.T) {
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"delegates", "handoffs", "escalations"} {
+	for _, name := range []string{"handoffs", "escalations", "task_groups"} {
 		if searchSchema(decoded, name) == nil {
 			t.Errorf("derived authoring schema has no %q property", name)
 		}
 	}
-	// And the retired spelling is gone from it, so a package written the old way
-	// fails against the published schema as well as against the compiler.
-	for _, name := range []string{"controls"} {
+	// And the retired spellings are gone from it, so a package written the old
+	// way fails against the published schema as well as against the compiler.
+	for _, name := range []string{"controls", "delegates"} {
 		if found := searchSchema(decoded, name); found != nil {
 			t.Errorf("derived authoring schema still carries %q: %v", name, found)
 		}

@@ -161,16 +161,50 @@ def print_transcript(spans: list[dict]) -> None:
             print(f"  {clock}  {who:<6}  {said}")
 
 
-def print_tools(spans: list[dict]) -> None:
-    """Tool calls, matched to their results.
+def payload_of(value: object) -> str:
+    """A tool payload verbatim, which text_of() would collapse.
 
-    The TOOL span carries the result but not reliably the name or arguments;
-    the model's own `llm_request` output carries the name and arguments. So
-    read the request for what was asked and the TOOL span for what came back.
+    text_of() exists to pull the spoken words out of a span, so given a dict
+    it returns the first of content/text/output/summary. That is right for a
+    transcript and wrong here: a task's structured result carries a `summary`
+    field, so text_of() would print the summary and hide every other field,
+    which is the one thing this section exists to show.
     """
-    print("\n=== tool calls ===")
-    asked = []
-    for span in sorted(spans, key=lambda s: s.get("startTime") or ""):
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return json.dumps(value, separators=(",", ":"))
+
+
+def print_tools(spans: list[dict]) -> None:
+    """Tool calls and their results, in the order they happened.
+
+    The two targets record a tool differently, so this reads both:
+
+      - Pipecat names the span `tool:<name>` and puts the arguments on its
+        input and the result on its output, so one span is the whole record.
+      - LiveKit names every tool span `function_tool` regardless of which tool
+        ran, and carries the name in an `lk.function_tool.name` attribute this
+        script does not fetch. So the name comes from the model's own
+        `llm_request` output, which carries it with the arguments, and the
+        `function_tool` span supplies the result.
+
+    A task's structured result is here on both targets: it is the arguments of
+    the finish call, `finish_<delegate>_<task>` on Pipecat and `finish` on
+    LiveKit.
+    """
+    rows: list[tuple[str, str, str]] = []
+
+    for span in spans:
+        name = span.get("name") or ""
+        if not name.startswith("tool:"):
+            continue
+        tool = name[len("tool:") :]
+        rows.append((span.get("startTime") or "", f"call    {tool}", payload_of(span.get("input"))))
+        rows.append((span.get("startTime") or "", f"result  {tool}", payload_of(span.get("output"))))
+
+    for span in spans:
         if span.get("name") != "llm_request":
             continue
         parsed = span.get("output")
@@ -188,22 +222,67 @@ def print_tools(spans: list[dict]) -> None:
                 except json.JSONDecodeError:
                     continue
             function = (call or {}).get("function") or {}
-            asked.append((span.get("startTime"), function.get("name"), function.get("arguments")))
+            rows.append(
+                (
+                    span.get("startTime") or "",
+                    f"call    {function.get('name')}",
+                    str(function.get("arguments") or ""),
+                )
+            )
 
-    results = [
-        (s.get("startTime"), text_of(s.get("output")))
-        for s in sorted(spans, key=lambda s: s.get("startTime") or "")
-        if s.get("type") == "TOOL"
-    ]
+    for span in spans:
+        # LiveKit's own tool span, which knows the result but not, at the
+        # fields this script asks for, which tool produced it.
+        if span.get("type") == "TOOL" and not (span.get("name") or "").startswith("tool:"):
+            rows.append((span.get("startTime") or "", "result", payload_of(span.get("output"))))
 
-    if not asked and not results:
+    print("\n=== tool calls ===")
+    if not rows:
         print("  (none)")
         return
-    for start, name, arguments in asked:
-        print(f"  {(start or '')[11:19]}  call    {name}({arguments or ''})")
-    for start, output in results:
-        if output:
-            print(f"  {(start or '')[11:19]}  result  {output[:160]}")
+    rows.sort(key=lambda r: r[0])
+    for start, label, payload in rows:
+        if payload:
+            print(f"  {start[11:19]}  {label:<44}  {payload[:200]}")
+
+
+def print_usage(spans: list[dict]) -> None:
+    """Per-span usage, which is where a context change shows up.
+
+    This is the number to read a `context.history` or a `requires:` change
+    against: trimming a step's context moves its input tokens and nothing
+    else. Langfuse reports what the provider reported, so on the SLNG router
+    `output` comes back 0 rather than absent, and a total that equals the
+    input is that, not a request with no reply. TTS reports characters instead
+    of tokens, so its row says so and is never added to a token figure.
+    """
+    buckets: dict[str, dict] = defaultdict(
+        lambda: {"n": 0, "input": 0, "output": 0, "total": 0, "max": 0, "unit": "tokens"}
+    )
+    for span in spans:
+        details = span.get("usageDetails") or {}
+        if span.get("type") != "GENERATION" or not details:
+            continue
+        row = buckets[span.get("name") or "?"]
+        total = int(details.get("total") or 0)
+        row["n"] += 1
+        row["input"] += int(details.get("input") or 0)
+        row["output"] += int(details.get("output") or 0)
+        row["total"] += total
+        row["max"] = max(row["max"], total)
+        if "characters" in details:
+            row["unit"] = "characters"
+
+    print("\n=== usage ===")
+    if not buckets:
+        print("  (no span reported any usage)")
+        return
+    print(f"  {'span':<8} {'n':>3} {'input':>8} {'output':>7} {'total':>8} {'mean':>7} {'max':>7}  unit")
+    for name, row in sorted(buckets.items(), key=lambda kv: -kv[1]["total"]):
+        print(
+            f"  {name:<8} {row['n']:>3} {row['input']:>8} {row['output']:>7} "
+            f"{row['total']:>8} {row['total'] // row['n']:>7} {row['max']:>7}  {row['unit']}"
+        )
 
 
 def print_latency(spans: list[dict]) -> None:
@@ -307,6 +386,7 @@ def main() -> int:
     print_transcript(spans)
     print_tools(spans)
     print_latency(spans)
+    print_usage(spans)
     return 0
 
 

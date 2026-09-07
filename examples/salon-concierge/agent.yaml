@@ -4,18 +4,45 @@ name: salon-concierge
 
 entry_agent: concierge
 
-timezone: Europe/Madrid
-
 agents:
   concierge:
     instructions: instructions.md
-    model: reasoning
-    voice: voice
+    think: reasoning
+    speak: voice
     tools:
       - look_up_salon_info
-    delegates:
-      - verify_customer
-      - manage_booking
+    tasks:
+      - name: verify_customer
+        when: >-
+          Run only when saved customer_status is unavailable or invalid, or the
+          caller explicitly corrects their phone number. Existing or created means
+          verification is complete for the whole call, including later booking changes
+          and complaints. When verification is needed, it reads the phone number back
+          and needs a yes before it looks anyone up.
+        instructions: tasks/verify-customer.md
+        tools:
+          - find_or_create_customer
+        assign:
+          - customer_phone: result.customer_phone
+          - customer_status: result.customer_status
+        context:
+          history: messages
+
+      - name: manage_booking
+        when: The caller wants to create, modify, or cancel a booking.
+        instructions: tasks/booking.md
+        tools:
+          - list_bookings
+          - check_availability
+          - create_booking
+          - modify_booking
+          - cancel_booking
+        handoffs:
+          - to_complaints
+        assign:
+          - appointment: result.appointment
+        context:
+          history: messages
     handoffs:
       - to_complaints
     escalations:
@@ -23,48 +50,43 @@ agents:
 
   complaint_specialist:
     instructions: agents/complaint-specialist.md
-    model: reasoning
-    voice: voice
+    think: reasoning
+    speak: voice
     tools:
       - look_up_refund_policy
-      - record_complaint
-    delegates:
+    # The concierge defines this one. A bare name runs the same task from here,
+    # so there is one definition and both agents can offer it.
+    tasks:
       - verify_customer
+      - name: handle_complaint
+        when: The verified caller wants a complaint recorded.
+        instructions: tasks/complaint.md
+        tools:
+          - record_complaint
+        handoffs:
+          - to_concierge
+          - to_complaints
+        assign:
+          - complaints+: result.complaint
+        context:
+          history: messages
     handoffs:
       - to_concierge
     escalations:
       - to_manager
 
-delegates:
-  verify_customer:
-    task: customer_verification
-    when: >-
-      Confirm who the caller is before any specialist handoff. The task reads
-      the phone number back and needs a yes before it looks anyone up.
-    assign:
-      customer_phone: result.customer_phone
-
-  manage_booking:
-    task: booking
-    when: The caller wants to create, modify, or cancel a booking.
-    announce: Let me pull up the diary.
-    requires:
-      - customer_phone
-
 handoffs:
   to_complaints:
     to: complaint_specialist
-    when: The verified caller has a complaint or service problem.
+    when: The caller has a complaint or service problem.
     context:
-      history: full
-      variables: all
+      history: messages
 
   to_concierge:
     to: concierge
     when: The caller changes to a request owned by another specialist.
     context:
-      history: full
-      variables: all
+      history: messages
 
 escalations:
   to_manager:
@@ -74,48 +96,38 @@ escalations:
       ring_timeout: 30s
       on_unavailable: hangup
 
-tasks:
-  customer_verification:
-    instructions: tasks/verify-customer.md
-    tools:
-      - find_or_create_customer
-    result:
-      customer_phone: string
-      status:
-        enum:
-          - existing
-          - created
-          - invalid
-      summary: string
-    context:
-      history: full
+shapes:
+  - name: Appointment
+    description: The latest booking successfully created, moved, or cancelled.
+    fields:
+      - booking_id: Id
+      - service: Literal["haircut", "hair-color", "blowout"]
+      - date: Date
+      - time: Time
+      - action: Literal["create", "modify", "cancel"]
 
-  booking:
-    instructions: tasks/booking.md
-    tools:
-      - list_bookings
-      - check_availability
-      - create_booking
-      - modify_booking
-      - cancel_booking
-    handoffs:
-      - to_complaints
-    result:
-      action:
-        enum:
-          - create
-          - modify
-          - cancel
-          - none
-      booking_id: string
-      status: string
-      summary: string
-    context:
-      history: full
+  - name: Complaint
+    description: One recorded complaint; a requested resolution is not an approval.
+    fields:
+      - complaint_id: Id
+      - summary: str
+      - requested_resolution: str
 
 variables:
+  customer_status:
+    type: Literal["existing", "created", "invalid"]
+    description: The customer lookup status saved after the caller confirms their number.
+
+  appointment:
+    type: Appointment
+    description: The latest successful booking action, saved only after the tool succeeds.
+
+  complaints:
+    type: list[Complaint]
+    description: Complaints recorded during this call.
+
   booking_date:
-    type: string
+    type: Date
     default: ""
     description: >-
       Today's date in the salon's own timezone, YYYY-MM-DD. Read once from the
@@ -125,10 +137,28 @@ variables:
       underneath a conversation would leave the caller and the agent disagreeing
       about what "tomorrow" means halfway through.
 
-  customer_phone:
+  booking_weekday:
     type: string
     default: ""
-    confirm: customer_verification
+    description: >-
+      The weekday today falls on, spelled out in English: Monday to Sunday. From
+      the same clock reading as `booking_date`, so the two cannot disagree about
+      which day it is. It is what lets the agent answer "next Friday" without a
+      second turn working out what day today is first.
+
+  salon_local_time:
+    type: Time
+    default: ""
+    description: >-
+      The salon's own wall clock when the call began, HH:MM on a 24 hour clock.
+      From the same reading as the two above. It is what lets the agent know that
+      a caller asking for "this afternoon" at 17:40 is asking for something that
+      has nearly passed, rather than offering them a slot that is already gone.
+
+  customer_phone:
+    type: Phone
+    default: ""
+    confirm: verify_customer
     description: >-
       The caller's phone number in E.164: a plus sign, then digits, with no
       spaces, brackets or dashes. One shape for every phone number in this
@@ -142,13 +172,8 @@ variables:
 
       Offered to the caller for a yes, never acted on unasked. Somebody may be
       ringing from a friend's phone, or may hold a second account, so until the
-      verification step has heard them agree this value satisfies no `requires:`
-      guard and appears in no prompt but that step's own.
-
-      An earlier version of this note said no prompt ever reads the number back.
-      That is now false rather than merely out of date: reading it back is the
-      whole saving, and it replaced twelve spoken digits with one yes. The
-      read-back turn does not cache, and that trade was made deliberately.
+      verification step has heard them agree this value stays unconfirmed and
+      appears in no prompt but that step's own.
 
   customer_name:
     type: string
@@ -160,11 +185,32 @@ variables:
       was: greeting a stranger by the account holder's name is the worst thing
       this feature could do, and the compiler refuses the prompt that would.
 
+  customer_on_file:
+    type: string
+    default: ""
+    description: >-
+      Whether the caller's number was already on file: `existing` or `unknown`.
+      From the same lookup as `customer_name`, in the same call. It is here to
+      show that one entry fills as many variables as the result has fields, and
+      it earns its place: the agent greets a returning customer differently from
+      somebody ringing for the first time, and asking would waste a turn.
+
+      Inherits `customer_phone`'s confirming step, exactly as `customer_name`
+      does, because a status found from a number nobody agreed to is as
+      unconfirmed as that number was.
+
 prefetch:
   - name: today
-    clock: date
+    clock: now
+    # The zone this entry reads its clock in, and the reason it sits here rather
+    # than on the package: the key belongs beside the reading it governs, and two
+    # entries could honestly want two zones. Not the container's clock, which is
+    # UTC and would name the wrong day for anybody who is not on it.
+    timezone: Europe/Madrid
     assign:
       - booking_date: result.date
+      - booking_weekday: result.day_of_week
+      - salon_local_time: result.time
 
   - name: caller
     source: from_number
@@ -173,10 +219,17 @@ prefetch:
 
   - name: profile
     tool: look_up_customer
+    # Does running this unasked, on every call including wrong numbers, change
+    # anything? No: look_up_customer reads. Its twin find_or_create_customer
+    # would answer true, which is why this entry points at this one.
+    writes: false
     args:
       - phone: "{{customer_phone}}"
     assign:
+      # Two variables, one call. The lookup returns both, so a second line costs
+      # nothing: not a second request, not a second turn, not a second second.
       - customer_name: result.name
+      - customer_on_file: result.status
 
 secrets:
   - OPENAI_API_KEY
@@ -207,13 +260,9 @@ knowledge:
 models:
   think:
     reasoning:
-      provider: slng
+      provider: openai
       model: gpt-5.6-luna
-      agent_id: optimized-salon-concierge-v13
-      upstream:
-        provider: openai
       params:
-        world_part_override: eu
         reasoning_effort: "none"
   speak:
     voice:

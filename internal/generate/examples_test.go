@@ -51,8 +51,12 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 // single-agent shape the compiler tests need.
 func examplePackagePath(name string) string {
 	switch name {
-	case "remy", "safe_core", "daily_carrier", "simple-prompt":
+	case "remy", "safe_core", "daily_carrier", "simple-prompt", "typed_state", "typed_inputs", "prefetch_core":
 		return filepath.Join("..", "testdata", name)
+	case "salon-concierge-v2", "salon-concierge-v3":
+		// Not a shipped example. It is a package we run against real providers,
+		// so it lives with the other voice-agent test packages.
+		return filepath.Join("..", voiceAgentTestsDir, name)
 	}
 	return filepath.Join("..", "..", "examples", name)
 }
@@ -74,32 +78,11 @@ func loadExample(t *testing.T, name string) *ir.Agent {
 
 func TestSalonConciergeFeatureContract(t *testing.T) {
 	resolved := loadExample(t, "salon-concierge")
-	// The turn-latency contract on both targets: thinking goes through the SLNG
-	// Context Router, the model does not think before its first token, and the
-	// caller never hears another agent's line.
-	//
-	// The middle one is now held by a prompt directive rather than by a parameter,
-	// and that is not a style choice. Three spellings of the thinking-off parameter
-	// were sent to three of this model's hosts on 2026-08-27, nine requests: every
-	// one accepted, every one ignored, hundreds of reasoning tokens each time. The
-	// model's own /no_think directive in the system prompt is the only thing that
-	// worked.
-	//
-	// The last of those was measured, not imagined. The router's cache key is the
-	// (assistant speech, user speech) pair and carries no system prompt, so two
-	// of this package's agents whose last exchange matched collided while they
-	// shared one cache scope. 2026-08-21, three live calls: the booking
-	// specialist's opening turn was served the concierge's "what phone number
-	// should I use", cache_layer l2_exact, 1.27ms, no model call.
-	//
-	// The fix is one scope per prompt site, which is what the scope assertion at
-	// the end of this function holds. It replaced slng_pure_proxy, which used to
-	// be required here and which bought the same safety by turning cache serving
-	// off entirely.
+	// Keep the runnable example on direct OpenAI with reasoning disabled.
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		reason := targetByProvider(t, resolved, provider).Models.Reason["reasoning"]
-		if !reason.Router() {
-			t.Errorf("%s reasoning is not a router binding: %#v", provider, reason)
+		if reason.Provider != "openai" || reason.Model != "gpt-5.6-luna" || reason.Router() {
+			t.Errorf("%s reasoning must use direct OpenAI gpt-5.6-luna: %#v", provider, reason)
 		}
 		// reasoning_effort is not optional once the agent has tools: the GPT-5
 		// family rejects function tools on chat completions without it, and every
@@ -124,23 +107,7 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		if reason.PromptSuffix != "" {
 			t.Errorf("%s reasoning sets prompt_suffix = %q; this model takes reasoning_effort instead", provider, reason.PromptSuffix)
 		}
-		// This used to require slng_pure_proxy, which stops the router serving
-		// from cache at all. It was a guard against a cross-agent cache hit
-		// repeating an earlier agent's line to the caller, and it bought that
-		// safety by giving up the speed the router exists for. The real fix is
-		// one cache scope per prompt site, and with that in place the guard is a
-		// workaround the example should not be teaching. If you are here because
-		// you put it back: the collision it guarded against cannot happen, and
-		// suppressing the serve means every turn goes to the model.
-		if _, present := reason.Params["slng_pure_proxy"]; present {
-			t.Errorf("%s reasoning sets slng_pure_proxy: %#v. The example demonstrates the router doing its job, and this switch stops it serving from cache", provider, reason.Params)
-		}
 	}
-
-	// SC-008 on the package a reader actually opens. A fixture and the goldens are
-	// gated elsewhere; nothing gated this until the collision had already shipped
-	// in it.
-	assertSalonScopes(t, resolved)
 
 	// No assertion on which transcriber this package binds. The measured
 	// finalisation numbers that make the choice matter are recorded in the
@@ -191,31 +158,36 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		t.Fatalf("manager transfer = %#v, want cold transfer with hangup fallback", resolved.Controls["to_manager"])
 	}
 
-	// Every internal handoff stays silent and carries the whole conversation, so
-	// the receiving agent never reintroduces itself and never re-asks a question
-	// already answered.
-	//
-	// What is deliberately NOT asserted here is a prerequisite on every handoff.
-	// This package used to gate all four on an identifier, which meant a caller
-	// who opened with "I want to speak to a manager" was interviewed before
-	// anyone would route them. A prerequisite belongs on the step that needs the
-	// value, not on the act of changing who is speaking. T012 below holds the
-	// escalation path specifically.
+	// Entry history carries speech. Saved status and appointment facts are
+	// explicit prompt reads, since a task's private conversation does not return.
 	for name, control := range resolved.Controls {
 		transfer, ok := control.(*ir.AgentTransfer)
 		if !ok {
 			continue
 		}
-		if transfer.Announce != "" || transfer.Context.History != ir.HistoryFull ||
-			!transfer.Context.Variables.All {
-			t.Errorf("internal handoff %q must stay silent and carry full history and every variable: %#v", name, transfer)
+		if transfer.Announce != "" || transfer.Context.History != ir.HistoryMessages {
+			t.Errorf("internal handoff %q must stay silent and carry spoken messages: %#v", name, transfer)
 		}
 	}
+	for name, task := range resolved.Tasks {
+		if task.Context.History != ir.HistoryMessages {
+			t.Errorf("task %q history = %q, want messages", name, task.Context.History)
+		}
+	}
+	for _, name := range []string{"concierge", "complaint_specialist"} {
+		for _, variable := range []string{"customer_status", "appointment"} {
+			if !slices.Contains(ir.TemplateRefs(resolved.Agents[name].Instructions), variable) {
+				t.Errorf("%s cannot read saved %s, so it would ask the caller again", name, variable)
+			}
+		}
+	}
+	if !slices.Contains(ir.TemplateRefs(resolved.Tasks["handle_complaint"].Instructions), "appointment") {
+		t.Error("the complaint task cannot read the latest saved appointment")
+	}
 
-	// FR-008 to FR-010: nothing on the path from the entry agent to a person
-	// carries a prerequisite. The entry agent holds the escalation control
-	// directly, and the handoff to customer care is ungated, so the two ways a
-	// caller reaches a human both work on the first utterance.
+	// The entry agent holds the escalation control directly, so a caller who
+	// opens with "I want to speak to a manager" reaches one on the first
+	// utterance rather than being routed through another agent first.
 	entry := resolved.Agents[resolved.EntryAgent]
 	reachesAPerson := false
 	for _, name := range entry.Tools {
@@ -225,15 +197,6 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	}
 	if !reachesAPerson {
 		t.Errorf("entry agent %q holds no human transfer: %v; a caller asking for a person must not have to pass through another agent to get one", resolved.EntryAgent, entry.Tools)
-	}
-	for _, name := range []string{"to_complaints", "to_concierge"} {
-		transfer, ok := resolved.Controls[name].(*ir.AgentTransfer)
-		if !ok {
-			t.Fatalf("control %q is not an agent transfer: %#v", name, resolved.Controls[name])
-		}
-		if len(transfer.Requires) != 0 {
-			t.Errorf("handoff %q carries prerequisites %v; hearing a complaint and returning to the entry agent must not be gated on identifying the caller", name, transfer.Requires)
-		}
 	}
 
 	// Every action tool here is a local Python handler, so nothing remote has to
@@ -313,9 +276,9 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// LLM round trip to finish, which the caller hears as silence, and the
 	// mutation tools already refuse an unconfirmed write, so the split bought
 	// latency and no safety. Held here so it cannot drift back.
-	booking, ok := resolved.Tasks["booking"]
+	booking, ok := resolved.Tasks["manage_booking"]
 	if !ok {
-		t.Fatal("tasks omit booking")
+		t.Fatal("tasks omit manage_booking")
 	}
 	for _, name := range []string{"prepare_booking", "confirm_booking", "apply_booking"} {
 		if _, split := resolved.Tasks[name]; split {
@@ -346,33 +309,54 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if _, declared := resolved.Tools["get_current_date"]; declared {
 		t.Error("get_current_date is still declared; the prefetch replaced it")
 	}
-	if resolved.Timezone == "" {
-		t.Error("the package declares no timezone:, so the pre-fetched date would be read in UTC")
-	}
 	var clock, caller, profile bool
 	for _, entry := range resolved.Prefetch {
-		clock = clock || entry.Clock == ir.PrefetchClockDate
+		if entry.Clock == ir.PrefetchClockNow {
+			clock = true
+			// The zone rides the entry that reads it. Without one the date would
+			// be read on the container clock, which is UTC.
+			if entry.Timezone == "" {
+				t.Errorf("prefetch %q reads the clock and names no zone, so the date is read in UTC", entry.Name)
+			}
+			// One reading, three facts. This is the saving the whole entry exists
+			// for: a second clock fact costs a line, not a turn.
+			if got := len(entry.Assign); got < 3 {
+				t.Errorf("the clock entry assigns %d variables, want at least 3: one reading fills as many "+
+					"facts as the prompt needs, and an example showing one teaches that it does not", got)
+			}
+		}
 		caller = caller || entry.Source == ir.VariableSourceFromNumber
 		profile = profile || entry.Tool == "look_up_customer"
 	}
 	if !clock || !caller || !profile {
 		t.Errorf("prefetch = %+v, want a clock entry, a from_number entry and a look_up_customer entry", resolved.Prefetch)
 	}
-	// The lookup a prefetch runs has to be the read-only one. Pre-fetching
-	// find_or_create_customer would create a customer record on every inbound
-	// call, wrong numbers included, which is the reason both tools exist.
-	if !resolved.Tools["look_up_customer"].ReadOnly {
-		t.Error("look_up_customer does not declare read_only: true, so no prefetch could run it")
+	// The lookup a prefetch runs has to be the one that writes nothing, and the
+	// entry running it has to say so. Pre-fetching find_or_create_customer would
+	// create a customer record on every inbound call, wrong numbers included,
+	// which is the reason both tools exist and why the split survived `writes:`
+	// arriving: the shipped example an author copies should not model it.
+	var declared bool
+	for _, entry := range resolved.Prefetch {
+		if entry.Tool != "look_up_customer" {
+			continue
+		}
+		declared = true
+		if entry.Writes {
+			t.Error("the salon pre-fetches look_up_customer and declares writes: true; that entry reads")
+		}
 	}
-	if resolved.Tools["find_or_create_customer"].ReadOnly {
-		t.Error("find_or_create_customer claims read_only: true, and it writes")
+	if !declared {
+		t.Error("no prefetch entry runs look_up_customer, so nothing declares whether the lookup writes")
 	}
-	wantBookingResult := []string{"action", "booking_id", "status", "summary"}
-	if got := slices.Sorted(maps.Keys(booking.Result)); !slices.Equal(got, wantBookingResult) {
-		t.Errorf("booking result = %v, want %v", got, wantBookingResult)
+	if _, ok := resolved.Tools["find_or_create_customer"]; !ok {
+		t.Error("find_or_create_customer is gone; it is the writing twin the pre-fetched lookup exists to avoid")
+	}
+	if got := slices.Sorted(maps.Keys(booking.Result)); !slices.Equal(got, []string{"appointment"}) {
+		t.Errorf("booking result = %v, want the typed appointment saved after success", got)
 	}
 	bookingDelegate, ok := resolved.Controls["manage_booking"].(*ir.Delegate)
-	if !ok || bookingDelegate.Task != "booking" || bookingDelegate.Group != "" {
+	if !ok || bookingDelegate.Task != "manage_booking" || bookingDelegate.Group != "" {
 		t.Fatalf("manage_booking = %#v, want a delegate to the single booking task", resolved.Controls["manage_booking"])
 	}
 	// The clock tool's input and output schema used to be pinned here. Its
@@ -440,7 +424,7 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// one drifting alone brings the repetition back.
 	requireText("concierge", resolved.Agents["concierge"].Instructions,
 		"confirm it in one short sentence without repeating the service, the day and the time")
-	requireText("booking task", resolved.Tasks["booking"].Instructions,
+	requireText("booking task", resolved.Tasks["manage_booking"].Instructions,
 		"Say the whole thing back in one sentence and ask one yes-or-no question",
 		"does not repeat the details")
 
@@ -493,34 +477,18 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 			injectedBy[toolName] = append(injectedBy[toolName], ir.TemplateRefs(text)...)
 		}
 	}
-	// A step reached only through a guarded delegate is the one exemption, and it
-	// is not a loophole: the guard has already refused the step unless the value
-	// is set, so the prompt cannot be wrong about it. That is why the booking step
-	// needs no placeholder and customer care does. Nothing guards the route to
-	// customer care, deliberately, because a caller with a complaint must not be
-	// interrogated before anyone will listen.
-	guaranteed := map[string][]string{}
-	for _, control := range resolved.Controls {
-		delegate, ok := control.(*ir.Delegate)
-		if !ok || len(delegate.Requires) == 0 {
-			continue
-		}
-		if delegate.Task != "" {
-			guaranteed[delegate.Task] = append(guaranteed[delegate.Task], delegate.Requires...)
-		}
-	}
-	canSee := func(holder, kind, prompt string, tools []string, given []string) {
+	// The variable's own `confirm:` is the one exemption: it may not appear in
+	// this prompt at all, and the emitted refusal is what tells the model the
+	// value is not usable yet.
+	canSee := func(holder, kind, prompt string, tools []string) {
 		for _, toolName := range tools {
 			for _, variable := range injectedBy[toolName] {
-				if strings.Contains(prompt, "{{"+variable+"}}") || slices.Contains(given, variable) {
+				if strings.Contains(prompt, "{{"+variable+"}}") {
 					continue
 				}
-				// A third way out, and the one this package now takes for the
-				// caller's number: the variable declares `confirm:`, so it may not
-				// appear in this prompt at all, and the emitted refusal is what
-				// tells the model the value is not usable yet. The prompt does not
-				// need to see the value to avoid asking for it: it is told, by name,
-				// which value is missing, on the turn it tries to use it.
+				// The prompt does not need to see the value to avoid asking for it:
+				// it is told, by name, which value is missing, on the turn it tries
+				// to use it.
 				//
 				// Seeing it was the right rule while the only way to have the value
 				// was to have collected it. It stops being the right rule once a
@@ -529,22 +497,22 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 				if resolved.Variables[variable].Confirm != "" {
 					continue
 				}
-				t.Errorf("%s %q holds %q, which injects %s, but it can neither see {{%s}} nor is it reached through a guard that requires it: it has no way to tell whether the value is already collected, so it asks the caller for something it already has",
+				t.Errorf("%s %q holds %q, which injects %s, but it cannot see {{%s}}: it has no way to tell whether the value is already collected, so it asks the caller for something it already has",
 					kind, holder, toolName, variable, variable)
 			}
 		}
 	}
 	for name, def := range resolved.Agents {
-		canSee(name, "agent", def.Instructions, def.Tools, nil)
+		canSee(name, "agent", def.Instructions, def.Tools)
 	}
 	for name, task := range resolved.Tasks {
-		canSee(name, "task", task.Instructions, task.Tools, guaranteed[name])
+		canSee(name, "task", task.Instructions, task.Tools)
 	}
 
 	// Verification is one phone number, nothing else. Spelling a name over a
 	// transcriber is the slowest and least reliable thing a caller can be asked
 	// to do, and the number alone identifies the record.
-	verification := resolved.Tasks["customer_verification"]
+	verification := resolved.Tasks["verify_customer"]
 	// The last three are what a real call broke on (2026-08-28, a Spanish
 	// number). The step judged the number short because it did not look like a
 	// NANP one and refused to move; it treated "that sounds about right"
@@ -595,15 +563,15 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	}
 	requireText("verification delegate", verificationDelegate.When,
 		"reads the phone number back", "needs a yes before it looks anyone up")
-	if _, assigned := verificationDelegate.Assign["customer_name"]; assigned {
+	if slices.Contains(ir.AssignedVars(verification.Assign), "customer_name") {
 		t.Error("verify_customer still assigns customer_name")
 	}
 	// Assigned from the result rather than captured from speech: a task result
 	// lands on both drivers by the same path customer_id already proves, while a
 	// conversation-sourced value depends on the capture tool firing, which is
 	// the write site Pipecat missed once already.
-	if got := verificationDelegate.Assign["customer_phone"]; got != "result.customer_phone" {
-		t.Errorf("verify_customer assigns customer_phone from %q, want result.customer_phone", got)
+	if got := assignedField(verification.Assign, "customer_phone"); got != "customer_phone" {
+		t.Errorf("verify_customer assigns customer_phone from result.%q, want result.customer_phone", got)
 	}
 	lookup := resolved.Tools["find_or_create_customer"]
 	requireText("customer lookup", lookup.Description,
@@ -625,12 +593,14 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		"Nothing said before that question counts as a yes",
 		"including the caller choosing the time",
 		"On a clear yes, save it in the same turn with `confirmed` set to true",
-		"On a no, or on a second unclear answer, finish with action `none` and save nothing",
+		"On a no, or on a second unclear answer, use the finish escape and save nothing",
 		// The date arrives pre-fetched, so the prompt names the value rather than a
 		// tool to call for it, and it says out loud not to call one. A model handed
 		// a date and still told to "call get_current_date first" would call a tool
 		// that no longer exists.
-		"Today is `{{booking_date}}`", "Do not call a tool to ask what day it is",
+		"Today is `{{booking_weekday}}` `{{booking_date}}`",
+		"the salon clock reads\n   `{{salon_local_time}}`",
+		"Do not\n   call a tool to ask what day or time it is",
 		"Never say a booking is saved, moved, or cancelled unless the matching tool ran in this turn")
 	// Open chat is the entry agent's job now, and it holds exactly one lookup:
 	// the salon's own documents. The prompt's job is the same as the deleted chat
@@ -669,17 +639,13 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	}
 
 	// The shape, held as tightly as the old shape was held. Two agents, and the
-	// booking step is a guarded delegate on the entry agent rather than an agent
-	// of its own.
+	// booking step is a delegate on the entry agent rather than an agent of its
+	// own.
 	if len(resolved.Agents) != 2 {
 		t.Errorf("the example has %d agents, want 2: %v", len(resolved.Agents), slices.Sorted(maps.Keys(resolved.Agents)))
 	}
-	guardedStep, ok := resolved.Controls["manage_booking"].(*ir.Delegate)
-	if !ok {
+	if _, ok := resolved.Controls["manage_booking"].(*ir.Delegate); !ok {
 		t.Fatalf("manage_booking = %T, want a delegate", resolved.Controls["manage_booking"])
-	}
-	if !slices.Equal(guardedStep.Requires, []string{"customer_phone"}) {
-		t.Errorf("manage_booking requires = %v, want [customer_phone]: the guard is what lets the booking step live on the entry agent", guardedStep.Requires)
 	}
 	if !slices.Contains(resolved.Agents[resolved.EntryAgent].Tools, "manage_booking") {
 		t.Errorf("the entry agent does not hold manage_booking: %v", resolved.Agents[resolved.EntryAgent].Tools)
@@ -693,6 +659,190 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 // agent that holds only controls is a routing table the caller has to be spoken
 // through, and this package shipped two of them for months, purely because the
 // compiler could not put a prerequisite on a step.
+// salon-concierge-v2 exists to be the scoped reading of the same salon, and an
+// example whose authored shape nobody holds is an example that quietly becomes a
+// second copy of the package it was meant to be read against. So this pins the
+// four choices that are the whole point of it, and the two that keep it from
+// landing on the other salon's deployment.
+//
+// It deliberately does not pin the prompts, the tools, the models or the routes.
+// Those are meant to stay identical to salon-concierge: the comparison only says
+// anything if the context wiring is the only difference.
+func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
+	resolved := loadExample(t, "salon-concierge-v2")
+
+	// The step that only reads a number back runs on nothing. This is the value
+	// the package is for, and the one with a floor: a `reset` step never receives
+	// the caller's triggering utterance, so moving another step onto it is a
+	// decision to make on purpose rather than by copying this line.
+	if got := resolved.Tasks["verify_customer"].Context.History; got != ir.HistoryReset {
+		t.Errorf("verify_customer runs on history %q; this package's point is that a step reading a number back needs no conversation, so it is %q", got, ir.HistoryReset)
+	}
+
+	// Everywhere else: the spoken turns, without the tool records. Both handoffs
+	// included, because a handoff is where a trimmed context is permanent.
+	for name, got := range map[string]ir.History{
+		"manage_booking": resolved.Tasks["manage_booking"].Context.History,
+		"to_complaints":  resolved.Controls["to_complaints"].(*ir.AgentTransfer).Context.History,
+		"to_concierge":   resolved.Controls["to_concierge"].(*ir.AgentTransfer).Context.History,
+	} {
+		if got != ir.HistoryMessages {
+			t.Errorf("%s carries history %q, want %q: a tool record crossing this seam is what the package removes", name, got, ir.HistoryMessages)
+		}
+	}
+
+	if _, ok := resolved.Controls["manage_booking"].(*ir.Delegate); !ok {
+		t.Fatalf("manage_booking = %#v, want a delegate", resolved.Controls["manage_booking"])
+	}
+	verify, ok := resolved.Controls["verify_customer"].(*ir.Delegate)
+	if !ok {
+		t.Fatalf("verify_customer = %#v, want a delegate", resolved.Controls["verify_customer"])
+	}
+	if got := assignedField(resolved.Tasks[verify.Task].Assign, "customer"); got != "customer" {
+		t.Errorf("verify_customer assigns customer from result.%q, want result.customer: nothing else in the package supplies it", got)
+	}
+
+	// No default, and this is the load-bearing one. A default is a value the
+	// variable holds before the first word, so a defaulted customer would
+	// render in the conversation info as a real-looking record before anyone
+	// had been looked up.
+	if def := resolved.Variables["customer"].Default; def != nil {
+		t.Errorf("customer declares default %#v; the conversation info would then show a caller nobody verified", def)
+	}
+	if shape := resolved.Variables["customer"].Shape; shape == nil || shape.String() != "Customer | None" {
+		t.Errorf("customer resolves to %q, want Customer | None: absent until the verification step fills it", shape.String())
+	}
+
+	// The declared shapes, and the four values they back. This package is what
+	// the feature is verified with, so a package that stops exercising a part of
+	// it fails here rather than passing quietly.
+	//
+	// The field floor is per shape rather than one number, because a shape is
+	// only as wide as the tools that fill it. `Customer` carries two: the
+	// lookup returns a number and a status and nothing else, so a third field
+	// would be one the model could only invent, which is the defect the shape's
+	// own `no id` comment records and the one the missing name recreated. Two
+	// still exercises what this shape is here for, a shaped text beside a
+	// Literal, and that pair is asserted rather than the count.
+	floors := map[string]int{"Customer": 2, "Appointment": 3, "Complaint": 3}
+	for _, name := range []string{"Customer", "Appointment", "Complaint"} {
+		shape, declared := resolved.Shapes[name]
+		if !declared {
+			t.Errorf("shape %q is no longer declared, so nothing in the tree exercises it", name)
+			continue
+		}
+		if len(shape.Fields) < floors[name] {
+			t.Errorf("shape %q declares %d fields, want at least %d; it is the verification package's own shape and it is meant to be a group",
+				name, len(shape.Fields), floors[name])
+		}
+		if shape.Description == "" {
+			t.Errorf("shape %q has no description, so the model is never told what the class is for", name)
+		}
+	}
+	// What `Customer` is for, now that its floor is two: the shaped text and the
+	// Literal are the two kinds a step has to hand back correctly, and a live
+	// call refused both before they were right.
+	var shaped, literal bool
+	for _, field := range resolved.Shapes["Customer"].Fields {
+		if field.Type == nil {
+			continue
+		}
+		if field.Type.Shaped != "" {
+			shaped = true
+		}
+		if len(field.Type.Literal) > 0 {
+			literal = true
+		}
+	}
+	if !shaped || !literal {
+		t.Errorf("Customer carries shaped text %v and a Literal %v; it needs both, because those are the two kinds a step hands back", shaped, literal)
+	}
+	// A shape inside a shape, which is the one thing no unit test settles: the
+	// generated schema emits $defs and $ref for it, and whether the provider
+	// accepts that has to be proven on a real request. Keeping the nesting here
+	// is what keeps that request meaningful.
+	complaint := resolved.Shapes["Complaint"]
+	nested := false
+	for _, field := range complaint.Fields {
+		nested = nested || field.Type.String() == "Appointment | None"
+	}
+	if !nested {
+		t.Error("Complaint no longer nests an Appointment; the nested-schema question is settled on a real request against this package, and a flat package cannot ask it")
+	}
+	for name, want := range map[string]string{
+		"caller_reason":  `list[Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]]`,
+		"appointments":   "list[Appointment]",
+		"complaints":     "list[Complaint]",
+		"customer_phone": "Phone",
+	} {
+		got := resolved.Variables[name].Shape
+		if got == nil {
+			t.Errorf("variable %q declares no shape, so this package stops exercising the type it exists to exercise", name)
+			continue
+		}
+		if got.String() != want {
+			t.Errorf("variable %q resolves to %q, want %q", name, got.String(), want)
+		}
+	}
+	// Two steps append rather than replace, because a caller can book twice and
+	// can be unhappy about two things. A replace here is what the `+` exists to
+	// prevent, and it would look like nothing at all.
+	for control, variables := range map[string][]string{
+		// Two steps append to one list, which is the case the spec separates
+		// from a change of mind: a caller who books and also complains rang for
+		// two reasons and the state holds both, while a step that changes its
+		// own mind replaces its own value. Both of them are steps that act, and
+		// that is the fix to a real call rather than a preference. The
+		// verification step recorded the reason first, and it runs on a reset
+		// history: it never receives the caller's triggering utterance, so the
+		// only way it could fill that field was to ask, and it asked on every
+		// call, immediately after the caller had said why they rang.
+		"manage_booking":   {"appointments", "caller_reason"},
+		"handle_complaint": {"complaints", "caller_reason"},
+	} {
+		delegate, ok := resolved.Controls[control].(*ir.Delegate)
+		if !ok {
+			t.Fatalf("%s = %#v, want a delegate", control, resolved.Controls[control])
+		}
+		for _, variable := range variables {
+			appends := false
+			for _, entry := range resolved.Tasks[delegate.Task].Assign {
+				if entry.Var == variable {
+					appends = entry.Append
+				}
+			}
+			if !appends {
+				t.Errorf("%s does not append to %q, so the caller's second one erases the first", control, variable)
+			}
+		}
+	}
+	// And the step that cannot see the conversation records nothing about it.
+	if got := ir.AssignedVars(resolved.Tasks[verify.Task].Assign); slices.Contains(got, "caller_reason") {
+		t.Errorf("verify_customer assigns %v; a reason recorded by a step running on a reset history can "+
+			"only be asked for, and asking is what this step must never do", got)
+	}
+	// The record holds no id, because no tool in the package returns one. A
+	// required shaped id here was a field the model could only invent, its own
+	// prompt forbids inventing one, and the empty string it sent instead ended
+	// every call at the finish call.
+	for _, field := range resolved.Shapes["Customer"].Fields {
+		if strings.Contains(field.Name, "id") {
+			t.Errorf("Customer declares %q; nothing in the package supplies a customer id, so the model can only invent one or leave it empty", field.Name)
+		}
+	}
+
+	// Its own deployment and its own router scope. Sharing either with
+	// salon-concierge means one deploy landing on the other, or one package being
+	// served the other's prompt.
+	other := loadExample(t, "salon-concierge")
+	if resolved.Name == other.Name {
+		t.Errorf("both salon packages state name %q, so their deploys land on top of each other", resolved.Name)
+	}
+	if id := resolved.Models["reasoning"].AgentID; id != "" && id == other.Models["reasoning"].AgentID {
+		t.Errorf("both salon packages state agent_id %q, and the router key carries neither the system prompt nor the substituted values, so one is served the other's prompt", resolved.Models["reasoning"].AgentID)
+	}
+}
+
 func TestSalonConciergeHasNoRoutingOnlyAgent(t *testing.T) {
 	resolved := loadExample(t, "salon-concierge")
 
@@ -981,6 +1131,63 @@ func TestRepositoryKeepsSpecsPrivateAndDocsFocused(t *testing.T) {
 	}
 }
 
+// voiceAgentTestsDir holds whole packages we compile and talk to against real
+// providers, as opposed to internal/testdata, which holds the smallest package
+// that makes a unit assertion possible. They are not shipped, so they are not
+// in examples/ and no reader is pointed at them, but they are deployed and
+// dialled, so they are held to the same bar: validate clean on every target
+// they declare, and generate.
+const voiceAgentTestsDir = "voice-agents-tests"
+
+func TestVoiceAgentTestPackagesValidateAndGenerate(t *testing.T) {
+	root := filepath.Join("..", voiceAgentTestsDir)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packages := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, entry.Name(), "agent.yaml")); err != nil {
+			continue
+		}
+		packages++
+		t.Run(entry.Name(), func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join(root, entry.Name()))
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatalf("build: %v", err)
+			}
+			if len(agent.Targets) == 0 {
+				t.Fatal("declares no target, so there is nothing to run it on")
+			}
+			for _, name := range slices.Sorted(maps.Keys(agent.Targets)) {
+				resolved := agent.Targets[name]
+				report, err := ir.Validate(agent, []ir.Target{resolved}, target.Default())
+				if err != nil {
+					t.Fatalf("validate %s: %v", name, err)
+				}
+				for _, row := range report.PerTarget {
+					if len(row.Errors) > 0 {
+						t.Errorf("%s: %v", name, row.Errors)
+					}
+				}
+				if _, err := Generate(agent, resolved, target.Default()); err != nil {
+					t.Errorf("generate %s: %v", name, err)
+				}
+			}
+		})
+	}
+	if packages == 0 {
+		t.Fatalf("%s holds no package, so this test asserts nothing; delete it or the directory", root)
+	}
+}
+
 // TestFixturePackagesValidate holds the internal fixtures to the same bar as the
 // public examples (SPEC V14): safe_core and remy back most of the suite, so a
 // fixture that stops validating would otherwise only surface as a confusing
@@ -1176,6 +1383,7 @@ func TestExampleAndDocLinksIntoExamplesResolve(t *testing.T) {
 		onlyExamples    bool
 	}{
 		{filepath.Join("..", "..", "examples"), ".md", false},
+		{filepath.Join("..", voiceAgentTestsDir), ".md", false},
 		{filepath.Join("..", "..", "docs"), ".md", true},
 		{filepath.Join("..", "..", "docs-site"), ".mdx", true},
 	} {
@@ -1249,55 +1457,6 @@ func TestExampleReadmesNameTheirDeclaredTransports(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// salonScopes is every cache scope the shipped example must produce: one per
-// agent, one per task. Four agents and two tasks on one think profile is the
-// shape that collided, so it is the shape worth naming here in full.
-func salonScopes() []string {
-	const id = "optimized-salon-concierge-v13"
-	return []string{
-		id + ":concierge",
-		id + ":complaint_specialist",
-		id + ":task.customer_verification",
-		id + ":task.booking",
-	}
-}
-
-// assertSalonScopes holds SC-008 on the package a reader opens: four distinct
-// scopes on each target, the same four on both, each carrying the authored
-// prefix, and the bare authored id sent by nobody.
-//
-// It was six. Two of them belonged to agents that existed only to hold a guard
-// the compiler could not put on a step, and each one was a separate prompt site
-// paying for its own cache.
-func assertSalonScopes(t *testing.T, resolved *ir.Agent) {
-	t.Helper()
-	value := regexp.MustCompile(`"X-Slng-Agent-Id": "([^"]*)"|_slng_scope = "([^"]*)"`)
-	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
-		artifact, err := Generate(resolved, targetByProvider(t, resolved, provider), target.Default())
-		if err != nil {
-			t.Fatalf("%s: generate: %v", provider, err)
-		}
-		found := map[string]bool{}
-		for _, file := range artifact.Files {
-			if !strings.HasSuffix(file.Path, ".py") {
-				continue
-			}
-			for _, match := range value.FindAllStringSubmatch(string(file.Content), -1) {
-				found[match[1]+match[2]] = true
-			}
-		}
-		for _, want := range salonScopes() {
-			if !found[want] {
-				t.Errorf("%s: the example sends no scope %q; found %v", provider, want, found)
-			}
-			delete(found, want)
-		}
-		for leftover := range found {
-			t.Errorf("%s: the example sends unexpected scope %q; the four are %v", provider, leftover, salonScopes())
-		}
 	}
 }
 
@@ -1393,16 +1552,7 @@ func TestRouterSurfacesCarryThePlaceholderAndProvenanceFacts(t *testing.T) {
 	}
 }
 
-// FR-006 and FR-013 on the package a reader opens, plus the one thing the scope
-// list above cannot see: that the constant in this file still describes the
-// package rather than a version of it that has moved on.
-//
-// The example is where an author learns what a placeholder is for, so three
-// claims have to hold together. Its prompts reference only names it declares,
-// because a name the router is not given is a 422 mid-call. Its spoken per-call
-// value is a placeholder, because that is the whole demonstration. And the value
-// that is never spoken stays out of every prompt: putting an identifier in a
-// placeholder widens what the router is asked to substitute and buys nothing.
+// Prompts read declared values, and only verification can read the phone number.
 func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
 	if err != nil {
@@ -1411,14 +1561,6 @@ func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 	resolved, err := ir.Build(pkg)
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	// FR-013. The scope list in this file names an id; the package authors one.
-	// When a prompt change bumps the id, this is what makes updating both a
-	// single deliberate step instead of a silent divergence.
-	authored := resolved.Models["reasoning"].AgentID
-	if want := strings.TrimSuffix(salonScopes()[0], ":concierge"); authored != want {
-		t.Errorf("the package authors agent_id %q and this file's scope list expects %q. Bumping the id is correct when a prompt changes, so update salonScopes() in the same commit", authored, want)
 	}
 
 	// Every referenced name is declared. ir.Validate holds this too; here it is
@@ -1430,7 +1572,7 @@ func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 		for name, body := range bodies {
 			for _, ref := range ir.TemplateRefs(body) {
 				if _, declared := resolved.Variables[ref]; !declared {
-					t.Errorf("%s %q references {{%s}}, which the package does not declare: the router answers an unsupplied name with a 422 mid-call", kind, name, ref)
+					t.Errorf("%s %q references {{%s}}, which the package does not declare", kind, name, ref)
 				}
 			}
 		}
@@ -1440,28 +1582,9 @@ func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 	// nothing. The silent one is a placeholder nowhere.
 	all := strings.Join(append(mapValues(promptBodies(resolved.Agents)), mapValues(taskBodies(resolved.Tasks))...), "\n")
 	if !strings.Contains(all, "{{customer_phone}}") {
-		t.Error("no prompt in the example uses {{customer_phone}}, so every answer that says the number is still refused by the router's number rule and the example teaches nothing about caching one")
+		t.Error("no prompt in the example uses {{customer_phone}}, so verification cannot read the prefetched number")
 	}
-	// The format rule is the feature, not decoration, and the package now pins
-	// E.164: one shape for every number it holds, MANAGER_PHONE_NUMBER included.
-	// That is a deliberate reversal, so the measurement behind the old shape is
-	// kept here rather than deleted. Measured against the live EU router on
-	// 2026-08-24, three reads per arm on fresh throwaway scopes: values written
-	// "555 070 1222" came back echoed character for character and the third read
-	// was served from cache in 109ms; the same numbers written "+15550707444"
-	// were reformatted by the model, so the value never appeared in the answer,
-	// and none of the three reads was served.
-	//
-	// The measurement stands. What changed is the decision made in light of it:
-	// the read-back turn is now allowed to lose its cache, deliberately, because
-	// it replaced twelve spoken digits and five model requests with one yes. That
-	// is 11.3 seconds off a 23.3 second step, against one turn that will not be
-	// served from cache, and it was traded on purpose rather than overlooked.
-	//
-	// So the assertion inverts rather than disappearing: exactly one prompt reads
-	// the number back, it is the step that confirms it, and the description says
-	// the trade was made. Anything else is the old defect back, or a second turn
-	// paying for it.
+	// One phone format, read only by the confirming task.
 	phone, declared := resolved.Variables["customer_phone"]
 	if !declared {
 		t.Fatal("the package declares no customer_phone")
@@ -1469,10 +1592,9 @@ func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 	for _, want := range []string{
 		"E.164",
 		"no spaces, brackets or dashes",
-		"does not cache",
 	} {
 		if !strings.Contains(phone.Description, want) {
-			t.Errorf("customer_phone description omits %q: the shape has to be pinned, and the cache trade has to be stated where the next reader will find it", want)
+			t.Errorf("customer_phone description omits %q: the phone format must be stated", want)
 		}
 	}
 	if phone.Confirm == "" {
@@ -1584,6 +1706,16 @@ func authoredPackageFiles(t *testing.T) map[string]string {
 // list of exceptions.
 var placeholders = regexp.MustCompile(`\{\{[^}]*\}\}|\[\[[^\]]*\]\]`)
 
+// typeExpressions strips the other thing that looks like flow style and is not:
+// a declared type.
+//
+// `type: list[Literal["haircut", "dry_cut"]]` is one scalar written in
+// Pydantic's own vocabulary, and its brackets are the type's, not YAML's. A
+// reader copying it gets something that compiles, which is the whole point of
+// the block-style rule. Matched by the key so the strip is narrow: a `[` on any
+// other line is still flow style and still fails.
+var typeExpressions = regexp.MustCompile(`(?m)^\s*(-\s+)?[a-z_]+: (list|Literal)\[.*$`)
+
 // TestAuthoredPackagesAreBlockStyle (FR-028, FR-031). Every shipped package and
 // the scaffold template are written in block style, because block style is what
 // makes the four lists readable at a glance, and a reader copies what they see.
@@ -1594,7 +1726,8 @@ var placeholders = regexp.MustCompile(`\{\{[^}]*\}\}|\[\[[^\]]*\]\]`)
 // declares what an agent can do.
 func TestAuthoredPackagesAreBlockStyle(t *testing.T) {
 	for path, source := range authoredPackageFiles(t) {
-		for i, line := range strings.Split(placeholders.ReplaceAllString(source, ""), "\n") {
+		stripped := typeExpressions.ReplaceAllString(placeholders.ReplaceAllString(source, ""), "")
+		for i, line := range strings.Split(stripped, "\n") {
 			if strings.Contains(line, "#") {
 				line = line[:strings.Index(line, "#")]
 			}
@@ -1605,18 +1738,107 @@ func TestAuthoredPackagesAreBlockStyle(t *testing.T) {
 	}
 }
 
-// TestNothingAuthoredSpeaksTheRetiredShape (FR-033). `controls:` and `kind:` on
-// a control are gone, with no alias and no migration message, so the one way
-// they can come back is somebody copying an old file in.
+// TestNothingAuthoredSpeaksTheRetiredShape (FR-033). `controls:`, `delegates:`
+// and `kind:` on a control are gone, with no alias and no migration message, so
+// the one way they can come back is somebody copying an old file in. The same
+// goes for an agent's `model:`/`voice:`, replaced by `think:`/`speak:`.
 //
 // A bare `kind:` stays legal and is not flagged: tools, channels and model
-// sections all use it. Only the three retired control kinds are refused.
+// sections all use it. Only the three retired control kinds are refused. The
+// agent-level check is indented exactly to an agent's own fields (four spaces)
+// with a same-line value, so it does not flag a models: section entry named
+// "voice" or a model's own `model:`/`voice:` fields six spaces deep.
 func TestNothingAuthoredSpeaksTheRetiredShape(t *testing.T) {
-	retired := regexp.MustCompile(`(?m)^controls:|^\s*kind:\s*(delegate|agent_transfer|human_transfer)\s*$`)
+	retired := regexp.MustCompile(`(?m)^controls:|^delegates:|^\s*kind:\s*(delegate|agent_transfer|human_transfer)\s*$|^ {4}(model|voice): *\S`)
 	for path, source := range authoredPackageFiles(t) {
 		if found := retired.FindString(source); found != "" {
 			t.Errorf("%s still speaks the retired shape (%q); an agent declares what it can do in tools:, delegates:, handoffs: and escalations:",
 				path, strings.TrimSpace(found))
+		}
+	}
+}
+
+// assignedField is the result field one assignment reads, for a test that used
+// to index a map.
+func assignedField(assign []ir.AssignTo, variable string) string {
+	for _, entry := range assign {
+		if entry.Var == variable {
+			return entry.Field
+		}
+	}
+	return ""
+}
+
+// promptFiles is every authored prompt in every package, which is every tracked
+// Markdown file inside a directory holding an agent.yaml, minus the README.
+// READMEs are for people and carry real commands with real arguments; a prompt
+// is read by a model that cannot tell an illustration from a value.
+func promptFiles(t *testing.T) map[string]string {
+	t.Helper()
+	root := filepath.Join("..", "..")
+	listed, err := exec.Command("git", "-C", root, "ls-files", "*.md").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	packages := map[string]bool{}
+	for path := range authoredPackageFiles(t) {
+		packages[filepath.Dir(path)] = true
+	}
+	out := map[string]string{}
+	for _, name := range strings.Fields(string(listed)) {
+		if filepath.Base(name) == "README.md" {
+			continue
+		}
+		dir := filepath.Dir(name)
+		owned := false
+		for pkg := range packages {
+			if dir == pkg || strings.HasPrefix(dir, pkg+"/") {
+				owned = true
+				break
+			}
+		}
+		if !owned {
+			continue
+		}
+		source, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[name] = string(source)
+	}
+	if len(out) < 5 {
+		t.Fatalf("found only %d authored prompts; the walk is looking in the wrong place", len(out))
+	}
+	return out
+}
+
+// TestNoPromptCarriesASpecimenPhoneNumber is the other half of the `confirm:`
+// refusal, and it exists because the first half was walked straight past.
+//
+// The compiler refuses a confirmed value's placeholder in every prompt but its
+// confirming step's, so an unconfirmed number reaches no other prompt. Then an
+// author writes one into the speech rules as an illustration, and the model,
+// which cannot tell an illustration from a value it is holding, reads it out.
+// On a live call the concierge, whose own prompt says never to say the caller's
+// number and holds no placeholder for one, opened with the example number from
+// its own formatting rule. The caller said yes to a number that was not theirs,
+// and the verification step then asked again with the real one.
+//
+// So: describe the grouping in words. A prompt needs no specimen, and a
+// specimen is indistinguishable from a leak.
+func TestNoPromptCarriesASpecimenPhoneNumber(t *testing.T) {
+	// A plus, then at least seven digits in any grouping. Tight enough that a
+	// prompt quoting a broken form it tells the model to avoid, which carries no
+	// plus, is not a finding.
+	specimen := regexp.MustCompile(`\+[0-9][0-9 ]{6,}[0-9]`)
+	for path, source := range promptFiles(t) {
+		for i, line := range strings.Split(source, "\n") {
+			if found := specimen.FindString(line); found != "" {
+				t.Errorf("%s:%d writes the phone number %q. A model cannot tell it from a value it is "+
+					"holding and reads it out, which is how an agent told never to say the caller's number "+
+					"said one: describe the grouping in words instead",
+					path, i+1, strings.TrimSpace(found))
+			}
 		}
 	}
 }

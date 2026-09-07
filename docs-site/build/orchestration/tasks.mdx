@@ -1,241 +1,228 @@
 ---
 title: "Tasks"
-description: "Delegate a step to a focused prompt with its own tools, and get a typed result back."
+description: "Run a focused step with its own prompt and tools, save typed values, and return control."
 ---
 
-A task is a step the agent hands off and gets back. The task has its own
-prompt, its own tools, and a declared result. When it finishes, control returns
-to the agent that called it. Its internal turns stay out of the agent's context,
-while the completed delegate call stays there so the same request does not run
-twice.
+A task is a focused step. It has its own instructions and tools. When it
+finishes, control returns to the agent that called it.
 
-Use a task instead of the other shapes when:
+Use a task when one bounded piece of work needs a smaller prompt or a smaller
+tool list. Use a [task group](/build/orchestration/task-groups) when several
+steps must run in order. Use a [handoff](/build/orchestration/handoffs) when a
+different agent should own the rest of the call.
 
-- you want control, and a typed result, back. A
-  [handoff](/build/orchestration/handoffs) never returns either.
-- the work is one bounded step, not a sequence with an order that has to
-  hold. Several such steps in a fixed order are a
-  [task group](/build/orchestration/task-groups) instead.
-- the step needs its own scoped tool list, kept off the rest of the agent's
-  tools rather than folded into one longer prompt.
-
-The YAML on this page is one worked pair of tasks. For a shipped package that
-does it, read `examples/salon-concierge`: a verification task and a booking
-task, one of them behind a `requires:` guard.
-
-## Declare the task
-
-```yaml agent.yaml
-tasks:
-  customer_record:
-    instructions: tasks/customer-record.md
-    tools:
-      - lookup_customer
-      - create_customer
-    result:
-      customer_id: string
-      customer_name: string
-      record_status:
-        enum:
-          - existing
-          - created
-          - failed
-      summary: string
-    context:
-      history: full
-```
-
-`result` is the contract. The task must come back with those fields, and
-`record_status` can only be one of three values. That is what makes a task
-different from a longer prompt: the outcome has a shape.
-
-Every task, including a task inside a group, needs a non-empty `result:` and `context.history`.
-
-A task can also declare its own `model:`, naming a different reasoning
-profile for that one step alone. Leave it out and the task runs on the agent's
-own model.
-
-**Task `result:` and tool `output:` are different contracts.** Tool contracts
-live in `tools/<name>.yaml`; the task's `tools:` list contains names only. The
-task result describes the outcome returned after all of its tool calls. Keep
-only what the calling agent needs instead of copying an attached tool's output
-schema by default.
-
-`context: history: full` gives the task the conversation so far, which is
-usually what you want, because the caller has already said something the task
-needs. `history:` is one of `full`, `messages`, `last_n`, `summary`, or
-`reset`; `last_n` also needs `max_messages` alongside it.
-
-## Delegate to it
-
-A task is run by a delegate. You declare the delegate under `delegates:` and
-attach it by name from the agent's `delegates:` list.
-
-```yaml agent.yaml
-agents:
-  appointment_desk:
-    delegates:
-      - check_customer
-      - manage_appointment
-
-delegates:
-  check_customer:
-    task: customer_record
-    when: Identify the caller before handling an appointment request.
-    assign:
-      customer_id: result.customer_id
-      customer_name: result.customer_name
-```
-
-`assign` copies fields out of the result into package variables, so the rest of
-the call can use them without asking again:
+## Declare a task
 
 ```yaml agent.yaml
 variables:
   customer_id:
-    type: string
+    type: Id
+    description: The customer record selected for this call.
   customer_name:
     type: string
+    description: The customer's name.
+
+agents:
+  appointment_desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tasks:
+      - name: verify_customer
+        when: Identify the caller before handling an appointment.
+        instructions: tasks/verify-customer.md
+        tools:
+          - lookup_customer
+        assign:
+          - customer_id: result.customer_id
+          - customer_name: result.customer_name
 ```
 
-A delegate can also carry `announce:`, one fixed line spoken as the step
-starts, so the two model requests between the caller finishing and the task's
-first word are not silence. It never speaks when the step is held back by
-`requires:`: a caller who hears "let me pull up the diary" and is then asked
-for a phone number has been told something untrue.
+`assign:` defines what the task returns and where each value is saved. The
+destination variable already owns the type and description, so the task does
+not repeat them in a separate result schema.
 
-```yaml agent.yaml
-delegates:
-  manage_booking:
-    task: booking
-    when: The caller wants to create, modify, or cancel a booking.
-    announce: Let me pull up the diary.
-    requires:
-      - customer_phone
+The generated finish call for this example has `customer_id` and
+`customer_name` arguments. It validates every value before saving any of them.
+If one value is invalid, the task stays open and no value changes.
+
+A task that saves nothing simply omits `assign:`. It can still finish.
+
+## Read a saved value
+
+Saving and sharing are separate choices. Put a placeholder in the prompt that
+needs the value:
+
+```markdown tasks/booking.md
+The verified customer is {{customer_name}} with ID {{customer_id}}.
+Help them manage their appointment.
 ```
 
-`examples/salon-concierge` declares it exactly this way on `manage_booking`.
+The task receives saved state only through the values its prompt names.
+Its history may separately contain facts spoken earlier. A description does not
+send a value to the model. An unset value renders as `none recorded yet.`
 
-## Guarding a step
+A dotted reference selects one field and does not send its siblings:
 
-A step that needs a value the conversation has not collected yet declares
-`requires:`:
-
-```yaml agent.yaml
-delegates:
-  manage_appointment:
-    task: appointment
-    when: The caller wants to make, change, or cancel an appointment.
-    requires:
-      - customer_phone
+```markdown
+Move appointment {{appointment.id}} to {{appointment.date}}.
 ```
 
-Every name must be a declared variable, or the package will not compile. A guard
-on a name nothing sets could never pass, and the symptom would be a step that
-silently never starts.
+See [Variables](/reference/variables) for shapes, dotted paths, append
+assignments, and confirmation.
 
-**The caller hears nothing.** While `customer_phone` is empty the step does not
-run, and the refusal goes to the model rather than to the caller. It names the
-missing variable and the delegate that supplies it, so the model runs
-`check_customer` and calls the step again in the same turn. The caller just hears
-the next natural question.
+## Choose conversation history
 
-The compiler also appends the requirement to the step's own description, so the
-model usually collects the value during the earlier turns and never reaches the
-guard at all. The guard is the net; the description is the mechanism.
+`context.history` is optional. When omitted, it is `messages`.
 
-**When the model cannot recover.** After five refusals of the same step the agent
-stops recovering quietly and asks the caller for the missing value out loud, in
-its own words. It does not fall silent and it does not end the call. That limit
-lives in the emitted code, not in a prompt: a model can be argued out of an
-instruction, and this exists for the case where it already has been.
-
-Both refusals are logged, with variable and step names only. No caller speech and
-no variable value is written, which matters when the identifier is a phone
-number.
-
-`requires:` works the same way on an [agent handoff](/build/orchestration/handoffs),
-but prefer the step. Guarding the route rather than the work means adding an agent
-whose only job is to hold the guard, and the caller has to be spoken through it.
-
-## What the agent can do shrinks
-
-Look at the agent's tool list. It holds two controls and none of the five
-domain tools. The agent cannot book anything itself; it can only delegate.
-Each task holds the tools its own step needs:
-
-| Task | Tools |
+| `history` | The task receives |
 |---|---|
-| `customer_record` | `lookup_customer`, `create_customer` |
-| `appointment_request` | `check_availability`, `book_appointment`, `cancel_appointment` |
+| `messages` | Earlier caller and agent speech. Tool calls and replies are removed together. |
+| `full` | Earlier speech and paired tool records. Earlier instructions are removed. |
+| `last_n` | The newest `max_messages` entries, without a broken tool pair. |
+| `reset` | No earlier conversation. Its own instructions and explicit placeholders still apply. |
+| `summary` | A generated summary on LiveKit. Pipecat refuses this value. |
 
-Booking before identification is not a rule in a prompt here. It is
-unavailable.
+```yaml agent.yaml
+      - name: reschedule_booking
+        instructions: tasks/reschedule-booking.md
+        tools:
+          - modify_booking
+        context:
+          history: reset
+```
 
-While a task runs, the caller is talking to the task: its prompt, and only what
-its own `tools:` and `handoffs:` name. The agent's own lists are not offered
-again until the task returns.
+```markdown tasks/reschedule-booking.md
+Move appointment {{appointment_id}} to {{appointment_date}}
+at {{appointment_time}}.
 
-Besides tools, the one thing a task may list is a handoff, under its own
-`handoffs:`. Use it when the caller can change intent during the step and should
-go straight to another agent. Calling it ends the task and any remaining
-task-group steps; the destination takes over without returning through the task
-owner. A task has `tools:` and `handoffs:` and no other list, so a delegate or an
-escalation on a task is unwritable rather than rejected.
+If the requested date or time is unavailable, ask the caller.
+Confirm the change before making it.
+```
 
-That scoping is the useful half of delegation, and also the part to plan for,
-because anything the task may need must appear in its own list.
+This reset task sees those three saved values because its prompt names them. It
+does not receive the sentence that triggered the task. If the new date was not
+saved, the task must ask for it again.
 
-A task that lists no handoff still has a way out. Every generated task
-prompt ends with one compiler-written rule: when the caller asks for something
-none of the step's tools can do, and no handoff on the step covers it, call the
-step's finish function right away with the closest result it has, and name that
-request in `unserved_request`. You do not write that rule in the task's own
-instructions. Without it, a locked-down step keeps refusing the same request
-instead of handing the caller on.
+History controls model input; it does not redact speech already retained in a
+different context. Use `reset` when the receiver should inherit no transcript.
+The [step-by-step context guide](/best-practices/context-scope) shows how to
+save the request first and keep the owner informed after the task finishes.
 
-The rule is narrow on purpose. It never excuses skipping the step's own work,
-the caller's original reason for being in the step is not an unserved request,
-and a handoff the step declares always wins over it. Loosely worded, a first
-step reads the caller's opening request as out of scope and bails on turn one.
+## What returns
 
-`unserved_request` is a reserved string field on every generated finish,
-optional and empty by default. You do not declare it in `result:`, and a task
-result that claims the name is a validation error. When it comes back filled,
-the returned result carries it, the owning agent is told to take that request
-next, and the caller does not have to ask twice.
+The owner gets its pre-task context back plus one neutral status:
 
-Only a `then: return` group hands the result to an owner on both targets. With
-`then: end` the call is over. With `then: transfer` the Pipecat handback still
-carries the results and the rule, while the LiveKit one gives the receiving
-agent the pre-flow context only, so the field goes unread there.
+```json
+{"status":"completed"}
+```
 
-## Empty LiveKit task responses
+or:
 
-Generated LiveKit tasks retry up to twice when a full successful response has
-neither non-whitespace text nor a tool call. Each retry starts immediately in
-the same speech turn. It keeps the task state and model settings, and
-adds a distinct temporary recovery instruction to a fresh copy of the
-conversation context before each retry. After a task tool returns, recovery
-keeps only `finish` instead of the full tool list. Non-whitespace text or an
-allowed tool call stops recovery.
-Errors and cancellations keep LiveKit's normal behavior.
+```json
+{"status":"unserved"}
+```
 
-If all three opening attempts are empty, the task speaks one fixed brief
-failure, runs no action, and stays active for the caller's next turn. If an
-empty reply follows a task tool, recovery can only call `finish`; it cannot run
-another operation. Exhausting that recovery asks the caller to check the current
-state before trying again. This applies only to generated LiveKit tasks. Normal
-LiveKit agents and Pipecat output are unchanged.
+Task arguments, tool results, private task turns, and the text of an unserved
+request do not cross back. The owner reads saved values through its own prompt
+placeholders.
+
+Every generated finish call includes optional `unserved_request`. A task uses
+it when it cannot complete the request with its tools or handoffs. A non-empty
+value skips all assignments. The owner sees the `unserved` status and asks the
+caller what they need; it does not receive the private request text.
+
+After a tool reports success, finish immediately with the result to save.
+Let the owner confirm it once, using its own placeholders. If the task waits
+for another turn, it may receive a new request before saving the first result.
+An `unserved` status does not undo an action already completed by a tool.
+
+For requests that another agent can handle, a task may declare `handoffs:`.
+Taking one ends the task and any remaining task-group steps. See
+[Handoffs](/build/orchestration/handoffs).
+
+## Append and project values
+
+Append one result to a list with `+`:
+
+```yaml agent.yaml
+variables:
+  appointments:
+    type: list[Appointment]
+
+assign:
+  - appointments+: result.appointment
+```
+
+An absent item adds nothing. Repeating the same structured item does not add a
+duplicate. Plain values may repeat.
+
+An assignment may select a nested field:
+
+```yaml agent.yaml
+assign:
+  - appointment: result.appointment
+  - appointment_id: result.appointment.id
+```
+
+The whole-object assignment establishes the result shape. The compiler then
+checks the nested path and derives its type.
+
+## Share a task across agents
+
+Define a task once. Another agent can attach it by name:
+
+```yaml agent.yaml
+agents:
+  appointment_desk:
+    tasks:
+      - name: verify_customer
+        when: Identify the caller before booking.
+        instructions: tasks/verify-customer.md
+        assign:
+          - customer_id: result.customer_id
+
+  billing_desk:
+    tasks:
+      - verify_customer
+```
+
+Task names are unique across the package.
+
+## Announce a task
+
+`announce:` is an optional fixed line spoken as the task starts. Omit it for
+a silent transition. If you add one, tell the model not to repeat it with a
+second "let me check" line:
+
+```yaml agent.yaml
+      - name: manage_booking
+        when: The caller wants to manage a booking.
+        announce: Let me pull up the diary.
+        instructions: tasks/booking.md
+```
 
 ## Task or second agent
 
 | | Task | Second agent |
 |---|---|---|
 | control returns | yes | no |
-| result | typed, declared in `result:` | none |
+| saved values | through `assign:` | already live in call state; read only by explicit placeholders |
 | prompt | one focused step | a whole role |
-| use it when | a step has a definite answer | two jobs have different rules |
+
+## Update an older task definition
+
+| Earlier configuration | What to do now | Why |
+|---|---|---|
+| A task `result:` schema | Put the types on variables and use task `assign:` | One declaration defines the saved value and finish argument |
+| Task or handoff `expect:` | Save needed facts first and reference them in the receiving prompt | Sharing is explicit, including with `reset` |
+| Task `requires:` | Put the order in the owner's prompt and the task's `when:` | The model can follow the flow; injected tools still guard missing or unconfirmed values |
+| An automatically appended state block | Add placeholders to each prompt that needs saved facts | Saving a value no longer shares it with every prompt |
+| An omitted history choice | Review whether `messages` is appropriate | `messages` is now the default |
+
+Ordinary tool `input:` and `output:` schemas are unchanged. Run
+`unmute validate` after updating an older package; retired keys produce a
+located error with migration advice.
 
 ## Try it
 
@@ -244,12 +231,6 @@ unmute validate examples/salon-concierge
 unmute dev examples/salon-concierge --target pipecat
 ```
 
-Ask to book a haircut. The agent calls the `verify_customer` delegate first,
-and only then `manage_booking`, which is held back by `requires:
-customer_phone` until the caller is identified.
-
-## Where to go next
-
 <Card title="Task groups" icon="list-ordered" href="/build/orchestration/task-groups">
-  Run several tasks in a fixed order, sharing one context.
+  Run several tasks in a fixed order.
 </Card>

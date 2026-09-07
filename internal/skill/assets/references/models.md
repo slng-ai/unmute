@@ -186,8 +186,8 @@ and one silent one.
 
 ### Everything else under `params:` rides the request body
 
-The compiler consumes two names — `world_part_override` becomes the router's base
-URL, `slng_pure_proxy` is the router's shadow-trial switch — and forwards the rest
+The compiler consumes two names: `world_part_override` becomes the router's base
+URL and `slng_pure_proxy` is the router's shadow-trial switch. It forwards the rest
 in the request body, on both targets. The router passes a key it does not
 recognise to the upstream.
 
@@ -219,7 +219,7 @@ On `qwen/qwen3-32b`, measured 2026-08-27 with a real 1.8 KB prompt and four tool
 schemas: p50 spanned 564 ms to 1261 ms, p90 spanned 739 ms to 7.3 s, one host
 skipped the tool entirely and another spoke a fragment of its own tool-call
 template into the reply on every single turn. One sample per host is not enough to
-choose — it is how a usable host gets excluded and a broken one gets shipped.
+choose: it is how a usable host gets excluded and a broken one gets shipped.
 
 ### `prompt_suffix`, when no parameter reaches the model
 
@@ -246,7 +246,7 @@ checking that model actually honours one.** On 2026-08-27 three spellings were
 sent to three hosts of `qwen/qwen3-32b`, nine requests: `reasoning: {enabled:
 false}`, `reasoning: {effort: "none"}`, `reasoning_effort: "none"`, and
 `chat_template_kwargs: {enable_thinking: false}`. Every one was accepted, and every
-one was ignored — hundreds of reasoning tokens each time. A parameter that is
+one was ignored: hundreds of reasoning tokens each time. A parameter that is
 accepted and ignored looks exactly like one that worked, which is the trap. Qwen3's
 own `/no_think` directive in the prompt was the only thing that worked.
 

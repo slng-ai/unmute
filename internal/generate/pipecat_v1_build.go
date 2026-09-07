@@ -53,7 +53,6 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		// Tracing is on for either provider now, and TracingProvider says which.
 		Tracing:         agent.Tracing != nil,
 		TracingProvider: tracingProviderOf(agent),
-		ResultsHint:     pipecatResultsHint,
 		Pace:            resolvePaceView(targetcap.Pipecat, target.Models.Turn),
 		SemanticOff:     semanticEndpointingOff(target.Models.Turn),
 	}
@@ -127,10 +126,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 
 	for _, name := range sortedVarNames(agent) {
 		v := agent.Variables[name]
-		pt, def := pyType(v.Type), pyLiteral(v.Default)
-		if v.Default == nil {
-			pt, def = pt+" | None", "None"
-		}
+		pt, def := stateField(v, false)
 		data.Variables = append(data.Variables, pipecatVariable{
 			Name: name, PyType: pt, Default: def, Source: string(v.Source), Description: oneLine(v.Description),
 		})
@@ -142,8 +138,16 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 				Name: name, Type: string(v.Type), Required: v.Default == nil && v.Source == ir.VariableSourceCallStart,
 			})
 		}
+		// A fact the call itself carries, lifted into call_context by whichever
+		// route this is. Without this arm the route table's grant would be a
+		// promise only the pre-fetch kept: `variables: source:` resolves through
+		// the same table and would compile green holding an empty string.
+		if ir.IsSystemSource(v.Source) {
+			data.SystemSourceVars = append(data.SystemSourceVars, pipecatSystemSourceVar{
+				Name: name, Source: string(v.Source),
+			})
+		}
 	}
-	data.Capture = buildPipecatCapture(agent)
 	data.HandoffControls = handoffControls(agent)
 	data.DevOptionalEnv = []string{"UNMUTE_LOG_LEVEL", devmetrics.Env}
 	if len(data.CallStartVars) > 0 {
@@ -189,7 +193,23 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	}
 	setImportNeeds(&data)
 	data.NeedsRender = renderNeeds(agent)
-	data.PrerequisiteGuard, data.NeedsPrerequisiteGuard = PrerequisiteGuard(agent)
+	typed, err := TypedState(agent)
+	if err != nil {
+		return pipecatData{}, err
+	}
+	if typed.Source != "" {
+		data.TypedState = &typed
+		var typingNames []string
+		if typed.NeedsAnnotated {
+			typingNames = append(typingNames, "Annotated")
+		}
+		if typed.NeedsLiteral {
+			typingNames = append(typingNames, "Literal")
+		}
+		data.TypingImports = strings.Join(typingNames, ", ")
+	}
+	data.PydanticImports = PydanticImports(false, data.TypedState)
+	data.NeedsDataclassField = StateNeedsDataclassField(agent) || PrefetchUnconfirmed(agent)
 	data.NeedsPrefetchUnconfirmed = PrefetchUnconfirmed(agent)
 	if block, needed := Prefetch(agent, prefetchStateExpr, func(entry ir.Prefetch) PrefetchRequest {
 		return prefetchRequestFor(agent, entry)
@@ -199,7 +219,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		data.NeedsPrefetchLocal, data.NeedsPrefetchSeed = block.NeedsLocal, block.NeedsSeed
 		data.NeedsHTTPX = data.NeedsHTTPX || prefetchNeedsHTTPX(agent)
 		data.NeedsInspect = data.NeedsInspect || block.NeedsLocal
-		data.PrefetchRunbook, _ = PrefetchRunbook(agent)
+		data.PrefetchRunbook, _ = PrefetchRunbook(agent, target)
 		// A pre-fetched tool reaches no agent's tools: list by design (FR-003),
 		// so setImportNeeds never sees it. Its handler still has to ride the
 		// artifact, and pipecat_image_imports_test.go holds the COPY line that
@@ -241,6 +261,10 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		}
 	}
 	data.Inline = inlineEligible(&data)
+	if !data.Inline {
+		data.FrameImports = append(data.FrameImports, "LLMRunFrame")
+	}
+	slices.Sort(data.FrameImports)
 	knowledge, err := loweredKnowledge(agent, env)
 	if err != nil {
 		return pipecatData{}, err
@@ -312,29 +336,6 @@ func agentToolLists(agents []pipecatAgent) [][]pipecatTool {
 		lists = append(lists, a.Tools)
 	}
 	return lists
-}
-
-// buildPipecatCapture builds the generated update_variables tool: one optional
-// argument per conversation variable, each carrying its declared type and
-// description so the model knows what it is saving (V6).
-func buildPipecatCapture(agent *ir.Agent) *pipecatCapture {
-	fields := captureFields(agent)
-	if len(fields) == 0 {
-		return nil
-	}
-	capture := &pipecatCapture{
-		Name: ir.CaptureToolName, Description: captureDescription(agent, fields), Fields: fields,
-	}
-	for _, name := range fields {
-		variable := agent.Variables[name]
-		// Every field is optional: the model saves what it has learned so far,
-		// one call or several, never all of them at once.
-		capture.Args = append(capture.Args, pipecatArg{
-			Name: name, PyType: pyType(variable.Type) + " | None", PyDefault: "None",
-			Description: variable.Description,
-		})
-	}
-	return capture
 }
 
 // pipecatConnectionVocabulary checks the Connection's key set against the route
@@ -533,9 +534,6 @@ func setImportNeeds(data *pipecatData) {
 	data.NeedsTurnStrategies = data.Interrupt != nil && data.Interrupt.MinWords > 0
 	data.NeedsAppendFrame = data.Inactivity != nil
 	data.NeedsEndFrame = data.NeedsEndAfter
-	if data.Capture != nil {
-		data.NeedsFunctionCalls = true // the generated capture tool is a @tool too
-	}
 	paramsClasses := map[string]bool{}
 	for _, a := range data.Agents {
 		if len(a.Tools)+len(a.Transfers)+len(a.Delegates) > 0 {
@@ -603,12 +601,35 @@ func setImportNeeds(data *pipecatData) {
 				data.NeedsEndFrame = true
 			}
 		}
+		for _, t := range a.Transfers {
+			// A handoff can carry a last_n window as readily as a task can, and
+			// the helper is emitted once at module scope for both.
+			data.NeedsLastN = data.NeedsLastN || strings.HasPrefix(t.CtxExpr, "_last_n(")
+			data.NeedsSpeechOnly = data.NeedsSpeechOnly || strings.HasPrefix(t.CtxExpr, "_speech_only(")
+			// A handoff's own `context.history` is the other site the runbook
+			// section has to cover, not just a task's.
+			data.NeedsHistoryRunbook = data.NeedsHistoryRunbook || t.CtxExpr != ""
+		}
 		for _, d := range a.Delegates {
 			data.HasFlows = true // tasks run as Flows on the owning worker (C8)
 			if d.Isolated {
-				data.HasIsolated = true
+				data.NeedsContextStrategy = true
 			}
 			for _, step := range d.StepTasks {
+				// The two things that render ContextStrategy.RESET on a node, and
+				// the one flag that imports the names they need. Missing this is a
+				// NameError at worker start, not a lint finding.
+				if step.Reset {
+					data.NeedsContextStrategy = true
+					data.NeedsHistoryRunbook = true
+				}
+				data.NeedsLastN = data.NeedsLastN || strings.HasPrefix(step.CtxExpr, "_last_n(")
+				data.NeedsSpeechOnly = data.NeedsSpeechOnly || strings.HasPrefix(step.CtxExpr, "_speech_only(")
+				data.NeedsHistoryRunbook = data.NeedsHistoryRunbook || step.CtxExpr != ""
+				for _, transfer := range step.Transfers {
+					data.NeedsLastN = data.NeedsLastN || strings.HasPrefix(transfer.CtxExpr, "_last_n(")
+					data.NeedsSpeechOnly = data.NeedsSpeechOnly || strings.HasPrefix(transfer.CtxExpr, "_speech_only(")
+				}
 				for _, t := range step.Tools {
 					if t.Local {
 						data.NeedsInspect = true
@@ -645,6 +666,8 @@ func setImportNeeds(data *pipecatData) {
 	sort.Slice(data.LocalTools, func(i, j int) bool { return data.LocalTools[i].Name < data.LocalTools[j].Name })
 	data.MCPParamsImports = sortedKeys(paramsClasses)
 
+	data.FrameImports = append(data.FrameImports, "LLMUpdateSettingsFrame")
+
 	// pipecat.frames.frames names ride one merged import (V2), sorted at the end
 	// so the merged import matches isort whatever order the flags are read in.
 	if data.NeedsEndFrame {
@@ -653,7 +676,7 @@ func setImportNeeds(data *pipecatData) {
 	if data.HasFlows {
 		// The delegate call resolves with run_llm=False (V7), and every
 		// activation resets an agent that owns Flows to its owner prompt.
-		data.FrameImports = append(data.FrameImports, "FunctionCallResultProperties", "LLMUpdateSettingsFrame")
+		data.FrameImports = append(data.FrameImports, "FunctionCallResultProperties")
 	}
 	if data.NeedsAppendFrame {
 		data.FrameImports = append(data.FrameImports, "LLMMessagesAppendFrame")
@@ -701,7 +724,6 @@ func setImportNeeds(data *pipecatData) {
 	if needsTTSSpeakFrame {
 		data.FrameImports = append(data.FrameImports, "TTSSpeakFrame")
 	}
-	slices.Sort(data.FrameImports)
 	setDailyParams(data)
 }
 
@@ -832,7 +854,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	// A templated prompt is rendered per session from the call state; an untouched
 	// one stays the bare module constant it always was.
 	profile, router := slngRouterBinding(agent, target, def.Model)
-	prompt := promptExpr(promptConst, def.Instructions, pipecatStateExpr, router)
+	prompt := promptExpr(promptConst, def.Instructions, pipecatStateExpr, router, "agent:"+name)
 	llm, err := resolvePipecatService(targetcap.Reason, target.Models.Reason[def.Model], env,
 		pipecatSlngSite(agent, target, profile, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name}),
 		pyKV{Key: "system_instruction", Value: prompt})
@@ -846,9 +868,8 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	built := pipecatAgent{
 		Name: name, Class: pyName(name) + "Agent", Prompt: def.Instructions,
 		PromptConst: promptConst, PromptExpr: prompt,
-		RuntimePromptExpr: promptExpr(promptConst, def.Instructions, "self.state", router),
+		RuntimePromptExpr: promptExpr(promptConst, def.Instructions, "self.state", router, "agent:"+name),
 		SlngHeaders:       pipecatRuntimeHeaders(target, profile, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name}),
-		SlngBody:          pipecatRuntimeBody(agent, target, profile),
 		LLM:               llm, TTS: tts,
 	}
 
@@ -861,7 +882,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 				built.MCPSources = append(built.MCPSources, buildMCPSource(ref, tool, env))
 				continue
 			}
-			lowered, err := buildTool(ref, tool, agent.Variables, env)
+			lowered, err := buildTool(ref, tool, agent.Variables, SupplierIndex(agent.Tasks), env)
 			if err != nil {
 				return pipecatAgent{}, err
 			}
@@ -876,10 +897,13 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 		case *ir.AgentTransfer:
 			// The method name is the control name (tools/controls share one
 			// namespace, D8), so the LLM invokes the tool by its spec name.
-			built.Transfers = append(built.Transfers, pipecatTransfer{
+			transfer := pipecatTransfer{
 				MethodName: ref, To: c.To, When: transferReason(c),
-				Announce: c.Announce, Reason: transferReason(c), Requires: c.Requires,
-			})
+				Announce: c.Announce,
+				Reason:   transferReason(c),
+			}
+			transfer.CtxExpr, _ = pipecatCtxExpr(c.Context.TaskContext)
+			built.Transfers = append(built.Transfers, transfer)
 		case *ir.HumanTransfer:
 			tool, err := humanTransferTool(ref, name, c, target, env)
 			if err != nil {
@@ -910,24 +934,56 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	return built, nil
 }
 
+// pipecatCtxExpr lowers a context block's history shaping to the Python list a
+// step or a receiving worker starts with. "" means history: full, which needs
+// no expression: Pipecat creates one LLMContext per call and hands every worker
+// the same object, so the full running history is what a step gets when nothing
+// shapes it. That is what keeps a `full`-only package byte for byte identical.
+//
+// history: summary is refused on this target (the capability table), and
+// include_tool_calls: false is refused too, which is why there is no exclude
+// branch here and why last_n keeps tool records the way LiveKit's does.
+//
+// messages goes through a helper rather than an inline filter because a tool
+// record cannot be half-dropped. On LiveKit `messages` is a filter over
+// .messages(), which holds no function-call items at all, so the call and its
+// result leave together. Pipecat holds provider-shaped dicts, where the call
+// is a key on an assistant message and only the reply has role "tool", so
+// filtering by role keeps the call and drops what answers it. A live call 400d
+// on exactly that: "tool_call_ids did not have response messages".
+//
+// The livekit twin is livekitCtxExpr. The two cannot share code: one builds a
+// ChatContext and one builds a list of provider-shaped dicts.
+func pipecatCtxExpr(c ir.TaskContext) (expr string, needsLastN bool) {
+	switch c.History {
+	case ir.HistoryReset:
+		return "[]", false
+	case ir.HistoryMessages:
+		return "_speech_only(self.context.get_messages())", false
+	case ir.HistoryLastN:
+		return fmt.Sprintf("_last_n(self.context.get_messages(), %d)", c.MaxMessages), true
+	default: // full keeps speech and paired tool records, never prior instructions.
+		return `[dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")]`, false
+	}
+}
+
 // buildDelegate lowers a delegate control to a Flow run on the owning worker
 // (C8): a single task is a one-node flow, a group a linear chain. Each step is
 // resolved here so the template emits its node inline.
 func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, env *envSet) (pipecatDelegate, error) {
 	delegate := pipecatDelegate{
 		MethodName: ref,
-		When:       delegateReason(c) + delegateForwardDeclaration(agent, c),
-		Requires:   c.Requires,
+		When:       delegateReason(c),
 		Announce:   c.Announce,
 	}
 	steps := []string{c.Task}
 	if c.Task != "" {
 		delegate.Task = c.Task
 		delegate.Then = "return" // a single task always returns (SCHEMA 4.7)
-		for variable, path := range c.Assign {
+		for _, entry := range agent.Tasks[c.Task].Assign {
 			delegate.Assign = append(delegate.Assign, pipecatAssign{
-				Var: variable, Field: strings.TrimPrefix(path, "result."),
-				Confirms: agent.Variables[variable].Confirm == c.Task,
+				Var: entry.Var, Field: entry.Field, Append: entry.Append,
+				Confirms: agent.Variables[entry.Var].Confirm == c.Task,
 			})
 		}
 		sort.Slice(delegate.Assign, func(i, j int) bool { return delegate.Assign[i].Var < delegate.Assign[j].Var })
@@ -951,6 +1007,12 @@ func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, e
 		delegate.StepTasks[i].NextName = delegate.StepTasks[i+1].Name
 		delegate.StepTasks[i].SlngNextHeaders = delegate.StepTasks[i+1].SlngHeaders
 	}
+	for i := range delegate.StepTasks {
+		context := agent.Tasks[delegate.StepTasks[i].Name].Context
+		delegate.StepTasks[i].Reset = delegate.Isolated || context.History == ir.HistoryReset
+		delegate.StepTasks[i].CtxExpr, _ = pipecatCtxExpr(context)
+	}
+
 	return delegate, nil
 }
 
@@ -975,9 +1037,10 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 		// A router-bound task ships its placeholders intact like any other router
 		// prompt site: the flow node's role_message goes to the router as the
 		// system message, through the owning agent's LLM.
-		PromptExpr:     promptExpr(pyQuote(prompt), prompt, "self.state", taskRouter),
-		ResultProps:    pyLiteral(resultProperties(task.Result)),
-		ResultRequired: pyLiteral(anyStrings(sortedResultNames(task.Result))),
+		PromptExpr:     promptExpr(pyQuote(prompt), prompt, "self.state", taskRouter, "task:"+name),
+		ResultProps:    resultPropsExpr(name, task.Result),
+		Typed:          true,
+		ResultRequired: "[]",
 		// A task's prompt is not its owner's, so its cache scope is not its
 		// owner's either. This is the value the emitted handlers swap in on the
 		// way into the node and out of on every way back.
@@ -994,9 +1057,12 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 			if !supported {
 				return pipecatTask{}, fmt.Errorf("task %q references unsupported control %q: tasks support agent_transfer controls only", name, ref)
 			}
+			ctxExpr, _ := pipecatCtxExpr(transfer.Context.TaskContext)
 			built.Transfers = append(built.Transfers, pipecatTransfer{
+				CtxExpr:    ctxExpr,
 				MethodName: ref, To: transfer.To, When: transferReason(transfer),
-				Announce: transfer.Announce, Reason: transferReason(transfer), Requires: transfer.Requires,
+				Announce: transfer.Announce,
+				Reason:   transferReason(transfer),
 			})
 			continue
 		}
@@ -1006,7 +1072,7 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 		if tool.Execution == ir.ToolMCP {
 			return pipecatTask{}, fmt.Errorf("task %q lists the MCP tool source %q: a Flows node advertises only its own function schemas, so list the source on the agent instead", name, ref)
 		}
-		lowered, err := buildTool(ref, tool, agent.Variables, env)
+		lowered, err := buildTool(ref, tool, agent.Variables, SupplierIndex(agent.Tasks), env)
 		if err != nil {
 			return pipecatTask{}, err
 		}
@@ -1045,6 +1111,24 @@ func resultProperties(result map[string]ir.ResultField) map[string]any {
 		}
 	}
 	return properties
+}
+
+// resultPropsExpr is the Python expression for one step's finish properties.
+//
+// A declared shape's entry is the generated class's own schema, read through
+// the TypeAdapter the finish table already holds, rather than a second copy
+// rendered here in Go. One owner for the shape: the class, its validator and
+// the schema the model is sent cannot drift, because there is only one of each.
+//
+// A step declaring no shape gets the literal it always got, byte for byte.
+func resultPropsExpr(task string, result map[string]ir.ResultField) string {
+	entries := []string{pyQuote(ir.UnservedResultField) + ": " + pyLiteral(resultProperties(nil)[ir.UnservedResultField])}
+	for _, name := range sortedResultNames(result) {
+		field := result[name]
+		anno := pyAnno(nullableType(pyAnno(resultPyType(field), field.Enum, "")), nil, field.Description)
+		entries = append(entries, fmt.Sprintf("%s: _schema(TypeAdapter(%s))", pyQuote(name), anno))
+	}
+	return "{" + strings.Join(entries, ", ") + "}"
 }
 
 // anyStrings widens a string slice for pyLiteral rendering.
@@ -1091,11 +1175,6 @@ func transferReason(c *ir.AgentTransfer) string {
 func delegateReason(c *ir.Delegate) string {
 	return orDefault(c.When, "Run this flow. It returns its result to you when it finishes.")
 }
-
-// pipecatResultsHint is the developer message that hands a delegate's results
-// back to the owning agent. LiveKit says the same thing in the delegate tool's
-// docstring; here there is no tool to describe, so it rides the handback.
-const pipecatResultsHint = " Continue with the caller in one short line. " + unservedOwnerRule
 
 // pipecatStateExpr is how emitted Pipecat code reaches the call state: an agent
 // @tool method has it on self, a flows handler receives it as a bound kwarg.
@@ -1145,7 +1224,7 @@ var pipecatLoweredKinds = map[ir.ToolExecution]bool{
 	ir.ToolSlngHosted: true,
 }
 
-func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env *envSet) (pipecatTool, error) {
+func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, suppliers map[string]string, env *envSet) (pipecatTool, error) {
 	if !pipecatLoweredKinds[tool.Execution] {
 		return pipecatTool{}, fmt.Errorf("tool %q: execution kind %q has no pipecat lowering; ir.Validate should have refused it for this target", name, tool.Execution)
 	}
@@ -1156,7 +1235,7 @@ func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env 
 	if tool.Auth != nil {
 		env.addRead(tool.Auth.TokenEnv)
 	}
-	inject, needed := loweredInject(tool, variables, pipecatStateExpr)
+	inject, needed := loweredInject(tool, variables, suppliers, pipecatStateExpr)
 	built := pipecatTool{
 		Name: name, MethodName: name, Description: tool.Description, URLEnv: tool.URLEnv,
 		URLExpr: urlExpr(tool, pipecatStateExpr), Inject: inject, Needed: needed,
@@ -1575,43 +1654,17 @@ func pipecatSlngSite(agent *ir.Agent, tgt ir.Target, profile string, site target
 	return slngSite{
 		SessionExpr: pipecatSessionIDExpr,
 		StateExpr:   pipecatStateExpr,
-		Names:       slngTemplateNames(agent, tgt, profile),
 		ConfigFunc:  slngConfigFunc(profile),
 		Scope:       targetcap.SlngScope(tgt.Models.Reason[profile].AgentID, site),
+		// The framework offers a per-request seam after all:
+		// build_chat_completion_params is public, its docstring invites the
+		// override, it returns the dict that is splatted into the SDK call, and
+		// its two call sites are the streaming and the one-shot paths. So the
+		// variables are read live here, exactly as they are on the other target,
+		// and the three settings-frame refreshes this used to need are gone.
+		VariablesPerRequest: true,
 	}
 }
-
-// pipecatRuntimeBody is one prompt site's router body extension as a Python
-// literal, spelled for an agent method body, so a settings delta can refresh the
-// variable snapshot where the call writes a variable.
-//
-// Empty for a site that references no variable: there would be nothing in the
-// dict but the model configuration, which never changes, and a delta that
-// rewrites an unchanged value is a frame for nothing.
-//
-// The body only, never the headers. A settings update merges `extra` key by key,
-// so `extra_headers` is replaced wholesale, and a refresh that carried it would
-// hand whichever site is speaking the owner's scope.
-func pipecatRuntimeBody(agent *ir.Agent, tgt ir.Target, profile string) string {
-	if profile == "" {
-		return ""
-	}
-	names := slngTemplateNames(agent, tgt, profile)
-	if len(names) == 0 {
-		return ""
-	}
-	site := slngSite{
-		StateExpr:  pipecatRuntimeStateExpr,
-		Names:      names,
-		ConfigFunc: slngConfigFunc(profile),
-	}
-	return pyLiteral(slngRequestBody(site, tgt.Models.Reason[profile]))
-}
-
-// pipecatRuntimeStateExpr is the call state inside an agent method, where the
-// constructor's parameter is out of scope. The same split RuntimePromptExpr and
-// pipecatRuntimeSessionIDExpr already make: one value, two spellings.
-const pipecatRuntimeStateExpr = "self.state"
 
 // pipecatRuntimeHeaders is one prompt site's identity header dict as a Python
 // literal, spelled for an agent method body rather than for a builder call.

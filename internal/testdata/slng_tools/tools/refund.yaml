@@ -6,7 +6,7 @@ slng:
   hash: 5600c5ecacce4f5bbfa4d89516b1aafe03645f3a24b7e3ddd705bf1761ef78db
 
 inject:
-  channel: voice
+  - channel: voice
 
 interruption: provider_default
 effect: returns_data

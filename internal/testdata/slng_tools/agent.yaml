@@ -56,8 +56,8 @@ variables:
 agents:
   support:
     instructions: instructions.md
-    model: reasoning
-    voice: front_desk
+    think: reasoning
+    speak: front_desk
     tools:
       - check_order
       - refund

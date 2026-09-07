@@ -43,8 +43,8 @@ models:
 agents:
   appointment_desk:
     instructions: instructions.md
-    model: reasoning
-    voice: voice
+    think: reasoning
+    speak: voice
     tools:
       - lookup_customer
       - create_customer

@@ -14,11 +14,11 @@ by side.
 | | Holds the session | Context the next step sees | Cost in round trips | A caller's correction | Best for |
 |---|---|---|---|---|---|
 | One agent with tools | the agent, for the whole call | the whole conversation | none beyond the tool call itself | ask again, same turn | one job, one set of rules |
-| Task | the task, until it returns | what `context:` gives it | 2 to enter, the same as one tool call | delegate again | a step with a definite, typed answer |
+| Task | the task, until it returns | what `context:` gives it | 2 to enter, the same as one tool call | run it again | a step with a definite, typed answer |
 | Task group | the group, across its steps, until it returns | shared across steps, or isolated per step, by `context_scope` | 2 to enter the group, once, however many steps run inside | revisit a step inside the group | an order that has to hold, with shared context |
 | Handoff | the receiving agent, for good | only what `context:` carries over | 1 to leave, plus the receiving agent's forced opening turn, every time control changes hands | another handoff back | two roles with genuinely different rules or permissions |
 
-These are not exclusive. One agent can delegate a task in one phase and hand
+These are not exclusive. One agent can run a task in one phase and hand
 off in another.
 
 ## Choose the native shape
@@ -56,70 +56,72 @@ tasks in a task group. The server owns its dynamic order.
 | the prompt keeps growing and starts contradicting itself | split it: [tasks](/build/orchestration/tasks) if the parts serve one caller goal, a [handoff](/build/orchestration/handoffs) if they are separate roles |
 | the model does things out of order | a [task group](/build/orchestration/task-groups): the order is declared, not requested |
 | the model calls a tool it should not have yet | move the tool. Lists are per agent and per task, so a tool the current step does not hold cannot be called at all |
-| a step runs before you have the value it needs | `requires:` on that delegate. The step is held back, and the model is told which control fills the gap |
-| you need a value out of a step and want to keep it | a task with `result:`, delegated with `assign:` |
+| a step runs before you have the value it needs | give the step's own `when:` the clause that names what has to be true first, "once the caller is identified" |
+| you need a value out of a step and want to keep it | a task that saves a declared variable with `assign:` |
 | two phases need different tools or different permissions | a [handoff](/build/orchestration/handoffs) |
 | the caller needs a person | none of these: that is a [human transfer](/transfers/overview), and what it can do depends on the phone route |
 
-A prompt that says "always identify the caller first" is a request. A task group is
-a guarantee, and so is `requires:` on the step that needs the identity. That is
-the difference you are buying.
+A prompt that says "always identify the caller first" is a request. A task group
+is a guarantee. A `when:` clause naming the dependency is not a guarantee the
+same way, but it is cheap: no extra step, no extra prompt site, and nothing
+the caller has to be spoken through. See [Order steps with the
+prompt](/best-practices/step-scoping#order-steps-with-the-prompt) for the full
+pattern, including the tool-level check that catches a step run out of
+order anyway.
 
-Reach for the task group when the *order* is what must hold, and for `requires:`
-when one *value* must be there before one step runs. The second is cheaper: no
-extra step, no extra prompt site, and nothing the caller has to be spoken
-through.
+Reach for the task group when the *order* is what must hold. Reach for a
+`when:` clause when one *value* should usually be there before one step runs,
+and a stray extra turn asking for it is an acceptable cost.
 
-## Delegate or hand off
+## Task or handoff
 
-The difference is whether control comes back. That is why they are two blocks
-rather than one block with a kind field: which block a thing is written in is
+The difference is whether control comes back. That is why they are two kinds
+of list rather than one with a kind field: which list a thing is written in is
 what it is.
 
 ```yaml
-delegates:
-  check_customer:          # runs, returns a typed result, the agent continues
-    task: customer_record
-    when: Identify the caller before handling an appointment request.
+agents:
+  appointment_desk:
+    tasks:
+      - name: check_customer     # runs, returns a typed result, the agent continues
+        when: Identify the caller before handling an appointment request.
+        instructions: tasks/check-customer.md
+        assign:
+          - customer_id: result.customer_id
 
 handoffs:
-  to_appointment_manager:  # hands the call over, nothing returns
+  to_appointment_manager:        # hands the call over, nothing returns
     to: appointment_manager
     when: The caller wants to reschedule or cancel an existing appointment.
 ```
 
-### Guard the step, not the route to it
+### Order the step, not the route to it
 
-Both kinds take `requires:`, and on a delegate it is usually the better place for
-it. Put the prerequisite on the work that needs the value:
+Say the dependency on the step itself, in its own `when:`:
 
 ```yaml
-delegates:
-  manage_booking:
-    task: booking
-    when: The caller wants to make, change, or cancel a booking.
-    requires:
-      - customer_phone
+      - name: manage_booking
+        when: The caller wants to make, change, or cancel a booking, once the caller is identified.
 ```
 
-The step will not start while `customer_phone` is empty. The refusal goes to the
-model, not to the caller: it names the missing variable and the delegate that
-supplies it, so the model runs that delegate and calls the step again on the
-same turn. See [Tasks](/build/orchestration/tasks#guarding-a-step) for what the caller
-hears, and what happens when the model cannot recover.
+The model reads that clause every time it considers the step. Reference the
+saved value in the owning prompt when the model needs to check it. See [Order steps with the
+prompt](/best-practices/step-scoping#order-steps-with-the-prompt) for what
+still catches a step run out of order anyway, and what the caller hears when
+it does.
 
-Do not add an agent whose only job is to hold a guard in front of a step. That
-agent has to be spoken through, which costs the caller a turn and buys nothing a
-`requires:` on the step does not already give. And do not guard the route to a
-person: someone who asks for a manager should not be interviewed first.
+Do not add an agent whose only job is to hold callers up in front of a step.
+That agent has to be spoken through, which costs the caller a turn and buys
+nothing a clause on the step does not already give. And never hold up the
+route to a person: someone who asks for a manager should not be interviewed
+first.
 
-| | `delegates:` | `handoffs:` |
+| | `tasks:` | `handoffs:` |
 |---|---|---|
 | returns | yes | no |
-| typed result | yes, `result:` | no |
-| targets | a task or a task group | another agent |
+| saved typed values | yes, through `assign:` | existing call state remains available to explicit prompt references |
+| targets | a task, run in place | another agent |
 | where context is set | `context:` on the task | `context:` on the handoff entry |
-| `requires:` | yes | yes |
 
 ## Choosing shapes for a booking flow
 
@@ -129,19 +131,19 @@ on a different shape, and together they are
 
 **Look up services and answer questions.** One job, one set of rules: a single
 agent with tools handles it. `concierge` calls `look_up_salon_info` directly,
-no delegation needed.
+with no task in between.
 
 **Confirm who is calling before anything personal.** A bounded step with a
-definite, typed answer: a task. The `verify_customer` delegate runs the
-`customer_verification` task and assigns its result to `customer_phone`, and
-`manage_booking` waits behind `requires: customer_phone` until it lands.
+definite, typed answer: a task. The `verify_customer` task assigns its result
+to `customer_phone`, and `manage_booking`'s own `when:` says it runs only
+once the caller is identified.
 
 **Would identifying the caller, checking availability, then confirming ever
 have to run in that exact order, every time?** That is the task-group
 question, and here the answer is no: identification only has to happen before
-booking starts, not before browsing services, so `requires:` on one delegate
-is enough. A task group would buy nothing extra, and the package declares
-none.
+booking starts, not before browsing services, so a clause on one task's
+`when:` is enough. A task group would buy nothing extra, and the package
+declares none.
 
 **Hand a complaint to someone who needs a different tool list and a refund
 policy the booking agent should never see.** A different role with different

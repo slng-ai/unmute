@@ -142,7 +142,12 @@ type Data struct {
 	Listen        Binding
 	Reason        Binding
 	Speak         Binding
-	Variables     []Variable
+	// Shapes is the package's shapes: section. The console does not edit it, and
+	// it has to be here anyway: maintain rewrites agent.yaml from this struct, so
+	// a field absent here is a field deleted from the author's file, and what
+	// would be deleted is every declared shape and the types that name them.
+	Shapes    []Shape
+	Variables []Variable
 	// Knowledge is the package's knowledge: section. The console does not edit
 	// it, but it has to carry it: maintain rewrites agent.yaml from this struct,
 	// so a field absent here is a field silently deleted from the author's file.
@@ -174,7 +179,24 @@ type Variable struct {
 	Source  string
 }
 
+// Shape is one declared shape: a named group of fields a variable's type:
+// refers to. Carried so the console's rewrite keeps it.
+type Shape struct {
+	Name        string
+	Description string
+	Fields      []ShapeField
+}
+
+// ShapeField is one member of a shape. Description is what decides which of the
+// two authored forms it is written back as: one line without, a block with.
+type ShapeField struct {
+	Name        string
+	Type        string
+	Description string
+}
+
 type Tool struct {
+	Inject      []spec.Pair
 	Name        string
 	Description string
 	Execution   string
@@ -273,13 +295,10 @@ type Handoff struct {
 	To               string
 	When             string
 	Announce         string
-	Requires         []string
 	History          string
 	MaxMessages      int
 	Summarizer       string
 	IncludeToolCalls *bool
-	AllVariables     bool
-	Variables        []string
 }
 
 type Task struct {
@@ -291,18 +310,19 @@ type Task struct {
 	// has nowhere to be written.
 	Handoffs         []string
 	Model            string
-	Result           string // flat typed result as a JSON object
 	History          string
 	MaxMessages      int
 	Summarizer       string
 	IncludeToolCalls *bool
-	Agent            string
-	When             string
-	Assign           string // optional JSON object mapping variables to result fields
+	// Agent is the agent that defines this task, read from where the task is
+	// written rather than paired back through a naming convention.
+	Agent    string
+	When     string
+	Announce string
+	Assign   []spec.Pair // ordered saved-variable assignments
 }
 
 func (t Task) PromptPath() string { return "tasks/" + t.Name + ".md" }
-func (t Task) RunName() string    { return "run_" + t.Name }
 
 type TaskGroup struct {
 	Name         string
@@ -312,9 +332,8 @@ type TaskGroup struct {
 	ThenTarget   string
 	Agent        string
 	When         string
+	Announce     string
 }
-
-func (g TaskGroup) RunName() string { return "run_" + g.Name }
 
 type Channel struct {
 	Name             string
@@ -595,21 +614,26 @@ func (d Data) AgentTools(name string) []string {
 	return names
 }
 
-// AgentDelegates covers both shapes a delegate can take, a task and a task
-// group, because the block they are written in does not distinguish them.
-func (d Data) AgentDelegates(name string) []string {
-	var names []string
-	seen := map[string]bool{}
+// AgentTasks is the tasks this agent defines, written out in full inside its
+// own block.
+func (d Data) AgentTasks(name string) []Task {
+	var tasks []Task
 	for _, task := range d.Tasks {
-		if task.Agent == name && !seen[task.RunName()] {
-			names = append(names, task.RunName())
-			seen[task.RunName()] = true
+		if task.Agent == name {
+			tasks = append(tasks, task)
 		}
 	}
+	return tasks
+}
+
+// AgentTaskGroups is the task groups this agent runs, named from its block.
+func (d Data) AgentTaskGroups(name string) []string {
+	var names []string
+	seen := map[string]bool{}
 	for _, group := range d.TaskGroups {
-		if group.Agent == name && !seen[group.RunName()] {
-			names = append(names, group.RunName())
-			seen[group.RunName()] = true
+		if group.Agent == name && !seen[group.Name] {
+			names = append(names, group.Name)
+			seen[group.Name] = true
 		}
 	}
 	return names
@@ -921,6 +945,13 @@ func parseTemplate(name string, raw []byte) (*template.Template, error) {
 		"quote":     strconv.Quote,
 		"yaml":      yamlScalar,
 		"yamlBlock": blockYAML,
+		"pairs": func(indent int, pairs []spec.Pair) (string, error) {
+			content, err := yaml.Marshal(pairs)
+			if err != nil {
+				return "", err
+			}
+			return blockYAML(indent, string(content))
+		},
 	}).Delims("[[", "]]").Parse(string(raw))
 }
 
