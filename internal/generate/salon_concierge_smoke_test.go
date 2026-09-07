@@ -16,6 +16,98 @@ func TestSmokeSalonConciergePipecatJourneys(t *testing.T) {
 	runPipecatSmokeScript(t, "salon-concierge", nil, nil, salonPipecatJourneysSmokeScript)
 }
 
+// Replay the v3 call's failure through the real finish validator, saved state,
+// and injected tool arguments. A slot is opaque text: changing its separators
+// to satisfy an Id validator makes the booking tool reject it.
+func TestSmokeSalonV3RescheduleLiveKit(t *testing.T) {
+	runLiveKitSmokeScript(t, "salon-concierge-v3", nil, nil, salonV3RescheduleScript("agent", "Userdata()"))
+}
+
+func TestSmokeSalonV3ReschedulePipecat(t *testing.T) {
+	runPipecatSmokeScript(t, "salon-concierge-v3", nil, nil, salonV3RescheduleScript("bot", "build_state()"))
+}
+
+func salonV3RescheduleScript(module, stateExpr string) string {
+	return `"""Smoke check: preserve a salon slot through finish and a reset move."""
+import asyncio
+import json
+import os
+from datetime import timedelta
+from functools import partial
+from types import SimpleNamespace
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import ` + module + ` as generated  # noqa: E402
+from tools import check_availability, create_booking, find_or_create_customer, list_bookings  # noqa: E402
+
+
+async def main():
+    state = generated.` + stateExpr + `
+    customer = find_or_create_customer.find_or_create_customer("+15005550006")
+    generated._save_result("verify_customer", state, customer)
+    tomorrow = check_availability._booking_today() + timedelta(days=1)
+    first = check_availability.check_availability("haircut", tomorrow.isoformat())["slots"][-1]
+    booking = create_booking.create_booking(state.customer_phone, "haircut", first["slot_id"], True)
+    assert booking["status"] == "booked", booking
+
+    async def ignore(*args, **kwargs):
+        pass
+
+    ctx = SimpleNamespace(userdata=state)
+    worker = None
+    if generated.__name__ == "bot":
+        worker = SimpleNamespace(
+            state=state, context=generated.LLMContext(), queue_frame=ignore, flush_pipeline=ignore,
+            _manage_booking_snapshot=([], []),
+        )
+        worker._manage_booking_complete_manage_booking = partial(
+            generated.ConciergeAgent._manage_booking_complete_manage_booking, worker
+        )
+
+    async def save_slot(slot):
+        day, service, time = slot["slot_id"].split("|")
+        values = dict(appointment_id=booking["booking_id"], appointment_date=day,
+                      appointment_service=service, appointment_slot_id=slot["slot_id"],
+                      appointment_time=time, unserved_request=None)
+        if generated.__name__ == "agent":
+            from livekit.agents.llm.utils import validated_arguments
+            task = generated.ManageBooking()
+            await task.finish(ctx, **validated_arguments(task.finish, values))
+            assert task.done(), "finish did not save the exact tool result"
+        else:
+            worker._manage_booking_active_step = "manage_booking"
+            worker._manage_booking_results = {}
+            result, _ = await generated.ConciergeAgent._manage_booking_finish_manage_booking(worker, values, None)
+            assert result == {"status": "ok"}, result
+        assert state.appointment_slot_id == slot["slot_id"]
+        prompt = generated._render(generated.CONCIERGE_PROMPT, state, site="agent:concierge")
+        assert day in prompt and time in prompt and service in prompt, prompt
+
+    await save_slot(first)
+    second_day = (tomorrow + timedelta(days=1)).isoformat()
+    second = check_availability.check_availability("haircut", second_day)["slots"][0]
+    await save_slot(second)
+    if generated.__name__ == "agent":
+        task = generated.RescheduleBooking()
+        task._activity = SimpleNamespace(session=SimpleNamespace(say=lambda *_a, **_k: None))
+        result = await task.modify_booking(ctx, confirmed=True)
+    else:
+        result = await generated._flow_tool_modify_booking(
+            {"confirmed": True}, SimpleNamespace(worker=worker), state
+        )
+    assert result["status"] == "modified", result
+    rows = list_bookings.list_bookings(state.customer_phone)["bookings"]
+    assert len(rows) == 1 and rows[0]["booking_id"] == booking["booking_id"], rows
+    assert rows[0]["start_time"] == second["start_time"], rows
+    print("Exact slot survived finish, state, and injection; booking moved.")
+
+
+asyncio.run(main())
+`
+}
+
 // The tools/salon.py handler is copied once per tool (see its own module
 // docstring), so a module-level dict would give each copy a private store.
 // The product's fix is one state module parked in sys.modules that every

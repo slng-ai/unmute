@@ -9,6 +9,10 @@ an existing booking and a new slot, then saves five typed variables:
 `appointment_id`, `appointment_date`, `appointment_time`,
 `appointment_slot_id`, and `appointment_service`.
 
+The slot ID uses `string` to preserve the exact value returned by availability,
+including its `|` separators. The concierge explicitly reads the saved service,
+date, and time when confirming the outcome.
+
 The rescheduling task uses `history: reset`. Its prompt names only those saved
 variables, so it receives the appointment details without receiving the earlier
 conversation. `modify_booking` injects the saved customer, booking, service, and

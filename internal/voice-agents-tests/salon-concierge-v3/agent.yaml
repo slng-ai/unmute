@@ -186,8 +186,8 @@ variables:
     description: The exact time selected with the caller.
 
   appointment_slot_id:
-    type: Id
-    description: The exact slot ID returned by availability.
+    type: string
+    description: The exact slot ID returned by availability, including its separators.
 
   appointment_service:
     type: Literal["haircut", "haircolor", "haircut_and_haircolor", "dry_cut"]
