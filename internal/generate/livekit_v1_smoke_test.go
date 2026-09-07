@@ -997,6 +997,7 @@ asyncio.run(main())
 // speech-pipeline observations under the framework's session trace (V21/V22).
 const livekitRequestTracingSmokeScript = `"""Smoke check: a real agent session traces STT, LLM, and TTS."""
 import asyncio
+import json
 import time
 
 import agent
@@ -1182,6 +1183,15 @@ async def main() -> None:
     memory = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(memory))
+    # What setup_langfuse does, minus the parts that want credentials and a
+    # JobContext. Without this the turn hook is never installed and the whole
+    # call arrives as one trace, which is the shape this test exists to refuse.
+    call = tracing.CallTrace(
+        provider.get_tracer("unmute"),
+        {"langfuse.session.id": "probe-room", "langfuse.trace.name": "probe-agent"},
+    )
+    provider.add_span_processor(call)
+    tracing.install_turn_spans(provider, call)
     set_tracer_provider(provider)
 
     audio_input = FakeAudioInput()
@@ -1209,24 +1219,32 @@ async def main() -> None:
         def _trace_speech_item(ev) -> None:
             text = getattr(ev.item, "raw_text_content", None)
             role = getattr(ev.item, "role", None)
-            if role == "user" and text and pending_stt_metrics:
-                tracing.trace_speech_metrics(
-                    provider,
-                    pending_stt_metrics,
-                    input_value="audio",
-                    output_value=text,
-                    ended_at=ev.created_at,
-                )
-                pending_stt_metrics.clear()
-            elif role == "assistant" and text and pending_tts_metrics:
-                tracing.trace_speech_metrics(
-                    provider,
-                    pending_tts_metrics,
-                    input_value=text,
-                    output_value="audio",
-                    ended_at=ev.created_at,
-                )
-                pending_tts_metrics.clear()
+            if role == "user" and text:
+                call.ensure()
+                call.said("user", text)
+                if pending_stt_metrics:
+                    tracing.trace_speech_metrics(
+                        provider,
+                        pending_stt_metrics,
+                        input_value="audio",
+                        output_value=text,
+                        ended_at=ev.created_at,
+                        context=call.context(),
+                    )
+                    pending_stt_metrics.clear()
+            elif role == "assistant" and text:
+                call.said("assistant", text)
+                if pending_tts_metrics:
+                    tracing.trace_speech_metrics(
+                        provider,
+                        pending_tts_metrics,
+                        input_value=text,
+                        output_value="audio",
+                        ended_at=ev.created_at,
+                        context=call.context(),
+                    )
+                    pending_tts_metrics.clear()
+                call.end()
 
         await session.start(ProbeAgent())
         audio_input.push(
@@ -1267,8 +1285,35 @@ async def main() -> None:
     assert by_name["stt"].attributes["langfuse.observation.output"] == "trace this request"
     assert by_name["tts"].attributes["langfuse.observation.input"] == "traced"
     assert by_name["tts"].attributes["langfuse.observation.output"] == "audio"
-    session_trace = by_name["agent_session"].context.trace_id
-    assert all(by_name[name].context.trace_id == session_trace for name in required)
+    # The whole call is one trace, and this is the level that proves livekit
+    # itself routes its turn spans through the patched provider. The
+    # exec-the-emitted-module harness cannot: it stubs livekit out.
+    session = by_name["agent_session"]
+    assert session.parent is None, "the call's root has a parent"
+    assert len({span.context.trace_id for span in spans}) == 1, "the call split into traces"
+    assert "turn" in by_name, sorted(by_name)
+    turn = by_name["turn"]
+    by_id = {span.context.span_id: span for span in spans}
+    assert by_id[turn.parent.span_id].name == "agent_session"
+    # agent_turn is the one livekit creates, and reaching it proves the patch
+    # took: livekit parents it to the session root explicitly, so it would sit
+    # beside the turn rather than inside it if the hook had not replaced that.
+    for name in ("stt", "tts", "agent_turn"):
+        assert by_id[by_name[name].parent.span_id].name == "turn", name
+    assert turn.attributes["langfuse.observation.input"] == "trace this request"
+    assert turn.attributes["langfuse.observation.output"] == "traced"
+    # Lifecycle hangs off the session directly, not off a turn.
+    for name in ("start_agent_activity",):
+        assert by_id[by_name[name].parent.span_id].name == "agent_session", name
+    # The root reads as the call, not as an envelope.
+    transcript = json.loads(session.attributes["langfuse.observation.input"])
+    assert [m["role"] for m in transcript] == ["user", "assistant"], transcript
+    assert session.attributes["langfuse.observation.output"] == "traced"
+    # The correlating attributes reach every span, generations included, or the
+    # call drops out of its own session in every view that groups by one.
+    for span in spans:
+        assert span.attributes.get("langfuse.session.id") == "probe-room", span.name
+        assert span.attributes.get("langfuse.trace.name") == "probe-agent", span.name
     print("livekit speech tracing smoke ok")
 
 

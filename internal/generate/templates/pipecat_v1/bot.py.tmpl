@@ -100,6 +100,7 @@ from dev_metrics import dev_metrics_observer
     flush_tracing,
 {{if eq .TracingProvider "coval"}}    setup_coval_tracing,
 {{else}}    setup_langfuse_tracing,
+    start_call,
 {{end}})
 {{end}}
 {{range .Imports}}{{.}}
@@ -1651,6 +1652,10 @@ def build_stt():
     trace_attributes = {"langfuse.trace.name": TRACE_NAME}
     if runner_args.session_id is not None:
         trace_attributes["langfuse.session.id"] = runner_args.session_id
+    # Pipecat puts these on the conversation span only. Langfuse v4 filters and
+    # sums over observations, so they have to reach every span under it too, and
+    # this is also where the container forgets the call it ran before.
+    start_call(trace_attributes)
 {{end}}{{end}}
 {{if and .HasColdTransfer (not .CloudWebsocket)}}    call_context["_transport"] = transport
 {{end}}    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

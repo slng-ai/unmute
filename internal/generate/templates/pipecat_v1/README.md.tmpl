@@ -1494,6 +1494,16 @@ Complete at least one user turn before reviewing the trace. A traced request
 contains `conversation` and `turn` spans plus `llm` and `tts` generation
 observations.
 
+Traces follow the Langfuse v4 data model. One call is one trace. Open it and
+the root observation holds the whole conversation, so the top of the trace reads
+as the call rather than as an envelope. Inside it each exchange is a `turn` span
+you can open on its own: what the caller said, what the agent replied, and every
+model and tool call in between.
+
+The session ID and the trace name are on every observation, not only on the top
+one, so filtering by session or adding up what a call cost covers all of it.
+Langfuse trace input and output are deprecated and this project writes neither.
+
 Traces can contain caller speech, model input and output, and tool arguments and results.
 Use only fake identities and fake customer data for release tests. Use a separate
 Langfuse project for those tests, and do not send real customer data until its

@@ -37,18 +37,50 @@ Each target picks its own session ID from something it already has:
 | `livekit` | the LiveKit room name |
 | `pipecat` | the Pipecat runner session ID, which is also its conversation ID |
 
+Both go on every observation in the call, not only on the top one. Langfuse v4
+answers questions over observations, so a session ID that sat only on the root
+would leave you unable to filter the model calls under it or add up what the
+session cost.
+
+## One call is one trace
+
+A call is one trace, and it is also one session. Open the trace and the root
+observation holds the whole conversation, so you can read what happened without
+opening anything. Inside it each exchange is a `turn` span: what the caller
+said, what the agent replied, and the model and tool calls that produced it.
+
+That shape is deliberate. A trace is the unit Langfuse aggregates over, so a
+call split into one trace per turn leaves nothing to aggregate and leaves the
+top of the call empty. Keeping the call whole means you can still deep dive,
+by opening a turn, without losing the view of the call.
+
+An observation-level evaluator can read a turn's root and get both sides of that
+exchange, because a v4 evaluator cannot read an observation's children.
+
+The two targets differ in how much work this takes. Pipecat already nests `turn`
+inside `conversation`, so it is left alone. LiveKit has no span covering one
+exchange, since `user_turn` closes when the caller stops speaking and
+`agent_turn` is its sibling, so that target adds a `turn` span of its own.
+
 ## What the spans look like
 
-| Target | What a traced request contains |
+| Target | The tree of one call |
 |---|---|
-| `pipecat` | `conversation` and `turn` spans, plus `llm` and `tts` generation observations |
-| `livekit` | `llm_node` and `llm_request` generation observations, plus the session and agent spans |
+| `pipecat` | `conversation`, then a `turn` per exchange, then `stt`, `llm` and `tts` generation observations |
+| `livekit` | `agent_session`, then a `turn` per exchange, then `user_turn` and `agent_turn` with `llm_node`, `llm_request`, `stt` and `tts` under them |
+
+Agent lifecycle on LiveKit, the starting, handing over and shutting down, hangs
+off `agent_session` beside the turns rather than inside one.
 
 Every tool call is its own span, named `tool:<name>` after the tool that ran, carrying the arguments and, once the call finishes, the result. Both targets name it that way. On `livekit` the framework names all of them `function_tool` and puts the real name in an attribute, so the generated tracing module puts the name back before the span is sent.
 
 A task's structured result is the arguments of its `finish` call, so it is on that call's span rather than on the model request that produced it. That call is named `finish` on `livekit`, and on `pipecat` it carries the step name twice over, once for the entry that runs it, as in `finish_verify_customer_verify_customer`. Every one of them also takes `unserved_request`, which is empty unless the step handed a request back for the agent that owns it to serve.
 
 Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
+
+In the Langfuse v4 data model a trace is only the observations that share a
+trace ID, so there is no separate place for a trace input or output, and this
+project writes neither.
 
 ## What a trace records
 

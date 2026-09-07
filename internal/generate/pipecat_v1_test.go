@@ -537,13 +537,28 @@ func TestV21PipecatUsesNativeTracing(t *testing.T) {
 	}
 
 	tracing := artifactFile(t, artifact, "tracing.py")
+	// The retired LangfuseAttributeProcessor rewrote Pipecat's own span
+	// attributes from inside on_start, by reassigning span.set_attribute. That
+	// job belongs to _patch_pipecat_tracing, which patches Pipecat's decorators
+	// where Pipecat sets the values. A processor that only stamps the call's
+	// correlating attributes is a different thing, and Langfuse v4 needs one:
+	// Pipecat puts additional_span_attributes on the conversation span alone,
+	// while v4 filters and sums over observations.
 	for _, forbidden := range []string{
-		"SpanProcessor",
 		"LangfuseAttributeProcessor",
+		"self._conversation_spans",
 	} {
 		if strings.Contains(tracing, forbidden) {
 			t.Errorf("tracing.py contains custom tracing hook %q", forbidden)
 		}
+	}
+	if got := strings.Count(tracing, "SpanProcessor"); got != 2 {
+		t.Errorf("tracing.py names SpanProcessor %d times, want 2: the import and the one CallTrace", got)
+	}
+	// Exactly one place swaps a span's setter, and it is the decorator patch.
+	// A second is a processor rewriting Pipecat's attributes again.
+	if got := strings.Count(tracing, "span.set_attribute = "); got != 1 {
+		t.Errorf("tracing.py reassigns span.set_attribute %d times, want 1 (inside _patch_pipecat_tracing)", got)
 	}
 }
 
@@ -570,8 +585,10 @@ func TestV23PipecatSpeechObservationsAreRich(t *testing.T) {
 		"service_decorators.add_tts_span_attributes",
 		`"langfuse.observation.input"`,
 		`"langfuse.observation.output"`,
-		`"langfuse.trace.input"`,
-		`"langfuse.trace.output"`,
+		// Langfuse v4 has no trace input or output: the call's overall pair goes
+		// on the root observation, which CallContext holds.
+		`CALL.said("user", value)`,
+		`CALL.said("assistant", value)`,
 		`"langfuse.observation.completion_start_time"`,
 		`"langfuse.observation.usage_details"`,
 		`"langfuse.observation.metadata.ttfb_seconds"`,
@@ -582,7 +599,10 @@ func TestV23PipecatSpeechObservationsAreRich(t *testing.T) {
 			t.Errorf("tracing.py missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{"TTSAudioRawFrame", "TTSService", "append_to_audio_context", "Pipecat 1.5"} {
+	for _, forbidden := range []string{
+		"TTSAudioRawFrame", "TTSService", "append_to_audio_context", "Pipecat 1.5",
+		"langfuse.trace.input", "langfuse.trace.output",
+	} {
 		if strings.Contains(tracing, forbidden) {
 			t.Errorf("tracing.py contains obsolete Pipecat tracing workaround %q", forbidden)
 		}
@@ -626,7 +646,10 @@ func TestV24PipecatStaticCheckSurface(t *testing.T) {
 	}
 	for _, want := range []string{
 		"from collections.abc import Sequence",
-		"from opentelemetry.sdk.trace import TracerProvider",
+		"from opentelemetry.sdk.trace import Span, SpanProcessor, TracerProvider",
+		"def on_start(self, span: Span, parent_context: Context | None = None) -> None:",
+		"def start_call(attributes: dict[str, AttributeValue]) -> None:",
+		"def said(self, role: str, text: str) -> None:",
 		"_TRACE_PROVIDER: TracerProvider | None = None",
 		`setattr(patched, "__langfuse_patch__", True)`,
 		`setattr(service_decorators, "add_llm_span_attributes", patched_llm)`,

@@ -92,7 +92,7 @@ func TestLiveKitNamesAToolSpanAfterItsTool(t *testing.T) {
 		`span._name = f"tool:{tool}"`,
 		`except AttributeError:`,
 		"should_export_span=_name_tool_spans",
-		"from opentelemetry.sdk.trace import ReadableSpan, TracerProvider",
+		"from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor, TracerProvider",
 	} {
 		if !strings.Contains(tracing, want) {
 			t.Errorf("tracing.py missing %q", want)
@@ -217,6 +217,17 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 	for _, want := range []string{
 		"def setup_langfuse(",
 		"def trace_speech_metrics(",
+		// Langfuse v4 filters and sums over observations, so the session ID and
+		// trace name have to reach every span, not only the session span.
+		"class CallTrace(SpanProcessor):",
+		"trace_provider.add_span_processor(call)",
+		"span.set_attributes(self._attributes)",
+		// And a call is a session of one trace per turn, so livekit's turn spans
+		// are routed into a root this module owns.
+		"def install_turn_spans(provider: TracerProvider, call: CallTrace) -> None:",
+		"install_turn_spans(trace_provider, call)",
+		`TURN_SPANS = ("user_turn", "agent_turn")`,
+		`self._tracer.start_span("turn", context=self._call_context)`,
 		"set_tracer_provider(trace_provider, metadata=metadata)",
 		"should_export_span=_name_tool_spans",
 		"ctx.add_shutdown_callback(flush_trace)",
@@ -239,7 +250,7 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 	if !strings.Contains(pyproject, `name = "unmute-remy-fixture"`) {
 		t.Error("pyproject.toml distribution name shadows the livekit dependency")
 	}
-	for _, dep := range []string{`"langfuse>=3"`, `"opentelemetry-sdk>=1.33,<2"`} {
+	for _, dep := range []string{`"langfuse>=4,<5"`, `"opentelemetry-sdk>=1.33,<2"`} {
 		if !strings.Contains(pyproject, dep) {
 			t.Errorf("pyproject.toml missing %s", dep)
 		}
@@ -300,8 +311,18 @@ func TestV23LiveKitSpeechObservationsAreUtteranceScoped(t *testing.T) {
 		"def trace_speech_metrics(",
 		`"langfuse.observation.input": input_value`,
 		`"langfuse.observation.output": output_value`,
-		`attributes["langfuse.trace.input"] = output_value`,
-		`attributes["langfuse.trace.output"] = input_value`,
+		// Langfuse v4 has no trace input or output. The call's overall input and
+		// output go on the root observation, and nothing may write the retired
+		// pair back onto a speech span.
+		`call.said("user", text)`,
+		`call.said("assistant", text)`,
+		// The turn ends when the reply lands, so the root's duration is the turn
+		// and not the turn plus the silence that followed it.
+		"            call.end()",
+		// The speech spans are started from an event handler, where the current
+		// context is the session. Without the turn passed in they land in a
+		// different trace from the turn they transcribe.
+		"context=call.context(),",
 		"pending_stt_metrics: list[STTMetrics] = []",
 		"pending_tts_metrics: list[TTSMetrics] = []",
 		`@session.on("conversation_item_added")`,
@@ -312,6 +333,11 @@ func TestV23LiveKitSpeechObservationsAreUtteranceScoped(t *testing.T) {
 	}
 	if strings.Contains(tracing, "trace_speech_metric(trace_provider, ev.metrics)") {
 		t.Error("speech generations must not be emitted for each metrics event")
+	}
+	for _, retired := range []string{"langfuse.trace.input", "langfuse.trace.output"} {
+		if strings.Contains(tracing, retired) {
+			t.Errorf("tracing.py still writes the deprecated %q", retired)
+		}
 	}
 }
 
