@@ -407,8 +407,9 @@ and a handoff the step declares wins over it.
 
 The request itself travels in `unserved_request`, a reserved optional string on
 every generated finish. It saves no domain values. On return, the owner receives
-only `{"status":"unserved"}`; the caller's request remains in shared speech
-history when that boundary uses messages or full history.
+only `{"status":"unserved"}` with its earlier conversation. Task-local speech
+and result values stay private. The owner uses its saved-value references and
+asks the caller for any missing request details.
 
 ### The opening turn cannot hand off again
 
@@ -443,7 +444,6 @@ LiveKit agents and Pipecat output are unchanged.
 | `max_messages` | a positive number | legal with `last_n` only |
 | `summarizer` | a model entry name | legal with `summary` only |
 | `include_tool_calls` | `true` or `false` | whether tool calls travel too |
-| `variables` | `all` or a list of names | handoffs only, optional, left out means all |
 
 What each value gives the step:
 
@@ -542,26 +542,19 @@ saves no value and the default spoken-message history is right.
 | `then_target` | an agent name | required with `transfer`, illegal otherwise |
 | `merge` | `results` | how the steps' results are combined |
 
-**Context decision, twice over:**
+**Choose the conversation each member receives:**
 
-- `context_scope: shared` means the service the caller named in step one is
-  still there in step two, with nothing passed by hand. This is what you want
-  most of the time. Each exact typed result enters the shared context before
-  the next task starts. LiveKit labels it with the source task, so the next task
-  can identify the value instead of reconstructing it from conversation wording.
-- `context_scope: isolated` means each step starts from its own prompt. It is
-  one setting for the whole group, not per step, so choosing it makes **every**
-  step start clean. An isolated group carries no results between steps. Reach
-  for it only when the group is a set of independent assessments that must not
-  colour each other. An intake flow that must not ask the same question twice
-  needs `shared`, and that is most groups.
-- `then: return` sends control back to the agent that named the group, with
-  `merge: results` returning the final map keyed by task name. `then: transfer`
-  needs `then_target` and hands the call to that agent instead. `then: end`
-  finishes the call.
+- `context_scope: shared` lets later tasks inherit the group's running
+  conversation, filtered by each task's own `context.history`.
+- `context_scope: isolated` starts each member without inherited group
+  conversation. Saved variables remain available through explicit prompt references.
 
-Say which of these you chose and why. All four combinations validate, and only
-one of them is what the user meant.
+Task results are private. Each completed step supplies only completion status;
+later tasks read saved values through `{{name}}` or `{{name.field}}`.
+With `then: return`, the owner gets its original context back plus `completed`
+or `unserved`, and reads saved values through its own prompt references.
+`merge: results` combines results internally; it does not expose a result map
+to the owner. `then: transfer` activates `then_target`; `then: end` ends the call.
 
 A member task may also list a handoff, under its own `handoffs:` key. Calling
 it ends that task and skips the group's remaining steps, then hands the caller
@@ -581,7 +574,7 @@ answer out loud for each boundary the package actually has.
 | a task | what is saved? | `assign:` on the task; destination variables supply the types |
 | a task group | do the steps share context or each start clean? | `context_scope` |
 | a task group | what happens when the last step ends? | `then`, and `then_target` if it transfers |
-| a task group | what reaches later shared steps and returns to the caller? | exact intermediate results enter shared context before the next step; the final `merge: results` map is keyed by task name |
+| a task group | what reaches later shared steps and returns to the caller? | completion status; saved values are visible only through explicit prompt references |
 
 Omitted history has a deliberate default: spoken messages without tool
 records. State other choices when they matter.
@@ -667,8 +660,9 @@ nested in the concierge (one of them ordered after the other by the agent's
 own prompt) and a bare name that lets the complaint specialist run the same
 verification task without a second copy.
 
-The one-agent, one-prompt shape has no package. `unmute init <name>` scaffolds
-it, and `package.md` in this bundle has the same shape inline.
+The one-agent, one-prompt shape is shown in
+`examples/salon-concierge-single-prompt`. `unmute init <name>` also scaffolds
+that structure.
 
 Task groups have no package either. The YAML above is the reference, and the
 LiveKit beta note in "Where a target refuses a shape" is the thing to repeat

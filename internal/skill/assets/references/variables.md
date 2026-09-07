@@ -13,7 +13,7 @@ Three parts write or read state:
 | `prefetch:` + `assign:` | state filled before the first word | the whole call | the same |
 | task `assign:` | fields a task saves when it finishes | the whole call from then on | the same |
 
-State is written only at a seam: before the call by `prefetch:`, and at task
+Values are supplied at session start, filled by `prefetch:`, or saved at task
 finish by `assign:`. Conversation sharing is controlled separately by
 `context.history`. A reset task receives no old speech, so put each saved value
 it needs directly in its prompt as `{{name}}`.
@@ -35,7 +35,44 @@ variables:
 | `source` | no | where the value comes from |
 | `default` | no | the value to use when nothing supplies one |
 | `confirm` | no | the step that must hear the caller agree before anything acts on this |
-| `description` | no | a note for readers of the file; not sent to the model |
+| `description` | no | explains the value to readers and describes the task's derived finish argument |
+
+## The type grammar
+
+Write `type:` as a single-line Python type expression. Choose a built-in type
+or compose a type using the forms below. The type checks
+saved values and defines the task's finish argument. A variable's description
+helps the model choose the right value; it does not expose the saved value.
+
+| Type | Value |
+|---|---|
+| `str` | Text |
+| `int` | A whole number |
+| `float` | A number that may have a decimal part |
+| `bool` | `true` or `false` |
+| `Phone` | One leading `+`, then 7 to 15 digits; the first digit is nonzero |
+| `Date` | Text in `YYYY-MM-DD` format |
+| `Time` | A 24-hour time in `HH:MM` format |
+| `Id` | 1 to 64 characters; starts with an ASCII letter or digit, followed by letters, digits, `.`, `-`, `_`, or `:` |
+
+Aliases: `string` means `str`, `integer` means `int`, `number` means `float`,
+and `boolean` means `bool`. Text-format checks are separate from business
+checks such as phone ownership, calendar validity, or record existence.
+
+| Form | Value |
+|---|---|
+| `Literal["value1", "value2"]` | One of the distinct, double-quoted strings listed |
+| Your shape's name | An object with the fields you declare under `shapes:` |
+| `list[T]` | An array of values of type `T` |
+| `T \| None` | A value of type `T` or `null` |
+
+`T` stands for a built-in type, a `Literal` expression, or a shape name.
+Lists start as `[]`. Use `T | None` for scalars or objects whose saved result
+may be absent. Shapes can contain other shapes and lists.
+
+No variable is appended to prompts automatically. Use `{{name}}` or
+`{{name.field}}` in each prompt that needs it. An empty referenced value renders
+as `none recorded yet.`.
 
 ## `shapes:` groups fields into a named type
 
@@ -44,16 +81,17 @@ A top-level list, declared once, each item naming a group of fields a
 
 ```yaml agent.yaml
 shapes:
-  - name: Appointment
-    description: One thing being booked, moved or cancelled.
+  - name: Record
+    description: A record selected by the caller.
     fields:
-      - scheduled_date: Date
-      - scheduled_time: Time
-      - name: appointment_type
-        type: Literal["haircut", "haircolor", "haircut_and_haircolor", "dry_cut"]
-      - name: calling_reason
-        type: Literal["create_booking", "modify_booking", "cancel_booking"]
-        description: Why this particular appointment is being touched.
+      - id: Id
+      - name: label
+        type: str
+        description: The name shown to the caller.
+
+variables:
+  selected_record:
+    type: Record | None
 ```
 
 | Key | Required | What it is |
@@ -91,49 +129,6 @@ Refused, each with its line:
 - A shape that refers to itself, directly or through another shape. Nothing
   can render an object with no bottom, and the model would be asked to fill
   one in.
-
-## The type grammar
-
-A variable's `type:` is a one-line type expression, written in Pydantic's own
-words. Task finish fields reuse the destination variable types named by
-`assign:`:
-
-```text
-type  := atom ("|" atom)*
-atom  := name | name "[" args "]"
-args  := arg ("," arg)*
-arg   := type | string
-```
-
-| Written | Accepted | Write instead |
-|---|---|---|
-| `str` `int` `float` `bool` | yes | `string` `number` `integer` `boolean` still work, same meaning |
-| `Phone` `Date` `Time` `Id` | yes | text with a validated shape; sent to the model as `str`, checked where the value enters the state |
-| `Literal["a", "b"]` | yes | a closed set, at least one entry, every entry in double quotes |
-| `list[T]` | yes | `T` is any type in this table |
-| a declared shape name | yes | must appear under `shapes:` |
-| `T \| None` | yes | either side; says the value may be absent |
-| `datetime` | no | write `Date` and `Time` as two fields |
-| `date` | no | write `Date` |
-| `time` | no | write `Time` |
-| `UUID` | no | write `Id` |
-| `SecretStr` | no | a secret never travels through state; give it a tool's own `*_env` field instead |
-| `PaymentCardNumber` | no | outside the declared type scope |
-| `dict[...]` / `Dict[...]` | no | declare a shape under `shapes:` and name it here |
-| `set[...]` | no | write `list[...]` |
-| `tuple[...]` | no | write `list[...]` |
-| `List[...]` | no | write `list[...]`, in lower case |
-| `Optional[...]` | no | write `T \| None` |
-| `Union[...]` | no | write `A \| B`; only `\| None` is meaningful here |
-| `Any` | no | name the real type: nothing can render or guard a value with none |
-| `BaseModel` | no | name one of the shapes declared under `shapes:` |
-
-Anything else is refused by name, with the line and the column inside the
-expression, and the message says what to write instead.
-
-No variable is appended to prompts automatically. Use `{{name}}` or a dotted
-path at each prompt that needs it. An empty referenced value renders as the
-words `none recorded yet.`, never `None`.
 
 ## Where values come from
 
