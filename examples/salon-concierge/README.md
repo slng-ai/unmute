@@ -15,7 +15,7 @@ down complaints, and puts a caller through to a manager when they ask for one.
 | `targets.yaml` | the two targets, one per telephony plane |
 | `instructions.md` | the concierge prompt |
 | `agents/complaint-specialist.md` | the customer care prompt |
-| `tasks/` | the two task prompts, verification and booking |
+| `tasks/` | the verification, booking and complaint task prompts |
 | `tools/` | one file per tool, all local Python over one in-memory store |
 | `knowledge/refunds/`, `knowledge/services/` | two document sets, each its own index |
 | `connections/` | the two carrier connections |
@@ -25,9 +25,10 @@ call. Customer care is a second agent because it holds a document set and a
 permission the concierge must not have: the refund policy and the complaint
 record.
 
-**Two tasks, one of them shared.** Verification confirms who is calling. Booking
-does create, modify and cancel in one step. Both are written inside the concierge,
-which is the agent that defines them. Customer care offers verification too, and
+**Three tasks, one of them shared.** Verification confirms who is calling.
+Booking does create, modify and cancel in one task and saves a typed Appointment.
+Customer care records complaints in its own task and appends typed Complaint
+values. Customer care offers verification too, and
 it does that with a bare name in its own `tasks:` list rather than a second copy:
 
 ```yaml
@@ -37,6 +38,19 @@ it does that with a bare name in its own `tasks:` list rather than a second copy
 ```
 
 so there is one definition, one prompt, and one name in the emitted project.
+
+**Spoken messages across every task and handoff.** Each context block declares
+`history: messages`, also the framework default. The receiver gets the caller
+and assistant speech available at entry, without tool calls and results.
+Returning from a task restores the owner's earlier conversation and gives only
+a completed or unserved status. It does not copy the task's conversation back.
+
+**Typed values shared on purpose.** Verification saves `customer_status` so both
+agents know it already happened. Booking saves `appointment` only after a create,
+move or cancellation succeeds. The owner and customer care read those values
+through explicit prompt references, including `{{appointment}}`, so a later
+complaint can refer to the updated date without asking again. Tools inject the
+confirmed phone number. No value is automatically added to a prompt.
 
 **Ordering carried by the prompt.** `manage_booking` runs after verification,
 but not because the compiler holds it back: the concierge's own instructions

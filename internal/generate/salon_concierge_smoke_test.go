@@ -164,6 +164,7 @@ for tool_name in (
     "check_availability",
     "create_booking",
     "list_bookings",
+    "modify_booking",
     "cancel_booking",
     "record_complaint",
 ):
@@ -187,6 +188,20 @@ def digits(phone):
     fixture that confuses the two passes for the wrong reason.
     """
     return "".join(character for character in str(phone) if character.isdigit())
+
+
+def appointment_value(action, booking_id, slot_id):
+    day, service, time = slot_id.split("|")
+    return dict(booking_id=booking_id, service=service, date=day, time=time, action=action)
+
+
+def check_saved_appointment(module, state, appointment):
+    assert state.appointment == appointment, state.appointment
+    for name, site in (("CONCIERGE_PROMPT", "agent:concierge"),
+                       ("COMPLAINT_SPECIALIST_PROMPT", "agent:complaint_specialist")):
+        prompt = module._render(getattr(module, name), state, site=site)
+        assert appointment["date"] in prompt and appointment["time"] in prompt, prompt
+        assert state.customer_status in prompt, prompt
 
 
 def booking_rows():
@@ -235,7 +250,20 @@ for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
 import agent  # noqa: E402
-from livekit.agents import llm  # noqa: E402
+from livekit.agents import AgentServer, llm  # noqa: E402
+import ast  # noqa: E402
+
+source = ast.parse(open("agent.py").read())
+local_options = next(node for node in source.body if isinstance(node, ast.If)
+                     and "UNMUTE_LOCAL_RUN" in ast.unparse(node.test))
+for local in ("", "0", "1"):
+    server = AgentServer()
+    before = (server._num_idle_processes, server._initialize_process_timeout)
+    os.environ["UNMUTE_LOCAL_RUN"] = local
+    exec(compile(ast.Module(body=[local_options], type_ignores=[]), "agent.py", "exec"),
+         {"os": os, "server": server})
+    after = (server._num_idle_processes, server._initialize_process_timeout)
+    assert after == ((1, 60.0) if local == "1" else before), after
 ` + salonStoreSmokePrelude + `
 
 def quiet_activity():
@@ -284,8 +312,21 @@ async def create_then_cancel(userdata):
         ctx, confirmed=True, service="haircut", slot_id=slot_id
     )
     assert created["status"] == "booked", created
-    await task.finish(ctx)
-    assert task.completions == [{"unserved_request": ""}]
+    appointment = appointment_value("create", created["booking_id"], slot_id)
+    await task.finish(ctx, appointment=appointment)
+    assert task.completions == [{"appointment": appointment, "unserved_request": ""}]
+    check_saved_appointment(agent, userdata, appointment)
+
+    task = recording_task(agent.ManageBooking)
+    requested = (date.fromisoformat(requested) + timedelta(days=1)).isoformat()
+    available = await task.check_availability(ctx, date=requested, service="haircut")
+    slot_id = available["slots"][0]["slot_id"]
+    moved = await task.modify_booking(ctx, booking_id=created["booking_id"],
+                                      service="haircut", slot_id=slot_id, confirmed=True)
+    assert moved["status"] == "modified", moved
+    appointment = appointment_value("modify", created["booking_id"], slot_id)
+    await task.finish(ctx, appointment=appointment)
+    check_saved_appointment(agent, userdata, appointment)
 
     task = recording_task(agent.ManageBooking)
     listed = await task.list_bookings(ctx)
@@ -296,8 +337,10 @@ async def create_then_cancel(userdata):
         ctx, booking_id=created["booking_id"], confirmed=True
     )
     assert cancelled["status"] == "cancelled", cancelled
-    await task.finish(ctx)
-    assert task.completions == [{"unserved_request": ""}]
+    appointment = appointment_value("cancel", created["booking_id"], slot_id)
+    await task.finish(ctx, appointment=appointment)
+    assert task.completions == [{"appointment": appointment, "unserved_request": ""}]
+    check_saved_appointment(agent, userdata, appointment)
     return created["booking_id"], slot_id
 
 
@@ -319,7 +362,7 @@ async def split_verification_then_intent_change():
     verification = recording_task(agent.VerifyCustomer, chat_ctx)
     ctx = run_context(userdata, "verification-finish")
     verified = await verification.find_or_create_customer(ctx, phone="3035550199")
-    finish_result = {"customer_phone": verified["customer_phone"]}
+    finish_result = {"customer_phone": verified["customer_phone"], "customer_status": verified["status"]}
     await verification.finish(ctx, **finish_result)
     assert verification.completions == [
         {**finish_result, "unserved_request": ""}
@@ -344,12 +387,18 @@ async def split_verification_then_intent_change():
         and item.raw_text_content == complaint
     ]
     assert complaint_messages == [complaint]
-    recorded = await transfer.agent.record_complaint(
+    complaint_task = recording_task(agent.HandleComplaint, transfer.agent.chat_ctx)
+    recorded = await complaint_task.record_complaint(
         run_context(userdata, "record-complaint"),
         requested_resolution="A manager callback",
         summary="The last visit did not meet expectations.",
     )
     assert recorded["status"] == "recorded"
+    value = dict(complaint_id=recorded["complaint_id"],
+                 summary="The last visit did not meet expectations.",
+                 requested_resolution="A manager callback")
+    await complaint_task.finish(run_context(userdata, "complaint-finish"), complaint=value)
+    assert userdata.complaints == [value]
     return verified
 
 
@@ -362,7 +411,7 @@ async def main():
     userdata = agent.Userdata(customer_phone=customer["customer_phone"])
     await agent._prefetch(userdata, None)
     agent._save_result(
-        "verify_customer", userdata, {"customer_phone": customer["customer_phone"]}
+        "verify_customer", userdata, {"customer_phone": customer["customer_phone"], "customer_status": customer["status"]}
     )
     booking_id, slot_id = await create_then_cancel(userdata)
     booking_actions = [name for name, _, _ in actions]
@@ -373,6 +422,8 @@ async def main():
         "look_up_customer",
         "check_availability",
         "create_booking",
+        "check_availability",
+        "modify_booking",
         "list_bookings",
         "cancel_booking",
     ]
@@ -427,7 +478,7 @@ from pipecat.processors.frame_processor import (  # noqa: E402
     FrameDirection,
     FrameProcessor,
 )
-from pipecat.services.llm_service import FunctionCallParams, LLMService  # noqa: E402
+from pipecat.services.llm_service import LLMService  # noqa: E402
 from pipecat.services.settings import LLMSettings  # noqa: E402
 
 
@@ -497,26 +548,36 @@ async def booking_flow(worker, context, *, action, booking_id=""):
             state=worker.state,
         )
         booking_id = result["booking_id"]
+    elif action == "modify":
+        requested = (date.fromisoformat(worker.state.appointment["date"]) + timedelta(days=1)).isoformat()
+        available = await bot._flow_tool_check_availability(
+            {"service": "haircut", "date": requested}, flow_manager)
+        slot_id = available["slots"][0]["slot_id"]
+        result = await bot._flow_tool_modify_booking(
+            {"booking_id": booking_id, "confirmed": True, "service": "haircut", "slot_id": slot_id},
+            flow_manager, state=worker.state)
     else:
         listed = await bot._flow_tool_list_bookings(
             {}, flow_manager, state=worker.state
         )
         assert [item["booking_id"] for item in listed["bookings"]] == [booking_id]
-        slot_id = ""
+        slot_id = shared_state.bookings[booking_id]["slot_id"]
         result = await bot._flow_tool_cancel_booking(
             {"booking_id": booking_id, "confirmed": True},
             flow_manager,
             state=worker.state,
         )
 
-    expected_status = "booked" if action == "create" else "cancelled"
+    expected_status = {"create": "booked", "modify": "modified", "cancel": "cancelled"}[action]
     assert result["status"] == expected_status, result
-    result_fields = {"unserved_request": ""}
+    appointment = appointment_value(action, booking_id, slot_id)
+    result_fields = {"appointment": appointment, "unserved_request": ""}
     finished, next_node = await worker._manage_booking_finish_manage_booking(
         result_fields, None
     )
     assert finished == {"status": "ok"} and next_node is None
     assert worker._manage_booking_results == {"manage_booking": result_fields}
+    check_saved_appointment(bot, worker.state, appointment)
     return booking_id, slot_id
 
 
@@ -542,7 +603,7 @@ async def split_verification_then_intent_change():
     verified = await bot._flow_tool_find_or_create_customer(
         {"phone": "3035550199"}, SimpleNamespace(worker=concierge)
     )
-    saved = {"customer_phone": verified["customer_phone"]}
+    saved = {"customer_phone": verified["customer_phone"], "customer_status": verified["status"]}
     finished, next_node = await concierge._verify_customer_finish_verify_customer(saved, None)
     assert finished == {"status": "ok"} and next_node is None
     assert state.customer_phone == verified["customer_phone"]
@@ -590,28 +651,19 @@ async def split_verification_then_intent_change():
         state=state, context=context, call_context={}, slng_session_id="smoke-session"
     )
     await quiet(complaint_worker)
-    callbacks = []
-
-    async def result_callback(result, **_kwargs):
-        callbacks.append(result)
-
-    await complaint_worker.record_complaint(
-        FunctionCallParams(
-            function_name="record_complaint",
-            tool_call_id="record-complaint",
-            arguments={
-                "requested_resolution": "A manager callback",
-                "summary": "The last visit did not meet expectations.",
-            },
-            llm=complaint_worker.llm,
-            pipeline_worker=complaint_worker,
-            context=context,
-            result_callback=result_callback,
-        ),
-        requested_resolution="A manager callback",
-        summary="The last visit did not meet expectations.",
-    )
-    assert len(callbacks) == 1 and callbacks[0]["status"] == "recorded"
+    value = dict(summary="The last visit did not meet expectations.",
+                 requested_resolution="A manager callback")
+    recorded = await bot._flow_tool_record_complaint(
+        value, SimpleNamespace(worker=complaint_worker), state=state)
+    assert recorded["status"] == "recorded"
+    value["complaint_id"] = recorded["complaint_id"]
+    complaint_worker._handle_complaint_active_step = "handle_complaint"
+    complaint_worker._handle_complaint_results = {}
+    complaint_worker._handle_complaint_snapshot = (context.get_messages(), context.tools)
+    result, _ = await complaint_worker._handle_complaint_finish_handle_complaint(
+        {"complaint": value}, None)
+    assert result == {"status": "ok"}, result
+    assert state.complaints == [value], state.complaints
     return verified
 
 
@@ -624,7 +676,7 @@ async def main():
     state = bot.State(customer_phone=customer["customer_phone"])
     await bot._prefetch(state, None)
     bot._save_result(
-        "verify_customer", state, {"customer_phone": customer["customer_phone"]}
+        "verify_customer", state, {"customer_phone": customer["customer_phone"], "customer_status": customer["status"]}
     )
     context = LLMContext()
     worker = bot.ConciergeAgent(
@@ -632,6 +684,8 @@ async def main():
     )
     await quiet(worker)
     booking_id, slot_id = await booking_flow(worker, context, action="create")
+    moved_id, slot_id = await booking_flow(worker, context, action="modify", booking_id=booking_id)
+    assert moved_id == booking_id
     cancelled_id, _ = await booking_flow(
         worker, context, action="cancel", booking_id=booking_id
     )
@@ -644,6 +698,8 @@ async def main():
         "look_up_customer",
         "check_availability",
         "create_booking",
+        "check_availability",
+        "modify_booking",
         "list_bookings",
         "cancel_booking",
     ]

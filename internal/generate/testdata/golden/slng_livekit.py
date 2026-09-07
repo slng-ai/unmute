@@ -1106,6 +1106,9 @@ def prewarm(proc: JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load(min_silence_duration=0.3)
 server = AgentServer()
 server.setup_fnc = prewarm
+if os.getenv("UNMUTE_LOCAL_RUN") == "1":
+    # One browser call needs one warm spare, not one index build per CPU.
+    server.update_options(num_idle_processes=1, initialize_process_timeout=60.0)
 
 
 @server.rtc_session(agent_name="safe-core-fixture-livekit")

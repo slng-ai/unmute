@@ -195,17 +195,31 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		t.Fatalf("manager transfer = %#v, want cold transfer with hangup fallback", resolved.Controls["to_manager"])
 	}
 
-	// Every internal handoff stays silent and carries the whole conversation, so
-	// the receiving agent never reintroduces itself and never re-asks a question
-	// already answered.
+	// Entry history carries speech. Saved status and appointment facts are
+	// explicit prompt reads, since a task's private conversation does not return.
 	for name, control := range resolved.Controls {
 		transfer, ok := control.(*ir.AgentTransfer)
 		if !ok {
 			continue
 		}
-		if transfer.Announce != "" || transfer.Context.History != ir.HistoryFull {
-			t.Errorf("internal handoff %q must stay silent and carry full history: %#v", name, transfer)
+		if transfer.Announce != "" || transfer.Context.History != ir.HistoryMessages {
+			t.Errorf("internal handoff %q must stay silent and carry spoken messages: %#v", name, transfer)
 		}
+	}
+	for name, task := range resolved.Tasks {
+		if task.Context.History != ir.HistoryMessages {
+			t.Errorf("task %q history = %q, want messages", name, task.Context.History)
+		}
+	}
+	for _, name := range []string{"concierge", "complaint_specialist"} {
+		for _, variable := range []string{"customer_status", "appointment"} {
+			if !slices.Contains(ir.TemplateRefs(resolved.Agents[name].Instructions), variable) {
+				t.Errorf("%s cannot read saved %s, so it would ask the caller again", name, variable)
+			}
+		}
+	}
+	if !slices.Contains(ir.TemplateRefs(resolved.Tasks["handle_complaint"].Instructions), "appointment") {
+		t.Error("the complaint task cannot read the latest saved appointment")
 	}
 
 	// The entry agent holds the escalation control directly, so a caller who
@@ -375,8 +389,8 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if _, ok := resolved.Tools["find_or_create_customer"]; !ok {
 		t.Error("find_or_create_customer is gone; it is the writing twin the pre-fetched lookup exists to avoid")
 	}
-	if got := slices.Sorted(maps.Keys(booking.Result)); len(got) != 0 {
-		t.Errorf("booking result = %v, want none because this task saves no variables", got)
+	if got := slices.Sorted(maps.Keys(booking.Result)); !slices.Equal(got, []string{"appointment"}) {
+		t.Errorf("booking result = %v, want the typed appointment saved after success", got)
 	}
 	bookingDelegate, ok := resolved.Controls["manage_booking"].(*ir.Delegate)
 	if !ok || bookingDelegate.Task != "manage_booking" || bookingDelegate.Group != "" {
@@ -616,7 +630,7 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		"Nothing said before that question counts as a yes",
 		"including the caller choosing the time",
 		"On a clear yes, save it in the same turn with `confirmed` set to true",
-		"On a no, or on a second unclear answer, finish with action `none` and save nothing",
+		"On a no, or on a second unclear answer, use the finish escape and save nothing",
 		// The date arrives pre-fetched, so the prompt names the value rather than a
 		// tool to call for it, and it says out loud not to call one. A model handed
 		// a date and still told to "call get_current_date first" would call a tool
@@ -1484,8 +1498,7 @@ func TestExampleReadmesNameTheirDeclaredTransports(t *testing.T) {
 }
 
 // salonScopes is every cache scope the shipped example must produce: one per
-// agent, one per task. Four agents and two tasks on one think profile is the
-// shape that collided, so it is the shape worth naming here in full.
+// agent, one per task. The two agents and three tasks each need their own scope.
 func salonScopes() []string {
 	const id = "optimized-salon-concierge-v13"
 	return []string{
@@ -1493,11 +1506,12 @@ func salonScopes() []string {
 		id + ":complaint_specialist",
 		id + ":task.verify_customer",
 		id + ":task.manage_booking",
+		id + ":task.handle_complaint",
 	}
 }
 
-// assertSalonScopes holds SC-008 on the package a reader opens: four distinct
-// scopes on each target, the same four on both, each carrying the authored
+// assertSalonScopes holds SC-008 on the package a reader opens: distinct
+// scopes on each target, the same on both, each carrying the authored
 // prefix, and the bare authored id sent by nobody.
 //
 // It was six. Two of them belonged to agents that existed only to hold a guard
@@ -1527,7 +1541,7 @@ func assertSalonScopes(t *testing.T, resolved *ir.Agent) {
 			delete(found, want)
 		}
 		for leftover := range found {
-			t.Errorf("%s: the example sends unexpected scope %q; the four are %v", provider, leftover, salonScopes())
+			t.Errorf("%s: the example sends unexpected scope %q; the expected scopes are %v", provider, leftover, salonScopes())
 		}
 	}
 }

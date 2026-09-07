@@ -1,6 +1,6 @@
 # Verify the customer
 
-Speak only in English.
+Speak only in English. Use plain speech without markdown or asterisks.
 
 The proposed phone number is {{customer_phone}}. The matching record name, when
 one was found, is {{customer_name}}. You have no earlier conversation.

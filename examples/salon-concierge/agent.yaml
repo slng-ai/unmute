@@ -14,19 +14,19 @@ agents:
     tasks:
       - name: verify_customer
         when: >-
-          Confirm who the caller is before any specialist handoff. The task reads
+          Confirm who the caller is before booking or recording a complaint. It reads
           the phone number back and needs a yes before it looks anyone up.
         instructions: tasks/verify-customer.md
         tools:
           - find_or_create_customer
         assign:
           - customer_phone: result.customer_phone
+          - customer_status: result.customer_status
         context:
-          history: full
+          history: messages
 
       - name: manage_booking
         when: The caller wants to create, modify, or cancel a booking.
-        announce: Let me pull up the diary.
         instructions: tasks/booking.md
         tools:
           - list_bookings
@@ -36,8 +36,10 @@ agents:
           - cancel_booking
         handoffs:
           - to_complaints
+        assign:
+          - appointment: result.appointment
         context:
-          history: full
+          history: messages
     handoffs:
       - to_complaints
     escalations:
@@ -49,11 +51,22 @@ agents:
     speak: voice
     tools:
       - look_up_refund_policy
-      - record_complaint
     # The concierge defines this one. A bare name runs the same task from here,
     # so there is one definition and both agents can offer it.
     tasks:
       - verify_customer
+      - name: handle_complaint
+        when: The verified caller wants a complaint recorded.
+        instructions: tasks/complaint.md
+        tools:
+          - record_complaint
+        handoffs:
+          - to_concierge
+          - to_complaints
+        assign:
+          - complaints+: result.complaint
+        context:
+          history: messages
     handoffs:
       - to_concierge
     escalations:
@@ -62,15 +75,15 @@ agents:
 handoffs:
   to_complaints:
     to: complaint_specialist
-    when: The verified caller has a complaint or service problem.
+    when: The caller has a complaint or service problem.
     context:
-      history: full
+      history: messages
 
   to_concierge:
     to: concierge
     when: The caller changes to a request owned by another specialist.
     context:
-      history: full
+      history: messages
 
 escalations:
   to_manager:
@@ -80,9 +93,38 @@ escalations:
       ring_timeout: 30s
       on_unavailable: hangup
 
+shapes:
+  - name: Appointment
+    description: The latest booking successfully created, moved, or cancelled.
+    fields:
+      - booking_id: Id
+      - service: Literal["haircut", "hair-color", "blowout"]
+      - date: Date
+      - time: Time
+      - action: Literal["create", "modify", "cancel"]
+
+  - name: Complaint
+    description: One recorded complaint; a requested resolution is not an approval.
+    fields:
+      - complaint_id: Id
+      - summary: str
+      - requested_resolution: str
+
 variables:
+  customer_status:
+    type: Literal["existing", "created", "invalid"]
+    description: The customer lookup status saved after the caller confirms their number.
+
+  appointment:
+    type: Appointment
+    description: The latest successful booking action, saved only after the tool succeeds.
+
+  complaints:
+    type: list[Complaint]
+    description: Complaints recorded during this call.
+
   booking_date:
-    type: string
+    type: Date
     default: ""
     description: >-
       Today's date in the salon's own timezone, YYYY-MM-DD. Read once from the
@@ -102,7 +144,7 @@ variables:
       second turn working out what day today is first.
 
   salon_local_time:
-    type: string
+    type: Time
     default: ""
     description: >-
       The salon's own wall clock when the call began, HH:MM on a 24 hour clock.
@@ -111,7 +153,7 @@ variables:
       has nearly passed, rather than offering them a slot that is already gone.
 
   customer_phone:
-    type: string
+    type: Phone
     default: ""
     confirm: verify_customer
     description: >-

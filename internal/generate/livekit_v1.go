@@ -855,6 +855,7 @@ func renderLiveKitV1(name string, data livekitData) ([]byte, error) {
 		"pyq":          pyQuote,
 		"resultAccess": resultAccess,
 		"join":         strings.Join,
+		"localRunEnv":  func() string { return LocalRunEnv },
 
 		"triple":     pyTriple,
 		"mcpTimeout": func() int { return mcpTimeoutSeconds },

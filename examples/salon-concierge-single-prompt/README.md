@@ -1,12 +1,9 @@
 # salon-concierge-single-prompt
 
-The baseline. This is [`salon-concierge`](../salon-concierge/) with every
-structural feature taken back out, and nothing else changed.
+The baseline. This is [`salon-concierge`](../salon-concierge/) with the booking, verification and complaint workflows in one prompt.
 
-It is here to be read next to that package, not to be copied. Same salon, same
-tools, same knowledge bases, same voice, same models, same two targets, same two
-carriers. The only thing that differs is how the work is arranged, and that is
-what the comparison is about.
+It is here to be read next to that package, not to be copied. Same salon, booking tools, knowledge bases, voice, model and two carrier routes.
+The differences in context, state, routing and turn taking are listed below.
 
 It is not a straw man. The prompt is written the way a careful team writes a
 single prompt: the voice contract stated once, a clear routing section at the
@@ -24,6 +21,11 @@ be four prompts at once, and it is all in front of the model on every turn.
 | `tools/` | the same local Python tools, all offered to the agent on every turn |
 | `knowledge/refunds/`, `knowledge/services/` | the same two document sets, both held by the one agent |
 | `connections/` | the same two carrier connections |
+
+Both examples speak English and run tools without pre-action announcements.
+This baseline keeps one continuous conversation, so it has no task or handoff
+context settings. After a booking moves, its prompt uses the latest successful
+tool result when a caller refers to that booking.
 
 What the one agent does differently:
 

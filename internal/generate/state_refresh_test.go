@@ -29,15 +29,15 @@ func TestLiveKitRefreshesTheOwnerPromptAfterAStepWritesState(t *testing.T) {
 	got := emitted(t, loadExample(t, "salon-concierge-v3"), ir.ProviderLiveKit)
 
 	// The owner whose prompt reads saved state declares the method.
-	if strings.Count(got, "async def _refresh_prompt(self) -> None:") != 1 {
-		t.Errorf("want one _refresh_prompt, got %d",
+	if strings.Count(got, "async def _refresh_prompt(self) -> None:") != 2 {
+		t.Errorf("want both owners to refresh their prompts, got %d",
 			strings.Count(got, "async def _refresh_prompt(self) -> None:"))
 	}
 
 	// Every assign site calls it. Counting the calls against the assign sites
 	// is what catches a new step added without one.
-	if calls := strings.Count(got, "await self._refresh_prompt()"); calls != 2 {
-		t.Errorf("got %d refresh calls, want one for each assigning concierge task", calls)
+	if calls := strings.Count(got, "await self._refresh_prompt()"); calls != 4 {
+		t.Errorf("got %d refresh calls, want one for each assigning task on both owners", calls)
 	}
 
 	// The call comes after the writes, not before: refreshing first renders the
@@ -91,7 +91,7 @@ func TestBothTargetsRefreshDeclaredStateWithoutWaitingForAnEntry(t *testing.T) {
 func TestNoRefreshEmittedForAPackageWhoseStepsAssignNothing(t *testing.T) {
 	t.Parallel()
 
-	for _, pkg := range []string{"salon-concierge", "salon-concierge-single-prompt"} {
+	for _, pkg := range []string{"salon-concierge-single-prompt"} {
 		got := emitted(t, loadExample(t, pkg), ir.ProviderLiveKit)
 		if strings.Contains(got, "_refresh_prompt") {
 			t.Errorf("%s emits _refresh_prompt; its steps assign nothing so nothing can go stale", pkg)

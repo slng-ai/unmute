@@ -22,7 +22,7 @@ input:
       description: Exact slot ID returned by check_availability
     confirmed:
       type: boolean
-      description: Exact true value from the shared confirm_booking result
+      description: True only after the caller agrees to this exact booking change
   required:
     - customer_phone
     - service
@@ -54,4 +54,3 @@ local:
 
 interruption: provider_default
 effect: returns_data
-announce: Booking that in.
