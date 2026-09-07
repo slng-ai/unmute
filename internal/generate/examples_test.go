@@ -78,32 +78,11 @@ func loadExample(t *testing.T, name string) *ir.Agent {
 
 func TestSalonConciergeFeatureContract(t *testing.T) {
 	resolved := loadExample(t, "salon-concierge")
-	// The turn-latency contract on both targets: thinking goes through the SLNG
-	// Context Router, the model does not think before its first token, and the
-	// caller never hears another agent's line.
-	//
-	// The middle one is now held by a prompt directive rather than by a parameter,
-	// and that is not a style choice. Three spellings of the thinking-off parameter
-	// were sent to three of this model's hosts on 2026-08-27, nine requests: every
-	// one accepted, every one ignored, hundreds of reasoning tokens each time. The
-	// model's own /no_think directive in the system prompt is the only thing that
-	// worked.
-	//
-	// The last of those was measured, not imagined. The router's cache key is the
-	// (assistant speech, user speech) pair and carries no system prompt, so two
-	// of this package's agents whose last exchange matched collided while they
-	// shared one cache scope. 2026-08-21, three live calls: the booking
-	// specialist's opening turn was served the concierge's "what phone number
-	// should I use", cache_layer l2_exact, 1.27ms, no model call.
-	//
-	// The fix is one scope per prompt site, which is what the scope assertion at
-	// the end of this function holds. It replaced slng_pure_proxy, which used to
-	// be required here and which bought the same safety by turning cache serving
-	// off entirely.
+	// Keep the runnable example on direct OpenAI with reasoning disabled.
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		reason := targetByProvider(t, resolved, provider).Models.Reason["reasoning"]
-		if !reason.Router() {
-			t.Errorf("%s reasoning is not a router binding: %#v", provider, reason)
+		if reason.Provider != "openai" || reason.Model != "gpt-5.6-luna" || reason.Router() {
+			t.Errorf("%s reasoning must use direct OpenAI gpt-5.6-luna: %#v", provider, reason)
 		}
 		// reasoning_effort is not optional once the agent has tools: the GPT-5
 		// family rejects function tools on chat completions without it, and every
@@ -128,23 +107,7 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		if reason.PromptSuffix != "" {
 			t.Errorf("%s reasoning sets prompt_suffix = %q; this model takes reasoning_effort instead", provider, reason.PromptSuffix)
 		}
-		// This used to require slng_pure_proxy, which stops the router serving
-		// from cache at all. It was a guard against a cross-agent cache hit
-		// repeating an earlier agent's line to the caller, and it bought that
-		// safety by giving up the speed the router exists for. The real fix is
-		// one cache scope per prompt site, and with that in place the guard is a
-		// workaround the example should not be teaching. If you are here because
-		// you put it back: the collision it guarded against cannot happen, and
-		// suppressing the serve means every turn goes to the model.
-		if _, present := reason.Params["slng_pure_proxy"]; present {
-			t.Errorf("%s reasoning sets slng_pure_proxy: %#v. The example demonstrates the router doing its job, and this switch stops it serving from cache", provider, reason.Params)
-		}
 	}
-
-	// SC-008 on the package a reader actually opens. A fixture and the goldens are
-	// gated elsewhere; nothing gated this until the collision had already shipped
-	// in it.
-	assertSalonScopes(t, resolved)
 
 	// No assertion on which transcriber this package binds. The measured
 	// finalisation numbers that make the choice matter are recorded in the
@@ -875,7 +838,7 @@ func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
 	if resolved.Name == other.Name {
 		t.Errorf("both salon packages state name %q, so their deploys land on top of each other", resolved.Name)
 	}
-	if resolved.Models["reasoning"].AgentID == other.Models["reasoning"].AgentID {
+	if id := resolved.Models["reasoning"].AgentID; id != "" && id == other.Models["reasoning"].AgentID {
 		t.Errorf("both salon packages state agent_id %q, and the router key carries neither the system prompt nor the substituted values, so one is served the other's prompt", resolved.Models["reasoning"].AgentID)
 	}
 }
@@ -1497,55 +1460,6 @@ func TestExampleReadmesNameTheirDeclaredTransports(t *testing.T) {
 	}
 }
 
-// salonScopes is every cache scope the shipped example must produce: one per
-// agent, one per task. The two agents and three tasks each need their own scope.
-func salonScopes() []string {
-	const id = "optimized-salon-concierge-v13"
-	return []string{
-		id + ":concierge",
-		id + ":complaint_specialist",
-		id + ":task.verify_customer",
-		id + ":task.manage_booking",
-		id + ":task.handle_complaint",
-	}
-}
-
-// assertSalonScopes holds SC-008 on the package a reader opens: distinct
-// scopes on each target, the same on both, each carrying the authored
-// prefix, and the bare authored id sent by nobody.
-//
-// It was six. Two of them belonged to agents that existed only to hold a guard
-// the compiler could not put on a step, and each one was a separate prompt site
-// paying for its own cache.
-func assertSalonScopes(t *testing.T, resolved *ir.Agent) {
-	t.Helper()
-	value := regexp.MustCompile(`"X-Slng-Agent-Id": "([^"]*)"|_slng_scope = "([^"]*)"`)
-	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
-		artifact, err := Generate(resolved, targetByProvider(t, resolved, provider), target.Default())
-		if err != nil {
-			t.Fatalf("%s: generate: %v", provider, err)
-		}
-		found := map[string]bool{}
-		for _, file := range artifact.Files {
-			if !strings.HasSuffix(file.Path, ".py") {
-				continue
-			}
-			for _, match := range value.FindAllStringSubmatch(string(file.Content), -1) {
-				found[match[1]+match[2]] = true
-			}
-		}
-		for _, want := range salonScopes() {
-			if !found[want] {
-				t.Errorf("%s: the example sends no scope %q; found %v", provider, want, found)
-			}
-			delete(found, want)
-		}
-		for leftover := range found {
-			t.Errorf("%s: the example sends unexpected scope %q; the expected scopes are %v", provider, leftover, salonScopes())
-		}
-	}
-}
-
 // The gate the four documentation surfaces never had. FR-047 and SC-005 are prose
 // claims, and prose is where this feature's reversal is easiest to half-finish: a
 // reader who lands on a stale line is told the opposite of what the compiler does.
@@ -1638,16 +1552,7 @@ func TestRouterSurfacesCarryThePlaceholderAndProvenanceFacts(t *testing.T) {
 	}
 }
 
-// FR-006 and FR-013 on the package a reader opens, plus the one thing the scope
-// list above cannot see: that the constant in this file still describes the
-// package rather than a version of it that has moved on.
-//
-// The example is where an author learns what a placeholder is for, so three
-// claims have to hold together. Its prompts reference only names it declares,
-// because a name the router is not given is a 422 mid-call. Its spoken per-call
-// value is a placeholder, because that is the whole demonstration. And the value
-// that is never spoken stays out of every prompt: putting an identifier in a
-// placeholder widens what the router is asked to substitute and buys nothing.
+// Prompts read declared values, and only verification can read the phone number.
 func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
 	if err != nil {
@@ -1656,14 +1561,6 @@ func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 	resolved, err := ir.Build(pkg)
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	// FR-013. The scope list in this file names an id; the package authors one.
-	// When a prompt change bumps the id, this is what makes updating both a
-	// single deliberate step instead of a silent divergence.
-	authored := resolved.Models["reasoning"].AgentID
-	if want := strings.TrimSuffix(salonScopes()[0], ":concierge"); authored != want {
-		t.Errorf("the package authors agent_id %q and this file's scope list expects %q. Bumping the id is correct when a prompt changes, so update salonScopes() in the same commit", authored, want)
 	}
 
 	// Every referenced name is declared. ir.Validate holds this too; here it is
@@ -1675,7 +1572,7 @@ func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 		for name, body := range bodies {
 			for _, ref := range ir.TemplateRefs(body) {
 				if _, declared := resolved.Variables[ref]; !declared {
-					t.Errorf("%s %q references {{%s}}, which the package does not declare: the router answers an unsupplied name with a 422 mid-call", kind, name, ref)
+					t.Errorf("%s %q references {{%s}}, which the package does not declare", kind, name, ref)
 				}
 			}
 		}
@@ -1685,28 +1582,9 @@ func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 	// nothing. The silent one is a placeholder nowhere.
 	all := strings.Join(append(mapValues(promptBodies(resolved.Agents)), mapValues(taskBodies(resolved.Tasks))...), "\n")
 	if !strings.Contains(all, "{{customer_phone}}") {
-		t.Error("no prompt in the example uses {{customer_phone}}, so every answer that says the number is still refused by the router's number rule and the example teaches nothing about caching one")
+		t.Error("no prompt in the example uses {{customer_phone}}, so verification cannot read the prefetched number")
 	}
-	// The format rule is the feature, not decoration, and the package now pins
-	// E.164: one shape for every number it holds, MANAGER_PHONE_NUMBER included.
-	// That is a deliberate reversal, so the measurement behind the old shape is
-	// kept here rather than deleted. Measured against the live EU router on
-	// 2026-08-24, three reads per arm on fresh throwaway scopes: values written
-	// "555 070 1222" came back echoed character for character and the third read
-	// was served from cache in 109ms; the same numbers written "+15550707444"
-	// were reformatted by the model, so the value never appeared in the answer,
-	// and none of the three reads was served.
-	//
-	// The measurement stands. What changed is the decision made in light of it:
-	// the read-back turn is now allowed to lose its cache, deliberately, because
-	// it replaced twelve spoken digits and five model requests with one yes. That
-	// is 11.3 seconds off a 23.3 second step, against one turn that will not be
-	// served from cache, and it was traded on purpose rather than overlooked.
-	//
-	// So the assertion inverts rather than disappearing: exactly one prompt reads
-	// the number back, it is the step that confirms it, and the description says
-	// the trade was made. Anything else is the old defect back, or a second turn
-	// paying for it.
+	// One phone format, read only by the confirming task.
 	phone, declared := resolved.Variables["customer_phone"]
 	if !declared {
 		t.Fatal("the package declares no customer_phone")
@@ -1714,10 +1592,9 @@ func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 	for _, want := range []string{
 		"E.164",
 		"no spaces, brackets or dashes",
-		"does not cache",
 	} {
 		if !strings.Contains(phone.Description, want) {
-			t.Errorf("customer_phone description omits %q: the shape has to be pinned, and the cache trade has to be stated where the next reader will find it", want)
+			t.Errorf("customer_phone description omits %q: the phone format must be stated", want)
 		}
 	}
 	if phone.Confirm == "" {

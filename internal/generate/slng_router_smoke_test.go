@@ -168,14 +168,14 @@ print("slng router helpers ok")
 // both helpers on the real SDK.
 func TestSmokeSlngRouterHelpers(t *testing.T) {
 	runPipecatSmokeScript(t, "salon-concierge", nil, func(agent *ir.Agent) {
-		// Swap the openai upstream for a vertex one so the credential helper is
+		// Use a router binding with a vertex upstream so the credential helper is
 		// emitted. The example ships openai, which is the case a reader copies;
 		// this is the case only smoke can exercise.
 		for name, target := range agent.Targets {
 			for profile, binding := range target.Models.Reason {
-				if !binding.Router() {
-					continue
-				}
+				binding.Provider = ir.ProviderSlngRouter
+				binding.AgentID = "salon-router-smoke"
+				binding.Params["world_part_override"] = "eu"
 				binding.Upstream = &ir.Upstream{
 					Provider: "vertex", CredentialsEnv: "SMOKE_GCP_KEY", Location: "europe-west4",
 				}

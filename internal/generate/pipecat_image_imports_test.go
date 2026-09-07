@@ -140,7 +140,7 @@ func TestPipecatHTTPXImportMatchesItsUseAndItsDependency(t *testing.T) {
 	// One package with no httpx anywhere, one with it everywhere, so a build that
 	// simply stopped emitting the import could not pass this.
 	checkedWith, checkedWithout := false, false
-	for _, name := range []string{"salon-concierge", "salon-concierge-single-prompt"} {
+	for _, name := range []string{"safe_core", "salon-concierge", "salon-concierge-single-prompt"} {
 		t.Run(name, func(t *testing.T) {
 			agent := loadExample(t, name)
 			artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())

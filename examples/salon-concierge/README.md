@@ -83,7 +83,7 @@ the package.
 
 | Name | Purpose |
 |---|---|
-| `OPENAI_API_KEY` | the reasoning model's upstream, and the knowledge embeddings at startup |
+| `OPENAI_API_KEY` | the OpenAI reasoning model and the knowledge embeddings at startup |
 | `SLNG_API_KEY` | the Context Router, the voice, and the transcription. One key for all three |
 | `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` | trace ingest. All three together, or startup fails |
 | `MANAGER_PHONE_NUMBER` | the transfer destination, in E.164. Needed only for a phone call |

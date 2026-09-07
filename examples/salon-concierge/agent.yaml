@@ -172,11 +172,6 @@ variables:
       verification step has heard them agree this value stays unconfirmed and
       appears in no prompt but that step's own.
 
-      An earlier version of this note said no prompt ever reads the number back.
-      That is now false rather than merely out of date: reading it back is the
-      whole saving, and it replaced twelve spoken digits with one yes. The
-      read-back turn does not cache, and that trade was made deliberately.
-
   customer_name:
     type: string
     default: ""
@@ -262,13 +257,9 @@ knowledge:
 models:
   think:
     reasoning:
-      provider: slng
+      provider: openai
       model: gpt-5.6-luna
-      agent_id: optimized-salon-concierge-v13
-      upstream:
-        provider: openai
       params:
-        world_part_override: eu
         reasoning_effort: "none"
   speak:
     voice:
