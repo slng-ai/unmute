@@ -591,7 +591,7 @@ async def split_verification_then_intent_change():
     ]
     state = bot.State()
     concierge = bot.ConciergeAgent(
-        state=state, context=context, call_context={}, slng_session_id="smoke-session"
+        state=state, context=context, call_context={}
     )
     await quiet(concierge)
     concierge._verify_customer_results = {}
@@ -620,7 +620,7 @@ async def split_verification_then_intent_change():
     snapshot = [dict(message) for message in context.get_messages()]
     context.add_message({"role": "user", "content": complaint})
     specialist = bot.ConciergeAgent(
-        state=state, context=context, call_context={}, slng_session_id="smoke-session"
+        state=state, context=context, call_context={}
     )
     await quiet(specialist)
     activations = []
@@ -648,7 +648,7 @@ async def split_verification_then_intent_change():
     assert complaint_messages == [complaint]
 
     complaint_worker = bot.ComplaintSpecialistAgent(
-        state=state, context=context, call_context={}, slng_session_id="smoke-session"
+        state=state, context=context, call_context={}
     )
     await quiet(complaint_worker)
     value = dict(summary="The last visit did not meet expectations.",
@@ -680,7 +680,7 @@ async def main():
     )
     context = LLMContext()
     worker = bot.ConciergeAgent(
-        state=state, context=context, call_context={}, slng_session_id="smoke-session"
+        state=state, context=context, call_context={}
     )
     await quiet(worker)
     booking_id, slot_id = await booking_flow(worker, context, action="create")
