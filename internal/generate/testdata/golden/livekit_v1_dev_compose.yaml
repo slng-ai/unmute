@@ -43,6 +43,8 @@ services:
       - UNMUTE_CALL_START
       # optional: set by `unmute dev`; absent otherwise
       - UNMUTE_DEV_METRICS
+      # optional: set by `unmute dev`; absent otherwise
+      - UNMUTE_LOCAL_RUN
     depends_on:
       livekit_server:
         condition: service_healthy

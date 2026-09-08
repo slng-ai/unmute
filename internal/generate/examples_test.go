@@ -38,8 +38,12 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 			if resolved.Telephony == nil {
 				t.Fatalf("target %q resolves no telephony route", name)
 			}
-			if _, err := Generate(agent, resolved, target.Default()); err != nil {
-				t.Errorf("target %q does not generate: %v", name, err)
+			artifact, err := Generate(agent, resolved, target.Default())
+			if err != nil {
+				t.Fatalf("target %q does not generate: %v", name, err)
+			}
+			if name == "livekit" && !strings.Contains(artifactFile(t, artifact, "agent.py"), "llm=openai.LLM(") {
+				t.Error("salon-concierge must use Chat Completions for the latency comparison")
 			}
 		})
 	}

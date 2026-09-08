@@ -194,14 +194,12 @@ models:
         reasoning_effort: "none"
 ```
 
-`reasoning_effort: "none"` stops the model thinking before its first token. On
-the `livekit` target it needs `api: responses` beside it, which selects the
-class that has a slot for it, and `use_websocket: true` is worth having for the
-same connection. All three go on the **base** think binding, never a target
-override: an override replaces the base entry instead of merging into it, so it
-would have to repeat `provider` and `model` to keep them. Pipecat acts on
-`reasoning_effort` alone and `unmute validate` warns about the other two by
-name, so nothing is dropped without saying so.
+`reasoning_effort: "none"` disables reasoning on a model that supports it. It
+works with Chat Completions on both targets; it does not require Responses.
+For LiveKit's Responses API, add `api: responses` to the base think binding
+and choose the transport with `use_websocket`. Pipecat drops those two params
+and `unmute validate` warns about each. Compare several calls with the same
+prompts and tools before choosing an API or transport for latency.
 
 **Check that the model honours a parameter at all before relying on one.** Not
 every model's thinking can be turned off that way, and a parameter that is

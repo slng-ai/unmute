@@ -442,13 +442,13 @@ replaces the base entry rather than merging into it, so an override has to
 repeat `provider`, `model` and `reasoning_effort` verbatim to keep them, and a
 duplicated binding is one somebody edits on one side only. Pipecat drops both
 and builds `OpenAILLMService` either way; `unmute validate` warns per param,
-naming the target, so the drop is reported rather than silent. Both salon
-examples author all three on the base binding.
+naming the target, so the drop is reported rather than silent.
+`salon-concierge-single-prompt` shows this binding; `salon-concierge` uses Chat
+Completions with `reasoning_effort: "none"`.
 
-`use_websocket: true` belongs in every voice package that reaches OpenAI. With
-HTTP each model call in a turn opens its own TLS connection, and a turn that
-calls a tool makes at least two, so the handshake lands in the silence the
-caller is sitting through.
+`use_websocket: true` keeps a WebSocket connection for Responses requests.
+HTTP clients can also reuse connections. Compare several calls with the same
+prompts and tools before choosing an API or transport for latency.
 
 ## The vendors, per target per role
 

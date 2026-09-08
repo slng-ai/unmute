@@ -254,9 +254,7 @@ models:
       provider: openai
       model: gpt-5.6-luna
       params:
-        api: responses
         reasoning_effort: "none"
-        use_websocket: true
   speak:
     voice:
       provider: slng
