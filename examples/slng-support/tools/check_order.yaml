@@ -1,12 +1,3 @@
-# A tool SLNG hosts. This file names it and pins the mirror committed beside
-# it; the platform owns the code, the version and the gate pipeline.
-#
-# `description:` is ours and overrides the platform's. input:, output: and
-# handler: are unwritable here, because the platform published the schema and
-# owns the module: a second copy could disagree with it.
-#
-# Run `unmute pull` to fetch it, and commit the two `.slng.` files it writes.
-# They are how this tool also reaches livekit and pipecat.
 description: Look up an order by its number and return its status and delivery date.
 
 slng:

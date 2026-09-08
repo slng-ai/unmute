@@ -162,10 +162,16 @@ func TestTurnFieldsSurviveAPerTargetOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Set both fields on the base turn binding, as an author would.
+	// Set all three fields on the base turn binding, as an author would. They
+	// are set here rather than read off the file so this proves the
+	// carry-forward whatever the example happens to author: it used to take
+	// endpointing_delay from salon-concierge's own base binding, so dropping
+	// that line from the package silently turned one of these three
+	// assertions into a no-op.
 	for name, def := range pkg.Agent.Models.Turn {
 		def.Pace = string(ir.PaceSnappy)
 		def.SemanticEndpointing = string(ir.SemanticEndpointingOff)
+		def.EndpointingDelay = "400ms"
 		pkg.Agent.Models.Turn[name] = def
 	}
 

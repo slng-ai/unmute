@@ -1,0 +1,5 @@
+description: End the call when the caller is finished or says goodbye.
+
+builtin:
+  id: end_call
+  instructions: Say one short goodbye in your own words, then end the call. Do not offer anything else first.

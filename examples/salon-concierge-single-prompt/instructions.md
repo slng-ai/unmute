@@ -28,9 +28,7 @@ So write speech, not text.
 - Write a phone number the way it is written on a phone, a plus sign, then the
   country code, then groups of two to four digits. Never put commas between digits and
   never break a number into separate words: the voice reads the shape above and
-  drops everything after the first comma. On a live call, "plus 3 4, 1 1 1,
-  1 1 1, 1 1 1" came out of the voice as "plus three four" and the rest of the
-  number was never spoken.
+  drops everything after the first comma.
 - Say `hair-color` as "hair color".
 - Never read out a list. Offer times the way a person does: "I've got 9:00 AM,
   11:30, or 3:00 in the afternoon."

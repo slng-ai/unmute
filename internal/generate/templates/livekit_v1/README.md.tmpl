@@ -51,10 +51,17 @@ interfere with a trace exporter you have configured.
 
 ## OpenAI Responses API
 
-This target uses OpenAI's Responses API. Keep `api: responses` inside the
-LiveKit target's model override. When set, `reasoning_effort` is emitted as the
-Responses API's nested reasoning setting; other targets keep their own provider
-call. Use that field instead of a raw `reasoning` map.
+This target uses OpenAI's Responses API. `api: responses` belongs on the shared
+think binding in `agent.yaml`, not in a target override: an override replaces
+the base entry rather than merging into it, so it would have to repeat
+`provider`, `model` and `reasoning_effort` as well. When set,
+`reasoning_effort` is emitted as the Responses API's nested reasoning setting.
+Use that field instead of a raw `reasoning` map.
+
+`api` and `use_websocket` reach this target only. A package that also builds
+for Pipecat gets `OpenAILLMService` there, with both params dropped rather than
+sent as request fields OpenAI's chat completions endpoint does not define, and
+`unmute validate` names each one it dropped.
 {{- end}}
 {{- if gt (len .Agents) 1}}
 

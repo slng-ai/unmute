@@ -1,8 +1,3 @@
-# A hosted `api_request` tool. SLNG stores its URL, its method and the name of
-# the credential it reads, so there is no url_env, base_url, path or auth block
-# here: all four described a tool body unmute no longer writes.
-#
-# No description of ours either, so the platform's reaches the model.
 slng:
   hash: 4852e83e9115ef630d7337f3ad5d6c6238cb8c0385065bf106f55cab82a368f5
 

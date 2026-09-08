@@ -367,9 +367,10 @@ decision the author is making rather than an implementation detail.
   a generation as fast as a hit. Nothing aggregates the lines, so a hit rate is a
   count of them.
 
-Full page: [Context Router](https://docs.slng.ai/context-router/). The two salon
-examples, `salon-concierge` and `optimized-salon-concierge`, are the same package
-with and without it.
+Full page: [Context Router](https://docs.slng.ai/context-router/). No shipped
+example binds to it today: both salon packages reach OpenAI directly, so an
+author who wants to see what the router is worth compiles one of them twice,
+once as it ships and once with the think binding pointed at the router.
 
 ## Keep SLNG speech models in region
 
@@ -416,24 +417,33 @@ agent worker runs; set that separately with `deployment_region` in
 
 ### LiveKit Responses API
 
-When a package needs OpenAI's Responses API on LiveKit, override the shared
-model inside that target:
+Author it once, on the shared think binding in `agent.yaml`:
 
-```yaml
+```yaml agent.yaml
 models:
-  reasoning:
-    provider: openai
-    model: gpt-5.6-terra
-    params:
-      api: responses
-      reasoning_effort: none
-      use_websocket: true
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-terra
+      params:
+        api: responses
+        reasoning_effort: none
+        use_websocket: true
 ```
 
-This emits `openai.responses.LLM` and, when present, maps `reasoning_effort` to
-the nested reasoning setting. Use that field instead of a raw `reasoning` map.
-Keep the override target-local so Pipecat retains its normal OpenAI request
-shape. The salon concierge is the working source example.
+On LiveKit this emits `openai.responses.LLM` and maps `reasoning_effort` to the
+nested reasoning setting when it is present. Use that field instead of a raw
+`reasoning` map.
+
+`api` and `use_websocket` are the two params only LiveKit can act on: one picks
+the class, the other is a kwarg that class has and the chat completions one does
+not. **Do not put them in a target override.** A per-target `models:` entry
+replaces the base entry rather than merging into it, so an override has to
+repeat `provider`, `model` and `reasoning_effort` verbatim to keep them, and a
+duplicated binding is one somebody edits on one side only. Pipecat drops both
+and builds `OpenAILLMService` either way; `unmute validate` warns per param,
+naming the target, so the drop is reported rather than silent. Both salon
+examples author all three on the base binding.
 
 `use_websocket: true` belongs in every voice package that reaches OpenAI. With
 HTTP each model call in a turn opens its own TLS connection, and a turn that

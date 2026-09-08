@@ -1301,6 +1301,7 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 		}
 		validatePlacement("reason."+name, &binding, row)
 		checkVendor(targetcap.Reason, &binding)
+		checkResponsesParams(provider, name, binding, row)
 	}
 	validateSlngRouter(agent, resolved, row)
 }
@@ -1707,6 +1708,42 @@ func checkWarmStandby(provider targetcap.Provider, profile string, binding Bindi
 		"pipecat speak.%s sets params.warm_standby_enabled, which pipecat-slng does not implement as of 0.5.1: the kwarg is absorbed and no socket is held open. It works on livekit, so move it to a livekit target override if that is where you meant it",
 		profile,
 	))
+}
+
+// ResponsesOnlyParams are the OpenAI think params only LiveKit can act on.
+//
+// `api` selects openai.responses.LLM instead of openai.LLM, and `use_websocket`
+// is a constructor kwarg that class has and the chat completions one does not.
+// Neither is a request field, so neither may ride the request body: Pipecat
+// builds OpenAILLMService whichever way these are set, and forwarding them
+// would put two keys OpenAI's chat completions endpoint does not define into
+// every request of every turn. generate.serviceCall drops them for that reason,
+// and this list is the one place their names are written.
+var ResponsesOnlyParams = []string{"api", "use_websocket"}
+
+// checkResponsesParams warns that the Responses-only params reach nothing on a
+// target that cannot construct that class.
+//
+// A warning rather than a refusal, and for the same reason as checkWarmStandby:
+// a package that ships to both targets authors one think binding for both, so
+// refusing here would break a working package to report a param that is merely
+// inert on one of its targets. This is what lets the params live on the base
+// binding, which is the whole point: they used to need a livekit target
+// override that repeated provider, model and reasoning_effort verbatim, and a
+// duplicated binding is one somebody edits on one side only.
+func checkResponsesParams(provider targetcap.Provider, profile string, binding Binding, row *TargetValidation) {
+	if provider == targetcap.LiveKit || binding.Provider != "openai" {
+		return
+	}
+	for _, name := range ResponsesOnlyParams {
+		if _, set := binding.Params[name]; !set {
+			continue
+		}
+		row.Warnings = add(row.Warnings, fmt.Sprintf(
+			"%s think.%s sets params.%s, which only livekit can act on: it selects and configures openai.responses.LLM, and %s builds the chat completions service either way. The param is dropped rather than sent, because OpenAI's chat completions endpoint does not define it",
+			provider, profile, name, provider,
+		))
+	}
 }
 
 func validateRoleBinding(role string, kind targetcap.RoleKind, binding *Binding, row *TargetValidation) {
