@@ -15,11 +15,6 @@ agents:
       - web_search
       - end_call
 
-variables:
-  customer_name:
-    type: string
-    default: there
-
 models:
   think:
     reasoning:
@@ -39,9 +34,6 @@ models:
       language: en
 
 secrets:
-  # SLNG_TOOL_RENDER is the credential the hosted request tool reads. The
-  # platform names it in the mirror, so it reaches the runbook's Vault table and
-  # the deploy preflight from there. A name, never a value.
   - SLNG_TOOL_RENDER
   - FIRECRAWL_MCP_URL
 
@@ -54,7 +46,7 @@ tools:
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi {{customer_name}}, you have reached Acme Support. How can I help?"
+    text: "Hi, you have reached Acme Support. How can I help?"
   interruption:
     enabled: true
 

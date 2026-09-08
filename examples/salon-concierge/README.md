@@ -16,7 +16,7 @@ down complaints, and puts a caller through to a manager when they ask for one.
 | `instructions.md` | the concierge prompt |
 | `agents/complaint-specialist.md` | the customer care prompt |
 | `tasks/` | the verification, booking and complaint task prompts |
-| `tools/` | one file per tool, all local Python over one in-memory store |
+| `tools/` | one file per tool: local Python over one in-memory store, plus the `end_call` builtin |
 | `knowledge/refunds/`, `knowledge/services/` | two document sets, each its own index |
 | `connections/` | the two carrier connections |
 
@@ -84,7 +84,7 @@ the package.
 | Name | Purpose |
 |---|---|
 | `OPENAI_API_KEY` | the OpenAI reasoning model and the knowledge embeddings at startup |
-| `SLNG_API_KEY` | the Context Router, the voice, and the transcription. One key for all three |
+| `SLNG_API_KEY` | the voice and the transcription. One key for both |
 | `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` | trace ingest. All three together, or startup fails |
 | `MANAGER_PHONE_NUMBER` | the transfer destination, in E.164. Needed only for a phone call |
 

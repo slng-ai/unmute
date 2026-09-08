@@ -15,8 +15,9 @@ deployment body, not a project you start and keep running.
   `acme-support-slng`: the package's name joined to the target's name.
 - **Agent.** `agent.yaml` defines one agent, `support`, whose prompt is in
   `instructions.md`. It reasons with a Gemini model, speaks with an SLNG
-  voice, and transcribes with Deepgram. It declares one variable,
-  `customer_name`, used in the greeting.
+  voice, and transcribes with Deepgram. It declares no variables: nothing
+  supplies a caller's name on this route, and a greeting that named one would
+  have to render a placeholder to every caller instead.
 - **Tools**, one of each kind SLNG supports. Every one is a reference: this
   target creates no tool.
   - `check_order` (`slng:`): a tool SLNG hosts, holding Python. Its mirror is

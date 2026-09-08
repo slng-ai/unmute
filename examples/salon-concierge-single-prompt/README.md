@@ -16,9 +16,9 @@ be four prompts at once, and it is all in front of the model on every turn.
 | Path | What it holds |
 |---|---|
 | `agent.yaml` | one agent, no tasks, no handoffs, no variables, no pre-fetch |
-| `targets.yaml` | the same two targets as the optimized package |
+| `targets.yaml` | the same two routes as the optimized package |
 | `instructions.md` | the one prompt, holding routing, verification, booking and complaints together |
-| `tools/` | the same local Python tools, all offered to the agent on every turn |
+| `tools/` | the same local Python tools plus the `end_call` builtin, all offered to the agent on every turn |
 | `knowledge/refunds/`, `knowledge/services/` | the same two document sets, both held by the one agent |
 | `connections/` | the same two carrier connections |
 
@@ -35,9 +35,12 @@ What the one agent does differently:
   "tomorrow" costs two chained requests.
 - The number is not a declared variable, so the model reads it off the
   transcript and retypes it into every tool call.
-- Turn taking is `pace: patient`, which reproduces the framework defaults.
-- Thinking goes straight to the model's own endpoint rather than through the
-  Context Router.
+
+Everything else is held identical on purpose, and that is what makes the
+comparison worth reading. Both packages speak to OpenAI directly, with the same
+three think params, at the same `pace: snappy`. So a difference you hear between
+them is a difference the structure made, not a model, a transport or a turn
+setting.
 
 **Routes.** The same two as the optimized package, one per telephony plane. The
 LiveKit target carries inbound calls and the manager transfer over a Twilio
@@ -57,11 +60,11 @@ Both targets validate with no errors and generate a runnable project, the same
 as the optimized package. A baseline that did not run would prove nothing.
 
 To see the difference for yourself, run the same conversation through each
-package and compare. The resolved turn floor and ceiling for each target are in
-`build/<target>/compile-report.json` under `notes`, and in the emitted
-`build/<target>/README.md`, so the turn-taking difference needs no measurement.
-Both packages trace to Langfuse, so one call through each is enough to compare
-what a request carries:
+package and compare. Both resolve the same turn floor and ceiling, which
+`build/<target>/compile-report.json` records under `notes` and the emitted
+`build/<target>/README.md` spells out, so turn taking is one thing you can rule
+out of whatever you hear. Both packages trace to Langfuse, so one call through
+each is enough to compare what a request carries:
 
 ```sh
 unmute dev examples/salon-concierge-single-prompt --target livekit

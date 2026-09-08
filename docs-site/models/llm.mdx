@@ -54,25 +54,33 @@ Pipecat merges into the request body as written.
 
 ## LiveKit Responses API
 
-Override an OpenAI reasoning model inside one LiveKit target when that package
-needs the Responses API:
+Ask for the Responses API on the shared think binding when a package needs it:
 
-```yaml targets.yaml
+```yaml agent.yaml
 models:
-  reasoning:
-    provider: openai
-    model: gpt-5.6-terra
-    params:
-      api: responses
-      reasoning_effort: none
-      use_websocket: true
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-terra
+      params:
+        api: responses
+        reasoning_effort: none
+        use_websocket: true
 ```
 
 Unmute emits `openai.responses.LLM` and turns `reasoning_effort` into the API's
 nested reasoning setting when it is present. Use that field instead of a raw
-`reasoning` map. Put this under the LiveKit target, not in the shared model
-profile: Pipecat keeps its normal OpenAI request shape. The salon concierge uses
-this exact override on its LiveKit target.
+`reasoning` map.
+
+`api` and `use_websocket` are the two params only LiveKit can act on: one picks
+the class, the other is a kwarg that class has and the chat completions one does
+not. Write them here rather than in a target override. A per-target `models:`
+entry replaces the base entry instead of merging into it, so an override would
+have to repeat `provider`, `model` and `reasoning_effort` to keep them, and two
+copies of one binding is a binding that gets edited on one side. Pipecat drops
+both and builds `OpenAILLMService` either way, and `unmute validate` prints a
+warning per param naming the target, so you are told what did not apply. Both
+salon examples author all three here.
 
 `use_websocket: true` is the latency line here. With HTTP, every model call in
 the turn opens a fresh TLS connection, and a turn that calls a tool makes at

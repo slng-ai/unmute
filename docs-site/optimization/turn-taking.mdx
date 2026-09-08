@@ -94,9 +94,10 @@ gets read as the end of the turn, and the agent answers before the sentence is
 finished.
 
 Unlike `pace`, this one **does** take a per-target override, because a silence
-window is tied to one target's mechanism. `examples/salon-concierge` authors
-400ms on the base binding and 200ms on its Pipecat target, and the next section
-is why.
+window is tied to one target's mechanism. `examples/salon-concierge` authors no
+floor on its base binding, so the pace owns it there, and 200ms on its Pipecat
+target. The next section is why that one figure is authored rather than left to
+the pace.
 
 ### The Pipecat floor is a cliff, not a dial
 

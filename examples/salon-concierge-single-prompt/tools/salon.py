@@ -44,10 +44,14 @@ def _booking_today() -> date:
 
     Not `date.today()`, which reads the container clock. That clock is UTC, so a
     booking taken at 23:30 in Madrid landed on the following day and every date
-    check here disagreed with the caller by one. The zone matches the `timezone:`
-    on the `today` prefetch entry in agent.yaml, which is what the pre-fetched
-    {{booking_date}} is read in, so
-    the prompt and the validation agree about what day it is.
+    check here disagreed with the caller by one.
+
+    This package declares no `prefetch:`, so the zone lives here and nowhere
+    else: the only way the model learns today's date is by calling
+    get_current_date below, which reads the same constant. In
+    examples/salon-concierge the zone is authored once as `timezone:` on the
+    `today` prefetch entry instead, and the reading is rendered straight into
+    the prompt.
     """
     return datetime.now(ZoneInfo(_SALON_TIMEZONE)).date()
 

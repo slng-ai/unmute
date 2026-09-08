@@ -381,13 +381,17 @@ agent that quotes times and prices from its own working sees fewer hits than
 one that asks questions, and a placeholder is what turns per-call numbers
 back into hits.
 
-## The salon example
+## Trying it on a package you already have
 
+No shipped example binds to the router today.
 [`examples/salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)
-is the package to read for this. It binds every think site to the router and
-sends one scope per prompt site. To see the router's own contribution on your
-own agent, compile it once as it ships and once with the think profile bound
-directly to the upstream vendor, and run the same conversation through both.
+reaches OpenAI directly, which makes it a useful starting point rather than a
+finished demonstration: it is a package with several prompt sites, so pointing
+its think binding at the router gives you one scope per site to look at.
+
+To see the router's own contribution on your own agent, compile it once with
+the think profile bound directly to the upstream vendor and once bound to the
+router, then run the same conversation through both.
 
 ## Next
 

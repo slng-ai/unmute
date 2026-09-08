@@ -219,11 +219,19 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		}
 	}
 	for name, tool := range resolved.Tools {
-		if tool.Execution == ir.ToolKnowledge {
+		switch tool.Execution {
+		case ir.ToolKnowledge:
 			continue // checked below, by base and by which agent holds it
+		case ir.ToolBuiltin:
+			// end_call is the registry's only row and the runtime already has
+			// it, so it opens no socket and needs no server up before the
+			// greeting. That is the invariant this loop is for, and a builtin
+			// meets it; the point is to keep out webhook, mcp and slng, which
+			// is what every remaining kind below still is.
+			continue
 		}
 		if tool.Execution != ir.ToolLocal || tool.Handler != "tools/salon.py" {
-			t.Errorf("tool %q = %#v, want shared local Python handler", name, tool)
+			t.Errorf("tool %q = %#v, want shared local Python handler or a builtin", name, tool)
 		}
 	}
 	// The two knowledge bases, and the isolation that is the point of having two.

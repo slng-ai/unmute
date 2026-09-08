@@ -177,9 +177,11 @@ it can be checked without guessing. Which `provider:` values are legal per role
 per target is in `models.md`.
 
 `params:` is normally the same passthrough. The narrow exception is
-`api: responses` on a LiveKit OpenAI reasoning binding: Unmute checks the
-directive, selects the Responses client, and maps `reasoning_effort` to nested
-reasoning. The scaffold's default OpenAI reasoning model needs
+`api: responses` on an OpenAI reasoning binding: Unmute checks the directive,
+selects the Responses client on LiveKit, and maps `reasoning_effort` to nested
+reasoning. It and `use_websocket` are the two params the compiler consumes
+rather than forwards, so a target that cannot build that class drops them
+instead of sending them as request fields, and says which at validate. The scaffold's default OpenAI reasoning model needs
 `reasoning_effort: "none"` when it carries function tools. Do not copy that
 provider-specific value onto every think model. `models.md` has the rule.
 

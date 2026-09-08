@@ -11,6 +11,7 @@ agents:
     speak: voice
     tools:
       - look_up_salon_info
+      - end_call
     tasks:
       - name: verify_customer
         when: >-
@@ -54,8 +55,7 @@ agents:
     speak: voice
     tools:
       - look_up_refund_policy
-    # The concierge defines this one. A bare name runs the same task from here,
-    # so there is one definition and both agents can offer it.
+      - end_call
     tasks:
       - verify_customer
       - name: handle_complaint
@@ -202,10 +202,6 @@ variables:
 prefetch:
   - name: today
     clock: now
-    # The zone this entry reads its clock in, and the reason it sits here rather
-    # than on the package: the key belongs beside the reading it governs, and two
-    # entries could honestly want two zones. Not the container's clock, which is
-    # UTC and would name the wrong day for anybody who is not on it.
     timezone: Europe/Madrid
     assign:
       - booking_date: result.date
@@ -219,15 +215,10 @@ prefetch:
 
   - name: profile
     tool: look_up_customer
-    # Does running this unasked, on every call including wrong numbers, change
-    # anything? No: look_up_customer reads. Its twin find_or_create_customer
-    # would answer true, which is why this entry points at this one.
     writes: false
     args:
       - phone: "{{customer_phone}}"
     assign:
-      # Two variables, one call. The lookup returns both, so a second line costs
-      # nothing: not a second request, not a second turn, not a second second.
       - customer_name: result.name
       - customer_on_file: result.status
 
@@ -263,7 +254,9 @@ models:
       provider: openai
       model: gpt-5.6-luna
       params:
+        api: responses
         reasoning_effort: "none"
+        use_websocket: true
   speak:
     voice:
       provider: slng
@@ -284,8 +277,7 @@ models:
     detector:
       provider: local
       model: silero
-      pace: balanced
-      endpointing_delay: 400ms
+      pace: snappy
 
 tools:
   - find_or_create_customer
@@ -298,6 +290,7 @@ tools:
   - modify_booking
   - cancel_booking
   - record_complaint
+  - end_call
 
 conversation:
   greeting:

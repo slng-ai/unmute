@@ -3,6 +3,7 @@ package generate
 import (
 	"cmp"
 	"fmt"
+	"slices"
 
 	"github.com/slng-ai/unmute/internal/ir"
 	targetcap "github.com/slng-ai/unmute/internal/target"
@@ -10,6 +11,23 @@ import (
 
 // defaultCatalog is the built-in provider map, and the only one there is.
 var defaultCatalog = targetcap.DefaultCatalog()
+
+// withoutParams copies params minus the named keys. Same shape and same reason
+// as slngConsumedParams: a param the compiler acts on itself must not also
+// reach the client as a kwarg or a request field.
+func withoutParams(params map[string]any, drop []string) map[string]any {
+	if len(params) == 0 {
+		return params
+	}
+	out := make(map[string]any, len(params))
+	for key, value := range params {
+		if slices.Contains(drop, key) {
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
 
 // mcpTimeoutSeconds is how long an MCP tool call may take on either target.
 // Both drivers write it out rather than letting each SDK pick: LiveKit's
@@ -85,6 +103,17 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 		if _, reasoning := binding.Params["reasoning"]; responsesAPI && reasoning {
 			return ServiceCall{}, entry, fmt.Errorf("livekit openai responses binding does not accept raw reasoning; use reasoning_effort")
 		}
+	}
+
+	// The Responses-only params on a target that cannot build that class. They
+	// are dropped here, before the split into constructor fields and request
+	// overflow, because Pipecat's OpenAI entry sends its params through the
+	// overflow and dropping them further down caught only one of the two paths.
+	// Filtered into a local for the same reason the router's are: the binding
+	// itself keeps what the author wrote, so nothing downstream that reads it
+	// sees a params block this function has already eaten.
+	if role == targetcap.Reason && vendor == "openai" && !responsesAPI {
+		params = withoutParams(params, ir.ResponsesOnlyParams)
 	}
 
 	call := ServiceCall{Class: spec.Class}
@@ -201,7 +230,7 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 			if responsesAPI {
 				switch kv.Key {
 				case "api":
-					continue
+					continue // consumed: it chose the class above
 				case "reasoning_effort":
 					kv.Key = "reasoning"
 					kv.Value = "openai_types.Reasoning(effort=" + kv.Value + ")"
