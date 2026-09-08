@@ -106,7 +106,8 @@ func generateFor(t *testing.T, pkgName string, provider ir.Provider) Artifact {
 // the variable on the child process is not enough: a container receives only
 // what its compose service declares. This shipped once with the producer wired
 // correctly and the variable never arriving, which looks exactly like a target
-// that reports nothing, so the compose files are pinned here.
+// that reports nothing, so the compose files are pinned here. The local-run
+// marker must also arrive or LiveKit skips its local worker startup settings.
 func TestEveryComposeThatRunsAnAgentForwardsTheSwitch(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -124,11 +125,13 @@ func TestEveryComposeThatRunsAnAgentForwardsTheSwitch(t *testing.T) {
 				// Bare name, no value: compose forwards the host's value when it
 				// is set and omits the variable entirely when it is not, which is
 				// what keeps a deployed artifact silent.
-				if !strings.Contains(compose, "\n      - "+devmetrics.Env+"\n") {
-					t.Errorf("%s does not forward %s, so the producer inside the container stays inert", name, devmetrics.Env)
-				}
-				if strings.Contains(compose, devmetrics.Env+"=") {
-					t.Errorf("%s pins a value for %s; it must pass through so it is absent when unset", name, devmetrics.Env)
+				for _, env := range []string{devmetrics.Env, LocalRunEnv} {
+					if !strings.Contains(compose, "\n      - "+env+"\n") {
+						t.Errorf("%s does not forward %s, so the container misses the dev settings", name, env)
+					}
+					if strings.Contains(compose, env+"=") {
+						t.Errorf("%s pins a value for %s; it must pass through so it is absent when unset", name, env)
+					}
 				}
 			}
 		})

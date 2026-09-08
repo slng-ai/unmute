@@ -149,7 +149,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		}
 	}
 	data.HandoffControls = handoffControls(agent)
-	data.DevOptionalEnv = []string{"UNMUTE_LOG_LEVEL", devmetrics.Env}
+	data.DevOptionalEnv = []string{"UNMUTE_LOG_LEVEL", devmetrics.Env, LocalRunEnv}
 	if len(data.CallStartVars) > 0 {
 		data.DevOptionalEnv = append(data.DevOptionalEnv, "UNMUTE_CALL_START")
 	}

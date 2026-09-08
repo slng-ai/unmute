@@ -31,7 +31,7 @@ import (
 func TestResponsesOnlyParamsReachLiveKitAndNoRequestBody(t *testing.T) {
 	load := func(t *testing.T) *ir.Agent {
 		t.Helper()
-		pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+		pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge-single-prompt"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +99,7 @@ func TestResponsesOnlyParamsReachLiveKitAndNoRequestBody(t *testing.T) {
 // such fields. Refusing is not the answer either, because one think binding
 // serving both targets is the shape this change exists to allow.
 func TestResponsesOnlyParamsWarnOnTheTargetThatCannotUseThem(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge-single-prompt"))
 	if err != nil {
 		t.Fatal(err)
 	}
