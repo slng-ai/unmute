@@ -219,13 +219,15 @@ func compareHosted(requirement generate.Requirement, accountTools []slngAccountT
 		found.State, found.Detail = notChecked, "the account's tools could not be listed, so hosted tool versions were not checked; the push decides what it would have covered"
 		return found
 	}
-	names := make([]string, 0, len(accountTools))
-	for _, tool := range accountTools {
-		names = append(names, tool.Name)
-	}
+	names := hostedNames(accountTools)
 	for _, tool := range accountTools {
 		if tool.Name != requirement.Name {
 			continue
+		}
+		if !attachableByReference(tool) {
+			found.State = wrongKind
+			found.Detail = curatedHostedDetail(requirement.Name)
+			return found
 		}
 		// The version comparison costs nothing extra: this listing carries
 		// latest_version, so one read answers both "does the name exist" and
@@ -257,6 +259,35 @@ func compareHosted(requirement generate.Requirement, accountTools []slngAccountT
 			joinNames(names))
 	}
 	return found
+}
+
+// attachableByReference says whether a `slng:` reference can attach this
+// listing entry. Only a `code` or an `api_request` tool: everything else in the
+// listing is a capability SLNG curates, which appears under an ordinary name
+// and a `tool_type` of its own, the same rule `internal/ir/hosted.go` holds a
+// committed mirror to.
+func attachableByReference(tool slngAccountTool) bool {
+	return tool.ToolType == "code" || tool.ToolType == "api_request"
+}
+
+// hostedNames are the names a `slng:` reference could resolve, for an "it has"
+// list. Built from the whole listing, the list named a curated capability as
+// present in the same sentence that called it missing.
+func hostedNames(catalogue []slngAccountTool) []string {
+	var names []string
+	for _, tool := range catalogue {
+		if attachableByReference(tool) {
+			names = append(names, tool.Name)
+		}
+	}
+	return names
+}
+
+// curatedHostedDetail is the refusal for a `slng:` reference to a capability
+// SLNG curates. Only `end_call` has a package spelling; the rest are attached
+// to the agent in the dashboard (target.SlngReservedToolNames says the same).
+func curatedHostedDetail(name string) string {
+	return fmt.Sprintf("`%s` is a capability SLNG curates, which a `slng:` reference cannot attach: only `end_call` is reachable from a package, as `builtin: end_call`, and every other curated capability is attached to the agent in the SLNG dashboard", name)
 }
 
 func compareMCPServer(requirement generate.Requirement, servers []slngMCPServer, names []string, wasChecked bool) finding {
