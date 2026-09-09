@@ -1565,7 +1565,7 @@ func TestLiveKitSIPGeneratedPythonCompiles(t *testing.T) { // telephony T10, V20
 	}
 }
 
-func runLiveKitSmokeScript(t *testing.T, example string, mutate func(*ir.Target), mutateAgent func(*ir.Agent), script string) {
+func runLiveKitSmokeScript(t *testing.T, example string, mutate func(*ir.Target), mutateAgent func(*ir.Agent), script string) []byte {
 	t.Helper()
 	if _, err := exec.LookPath("uv"); err != nil {
 		t.Skip("uv not available")
@@ -1606,11 +1606,13 @@ func runLiveKitSmokeScript(t *testing.T, example string, mutate func(*ir.Target)
 
 	cmd := exec.Command("uv", "run", "python", "smoke_check.py")
 	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		t.Fatalf("smoke check failed:\n%s", out)
 	} else if strings.Contains(string(out), "--- Logging error ---") {
 		t.Fatalf("smoke check logged an internal formatting error:\n%s", out)
 	} else {
 		t.Logf("%s", out)
 	}
+	return out
 }

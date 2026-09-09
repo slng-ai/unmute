@@ -262,7 +262,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	}
 	data.Inline = inlineEligible(&data)
 	if !data.Inline {
-		data.FrameImports = append(data.FrameImports, "LLMRunFrame")
+		data.FrameImports = append(data.FrameImports, "LLMUpdateSettingsFrame", "LLMRunFrame")
 	}
 	slices.Sort(data.FrameImports)
 	knowledge, err := loweredKnowledge(agent, env)
@@ -665,8 +665,6 @@ func setImportNeeds(data *pipecatData) {
 	collectLocal(data.FlowTools)
 	sort.Slice(data.LocalTools, func(i, j int) bool { return data.LocalTools[i].Name < data.LocalTools[j].Name })
 	data.MCPParamsImports = sortedKeys(paramsClasses)
-
-	data.FrameImports = append(data.FrameImports, "LLMUpdateSettingsFrame")
 
 	// pipecat.frames.frames names ride one merged import (V2), sorted at the end
 	// so the merged import matches isort whatever order the flags are read in.

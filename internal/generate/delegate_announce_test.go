@@ -34,7 +34,7 @@ func TestDelegateAnnounceComesAtTheStartOfTheDelegate(t *testing.T) {
 		say      string
 		starts   string // marks the step's own work, which must come after say
 	}{
-		{ir.ProviderLiveKit, "agent.py", `self.session.say("One moment while I check.")`, "owner_ctx = self.chat_ctx.copy()"},
+		{ir.ProviderLiveKit, "agent.py", `dev_say(self.session, "One moment while I check.")`, "owner_ctx = self.chat_ctx.copy()"},
 		{ir.ProviderPipecat, "bot.py", `TTSSpeakFrame("One moment while I check.")`, "self._verify_caller_results = {}"},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
@@ -89,7 +89,7 @@ func TestDelegateWithoutAnnounceEmitsNothing(t *testing.T) {
 			// exactly one blank line the first time this shipped, which is how the
 			// bug was found. Pipecat method bodies carry legitimate blank lines, so
 			// a blanket check here would be noise rather than a gate.
-			if strings.Contains(method, "session.say(") || strings.Contains(method, "TTSSpeakFrame(") {
+			if strings.Contains(method, "session.say(") || strings.Contains(method, "dev_say(") || strings.Contains(method, "TTSSpeakFrame(") {
 				t.Errorf("the method speaks with no announce: declared:\n%s", method)
 			}
 		})

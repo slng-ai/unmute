@@ -106,13 +106,42 @@ so switching never interrupts a call.
 
 | View | What it is for |
 |---|---|
-| Conversation | the call: what was said, its timings, and the controls |
-| Logs | everything the run printed, plus one line per turn of latency measurements |
+| Conversation | streaming words, current activity, and expandable measurements |
+| Logs | runtime output and activity or measurement updates labelled by call |
 
-Each agent turn carries its own numbers underneath it: end to end, time to first
-byte for each service, how long the reply took to stream out, and a row of its own
-for every tool the turn called. A number the target did not report shows as a dash,
-never as zero, so you can tell "not measured" from "instant".
+Recognized words appear as they arrive. Each finalized part becomes normal text
+immediately, even while the model is still silent. The agent's text also grows
+as it is generated. Generated words can lead audio playback; the page keeps
+those states separate and marks interruptions or incomplete replies.
+
+Model and tool activity appears before answer text. Each tool call has its own
+row, even when two calls use the same name. Reported outcomes update that row;
+`returned` means a result arrived, not that the business action succeeded.
+A reply summary shows its reported latency and model-call count. Each `LLM 1`,
+`LLM 2`, and later row shows its own first-response and full-duration values
+without expanding anything. TTS first-audio time and tool duration stay visible
+too. **Debug details** holds secondary timings and source/model details. See
+[Reading the latency numbers](/optimization/latency) for definitions. Counts appear only after
+identified model calls arrive.
+
+Only captured measurements appear. Missing and pending values have no
+placeholder; a measured zero is `0ms`. Small positive values stay positive:
+`1ms`, or `<1ms` below one millisecond. Timing values can overlap, so adding
+stage values does not reconstruct reply latency.
+
+The conversation follows new content until you scroll back. **Latest** returns
+to the newest content with one action. Details keep their open state and work
+with Enter or Space. Ending a call retains its words and marks unfinished text;
+starting another call clears that history.
+
+Live-data status is separate from audio status. Reconnecting the event feed
+does not restart the microphone. If some history cannot be recovered, the page
+keeps the incomplete-history label until the next call and shows observed model
+calls labelled as observed. Late updates stay with their known exchange;
+unassignable values remain labelled as unassigned. **Call diagnostics**, below
+the conversation, holds those values and call-level first-speech measurements.
+It starts collapsed and appears only when there is data to inspect; it does not
+insert diagnostic sections between turns.
 
 Controls do not get a row. A task, a task group, or a transfer reaches the
 framework as a function call, so it would otherwise be timed like a tool, and a
@@ -153,7 +182,9 @@ with no argument, that reads:
     ctrl-c to stop  ·  logs: build/livekit/dev.log
 ```
 
-The file holds the local runtime's output and the reason a start failed. It is
+The file holds the local runtime's output and the reason a start failed. Raw
+dev records include recognized and generated transcript text. The visible
+measurement filter leaves out repeated transcript fragments. The file is
 rewritten on every run, so the file you are looking at is
 always this run.
 

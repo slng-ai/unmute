@@ -25,8 +25,8 @@ func TestDevMetricsProducerAgreesWithTheGoContract(t *testing.T) {
 		entry    string
 		wiring   string
 	}{
-		{"pipecat", "safe_core", ir.ProviderPipecat, "bot.py", "observers=[dev_metrics_observer()]"},
-		{"livekit", "remy", ir.ProviderLiveKit, "agent.py", "install_dev_metrics(session)"},
+		{"pipecat", "safe_core", ir.ProviderPipecat, "bot.py", "dev.observers()"},
+		{"livekit", "remy", ir.ProviderLiveKit, "agent.py", "install_dev_metrics(session, call_id=ctx.room.name)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			artifact := generateFor(t, tc.pkg, tc.provider)

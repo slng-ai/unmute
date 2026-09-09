@@ -29,7 +29,7 @@
     display:flex;flex-direction:column;min-height:100%;
   }
   main{
-    flex:1;width:100%;max-width:640px;margin:0 auto;
+    flex:1;width:100%;max-width:880px;margin:0 auto;
     padding:24px 24px 32px;display:flex;flex-direction:column;gap:20px;
     min-height:0; /* let transcript scroll inside flexbox */
   }
@@ -146,9 +146,13 @@
   body[data-state="connected"] .transcript,
   body[data-has-history="true"] .transcript{display:flex}
 
+  .conversation-scroll{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+  #diagnostics{flex:none;max-height:35%;overflow-y:auto;border-top:1px solid var(--border);padding:5px 18px}
+  #diagnostics[hidden],.exchange[hidden],.exchange-content:empty{display:none}
+  #diagnostic-list{display:flex;flex-direction:column;gap:8px}
   .tlist{
-    flex:1;overflow-y:auto;overscroll-behavior:contain;
-    padding:18px 18px 12px;display:flex;flex-direction:column;gap:14px;
+    flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;overflow-anchor:none;
+    padding:18px 18px 12px;display:flex;flex-direction:column;gap:10px;
     scrollbar-width:thin;scrollbar-color:var(--border) transparent;
   }
   .tlist::-webkit-scrollbar{width:8px}
@@ -165,41 +169,57 @@
   }
   .turn.you .said{color:var(--text)}
   .turn.bot .said{color:var(--accent)}
-  .turn.partial .said{color:var(--muted)}
-  .turn.partial .said::after{content:" …";color:var(--faint)}
+  .exchange{flex:none;min-width:0;display:flex;flex-direction:column;gap:6px}
+  .exchange-content{display:flex;flex-direction:column;gap:10px}
+  .exchange-status{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+  .said{white-space:pre-wrap}
+  .segment[data-state="provisional"]{color:var(--muted)}
+  .segment[data-state="provisional"]::after{content:" …";color:var(--faint)}
+  .segment[data-state="incomplete"]{text-decoration:underline dotted var(--muted);text-underline-offset:4px}
 
   .tempty{
     margin:auto;padding:24px;text-align:center;color:var(--faint);
     font-size:12.5px;letter-spacing:.04em;
   }
 
-  /* ── per-turn timings ─────────────────────────────────────
-     Reference, not content: quiet enough that reading the conversation is
-     unaffected, close enough that you never go looking. No thresholds and no
-     colour scale, because picking "slow" is a policy nobody asked for. */
-  .timing{display:flex;flex-wrap:wrap;gap:12px;margin-top:3px}
-  .timing span{
-    font-size:10.5px;letter-spacing:.06em;color:var(--faint);
-    display:flex;gap:4px;white-space:nowrap;
-  }
-  .timing b{color:var(--muted);font-weight:600}
-
-  /* a tool call is its own step in the timeline, between the two turns */
-  .toolrow{display:flex;align-items:baseline;gap:8px;max-width:100%}
-  .toolrow .tname{
-    font-size:12.5px;color:var(--muted);
-    word-wrap:break-word;overflow-wrap:anywhere;
-  }
-  .toolrow .ttime{font-size:10.5px;letter-spacing:.06em;color:var(--faint);white-space:nowrap}
+  .activity,.measurements{font-size:11.5px;color:var(--muted);overflow-wrap:anywhere}
+  .activity:empty{display:none}
+  .activity{display:flex;flex-direction:column;gap:6px}
+  .operation{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px}
+  .operation-metrics{display:flex;flex-wrap:wrap;gap:4px 14px}
+  .operation-metrics .measurement{padding:0}
+  .metrics-summary{font-size:11.5px;color:var(--text)}
+  .feed-bar{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 16px}
+  .metrics-guide{font-size:11px;color:var(--muted)}
+  .metrics-guide:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .activity [data-state="running"]{color:var(--text)}
+  .measurements summary{cursor:pointer;padding:4px 0;color:var(--muted)}
+  .measurements summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .measurement{padding:5px 0;display:flex;flex-direction:column;gap:2px}
+  .measurement-label{color:var(--text)}
+  .source-note{white-space:pre-line}
+  .measurement-note,.source-note{font-size:10.5px;color:var(--muted)}
+  [id="feed-status"]{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
 
   /* compact mode when conversation is active: shrink the stage out of the way */
   body[data-state="connected"] .state{font-size:22px}
   body[data-state="connected"] .stage{gap:14px}
   body[data-state="connected"] .meter{height:36px}
   body[data-state="connected"] .hint{opacity:0;min-height:0;height:0;margin:0}
+  body[data-state="connected"] .stage,body[data-has-history="true"] .stage{
+    flex:none;flex-direction:row;justify-content:space-between;gap:12px;
+  }
+  body[data-state="connected"] .state,body[data-has-history="true"] .state{font-size:16px}
+  body[data-state="connected"] .meter,body[data-has-history="true"] .meter{height:18px}
+  body[data-has-history="true"] .hint{display:none}
+  .transcript{position:relative}
+  .tlist{padding-bottom:50px}
+  #latest{position:absolute;right:10px;bottom:10px;padding:5px 10px;font-size:11px;z-index:1}
+  #latest[hidden]{display:none}
+  #latest:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
   /* ── controls ────────────────────────────────────────── */
-  .controls{display:flex;flex-direction:column;gap:12px}
+  .controls{display:flex;flex-direction:column;gap:12px;flex:none}
   .btnrow{display:flex;gap:12px}
   .btn,#connect,#mute{
     font-family:var(--mono);font-size:15px;font-weight:600;
@@ -280,6 +300,21 @@
 
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
 
+  @media (max-width:520px){
+    main{padding:16px;gap:12px}
+    .bar{flex-wrap:wrap;gap:10px}
+    .status{flex:1}
+    .viewtabs{order:1;width:100%}
+    .vtab{flex:1;justify-content:center}
+    .logtools{flex-wrap:wrap}
+    #logfilter{flex-basis:100%}
+    .view{gap:12px}
+    .tlist{padding:12px 12px 50px}
+    .btnrow{gap:8px}
+    #connect,#mute{padding:12px}
+    .state{font-size:30px}
+  }
+
   @media (prefers-reduced-motion:reduce){
     .dot{animation:none!important}
     .meter i{transition:background .22s var(--ease)}
@@ -303,6 +338,10 @@
       <img class="logo" src="logo.svg" alt="Unmute">
     </header>
 
+    <div class="feed-bar">
+    <div id="feed-status" role="status" aria-live="polite">Live data connecting</div>
+    <a class="metrics-guide" href="https://unmute.ai/optimization/latency" target="_blank" rel="noopener">How to read latency ↗</a>
+    </div>
     <div class="views" id="views">
       <div class="view" id="view-conversation" data-view="conversation" data-active="true">
         <section class="stage">
@@ -312,7 +351,14 @@
         </section>
 
         <section class="transcript" aria-label="Conversation transcript">
-          <div class="tlist" id="tlist" aria-live="polite" aria-atomic="false"></div>
+          <div class="conversation-scroll">
+            <div class="tlist" id="tlist"></div>
+            <button id="latest" class="btn" type="button" hidden>Latest</button>
+          </div>
+          <details id="diagnostics" class="measurements" hidden>
+            <summary>Call diagnostics</summary>
+            <div id="diagnostic-list"></div>
+          </details>
         </section>
       </div>
 
@@ -381,9 +427,14 @@ const el = {
   micGlyph: document.querySelector("#mute .mic-glyph"),
   micLevel: document.getElementById("miclevel"),
   tlist: document.getElementById("tlist"),
+  transcript: document.querySelector('.transcript'),
+  diagnostics: document.getElementById('diagnostics'),
+  diagnosticList: document.getElementById('diagnostic-list'),
   loglist: document.getElementById("loglist"),
   logfilter: document.getElementById("logfilter"),
   flagcount: document.getElementById("flagcount"),
+  feed: document.getElementById('feed-status'),
+  latest: document.getElementById('latest'),
 };
 el.agent.textContent = AGENT;
 
@@ -401,33 +452,27 @@ let micAnalyser = null;                               // mic-only tap, drives th
 let muted = false, selectedDeviceId = null;
 let micState = "unavailable";                         // "unavailable" | "live" | "muted"
 let holding = false, heldWasMuted = false;            // hold-to-talk
-// One open user row per spoken turn. The recognizer sends several finished
-// pieces per sentence, so the row accumulates them instead of pushing a row
-// each time. Finished text and live text are kept apart: pieces append to the
-// first, interim text replaces the second, and the row shows the two joined.
-let userTurnEl = null;
-let userFinished = "", userLive = "";
-let botTurnEl = null;
-const botSegments = new Map(); // RTVI segment id → latest text
-
 // ── views ───────────────────────────────────────────────
 // State, not navigation: tearing the page down would end the call, so there is
 // no router and no second document. The session controls live outside both views.
 let currentView = "conversation";
 let viewPinned = false;              // the author chose; stop moving it for them
+let savedReading = null;
 const tabs = Array.from(document.querySelectorAll(".vtab"));
 
 function showView(name, byUser){
   if (byUser) viewPinned = true;
+  if (currentView==='conversation' && name!=='conversation') savedReading=readingPosition();
   currentView = name;
   for (const view of document.querySelectorAll(".view"))
     view.dataset.active = String(view.dataset.view === name);
   for (const tab of tabs)
     tab.setAttribute("aria-selected", String(tab.dataset.view === name));
   if (name === "logs") renderLog();
+  else restoreReading(savedReading);
 }
 for (const tab of tabs)
-  tab.addEventListener("click", () => { tab.blur(); showView(tab.dataset.view, true); });
+  tab.addEventListener("click", () => { showView(tab.dataset.view, true); });
 
 // ── run output ──────────────────────────────────────────
 // The run's lifecycle drives what is in front, because the first thing worth
@@ -438,7 +483,7 @@ let flagged = 0;
 let ready = false;
 
 function setRunState(state){
-  el.connect.disabled = !ready && state !== "ready";
+  el.connect.disabled = !transport && !connecting && !ready && state !== "ready";
   if (state === "ready"){
     ready = true;
     el.connect.disabled = false;
@@ -447,8 +492,8 @@ function setRunState(state){
     if (!viewPinned && !flagged) showView("conversation");
   } else if (state === "failed"){
     ready = false;
-    el.connect.disabled = true;
-    setState("error", "error", "the agent did not start; see the output");
+    el.connect.disabled = !transport && !connecting;
+    if (!transport) setState("error", "error", "the agent did not start; see the output");
     if (!viewPinned) showView("logs");
   } else if (!viewPinned && currentView !== "logs"){
     showView("logs");
@@ -470,6 +515,18 @@ function pushLogRow(row){
 // leaving it.
 function metricText(rec){
   if (!rec) return "";
+  if (rec.version === 2){
+    const prefix = rec.call_id+' · '+rec.id+' · ';
+    if (rec.operation) return prefix+[rec.operation.type,rec.operation.name,rec.operation.state,rec.operation.model,rec.operation.provider,rec.operation.source_request_id].filter(Boolean).join(' · ');
+    if (rec.measurement){
+      const m=rec.measurement;
+      if (m.state!=='measured') return '';
+      return prefix+m.scope+' · '+m.metric.replaceAll('_',' ')+' '+secs(m.value)+' · '+
+        [m.source,m.model,m.provider,m.operation_id,m.exchange_id,m.reason].filter(Boolean).join(' · ');
+    }
+    if (rec.call) return prefix+rec.call.state;
+    return ''; // raw transcript snapshots remain in dev.log, not repeated here
+  }
   if (rec.kind === "session")
     return "session · first speech " + secs(rec.first_speech);
   const parts = ["turn " + (rec.seq || "?")];
@@ -487,7 +544,13 @@ function metricText(rec){
   if (rec.interrupted) parts.push("interrupted");
   return parts.join("  ·  ");
 }
-function secs(v){ return v == null ? "—" : v.toFixed(2) + "s"; }
+function secs(v){
+  if (v == null) return 'not reported';
+  if (v === 0) return '0ms';
+  if (v < .001) return '<1ms';
+  const ms=Math.round(v*1000);
+  return ms < 1000 ? ms+'ms' : v.toFixed(2)+'s';
+}
 
 function logMatches(row, needle, kind){
   if (kind === "output" && row.kind !== "output") return false;
@@ -525,7 +588,6 @@ for (const button of document.querySelectorAll(".kind")){
   button.addEventListener("click", () => {
     for (const other of document.querySelectorAll(".kind"))
       other.setAttribute("aria-pressed", String(other === button));
-    button.blur();
     renderLog();
   });
 }
@@ -535,13 +597,28 @@ for (const button of document.querySelectorAll(".kind")){
 function startEventStream(){
   if (DEMO || !window.EventSource) return;
   const es = new EventSource("/api/events");
+  es.addEventListener('open',()=>{feedFresh=true;renderFeed();});
+  es.addEventListener('error',()=>{feedFresh=false;renderFeed();});
   es.addEventListener("message", (e) => {
     let ev;
-    try { ev = JSON.parse(e.data); } catch { return; }
+    try { ev = JSON.parse(e.data); } catch { historyGap=true;renderFeed();return; }
+    if (ev.stream_id && ev.stream_id!==feedStream){
+      if (feedStream && selectedCallID) historyGap=true;
+      feedStream=ev.stream_id;feedSequence=0;
+    }
+    if (ev.seq){
+      if (ev.seq<=feedSequence) return;
+      if (feedSequence && ev.seq!==feedSequence+1) historyGap=true;
+      feedSequence=ev.seq;
+    }
+    if (ev.t==='gap' || ev.reason) historyGap=true;
+    feedFresh=true;
+    renderFeed();
     if (ev.t === "state") setRunState(ev.state);
     else if (ev.t === "log") pushLogRow({kind:"output", text: ev.text || "", flagged: !!ev.flagged});
     else if (ev.t === "metric"){
-      pushLogRow({kind:"metric", text: metricText(ev.record), flagged:false});
+      const text=metricText(ev.record);
+      if (text) pushLogRow({kind:"metric", text, flagged:false});
       attachRecord(ev.record);
     }
   });
@@ -555,162 +632,283 @@ function setState(s, label, hint){
 function setBars(v){ for (const b of bars) b.style.transform = `scaleY(${Math.max(0.08, v)})`; }
 function audioConstraint(){ return selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true; }
 
-// ── transcript ──────────────────────────────────────────
+// Identified snapshots are the sole dev conversation source. Audio callbacks
+// retain connection and playback duties; they never guess which row owns text.
+let selectedCallID = null, connectionGeneration = 0, connecting = false;
+let locallyEnded = false;
+let feedFresh=false, historyGap=false, feedStream=null, feedSequence=0;
+const records = new Map(), recordNodes = new Map(), exchangeNodes = new Map(), messageNodes = new Map();
+
+function node(tag, className, text){
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text !== undefined) element.textContent = text;
+  return element;
+}
+function setText(element, text){
+  if (element.textContent !== text) element.textContent = text;
+}
+function ordered(parent, element, order){
+  element.dataset.order = String(order);
+  const before = Array.from(parent.children).find(child => child !== element && Number(child.dataset.order) > order) || null;
+  if (element.parentNode !== parent || element.nextElementSibling !== before) parent.insertBefore(element, before);
+}
 function clearTranscript(){
-  el.tlist.innerHTML = "";
-  userTurnEl = null;
-  userFinished = userLive = "";
-  botTurnEl = null;
-  heldRecord = null;
-  botSegments.clear();
-  el.body.dataset.hasHistory = "false";
+  el.tlist.replaceChildren();
+  el.diagnosticList.replaceChildren();
+  el.diagnostics.open=false;
+  el.diagnostics.hidden=true;
+  records.clear(); recordNodes.clear(); exchangeNodes.clear(); messageNodes.clear();
+  selectedCallID = null;
+  locallyEnded = false;
+  historyGap = false;
+  renderFeed();
+  el.body.dataset.hasHistory = 'false';
+  el.latest.hidden=true;
+  savedReading={following:true};
 }
-function nearBottom(){
-  const gap = el.tlist.scrollHeight - el.tlist.scrollTop - el.tlist.clientHeight;
-  return gap < 64;
+function nearBottom(){return el.tlist.scrollHeight-el.tlist.scrollTop-el.tlist.clientHeight < 64;}
+function readingPosition(){
+  if (currentView!=='conversation') return null;
+  const {top,bottom}=el.tlist.getBoundingClientRect();
+  const selected=window.getSelection()?.anchorNode;
+  const selectedElement=selected?.nodeType===1?selected:selected?.parentElement;
+  const visible=element=>element && el.tlist.contains(element) && element.getBoundingClientRect().bottom>top && element.getBoundingClientRect().top<bottom;
+  // Prefer what the reader selected; an enclosing exchange can grow above it.
+  const anchor=visible(selectedElement)?selectedElement:Array.from(el.tlist.querySelectorAll('[data-kind],summary')).find(child=>visible(child)&&child.getBoundingClientRect().top>=top)
+    || Array.from(el.tlist.children).find(visible);
+  return {following:nearBottom(),anchor,offset:anchor?anchor.getBoundingClientRect().top-top:0};
 }
-function pushTurn(who, text, opts = {}){
-  const turn = document.createElement("div");
-  turn.className = "turn " + who + (opts.partial ? " partial" : "");
-  const stick = nearBottom();
-  turn.innerHTML = `<span class="who">${who === "you" ? "you" : AGENT}</span><span class="said"></span>`;
-  turn.querySelector(".said").textContent = text;
-  el.tlist.appendChild(turn);
-  el.body.dataset.hasHistory = "true";
-  if (stick) el.tlist.scrollTop = el.tlist.scrollHeight;
-  return turn;
+function restoreReading(position){
+  if (!position || currentView!=='conversation') return;
+  if (position.following) el.tlist.scrollTop=el.tlist.scrollHeight;
+  else if (position.anchor?.isConnected) el.tlist.scrollTop+=position.anchor.getBoundingClientRect().top-el.tlist.getBoundingClientRect().top-position.offset;
 }
-// Ordinary prose, so a piece that starts with punctuation closes up to the word
-// before it. ponytail: one condition, not a text processor — nothing else about
-// spacing or capitalisation is ours to fix.
-function joinSaid(a, b){
-  if (!a) return b;
-  if (!b) return a;
-  return /^[,.!?;:…]/.test(b) ? a + b : a + " " + b;
-}
-// A piece that restates or corrects what is already shown replaces it, rather
-// than piling on. Same shape as the merge setBotSegment does for agent output.
-function mergeFinished(done, piece){
-  if (!done) return piece;
-  if (piece.startsWith(done)) return piece;
-  if (done.endsWith(piece)) return done;
-  return joinSaid(done, piece);
-}
-function renderUserTurn(){
-  const text = joinSaid(userFinished, userLive);
-  if (!text){ if (userTurnEl){ userTurnEl.remove(); userTurnEl = null; } return; }
-  if (!userTurnEl) userTurnEl = pushTurn("you", text, {partial:true});
-  else {
-    userTurnEl.querySelector(".said").textContent = text;
-    if (nearBottom()) el.tlist.scrollTop = el.tlist.scrollHeight;
+el.latest.addEventListener('click',()=>{el.tlist.scrollTop=el.tlist.scrollHeight;});
+el.transcript.addEventListener('click',event=>{
+  if (!event.target.closest('summary')) return;
+  const reading=readingPosition();
+  requestAnimationFrame(()=>restoreReading(reading));
+});
+function exchangeNode(id, order){
+  if (!exchangeNodes.has(id)){
+    const element = node('section','exchange');
+    element.dataset.exchange = id.startsWith('exchange:') ? id.slice(9) : id;
+    const status = node('div','exchange-status');
+    const content = node('div','exchange-content');
+    const activity = node('div','activity');
+    const details = node('details','measurements');
+    const summary = node('div','metrics-summary');
+    const debugSummary = node('summary',undefined,'Debug details');
+    const values = node('div');
+    const note = node('p','source-note');
+    details.append(debugSummary,values,note);
+    details.hidden=true;
+    element.append(status,content,summary,activity,details);
+    exchangeNodes.set(id,{element,status,content,activity,details,summary,values,note});
+    ordered(id==='call-details'||id==='unassigned'?el.diagnosticList:el.tlist,element,order);
   }
+  return exchangeNodes.get(id);
 }
-function setUserLive(text){
-  userLive = (text || "").trim();
-  renderUserTurn();
-}
-function addUserFinished(text){
-  text = (text || "").trim();
-  if (!text) return;
-  userFinished = mergeFinished(userFinished, text);
-  userLive = "";
-  renderUserTurn();
-}
-// The agent starting to speak is the only thing that ends a user turn: no
-// silence timer, and no per-transport end-of-speech signal to keep in step.
-function closeUserTurn(){
-  if (userTurnEl) userTurnEl.classList.remove("partial");
-  userTurnEl = null;
-  userFinished = userLive = "";
-}
-function resetBotTurn(){
-  botTurnEl = null;
-  botSegments.clear();
+function renderExchange(id){
+  const view = exchangeNodes.get(id);
+  if (!view) return;
+  const record = records.get(id), data = record?.exchange;
+  if (record) ordered(el.tlist,view.element,record.order);
+  let state = data?.state || 'unknown';
+  if (locallyEnded && state === 'open') state = 'incomplete';
+  const assistant = data?.role === 'response' || !!view.content.querySelector('[data-speaker="assistant"]');
+  const labels = {open:'generating',ended:'text complete',interrupted:'interrupted',incomplete:'incomplete'};
+  let label = ['unknown','open','ended'].includes(state) ? '' : state;
+  if (assistant) label = ['generated',labels[state],data?.playback && data.playback!=='unknown' ? 'audio '+data.playback.replaceAll('_',' ') : ''].filter(Boolean).join(' · ');
+  if ((!feedFresh||historyGap) && state==='open' && label) label='last known: '+label;
+  setText(view.status,label);
+  view.status.hidden = !label;
+  view.element.dataset.state = state;
 }
 
-// ── per-turn timings ────────────────────────────────────
-// Records are matched to turns by nearest in time, not by an identifier plumbed
-// through the transport. A record usually lands within a moment of the turn it
-// describes, but it can beat the transcript row it belongs to, so one is held.
-// Under heavy interruption a line may land on a neighbouring turn; that is the
-// accepted cost of not threading an id through two SDKs for a local view.
-let heldRecord = null;
-
-function attachRecord(rec){
-  if (!rec || rec.kind !== "turn") return;   // the session record is log-only
-  if (botTurnEl) renderTurnTiming(botTurnEl, rec);
-  else heldRecord = rec;
+function renderFeed(){
+  const label=(feedFresh?'Live data connected':'Live data reconnecting')+(historyGap?' · incomplete history':'');
+  if (el.feed.textContent===label) return;
+  const reading=readingPosition();
+  setText(el.feed,label);
+  for (const id of exchangeNodes.keys()) renderExchange(id);
+  renderData();
+  restoreReading(reading);
 }
 
-function claimHeldRecord(turn){
-  if (!heldRecord) return;
-  const rec = heldRecord;
-  heldRecord = null;
-  renderTurnTiming(turn, rec);
+// Namespace native IDs separately from display-only groups. IDs are opaque.
+function operationGroup(data){return data.exchange_id ? 'exchange:'+data.exchange_id : 'unassigned';}
+function measurementGroup(data){
+  if (data.scope==='call') return 'call-details';
+  const exchangeID=data.exchange_id || records.get('operation:'+data.operation_id)?.operation.exchange_id;
+  return exchangeID ? 'exchange:'+exchangeID : 'unassigned';
 }
-
-function timingEntry(label, value){
-  const span = document.createElement("span");
-  const name = document.createElement("i");
-  name.textContent = label;
-  const amount = document.createElement("b");
-  amount.textContent = secs(value);       // an unreported value is a dash, never 0.00
-  span.append(name, amount);
-  return span;
+function operationLabel(record){
+  const data=record.operation;
+  if (data.type!=='llm') return data.type.toUpperCase()+' · '+data.name;
+  const peers=Array.from(records.values()).filter(r=>r.operation?.type==='llm' && operationGroup(r.operation)===operationGroup(data)).sort((a,b)=>a.order-b.order);
+  return 'LLM '+(peers.findIndex(r=>r.id===record.id)+1);
 }
-
-function renderTurnTiming(turn, rec){
-  // Tools ran before the reply did, so they belong above it in the timeline.
-  for (const tool of rec.tools || []){
-    const row = document.createElement("div");
-    row.className = "toolrow";
-    const who = document.createElement("span");
-    who.className = "who";
-    who.textContent = "tool";
-    const name = document.createElement("span");
-    name.className = "tname";
-    name.textContent = tool.name;
-    const time = document.createElement("span");
-    time.className = "ttime";
-    time.textContent = secs(tool.seconds);
-    row.append(who, name, time);
-    turn.parentNode.insertBefore(row, turn);
+function metricLabel(data, operation){
+  if (data.metric==='first_response'){
+    if (operation?.type==='tts' || data.source.includes('ttfb')) return 'TTFB';
+    if (data.source.includes('ttft')) return 'TTFT';
   }
-
-  const old = turn.querySelector(".timing");
-  if (old) old.remove();                  // a re-delivered record replaces, never stacks
-  const line = document.createElement("div");
-  line.className = "timing";
-  line.appendChild(timingEntry("e2e", rec.e2e));
-  for (const stage of rec.stages || []){
-    if (stage.ttfb == null && stage.total == null) continue;
-    line.appendChild(timingEntry(stage.kind, stage.ttfb != null ? stage.ttfb : stage.total));
-    // Sits immediately after its stage, so it does not repeat the stage's name.
-    if (stage.ttfb != null && stage.total != null)
-      line.appendChild(timingEntry("total", stage.total));
-  }
-  if (rec.interrupted){
-    const flag = document.createElement("span");
-    flag.textContent = "interrupted";
-    line.appendChild(flag);
-  }
-  turn.appendChild(line);
-  if (nearBottom()) el.tlist.scrollTop = el.tlist.scrollHeight;
+  return data.metric.replaceAll('_',' ');
 }
-function setBotSegment(id, text){
-  text = (text || "").trim();
-  if (!text) return;
-  botSegments.set(String(id), text);
-  let merged = "";
-  for (const part of botSegments.values()){
-    if (!merged || part.startsWith(merged)) merged = part;
-    else if (part !== merged && !merged.endsWith(part)) merged += " " + part;
+function renderData(){
+  // ponytail: scan retained call snapshots; index per group if long-call replay gets slow.
+  const all=Array.from(records.values());
+  const focused=document.activeElement;
+  const focusedDiagnostics=el.diagnostics.contains(focused);
+  let movedFocus=null;
+  // Build operation rows before attaching their measurements, even on late association.
+  for (const record of all.filter(r=>r.operation).concat(all.filter(r=>r.measurement))){
+    const key=record.kind+':'+record.id, data=record[record.kind];
+    if (record.measurement && data.state!=='measured'){
+      recordNodes.get(key)?.remove();
+      continue;
+    }
+    const groupID=record.operation ? operationGroup(data) : measurementGroup(data);
+    const view=exchangeNode(groupID,record.order);
+    let row=recordNodes.get(key);
+    if (!row){
+      row=node('div',record.measurement?'measurement':'operation');
+      row.dataset.kind=record.kind;row.dataset.id=record.id;
+      row.append(node('span','measurement-label'),node('span',record.operation?'operation-metrics':'measurement-note'));
+      recordNodes.set(key,row);
+    }
+    const previousDetails=row.closest('section')?.querySelector('details');
+    if (previousDetails && previousDetails!==view.details){
+      if (previousDetails.open) view.details.open=true;
+      if (focused===previousDetails.querySelector('summary') ||
+          (focused===el.diagnostics.firstElementChild && el.diagnosticList.contains(row))) movedFocus=view.details.querySelector('summary');
+    }
+    if (record.operation){
+      const terminal=locallyEnded || ['ended','interrupted','incomplete'].includes(records.get(groupID)?.exchange.state);
+      const state=data.state==='running' ? terminal?'incomplete (last seen running)':(!feedFresh||historyGap)?'last seen running':data.state : data.state;
+      row.dataset.state=state;
+      setText(row.firstChild,operationLabel(record)+' · '+state);
+      ordered(view.activity,row,record.order);
+    } else {
+      const operation=records.get('operation:'+data.operation_id);
+      const label=operation ? operationLabel(operation) : data.source.includes('llm_node_ttft')?'LLM node':data.source.includes('tts_node_ttfb')?'TTS node':({call:'Call',input:'Input',response:'Reply-level',operation:'Operation',unassigned:'Unassigned'})[data.scope];
+      const primary=operation && operationGroup(operation.operation)===groupID && (data.metric==='first_response' ||
+        (operation.operation.type==='llm' && data.metric==='request_duration') || data.metric==='tool_duration');
+      setText(row.firstChild,(primary?'':label+' · ')+metricLabel(data,operation?.operation)+' '+secs(data.value));
+      setText(row.lastChild,primary?'':[data.source,data.model,data.provider].filter(value=>value && value!=='unknown').join(' · '));
+      row.lastChild.hidden=primary;
+      ordered(primary?recordNodes.get('operation:'+operation.id).lastChild:view.values,row,record.order);
+    }
   }
-  // This is the one place an agent row is made, so it is the one place a user
-  // turn ends. Both transports get the same boundary with no branch of their own.
-  if (!botTurnEl){ closeUserTurn(); botTurnEl = pushTurn("bot", merged); claimHeldRecord(botTurnEl); }
-  else botTurnEl.querySelector(".said").textContent = merged;
+  const call=all.find(r=>r.call)?.call;
+  for (const [id,view] of exchangeNodes){
+    const exchange=records.get(id)?.exchange;
+    const operations=all.filter(r=>r.operation && operationGroup(r.operation)===id);
+    const measurements=all.filter(r=>r.measurement?.state==='measured' && measurementGroup(r.measurement)===id);
+    const response=exchange?.role==='response';
+    view.details.hidden=!(operations.length||measurements.length);
+    if (response){
+      const models=operations.filter(r=>r.operation.type==='llm');
+      const complete=locallyEnded||exchange.state!=='open';
+      const latency=measurements.find(r=>r.measurement.metric==='reply_latency');
+      const count=models.length ? models.length+' model call'+(models.length===1?'':'s')+(historyGap||call?.model_calls!=='known'?' observed':complete?'':' so far') : '';
+      setText(view.summary,[latency?'Reply latency '+secs(latency.measurement.value):'',count].filter(Boolean).join(' · ') || 'Response measurements');
+    } else setText(view.summary,id==='call-details'?'Call measurements':id==='unassigned'?'Unassigned activity and measurements':'Input measurements');
+    view.summary.hidden=!(operations.length||measurements.length);
+    view.element.hidden=!(view.content.querySelector('.segment:not([hidden])') || operations.length || measurements.length || (response && exchange.state==='open'));
+    setText(view.note,operations.map(r=>[operationLabel(r),r.operation.name,r.operation.model,r.operation.provider,r.operation.source_request_id].filter(value=>value && value!=='unknown').join(' · '))
+      .concat(measurements.filter(r=>r.measurement.operation_id).map(r=>{
+        const m=r.measurement,op=records.get('operation:'+m.operation_id);
+        return [op?operationLabel(op):'',metricLabel(m,op?.operation),m.source,m.model,m.provider].filter(value=>value && value!=='unknown').join(' · ');
+      })).join('\n'));
+    view.note.hidden=!view.note.textContent;
+  }
+  for (const [id,view] of exchangeNodes)
+    if (!view.content.childNodes.length && !view.activity.childNodes.length && !view.values.childNodes.length && !records.has(id)){
+      view.element.remove();exchangeNodes.delete(id);
+    }
+  el.diagnostics.hidden=!el.diagnosticList.childNodes.length;
+  if ((!focused.isConnected || !focused.checkVisibility()) && (movedFocus || focusedDiagnostics))
+    (movedFocus || el.connect).focus({preventScroll:true});
 }
+function renderText(record){
+  const data = record.text;
+  // ponytail: scan this call's snapshots; index messages if long-call replay makes this hot.
+  const siblings = Array.from(records.values()).filter(r => r.text?.message_id === data.message_id && r.text.speaker === data.speaker);
+  const parents = new Set(siblings.map(r => r.text.exchange_id).filter(Boolean));
+  const exchangeID = data.exchange_id || (parents.size === 1 ? parents.values().next().value : null);
+  const groupID = exchangeID ? 'exchange:'+exchangeID : 'unassigned:'+JSON.stringify([data.speaker,data.message_id]);
+  const group = exchangeNode(groupID,record.order);
+  const messageKey = JSON.stringify([data.speaker,data.message_id,parents.size > 1 ? groupID : '']);
+  let message = messageNodes.get(messageKey);
+  if (!message){
+    const element=node('div','turn '+(data.speaker==='user'?'you':'bot'));
+    element.dataset.speaker = data.speaker;
+    element.dataset.message = data.message_id;
+    const said=node('div','said');
+    element.append(node('span','who',data.speaker==='user'?'you':AGENT),said);
+    message={element,said,order:record.order};
+    messageNodes.set(messageKey,message);
+  }
+  message.order = Math.min(message.order, record.order);
+  ordered(group.content,message.element,message.order);
+  let span=recordNodes.get('text:'+record.id);
+  if (!span){
+    span=node('span','segment');
+    span.dataset.kind='text';span.dataset.id=record.id;
+    recordNodes.set('text:'+record.id,span);
+  }
+  span.dataset.state=locallyEnded && data.state==='provisional'?'incomplete':data.state;
+  span.hidden = data.text.length === 0;
+  setText(span,data.separator_before+data.text);
+  ordered(message.said,span,record.order);
+  renderExchange(groupID);
+}
+function attachRecord(record){
+  if (!record || record.version!==2 || record.call_id!==selectedCallID) return;
+  const key=record.kind+':'+record.id, prior=records.get(key);
+  if (prior && record.revision<=prior.revision) return;
+  if (prior?.text?.state==='final' && record.text?.state==='provisional') return;
+  const reading=readingPosition();
+  const selection=window.getSelection();
+  const selected=selection && !selection.isCollapsed && el.transcript.contains(selection.anchorNode) && el.transcript.contains(selection.focusNode)
+    ? [selection.anchorNode,selection.anchorOffset,selection.focusNode,selection.focusOffset] : null;
+  const focused=document.activeElement;
+  records.set(key,record);
+  if (record.kind==='text'){
+    // A proven link on one segment applies to the shared message, even when
+    // another segment's later correction has no new association information.
+    for (const sibling of records.values())
+      if (sibling.text?.message_id === record.text.message_id && sibling.text.speaker === record.text.speaker) renderText(sibling);
+    for (const [id,message] of messageNodes) if (!message.said.childNodes.length){message.element.remove();messageNodes.delete(id);}
+    for (const [id,view] of exchangeNodes) if (!view.content.childNodes.length && !view.activity.childNodes.length && !view.values.childNodes.length && !records.has(id)){view.element.remove();exchangeNodes.delete(id);}
+  }
+  else if (record.kind==='exchange'){
+    exchangeNode(key,record.order);
+    renderExchange(key);
+  }
+  else if (record.kind==='call'){
+    if (record.call.state!=='open') endConversation();
+    for (const id of exchangeNodes.keys()) renderExchange(id);
+  }
+  renderData();
+  if (focused.isConnected && focused.checkVisibility() && document.activeElement!==focused) focused.focus({preventScroll:true});
+  if (selected && selected[0].isConnected && selected[2].isConnected) selection.setBaseAndExtent(...selected);
+  el.body.dataset.hasHistory=String(exchangeNodes.size>0);
+  el.latest.hidden=exchangeNodes.size===0;
+  restoreReading(reading);
+}
+function endConversation(){
+  const reading=readingPosition();
+  locallyEnded=true;
+  for (const record of records.values()) if (record.kind==='text') renderText(record);
+  for (const id of exchangeNodes.keys()) renderExchange(id);
+  renderData();
+  restoreReading(reading);
+}
+function currentConnection(session){return session.generation===connectionGeneration && session.call_id===selectedCallID;}
 
 // ── meters: one mixed (mic + agent) for the stage, one mic-only for the control ──
 // Two analysers off one context. The stage meter answers "is anything happening",
@@ -767,20 +965,25 @@ function stopMeter(){
 
 // ── shared teardown (either transport) ──────────────────
 function teardown(state, hint){
+  ++connectionGeneration;
+  connecting = false;
+  endConversation();
   stopMeter();
   clearInterval(clientReadyTimer); clientReadyTimer = 0;
-  if (dc){ try { dc.close(); } catch {} dc = null; }
-  if (pc){ pc.close(); pc = null; }
+  const oldChannel = dc, oldPeer = pc, oldRoom = room;
+  dc = pc = room = null;
+  if (oldChannel){ try { oldChannel.close(); } catch {} }
+  if (oldPeer) oldPeer.close();
+  if (oldRoom){ try { oldRoom.disconnect(); } catch {} }
   pcId = null;
   if (mic){ mic.getTracks().forEach(t => t.stop()); mic = null; }
-  if (room){ try { room.disconnect(); } catch {} room = null; }
   el.remote.srcObject = null;
   setMicUnavailable();
   el.connect.textContent = "connect";
+  el.connect.disabled = !ready;
   transport = null;
-  setUserLive("");
   setState(state, state === "error" ? "error" : "ready",
-           state === "error" ? hint : "press connect and talk to your agent");
+    state === "error" ? hint : "press connect and talk to your agent");
 }
 
 // ── microphone: the control names the state, styling carries the affordance ──
@@ -815,8 +1018,9 @@ function toggleMute(){
 // focus — otherwise it activates that button and ends the call.
 function typingTarget(t){
   if (!t) return false;
+  if (t.closest?.('.transcript summary,.transcript button')) return true;
   const tag = (t.tagName || "").toLowerCase();
-  return tag === "input" || tag === "textarea" || tag === "select" || t.isContentEditable;
+  return tag === "a" || tag === "input" || tag === "textarea" || tag === "select" || t.isContentEditable;
 }
 document.addEventListener("keydown", (e) => {
   if (typingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -841,27 +1045,32 @@ document.addEventListener("keyup", (e) => {
 // ── bootstrap: ask the CLI which transport this target uses ──
 async function connect(){
   if (DEMO) return simulate();
-  if (transport) return;                              // re-entry guard
+  if (transport || connecting) return;
   clearTranscript();
-  setState("connecting", "connecting", "reaching the agent");
-  let session;
+  connecting = true;
+  const generation = ++connectionGeneration;
+  el.connect.textContent = 'cancel';
+  setState('connecting','connecting','reaching the agent');
   try {
-    const res = await fetch("/api/session");
-    if (!res.ok) throw new Error("session " + res.status);
-    session = await res.json();
-  } catch (err) {
-    return setState("error", "error", "could not reach the dev server");
+    const res = await fetch('/api/session');
+    if (!res.ok) throw new Error('session '+res.status);
+    const session = await res.json();
+    if (generation !== connectionGeneration) return;
+    if (session.ready === false){
+      teardown('idle');
+      el.hint.textContent = 'the agent is not running yet; see the output';
+      if (!viewPinned) showView('logs');
+      return;
+    }
+    if (session.dev_events_version !== 2 || !session.call_id) throw new Error('streaming session identity unavailable');
+    selectedCallID = session.call_id;
+    session.generation = generation;
+    transport = session.kind;
+    if (session.kind === 'livekit') await connectLivekit(session);
+    else await connectPipecat(session);
+  } catch (err){
+    if (generation === connectionGeneration) teardown('error', String(err.message || err));
   }
-  if (session.ready === false){
-    // The page outlives its runtime in both directions now, so this is a real
-    // answer rather than an error: there is nothing to call yet.
-    setState("idle", "ready", "the agent is not running yet; see the output");
-    if (!viewPinned) showView("logs");
-    return;
-  }
-  transport = session.kind;
-  if (session.kind === "livekit") return connectLivekit(session);
-  return connectPipecat(session);                     // "webrtc-offer"
 }
 
 // ── pipecat transport: WebRTC offer → containerized bot ──
@@ -932,21 +1141,10 @@ async function waitForPeer(pc){
   });
 }
 
-// RTVI 2 message types we render. bot-output carries a stable segment id, so
-// progress updates replace their segment instead of adding transcript rows.
+// RTVI only acknowledges readiness; identified dev events own the transcript.
 function handleRtvi(msg){
-  const t = msg.type, d = msg.data || {};
-  if (t === "bot-ready"){
+  if (msg.type === "bot-ready"){
     clearInterval(clientReadyTimer); clientReadyTimer = 0;
-  } else if (t === "user-transcription"){
-    const text = (d.text || "").trim();
-    if (!text) return;
-    if (d.final){ addUserFinished(text); resetBotTurn(); }
-    else setUserLive(text);
-  } else if (t === "bot-llm-started"){
-    resetBotTurn();
-  } else if (t === "bot-output"){
-    setBotSegment(d.segment_id, d.text);
   }
 }
 
@@ -960,69 +1158,71 @@ function sendClientReady(){
 }
 
 async function connectPipecat(session){
-  const offerUrl = session.offerUrl || "/api/offer";
-  setState("connecting", "connecting", "requesting microphone");
+  const offerUrl = session.offerUrl || '/api/offer';
+  setState('connecting','connecting','requesting microphone');
+  let stream;
   try {
-    mic = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint() });
-    if (!selectedDeviceId) {
-      selectedDeviceId = mic.getAudioTracks()[0].getSettings().deviceId || null;
-      // Re-acquire with an explicit deviceId. Chrome's implicit-default audio
-      // track on macOS sometimes ships silent over WebRTC until the user picks
-      // the device manually — the swap-and-swap-back workaround. One extra
-      // getUserMedia is the smallest fix.
-      if (selectedDeviceId) {
-        mic.getTracks().forEach(t => t.stop());
-        mic = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint() });
+    stream = await navigator.mediaDevices.getUserMedia({audio:audioConstraint()});
+    if (!currentConnection(session)){stream.getTracks().forEach(t=>t.stop());return;}
+    if (!selectedDeviceId){
+      selectedDeviceId = stream.getAudioTracks()[0].getSettings().deviceId || null;
+      if (selectedDeviceId){
+        stream.getTracks().forEach(t=>t.stop());
+        stream = await navigator.mediaDevices.getUserMedia({audio:audioConstraint()});
+        if (!currentConnection(session)){stream.getTracks().forEach(t=>t.stop());return;}
       }
     }
-    await refreshMics();                              // labels resolve once permission is granted
+    mic = stream;
+    await refreshMics();
+    if (!currentConnection(session)) return;
   } catch {
-    return teardown("error", "microphone permission denied");
+    if (currentConnection(session)) teardown('error','microphone permission denied');
+    return;
   }
+  const peer = new RTCPeerConnection();
+  pc = peer;
   try {
-    pc = new RTCPeerConnection();
-    mic.getTracks().forEach(t => pc.addTrack(t, mic));
-    pc.addEventListener("track", e => { el.remote.srcObject = e.streams[0]; startMeter(e.streams[0]); });
-    pc.addEventListener("connectionstatechange", () => {
-      if (["failed","disconnected","closed"].includes(pc.connectionState) && el.body.dataset.state === "connected")
-        teardown("error", "connection lost");
+    stream.getTracks().forEach(t=>peer.addTrack(t,stream));
+    peer.addEventListener('track',e=>{
+      if (!currentConnection(session)) return;
+      el.remote.srcObject=e.streams[0];startMeter(e.streams[0]);
     });
-
-    // RTVI carries transcripts over the "chat" data channel; pipecat's server
-    // expects the client to create it. JSON frames: {label:"rtvi-ai", type, data}.
-    dc = pc.createDataChannel("chat", { ordered: true });
-    dc.addEventListener("open", () => {
-      sendClientReady();
-      clientReadyTimer = setInterval(sendClientReady, 500);
+    peer.addEventListener('connectionstatechange',()=>{
+      if (currentConnection(session) && ['failed','disconnected','closed'].includes(peer.connectionState)) teardown('error','connection lost');
     });
-    dc.addEventListener("message", e => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg && msg.label === "rtvi-ai") handleRtvi(msg);
-      } catch { /* signalling / non-JSON frames pass through */ }
+    const channel = peer.createDataChannel('chat',{ordered:true});
+    dc = channel;
+    channel.addEventListener('open',()=>{
+      if (!currentConnection(session)) return;
+      sendClientReady();clientReadyTimer=setInterval(sendClientReady,500);
     });
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    await waitForIce(pc);
-    setState("connecting", "connecting", "negotiating with agent");
-
-    const res = await fetch(offerUrl, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, pc_id: pcId }),
+    channel.addEventListener('message',e=>{
+      if (!currentConnection(session)) return;
+      try {const msg=JSON.parse(e.data);if(msg?.label==='rtvi-ai')handleRtvi(msg);}catch{}
     });
-    if (!res.ok) throw new Error("offer rejected (" + res.status + ")");
-    const answer = await res.json();
-    pcId = answer.pc_id || pcId;
-    await pc.setRemoteDescription(answer);
-    await waitForPeer(pc);
-
+    const offer=await peer.createOffer();
+    if (!currentConnection(session)) return;
+    await peer.setLocalDescription(offer);
+    await waitForIce(peer);
+    if (!currentConnection(session)) return;
+    setState('connecting','connecting','negotiating with agent');
+    const res=await fetch(offerUrl,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({sdp:peer.localDescription.sdp,type:peer.localDescription.type,pc_id:pcId,request_data:{unmute_dev_call_id:session.call_id}}),
+    });
+    if (!currentConnection(session)) return;
+    if (!res.ok) throw new Error('offer rejected ('+res.status+')');
+    const answer=await res.json();
+    if (!currentConnection(session)) return;
+    pcId=answer.pc_id || pcId;
+    await peer.setRemoteDescription(answer);
+    await waitForPeer(peer);
+    if (!currentConnection(session)) return;
+    connecting=false;
     setMuted(false);
     el.connect.textContent = "end call";
-    setState("connected", "live", "talk to your agent");
-  } catch (err) {
-    teardown("error", String(err.message || err));
-  }
+    setState('connected','live','talk to your agent');
+  } catch(err){if(currentConnection(session))teardown('error',String(err.message || err));}
 }
 
 // ── livekit transport: join a room with the vendored JS SDK ──
@@ -1058,89 +1258,65 @@ async function swapMicLivekit(){
 }
 
 async function connectLivekit(session){
-  setState("connecting", "connecting", "loading the livekit client");
-  const LK = await loadLiveKit();
-  if (!LK) return teardown("error", "could not load the livekit client");
-
-  room = new LK.Room({ adaptiveStream:true, dynacast:true });
-  room.on(LK.RoomEvent.TrackSubscribed, (track) => {
-    if (track.kind === LK.Track.Kind.Audio){
-      const stream = new MediaStream([track.mediaStreamTrack]);
-      el.remote.srcObject = stream;                   // playback
-      startMeter(stream);                             // agent voice drives the meter
+  setState('connecting','connecting','loading the livekit client');
+  const LK=await loadLiveKit();
+  if (!currentConnection(session)) return;
+  if (!LK) return teardown('error','could not load the livekit client');
+  const nextRoom=new LK.Room({adaptiveStream:true,dynacast:true});
+  room=nextRoom;
+  nextRoom.on(LK.RoomEvent.TrackSubscribed,track=>{
+    if (!currentConnection(session)) return;
+    if(track.kind===LK.Track.Kind.Audio){
+      const stream=new MediaStream([track.mediaStreamTrack]);
+      el.remote.srcObject=stream;startMeter(stream);
     }
   });
-  room.on(LK.RoomEvent.TrackUnsubscribed, () => { el.remote.srcObject = null; });
-  room.on(LK.RoomEvent.LocalTrackPublished, (pub) => {
-    if (pub && pub.kind === LK.Track.Kind.Audio) attachLocalMic();
+  nextRoom.on(LK.RoomEvent.TrackUnsubscribed,()=>{if(currentConnection(session))el.remote.srcObject=null;});
+  nextRoom.on(LK.RoomEvent.LocalTrackPublished,pub=>{
+    if(currentConnection(session) && pub?.kind===LK.Track.Kind.Audio)attachLocalMic();
   });
-  room.on(LK.RoomEvent.Disconnected, () => teardown("idle"));
-  room.on(LK.RoomEvent.ParticipantConnected, (p) => setState("connected", "live", "talking to " + p.identity));
-  // Transcriptions are optional across SDK builds; wire them when present.
-  if (LK.RoomEvent.TranscriptionReceived){
-    room.on(LK.RoomEvent.TranscriptionReceived, (segments, participant) => {
-      const who = participant && participant.isLocal ? "you" : "bot";
-      for (const seg of segments){
-        const text = (seg.text || "").trim();
-        if (!text) continue;
-        if (who === "you" && !seg.final) setUserLive(text);
-        else if (who === "you"){ addUserFinished(text); resetBotTurn(); }
-        else setBotSegment(seg.id, text);
-      }
-    });
-  }
-
+  nextRoom.on(LK.RoomEvent.Disconnected,()=>{if(currentConnection(session))teardown('idle');});
+  nextRoom.on(LK.RoomEvent.ParticipantConnected,p=>{
+    if(currentConnection(session))setState('connected','live','talking to '+p.identity);
+  });
   try {
-    setState("connecting", "connecting", "connecting to room");
-    await room.connect(session.url, session.token);
-    setState("connected", "live", "talk to your agent");
+    await nextRoom.connect(session.url,session.token);
+    if (!currentConnection(session)){nextRoom.disconnect();return;}
+    connecting=false;
+    setState('connected','live','talk to your agent');
     el.connect.textContent = "end call";
-  } catch (err) {
-    return teardown("error", String(err.message || err));
-  }
-  // Mic failure must not mask a successful join: you can still hear the agent.
+  } catch(err){if(currentConnection(session))teardown('error',String(err.message || err));return;}
   try {
-    await room.localParticipant.setMicrophoneEnabled(true);
-    setMuted(false);
-    attachLocalMic();                                 // in case the publish event already fired
-    await refreshMics();                              // labels resolve once permission is granted
-  } catch (err) {
-    setMicUnavailable();                              // nothing to unmute, so not "muted"
-    el.state.textContent = "live — microphone blocked; allow access and reconnect";
+    await nextRoom.localParticipant.setMicrophoneEnabled(true);
+    if (!currentConnection(session)) return;
+    setMuted(false);attachLocalMic();await refreshMics();
+  } catch {
+    if (!currentConnection(session)) return;
+    setMicUnavailable();
+    el.state.textContent='live — microphone blocked; allow access and reconnect';
   }
 }
 
-// blur() after every click: a button that keeps focus swallows the hold key.
+
+// Keep native focus; the keyboard handler owns push-to-talk.
 el.connect.addEventListener("click", () => {
-  el.connect.blur();
-  el.body.dataset.state === "connected" ? teardown("idle") : connect();
+  (connecting || el.body.dataset.state === "connected") ? teardown("idle") : connect();
 });
-el.mute.addEventListener("click", () => { el.mute.blur(); toggleMute(); });
+el.mute.addEventListener("click", () => { toggleMute(); });
 if (!DEMO && navigator.mediaDevices && navigator.mediaDevices.addEventListener)
   navigator.mediaDevices.addEventListener("devicechange", () => { if (transport) refreshMics(); });
 
 // ── demo-only visual preview (DEMO=true builds) ──────────
 function simulate(){
   clearTranscript();
-  setState("connecting", "connecting", "negotiating with agent");
-  setTimeout(() => {
-    setMuted(false); el.connect.textContent = "end call";
-    setState("connected", "live", "talk to your agent");
-    pushTurn("bot", "Hi! I'm here to help. What can I do for you?");
-    setTimeout(() => setUserLive("hey what's the weather"), 800);
-    setTimeout(() => addUserFinished("hey what's the weather in Berlin"), 1700);
-    setTimeout(() => pushTurn("bot", "It's 14 degrees and partly cloudy in Berlin right now."), 2400);
-    const t0 = performance.now();
-    const tick = () => {
-      const t = (performance.now() - t0) / 1000;
-      for (let i = 0; i < BARS; i++){
-        const env = muted ? 0.12 : (0.5 + 0.5 * Math.sin(t * 3 + i * 0.5)) * (0.4 + 0.6 * Math.abs(Math.sin(t * 1.3)));
-        bars[i].style.transform = `scaleY(${Math.max(0.08, env)})`;
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    tick();
-  }, 750);
+  selectedCallID = "demo";
+  setMuted(false);
+  el.connect.textContent = "end call";
+  setState("connected", "live", "talk to your agent");
+  attachRecord({version:2,kind:"exchange",call_id:"demo",id:"greeting",revision:1,order:1,
+    exchange:{role:"response",state:"ended",link_status:"unavailable",playback:"unknown"}});
+  attachRecord({version:2,kind:"text",call_id:"demo",id:"hello",revision:1,order:2,
+    text:{exchange_id:"greeting",message_id:"hello",speaker:"assistant",text:"Hi! How can I help?",state:"final",origin:"generated",separator_before:""}});
 }
 
 setBars(0.08);

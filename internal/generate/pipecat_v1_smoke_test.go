@@ -2336,7 +2336,7 @@ func runPipecatSmoke(t *testing.T, example string, mutate func(*ir.Target), muta
 	runPipecatSmokeScript(t, example, mutate, mutateAgent, smokeCheckScript)
 }
 
-func runPipecatSmokeScript(t *testing.T, example string, mutate func(*ir.Target), mutateAgent func(*ir.Agent), script string) {
+func runPipecatSmokeScript(t *testing.T, example string, mutate func(*ir.Target), mutateAgent func(*ir.Agent), script string) []byte {
 	t.Helper()
 	if _, err := exec.LookPath("uv"); err != nil {
 		t.Skip("uv not available")
@@ -2360,7 +2360,7 @@ func runPipecatSmokeScript(t *testing.T, example string, mutate func(*ir.Target)
 	if err != nil {
 		t.Fatal(err)
 	}
-	runGeneratedPipecatSmokeScript(t, artifact, script)
+	return runGeneratedPipecatSmokeScript(t, artifact, script)
 }
 
 // knowledgeSmokeStub is prepended to every emitted-project smoke script.
@@ -2434,7 +2434,7 @@ func TestWithKnowledgeStubKeepsTheDocstringFirst(t *testing.T) {
 	}
 }
 
-func runGeneratedPipecatSmokeScript(t *testing.T, artifact Artifact, script string) {
+func runGeneratedPipecatSmokeScript(t *testing.T, artifact Artifact, script string) []byte {
 	t.Helper()
 	script = withKnowledgeStub(script)
 	dir := t.TempDir()
@@ -2455,9 +2455,11 @@ func runGeneratedPipecatSmokeScript(t *testing.T, artifact Artifact, script stri
 	// so repeat runs are fast) and runs the check inside it.
 	cmd := exec.Command("uv", "run", "python", "smoke_check.py")
 	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		t.Fatalf("smoke check failed:\n%s", out)
 	} else {
 		t.Logf("%s", out)
 	}
+	return out
 }

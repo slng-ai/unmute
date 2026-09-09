@@ -14,7 +14,7 @@ there is nothing left to hold this back. */ -}}
         # Not awaited, for the same reason the tool announcement is not: awaiting
         # the handle holds the step until playout finishes, which is the delay
         # this line exists to hide.
-        self.session.say({{pyq .Announce}}){{end}}{{end}}{{define "opening_tools"}}tools=[t.id for t in self.tools if t.id not in { {{- range $i, $t := .Transfers}}{{if $i}}, {{end}}{{pyq $t.Method}}{{end -}} }]{{end}}
+        dev_say(self.session, {{pyq .Announce}}){{end}}{{end}}{{define "opening_tools"}}tools=[t.id for t in self.tools if t.id not in { {{- range $i, $t := .Transfers}}{{if $i}}, {{end}}{{pyq $t.Method}}{{end -}} }]{{end}}
 {{- /* svc renders any resolved ServiceCall inline (session/agent kwargs).
 Classes, kwargs, and model-route forms come from the provider catalogue
 (internal/target/catalog_livekit.go). */ -}}
@@ -42,7 +42,7 @@ agents and tasks share the shape (T15). */ -}}
         # handle holds the tool until playout finishes, which is the delay this
         # line exists to hide. Announced after any refusal, so a refused call
         # stays silent.
-        self.session.say({{pyq .Announce}})
+        dev_say(self.session, {{pyq .Announce}})
 {{- end}}
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -71,7 +71,7 @@ the file defines a callable named like the tool; sync or async). */ -}}
 {{- end}}
 {{- if .Announce}}
         # Not awaited, on purpose: see the same line in webhook_tool.
-        self.session.say({{pyq .Announce}})
+        dev_say(self.session, {{pyq .Announce}})
 {{- end}}
         result = tools.{{.Method}}.{{.Method}}({{.CallKwargs}})
         if inspect.isawaitable(result):
@@ -90,7 +90,7 @@ never reads a file and never re-indexes (FR-017). */ -}}
         {{triple .Description}}
 {{- if .Announce}}
         # Not awaited, on purpose: see the same line in webhook_tool.
-        self.session.say({{pyq .Announce}})
+        dev_say(self.session, {{pyq .Announce}})
 {{- end}}
         return await knowledge.look_up({{pyq .KnowledgeBase}}, query)
 {{end -}}
@@ -109,7 +109,7 @@ The result is a pydantic model, so it is dumped to a dict for the model. */ -}}
 {{- end}}
 {{- if .Announce}}
         # Not awaited, on purpose: see the same line in webhook_tool.
-        self.session.say({{pyq .Announce}})
+        dev_say(self.session, {{pyq .Announce}})
 {{- end}}
         result = tools.{{.Method}}.{{hostedEntry}}(tools.{{.Method}}.{{hostedInput}}({{.CallKwargs}}))
         if inspect.isawaitable(result):
@@ -227,7 +227,7 @@ from livekit.agents.beta.tools import EndCallTool  # prebuilt end_call (beta)
 from livekit.agents.voice import MetricsCollectedEvent
 from livekit.plugins import {{join .PluginModules ", "}}
 
-from dev_metrics import install_dev_metrics
+from dev_metrics import dev_llm_node, dev_say, install_dev_metrics
 {{if .Knowledge.Knowledge}}import knowledge
 {{end}}{{if .Tracing}}{{if eq .TracingProvider "coval"}}from tracing import setup_coval
 {{else}}from tracing import setup_langfuse
@@ -863,7 +863,7 @@ def _hydrate_livekit_context(userdata: Userdata, context: dict, *, require_all: 
 {{- end}}
 async def _livekit_entry_greeting(session: AgentSession) -> None:
 {{- if .Telephony.Greeting.Say}}
-    await session.say({{if .Telephony.Greeting.Templated}}_render({{pyq .Telephony.Greeting.Say}}, session.userdata){{else}}{{pyq .Telephony.Greeting.Say}}{{end}})
+    await dev_say(session, {{if .Telephony.Greeting.Templated}}_render({{pyq .Telephony.Greeting.Say}}, session.userdata){{else}}{{pyq .Telephony.Greeting.Say}}{{end}})
 {{- else if .Telephony.Greeting.RunLLM}}
     session.generate_reply(instructions="Greet the caller and offer to help.")
 {{- else}}
@@ -1026,13 +1026,17 @@ class _SlngScoped:
     _slng_scope: str
 
     def llm_node(self, chat_ctx, tools, model_settings):
-        return _slng_llm_node(self, chat_ctx, tools, model_settings)
+        return dev_llm_node(self, _slng_llm_node, chat_ctx, tools, model_settings)
 
 
 {{end -}}
 # --- agents ----------------------------------------------------------------
 {{range .Agents}}
 class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
+{{if not .SlngScope}}    def llm_node(self, chat_ctx, tools, model_settings):
+        return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
+
+{{end -}}
 {{if .SlngScope}}    # This agent's own cache scope, sent by _SlngScoped on every request.
     _slng_scope = {{pyq .SlngScope}}
 
@@ -1082,7 +1086,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- end}}
 {{- if .Greeting}}
 {{- if .Greeting.Say}}
-        await self.session.say({{if .Greeting.Templated}}_render({{pyq .Greeting.Say}}, self.session.userdata){{else}}{{pyq .Greeting.Say}}{{end}})
+        await dev_say(self.session, {{if .Greeting.Templated}}_render({{pyq .Greeting.Say}}, self.session.userdata){{else}}{{pyq .Greeting.Say}}{{end}})
 {{- else if .Greeting.RunLLM}}
 {{- if .Transfers}}
 {{template "opening_guard_note" .}}        self.session.generate_reply(instructions="Greet the caller and offer to help.", {{template "opening_tools" .}})
@@ -1108,7 +1112,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
         {{triple .When}}
 
 {{- if .Announce}}
-        await ctx.session.say({{pyq .Announce}}, allow_interruptions=False)
+        await dev_say(ctx.session, {{pyq .Announce}}, allow_interruptions=False)
 {{- end}}
 
 
@@ -1145,7 +1149,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
         #
         # The tool speaks its own line before the hold (V4/B4): the caller
         # hears the handoff start instead of sudden hold music.
-        await ctx.session.say(
+        await dev_say(ctx.session,
             "One moment while I bring a colleague on the line.", allow_interruptions=False
         )
         # Read the conversation once and hand that same object over, so the
@@ -1208,7 +1212,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
             )
             return f"Nobody took the transfer ({error}). Tell the caller and keep helping them."
 {{- end}}
-        await ctx.session.say(
+        await dev_say(ctx.session,
             "You are on the line with my colleague now. I will leave you to it.",
             allow_interruptions=False,
         )
@@ -1259,7 +1263,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
         # The tool speaks the announcement itself (V4/B4): leaving it to the
         # prompt lets a model say "putting you through" and never call this,
         # which a caller cannot tell apart from a transfer that failed.
-        await ctx.session.say(
+        await dev_say(ctx.session,
             "Putting you through now, one moment.", allow_interruptions=False
         )
         request = api.TransferSIPParticipantRequest(
@@ -1432,11 +1436,11 @@ class _RetryEmptyTaskResponseMixin:
                 if getattr(self, "_slng_scope", None)
                 else Agent.default.llm_node
             )
-            async for chunk in node(
-                self, request_chat_ctx, request_tools, model_settings
+            async for chunk in dev_llm_node(
+                self, node, request_chat_ctx, request_tools, model_settings
             ):
-{{else}}            async for chunk in Agent.default.llm_node(
-                self, request_chat_ctx, request_tools, model_settings
+{{else}}            async for chunk in dev_llm_node(
+                self, Agent.default.llm_node, request_chat_ctx, request_tools, model_settings
             ):
 {{end}}                if isinstance(chunk, str):
                     has_response = has_response or bool(chunk.strip())
@@ -1594,7 +1598,7 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 
         try:
 {{- if .Announce}}
-            await ctx.session.say({{pyq .Announce}}, allow_interruptions=False)
+            await dev_say(ctx.session, {{pyq .Announce}}, allow_interruptions=False)
 {{- end}}
 
 
@@ -1778,7 +1782,7 @@ async def entrypoint(ctx: JobContext) -> None:
 {{end}}{{end}}
     # Inert unless the dev loop set UNMUTE_DEV_METRICS. Reads session events, so
     # it never touches the tracer provider an opt-in trace export would own.
-    install_dev_metrics(session)
+    install_dev_metrics(session, call_id=ctx.room.name)
 
     @session.on("metrics_collected")
     def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:

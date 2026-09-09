@@ -2,6 +2,7 @@ package devmetrics
 
 import (
 	"bufio"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -178,5 +179,112 @@ func TestAbsentTimingStaysNil(t *testing.T) {
 		if got != nil {
 			t.Errorf("%s decoded to %v, want nil: an unreported stage must not read as zero", name, *got)
 		}
+	}
+}
+
+func TestStreamingContract(t *testing.T) {
+	for _, target := range []string{"livekit", "pipecat"} {
+		records := readFixture(t, "streaming-"+target+".jsonl")
+		kinds := map[string]bool{}
+		for _, record := range records {
+			kinds[record.Kind] = true
+		}
+		if len(kinds) != 5 {
+			t.Fatalf("%s: got %v", target, kinds)
+		}
+	}
+}
+
+func TestStreamingValidation(t *testing.T) {
+	valid := `{"version":2,"kind":"measurement","call_id":"call-a","id":"m:1","revision":1,"order":1,"measurement":{"scope":"unassigned","metric":"first_response","value":0,"unit":"seconds","state":"measured","source":"sdk"}}`
+	for _, replace := range [][2]string{
+		{`"version":2`, `"version":3`}, {`"revision":1`, `"revision":0`},
+		{`"order":1`, `"order":-1`}, {`"call-a"`, `""`},
+		{`"m:1"`, `"` + strings.Repeat("x", 129) + `"`},
+		{`"measured"`, `"banana"`}, {`"value":0`, `"value":-1`},
+		{`"value":0`, `"value":1e999`}, {`"value":0,`, ``},
+		{`"measured"`, `"unavailable"`}, {`"kind":"measurement"`, `"kind":"text"`},
+		{`"measurement":`, `"text":{},"measurement":`},
+	} {
+		bad := strings.Replace(valid, replace[0], replace[1], 1)
+		if _, found, err := Extract([]byte(Sentinel + bad)); !found || err == nil {
+			t.Errorf("accepted invalid record: %s", bad)
+		}
+	}
+	for _, input := range []string{valid, strings.Replace(valid, `"value":0,`, ``, 1)} {
+		if !strings.Contains(input, `"value"`) {
+			input = strings.Replace(input, `"measured"`, `"unavailable"`, 1)
+		}
+		if _, _, err := Extract([]byte("container | " + Sentinel + input)); err != nil {
+			t.Error(err)
+		}
+	}
+	if _, found, err := Extract([]byte(Sentinel + strings.Repeat(" ", 512<<10) + valid)); !found || err == nil {
+		t.Error("oversized framed record accepted")
+	}
+}
+
+func TestStreamingPayloadStates(t *testing.T) {
+	for _, kind := range []string{"call", "exchange", "text", "operation"} {
+		records, err := os.ReadFile("testdata/streaming-livekit.jsonl")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(records), "\n") {
+			if !strings.Contains(line, `"kind":"`+kind+`"`) {
+				continue
+			}
+			var record map[string]any
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(line, Sentinel)), &record); err != nil {
+				t.Fatal(err)
+			}
+			payload := record[kind].(map[string]any)
+			payload["state"] = "invalid"
+			encoded, err := json.Marshal(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := Extract(append([]byte(Sentinel), encoded...)); err == nil {
+				t.Errorf("accepted invalid %s state", kind)
+			}
+			break
+		}
+	}
+}
+
+func TestStreamingRejectsMissingTextAndScope(t *testing.T) {
+	text := `{"version":2,"kind":"text","call_id":"call-a","id":"s","revision":1,"order":1,"text":{"message_id":"m","speaker":"user","text":"","state":"final","origin":"recognition","separator_before":""}}`
+	for _, bad := range []string{
+		strings.Replace(text, `"text":"",`, "", 1),
+		strings.Replace(text, `,"separator_before":""`, "", 1),
+		strings.Replace(text, `"message_id":"m"`, `"message_id":""`, 1),
+		strings.Replace(text, `"call-a"`, `"call with spaces"`, 1),
+		strings.Replace(text, `"origin":"recognition"`, `"origin":"thought"`, 1),
+		strings.Replace(text, `"text":""`, `"text":"`+string([]byte{0xff})+`"`, 1),
+		strings.Replace(text, `"version":2`, `"version":0`, 1),
+		strings.Replace(text, `"version":2`, `"version":2,"e2e":0`, 1),
+		strings.Replace(text, `"speaker":"user"`, `"speaker":"user","prompt":"private"`, 1),
+	} {
+		if _, _, err := Extract([]byte(Sentinel + bad)); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+	if _, _, err := Extract([]byte(Sentinel + text)); err != nil {
+		t.Errorf("empty correction: %v", err)
+	}
+	measurement := `{"version":2,"kind":"measurement","call_id":"call-a","id":"m","revision":1,"order":1,"measurement":{"scope":"operation","metric":"first_response","unit":"seconds","state":"unavailable","source":"sdk"}}`
+	if _, _, err := Extract([]byte(Sentinel + measurement)); err == nil {
+		t.Error("operation measurement without its operation accepted")
+	}
+}
+
+func TestPlaybackDelayKeepsItsOwnQuantity(t *testing.T) {
+	line := Sentinel + `{"version":2,"kind":"measurement","call_id":"call-a","id":"playback","revision":1,"order":1,"measurement":{"scope":"response","exchange_id":"reply","metric":"playback_delay","value":0.002,"unit":"seconds","state":"measured","source":"LiveKit playback_latency"}}`
+	record, found, err := Extract([]byte(line))
+	if err != nil || !found {
+		t.Fatalf("native playback delay lost: %v", err)
+	}
+	if record.Measurement.Metric != "playback_delay" || *record.Measurement.Value != 0.002 {
+		t.Fatal("playback delay became another quantity")
 	}
 }
