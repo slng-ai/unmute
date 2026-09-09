@@ -78,7 +78,14 @@ func printValidationReport(out, errOut io.Writer, report ir.ValidateReport) {
 		if len(row.Errors) > 0 {
 			status = u.Failed("✗")
 		}
-		fmt.Fprintf(out, "%s %s %s\n", status, u.Accent(row.Name), u.Dim("("+string(row.Provider)+")"))
+		fmt.Fprintf(out, "%s %s %s", status, u.Accent(row.Name), u.Dim("("+string(row.Provider)+")"))
+		// row.Scope is set only when this row's checks left something for
+		// `unmute deploy` to confirm, which is what keeps this from becoming a
+		// routine line every slng row prints.
+		if row.Scope != "" {
+			fmt.Fprintf(out, "  %s", u.Dim(row.Scope))
+		}
+		fmt.Fprintln(out)
 	}
 	// Prerequisites first, because they are the thing an author has to go and ask
 	// someone else for, and the lead time is theirs, not ours. Exit code stays 0:

@@ -1,7 +1,4 @@
-description: Look up an order by its number and return its status and delivery date.
-
-slng:
-  hash: f169d60d6496768081448551f1a84286a34569063a61c480b0aa12475759a00f
+slng: check_order
 
 announce: One moment while I look that up.
 effect: returns_data

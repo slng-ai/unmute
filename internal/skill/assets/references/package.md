@@ -487,30 +487,37 @@ project:
 
 ```text
 build/slng/
-├── agent.json          the agent create body
-├── tools/<name>.json   one tool body per local: or webhook: tool
-└── README.md           the runbook
+├── agent.json               the agent create body
+├── compile-report.json      what was compiled, and which checks were left to deployment
+└── README.md                the runbook
 ```
 
-A package whose tools are all builtins gets no `tools/` directory. Unmute's
+This target writes no `tools/` directory at all: every tool reference,
+builtin, hosted or MCP, resolves by name against the organisation, so there
+is never a body of the package's own to write beside the agent body. Unmute's
 compiler opens no connection to SLNG at any point: `unmute deploy` hands the
 files to the `voiceai` CLI, which must be on PATH
 (`brew install slng-ai/tap/voiceai`).
 
 ```bash
 export SLNG_API_KEY=...
-unmute pull .                              # only if a tool uses `slng:`; commit what it writes
 unmute deploy .
 unmute deploy . --dry-run                  # check everything, change nothing
 voiceai agents web-sessions create <agent_id> --file session.json
 ```
 
-`unmute pull` is the only command that fetches anything, and it is required
-before the first compile of a package that references a hosted tool: `validate`
-and `compile` read the committed mirror and open no connection, which is what
-lets a machine with no SLNG key build the package. Do not pass `--run-samples`.
-A sample proves a tool before the platform publishes it, and this push creates
-no tool.
+No `unmute pull` first. A `slng:` reference needs no hash, no mirror and no
+pull: `unmute deploy` resolves it directly against the organisation. `pull`
+matters only for a package that also targets `livekit` or `pipecat`, which
+build and run the tool themselves and so need a real copy of it; a slng-only
+package never runs it. Do not pass `--run-samples`. A sample proves a tool
+before the platform publishes it, and this push creates no tool.
+
+A real push needs a `voiceai` release that supports a checked, resolved
+attachment. `unmute deploy` checks for that support first and refuses with
+upgrade guidance, naming the install command, when it is missing, rather than
+falling back to an unchecked push. Tell the user this if a run refuses early,
+naming `--require-resolved`.
 
 The key is read from `SLNG_API_KEY`, then `VOICEAI_API_KEY`, then whatever
 profile `voiceai login` stored. Those are two names for one token: a single SLNG
@@ -569,11 +576,15 @@ own stored capability snapshot. Nothing connects to the server. The one caveat
 is a stale or unhealthy snapshot, which the push refuses; refresh it first with
 `voiceai mcp run <server>`.
 
-A refused deploy has changed nothing, and reports every problem together with the
-dashboard page that fixes each: `vault missing`, `tool unresolved`,
-`agent ambiguous`. Two more are refused earlier, by `validate`, before the
-account is read: a `slng:` tool with no committed mirror, and a mirror that does
-not match the hash its tool file pins. Both say to run `unmute pull`.
+A refused deploy has changed nothing, and reports every problem together with
+the dashboard page that fixes each: `vault missing`, a hosted tool the
+organisation does not have, an argument that does not fit a published
+tool's parameters, `agent ambiguous`, or an incompatible `voiceai`. All of
+these come from `unmute deploy` reading the account or resolving a
+reference, not from `validate`: `unmute deploy` compiles only the slng
+target, and slng reads no mirror, so `no mirror of it is committed` and
+`does not match the hash` never happen here. Those two belong to a `livekit`
+or `pipecat` compile of the same package.
 
 The pushed agent is called **`<name>-<target>`**, so a package named
 `acme-support` on the target below pushes `acme-support-slng`. Check the name is
@@ -626,9 +637,9 @@ holds.
 
 So there are three ways to name a tool on this target, and no fourth:
 
-- `slng:` for a tool the organisation hosts. Write `slng: {}`, tell the user to
-  run `unmute pull`, and commit the mirror it writes. See
-  [tools.md](tools.md).
+- `slng:` for a tool the organisation hosts. Write `slng: check_order`, one
+  line, the tool's exact name on the platform: no hash, no mirror, no pull,
+  no description or schema to copy. See [tools.md](tools.md).
 - `builtin:` for a capability SLNG curates, such as `end_call`.
 - `mcp:` for a server the organisation registered.
 
@@ -637,8 +648,9 @@ SLNG dashboard, and that unmute cannot create it. Do not write a `local:` or
 `webhook:` block for an slng package and hope: it is refused at validate,
 before anything is written.
 
-A hosted tool's Python dependencies are the platform's own, mirrored rather
-than authored. Each is an exact `name==version` pin, because SLNG builds a
+A hosted tool's Python dependencies are the platform's own. They are invisible
+to a slng-only package; a package that also pulls a mirror for `livekit` or
+`pipecat` sees them as an exact `name==version` pin, because SLNG builds a
 locked environment per tool. The sandbox runs Python 3.14 with `pydantic`
 present, so a tool using only the standard library and pydantic mirrors none.
 A hosted tool that does declare dependencies is refused on `livekit` and
@@ -655,9 +667,13 @@ one offers with `voiceai mcp tools <server>`.
 
 ### Vault names and Vault tokens
 
-SLNG reads secrets from its own store. The emitted runbook lists every name the
-package needs, grouped by where it came from, above the push command. Unmute
-lists names and never values.
+SLNG reads secrets from its own store. The emitted runbook lists what compiling
+the package could see, grouped by where it came from, above the push command:
+a declared `auth:`, a `{{$NAME}}` token, and anything a committed mirror
+recorded. That is not the complete picture for a hosted tool or MCP server: its
+own credential is SLNG's, invisible to an offline compile, so `unmute deploy`
+reads the account directly and may ask about an entry the runbook never named.
+Unmute lists names and never values, either way.
 
 A `{{$NAME}}` token in a prompt, a greeting or a tool field is a **SLNG Vault
 variable**, not a package variable: SLNG substitutes the value at run time and

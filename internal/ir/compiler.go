@@ -708,6 +708,38 @@ type Tool struct {
 	// questions.
 	MirrorPin   string `json:"-" yaml:"-"`
 	MirrorBytes []byte `json:"-" yaml:"-"`
+	// MirrorFailure is why a mirror that is on disk could not be read (slng
+	// only). Empty covers both "no mirror" and "a mirror that decoded", which
+	// are different states elsewhere but the same one here: this field answers
+	// only "did reading it fail".
+	//
+	// json:"-" because it is not resolved authoring and not a compiler decision
+	// either: it is a fact about a file the author did not write, and inlining a
+	// decoder complaint into the debug schema would bury both of the things that
+	// schema is for. The selected code target's validation turns it into the
+	// refusal an author reads.
+	MirrorFailure string `json:"-" yaml:"-"`
+	// MirrorScalar records that this tool's `slng:` reference is the scalar
+	// form rather than the legacy hash block (slng only). A missing or
+	// mismatched-pin refusal needs to know which file to name: a scalar
+	// reference's pin is generated tools/<name>.slng.meta.json, a legacy one's
+	// is the tool file's own `hash:` line.
+	MirrorScalar bool `json:"-" yaml:"-"`
+	// HostedName is the tool SLNG hosts (slng only): the `slng:` scalar, or this
+	// tool's own name for the legacy block. It is separate from the map key
+	// because the two are allowed to differ, which is what makes
+	// tools/order_status.yaml holding `slng: check_order` legal.
+	HostedName string `json:"hosted_name,omitempty" yaml:"hosted_name,omitempty"`
+	// DescriptionAuthored records that Description came from the tool file
+	// rather than from the mirror.
+	//
+	// Load-bearing on slng: an attachment's description is an override, and an
+	// inherited one must not become one. Without this, folding the mirror's
+	// description in for the code targets would silently pin the platform's own
+	// words onto the attachment, so removing `description:` from the file would
+	// stop restoring inheritance and a stale mirror could override a published
+	// description that had moved on.
+	DescriptionAuthored bool `json:"description_authored,omitempty" yaml:"description_authored,omitempty"`
 }
 
 type ToolExecution string

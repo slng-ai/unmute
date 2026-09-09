@@ -246,7 +246,21 @@ func TestLoadToolShape(t *testing.T) {
 		{"slng with output", "description: Probe.\nslng:\n  hash: abc\noutput: { type: object }\n", "tools/probe.yaml:4: remove `output`"},
 		{"slng beside webhook", "description: Probe.\nslng:\n  hash: abc\nwebhook:\n  url_env: PROBE_URL\n", "two execution blocks"},
 		{"slng beside local", "description: Probe.\nslng:\n  hash: abc\nlocal:\n  handler: tools/probe.py\n", "two execution blocks"},
-		{"bare slng block", "description: Probe.\nslng:\n", "needs an explicit empty body"},
+		// A bare `slng:` is a name nobody wrote. The message teaches the scalar,
+		// because that is the form a package should carry now; `slng: {}` still
+		// loads and is what a legacy package written before the first pull holds.
+		{"bare slng block", "description: Probe.\nslng:\n", "write `slng: check_order`"},
+		{"empty slng name", "description: Probe.\nslng: \"\"\n", "write `slng: check_order`"},
+		{"padded slng name", "description: Probe.\nslng: \"  check_order  \"\n", "write `slng: check_order`"},
+		{"numeric slng name", "description: Probe.\nslng: 42\n", "write `slng: check_order`"},
+		{"boolean slng name", "description: Probe.\nslng: true\n", "write `slng: check_order`"},
+		{"listed slng name", "description: Probe.\nslng: [check_order]\n", "write `slng: check_order`"},
+		// The legacy block takes `hash:` and nothing else. A `name:` inside it is
+		// the scalar written one level too deep, and is named as such rather than
+		// accepted as a third form nobody documents.
+		{"slng block naming the tool", "description: Probe.\nslng:\n  name: check_order\n", "write `slng: check_order`"},
+		{"slng block with a name and a pin", "description: Probe.\nslng:\n  name: check_order\n  hash: abc\n", "write `slng: check_order`"},
+		{"slng block unknown key", "description: Probe.\nslng:\n  version: 3\n", "unknown key"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Load(writeToolPackage(t, tc.body))
@@ -277,6 +291,10 @@ func TestLoadToolShape(t *testing.T) {
 		{"explicit empty slng", "description: Probe.\nslng: {}\n", "slng"},
 		{"slng with a pin", "description: Probe.\nslng:\n  hash: abc\n", "slng"},
 		{"slng keeps announce and effect", "description: Probe.\nannounce: One moment.\neffect: returns_data\nslng:\n  hash: abc\n", "slng"},
+		// The scalar is the whole reference: one line, the hosted tool's name.
+		{"scalar slng", "slng: check_order\n", "slng"},
+		{"scalar slng with a description", "description: Probe.\nslng: check_order\n", "slng"},
+		{"scalar slng keeps announce and inject", "announce: One moment.\nslng: check_order\ninject:\n  - query: hello\n", "slng"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pkg, err := Load(writeToolPackage(t, tc.body))
@@ -507,5 +525,67 @@ func TestLoadTaskItemAcceptsBareNameAndMapping(t *testing.T) {
 	}
 	if tasks[1].Ref != "" || tasks[1].Task == nil || tasks[1].Task.Name != "verify_customer" {
 		t.Errorf("mapping item = %+v, want Task.Name %q and no Ref", tasks[1], "verify_customer")
+	}
+}
+
+// TestLoadSlngReference is the half TestLoadToolShape cannot see: which of the
+// two forms was written, and what each one resolved the hosted name to. The
+// local file name and the hosted name are separate values now, so a test that
+// only checked the execution kind would pass with them swapped.
+func TestLoadSlngReference(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		wantName   string
+		wantHash   string
+	}{
+		{"scalar", "slng: check_order\n", "check_order", ""},
+		// The alias, which is the whole point of the field: the file is
+		// tools/probe.yaml and the agent attaches `probe`, while deployment
+		// resolves `check_order`.
+		{"alias", "slng: check_order\n", "check_order", ""},
+		{"hyphenated hosted name", "slng: search-places-text\n", "search-places-text", ""},
+		{"legacy pin", "description: Probe.\nslng:\n  hash: abc123\n", "", "abc123"},
+		// `slng: {}` is a legacy block with nothing in it, not a scalar with an
+		// empty name: it carries neither a hosted name nor a pin, and the target
+		// that needs the mirror is what refuses it.
+		{"legacy before the first pull", "description: Probe.\nslng: {}\n", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg, err := Load(writeToolPackage(t, tc.body))
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			tool := pkg.Tools["probe"]
+			if tool.Slng == nil {
+				t.Fatal("the slng block did not decode at all")
+			}
+			if tool.Slng.Name != tc.wantName {
+				t.Errorf("hosted name = %q, want %q", tool.Slng.Name, tc.wantName)
+			}
+			if tool.Slng.Hash != tc.wantHash {
+				t.Errorf("pin = %q, want %q", tool.Slng.Hash, tc.wantHash)
+			}
+		})
+	}
+}
+
+// TestSchemaKeepsBothSlngShapes: the derived authoring schema publishes the
+// scalar as well as the legacy block, so a reader validating their file against
+// it is not told the one-line form is wrong.
+func TestSchemaKeepsBothSlngShapes(t *testing.T) {
+	schema, err := Schema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "The hosted tool's exact name") {
+		t.Error("the derived schema does not publish the scalar `slng:` form")
+	}
+	if !strings.Contains(text, "The legacy form") {
+		t.Error("the derived schema does not publish the legacy `slng:` block")
 	}
 }

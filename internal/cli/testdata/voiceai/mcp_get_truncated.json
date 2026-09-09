@@ -1,0 +1,20 @@
+{
+  "id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+  "name": "wide-mcp",
+  "url_template": "https://wide.example.invalid/mcp",
+  "transport": "streamable_http",
+  "revision": 11,
+  "capability_status": "healthy",
+  "capability_observed_at": "2026-09-08T10:03:00Z",
+  "capability_tool_count": 400,
+  "next_refresh_at": "2026-09-08T10:08:00Z",
+  "auth": {"type": "bearer", "secret_name": "WIDE_MCP_TOKEN"},
+  "headers": [],
+  "capabilities": {
+    "truncated": true,
+    "pages_fetched": 2,
+    "tools": [
+      {"name": "page_one_tool", "schema_hash": "0000000000000000000000000000000000000000000000000000000000000001"}
+    ]
+  }
+}

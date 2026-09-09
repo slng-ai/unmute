@@ -1,0 +1,14 @@
+{
+  "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+  "name": "broken-mcp",
+  "url_template": "https://down.example.invalid/mcp",
+  "transport": "sse",
+  "revision": 2,
+  "capability_status": "connection_failed",
+  "capability_error": "dial tcp: lookup down.example.invalid: no such host",
+  "capability_observed_at": "2026-09-08T09:58:10Z",
+  "capability_tool_count": null,
+  "auth": null,
+  "headers": [],
+  "capabilities": {"truncated": false, "pages_fetched": 0, "tools": []}
+}

@@ -1018,7 +1018,7 @@ func chooseToolExecution(runner *fieldRunner, data *scaffold.Data, tool *scaffol
 			"mcp":       "server address from an environment variable",
 			"builtin":   "provider prebuilt tool (end_call)",
 			"knowledge": knowledgeDetail(data),
-			"slng":      "a tool SLNG already hosts; run `unmute pull` after saving",
+			"slng":      "a tool SLNG already hosts; name it below (a livekit or pipecat target also needs `unmute pull` after saving)",
 		}
 		options := make([]menuChoice, 0, len(toolExecutionKinds)+1)
 		for _, kind := range toolExecutionKinds {
@@ -1161,12 +1161,37 @@ func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) err
 			}
 		case tool.ExecutionKind() == "mcp":
 			// The server announces its own tools, so the file has no
-			// description, input, or output to edit (N40). Transport, auth, and
-			// a tool selection are written by hand and carried through here
-			// untouched.
+			// description, input, or output to edit (N40). Transport and auth
+			// are written by hand and carried through here untouched; the
+			// server name and the explicit tool selection are what an author
+			// actually picks. The URL env is a code-target connection detail
+			// only: a SLNG-only package never needs one, which is why this
+			// field stays optional here the same way it always has.
 			options = []menuChoice{
 				newChoice("Execution  ·  mcp", "execution"),
-				newChoice("MCP server URL env  ·  "+cmp.Or(tool.URLEnv, "none"), "url"),
+				newChoice("MCP server  ·  "+cmp.Or(tool.MCPServer, "same as this tool's name"), "server"),
+				newChoice("MCP server URL env (code targets only)  ·  "+cmp.Or(tool.URLEnv, "none"), "url"),
+				newChoice("Selected tools  ·  "+cmp.Or(strings.Join(tool.MCPTools, ", "), "every tool the server offers"), "tools"),
+				newChoice("Attached to  ·  "+toolAttachmentLabel(data, *tool), "attach"),
+				newChoice("Delete tool", "delete"),
+				newChoice("← Back", actionBack),
+			}
+		case tool.ExecutionKind() == "slng":
+			// A hosted tool's schema and code are the platform's; only the
+			// hosted name, an optional description override and the
+			// announcement are ours to write. The legacy hash pin `unmute
+			// pull` stamps into the file is never shown or edited here: this
+			// menu offers nothing that would let an author put a hash in by
+			// hand, which is the whole point of the scalar form.
+			//
+			// A legacy reference (SlngName empty, SlngHash set) resolves by
+			// this tool's own file name, so that is the honest label rather
+			// than "not set"; typing a hosted name here is what turns a
+			// legacy reference into a scalar one.
+			options = []menuChoice{
+				newChoice("Hosted tool  ·  "+cmp.Or(tool.SlngName, tool.Name), "hosted"),
+				newChoice("Description  ·  "+cmp.Or(oneLine(tool.Description), "inherited from SLNG"), "description"),
+				newChoice("Announcement  ·  "+cmp.Or(oneLine(tool.Announce), "none"), "announce"),
 				newChoice("Attached to  ·  "+toolAttachmentLabel(data, *tool), "attach"),
 				newChoice("Delete tool", "delete"),
 				newChoice("← Back", actionBack),
@@ -1193,13 +1218,40 @@ func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) err
 		}
 		switch choice {
 		case "description":
-			// Optional for a builtin (the registry supplies a default).
+			// Optional for a builtin (the registry supplies a default) and for
+			// a hosted tool (an empty one restores the platform's own, and a
+			// stale mirror must never be able to change that).
 			validate := validateRequiredText
-			if tool.ExecutionKind() == "builtin" {
+			if tool.ExecutionKind() == "builtin" || tool.ExecutionKind() == "slng" {
 				validate = validateBasic
 			}
 			if _, err := runner.input("Description", "What the model sees.", &tool.Description, validate); err != nil {
 				return err
+			}
+		case "hosted":
+			if _, err := runner.input("Hosted tool", "The exact name SLNG already hosts this tool under.",
+				&tool.SlngName, required("a hosted name is required", validateBasic)); err != nil {
+				return err
+			}
+		case "announce":
+			if _, err := runner.input("Announcement (optional)", "One fixed sentence spoken as the tool starts, so a slow call is not silence.",
+				&tool.Announce, validateBasic); err != nil {
+				return err
+			}
+		case "server":
+			if _, err := runner.input("MCP server (optional)", "The platform's name for the server, when it differs from this tool's own name.",
+				&tool.MCPServer, validateBasic); err != nil {
+				return err
+			}
+		case "tools":
+			value := strings.Join(tool.MCPTools, ", ")
+			back, err := runner.input("Selected tools (optional)", "Comma-separated tool names on the server. Blank exposes every tool it offers.",
+				&value, func(string) error { return nil })
+			if err != nil {
+				return err
+			}
+			if !back {
+				tool.MCPTools = parsePhrases(value)
 			}
 		case "instructions":
 			if _, err := runner.input("Goodbye message", "Optional. What the agent says as it ends the call.", &tool.Instructions, validateBasic); err != nil {
@@ -1216,7 +1268,7 @@ func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) err
 		case "url":
 			title, hint := "Webhook URL env", "Environment variable containing the URL; never the URL itself."
 			if tool.ExecutionKind() == "mcp" {
-				title, hint = "MCP server URL env", "Environment variable containing the MCP server address; never the URL itself."
+				title, hint = "MCP server URL env (code targets only)", "Environment variable containing the MCP server address; never the URL itself. Only a livekit or pipecat target reads it; a SLNG-only package needs none."
 			}
 			if _, err := runner.input(title, hint, &tool.URLEnv, validateEnvName); err != nil {
 				return err

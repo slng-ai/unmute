@@ -1,0 +1,22 @@
+{
+  "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  "name": "firecrawl-mcp-2",
+  "url_template": "https://mcp.example.invalid/{{$FIRECRAWL_MCP_PATH}}",
+  "transport": "streamable_http",
+  "revision": 8,
+  "capability_status": "healthy",
+  "capability_observed_at": "2026-09-08T10:06:20Z",
+  "capability_tool_count": 3,
+  "next_refresh_at": "2026-09-08T10:11:20Z",
+  "auth": {"type": "bearer", "secret_name": "FIRECRAWL_API_KEY"},
+  "headers": [],
+  "capabilities": {
+    "truncated": false,
+    "pages_fetched": 1,
+    "tools": [
+      {"name": "firecrawl_scrape", "schema_hash": "de0000000000000000000000000000000000000000000000000000000000adbe"},
+      {"name": "firecrawl_search", "schema_hash": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"},
+      {"name": "firecrawl_crawl", "schema_hash": "5555555555555555555555555555555555555555555555555555555555555555"}
+    ]
+  }
+}

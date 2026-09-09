@@ -2,9 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -157,6 +159,13 @@ func TestCompileNeedsNoCredential(t *testing.T) {
 		{"slng_hosted", "slng"},
 		{"slng_hosted_code", "livekit"},
 		{"slng_hosted_code", "pipecat"},
+		// The scalar counterpart: a code target's pin lives in generated
+		// tools/<name>.slng.meta.json rather than the tool file's own `hash:`
+		// line. slng_hosted_code_scalar declares no slng target of its own;
+		// TestSlngNeedsNoScalarMetadataEither (internal/ir/hosted_test.go)
+		// covers slng needing no pin at all on the scalar form.
+		{"slng_hosted_code_scalar", "livekit"},
+		{"slng_hosted_code_scalar", "pipecat"},
 	} {
 		t.Run(tc.fixture+"/"+tc.target, func(t *testing.T) {
 			dir := t.TempDir()
@@ -181,6 +190,134 @@ func TestCompileNeedsNoCredential(t *testing.T) {
 				t.Errorf("compile wrote no agent module:\n%s", out)
 			}
 		})
+	}
+}
+
+func TestCompileSlngPreservesAuthoredFalseAndNumbers(t *testing.T) {
+	dir := copyPackage(t, "slng_hosted")
+	tool := "slng: check_order\ninject:\n  - enabled: false\n  - limit: 0\n  - count: 42\n  - offset: -1\n  - ratio: 0.5\n"
+	if err := os.WriteFile(filepath.Join(dir, "tools", "check_order.yaml"), []byte(tool), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, err := runCompileCommand(t, dir, "--target", "slng")
+	if err != nil {
+		t.Fatalf("authored scalars refused: %v\n%s\n%s", err, out, errOut)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "build", "slng", "agent.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Refs []struct {
+			Tool      string         `json:"tool"`
+			Arguments map[string]any `json:"argument_overrides"`
+		} `json:"tool_refs"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range body.Refs {
+		if ref.Tool != "check_order" {
+			continue
+		}
+		for key, want := range map[string]any{"enabled": false, "limit": float64(0), "count": float64(42), "offset": float64(-1), "ratio": 0.5} {
+			if got := ref.Arguments[key]; got != want {
+				t.Errorf("%s = %#v, want %#v", key, got, want)
+			}
+		}
+		return
+	}
+	t.Fatal("missing check_order attachment")
+}
+
+// TestCompileSelectsMixedTargetsInEitherOrder is the compile-command half of
+// TestSelectingTargetsInEitherOrderGivesTheSameResult (internal/ir/hosted_test.go):
+// selecting two targets in one compile must not let their order change what
+// either one produces, which is what a check that wrote a finding onto the
+// shared IR rather than onto its own target's row would get wrong. No
+// package here mixes slng with a code target: they share a turn: model, and
+// slng refuses one outright (a pre-existing, orthogonal gap the fixtures'
+// own comments already flag), so this proves order-independence with the two
+// code targets slng_hosted_code_scalar already declares together.
+func TestCompileSelectsMixedTargetsInEitherOrder(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "slng_hosted_code_scalar"))); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(target.SlngRouterKeyEnv, "")
+	t.Setenv(target.SlngPushCredentialEnv, "")
+	t.Setenv("PATH", t.TempDir())
+
+	forward, errOut, err := runCompileCommand(t, dir, "--target", "livekit", "--target", "pipecat")
+	if err != nil {
+		t.Fatalf("livekit-then-pipecat failed: %v\n%s\n%s", err, forward, errOut)
+	}
+	reverse, errOut, err := runCompileCommand(t, dir, "--target", "pipecat", "--target", "livekit")
+	if err != nil {
+		t.Fatalf("pipecat-then-livekit failed: %v\n%s\n%s", err, reverse, errOut)
+	}
+	forwardLines, reverseLines := strings.Split(strings.TrimSpace(forward), "\n"), strings.Split(strings.TrimSpace(reverse), "\n")
+	sort.Strings(forwardLines)
+	sort.Strings(reverseLines)
+	if strings.Join(forwardLines, "\n") != strings.Join(reverseLines, "\n") {
+		t.Errorf("compile wrote a different file list depending on target order:\n  livekit,pipecat: %v\n  pipecat,livekit: %v", forwardLines, reverseLines)
+	}
+}
+
+// TestCompileSlngIgnoresASiblingCodeTargetsMissingMirror is FR-006/acceptance
+// scenario 2: a target declared but not selected must not block slng, even
+// when that target is missing something only it needs. slng_hosted already
+// carries a committed mirror for every hosted tool; deleting it here without
+// declaring a code target still proves nothing, so a livekit target instance
+// is declared beside slng specifically so there is a target for the missing
+// mirror to matter to, and then never selected.
+func TestCompileSlngIgnoresASiblingCodeTargetsMissingMirror(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "slng_hosted"))); err != nil {
+		t.Fatal(err)
+	}
+	// slng_hosted's own turn: is absent, which is exactly what lets a code
+	// target instance be declared beside slng without the two colliding over
+	// one: a resolved target with no turn model at all offends neither
+	// slng's refusal of one nor (were it ever selected, which this test
+	// never does) livekit's requirement for one.
+	targetsPath := filepath.Join(dir, "targets.yaml")
+	targetsContent, err := os.ReadFile(targetsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withLivekit := append(append([]byte{}, targetsContent...), []byte(
+		"\n  livekit:\n    provider: livekit\n    version: \"1.6.10\"\n    sdk_language: python\n")...)
+	if err := os.WriteFile(targetsPath, withLivekit, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// check_order's mirror is what livekit would need and slng never reads.
+	for _, mirrored := range []string{"tools/check_order.slng.json", "tools/check_order.slng.py"} {
+		if err := os.Remove(filepath.Join(dir, mirrored)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Setenv(target.SlngRouterKeyEnv, "")
+	t.Setenv(target.SlngPushCredentialEnv, "")
+	t.Setenv("PATH", t.TempDir())
+
+	slngOut, errOut, err := runCompileCommand(t, dir, "--target", "slng")
+	if err != nil {
+		t.Fatalf("slng alone failed even though the missing mirror belongs to a sibling target that was only declared, not selected: %v\n%s\n%s", err, slngOut, errOut)
+	}
+	if !strings.Contains(slngOut, "agent.json") {
+		t.Errorf("compile wrote no slng agent.json:\n%s", slngOut)
+	}
+
+	// The other half: selecting the code target that actually needs the
+	// mirror still refuses, naming the fix.
+	_, _, err = runCompileCommand(t, dir, "--target", "livekit")
+	if err == nil {
+		t.Fatal("livekit compiled with no committed mirror for check_order")
+	}
+	if !strings.Contains(err.Error(), "unmute pull") {
+		t.Errorf("the livekit refusal does not name the fix: %v", err)
 	}
 }
 

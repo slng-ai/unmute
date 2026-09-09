@@ -88,8 +88,8 @@ func runPull(cmd *cobra.Command, args []string, force, check bool) error {
 	if err != nil {
 		return fmt.Errorf("pull %s: %w", displayDir(dir), err)
 	}
-	hosted := hostedToolNames(pkg)
-	if len(hosted) == 0 {
+	refs := hostedToolRefs(pkg)
+	if len(refs) == 0 {
 		return fmt.Errorf("pull %s: no tool in this package has an `slng:` block, so there is nothing to fetch: "+
 			"write `slng: {}` in a tools/<name>.yaml naming a tool your organisation hosts, then run this again", displayDir(dir))
 	}
@@ -130,23 +130,23 @@ func runPull(cmd *cobra.Command, args []string, force, check bool) error {
 	// tool cannot be fetched must not be left holding a mirror of its first:
 	// `unmute init` refuses rather than half-writing, and the same reasoning
 	// applies to a fetch that touches several files at once.
-	mirrors := make(map[string]spec.Mirror, len(hosted))
+	mirrors := make(map[string]spec.Mirror, len(refs))
 	var listing []slngAccountTool
 	listErr := runner.read(target.SlngToolList, &listing)
-	for _, name := range hosted {
-		mirror, err := readTool(runner, name)
+	for _, ref := range refs {
+		mirror, err := readTool(runner, ref.Hosted)
 		if err != nil || mirror.Name == "" {
-			return fmt.Errorf("pull %s: %s", displayDir(dir), missingToolGuidance(name, listing, listErr, account, err))
+			return fmt.Errorf("pull %s: %s", displayDir(dir), missingToolGuidance(ref, listing, listErr, account, err))
 		}
 		if mirror.Source == "curated" {
 			return fmt.Errorf("pull %s: `%s` is a capability SLNG curates, not a tool with a definition to mirror: "+
-				"attach it with `builtin: %s` instead, which needs no pull", displayDir(dir), name, name)
+				"attach it with `builtin: %s` instead, which needs no pull", displayDir(dir), ref.Hosted, ref.Hosted)
 		}
 		mirror.Fetched = time.Now().UTC().Format(time.DateOnly)
-		mirrors[name] = mirror
+		mirrors[ref.Local] = mirror
 	}
 
-	files, err := planPull(dir, hosted, mirrors)
+	files, err := planPull(dir, refs, mirrors)
 	if err != nil {
 		return fmt.Errorf("pull %s: %w", displayDir(dir), err)
 	}
@@ -185,31 +185,55 @@ func runPull(cmd *cobra.Command, args []string, force, check bool) error {
 	return nil
 }
 
-// hostedToolNames are the package's `slng:` tools, sorted, so the report and
-// every refusal are in a stable order.
-func hostedToolNames(pkg *spec.Package) []string {
-	var names []string
+// hostedRef pairs a package tool's LOCAL file name, the one every other
+// package file and diagnostic uses, with the HOSTED name pull fetches it by.
+// They differ only for a scalar reference whose `slng:` value is not the tool
+// file's own name (tools/order_status.yaml holding `slng: check_order`); a
+// legacy block always resolves by the file name, so Local and Hosted are the
+// same string for one.
+type hostedRef struct {
+	Local  string
+	Hosted string
+	// Scalar is false for a legacy `slng:\n  hash:` block, whose pin is
+	// stamped into the tool file itself. True for a scalar `slng: name`
+	// reference, whose pin goes into generated metadata instead, because a
+	// scalar reference authors none for stampPin to update.
+	Scalar bool
+}
+
+// hostedToolRefs are the package's `slng:` tools, sorted by local name, so the
+// report and every refusal are in a stable order.
+func hostedToolRefs(pkg *spec.Package) []hostedRef {
+	var refs []hostedRef
 	for name, tool := range pkg.Tools {
-		if tool.Slng != nil {
-			names = append(names, name)
+		if tool.Slng == nil {
+			continue
 		}
+		hosted := tool.Slng.Name
+		scalar := hosted != ""
+		if hosted == "" {
+			hosted = name // the legacy block resolves by the file's own name
+		}
+		refs = append(refs, hostedRef{Local: name, Hosted: hosted, Scalar: scalar})
 	}
-	sort.Strings(names)
-	return names
+	sort.Slice(refs, func(i, j int) bool { return refs[i].Local < refs[j].Local })
+	return refs
 }
 
 // planPull turns each fetched mirror into the files it writes, without writing
 // any of them.
 //
-// Three per hosted tool at most: the sidecar, the module for a code tool, and
-// the pin stamped into the authored tool file. The tool file is rewritten one
-// line at a time rather than re-rendered, because every other line in it is the
-// author's.
-func planPull(dir string, hosted []string, mirrors map[string]spec.Mirror) ([]pullFile, error) {
+// Fetched by ref.Hosted, written under ref.Local: three files per hosted code
+// tool, two per hosted request tool. A legacy reference's third file is the
+// pin stamped into the authored tool file, rewritten one line at a time rather
+// than re-rendered because every other line in it is the author's. A scalar
+// reference's third file is generated metadata instead: stampPin is never
+// called for one, so a scalar reference's YAML is untouched by a pull.
+func planPull(dir string, refs []hostedRef, mirrors map[string]spec.Mirror) ([]pullFile, error) {
 	var files []pullFile
-	for _, name := range hosted {
-		mirror := mirrors[name]
-		sidecarPath, modulePath := spec.MirrorPaths(name)
+	for _, ref := range refs {
+		mirror := mirrors[ref.Local]
+		sidecarPath, modulePath := spec.MirrorPaths(ref.Local)
 
 		sidecar, err := mirror.MirrorJSON()
 		if err != nil {
@@ -226,21 +250,31 @@ func planPull(dir string, hosted []string, mirrors map[string]spec.Mirror) ([]pu
 			// would leave a file the pin does not cover and the code targets
 			// would still copy.
 			return nil, fmt.Errorf("%s is no longer a code tool on the platform, and %s is still committed: "+
-				"delete it, then run this again", name, modulePath)
+				"delete it, then run this again", ref.Local, modulePath)
 		}
 
 		// The pin covers the sidecar and the module together, so one field pins
 		// the whole mirror and there is no way for half of it to be right.
 		hash := ir.MirrorDigest(pinned)
-		toolPath := filepath.ToSlash(filepath.Join("tools", name+".yaml"))
-		stamped, changed, err := stampPin(filepath.Join(dir, toolPath), hash)
-		if err != nil {
-			return nil, err
-		}
-		if changed {
-			planned = append(planned, pullFile{Path: toolPath, Content: stamped, Action: pullPinned})
+		if ref.Scalar {
+			metaContent, err := spec.MirrorMeta{Hash: hash}.MirrorMetaJSON()
+			if err != nil {
+				return nil, err
+			}
+			// The same overwrite protection every other mirrored file gets: a
+			// hand-edited metadata file is Edited, not silently replaced.
+			planned = append(planned, fileAction(dir, spec.MirrorMetaPath(ref.Local), metaContent))
 		} else {
-			planned = append(planned, pullFile{Path: toolPath, Content: stamped, Action: pullUnchanged})
+			toolPath := filepath.ToSlash(filepath.Join("tools", ref.Local+".yaml"))
+			stamped, changed, err := stampPin(filepath.Join(dir, toolPath), hash)
+			if err != nil {
+				return nil, err
+			}
+			if changed {
+				planned = append(planned, pullFile{Path: toolPath, Content: stamped, Action: pullPinned})
+			} else {
+				planned = append(planned, pullFile{Path: toolPath, Content: stamped, Action: pullUnchanged})
+			}
 		}
 		files = append(files, planned...)
 	}
@@ -272,6 +306,10 @@ func fileAction(dir, path string, content []byte) pullFile {
 // author's, and a re-render would lose their comments, their key order and
 // their blank lines. Nothing else in this tree rewrites an authored file, so
 // the one that does touches as little as it can.
+//
+// Called for a legacy reference only. A scalar reference authors no `slng:`
+// block for this to find, and its pin goes into generated metadata instead
+// (planPull), so a pull never reaches into a scalar reference's YAML at all.
 func stampPin(path, hash string) (content []byte, changed bool, err error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -312,6 +350,22 @@ func stampPin(path, hash string) (content []byte, changed bool, err error) {
 // nowhere and derives its own list, so writing only here would be visible in
 // the diff and checked by nothing.
 func planSecrets(pkg *spec.Package, dir string, mirrors map[string]spec.Mirror) ([]string, *pullFile, error) {
+	// Only where a target actually builds and runs the tool.
+	//
+	// A code target emits a project that calls the tool itself, so the
+	// credential has to reach that project and the package's `secrets:` is how
+	// it gets there. On slng the platform holds the tool and reads the
+	// credential from its own vault, and the slng driver reads the package's
+	// `secrets:` nowhere at all: adding a name there edits the author's file to
+	// declare something nothing consumes, and `unmute deploy` discovers the same
+	// requirement from the published contract anyway.
+	//
+	// This is why it is conditional rather than removed. Take it away outright
+	// and a package pulled for livekit or pipecat loses the one line that gets
+	// its credential into the emitted project.
+	if !buildsToolsLocally(pkg) {
+		return nil, nil, nil
+	}
 	declared := map[string]bool{}
 	for _, name := range pkg.Agent.Secrets {
 		declared[name] = true
@@ -339,6 +393,17 @@ func planSecrets(pkg *spec.Package, dir string, mirrors map[string]spec.Mirror) 
 		Path: "agent.yaml", Content: content,
 		Action: pullAction(fmt.Sprintf("%s added", pluralSecrets(missing))),
 	}, nil
+}
+
+// buildsToolsLocally reports whether any selected target emits a project that
+// runs the package's tools itself.
+func buildsToolsLocally(pkg *spec.Package) bool {
+	for _, tgt := range pkg.Targets {
+		if target.EmitsProject(target.Provider(tgt.Provider)) {
+			return true
+		}
+	}
+	return false
 }
 
 // appendSecrets adds names under an existing `secrets:` list, or writes the
@@ -412,13 +477,11 @@ func editedPaths(files []pullFile) []string {
 // hold, and names the organisation, because the answer depends on it.
 //
 // unmute creates no tool, so this is the end of the road until somebody makes
-// one. The message says that rather than implying a flag would fix it.
-func missingToolGuidance(name string, listing []slngAccountTool, listErr error, account slngAccount, readErr error) string {
-	var missed *unchecked
-	if errors.As(readErr, &missed) && listErr != nil {
-		// Both reads failed, so this is not evidence the tool is absent.
-		return fmt.Sprintf("could not read `%s` from %s: %v", name, account, readErr)
-	}
+// one. The message says that rather than implying a flag would fix it. The fix
+// itself differs by reference form: a legacy block resolves by the tool
+// file's own name, so renaming the file is the fix; a scalar reference names
+// the hosted tool on its own line, so the fix is changing that line instead.
+func missingToolGuidance(ref hostedRef, listing []slngAccountTool, listErr error, account slngAccount, readErr error) string {
 	var names []string
 	for _, tool := range listing {
 		if !slices.Contains(names, tool.Name) {
@@ -426,13 +489,42 @@ func missingToolGuidance(name string, listing []slngAccountTool, listErr error, 
 		}
 	}
 	sort.Strings(names)
+
+	// `voiceai tool get` exits non-zero for an absent tool and for a read that
+	// did not work, so the error alone cannot tell them apart. The listing can,
+	// and the distinction matters: an absent tool is created in the dashboard
+	// and a failed read is retried.
+	var missed *unchecked
+	if errors.As(readErr, &missed) {
+		switch {
+		case listErr != nil:
+			// Neither read worked, so nothing here is evidence either way.
+			return fmt.Sprintf("could not read `%s` from %s: %v", ref.Hosted, account, readErr)
+		case slices.Contains(names, ref.Hosted):
+			// The listing names it and the read failed. Reporting this as an
+			// absence produced a self-contradicting sentence, seen for real:
+			// "this organisation has no tool called `check_order` (it has
+			// `check_order`)". A truncated response or a partial outage is
+			// exactly this shape.
+			return fmt.Sprintf("`%s` is listed in %s and its definition could not be read: %v. "+
+				"That is a failed read rather than a missing tool, so nothing was written: run this again",
+				ref.Hosted, account, readErr)
+		}
+		// The listing worked and does not name it, so it really is absent and
+		// the guidance below is right.
+	}
 	held := "it holds none"
 	if len(names) > 0 {
 		held = "it has `" + strings.Join(names, "`, `") + "`"
 	}
+	if ref.Scalar {
+		return fmt.Sprintf("this organisation has no tool called `%s` (%s). Change the `slng: %s` line in tools/%s.yaml "+
+			"to a tool the organisation has, or create the tool in the SLNG dashboard: unmute creates none",
+			ref.Hosted, held, ref.Hosted, ref.Local)
+	}
 	return fmt.Sprintf("this organisation has no tool called `%s` (%s). A hosted reference is the tool file's own name, "+
 		"so either rename tools/%s.yaml to a tool the organisation has, or create the tool in the SLNG dashboard: unmute creates none",
-		name, held, name)
+		ref.Hosted, held, ref.Local)
 }
 
 func pluralSecrets(names []string) string {

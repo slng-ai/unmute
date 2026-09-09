@@ -74,12 +74,19 @@ func TestSlngHostedToolEmitsARefAndNoBody(t *testing.T) {
 	if err := json.Unmarshal([]byte(files["agent.json"]), &body); err != nil {
 		t.Fatalf("agent.json is not JSON: %v", err)
 	}
+	// An attachment's description is an override, so only an authored one is
+	// written and an inherited one is left out. check_order writes its own;
+	// search_places_text writes none, so the published version's description
+	// reaches the model and removing the field is what restores that.
+	//
+	// This inverts what the driver used to do. It emitted the mirror's
+	// description as an override, which meant a mirror that had gone stale
+	// pinned the platform's old words onto the attachment, and deleting
+	// `description:` from the file could not restore inheritance because the
+	// file was never what supplied it.
 	want := map[string]string{
-		"check_order": "Look up an order by its number and return its status and delivery date.",
-		// No description of its own, so the platform's reaches the model. That
-		// is the precedent `builtin:` sets, and it is why the mirror carries a
-		// description at all.
-		"search_places_text": "Call this tool to search for places via a simple text query using the places api from google.",
+		"check_order":        "Look up an order by its number and return its status and delivery date.",
+		"search_places_text": "",
 	}
 	seen := map[string]bool{}
 	for _, ref := range body.ToolRefs {

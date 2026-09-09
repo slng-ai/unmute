@@ -196,7 +196,18 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		data.Agents = append(data.Agents, agent)
 	}
 
-	for _, name := range slices.Sorted(maps.Keys(pkg.Tools)) {
+	// Authored order, not sorted: pkg.Agent.Tools is the package's own `tools:`
+	// catalogue, written in the order the author put it in, and pkg.Tools (a
+	// map) has no order of its own for a walk to preserve instead. scaffold.go
+	// renders both the top-level catalogue and each agent's own `tools:` list
+	// straight from data.Tools's order (Data.AgentTools filters it, it does not
+	// re-sort it), so this loop's order is the whole story for both.
+	seenTool := make(map[string]bool, len(pkg.Agent.Tools))
+	for _, name := range pkg.Agent.Tools {
+		if seenTool[name] {
+			continue
+		}
+		seenTool[name] = true
 		tool := pkg.Tools[name]
 		// The execution block decides which fields exist; maintenance carries
 		// every one of them through, auth included, so a rewrite never drops a
@@ -205,6 +216,11 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 			Name: name, Description: tool.Description, Execution: tool.ExecutionKind(),
 			Input: jsonText(tool.Input), Output: jsonText(tool.Output),
 			Inject: append([]packagespec.Pair(nil), tool.Inject...),
+			// Announce is legal on webhook, local, knowledge and slng execution
+			// only (V36); carried unconditionally like Description above rather
+			// than gated per case, because a well-formed package never authors
+			// it elsewhere and ir.Validate is what refuses it if one somehow did.
+			Announce: tool.Announce,
 		}
 		switch {
 		case tool.Webhook != nil:
@@ -218,12 +234,13 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		case tool.MCP != nil:
 			value.URLEnv, value.Auth = tool.MCP.URLEnv, tool.MCP.Auth
 			value.MCPTransport, value.MCPTools = tool.MCP.Transport, tool.MCP.Tools
+			value.MCPServer = tool.MCP.Server
 		case tool.Builtin != nil:
 			value.Builtin, value.Instructions = tool.Builtin.ID, tool.Builtin.Instructions
 		case tool.Knowledge != nil:
 			value.KnowledgeBase = tool.Knowledge.Base
 		case tool.Slng != nil:
-			value.SlngHash = tool.Slng.Hash
+			value.SlngName, value.SlngHash = tool.Slng.Name, tool.Slng.Hash
 		}
 		for agentName, definition := range pkg.Agent.Agents {
 			if slices.Contains(definition.Tools, name) {

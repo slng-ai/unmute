@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
@@ -373,8 +374,18 @@ func TestPreflightTreatsAnUnmadeCheckAsNeitherPassNorFail(t *testing.T) {
 	if !strings.Contains(errOut.String(), "insufficient scope") {
 		t.Errorf("the skipped read is not reported: %q", errOut.String())
 	}
-	if !strings.Contains(errOut.String(), "the push decides") {
-		t.Errorf("the warning does not say what covers the gap: %q", errOut.String())
+	// And what covers the gap is said per requirement rather than as one
+	// blanket clause on the warning line. It used to end "the push decides what
+	// it would have covered", about every unread listing, which was untrue of
+	// most of them: the guarded push re-checks the package's own declared vault
+	// names and nothing else. The finding is where the answer belongs, because
+	// it is a different answer per requirement.
+	said := out.String() + errOut.String()
+	if !strings.Contains(said, "still refused there") {
+		t.Errorf("nothing says what covers this gap: %q", said)
+	}
+	if strings.Contains(said, "the push decides") {
+		t.Errorf("the blanket claim is back, and it is untrue of most reads: %q", said)
 	}
 }
 
@@ -715,11 +726,11 @@ func TestDeployWritesNothingButSecrets(t *testing.T) {
 	stub := `printf '%s\n' "$*" >> ` + log + `
 case "$*" in
   *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"n"}}' ;;
-  *"agents push"*) printf '{"ok":true,"organisation":{"id":"o","name":"n"},"agent":{"id":"a1","name":"a","action":"create"},"version":"unchanged"}' ;;
-  *"tool list"*) printf '[{"name":"end_call","tool_type":"end_call"},{"name":"check_order","tool_type":"code","latest_version":1},{"name":"refund","tool_type":"api_request","latest_version":2}]' ;;
-  *"secret list"*) printf '[{"name":"REFUND_API_TOKEN","kind":"secret","has_value":true},{"name":"ACME_BRAND","kind":"variable","has_value":true}]' ;;
-  *"mcp list"*) printf '[{"name":"internal_docs","capability_status":"healthy"}]' ;;
-  *"mcp tools"*) printf '[{"name":"search_docs"},{"name":"read_doc"}]' ;;
+  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"organisation":{"id":"o","name":"n"},"agent":{"id":"a1","action":"create"}}' ;;
+  *"agents push"*) printf '{"ok":true,"resolution_contract":1,"organisation":{"id":"o","name":"n"},"agent":{"id":"a1","name":"a","action":"create"},"version":"unchanged"}' ;;
+` + provisionedCatalogue + `
+` + provisionedContract("o") + `
+` + provisionedAgent + `
   *) printf '[]' ;;
 esac`
 	if _, _, _, err := deployWithStub(t, stub); err != nil {
@@ -738,6 +749,361 @@ esac`
 			if strings.Contains(line, verb) {
 				t.Errorf("a deploy ran `voiceai %s`; the only write unmute makes is a secret create", line)
 			}
+		}
+	}
+}
+
+// mcpFixtureRecord loads one of the spec 007 MCP fixtures.
+func mcpFixtureRecord(t *testing.T, name string) slngMCPRecord {
+	t.Helper()
+	var record slngMCPRecord
+	fixture(t, name, &record)
+	return record
+}
+
+// TestMCPRecordStatesAreReadTogether is the property FR-012 turns on: no single
+// field of a capability snapshot says whether a selected tool can be attached.
+//
+// A healthy status with a week-old observation is stale. A fresh observation on
+// a failed probe found nothing. A truncated record listing two tools does not
+// say a third is absent, it says the probe stopped. Each of the four fixtures
+// is one of those, and the point is that they are four different answers rather
+// than "healthy" and "not healthy".
+func TestMCPRecordStatesAreReadTogether(t *testing.T) {
+	for _, tc := range []struct {
+		fixture string
+		usable  bool
+		// state is a fragment the reason has to carry, so the message tells the
+		// author which of the four they are looking at.
+		state string
+	}{
+		{fixture: "mcp_get_healthy.json", usable: true, state: "usable"},
+		// Stale is the case a status alone gets wrong: it still says healthy,
+		// and the window the platform keeps the observation for has passed. The
+		// platform refuses such a snapshot at push time, so calling it usable
+		// would produce a deployment that checked a record and then could not
+		// attach it.
+		{fixture: "mcp_get_stale.json", usable: false, state: "stale"},
+		{fixture: "mcp_get_failed.json", usable: false, state: "connection_failed"},
+		{fixture: "mcp_get_truncated.json", usable: false, state: "truncated"},
+	} {
+		t.Run(tc.fixture, func(t *testing.T) {
+			record := mcpFixtureRecord(t, tc.fixture)
+			// A fixed moment, just after the healthy fixture's observation, so
+			// the answers are about the fixtures and not about when the suite
+			// happens to run.
+			now := time.Date(2026, 9, 8, 10, 5, 0, 0, time.UTC)
+			if record.usableAt(now) != tc.usable {
+				t.Errorf("usable = %v, want %v (status %q, truncated %v, next refresh %q)",
+					record.usableAt(now), tc.usable, record.Status, record.Capabilities.Truncated, record.NextRefreshAt)
+			}
+			if got := recordState(record, now); !strings.Contains(got, tc.state) {
+				t.Errorf("the state reads %q, want it to say %q", got, tc.state)
+			}
+		})
+	}
+
+	// The window.
+	//
+	// The platform expires a snapshot on the age of its observation, against a
+	// TTL that is a server setting and is not knowable from here.
+	// `next_refresh_at` is the platform's own background-discovery schedule,
+	// which falls at 80-90% of that TTL, so it always lands BEFORE the expiry
+	// and being inside it means the observation is inside the window with room
+	// to spare. Reading it that way is conservative in the one safe direction:
+	// a refresh slightly early costs one connection.
+	healthy := mcpFixtureRecord(t, "mcp_get_healthy.json")
+	if !healthy.fresh(time.Date(2026, 9, 8, 10, 5, 0, 0, time.UTC)) {
+		t.Error("a record inside its own schedule is not fresh")
+	}
+	if healthy.fresh(time.Date(2026, 9, 8, 10, 8, 0, 0, time.UTC)) {
+		t.Error("a record past its own next_refresh_at is still called fresh, and a push would refuse it")
+	}
+
+	// A record declaring no schedule used to be treated as fresh, and that was
+	// the defect: with no schedule and no knowable TTL, nothing on the record
+	// says how old the observation may be, so a six-year-old snapshot read as
+	// current and the deploy attached it. An unknown window is not a fresh one.
+	undated := healthy
+	undated.NextRefreshAt = ""
+	if undated.fresh(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Error("a record declaring no refresh schedule is treated as fresh, so an observation of any age would be attached")
+	}
+	if got := recordState(undated, time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)); !strings.Contains(got, "unknown age") {
+		t.Errorf("the state does not say the age is unknown, and it rendered an empty deadline before: %q", got)
+	}
+
+	// The platform refuses a snapshot it cannot date, and its own schema
+	// forbids a healthy record from carrying no observation time.
+	unobserved := healthy
+	unobserved.ObservedAt = ""
+	if unobserved.fresh(time.Date(2026, 9, 8, 10, 5, 0, 0, time.UTC)) {
+		t.Error("a record with no observation time is treated as fresh")
+	}
+
+	stopped := healthy
+	stopped.NextRefreshAt = "not a timestamp"
+	if stopped.fresh(time.Date(2026, 9, 8, 10, 0, 0, 0, time.UTC)) {
+		t.Error("an unparseable window is treated as fresh; refreshing is the safe direction")
+	}
+
+	// A failed probe carries its reason, and the reason is what an author acts
+	// on: a DNS failure and a refused credential are different problems.
+	failed := mcpFixtureRecord(t, "mcp_get_failed.json")
+	moment := time.Date(2026, 9, 8, 10, 5, 0, 0, time.UTC)
+	if !strings.Contains(recordState(failed, moment), "no such host") {
+		t.Errorf("a failed probe does not carry the server's own reason: %s", recordState(failed, moment))
+	}
+}
+
+// TestMCPRecordFindsATool: the lookup, and the fact its bool means "the record
+// contains it" rather than "the server offers it".
+func TestMCPRecordFindsATool(t *testing.T) {
+	record := mcpFixtureRecord(t, "mcp_get_healthy.json")
+	entry, ok := record.Tool("firecrawl_search")
+	if !ok {
+		t.Fatal("a tool the fixture lists was not found")
+	}
+	if entry.SchemaHash == "" {
+		t.Error("the schema hash is empty, and it is the value an attachment carries")
+	}
+	if _, ok := record.Tool("firecrawl_crawl"); ok {
+		t.Error("a tool the fixture does not list was found")
+	}
+
+	// The same lookup on a truncated record. It answers "not in this record",
+	// and resolveMCP is what refuses to read that as "not on the server".
+	truncated := mcpFixtureRecord(t, "mcp_get_truncated.json")
+	if _, ok := truncated.Tool("firecrawl_search"); ok {
+		t.Error("a truncated record claims to hold a tool it never listed")
+	}
+	if truncated.usable() {
+		t.Error("a truncated record is usable, so an absent tool would be reported as missing on evidence that cannot support it")
+	}
+}
+
+// TestMCPVaultNeedsComeFromTheHostedServer.
+//
+// SLNG holds the server: its address, its transport and its credential are the
+// platform's. So the credential names come off the server record, and a code
+// target's own `url_env` and `auth:` are that target's business. Reporting
+// those here would ask an author to put a code target's environment into the
+// SLNG vault.
+func TestMCPVaultNeedsComeFromTheHostedServer(t *testing.T) {
+	record := mcpFixtureRecord(t, "mcp_get_healthy.json")
+	needs := mcpVaultNeeds(record, "tools/web_search.yaml")
+
+	kinds := map[string]string{}
+	for _, need := range needs {
+		kinds[need.Name] = need.Kind
+		if !strings.Contains(need.Where, "tools/web_search.yaml") {
+			t.Errorf("%s does not trace back to the file that selected the server: %s", need.Name, need.Where)
+		}
+	}
+	if kinds["FIRECRAWL_API_KEY"] != "secret" {
+		t.Errorf("the bearer credential is %q, want a secret", kinds["FIRECRAWL_API_KEY"])
+	}
+	if kinds["FIRECRAWL_WORKSPACE"] != "secret" {
+		t.Errorf("the header credential is %q, want a secret", kinds["FIRECRAWL_WORKSPACE"])
+	}
+	// A token substituted into the address is a vault VARIABLE. The two kinds
+	// are created differently, so the wrong one sends an author to make an entry
+	// the platform then refuses as a duplicate.
+	if kinds["FIRECRAWL_MCP_PATH"] != "variable" {
+		t.Errorf("the URL-template token is %q, want a variable", kinds["FIRECRAWL_MCP_PATH"])
+	}
+	// And no URL, no transport and no auth type leaves the function.
+	for _, need := range needs {
+		for _, forbidden := range []string{"https://", "streamable_http", "bearer"} {
+			if strings.Contains(need.Where, forbidden) {
+				t.Errorf("%s's reason leaks %q from the server's configuration: %s", need.Name, forbidden, need.Where)
+			}
+		}
+	}
+}
+
+// TestEligibleToolsSeparatesTheOrganisationsOwnFromTheCurated.
+//
+// `tool_list_scoped.json` holds `end_call` at both scopes at once, which is a
+// real shape: SLNG publishes the capability to everybody and an organisation
+// can have its own. Without the scope filter a `slng:` reference and a
+// `builtin:` reference would resolve to the same record and one of the two
+// would attach the wrong thing.
+func TestEligibleToolsSeparatesTheOrganisationsOwnFromTheCurated(t *testing.T) {
+	var catalogue []slngAccountTool
+	fixture(t, "tool_list_scoped.json", &catalogue)
+
+	if got := eligibleTools("end_call", catalogue); len(got) != 1 || got[0].Scope != "organisation" {
+		t.Errorf("end_call resolves to %+v, want the one organisation-scoped record", got)
+	}
+	// Two organisation-owned records of one name. Nothing local can choose, and
+	// picking the first is what the name-only push did.
+	if got := eligibleTools("ambiguous_tool", catalogue); len(got) != 2 {
+		t.Errorf("ambiguous_tool resolves to %d records, want the 2 the account holds", len(got))
+	}
+	// A curated-only name is not eligible for a `slng:` reference at all.
+	if got := eligibleTools("user_phone_number", catalogue); len(got) != 0 {
+		t.Errorf("a curated-only name is eligible for a hosted reference: %+v", got)
+	}
+}
+
+// TestPublishedVersionIsNotTheDraft.
+//
+// The reason the immutable getter is an upstream prerequisite at all. The
+// mutable record is whatever somebody last saved in the dashboard, and
+// `tool_get_draft_divergent.json` is a real shape of that: it renames the one
+// parameter the example injects and names a secret no published version needs.
+//
+// A binding validated against it would be validated against a contract nothing
+// serves, and it would pass or fail for the wrong reason.
+func TestPublishedVersionIsNotTheDraft(t *testing.T) {
+	var draft map[string]any
+	fixture(t, "tool_get_draft_divergent.json", &draft)
+	var version slngPublishedVersion
+	fixture(t, "tool_version_published.json", &version)
+
+	if version.Snapshot.ArgumentSchema == nil {
+		t.Fatal("the published snapshot's parameters did not decode: `argument_schema` is the published field and `arg_schema` is the draft's, and they are different fields")
+	}
+	published, _ := version.Snapshot.ArgumentSchema["properties"].(map[string]any)
+	if _, ok := published["query"]; !ok {
+		t.Error("the published contract does not declare `query`, which is what the example injects")
+	}
+	// The draft renamed it. Reading the draft would refuse a binding that the
+	// published version accepts.
+	drafted, _ := draft["arg_schema"].(map[string]any)
+	draftedProperties, _ := drafted["properties"].(map[string]any)
+	if _, ok := draftedProperties["query"]; ok {
+		t.Fatal("the divergent-draft fixture no longer diverges, so it proves nothing")
+	}
+	// And the draft's own fields say it is not current, which is the evidence
+	// nothing reads today.
+	if draft["is_current_version"] != false || draft["schema_stale"] != true {
+		t.Error("the draft fixture does not carry the fields that say it is not the published version")
+	}
+}
+
+// TestVaultEntryWithNoReportedKindIsNotAMismatch.
+//
+// An account's real `secret list` carries the name and has_value and no kind.
+// Read as a kind of "", every populated entry became a mismatch against a
+// wanted "secret", and the deploy told the author to delete or rename an entry
+// that was correct and populated. An absent field is the absence of evidence,
+// which is the opposite conclusion from evidence of a mismatch.
+//
+// The kind is still compared when the listing reports one, because two things
+// sharing a name really is unfixable by creating a third.
+func TestVaultEntryWithNoReportedKindIsNotAMismatch(t *testing.T) {
+	requirement := generate.Requirement{Name: "SLNG_TOOL_RENDER", Where: "check_order reads it"}
+
+	unreported := compareVault(requirement, "secret",
+		[]slngVaultEntry{{Name: "SLNG_TOOL_RENDER", HasValue: true}}, true, false)
+	if unreported.State != satisfied {
+		t.Errorf("a populated entry whose kind the listing does not report is %v, and the listing never reports one: %s",
+			unreported.State, unreported.Detail)
+	}
+	for _, forbidden := range []string{"delete", "rename"} {
+		if strings.Contains(unreported.Detail, forbidden) {
+			t.Errorf("the finding tells the author to %s a correct entry: %s", forbidden, unreported.Detail)
+		}
+	}
+
+	// Still empty when it is empty: the name existing is not the value existing.
+	hollow := compareVault(requirement, "secret",
+		[]slngVaultEntry{{Name: "SLNG_TOOL_RENDER"}}, true, false)
+	if hollow.State != empty {
+		t.Errorf("an entry holding no value is %v, and a tool reading it gets nothing", hollow.State)
+	}
+
+	// And a reported kind that really differs is still a mismatch.
+	mismatched := compareVault(requirement, "secret",
+		[]slngVaultEntry{{Name: "SLNG_TOOL_RENDER", Kind: "variable", HasValue: true}}, true, false)
+	if mismatched.State != wrongKind {
+		t.Errorf("a reported kind of %q against a wanted secret is %v, so the real mismatch stopped being caught",
+			"variable", mismatched.State)
+	}
+}
+
+// TestEveryBlockedFindingIsPrinted.
+//
+// kindOrder used to be the filter as well as the order, so a finding whose kind
+// was not on its hardcoded list was counted in "1 thing to fix" and printed
+// nowhere: a refusal naming a number with nothing under it, and no test failed
+// because every kind that existed was on the list. Adding one broke it.
+//
+// The kind is a label. A label nobody thought to add here is not a reason to
+// hide the finding, so this asserts the property rather than the list.
+func TestEveryBlockedFindingIsPrinted(t *testing.T) {
+	report := preflightReport{Findings: []finding{{
+		Kind:  "a kind nobody added to the order",
+		State: wrongKind,
+		Requirement: generate.Requirement{
+			Name:  "the thing that is wrong",
+			Where: "the line that asked for it",
+		},
+		Detail: "the sentence that says what to do about it",
+	}}}
+
+	var out, errOut bytes.Buffer
+	if err := renderPreflight(&out, &errOut, "slng", report); err == nil {
+		t.Fatal("a blocked finding did not refuse the run")
+	}
+	said := out.String() + errOut.String()
+	for _, want := range []string{"the thing that is wrong", "the sentence that says what to do about it"} {
+		if !strings.Contains(said, want) {
+			t.Errorf("the refusal counts this finding and does not print %q:\n%s", want, said)
+		}
+	}
+}
+
+// TestAnUnreadableVaultBlocksADiscoveredNeedAndWarnsOnADeclaredOne.
+//
+// The two are not the same gap, and this used to treat them as one.
+//
+// The push's own vault check reads `requiredSecretNames`: the `{{$NAME}}`
+// tokens in the package's prompts, plus the credential names on tool bodies
+// physically present in the package. A name the package declares is therefore
+// re-checked against a fresh read at push time, so an unreadable listing here
+// can warn: the gap really is covered, and refusing would refuse a deployment
+// that gets refused later with a worse message.
+//
+// A name DISCOVERED from a published contract or a hosted MCP server's
+// credentials is in neither of those sources. It never reaches the push's
+// check, so an unreadable listing leaves it unverified with nothing downstream
+// to catch it, and that is the same case as a resolved version: it blocks.
+//
+// The warning also has to stop claiming more than it can. Neither run
+// establishes whether an entry holds a value, because the push compares a name
+// and a kind and never reads `has_value`.
+func TestAnUnreadableVaultBlocksADiscoveredNeedAndWarnsOnADeclaredOne(t *testing.T) {
+	requirement := generate.Requirement{Name: "FIRECRAWL_API_KEY", Where: "the hosted server reads it"}
+
+	discovered := compareVault(requirement, "secret", nil, false, true)
+	if !discovered.blocks() {
+		t.Errorf("an unreadable listing leaves a discovered credential unverified and does not block: %+v", discovered)
+	}
+	if !strings.Contains(discovered.Detail, "the push does not check it either") {
+		t.Errorf("the refusal does not say why nothing downstream covers it: %s", discovered.Detail)
+	}
+
+	declared := compareVault(requirement, "secret", nil, false, false)
+	if declared.blocks() {
+		t.Errorf("a name the push re-checks against a fresh read blocks here as well: %+v", declared)
+	}
+	if !strings.Contains(declared.Detail, "holds a value") {
+		t.Errorf("the warning does not say what neither run establishes: %s", declared.Detail)
+	}
+}
+
+// TestMCPHealthIsThePlatformsOwnWord.
+//
+// The platform's attachment validation refuses any status but "healthy". This
+// accepted "ok" as well, which is not a status the platform has: a permissive
+// alias can only ever pass something the push then refuses.
+func TestMCPHealthIsThePlatformsOwnWord(t *testing.T) {
+	for status, want := range map[string]bool{"healthy": true, "ok": false, "unknown": false, "connection_failed": false} {
+		if got := (slngMCPRecord{Status: status}).healthy(); got != want {
+			t.Errorf("status %q reads as healthy=%v, want %v", status, got, want)
 		}
 	}
 }

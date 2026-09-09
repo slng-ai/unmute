@@ -99,6 +99,22 @@ func (r *voiceaiRunner) read(command target.SlngCommand, out any) error {
 	}
 
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), out); err != nil {
+		// A document that decodes as far as it goes and then stops is a
+		// truncated one, and json.Unmarshal says so precisely. Worth naming,
+		// because the alternative message is "could not be read" about 65,532
+		// bytes of perfectly good JSON, which sends a reader looking for a
+		// malformed response that does not exist.
+		//
+		// The cause is upstream and not here: a large document written to a
+		// PIPE can be cut off when the tool exits before the write drains,
+		// where the same command redirected to a file is complete. So the
+		// reason says what was seen and what it means, and the run fails
+		// closed like any other unanswered question.
+		if truncatedJSON(err, bytes.TrimSpace(stdout.Bytes())) {
+			return &unchecked{Command: command.String(), Reason: fmt.Sprintf(
+				"its output stopped part way through, after %d bytes: the document is valid as far as it goes and then ends, which is a write that did not finish rather than a bad response. Upgrade `voiceai`, and check `%s ... --json > out.json` writes a complete document",
+				stdout.Len(), target.SlngPushBinary)}
+		}
 		return &unchecked{Command: command.String(), Reason: readFailure(stdout, stderr, runErr)}
 	}
 	// A command can exit non-zero and still print a usable document; `secret get`
@@ -109,6 +125,22 @@ func (r *voiceaiRunner) read(command target.SlngCommand, out any) error {
 		return &unchecked{Command: command.String(), Reason: readFailure(stdout, stderr, runErr)}
 	}
 	return nil
+}
+
+// truncatedJSON reports whether a decode failed because the document ran out
+// rather than because it was malformed.
+//
+// The signal is structural rather than a message match: encoding/json reports a
+// document that ends early as a syntax error whose Offset is the end of the
+// input, because that is where it ran out of bytes to read. A genuinely
+// malformed document fails at the byte that is wrong, which is somewhere
+// earlier.
+func truncatedJSON(err error, document []byte) bool {
+	var syntax *json.SyntaxError
+	if !errors.As(err, &syntax) {
+		return false
+	}
+	return syntax.Offset >= int64(len(document)) && len(document) > 0
 }
 
 // readFailure picks the most informative thing the tool said. stderr first,
@@ -173,9 +205,15 @@ func (a slngAccount) String() string {
 // vault question this feature asks, which is why there is no lookup per name.
 type slngVaultEntry struct {
 	Name string `json:"name"`
-	// Kind is "secret" or "variable". They are created differently and used
-	// differently, so an entry under the wrong one is a mismatch rather than a
-	// hit: creating it again would not help.
+	// Kind is "secret" or "variable" WHERE THE LISTING REPORTS ONE. They are
+	// created differently and used differently, so an entry under the wrong one
+	// is a mismatch rather than a hit: creating it again would not help.
+	//
+	// An account's real `secret list` carries the name and has_value and no kind
+	// at all, so this is empty far more often than not, and empty means "the
+	// listing did not say" rather than "neither". compareVault only compares a
+	// kind it was given: reading the absent field as a kind of "" made every
+	// populated entry a mismatch and told the author to delete a correct one.
 	Kind string `json:"kind"`
 	// HasValue is the populated bit. Values are never readable back, so this is
 	// the only way to tell a real credential from a name someone reserved.
@@ -188,6 +226,15 @@ type slngVaultEntry struct {
 // in it as ordinary tools, with ids and versions. That is what turns a builtin
 // check from a guess into a decidable question.
 type slngAccountTool struct {
+	// ID is what every resolution read is addressed by, and it is why this
+	// listing is decoded further than it used to be: a name is what an author
+	// writes and an id is what cannot be reused under them.
+	ID string `json:"id"`
+	// Scope separates a tool the organisation owns from a capability SLNG
+	// curates and publishes to everybody. Both appear in this listing under
+	// ordinary names, so without it `slng: end_call` and `builtin: end_call`
+	// would resolve to the same record and one of the two would be wrong.
+	Scope    string `json:"scope"`
 	Name     string `json:"name"`
 	ToolType string `json:"tool_type"`
 	// LatestVersion is what makes the hosted-tool drift check free. This listing
@@ -200,6 +247,10 @@ type slngAccountTool struct {
 
 // slngMCPServer is one row of `voiceai mcp list`.
 type slngMCPServer struct {
+	// ID is what a capability read and a refresh are addressed by. A name can be
+	// renamed or reused between the check and the write, and both of those would
+	// silently move the read onto a different server.
+	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Transport string `json:"transport"`
 	// CapabilityStatus and the tool list both come from the last stored

@@ -1,0 +1,18 @@
+# The two code targets. Same two hosted tools as slng_hosted, and this is where
+# the portability claim is checked: the committed mirror has to be enough to
+# build a working tool in a generated project, offline.
+
+targets:
+  livekit:
+    provider: livekit
+    version: "1.6.10"
+    sdk_language: python
+    models:
+      vad:
+        provider: livekit
+        model: turn-detector-mini
+        semantic_endpointing: preferred
+
+  pipecat:
+    provider: pipecat
+    version: "1.8.0"

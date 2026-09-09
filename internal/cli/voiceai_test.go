@@ -363,3 +363,41 @@ printf '[{"direction":"inbound","name":"1_inbound","numbers":["+441234567890"],"
 func asUnchecked(err error, out **unchecked) bool {
 	return errors.As(err, out)
 }
+
+// TestVoiceaiNamesATruncatedDocument.
+//
+// A large `--json` document written to a PIPE can be cut off when the tool
+// exits before the write drains: the same command redirected to a file is
+// complete, and the parent reading it through a pipe gets a document that
+// decodes as far as it goes and then stops.
+//
+// The generic message for that is "could not be read", about 65,532 bytes of
+// perfectly good JSON, which sends a reader hunting for a malformed response
+// that does not exist. json.Unmarshal reports the case exactly, so it is named.
+//
+// The run still fails, and that is the point: an unanswered question never
+// counts as a satisfied check, whatever the reason.
+func TestVoiceaiNamesATruncatedDocument(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stub voiceai is a POSIX shell script")
+	}
+	binDir := t.TempDir()
+	// A document that stops inside a string, which is what the real failure
+	// looked like: valid up to the cut.
+	stub := `printf '{"id":"s-1","name":"firecrawl-mcp-2","capabilities":{"tools":[{"name":"firecrawl_scra'`
+	if err := os.WriteFile(filepath.Join(binDir, "voiceai"), []byte("#!/bin/sh\n"+stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := newVoiceaiRunner(filepath.Join(binDir, "voiceai"), os.Environ(), "")
+	var record slngMCPRecord
+	err := runner.read(target.SlngMCPGet.With("s-1", "--id"), &record)
+	if err == nil {
+		t.Fatal("a truncated document was decoded, so a partial record would be read as the server's whole capability list")
+	}
+	for _, want := range []string{"stopped part way through", "did not finish"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the failure does not say %q, so a reader looks for a malformed response instead: %v", want, err)
+		}
+	}
+}

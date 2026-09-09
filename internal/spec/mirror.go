@@ -228,3 +228,29 @@ const MirrorHeaderLines = `# ruff: noqa
 func MirrorPaths(name string) (sidecar, module string) {
 	return "tools/" + name + ".slng.json", "tools/" + name + ".slng.py"
 }
+
+// MirrorMeta is a scalar reference's generated pin: the digest a legacy
+// reference keeps in its own tool file's `hash:` line, held here instead
+// because a scalar reference authors none. `unmute pull` writes it beside the
+// mirror, and nothing reads it as authored surface.
+type MirrorMeta struct {
+	Hash string `json:"hash"`
+}
+
+// MirrorMetaJSON is the bytes `unmute pull` writes to MirrorMetaPath, in the
+// same indented shape MirrorJSON uses.
+func (m MirrorMeta) MirrorMetaJSON() ([]byte, error) {
+	content, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("mirror meta: %w", err)
+	}
+	return append(content, '\n'), nil
+}
+
+// MirrorMetaPath is the third file `unmute pull` writes for a scalar
+// reference, beside the two MirrorPaths files. A legacy reference has no use
+// for it: its pin is the tool file's own `hash:` line, and this file is never
+// read for one, even if it happens to exist.
+func MirrorMetaPath(name string) string {
+	return "tools/" + name + ".slng.meta.json"
+}

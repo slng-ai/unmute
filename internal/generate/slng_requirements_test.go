@@ -1,9 +1,14 @@
 package generate
 
 import (
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/target"
 )
 
 // TestSlngRequirementsCoversEveryKind. The slng_tools fixture is the one package
@@ -225,4 +230,79 @@ func TestSlngMCPServerNameCanDifferFromTheToolName(t *testing.T) {
 			t.Errorf("origin %q does not name the file that asked; tools/firecrawl-mcp.yaml does not exist", requirement.Where)
 		}
 	}
+}
+
+// TestSlngMCPRequirementsCarryNoCodeTargetConnectionSetting.
+//
+// A hosted MCP server's address, transport and credential are SLNG's. So a
+// package that deploys only there writes none of them, and the requirements the
+// runbook prints and the deploy preflight checks must not name them either:
+// `url_env` and `auth.token_env` on an `mcp:` block belong to livekit and
+// pipecat, which dial the server themselves.
+//
+// This is the half that would go wrong silently. Harvesting every env name on
+// the tool would put a code target's environment variable into the list of
+// things the SLNG vault has to hold, and an author would create an entry the
+// platform reads nowhere.
+func TestSlngMCPRequirementsCarryNoCodeTargetConnectionSetting(t *testing.T) {
+	agent, resolved := loadSlngRequirementsFixture(t, "slng_mcp_server")
+	artifact, err := Generate(agent, resolved, target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	// The server and its tools are required: those are names SLNG must hold.
+	if len(artifact.Requires.MCPServers) == 0 {
+		t.Fatal("the MCP server is not required, so the deploy would not check it exists")
+	}
+	if len(artifact.Requires.MCPTools) == 0 {
+		t.Fatal("no selected MCP tool is required, so the deploy would attach an unchecked selection")
+	}
+	for _, requirement := range artifact.Requires.MCPTools {
+		if requirement.Server == "" {
+			t.Errorf("selected tool %q names no server, so a finding could not say which one has to offer it", requirement.Name)
+		}
+	}
+
+	// And the local connection settings are not. Every env name the mcp block
+	// carries is read from the package by the code targets and by nothing here.
+	local := map[string]bool{}
+	for _, tool := range agent.Tools {
+		if tool.URLEnv != "" {
+			local[tool.URLEnv] = true
+		}
+		if tool.Auth != nil && tool.Auth.TokenEnv != "" {
+			local[tool.Auth.TokenEnv] = true
+		}
+	}
+	if len(local) == 0 {
+		t.Skip("the fixture declares no local MCP connection settings, so this proves nothing")
+	}
+	for _, requirement := range append(artifact.Requires.Secrets, artifact.Requires.Variables...) {
+		if local[requirement.Name] {
+			t.Errorf("%s is an MCP connection setting the code targets read, and the slng requirements name it: %s",
+				requirement.Name, requirement.Where)
+		}
+	}
+}
+
+// loadSlngRequirementsFixture builds one fixture and returns its slng target.
+func loadSlngRequirementsFixture(t *testing.T, fixture string) (*ir.Agent, ir.Target) {
+	t.Helper()
+	pkg, err := spec.Load(filepath.Join("..", "testdata", fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, resolved := range agent.Targets {
+		if resolved.Provider == ir.ProviderSlng {
+			return agent, resolved
+		}
+		_ = name
+	}
+	t.Fatalf("fixture %s declares no slng target", fixture)
+	return nil, ir.Target{}
 }

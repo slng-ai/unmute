@@ -1,0 +1,15 @@
+# A tool SLNG hosts, named on one line: the scalar counterpart of the legacy
+# block sibling fixture (slng_hosted_code) carries. Its pin lives in generated
+# tools/check_order.slng.meta.json rather than in this file, which is the
+# whole point of the scalar form: nothing here is written by `unmute pull`.
+#
+# `description:` is ours and overrides the platform's. Everything about how the
+# tool runs is the platform's, which is why input:, output:, handler: and
+# dependencies: are unwritable here.
+description: Look up an order by its number and return its status and delivery date.
+
+slng: check_order
+
+announce: One moment while I look that up.
+interruption: provider_default
+effect: returns_data

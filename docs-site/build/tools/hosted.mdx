@@ -1,41 +1,65 @@
 ---
 title: "Hosted tools"
-description: "Reference a tool your SLNG organisation already has: the one field you write, and what unmute pull mirrors for you."
+description: "Reference a tool your SLNG organisation already has by its exact name: no hash, no mirror, no pull required for SLNG."
 ---
 
 A hosted tool is not defined in your package. It is defined on the SLNG
-platform already, and the block just points at it.
+platform already, and the block just names it.
 
 ```yaml tools/check_order.yaml
-description: Look up an order by its number and return its status and delivery date.
+slng: check_order
 
-slng:
-  hash: 336a66b9a564f472...
+announce: One moment while I look that up.
 ```
 
-`hash` is the only field, and you do not write it yourself. `unmute pull`
-writes it, after it fetches the tool's definition and mirrors it beside this
-file. It is the pin that proves the committed mirror is the one this file
-means.
+`slng: check_order` is the whole reference. The scalar is the hosted tool's
+**exact name**, as your organisation holds it. No description, no schema, no
+hash, no mirror, and no `unmute pull` are required to validate, compile, or
+deploy this to SLNG.
 
-The tool **file's** name is what resolves against your organisation, so
-`tools/check_order.yaml` binds to a tool called `check_order`. There is no
-name field. This is the same rule [`builtin:`](/build/tools/prebuilt) follows,
-and it exists for the same reason: a second name to keep in sync is a second
-name that can drift.
+## The file name and the hosted name are two different things
 
-## Before the first pull
+The tool **file's** name is still the package reference: it is what an
+agent's `tools:` list attaches, and what every local diagnostic calls the
+tool. The `slng:` scalar is the name deployment resolves against your
+organisation. They usually agree, and they do not have to:
 
-Write `slng: {}` for a tool your organisation already has, then run the pull.
-An empty block compiles to nothing, and `unmute compile` says so rather than
-guessing:
+```yaml tools/order_status.yaml
+slng: check_order
+```
+
+The agent attaches `order_status`; deployment resolves `check_order`. This
+creates no tool and renames nothing in SLNG, it only lets your package call
+the reference whatever reads best in the prompt and the tool list. Say the
+hosted callable name out loud in a prompt that explicitly names the platform
+function; the file name is a package reference, not a remote rename.
+
+Leave the block bare and validation refuses before anything else runs:
 
 ```text wrap
-tool "check_order": `slng:` names a tool SLNG hosts and no mirror of it is committed, so
-  there is nothing to compile: run `unmute pull` to fetch it, and commit what it writes
+tools/check_order.yaml:1: `slng:` names the tool SLNG already hosts: write `slng: check_order`,
+  one line, the hosted tool's exact name
 ```
 
-## What the block refuses
+## Descriptions and parameters are inherited
+
+A hosted tool owns its own description and schema. Omit `description:` and
+the attachment uses whatever the published tool says; write one and it
+**overrides** the platform's for this attachment only. Delete the field later
+and inheritance comes back:
+
+```yaml tools/check_order.yaml
+slng: check_order
+description: Look up an order and tell the caller its status and delivery date.
+```
+
+Nothing here is checked offline: the description you write is checked only in
+the sense that a compile records it as an override; whether the published
+tool still means the same thing is a question only your organisation's copy
+can answer, which is why it is one of the checks `unmute deploy` completes,
+not one `unmute compile` does.
+
+## `input` and `output` still have nowhere to go
 
 A hosted tool owns its own schema, so these fields are unwritable rather than
 silently ignored:
@@ -43,25 +67,61 @@ silently ignored:
 | Field | Because |
 |---|---|
 | `input`, `output` | the platform published the schema; a second copy here could disagree with it |
-| `handler` | the code is the platform's, mirrored, not authored |
+| `handler` | the code is the platform's, not authored here |
 | `url_env`, `base_url`, `path` | the platform stores the URL |
 | `dependencies` | the platform installs them |
 
 ## What the block keeps
 
 These describe how your agent uses the tool, not what the tool is, so they
-stay yours to write:
+stay yours to write, exactly as before:
 
 | Field | Effect |
 |---|---|
-| `description` | overrides the platform's own. Omit it to use what the platform already says |
+| `description` | overrides the platform's own. Omit it to inherit what the platform already says |
 | `inject` | values merged into every call, never shown to the model |
 | `announce` | one sentence the agent speaks as the tool starts |
 | `effect` | whether the call ends the conversation |
 | `interruption` | whether the caller can interrupt during the call |
 
-Full rules for the last three are on
+```yaml tools/search_places_text.yaml
+slng: search_places_text
+
+inject:
+  - query: "{{customer_name}}"
+```
+
+Injected values keep their exact type, including `false` and `0`, and are
+never shown to the model. `{{customer_name}}` is resolved when a call starts;
+a fixed value such as `- limit: 0` is bound as written. Full rules for the
+last three fields are on
 [the tools overview](/build/tools/overview#the-three-behavior-fields).
+
+A variable does not have to land on a text parameter. SLNG stores the value as
+text and converts it into the parameter's declared type, so `- limit:
+"{{how_many}}"` works on an integer parameter as long as the stored value reads
+as a number. That conversion happens when the call starts, so `unmute deploy`
+checks the parameter and reports the value as deferred rather than claiming to
+have validated it.
+
+`unmute deploy` refuses an injected value in three cases, each naming the tool
+file and the published version:
+
+- **The parameter is not declared.** An attachment pins a declared parameter.
+  A schema that allows extra properties lets the *model* send more; it does not
+  give an override anywhere to bind.
+- **The parameter's type is not settled.** A parameter that could be a string
+  or an integer, or that declares no type, or that holds an object or a list,
+  cannot take a pinned value. Leave it to the model.
+- **A constraint sits at the root of the schema.** A published schema may
+  constrain a parameter from its root, under `allOf` and friends. Checking one
+  supplied value against a rule written for the whole call would reject the
+  arguments the model fills in, so the value is not reported as checked.
+
+Two tool files resolving to the same hosted tool are refused as well, naming
+both. SLNG attaches a hosted tool once, so the two cannot carry separate
+descriptions or `inject:` values, and a push would silently keep one file's
+settings and drop the other's.
 
 ## Attaching one
 
@@ -82,35 +142,110 @@ tools:
   - end_call
 ```
 
-## The loop
+## Deploying to SLNG needs no mirror
 
 ```sh
-unmute pull          # once, and again when the tool changes on the platform
-unmute compile       # offline, from the committed mirror
-unmute deploy
+unmute validate examples/slng-support --target slng
+unmute compile examples/slng-support --target slng
+unmute deploy examples/slng-support
 ```
 
-`pull` is the only command that needs a credential. `validate` and `compile`
-read the committed mirror and work with no network at all, which is what lets
-CI build a package that names a hosted tool. Full command reference at
-[`unmute pull`](/reference/cli/pull).
+All three work with no mirror file, no network, and no credential except the
+last, which is the one step that has to reach your organisation at all. That
+is the whole point of naming a tool rather than copying it: the published
+version is the only copy, so there is nothing local to keep in step with it.
 
-Commit everything `pull` writes. The mirror is how the tool reaches livekit
-and pipecat, and the pin is how a later compile knows the mirror is still the
-right one.
+What an offline compile genuinely cannot check, because the answer lives in
+your organisation and not in your package:
+
+- that a tool called `check_order` exists there, and which published version
+  is the latest;
+- that every `inject` argument is a parameter of that published version, and
+  that a fixed value is the type it declares;
+- which Vault entries the published version needs.
+
+`build/slng/compile-report.json` names these under `deferred_checks`, against
+the references they apply to, so a clean compile reads as "nothing wrong yet"
+rather than "everything is fine." `unmute deploy` completes all three before
+it changes the agent, and `--dry-run` reports them without changing anything.
+See [Deploy to SLNG](/deploy/slng) for what that run checks and what it
+prints.
+
+## The legacy form still loads
+
+```yaml tools/check_order.yaml
+slng:
+  hash: 336a66b9a564f472...
+```
+
+A tool file written before this shape existed still resolves, by the
+**file's** own name, and a code target still checks its mirror's pin exactly
+as it always did. It is accepted, not taught: a new tool file should write
+the scalar name instead. Nothing about deploying to SLNG reads this form's
+mirror or its pin; SLNG resolves the reference by name either way.
 
 ## What each target does with it
 
 | Target | What happens |
 |---|---|
-| SLNG | references the platform's own tool by name. Nothing is created, nothing is uploaded |
+| SLNG | resolves the platform's own tool by name at deploy time. Nothing is created, nothing is uploaded, nothing local is required |
 | LiveKit | the mirrored code runs inside the generated project |
 | Pipecat | the same |
 
-It works on all three because the definition travels rather than staying put.
-`unmute pull` writes the platform's own schema, and for a code tool its
-module, into your package, so livekit and pipecat build a real tool out of the
-committed mirror with no network at all.
+SLNG needs nothing from your package beyond the name. LiveKit and Pipecat are
+different: they build and run the tool themselves, so they need a real copy
+of its definition, and for a `code` tool its module, sitting in your package.
+That copy is what `unmute pull` fetches:
+
+```sh
+unmute pull my-agent          # writes the mirror beside each hosted tool file
+unmute compile my-agent --target livekit
+```
+
+The reference line is the portable part. `slng: check_order` is the same on
+all three targets, and nothing about the tool file changes between them.
+
+What does not travel is one package selecting slng **and** a code target at
+once. A code target needs a `turn:` binding to place its end-of-turn detector,
+the slng target refuses one because SLNG runs its own turn taking, and a
+per-target `models:` override cannot add a binding the agent does not define.
+So the code-target build is a second package with the same tool files in it:
+
+```text
+my-agent/            targets.yaml selects slng, no turn binding
+  tools/check_order.yaml         slng: check_order
+my-agent-livekit/    targets.yaml selects livekit, agent.yaml adds turn
+  tools/check_order.yaml         the same one line
+  tools/check_order.slng.json    written by unmute pull
+```
+
+For a scalar reference, the pin that proves the mirror is still the one your
+package means goes into a generated `tools/<name>.slng.meta.json` beside the
+mirror, never into your tool file. Commit everything `pull` writes. A package
+that targets slng alone never runs this command at all.
+
+Two things `pull` may still write into files you wrote, so you can read the
+diff knowing what to expect:
+
+- A tool file written the older `slng:` block form has its `hash:` restamped
+  in place, because that form keeps its pin in the tool file. A scalar
+  reference never gets touched.
+- `secrets:` in `agent.yaml` gains any credential name a mirrored tool needs
+  and your package does not declare yet, and only when a target builds the
+  tool itself. LiveKit and Pipecat read that list to get the credential into
+  the generated project. A package targeting slng alone gets nothing added:
+  the platform reads the credential from its own vault, and `unmute deploy`
+  reports the same requirement from the published contract.
+
+Skip the pull for a code target and the refusal names the fix, and the
+shortcut:
+
+```text wrap
+livekit: tool "check_order": `slng:` names a tool SLNG hosts and this target builds a tool
+  out of its committed mirror, and none is committed: run `unmute pull` to fetch it and
+  commit what it writes, or compile this package to slng, which references the published
+  tool and needs no mirror
+```
 
 **One limit, and it is the honest cost of "runs everywhere."** A hosted tool
 that declares Python dependencies compiles to slng, which installs a per-tool
@@ -126,20 +261,24 @@ the LiveKit driver builds one dependency list for the whole generated project fr
 
 A mirrored pin and an authored one reach nothing on those two targets for the
 same reason: each builds one dependency list for the whole project, and reads
-no per-tool pins. A hosted tool with no dependencies works on all three.
+no per-tool pins. A hosted tool with no dependencies works on all three. On a
+slng-only package this limit is invisible until deploy, because there is no
+mirror to read it from ahead of time; deploy reports it as one of the checks
+it completed.
 
 ## The mirrors are not yours to edit
 
 `tools/<name>.slng.json` and, for a code tool, `tools/<name>.slng.py` are the
-platform's copy, not yours. The `.slng.` infix marks a file as mirrored rather
-than authored, so one glance answers whether you may edit it. The answer is
-no.
+platform's copy, not yours, whichever form the reference is written in. The
+`.slng.` infix marks a file as mirrored rather than authored, so one glance
+answers whether you may edit it. The answer is no.
 
-Every compile checks the mirror against the pin, with no network at all, so a
-hand edit is caught the next time anybody builds the package:
+Every compile of a code target checks the mirror against its pin, with no
+network at all, so a hand edit is caught the next time anybody builds the
+package:
 
 ```text wrap
-tool "check_order": tools/check_order.slng.py does not match the hash tools/check_order.yaml
+tool "check_order": tools/check_order.slng.py does not match the hash tools/check_order.slng.meta.json
   pins, so the committed mirror is not the one this package means: run `unmute pull` and
   read the diff, or `git checkout` the mirror if the edit was a mistake
 ```
@@ -176,8 +315,14 @@ The last two are the two that no longer reach slng.
 ## Where to go next
 
 <Columns cols={2}>
+  <Card title="Deploy to SLNG" icon="cloud-upload" href="/deploy/slng">
+    What a real deploy resolves, checks and reports.
+  </Card>
   <Card title="unmute pull" icon="download" href="/reference/cli/pull">
-    The command, its flags, and every refusal.
+    Optional, and only for livekit or pipecat: the command, its flags, and every refusal.
+  </Card>
+  <Card title="MCP servers" icon="plug" href="/build/tools/mcp">
+    The other hosted-by-name block: a server SLNG already has.
   </Card>
   <Card title="Prebuilt tools" icon="package" href="/build/tools/prebuilt">
     The other reference-only block: a capability SLNG curates.

@@ -161,6 +161,27 @@ var (
 	SlngMCPList  = SlngCommand{"mcp", "list"}
 	SlngMCPTools = SlngCommand{"mcp", "tools"}
 
+	// SlngMCPGet takes a server id and SlngIDFlag with .With(), and returns the
+	// server's whole record: its transport, its capability status, when that
+	// snapshot was observed, whether it was truncated, and one entry per tool it
+	// found carrying that tool's schema hash. Those four have to be read
+	// together: a fresh timestamp on a failed probe is not a usable record, and a
+	// truncated one cannot establish that a selected tool is absent.
+	SlngMCPGet = SlngCommand{"mcp", "get"}
+
+	// SlngMCPRun connects to one server now and refreshes the snapshot SLNG
+	// stores for it. It is the one read on the deploy path that changes remote
+	// state, so it runs on a real deploy only, at most once per server, and never
+	// under --dry-run. It performs discovery and runs no selected tool.
+	SlngMCPRun = SlngCommand{"mcp", "run"}
+
+	// SlngAgentGet takes an agent id with .With() and returns the live agent,
+	// attachments included. It is what makes a replacement preview honest: a push
+	// REPLACES, so the settings on the agent now are what an author is about to
+	// lose, including anything edited in the dashboard that the package does not
+	// declare.
+	SlngAgentGet = SlngCommand{"agents", "get"}
+
 	// SlngTrunksList carries `in_use_by`, one agent name, which answers "which
 	// number reaches my agent" on its own. `voiceai trunks get` adds a per-agent
 	// breakdown and costs the same reads, because there is no per-trunk route and
@@ -194,6 +215,60 @@ var SlngTrunkFields = map[string]string{
 // subcommand, or worse, a silently different account from the one the push
 // writes to.
 const SlngProfileFlag = "--profile"
+
+// The flags spec 007 needs, and none of them exists in `voiceai` 0.1.16: they
+// are the upstream prerequisite recorded in that feature's
+// contracts/voiceai-deployment.md. An older CLI rejects each as an unknown
+// option before writing anything, which is what makes the capability probe safe.
+const (
+	// SlngIDFlag addresses a resource by its id rather than by its name, so a
+	// rename or a name reused for a second resource cannot redirect a read to
+	// something else between the check and the write.
+	SlngIDFlag = "--id"
+
+	// SlngVersionFlag selects one immutable published version. Without it a tool
+	// read returns the mutable draft, which is a contract nothing serves: a
+	// binding validated against a draft is validated against parameters no call
+	// will ever be made with.
+	SlngVersionFlag = "--version"
+
+	// SlngRequireResolvedFlag is both a capability gate and a promise. It tells
+	// the push to attach exactly the tool ids, versions and MCP schema hashes the
+	// body carries, rather than resolving names again and floating each reference
+	// to whatever is newest. Unmute promises to attach a checked version, and it
+	// cannot keep that promise through a push that re-resolves.
+	SlngRequireResolvedFlag = "--require-resolved"
+
+	// SlngExpectOrgFlag names the organisation the checks ran against, so the
+	// push refuses before writing if its credential belongs to another one. A
+	// matching profile name is not evidence: an exported key and a stored profile
+	// can resolve to different organisations, and nothing else on screen says
+	// which one was written to.
+	SlngExpectOrgFlag = "--expect-org"
+)
+
+// SlngResolutionContract is the marker a compatible push returns, and reading it
+// is the whole support check. A JSON document that merely decodes is not
+// evidence: an older CLI's output decodes fine and means something else.
+//
+// SlngResolutionContractVersion is the value that marker must carry. A run that
+// cannot see it gets upgrade guidance and no write, never a quiet fall back to
+// an unchecked name-only push.
+const (
+	SlngResolutionContract        = "resolution_contract"
+	SlngResolutionContractVersion = 1
+)
+
+// SlngUpgradeGuidance is what to tell an author whose installed CLI predates the
+// contract above. It names the install command because the refusal is the only
+// place they will see it.
+const SlngUpgradeGuidance = "the installed `" + SlngPushBinary + "` cannot attach a checked tool version: " +
+	"it does not support `" + SlngRequireResolvedFlag + "`, so a push would resolve every name again and attach whatever is newest, " +
+	"which is not the version this run checked. Upgrade it with `" + SlngPushInstall + "`"
+
+// SlngPushInstall is how the push tool is installed. One owner, because three
+// refusals name it.
+const SlngPushInstall = "brew install slng-ai/tap/voiceai"
 
 // SlngVaultDashboardURL is the page that fixes a missing vault entry. It is
 // known because the push tool returns it on a `vault_missing` blocker.

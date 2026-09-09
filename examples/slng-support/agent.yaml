@@ -33,9 +33,19 @@ models:
       model: slng/deepgram/nova:3-en
       language: en
 
-secrets:
-  - SLNG_TOOL_RENDER
-  - FIRECRAWL_MCP_URL
+# The caller's name, supplied when a session starts. `search_places_text`
+# injects it as its query, so the tool receives it without the model having to
+# repeat it back.
+variables:
+  customer_name:
+    type: str
+    source: call_start
+    description: The caller's name, supplied when the session is dispatched.
+
+# There is no `secrets:` block. The two hosted tools authenticate with
+# credentials SLNG holds for them, and the MCP server's address and credential
+# are SLNG's too, so `unmute deploy` discovers what the vault has to hold
+# rather than this file repeating names that could go out of step with it.
 
 tools:
   - web_search

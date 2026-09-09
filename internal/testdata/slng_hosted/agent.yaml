@@ -27,9 +27,13 @@ name: slng-hosted-fixture
 entry_agent: support
 
 secrets:
-  # SLNG_TOOL_RENDER is the credential the hosted request tool reads, and the
-  # pull is what put it here: the platform names it in config.auth.secret_name
-  # and leaves declared_secrets empty. A name, never a value.
+  # SLNG_TOOL_RENDER is the credential the hosted request tool reads. Declared
+  # by hand here: on a slng-only package the platform holds the tool and reads
+  # the credential from its own vault, so `unmute pull` adds nothing to this
+  # list and `unmute deploy` discovers the same requirement from the published
+  # contract. The sibling slng_hosted_code fixture is where the name is
+  # load-bearing, because the emitted project runs the tool itself.
+  # A name, never a value.
   - SLNG_TOOL_RENDER
   - OPENAI_API_KEY
   - DEEPGRAM_API_KEY

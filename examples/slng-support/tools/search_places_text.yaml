@@ -1,4 +1,9 @@
-slng:
-  hash: 4852e83e9115ef630d7337f3ad5d6c6238cb8c0385065bf106f55cab82a368f5
+slng: search_places_text
+
+# The caller's name fills the query, so the model does not have to repeat back
+# something it was already told. Every other argument the tool declares is left
+# to the model.
+inject:
+  - query: "{{customer_name}}"
 
 effect: returns_data

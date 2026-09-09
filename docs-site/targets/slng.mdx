@@ -61,13 +61,15 @@ unmute compile examples/slng-support --target slng
 ```text
 examples/slng-support/build/slng/
 ├── agent.json                # the agent create body
-└── README.md                 # the runbook: what to create, what to run, what to watch
+├── README.md                 # the runbook: what to create, what to run, what to watch
+└── compile-report.json       # what was compiled, and which checks were left to deployment
 ```
 
 This target writes no `tools/` directory. Every tool reference in
 `agent.json`, whether a curated capability, a hosted tool, or an MCP server,
 resolves by name against your organisation, so there is never a body of your
-own to write beside it.
+own to write beside it. A `slng:` reference needs no mirror to reach even
+this point: `agent.json` carries the name, and nothing else about the tool.
 
 Unmute's compiler opens no connection to SLNG, at validate time or compile time.
 It writes files and stops. [`unmute deploy`](/reference/cli/deploy) hands them to
@@ -200,11 +202,14 @@ there has no network access of its own: an `api_request` tool is how SLNG
 itself reaches an outside service.
 
 Reference what your organisation already has by name with
-[`slng:`](/build/tools/hosted), for the reason at the top of this page.
-`unmute pull` mirrors the definition into your package, so the same tool also
-runs on livekit and pipecat. [Hosted tools](/build/tools/hosted) has the
-field-by-field version, including the one limit: a hosted tool's Python
-dependencies compile to slng and are refused on the two code targets.
+[`slng:`](/build/tools/hosted), for the reason at the top of this page. This
+target needs nothing else: no mirror, no hash, no `unmute pull`, because the
+published tool is the only copy and this target resolves it by name at deploy
+time. `unmute pull` is only for a package that also compiles to livekit or
+pipecat, which build and run the tool themselves and so need a real copy of
+its definition, mirrored into your package. [Hosted tools](/build/tools/hosted)
+has the field-by-field version, including the one limit: a hosted tool's
+Python dependencies compile to slng and are refused on the two code targets.
 
 ### Names, not identifiers
 
@@ -260,6 +265,11 @@ Compile from the package instead.
 
 ## Hosted tool dependencies
 
+This section is about a package that also targets livekit or pipecat and has
+pulled a mirror; an slng-only deploy never reads a dependency list at all,
+because SLNG installs whatever the published tool declares on its own side,
+invisible to unmute.
+
 A hosted tool's Python dependencies are the platform's own, mirrored by
 `unmute pull` into `tools/<name>.slng.json` rather than written by you. Each
 is an exact `name==version` pin, because SLNG builds a locked, hash-verified
@@ -277,10 +287,17 @@ a hosted tool that declares dependencies is refused on `livekit` and
 
 ## The Vault
 
-SLNG reads secrets from its own store. Unmute knows which names a package needs
-and can create none of them, so the runbook lists them, grouped by where each
-one came from, above the push command. No secret value reaches any emitted file
-or any command in the runbook.
+SLNG reads secrets from its own store. Unmute can create none of them, so the
+runbook lists what compiling the package could see, grouped by where each one
+came from, above the push command. No secret value reaches any emitted file or
+any command in the runbook.
+
+That list is only what a compile can read offline: a tool's declared `auth:`,
+a `{{"{{$NAME}}"}}` token in your text, and anything a committed mirror
+recorded. A hosted tool or MCP server's own credential is not on it, because
+SLNG holds that credential and a compile never asks SLNG anything.
+`unmute deploy` reads the account directly and may ask to create an entry the
+runbook never named.
 
 Two kinds appear there:
 

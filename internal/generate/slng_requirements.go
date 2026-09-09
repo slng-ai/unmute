@@ -46,24 +46,38 @@ type Requirements struct {
 }
 
 // Requirement is one thing the account must hold.
+// The json tags are load-bearing now rather than decoration: this type is
+// written into `compile-report.json` and `deploy-report.json`, and without them
+// the reports would carry Go field names in a document a person reads.
 type Requirement struct {
 	// Name is exact and case-sensitive. Every one of the account's listings
 	// matches on exact name, so a near miss is a miss.
-	Name string
+	Name string `json:"name"`
 	// Server is set on MCPTools alone, naming the server that must offer Name.
-	Server string
+	Server string `json:"server,omitempty"`
+	// Source is the package tool file's own name, without the directory or the
+	// extension, and it is not always Name: a `slng:` scalar lets a file be
+	// called one thing and reference another.
+	//
+	// It is a field rather than something a reader digs out of Where, and that
+	// is deliberate. Deployment keys its authored `inject:` values and its
+	// authored descriptions by this name, and recovering it by finding the word
+	// starting with "tools/" in an English sentence would mean that rewording
+	// the sentence silently stopped every argument being checked, with no test
+	// failing and the deploy reporting success.
+	Source string `json:"source,omitempty"`
 	// Version and ContentHash are set on Hosted alone: what the committed mirror
 	// was taken from. They are compared, never recomputed, because the
 	// platform's hash algorithm is not ours. A mismatch is a warning and not a
 	// refusal, because the agent calls the platform's copy either way, so the
 	// risk is a stale package rather than a broken deploy.
-	Version     int
-	ContentHash string
+	Version     int    `json:"version,omitempty"`
+	ContentHash string `json:"content_hash,omitempty"`
 	// Where is the line of the package that asked for this. It is mandatory:
 	// "create ACME_TOKEN" is only actionable beside "because check_order
 	// authenticates with it", and a finding an author cannot trace is a finding
 	// they cannot act on.
-	Where string
+	Where string `json:"where"`
 }
 
 // Empty reports whether the package needs nothing from the account at all. Such
@@ -110,12 +124,13 @@ func slngRequirements(agent *ir.Agent, built slngArtifacts) Requirements {
 	// dashboard and the body carries no reference to it. There is no name to
 	// resolve, so there is nothing an account read could confirm or deny.
 	for _, ref := range built.Body.ToolRefs {
-		if agent.Tools[ref.Tool].Execution != ir.ToolBuiltin {
+		if agent.Tools[ref.origin].Execution != ir.ToolBuiltin {
 			continue
 		}
 		requirements.Builtins = append(requirements.Builtins, Requirement{
-			Name:  ref.Tool,
-			Where: "tools/" + ref.Tool + ".yaml is a builtin, so SLNG must already have a tool of that name",
+			Name:   ref.Tool,
+			Source: ref.origin,
+			Where:  "tools/" + ref.origin + ".yaml is a builtin, so SLNG must already have a tool of that name",
 		})
 	}
 
@@ -123,33 +138,53 @@ func slngRequirements(agent *ir.Agent, built slngArtifacts) Requirements {
 	// carries the package tool's own name and that is the name the organisation
 	// must hold.
 	for _, ref := range built.Body.ToolRefs {
-		tool := agent.Tools[ref.Tool]
-		if tool.Execution != ir.ToolSlngHosted || tool.Mirror == nil {
+		tool := agent.Tools[ref.origin]
+		if tool.Execution != ir.ToolSlngHosted {
 			continue
 		}
-		requirements.Hosted = append(requirements.Hosted, Requirement{
-			Name:        ref.Tool,
-			Version:     tool.Mirror.Version,
-			ContentHash: tool.Mirror.ContentHash,
-			Where:       "tools/" + ref.Tool + ".yaml references a tool SLNG hosts, so SLNG must already have one of that name",
-		})
+		// No mirror gate. A SLNG-only package carries none, and dropping the
+		// requirement when it was absent meant the one shape this target is for
+		// was the one nothing checked: the runbook stopped naming the tool and
+		// the deploy preflight stopped looking for it.
+		//
+		// Version and ContentHash come from a mirror when there is one, which
+		// only a package also targeting livekit or pipecat has. They are what a
+		// mirror was taken from, so a reference with none reports zero and the
+		// preflight's staleness comparison skips it: deployment resolves the
+		// latest published version either way.
+		hosted := Requirement{
+			Name:   ref.Tool,
+			Source: ref.origin,
+			Where:  "tools/" + ref.origin + ".yaml references a tool SLNG hosts, so SLNG must already have one of that name",
+		}
+		if ref.Tool != ref.origin {
+			hosted.Where = "tools/" + ref.origin + ".yaml declares `slng: " + ref.Tool + "`, so SLNG must already have a tool of that name"
+		}
+		if tool.Mirror != nil {
+			hosted.Version, hosted.ContentHash = tool.Mirror.Version, tool.Mirror.ContentHash
+		}
+		requirements.Hosted = append(requirements.Hosted, hosted)
 	}
 
 	// MCP servers and their tools. The body carries one reference per exposed
 	// tool, so the servers are the distinct half of that.
-	seenServer := map[string]string{}
+	seenServer, seenServerOrigin := map[string]string{}, map[string]string{}
 	for _, ref := range built.Body.MCPRefs {
 		if seenServer[ref.Server] == "" {
 			seenServer[ref.Server] = mcpOrigin(agent, ref.Server) + " names this MCP server"
+			seenServerOrigin[ref.Server] = ref.origin
 		}
 		requirements.MCPTools = append(requirements.MCPTools, Requirement{
 			Name:   ref.Tool,
 			Server: ref.Server,
+			Source: ref.origin,
 			Where:  mcpOrigin(agent, ref.Server) + " exposes it under mcp.tools",
 		})
 	}
 	for _, name := range slices.Sorted(maps.Keys(seenServer)) {
-		requirements.MCPServers = append(requirements.MCPServers, Requirement{Name: name, Where: seenServer[name]})
+		requirements.MCPServers = append(requirements.MCPServers, Requirement{
+			Name: name, Source: seenServerOrigin[name], Where: seenServer[name],
+		})
 	}
 
 	requirements.Secrets, requirements.Variables = slngVaultRequirements(agent, built)

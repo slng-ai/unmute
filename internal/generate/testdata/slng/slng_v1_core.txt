@@ -12,13 +12,13 @@ Everything in this directory is disposable. Edit the package and compile again.
 |---|---|
 | `agent.json` | the agent create body |
 | `README.md` | this file |
+| `compile-report.json` | what was compiled, and which checks were left to deployment |
 
 The agent deploys to region **eu-central**.
 
 ## 1. Vault entries
 
-This package needs none. Nothing in it names a secret or a Vault variable
-token, so there is nothing to create before you push.
+This package needs none, as far as this compile can tell. Nothing in it names a secret or a Vault variable token, so there is nothing to create before you push.
 
 ## 2. Deploy
 
@@ -45,8 +45,10 @@ The organisation the push resolved is printed on every run. That matters because
 an exported key and a stored profile can belong to **different** organisations,
 and nothing else on screen would tell you which one you just wrote to.
 
-One flag is worth knowing before your first update: `--dry-run` checks
-everything, reports it, and changes nothing.
+Deployment requires a compatible `voiceai`; this flow was verified with 0.1.18.
+Use `--dry-run` to preview checked versions and attachment changes without
+changing SLNG. Future session inputs remain runtime checks. The result is saved
+in `deploy-report.json` beside these files.
 
 `--run-samples` has nothing to act on here. A sample proves a tool works before
 the platform publishes it, and this push creates no tool: it writes references
@@ -70,10 +72,10 @@ voiceai agents list
 Rename in `agent.yaml` and compile again if it is taken. Renaming later does not
 move a deployed agent: it leaves the old one running and writes a second.
 
-Nothing on SLNG is created until every check passes, so a run that reports
-problems has changed nothing. Each problem comes back with what to do and the
-dashboard page that fixes it: a missing Vault entry, a tool name that resolves to
-nothing, a tool that needs a verified run.
+The agent is written only after its required checks pass. A real deploy may
+first refresh MCP discovery or fill a Vault entry with your consent; if a later
+check fails, the report names those completed changes. A dry run does neither.
+Each problem names what to fix and the relevant dashboard page.
 
 An agent id comes back. Keep it for step 3, or find it again with
 `voiceai agents list`: unmute stores no id, writes no lockfile, and keeps no
@@ -81,13 +83,15 @@ local state about your account.
 
 ### Driving the push tool yourself
 
-`unmute deploy .` runs this underneath, and you can run it directly:
+The standalone push command is also available:
 
 ```bash
 voiceai agents push build/slng
 ```
 
-It takes the package root or this directory. Do **not** post `agent.json` with
+It takes the package root or this directory, but bypasses Unmute's published
+binding checks and checked-version staging. Use `unmute deploy .` for the
+checked deployment flow. Do **not** post `agent.json` with
 `voiceai agents create` instead: that sends the body verbatim, and the body
 carries a name in every place the API wants an identifier.
 
@@ -99,9 +103,9 @@ invent an id a server assigns. Each entry under `tool_refs` is written as
 `version`, all three required, with no `tool` field at all. `mcp_refs` is the
 same shape.
 
-The push step resolves those names against your organisation's tools, mints the
-attachment ids, and creates any tool this package ships a body for. Nothing here
-is yours to edit by hand.
+The push step resolves those names against your organisation's tools and mints
+the attachment ids. It creates none of them: every name here is a tool your
+organisation already holds. Nothing here is yours to edit by hand.
 
 **A curated capability is no exception.** A builtin such as `end_call` needs
 nothing *created*, and its `tool_id` still has to be filled in, which the push
@@ -115,8 +119,8 @@ This package's curated references: `end_call`.
 Use the agent id step 2 printed. It is not optional: the command creates a
 session for one named agent.
 
-The `--file` is not optional either, even though everything in it is. Write a
-`session.json`:
+Supply a request body with `--file`. Write a `session.json`, filling in any
+required session arguments:
 
 ```json
 {"arguments": {}, "participant_name": "you"}
@@ -126,14 +130,15 @@ The `--file` is not optional either, even though everything in it is. Write a
 takes strings only, at most 32 of them.
 
 This agent declares: `customer_name`.
-Leave one out and its declared default is used.
+A declared default can fill an omitted value. Supply any value a required
+tool binding uses when it has no default; otherwise session creation is refused.
 
 ```bash
 voiceai agents web-sessions create <agent_id> --file session.json
 ```
 
-That returns LiveKit connection details, and dispatches a worker: a
-`livekit_dispatch_id` in the response means the agent joined the room. Sessions
+That returns LiveKit connection details and requests a worker. Connect a
+LiveKit client to join the room and talk to the agent. Sessions
 cap at `max_session_seconds`, which the same response carries.
 
 There is no `unmute dev` for this target. `dev` runs the generated project
@@ -264,4 +269,45 @@ Compile from the package instead. That is the shape this file is.
       "required": true
     }
   }
+}
+=== compile-report.json ===
+{
+  "target": "slng",
+  "provider": "slng",
+  "region": "eu-central",
+  "agent": "slng-core-fixture-slng",
+  "files": [
+    "README.md",
+    "agent.json",
+    "compile-report.json"
+  ],
+  "tool_refs": [
+    {
+      "source": "end_call",
+      "tool": "end_call",
+      "description": "End the call when the caller is finished or says goodbye."
+    }
+  ],
+  "requires": {
+    "builtins": [
+      {
+        "name": "end_call",
+        "source": "end_call",
+        "where": "tools/end_call.yaml is a builtin, so SLNG must already have a tool of that name"
+      }
+    ]
+  },
+  "deferred_checks": [
+    {
+      "check": "that the organisation holds a curated capability of this name",
+      "by": "unmute deploy",
+      "refs": [
+        "end_call"
+      ]
+    }
+  ],
+  "notes": [
+    "slng target: model strings are forwarded to SLNG exactly as written; SLNG owns its own model list, so unmute checks no vendor or model name here",
+    "slng target: region eu-central is written as declared"
+  ]
 }

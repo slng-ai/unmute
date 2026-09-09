@@ -31,6 +31,25 @@ type Package struct {
 	// exactly this shape and says why (no_dictionaries_test.go).
 	Mirrors     map[string]Mirror `json:"-" yaml:"-"`
 	MirrorBytes map[string][]byte `json:"-" yaml:"-"`
+	// MirrorFailures holds, by tool name, why a mirror that is on disk could not
+	// be read, so loading a package does not fail on a file only a code target
+	// needs. A SLNG-only package references published tools by name and compiles
+	// with no mirror at all, so a corrupt one beside it must not stop the load
+	// before a target has even been selected. The selected code target's own
+	// validation turns an entry here into its existing actionable refusal.
+	//
+	// A failure is never turned into an empty valid mirror: absent, decoded and
+	// failed are three states, and collapsing the third into the first would
+	// report a corrupt file as a missing one and send the author to the wrong
+	// fix.
+	MirrorFailures map[string]string `json:"-" yaml:"-"`
+	// MirrorMetaHash holds, by tool name, a scalar reference's generated pin:
+	// the digest tools/<name>.slng.meta.json records, read only for a scalar
+	// `slng:` reference. A legacy reference keeps its pin in the tool file's own
+	// `hash:` line instead and this map holds nothing for it. Absent means no
+	// metadata is committed yet, the same state an absent Mirror entry is: not
+	// an error, just not pulled.
+	MirrorMetaHash map[string]string `json:"-" yaml:"-"`
 	// Tasks and Callables are derived by Load from the nested shape and never
 	// authored, beside the derived fields above, and are untagged for the same
 	// load-bearing reason.
@@ -602,21 +621,37 @@ type ToolLocal struct {
 	Dependencies []string `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
 }
 
-// ToolSlng is the `slng:` block: a tool the SLNG platform hosts, referenced by
-// this file's own name and pinned by the digest of the mirror committed beside
-// it. One field, because the platform owns everything else about the tool.
+// ToolSlng is the `slng:` block: a tool the SLNG platform hosts, named on one
+// line.
 //
-// There is deliberately no tool name here. The file's name resolves against the
-// organisation, which is the rule `builtin:` already follows, so there is never
-// a second name to keep in sync and no way for the two to disagree.
+//	slng: check_order
+//
+// The scalar is the hosted tool's exact name. The file's own name stays the
+// package reference, so tools/order_status.yaml may hold `slng: check_order`:
+// the agent attaches order_status and deployment resolves check_order. Naming
+// the hosted tool here is what takes the pull, the mirror and the pin off a
+// SLNG-only package, because the published version supplies the description and
+// the parameters and there is nothing left to keep in sync.
+//
+// The legacy block, `slng:` with a `hash:` under it, still loads and resolves by
+// the file's own name. It is what packages authored before this shape carry, and
+// it is the form a code target's committed mirror is pinned by.
 type ToolSlng struct {
-	// Hash pins the committed mirror: the lowercase hex SHA-256 `unmute pull`
-	// recorded when it wrote it. Checked offline at every compile, which is what
-	// makes a build with no credential trustworthy.
+	// Name is the hosted tool's exact name, from the scalar form. Empty for the
+	// legacy block, whose hosted name is the file's own.
 	//
-	// Empty is legal and is what an author writes before the first pull
-	// (`slng: {}`). ir.Validate refuses it, naming the pull, rather than
-	// emitting a reference to a tool no mirror describes.
+	// yaml:"-" because it is not a block key: `slng:` takes a name or a block,
+	// and a `name:` written inside the block is refused by UnmarshalYAML with
+	// its line, rather than quietly becoming a third form.
+	Name string `json:"name,omitempty" yaml:"-"`
+
+	// Hash pins the committed mirror: the lowercase hex SHA-256 `unmute pull`
+	// recorded when it wrote it. Checked offline at every compile of a code
+	// target, which is what makes a build with no credential trustworthy.
+	//
+	// Legacy only. A scalar reference records the same digest in generated
+	// `tools/<name>.slng.meta.json` instead, so preparing a code target never
+	// writes into an authored file.
 	Hash string `json:"hash,omitempty" yaml:"hash,omitempty"`
 }
 
