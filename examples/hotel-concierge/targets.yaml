@@ -1,4 +1,4 @@
 targets:
   slng:
     provider: slng
-    deployment_region: any
+    deployment_region: eu-central

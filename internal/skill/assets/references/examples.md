@@ -19,7 +19,7 @@ table below to know what shape you are aiming at.
 |---|---|---|
 | one full release-readiness project | `examples/salon-concierge` | a verification task shared across agents by name, a booking task ordered after it by the agent's own prompt, two agents that hand the caller over, in-process tool state, Langfuse tracing, a cold manager transfer, browser audio, and an inbound phone route on each of its two targets; every tool is either local Python or the `end_call` builtin, so it starts with no external tool server |
 | to show what the optimizations are worth | `examples/salon-concierge-single-prompt` | the same salon with none of them: one prompt, every tool on every turn, no variables and no pre-fetch. Model, transport and turn taking are held identical to `salon-concierge`, so the only difference left is the structure. **A baseline to read against, never a shape to copy.** If a user asks what tasks or pre-fetch actually buy, diff it against `examples/salon-concierge` |
-| an agent SLNG hosts | `examples/slng-support` | every tool is a reference, because the slng target creates none: two `slng:` tools with committed mirrors, one `mcp:` server, one `builtin:`. Emits no runnable project, so there is no `unmute dev`: `unmute deploy` pushes it and a web session talks to it. A `local:` or `webhook:` block is refused there, so send those to pipecat or livekit |
+| an agent SLNG hosts | `examples/hotel-concierge` | everything the slng target accepts, in one hotel concierge line: two `slng:` tools by name (a code tool and a request tool), two named tools from one `mcp:` server, one `builtin:`, five template variables with defaults reaching the greeting and the prompt, an `inject:` that pins the hotel's identifier so the model never asks for it, a tool `announce:` and a think `fallback:`. No mirror: the slng target creates no tool. Emits no runnable project, so there is no `unmute dev`: `unmute deploy` pushes it and a web session or an attached phone number talks to it. A `local:` or `webhook:` block is refused there, so send those to pipecat or livekit |
 
 The smallest thing that runs is not an example any more. `unmute init <name>`
 scaffolds it: one agent, browser audio, one builtin, no Twilio and no third-party
@@ -33,12 +33,12 @@ unmute validate examples/salon-concierge
 unmute dev examples/salon-concierge --target pipecat
 ```
 
-`slng-support` is the exception to that second line: it emits no runnable
+`hotel-concierge` is the exception to that second line: it emits no runnable
 project, so `dev` has nothing to run. Deploy it instead.
 
 ```sh
-unmute validate examples/slng-support
-unmute deploy examples/slng-support --dry-run
+unmute validate examples/hotel-concierge
+unmute deploy examples/hotel-concierge --dry-run
 ```
 
 Then read `examples/<name>/agent.yaml` and its `README.md`. Every one of these

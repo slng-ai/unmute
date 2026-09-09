@@ -20,8 +20,8 @@ import (
 // meaning.
 var updateSlngV1 = flag.Bool("update-slng-target", false, "rewrite the slng target goldens")
 
-func TestSlngSupportNeedsNoSessionArguments(t *testing.T) {
-	_, files := compileSlng(t, filepath.Join("..", "..", "examples", "slng-support"))
+func TestSlngExampleNeedsNoSessionArguments(t *testing.T) {
+	_, files := compileSlng(t, filepath.Join("..", "..", "examples", "hotel-concierge"))
 	body := slngBodyOf(t, files)
 	defaults := body["template_defaults"].(map[string]any)
 	for name, raw := range body["template_variable_options"].(map[string]any) {
@@ -33,7 +33,7 @@ func TestSlngSupportNeedsNoSessionArguments(t *testing.T) {
 }
 
 func TestSlngPreviewIncludesTheBuiltinDescription(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "slng-support"))
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "hotel-concierge"))
 	if err != nil {
 		t.Fatal(err)
 	}

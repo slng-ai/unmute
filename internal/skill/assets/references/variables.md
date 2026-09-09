@@ -136,6 +136,7 @@ Refused, each with its line:
 |---|---|---|
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
 | omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so write the prompt to read whole while it is still empty, or give it a `default:` |
+| `conversation` | the model, during the call, once the caller has given and confirmed the value | `slng` only: it becomes a runtime variable the platform's `set_runtime_variables` tool fills, returned on the call record as `memory_variables`. No `default:`, and a `description:` is required because the model reads it. Refused on `livekit` and `pipecat`, where a step's `assign:` does this job |
 | `session_id`, `carrier`, `connection` | the phone adapter | LiveKit `sip` or `connector` only |
 | `call_id`, `direction` | the phone adapter | LiveKit `sip` or `connector`, and both Pipecat Twilio routes |
 | `stream_id` | the phone adapter | LiveKit `connector`, and Pipecat `cloud-websocket` |

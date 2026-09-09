@@ -108,7 +108,10 @@ func SlngResolvedBody(agent *ir.Agent, tgt ir.Target, tools []SlngResolvedTool, 
 func SlngInjectedArguments(agent *ir.Agent) map[string]map[string]any {
 	out := map[string]map[string]any{}
 	for name, tool := range agent.Tools {
-		if len(tool.Inject) == 0 {
+		// A builtin's inject: is a setting, not an argument: send_sms's sender is
+		// written to config_overrides, and the published tool has no argument
+		// schema to check it against.
+		if len(tool.Inject) == 0 || tool.Execution == ir.ToolBuiltin {
 			continue
 		}
 		arguments := make(map[string]any, len(tool.Inject))
@@ -116,6 +119,23 @@ func SlngInjectedArguments(agent *ir.Agent) map[string]map[string]any {
 			arguments[key] = value
 		}
 		out[name] = arguments
+	}
+	return out
+}
+
+// SlngAuthoredConfig is each package tool file's config override, keyed by the
+// tool file's own name. Today that is one shape: a builtin send_sms's sender,
+// which `inject: from_number` pins and the driver writes as the attachment's
+// config_overrides. It exists for the same reason SlngAuthoredAnnouncements
+// does: a preview cannot compare a setting it was never given, and without it
+// the deploy report told an author that writing their own sender would delete
+// it.
+func SlngAuthoredConfig(agent *ir.Agent) map[string]map[string]any {
+	out := map[string]map[string]any{}
+	for name, tool := range agent.Tools {
+		if tool.Execution == ir.ToolBuiltin && tool.Builtin == "send_sms" && len(tool.Inject) > 0 {
+			out[name] = slngSendSmsConfig(tool)
+		}
 	}
 	return out
 }

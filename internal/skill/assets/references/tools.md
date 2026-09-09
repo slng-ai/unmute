@@ -52,7 +52,7 @@ also the list of what you could have written.
 | `webhook:` | an HTTP call to a URL named by an environment variable | the user already has an API. This is the everyday case |
 | `local:` | a Python function in the package | the call needs code of your own: a signature, a transform, a fixture |
 | `mcp:` | a remote MCP server that offers its own tools | the user names a server and wants what it exposes |
-| `builtin:` | a tool the runtime already has, selected by id | you want `end_call`, which is the only one |
+| `builtin:` | a tool the runtime already has, selected by id | you want `end_call`, or `send_sms` on the `slng` target |
 | `slng:` | a tool the SLNG platform already hosts | the user names a tool that exists in their SLNG organisation. See below |
 | `client:` | a tool the caller's own application fulfils | never yet. Gated, see below |
 | `provider_hosted:` | a tool the model provider runs itself | never yet. Gated, see below |
@@ -554,14 +554,21 @@ builtin:
   instructions: Thank the caller briefly, then end the call.
 ```
 
-**The registry is closed and has one row.**
+**The registry is closed and has two rows.**
 
-Builtin ids: `end_call`. `builtin.instructions` is optional and tells the model
+Builtin ids: `end_call`, `send_sms`. `send_sms` is SLNG's curated text message
+and compiles on the `slng` target only: write `inject:` with one `from_number`,
+a literal number in international format starting with a plus sign, and nothing
+else; the model supplies the recipient and the body, and SLNG reads
+`TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` from the vault by itself, which
+`unmute deploy` checks. Pair it with a `source: conversation` variable so the
+confirmed number is recorded on the call. `builtin.instructions` is optional and tells the model
 what to do as the prebuilt runs without changing its fixed behavior.
 
 | id | Effect | Default description |
 |---|---|---|
 | `end_call` | `ends_conversation` | End the call when the caller is finished or says goodbye. |
+| `send_sms` | `returns_data` | Send a text message to a phone number the caller has given and confirmed. |
 
 There is no plugin seam, and you cannot add to it from a package. Do not invent
 a builtin id: an unknown one is refused by name.

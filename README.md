@@ -244,9 +244,11 @@ time by adding `.md` to its URL. See
 - [`salon-concierge-single-prompt`](examples/salon-concierge-single-prompt/) is
   the same salon with the structural features taken back out, so the one above
   can be read against something.
-- [`slng-support`](examples/slng-support/) is the hosted target in its smallest
-  form. It produces no runnable project: `unmute deploy` compiles a deployment
-  body and pushes it.
+- [`hotel-concierge`](examples/hotel-concierge/) is the hosted target's
+  showcase: a concierge line whose tools are all references SLNG already holds,
+  with template variables, an injected argument, a tool announcement, named MCP
+  tools and a fallback. It produces no runnable project:
+  `unmute deploy` compiles a deployment body and pushes it.
 
 If you want a package to start from rather than one to read, run
 `unmute init my-agent`.

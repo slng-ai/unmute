@@ -178,6 +178,10 @@ type proposedSettings struct {
 	// Announce is each tool file's own `announce:`, which compiles to the
 	// attachment's execution_policy.pre_action_message.
 	Announce map[string]string
+	// Config is each tool file's own config override, which today is a builtin
+	// send_sms's sender, so the preview compares it rather than calling every
+	// config override a setting the package cannot declare.
+	Config map[string]map[string]any
 }
 
 func compareAttachments(
@@ -300,8 +304,28 @@ func attachmentChanges(attached slngLiveTool, reference resolvedTool, proposed p
 		changes = append(changes, "execution_policy.pre_action_message.wait, which makes the agent wait for that sentence before the tool runs and this package cannot declare, so a replacement clears it")
 	}
 	changes = append(changes, attached.unreadPolicySettings()...)
-	if len(attached.ConfigOverrides) > 0 {
+	proposedConfig, declaresConfig := proposed.Config[source]
+	switch {
+	case !declaresConfig && len(attached.ConfigOverrides) > 0:
 		changes = append(changes, "config_overrides, this attachment's own settings for the tool, which the agent has now and this package cannot declare, so a replacement removes them")
+	case declaresConfig:
+		// The one config a package declares is a send_sms sender. Compare that
+		// field and say so; any other key the agent holds is one this package
+		// cannot write back.
+		want, _ := proposedConfig["from_number"].(string)
+		have, _ := attached.ConfigOverrides["from_number"].(string)
+		switch have {
+		case want:
+		case "":
+			changes = append(changes, "config_overrides.from_number, the sender this package's `inject:` pins, which the agent does not have now")
+		default:
+			changes = append(changes, fmt.Sprintf("config_overrides.from_number, from %q to this package's `inject:`", have))
+		}
+		for _, key := range sortedMapKeys(attached.ConfigOverrides) {
+			if key != "from_number" && key != "type" {
+				changes = append(changes, fmt.Sprintf("config_overrides.%s, which the agent has now and this package cannot declare, so a replacement removes it", key))
+			}
+		}
 	}
 	for _, key := range sortedMapKeys(attached.Arguments) {
 		want, supplied := injected[key]

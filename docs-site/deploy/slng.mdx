@@ -10,7 +10,7 @@ first:
 
 ```sh
 export SLNG_API_KEY=...
-unmute deploy examples/slng-support
+unmute deploy examples/hotel-concierge
 ```
 
 That validates the package, compiles it, resolves every tool reference
@@ -40,15 +40,21 @@ report records those changes even if a later check fails. A dry run does neither
 </Warning>
 
 A builtin names a capability SLNG already owns, so the push has nothing to
-create first. In a package that is a `builtin:` block naming `id: end_call`.
-The other curated capabilities, voicemail detection, current date and time,
-and the caller's phone number, are attached to the agent in the SLNG dashboard
-rather than written in the package.
+create first. In a package that is a `builtin:` block naming `id: end_call`,
+or `id: send_sms` with the sender pinned by `inject: from_number`. The other
+curated capabilities, voicemail detection, current date and time, and the
+caller's phone number, are attached to the agent in the SLNG dashboard rather
+than written in the package. A value the model records during the call, such
+as a number the caller confirms, is a variable with `source: conversation`,
+which becomes one of the agent's runtime variables and comes back on the call
+record.
 
-[`slng-support`](https://github.com/slng-ai/unmute/tree/main/examples/slng-support)
-is the working example and the shape to copy: builtins and hosted tools, a
-greeting and no required session inputs. If your agent needs a tool SLNG does
-not host yet,
+[`hotel-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/hotel-concierge)
+is the working example and the shape to copy: two hosted tools by name, two
+named MCP tools, a builtin, template variables with defaults in the greeting
+and the prompt, an injected argument, a tool announcement and a model fallback,
+with no required session inputs. If your agent needs a
+tool SLNG does not host yet,
 create it in the SLNG dashboard and reference it with `slng:`
 (see [Hosted tools](/build/tools/hosted)), or compile the package to
 `pipecat` or `livekit` instead, where the handler runs in the project you
@@ -93,7 +99,7 @@ host.
 
 ## The walkthrough
 
-Follow these against `examples/slng-support` from a clone of the repository.
+Follow these against `examples/hotel-concierge` from a clone of the repository.
 It references two hosted tools and one MCP server, all three by name, with no
 mirror committed anywhere in the package.
 
@@ -106,7 +112,7 @@ prove those resources exist in your account.
 <Steps>
   <Step title="Validate">
     ```sh
-    unmute validate examples/slng-support
+    unmute validate examples/hotel-concierge
     ```
 
     ```text
@@ -120,13 +126,13 @@ prove those resources exist in your account.
 
   <Step title="Compile">
     ```sh
-    unmute compile examples/slng-support --target slng
+    unmute compile examples/hotel-concierge --target slng
     ```
 
     ```text
-    examples/slng-support/build/slng/agent.json
-    examples/slng-support/build/slng/README.md
-    examples/slng-support/build/slng/compile-report.json
+    examples/hotel-concierge/build/slng/agent.json
+    examples/hotel-concierge/build/slng/README.md
+    examples/hotel-concierge/build/slng/compile-report.json
     ```
 
     Also local, also no key. `agent.json` carries each tool by name only.
@@ -138,17 +144,17 @@ prove those resources exist in your account.
 
   <Step title="Preview the push">
     ```sh
-    unmute deploy examples/slng-support --dry-run
+    unmute deploy examples/hotel-concierge --dry-run
     ```
 
     This is the step that needs the `voiceai` release described above. With
     one installed, a clean preview names the organisation it resolved,
-    resolves `check_order`, `search_places_text` and `end_call` against it,
+    resolves `hotel_info`, `search_places_text` and `end_call` against it,
     checks their published contracts and reports the version it would attach
     for each reference, without writing anything:
 
     ```text
-    slng: check_order v<n>
+    slng: hotel_info v<n>
     slng: search_places_text v<n>
     slng: dry run, nothing was created or changed
     ```
@@ -169,14 +175,14 @@ prove those resources exist in your account.
 
   <Step title="Deploy">
     ```sh
-    unmute deploy examples/slng-support
+    unmute deploy examples/hotel-concierge
     ```
 
     A successful run prints the version it attached for every reference and
     the agent id:
 
     ```text
-    slng: attached check_order v<n>
+    slng: attached hotel_info v<n>
     slng: attached search_places_text v<n>
     slng: attached end_call v<n>
     slng: attached firecrawl-mcp-2 firecrawl_scrape
@@ -314,7 +320,7 @@ unmute pull ./my-agent --check
 
 It writes nothing and exits 1 on drift, which is what makes it usable in CI.
 `unmute pull` then brings the mirror forward. A slng-only package, such as
-`examples/slng-support`, carries no mirror and has nothing here to check.
+`examples/hotel-concierge`, carries no mirror and has nothing here to check.
 
 ## Renaming the agent
 

@@ -33,13 +33,36 @@ run.
 | id | Effect | Default description |
 |---|---|---|
 | `end_call` | `ends_conversation` | End the call when the caller is finished or says goodbye. |
+| `send_sms` | `returns_data` | Send a text message to a phone number the caller has given and confirmed. |
 
-One row. The registry is **closed**: you cannot add to it from a package, and
+Two rows. The registry is **closed**: you cannot add to it from a package, and
 there is no plugin seam. Adding a prebuilt means a row in the compiler plus a
 lowering for each target, which is a change to Unmute, not to your agent.
 
-So read this page as a list of one thing that exists, not as a catalog to browse.
-If what you want is not `end_call`, it is a
+`end_call` compiles on every target. `send_sms` is a capability SLNG curates
+and compiles on the `slng` target only; a code target refuses it by name. It
+takes one setting from the package, the sender:
+
+```yaml tools/send_sms.yaml
+description: Send a text message to the guest's confirmed mobile number.
+
+builtin:
+  id: send_sms
+
+inject:
+  - from_number: "+447700900123"
+```
+
+`from_number` is a literal number in international format starting with a plus
+sign, and it is the only key `inject:` may carry here: SLNG requires the
+sender on the attachment and lets the model supply the recipient and the body.
+SLNG reads the Twilio credentials from your vault under `TWILIO_ACCOUNT_SID`
+and `TWILIO_AUTH_TOKEN`, so `unmute deploy` checks both. Pair it with a
+[`source: conversation` variable](/reference/variables#sources) so the number
+the caller confirmed is recorded on the call.
+
+So read this page as a list of two things that exist, not as a catalog to
+browse. If what you want is neither, it is a
 [webhook](/build/tools/webhook), a [Python handler](/build/tools/python), or an
 [MCP server](/build/tools/mcp).
 

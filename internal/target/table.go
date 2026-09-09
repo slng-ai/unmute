@@ -109,6 +109,7 @@ const (
 	FieldTracingCoval          Field = "tracing.provider.coval"
 	FieldPrefetch              Field = "prefetch"
 	FieldVariableConfirm       Field = "variables.confirm"
+	FieldVariableConversation  Field = "variables.source.conversation"
 	FieldDelegateAnnounce      Field = "controls.delegate.announce"
 	FieldToolInject            Field = "tools.inject"
 	FieldWebhookPath           Field = "tools.webhook.path"
@@ -366,6 +367,16 @@ func Default() Table {
 			// Confirmation holds a value back from a gate, and the gate is the
 			// prerequisite guard on a step. No steps, no guard, nothing to hold.
 			FieldVariableConfirm: field(deny(Slng, slngNoTasks("a value awaiting confirmation"))),
+			// A value the model records mid-call. SLNG has a place for it: a
+			// runtime variable, filled by the platform's own set_runtime_variables
+			// tool and returned on the call record. The code drivers have no such
+			// slot outside a task, and a task's `assign:` is the honest spelling
+			// there.
+			FieldVariableConversation: field(
+				allow(Slng),
+				deny(LiveKit, codeNoConversationVariable("livekit")),
+				deny(Pipecat, codeNoConversationVariable("pipecat")),
+			),
 			// Declared state is a generated Pydantic class in a module the two
 			// code drivers write. The slng target writes a spec and emits no
 			// module, so there is nowhere for the class, the validator or the
@@ -748,6 +759,13 @@ func slngNoModule(what string) string {
 	return "slng target pushes a spec and emits no module of its own, so " + what +
 		" has nowhere to be declared or checked: declare the value as one of the primitive types, " +
 		"or compile to livekit or pipecat, which generate the class and validate the value where it enters"
+}
+
+// codeNoConversationVariable is the one reason both code targets refuse
+// `source: conversation`: neither emits a store the model writes to outside a
+// task, and the task's `assign:` already does that job there.
+func codeNoConversationVariable(provider string) string {
+	return provider + " target has no value a model records mid-call outside a task: declare the variable without a source and fill it with a task's `assign:`, or compile to slng, whose set_runtime_variables tool records it and returns it on the call record"
 }
 
 func slngNoHandoff(what string) string {

@@ -1,0 +1,64 @@
+# The smallest package that records a value the model fills mid-call and
+# texts it back: one `source: conversation` variable, which the slng driver
+# emits as a runtime variable, and one `builtin: send_sms` whose sender is
+# pinned with `inject:` and lands on the attachment's config override. The
+# tests in internal/ir and internal/generate read this package; nothing here
+# reaches the network.
+
+version: 1
+
+name: slng-memory-sms-fixture
+
+entry_agent: desk
+
+agents:
+  desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tools:
+      - send_sms
+      - end_call
+
+models:
+  think:
+    reasoning:
+      description: answers the caller
+      model: gemini/google/gemini-2.5-flash:latest
+  speak:
+    voice:
+      description: the voice
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      description: default STT
+      provider: deepgram
+      model: deepgram/nova:3
+      language: en
+
+variables:
+  customer_name:
+    type: string
+    default: there
+    description: The caller's first name, supplied by the session.
+  caller_phone:
+    type: string
+    source: conversation
+    description: The caller's mobile number, recorded after the caller confirmed it.
+
+tools:
+  - send_sms
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi {{customer_name}}, how can I help?"
+  interruption:
+    enabled: true
+
+channels:
+  web:
+    kind: realtime_audio

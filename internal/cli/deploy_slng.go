@@ -156,6 +156,7 @@ func deployResolution(
 		Arguments:   generate.SlngInjectedArguments(agent),
 		Description: generate.SlngAuthoredDescriptions(agent),
 		Announce:    generate.SlngAuthoredAnnouncements(agent),
+		Config:      generate.SlngAuthoredConfig(agent),
 	}
 	deployment.Bindings = checkBindings(deployment.Resolution.Tools, deployment.Proposed.Arguments)
 	report.Findings = append(report.Findings, bindingFindings(deployment.Bindings)...)

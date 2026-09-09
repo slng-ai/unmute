@@ -1088,9 +1088,12 @@ func TestPublicExamplePackages(t *testing.T) {
 		}
 	}
 	// Three packages: salon-concierge as the composite release fixture that also
-	// carries the only shipped telephony route, and slng-support, which emits no
-	// runnable project. slng-support references only builtins, so its push
-	// creates nothing, and that is the only slng shape that publishes today.
+	// carries the only shipped telephony route, and hotel-concierge, which emits
+	// no runnable project. hotel-concierge is the hosted target's showcase: two
+	// hosted references, an MCP selection, a builtin, template variables, an
+	// injected argument, an announcement and a fallback. Every
+	// tool is a reference, so its push creates nothing, and that is the only slng
+	// shape that publishes today. It replaced slng-support on 2026-09-09.
 	//
 	// salon-concierge-single-prompt is the third, added 2026-09-01, and it is the
 	// one exception to the rule that a shipped example is something to copy. It is
@@ -1106,7 +1109,7 @@ func TestPublicExamplePackages(t *testing.T) {
 	// 2026-08-28, and a reader who wants a package to run scaffolds one with
 	// `unmute init`. simple-prompt lives on as internal/testdata/simple-prompt,
 	// because it is the minimal single-agent shape a dozen tests compile.
-	want := []string{"salon-concierge", "salon-concierge-single-prompt", "slng-support"}
+	want := []string{"hotel-concierge", "salon-concierge", "salon-concierge-single-prompt"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
@@ -1714,7 +1717,7 @@ func authoredPackageFiles(t *testing.T) map[string]string {
 //
 // `{{customer_name}}` inside a greeting is prose, and the scaffold template's
 // `[[ ]]` are its own action delimiters. A literal test for `{` or `[` fails on
-// examples/slng-support today, which is why this stripping exists rather than a
+// examples/hotel-concierge today, which is why this stripping exists rather than a
 // list of exceptions.
 var placeholders = regexp.MustCompile(`\{\{[^}]*\}\}|\[\[[^\]]*\]\]`)
 

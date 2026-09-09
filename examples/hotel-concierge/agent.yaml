@@ -1,0 +1,112 @@
+version: 1
+
+name: hotel-concierge
+
+entry_agent: concierge
+
+agents:
+  concierge:
+    instructions: instructions.md
+    think: reasoning
+    speak: front_desk
+    tools:
+      - hotel_info
+      - search_places_text
+      - web_search
+      - send_sms
+      - end_call
+
+models:
+  think:
+    reasoning:
+      description: answers the guest
+      model: gemini/google/gemini-3.1-flash-lite:latest
+      # One fallback model. SLNG tries it when the primary fails to answer.
+      # Named here, defined below, and emitted as the platform's own
+      # fallbacks.llm list.
+      fallback:
+        - backup
+    backup:
+      description: takes over when the primary model fails
+      model: gemini/google/gemini-2.5-flash:latest
+  # Both speech models are written whole, vendor and model joined, and both are
+  # ones SLNG serves in the eu region. The `slng/deepgram/...-en` ids the
+  # scaffold uses elsewhere are SLNG-hosted copies that run in us-central,
+  # Australia and India only, and a push into eu-central refuses them with
+  # AGENT_MODEL_UNAVAILABLE.
+  speak:
+    front_desk:
+      description: warm, concise
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      description: default STT
+      provider: deepgram
+      model: deepgram/nova:3
+      language: en
+
+# Template variables. Every one has a default, so an inbound phone call, which
+# supplies no arguments, gets the default hotel. A web session may override any
+# of them in its `arguments`.
+variables:
+  hotel_name:
+    type: string
+    default: Hotel Lumbre
+    description: The property this deployment answers for. Spoken in the greeting.
+  neighbourhood:
+    type: string
+    default: Sol, in the centre of Madrid
+    description: Where the hotel is, in words a places query can use.
+  city:
+    type: string
+    default: Madrid
+    description: The city.
+  hotel_website:
+    type: string
+    default: lumbre-hotels.example
+    description: The hotel's website, spoken on request without a scheme.
+  # A value the model records during the call, not one a session supplies. No
+  # default, because nothing knows it before the guest says it. SLNG fills it
+  # through its own set_runtime_variables tool once the guest has confirmed
+  # the number, and the call record returns it under memory_variables.
+  caller_phone:
+    type: string
+    source: conversation
+    description: The guest's mobile number for a text message, in international format starting with a plus sign, recorded only after the guest has heard it read back and confirmed it.
+
+# There is no `secrets:` block. The places tool's credential is SLNG's, held
+# in its Vault under the name the published tool records, and `unmute deploy`
+# discovers it from the platform rather than this file repeating it. Every
+# value this package varies per deployment is a template variable above; a
+# `{{$NAME}}` Vault variable would also work in the prompt on this target, but
+# Vault variables belong to a project, so this package keeps them out.
+
+tools:
+  - hotel_info
+  - search_places_text
+  - web_search
+  - send_sms
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Good day, this is the concierge desk at {{hotel_name}}. How can I help with your stay?"
+  interruption:
+    enabled: true
+
+channels:
+  web:
+    kind: realtime_audio
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: false
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  peak_starts_per_second: 0.5
+  avg_session_duration: 4m

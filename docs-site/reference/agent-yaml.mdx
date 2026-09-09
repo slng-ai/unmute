@@ -665,7 +665,13 @@ all illegal on one, because the server describes its own tools.
 |---|---|
 | `transport` | `sse` or `streamable_http` |
 
-Builtin ids: `end_call`.
+Builtin ids: `end_call`, `send_sms`. `end_call` compiles on every target.
+`send_sms` is a capability SLNG curates, so it compiles on the `slng` target
+only, and it takes one setting from the package: `inject:` with a single
+`from_number`, the sender as a literal number in international format starting
+with a plus sign. The model supplies the recipient and the body itself, and
+SLNG reads the Twilio credentials from your vault under `TWILIO_ACCOUNT_SID`
+and `TWILIO_AUTH_TOKEN`, which `unmute deploy` checks.
 
 `webhook.auth`:
 

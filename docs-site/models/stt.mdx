@@ -32,8 +32,8 @@ To keep transcription compute in a world part or exact region, see
 
 | Where | `model:` |
 |---|---|
-| `unmute init`, and every example except `slng-support` | `deepgram/nova:3` |
-| `slng-support`, which compiles to the `slng` target | `slng/deepgram/nova:3-en` |
+| `unmute init`, and every example, `hotel-concierge` on the `slng` target included | `deepgram/nova:3` |
+| the SLNG-hosted English copy, which runs in `us-central`, `au` and `in` only, so an `slng` package deploying to `eu-central` cannot name it | `slng/deepgram/nova:3-en` |
 
 Those are the only exact ids the docs name, because they are the ones the examples
 run. The full SLNG catalog, with languages, regions, and hosting, is at

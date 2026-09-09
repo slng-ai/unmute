@@ -4,8 +4,9 @@ Three packages. `salon-concierge` is the full Sage and Stone Salon project and
 the one to read when you want to see every path working together.
 `salon-concierge-single-prompt` is that same salon with the structural
 optimizations removed, so the optimized package can be read against something.
-`slng-support` is the hosted target, which emits no runnable project and today
-publishes only agents whose tools are already built.
+`hotel-concierge` is the hosted target, which emits no runnable project and
+publishes only agents whose tools SLNG already holds; it uses everything that
+target accepts.
 
 If you want a package of your own to start from rather than one to read, run
 `unmute init my-agent`. The scaffold writes the smallest package that does
@@ -20,7 +21,7 @@ provider request and a human conversation, not only the automated checks.
 |---|---|---|
 | [`salon-concierge`](salon-concierge/) | Two agents, two tasks (one shared by both agents from a single definition), handoffs, a guarded task, a cold manager transfer, tracing, and inbound phone routes | **Release-readiness example.** Verify once, manage stored bookings, answer or escalate complaints, cold-transfer to a manager, and inspect Langfuse traces. Every tool is local Python, so nothing remote has to be up before the greeting. Browser and inbound phone on two targets, one per telephony plane, no outbound. |
 | [`salon-concierge-single-prompt`](salon-concierge-single-prompt/) | One agent, one prompt holding everything, every tool on every turn | **The baseline, not a template.** The same salon as above with no tasks, no handoffs, no variables and no pre-fetch: the caller is asked for a number the carrier already supplied, the model calls a tool to find out what day it is, and it retypes the phone number into every tool call. Model, transport and turn taking are held identical to the package above, so a difference you hear is a difference the structure made. Validates, compiles and runs on the same two targets, because a baseline that did not would prove nothing. |
-| [`slng-support`](slng-support/) | One agent, four tools, every one of them a reference, hosted by SLNG | **The hosted target, smallest form.** Produces no runnable project: `unmute deploy` compiles a deployment body and pushes it. Two `slng:` tools with committed mirrors, one `mcp:` server and one `builtin:`, so the push creates nothing and SLNG already owns every capability it names. No `unmute dev`. |
+| [`hotel-concierge`](hotel-concierge/) | One agent, four tool references, five template variables, a model fallback, hosted by SLNG | **The hosted target's showcase.** Produces no runnable project: `unmute deploy` compiles a deployment body and pushes it. Two `slng:` tools by name, two named tools from one `mcp:` server and one `builtin:`, so the push creates nothing and SLNG already owns every capability it names. Template variables with defaults reach the greeting and the prompt, an `inject:` pins the hotel's identifier so the model never asks for it, and a tool `announce:` covers the wait. No `unmute dev`: a web session or an attached phone number talks to it. |
 
 The two salon packages are the ones with a telephony route, and they carry the
 same pair: a Twilio Elastic SIP Trunk on their LiveKit target and Pipecat Cloud's

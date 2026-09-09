@@ -1,0 +1,7 @@
+description: Send a text message to the caller's confirmed mobile number.
+
+builtin:
+  id: send_sms
+
+inject:
+  - from_number: "+447700900123"

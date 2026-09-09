@@ -294,6 +294,17 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 		if variable.Source != "" && !validVariableSource(variable.Source) {
 			errors = add(errors, fmt.Sprintf("variable %q has invalid source %q", name, variable.Source))
 		}
+		if variable.Source == VariableSourceConversation {
+			// The model fills it, so nothing supplies a starting value, and the
+			// model reads the description to know what to record: SLNG requires
+			// one on every runtime variable.
+			if variable.Default != nil {
+				errors = add(errors, fmt.Sprintf("variable %q is recorded by the model during the call and takes no default: remove default:, or drop source: conversation and let the dispatch supply it", name))
+			}
+			if strings.TrimSpace(variable.Description) == "" {
+				errors = add(errors, fmt.Sprintf("variable %q is recorded by the model during the call, so it needs a description: the model reads it to know what to record and when", name))
+			}
+		}
 		if variable.Default != nil && !defaultMatches(variable.Type, variable.Default) {
 			if variable.Shape != nil {
 				errors = add(errors, fmt.Sprintf("variable %q is %s, which starts empty and takes no default: remove default:", name, variable.Shape.String()))
@@ -389,6 +400,13 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			// have a call unmute assembles, so there is somewhere for a hidden
 			// value to go.
 			case ToolWebhook, ToolLocal, ToolSlngHosted:
+			case ToolBuiltin:
+				// send_sms is the one builtin with a setting a package pins: the
+				// sender number, which the platform wants on the attachment.
+				// validateBuiltinTool holds it to that one key.
+				if tool.Builtin != "send_sms" {
+					errors = add(errors, fmt.Sprintf("tool %q inject is legal for webhook, local and slng execution, and on builtin send_sms for its sender: builtin %q takes no argument", name, tool.Builtin))
+				}
 			default:
 				errors = add(errors, fmt.Sprintf("tool %q inject is legal for webhook, local and slng execution only", name))
 			}
@@ -1200,6 +1218,32 @@ func validateBuiltinTool(name string, tool Tool, errors *[]string) {
 	if tool.Effect != ToolEffect(prebuilt.Effect) {
 		*errors = add(*errors, fmt.Sprintf("tool %q builtin %q fixes effect to %s, cannot be %q", name, tool.Builtin, prebuilt.Effect, tool.Effect))
 	}
+	if tool.Builtin == "send_sms" {
+		validateSendSmsSender(name, tool, errors)
+	}
+}
+
+// validateSendSmsSender holds a builtin send_sms to the one setting a package
+// pins: `inject: from_number`, a literal E.164 number. SLNG compiles the
+// attachment with the model supplying recipient and body, requires the sender on
+// the attachment, and refuses a sender that is not a literal E.164 number
+// (agent_runtime_compiler.py:1489-1492, SendSmsOverrides.validate_sender), so
+// each of those is refused here, before anything is pushed, with the rule.
+func validateSendSmsSender(name string, tool Tool, errors *[]string) {
+	sender, ok := tool.Inject["from_number"]
+	if !ok {
+		*errors = add(*errors, fmt.Sprintf("tool %q builtin send_sms needs `inject:` with one `from_number`, the sender in international format starting with a plus sign: SLNG requires the sender on the attachment and the model supplies the recipient and the body", name))
+		return
+	}
+	for _, key := range sortedKeys(tool.Inject) {
+		if key != "from_number" {
+			*errors = add(*errors, fmt.Sprintf("tool %q builtin send_sms injects %q, and the platform takes only the sender from a package: the model supplies the recipient and the body, so drop this entry and keep `from_number`", name, key))
+		}
+	}
+	text, isText := sender.(string)
+	if !isText || !regexp.MustCompile(targetcap.SendSmsSenderPattern).MatchString(text) {
+		*errors = add(*errors, fmt.Sprintf("tool %q builtin send_sms injects from_number that is not a literal number in international format starting with a plus sign, which is the only sender SLNG accepts on an attachment: write the number itself, not a template reference", name))
+	}
 }
 
 // validateToolAuth checks a webhook auth block: a known scheme, exactly its own
@@ -1976,6 +2020,13 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 			applyCapability(caps, targetcap.FieldToolProviderHosted, provider, row)
 		case ToolBuiltin:
 			applyCapability(caps, targetcap.FieldToolBuiltin, provider, row)
+			// The code targets lower one prebuilt, end_call, through their own
+			// SDKs. Every other registry id is a capability SLNG curates and only
+			// the slng driver attaches, so a code target refuses it by name rather
+			// than emitting a tool with no body behind it.
+			if targetcap.EmitsProject(provider) && tool.Builtin != "end_call" {
+				row.Errors = add(row.Errors, fmt.Sprintf("%s target hosts only the end_call prebuilt: %q is a capability SLNG curates, so compile this package to slng, or drop tools/%s.yaml", provider, tool.Builtin, name))
+			}
 		case ToolKnowledge:
 			applyCapability(caps, targetcap.FieldToolKnowledge, provider, row)
 		case ToolSlngHosted:
@@ -2057,6 +2108,12 @@ func validateVariables(agent *Agent, provider targetcap.Provider, caps targetcap
 	for _, name := range sortedKeys(agent.Variables) {
 		if agent.Variables[name].Confirm != "" {
 			applyCapability(caps, targetcap.FieldVariableConfirm, provider, row)
+			break
+		}
+	}
+	for _, name := range sortedKeys(agent.Variables) {
+		if agent.Variables[name].Source == VariableSourceConversation {
+			applyCapability(caps, targetcap.FieldVariableConversation, provider, row)
 			break
 		}
 	}
@@ -3037,7 +3094,8 @@ func validVariableSource(value VariableSource) bool {
 	switch value {
 	case VariableSourceCallStart, VariableSourceSessionID, VariableSourceCarrier,
 		VariableSourceConnection, VariableSourceCallID, VariableSourceStreamID,
-		VariableSourceDirection, VariableSourceFromNumber, VariableSourceToNumber:
+		VariableSourceDirection, VariableSourceFromNumber, VariableSourceToNumber,
+		VariableSourceConversation:
 		return true
 	default:
 		return false
