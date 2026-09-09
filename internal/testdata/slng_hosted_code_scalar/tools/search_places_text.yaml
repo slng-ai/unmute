@@ -1,0 +1,8 @@
+# A hosted `api_request` tool, scalar form. No description of our own, so the
+# platform's reaches the model. No mirrored module either: an api_request tool
+# has no code, and its mirror carries the url, the method and the name of the
+# credential. Its pin lives in generated tools/search_places_text.slng.meta.json.
+slng: search_places_text
+
+interruption: provider_default
+effect: returns_data

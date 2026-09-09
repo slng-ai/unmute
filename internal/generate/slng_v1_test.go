@@ -5,6 +5,8 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -17,6 +19,32 @@ import (
 // Router goldens next door, which are the model vendor's. Same word, third
 // meaning.
 var updateSlngV1 = flag.Bool("update-slng-target", false, "rewrite the slng target goldens")
+
+func TestSlngSupportNeedsNoSessionArguments(t *testing.T) {
+	_, files := compileSlng(t, filepath.Join("..", "..", "examples", "slng-support"))
+	body := slngBodyOf(t, files)
+	defaults := body["template_defaults"].(map[string]any)
+	for name, raw := range body["template_variable_options"].(map[string]any) {
+		option := raw.(map[string]any)
+		if _, supplied := defaults[name]; option["required"] == true && !supplied {
+			t.Errorf("inbound example requires session argument %q without a default", name)
+		}
+	}
+}
+
+func TestSlngPreviewIncludesTheBuiltinDescription(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "slng-support"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := SlngAuthoredDescriptions(agent)["end_call"], agent.Tools["end_call"].Description; got == "" || got != want {
+		t.Fatalf("preview description = %q, emitted builtin description = %q", got, want)
+	}
+}
 
 // compileSlng builds one fixture and returns its emitted files by path, which is
 // what nearly every assertion below wants to read.
@@ -101,7 +129,7 @@ func TestSlngV1WritesTheBodyAndTheRunbookAndNothingElse(t *testing.T) {
 	if artifact.Kind != BodyTarget {
 		t.Errorf("artifact kind = %q, want %q", artifact.Kind, BodyTarget)
 	}
-	for _, want := range []string{"agent.json", "README.md"} {
+	for _, want := range []string{"agent.json", "README.md", "compile-report.json"} {
 		if _, ok := files[want]; !ok {
 			t.Errorf("no %s was written", want)
 		}
@@ -119,8 +147,12 @@ func TestSlngV1WritesTheBodyAndTheRunbookAndNothingElse(t *testing.T) {
 			t.Errorf("the slng driver wrote %s; it emits a deployment body, not a project", path)
 		}
 	}
-	if len(files) != 2 {
-		t.Errorf("the slng driver wrote %d files, want 2: %v", len(files), files)
+	// Three: the body, the runbook, and the report that says which checks this
+	// compile could not make. A hosted reference names a tool somebody else
+	// published, so "compiled clean" has to be readable as something narrower
+	// than "checked".
+	if len(files) != 3 {
+		t.Errorf("the slng driver wrote %d files, want 3: %v", len(files), files)
 	}
 }
 
@@ -344,9 +376,12 @@ func TestSlngV1RunbookNamesTheTrapsAndTheCredential(t *testing.T) {
 		// named as the thing not to reach for, because it posts the body verbatim.
 		"carries a name where the API wants an id",
 		"The push step resolves those names", "voiceai agents create",
-		// R12: an MCP reference is a lookup like the others. The runbook has to say
-		// nothing connects to the server, because it said the opposite for a year.
-		"nothing here connects to the server",
+		// A stale MCP record is refreshed by real deployment, never by preview,
+		// and discovery does not execute a selected tool.
+		"A real deploy refreshes an unusable snapshot once",
+		"A dry run reports the stale snapshot without refreshing it",
+		"Discovery executes no business tool",
+		"bypasses Unmute's published binding checks and checked-version staging",
 		// FR-025: an export is not always postable back.
 		"not** always a body the API will accept", "orchestrator",
 	} {
@@ -395,5 +430,273 @@ func TestSlngV1WritesNoToolBodyToTag(t *testing.T) {
 		if strings.HasPrefix(path, "tools/") {
 			t.Errorf("%s was written: a tool body needs its config tagged with its own tool_type, and an untagged one deploys once and 422s forever after", path)
 		}
+	}
+}
+
+// TestSlngEmitsTheHostedNameAndKeepsTheLocalOne is the alias, which is the
+// field spec 007 added and the one thing a name-based reference can get wrong in
+// a way no test used to see.
+//
+// tools/order_status.yaml holding `slng: check_order` means two names: the agent
+// attaches order_status, and the organisation is asked for check_order. Every
+// reader that wanted the file back was indexing agent.Tools by the emitted name,
+// which is right for a builtin and silently wrong here.
+func TestSlngEmitsTheHostedNameAndKeepsTheLocalOne(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "slng_hosted"))); err != nil {
+		t.Fatal(err)
+	}
+	// The same tool, referenced under a name the file is not called after, and
+	// with no mirror files beside it: that is the SLNG-only shape.
+	for _, path := range []string{"tools/check_order.yaml", "tools/check_order.slng.json", "tools/check_order.slng.py"} {
+		if err := os.Remove(filepath.Join(dir, path)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tools", "order_status.yaml"),
+		[]byte("slng: check_order\nannounce: One moment while I look that up.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agentYAML := filepath.Join(dir, "agent.yaml")
+	raw, err := os.ReadFile(agentYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agentYAML, []byte(strings.ReplaceAll(string(raw), "check_order", "order_status")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	pkg, err := spec.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, agent.Targets["slng"], target.Default())
+	if err != nil {
+		t.Fatalf("a scalar reference with no mirror did not compile: %v", err)
+	}
+	files := map[string]string{}
+	for _, file := range artifact.Files {
+		files[file.Path] = string(file.Content)
+	}
+
+	var body struct {
+		ToolRefs []struct {
+			Tool      string         `json:"tool"`
+			Policy    map[string]any `json:"execution_policy"`
+			Arguments map[string]any `json:"argument_overrides"`
+		} `json:"tool_refs"`
+	}
+	if err := json.Unmarshal([]byte(files["agent.json"]), &body); err != nil {
+		t.Fatalf("agent.json is not JSON: %v", err)
+	}
+	var found bool
+	for _, ref := range body.ToolRefs {
+		if ref.Tool == "order_status" {
+			t.Error("agent.json names the package's own file, not the tool the organisation holds: an alias would deploy a reference to a tool that does not exist")
+		}
+		if ref.Tool == "check_order" {
+			found = true
+			if ref.Policy == nil {
+				t.Error("the announcement did not survive the alias")
+			}
+			if ref.Arguments == nil {
+				t.Error("argument_overrides is absent; it is always written, empty when there are none")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("agent.json carries no reference to the hosted tool: %v", body.ToolRefs)
+	}
+
+	// The requirement, and the file it traces back to. Both matter: the name is
+	// what the account is asked for, and the path is what the author edits.
+	var hosted *Requirement
+	for i := range artifact.Requires.Hosted {
+		if artifact.Requires.Hosted[i].Name == "check_order" {
+			hosted = &artifact.Requires.Hosted[i]
+		}
+		if artifact.Requires.Hosted[i].Name == "order_status" {
+			t.Error("the account is asked for the package's own file name; it holds no tool called that")
+		}
+	}
+	if hosted == nil {
+		t.Fatalf("the aliased tool is not in the hosted requirements, so the deploy preflight will not look for it: %v", artifact.Requires.Hosted)
+	}
+	if !strings.Contains(hosted.Where, "tools/order_status.yaml") {
+		t.Errorf("the requirement does not trace back to the file that declared it: %q", hosted.Where)
+	}
+	if hosted.Version != 0 {
+		t.Errorf("a reference with no committed mirror reports version %d; nothing pinned one", hosted.Version)
+	}
+
+	// And the report says what it did not check.
+	var report struct {
+		ToolRefs []struct {
+			Source string `json:"source"`
+			Tool   string `json:"tool"`
+			Hosted bool   `json:"hosted"`
+		} `json:"tool_refs"`
+		Deferred []struct {
+			Check string   `json:"check"`
+			By    string   `json:"by"`
+			Refs  []string `json:"refs"`
+		} `json:"deferred_checks"`
+	}
+	if err := json.Unmarshal([]byte(files["compile-report.json"]), &report); err != nil {
+		t.Fatalf("compile-report.json is not JSON: %v", err)
+	}
+	var paired bool
+	for _, ref := range report.ToolRefs {
+		if ref.Source == "order_status" && ref.Tool == "check_order" && ref.Hosted {
+			paired = true
+		}
+	}
+	if !paired {
+		t.Errorf("the report does not pair the local file with the hosted name: %v", report.ToolRefs)
+	}
+	if len(report.Deferred) == 0 {
+		t.Error("the report names no deferred check, so a clean compile reads as a checked one")
+	}
+	for _, deferred := range report.Deferred {
+		if deferred.By == "" {
+			t.Errorf("deferred check %q names nothing that completes it", deferred.Check)
+		}
+	}
+}
+
+// TestSlngKeepsAuthoredAttachmentOrder: the body's references follow the agent's
+// own `tools:` list. A map iteration would reorder them per run, and a reader
+// diffing two deploys would see changes nobody made.
+func TestSlngKeepsAuthoredAttachmentOrder(t *testing.T) {
+	_, files := compileSlng(t, "slng_tools")
+	var body struct {
+		ToolRefs []struct {
+			Tool string `json:"tool"`
+		} `json:"tool_refs"`
+	}
+	if err := json.Unmarshal([]byte(files["agent.json"]), &body); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(body.ToolRefs))
+	for _, ref := range body.ToolRefs {
+		got = append(got, ref.Tool)
+	}
+	sorted := append([]string(nil), got...)
+	sort.Strings(sorted)
+	if len(got) > 1 && slices.Equal(got, sorted) && got[0] == "check_order" {
+		// Not a failure by itself: the fixture's authored order may be
+		// alphabetical. The golden holds the exact list, so this only warns the
+		// reader of that fixture that the property is not being exercised here.
+		t.Logf("the fixture's authored order is alphabetical, so this ordering is also what a sort would give: %v", got)
+	}
+	if len(got) == 0 {
+		t.Fatal("no tool references were emitted at all")
+	}
+}
+
+// TestOrdinaryCompiledBodyCarriesNoAccountIdentity is the half of the staging
+// design that is easy to break and hard to notice.
+//
+// `build/<target>/agent.json` is compiled with no credential and has to mean the
+// same thing on two machines, so it carries names and no ids. The resolved copy
+// a guarded push consumes carries ids, and the two are different documents. The
+// only thing keeping them apart is `omitempty` on four fields, which is one
+// keyword away from putting an id into every compile.
+func TestOrdinaryCompiledBodyCarriesNoAccountIdentity(t *testing.T) {
+	_, files := compileSlng(t, "slng_tools")
+	body := files["agent.json"]
+	for _, forbidden := range []string{"tool_id", "\"version\"", "server_id", "observed_schema_hash", "attachment_id"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("the compiled body carries %s, so it is no longer account-independent and two machines would compile different files", forbidden)
+		}
+	}
+}
+
+// TestResolvedBodyCarriesExactlyWhatWasChecked: the staged copy, and the two
+// ways it can be wrong.
+//
+// It must carry the id and version this run resolved, because a push in the
+// guarded mode attaches those and checks neither for itself. And it must refuse
+// rather than emit a partial document, because an unresolved reference reaching
+// the push is a refusal there with a worse message than one here that can name
+// the tool and its file.
+func TestResolvedBodyCarriesExactlyWhatWasChecked(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "slng_tools"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := agent.Targets["slng"]
+
+	// Every reference, including the builtin: a push in this mode attaches ids
+	// and attaches them for all of them.
+	tools := []SlngResolvedTool{
+		{Source: "check_order", ToolID: "t-check_order", Version: 1},
+		{Source: "refund", ToolID: "t-refund", Version: 7},
+		{Source: "end_call", ToolID: "t-end_call", Version: 1},
+	}
+	mcp := []SlngResolvedMCP{
+		{Server: "internal_docs", Tool: "search_docs", ServerID: "s-1", SchemaHash: "h-search"},
+		{Server: "internal_docs", Tool: "read_doc", ServerID: "s-1", SchemaHash: "h-read"},
+	}
+	body, err := SlngResolvedBody(agent, resolved, tools, mcp)
+	if err != nil {
+		t.Fatalf("the resolved body was not produced: %v", err)
+	}
+	var decoded struct {
+		ToolRefs []struct {
+			Tool    string `json:"tool"`
+			ToolID  string `json:"tool_id"`
+			Version int    `json:"version"`
+		} `json:"tool_refs"`
+		MCPRefs []struct {
+			Server     string `json:"server"`
+			Tool       string `json:"tool_name"`
+			ServerID   string `json:"server_id"`
+			SchemaHash string `json:"observed_schema_hash"`
+		} `json:"mcp_refs"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("the resolved body is not JSON: %v", err)
+	}
+	want := map[string]int{"check_order": 1, "refund": 7, "end_call": 1}
+	for _, ref := range decoded.ToolRefs {
+		if ref.ToolID == "" || ref.Version < 1 {
+			t.Errorf("%s carries id %q version %d, which a guarded push refuses", ref.Tool, ref.ToolID, ref.Version)
+		}
+		if ref.Version != want[ref.Tool] {
+			t.Errorf("%s carries version %d, want the %d this run checked", ref.Tool, ref.Version, want[ref.Tool])
+		}
+	}
+	for _, ref := range decoded.MCPRefs {
+		if ref.ServerID == "" || ref.SchemaHash == "" {
+			t.Errorf("%s %s carries id %q hash %q, which a guarded push refuses", ref.Server, ref.Tool, ref.ServerID, ref.SchemaHash)
+		}
+	}
+	// No tool body. The push creates no tool in this mode and refuses one.
+	if strings.Contains(string(body), "code_src") || strings.Contains(string(body), "tool_type") {
+		t.Error("the resolved body carries a tool definition, which a guarded push refuses")
+	}
+
+	// And the refusals, which are the reason this returns an error at all.
+	if _, err := SlngResolvedBody(agent, resolved, tools[:1], mcp); err == nil {
+		t.Error("a body was produced with two references unresolved")
+	} else if !strings.Contains(err.Error(), "refund") {
+		t.Errorf("the refusal does not name the unresolved tool: %v", err)
+	}
+	short := append([]SlngResolvedTool(nil), tools...)
+	short[1].Version = 0
+	if _, err := SlngResolvedBody(agent, resolved, short, mcp); err == nil {
+		t.Error("a body was produced carrying version 0, which the platform's own contract refuses")
+	}
+	if _, err := SlngResolvedBody(agent, resolved, tools, mcp[:1]); err == nil {
+		t.Error("a body was produced with an MCP selection unchecked")
 	}
 }

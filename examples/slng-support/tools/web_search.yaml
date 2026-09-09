@@ -1,7 +1,5 @@
 mcp:
   server: firecrawl-mcp-2
-  url_env: FIRECRAWL_MCP_URL
-  transport: streamable_http
   tools:
     - firecrawl_scrape
     - firecrawl_search

@@ -61,13 +61,15 @@ unmute compile examples/slng-support --target slng
 ```text
 examples/slng-support/build/slng/
 ├── agent.json                # the agent create body
-└── README.md                 # the runbook: what to create, what to run, what to watch
+├── README.md                 # the runbook: what to create, what to run, what to watch
+└── compile-report.json       # what was compiled, and which checks were left to deployment
 ```
 
 This target writes no `tools/` directory. Every tool reference in
 `agent.json`, whether a curated capability, a hosted tool, or an MCP server,
 resolves by name against your organisation, so there is never a body of your
-own to write beside it.
+own to write beside it. A `slng:` reference needs no mirror to reach even
+this point: `agent.json` carries the name, and nothing else about the tool.
 
 Unmute's compiler opens no connection to SLNG, at validate time or compile time.
 It writes files and stops. [`unmute deploy`](/reference/cli/deploy) hands them to
@@ -186,11 +188,10 @@ itself reads, so export whichever your shell already has.
 The organisation is printed on every run, because an exported key and a stored
 profile can belong to different ones.
 
-To drive the push tool directly:
-
-```sh
-voiceai agents push build/slng
-```
+Use `unmute deploy` for checked deployment. Running `voiceai agents push`
+directly bypasses Unmute's binding checks and resolved staging. For standalone
+`voiceai` commands, set `export VOICEAI_API_KEY="$SLNG_API_KEY"` to use the
+same account.
 
 ### Where your tools come from
 
@@ -200,11 +201,14 @@ there has no network access of its own: an `api_request` tool is how SLNG
 itself reaches an outside service.
 
 Reference what your organisation already has by name with
-[`slng:`](/build/tools/hosted), for the reason at the top of this page.
-`unmute pull` mirrors the definition into your package, so the same tool also
-runs on livekit and pipecat. [Hosted tools](/build/tools/hosted) has the
-field-by-field version, including the one limit: a hosted tool's Python
-dependencies compile to slng and are refused on the two code targets.
+[`slng:`](/build/tools/hosted), for the reason at the top of this page. This
+target needs nothing else: no mirror, no hash, no `unmute pull`, because the
+published tool is the only copy and this target resolves it by name at deploy
+time. `unmute pull` is only for a package that also compiles to livekit or
+pipecat, which build and run the tool themselves and so need a real copy of
+its definition, mirrored into your package. [Hosted tools](/build/tools/hosted)
+has the field-by-field version, including the one limit: a hosted tool's
+Python dependencies compile to slng and are refused on the two code targets.
 
 ### Names, not identifiers
 
@@ -232,9 +236,10 @@ say up front: which tools you want. Unmute compiles offline, so it cannot expand
 
 Once the list is there, the push looks up the server's name for its
 `server_id`, then copies each named tool's schema hash out of the platform's own
-stored capability snapshot. Nothing connects to the MCP server. The one caveat:
-the platform refuses a snapshot that is unhealthy or older than five minutes.
-Refresh it first with `voiceai mcp run <server>`.
+stored capability snapshot. A real `unmute deploy` can refresh an unusable
+snapshot once through `voiceai mcp run <server>`, then checks it again. A dry
+run never refreshes it and reports what needs attention. Discovery does not
+execute business tools.
 
 The runbook says which case your package is in.
 
@@ -260,6 +265,11 @@ Compile from the package instead.
 
 ## Hosted tool dependencies
 
+This section is about a package that also targets livekit or pipecat and has
+pulled a mirror; an slng-only deploy never reads a dependency list at all,
+because SLNG installs whatever the published tool declares on its own side,
+invisible to unmute.
+
 A hosted tool's Python dependencies are the platform's own, mirrored by
 `unmute pull` into `tools/<name>.slng.json` rather than written by you. Each
 is an exact `name==version` pin, because SLNG builds a locked, hash-verified
@@ -277,10 +287,17 @@ a hosted tool that declares dependencies is refused on `livekit` and
 
 ## The Vault
 
-SLNG reads secrets from its own store. Unmute knows which names a package needs
-and can create none of them, so the runbook lists them, grouped by where each
-one came from, above the push command. No secret value reaches any emitted file
-or any command in the runbook.
+SLNG reads secrets from its own store. With your consent, `unmute deploy` can
+fill missing Vault entries through `voiceai`. The runbook lists what compiling
+the package could see, grouped by source, above the push command. No secret value reaches any emitted file or
+any command in the runbook.
+
+That list is only what a compile can read offline: a tool's declared `auth:`,
+a `{{"{{$NAME}}"}}` token in your text, and anything a committed mirror
+recorded. A hosted tool or MCP server's own credential is not on it, because
+SLNG holds that credential and a compile never asks SLNG anything.
+`unmute deploy` reads the account directly and may ask to create an entry the
+runbook never named.
 
 Two kinds appear there:
 
@@ -317,9 +334,9 @@ None is dropped quietly.
 | outbound calling, `on_voicemail` | a package declares no carrier state on SLNG; `unmute deploy` attaches an existing trunk after a push |
 | a warm human transfer | SLNG's curated transfer places a single blind transfer |
 
-An MCP tool works. Its one caveat: the platform's stored capability snapshot
-for that server has to be healthy and no older than five minutes, or the push
-refuses it.
+An MCP tool works when its selected names and discovery snapshot pass the
+platform checks. A real deploy may refresh an unusable snapshot once; a dry
+run reports it without refreshing.
 
 ## If the agent answers with silence
 
@@ -346,13 +363,16 @@ voiceai agents web-sessions create <agent_id> --file session.json
 ```
 
 The agent id is the one `unmute deploy` printed; `voiceai agents list` finds it
-again. The command returns LiveKit connection details, and a
-`livekit_dispatch_id` meaning a worker joined the room.
+again. The command returns LiveKit connection details; it does not open a
+microphone or prove the worker joined. For a browser test, open the agent in
+the SLNG dashboard, choose **Test**, then **Web session**, and allow microphone
+access. See [the test panel guide](https://docs.slng.ai/dashboard/agent-infra#test-your-agent).
 
-The `--file` is required even though every field in it is optional, because the
-endpoint declares a request body and the CLI sends none without it. A minimal
-`session.json` is `{"arguments": {}}`; `arguments` is where the package's
-declared variables get their value for one session.
+Supply the request body with `--file`. A minimal `session.json` is
+`{"arguments": {}}`; fill any required inputs without defaults in `arguments`.
+For inbound calls, those inputs need defaults because the carrier supplies no
+web-session payload. Follow [the phone setup](/deploy/slng#receive-phone-calls)
+for both carrier routing and trunk attachment.
 
 ## Where to go next
 

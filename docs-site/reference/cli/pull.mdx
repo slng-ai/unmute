@@ -1,6 +1,6 @@
 ---
 title: "unmute pull"
-description: "Fetch a hosted tool's definition into your package, so an offline compile can trust it."
+description: "Optional, and only for a livekit or pipecat build: fetch a hosted tool's definition into your package so that compile can trust it offline. SLNG needs none of this."
 ---
 
 ```text
@@ -23,24 +23,36 @@ Flags:
   -h, --help    help for pull
 ```
 
+## Run it only for livekit or pipecat
+
+SLNG resolves a `slng:` reference by name at deploy time and needs nothing
+this command writes: no mirror, no hash, no credential ahead of the deploy
+itself. Run `unmute pull` when the same package also compiles to `livekit` or
+`pipecat`, which build and run the tool themselves and so need a real copy of
+its definition sitting in the package. A package that targets slng alone never
+needs this command.
+
 ## Usage
 
 ```sh
 unmute pull acme-support
 ```
 
-One line per file, with what happened to it. `pinned` means the tool file's
-`hash:` was written or updated; `written` and `unchanged` describe the two
-mirror files:
+One line per file, with what happened to it. `written` and `unchanged`
+describe the mirror files. `pinned` is where the two reference forms differ:
+for a **scalar** reference (`slng: check_order`), it means the generated
+`tools/check_order.slng.meta.json` was written or updated, and the tool file
+itself, `tools/check_order.yaml`, is never touched; for the **legacy** block
+(`slng: {hash: ...}`), it means that tool file's own `hash:` line was:
 
 ```text expandable
 pull acme-support
 
   slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
 
-  tools/check_order.yaml                  pinned
   tools/check_order.slng.json             written
   tools/check_order.slng.py               written
+  tools/check_order.slng.meta.json        pinned
   tools/search_places_text.yaml           unchanged
   tools/search_places_text.slng.json      unchanged
   agent.yaml                              1 secret added
@@ -60,7 +72,8 @@ Per hosted tool, beside the tool file:
 
 | File | Authored? | Holds |
 |---|---|---|
-| `tools/<name>.yaml` | authored | gains or updates `slng.hash` only. Every other line is left alone |
+| `tools/<name>.yaml` | authored | for the **legacy** block only: gains or updates `slng.hash`. A scalar reference (`slng: check_order`) is not touched here at all; every other line, on either form, is left alone |
+| `tools/<name>.slng.meta.json` | generated | for a **scalar** reference only: the pin a legacy reference keeps in its own `hash:` line instead |
 | `tools/<name>.slng.json` | generated | the mirrored definition: description, input schema, dependencies, secret names, source, request configuration, the platform's content hash and version, and the date fetched |
 | `tools/<name>.slng.py` | generated | the mirrored module, for a `code` tool only |
 

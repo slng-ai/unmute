@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -27,7 +28,10 @@ import (
 // than being reimplemented here against an API this repository is not allowed to
 // call. `--json` is parseable on success *and* on failure, which is what makes
 // this readable rather than a screen-scrape.
-const deployPushInstall = "brew install slng-ai/tap/voiceai"
+// deployPushInstall has one owner in internal/target now, because the upgrade
+// guidance for an incompatible CLI names it too and two spellings of an install
+// command is one wrong install command.
+const deployPushInstall = target.SlngPushInstall
 
 // deployPushBinary is the tool that owns the account, the credential and every
 // write. Named in internal/target because four documentation surfaces quote it
@@ -158,12 +162,106 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		// has here, between the two, and a run refused at this point leaves both
 		// the build directory and the organisation exactly as it found them.
 		runner := newVoiceaiRunner(bin, pushEnv, opts.profile)
-		account, err := runPreflight(cmd, runner, resolved.Name, artifact.Requires, env)
+		cache := newResolveCache()
+		deployment, preflight, err := deployResolution(cmd, runner, cache, resolved.Name,
+			artifact, agent, env, opts.dryRun)
 		if err != nil {
 			return fmt.Errorf("deploy %s: %w", dir, err)
 		}
+		account := deployment.Account
+
+		// The refusal comes before the write, and that ordering is the promise
+		// the whole command rests on: Generate returned an artifact and
+		// writeArtifactFiles below is a separate step, so a run refused here has
+		// touched neither the build directory nor the organisation.
+		//
+		// The blocked preview is therefore printed and not filed. renderPreflight
+		// groups every gap with what asked for it and what fixes it, which is
+		// the useful part; writing a report would mean creating the directory
+		// this refusal exists to leave alone.
+		if err := renderPreflight(out, errOut, resolved.Name, preflight); err != nil {
+			return fmt.Errorf("deploy %s: %w", dir, err)
+		}
+		// The deferred notes go to the preview and to the report, and not to a
+		// real run's output.
+		//
+		// They are facts rather than actions: "this value arrives when a call
+		// starts" names nothing the reader has to do, and it would print on
+		// every deploy of every package that injects a variable. That is the
+		// shape this repository's own rule exists to stop, and the two places
+		// that want it are the dry run, whose whole job is to describe what
+		// will happen, and `deploy-report.json`, which is where a reader who
+		// wants the detail looks.
+		if opts.dryRun {
+			for _, line := range deferredLines(deployment) {
+				notef(errOut, "%s: %s\n", resolved.Name, line)
+			}
+		}
 
 		outDir := filepath.Join(dir, "build", resolved.Name)
+
+		// The staged copy carries the ids and versions this run checked. It is a
+		// temporary directory, deleted on every exit, and it exists before the
+		// build directory does because the guarded dry run below is what proves
+		// the installed push tool can honour it.
+		staged, err := stageResolvedBody(agent, resolved, deployment, outDir)
+		if err != nil {
+			return fmt.Errorf("deploy %s: %w", dir, err)
+		}
+		defer func() {
+			// A staged body is a temporary directory holding one JSON document
+			// and any tool samples. It is deleted on every exit, and a failure
+			// to delete it is worth saying rather than swallowing: the next run
+			// works either way, so this warns and never fails a deploy.
+			if err := os.RemoveAll(staged); err != nil {
+				warnf(errOut, "%s: the temporary resolved body at %s could not be removed: %v\n", resolved.Name, staged, err)
+			}
+		}()
+
+		// One guarded dry run, always, before anything is written, and it does
+		// three jobs at once.
+		//
+		// It proves the installed push tool implements the contract, by
+		// returning the marker; an older one rejects the unknown option instead
+		// and this is where an author hears about it. It surfaces the platform's
+		// own blockers, which are a different set from the account checks above.
+		// And it returns the agent this push would replace, which is where the
+		// baseline read gets its id: reusing the push's own identity selection
+		// rather than resolving the agent name a second time and possibly
+		// differently.
+		//
+		// A real deploy therefore makes two pushes, one that changes nothing and
+		// one that writes. That is deliberate: the alternative is reading the
+		// agent AFTER replacing it, which would report the state this run just
+		// created as the state it replaced, and every "previous version" in the
+		// preview would be the version just attached.
+		preview := opts
+		preview.dryRun = true
+		planned, err := runResolvedPush(bin, staged, env, key, account.Account.OrgID, preview)
+		if err != nil {
+			// A push that printed nothing readable, given the two options an
+			// older tool has never heard of, is overwhelmingly an older tool:
+			// it rejects the unknown option and writes to its error stream.
+			// So the upgrade guidance rides along with what it actually said,
+			// because the raw complaint on its own reads as a bug in unmute.
+			return fmt.Errorf("deploy %s: slng target %q: %w\n  %s", dir, resolved.Name, err, target.SlngUpgradeGuidance)
+		}
+		if err := checkResolutionContract(planned); err != nil {
+			return fmt.Errorf("deploy %s: slng target %q: %w", dir, resolved.Name, err)
+		}
+		readBaseline(runner, cache, &deployment, planned.Agent.ID)
+
+		writeReport := func(report deployReport) {
+			content, marshalErr := marshalDeployReport(report)
+			if marshalErr != nil {
+				warnf(errOut, "%s: the deployment report could not be written: %v\n", resolved.Name, marshalErr)
+				return
+			}
+			if writeErr := os.WriteFile(filepath.Join(outDir, "deploy-report.json"), content, 0o644); writeErr != nil {
+				warnf(errOut, "%s: the deployment report could not be written: %v\n", resolved.Name, writeErr)
+			}
+		}
+
 		if err := writeArtifactFiles(errOut, outDir, artifact.Files); err != nil {
 			return fmt.Errorf("deploy %s: %w", dir, err)
 		}
@@ -172,9 +270,38 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		}
 		fmt.Fprintf(out, "%s: compiled %s (%d files)\n", resolved.Name, outDir, len(artifact.Files))
 
-		result, err := runPush(bin, outDir, env, key, opts)
-		if err != nil {
-			return fmt.Errorf("deploy %s: %w", dir, err)
+		// The dry run's own result is the preview. A real run pushes again, for
+		// real, and its result is what actually happened.
+		result := planned
+		if !opts.dryRun && len(planned.Blockers) == 0 && planned.OK {
+			result, err = runResolvedPush(bin, staged, env, key, account.Account.OrgID, opts)
+			if err != nil {
+				return fmt.Errorf("deploy %s: %w", dir, err)
+			}
+		}
+
+		outcome := "deployed"
+		switch {
+		case len(result.Blockers) > 0 || !result.OK:
+			outcome = "blocked"
+			if result.Changed {
+				outcome = "partial"
+			}
+		case opts.dryRun:
+			outcome = "previewed"
+		}
+		report := buildDeployReport(resolved.Name, deployName, result.Agent.ID, result.Agent.Action,
+			opts.dryRun, outcome, deployment, preflight)
+		writeReport(report)
+		if opts.dryRun {
+			printResolvedPlan(out, resolved.Name, report)
+		}
+		// Before printPushResult, so the attached versions sit above the line
+		// that closes the run rather than after it. Guarded on the push having
+		// actually succeeded: a blocked or failed result has attached nothing,
+		// and saying otherwise is the one thing this output must never do.
+		if !opts.dryRun && result.OK && len(result.Blockers) == 0 {
+			printAttachedVersions(out, resolved.Name, report)
 		}
 		if err := printPushResult(out, errOut, resolved.Name, deployName, outDir, keySource, account, result); err != nil {
 			return fmt.Errorf("deploy %s: %w", dir, err)
@@ -193,28 +320,78 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 	return nil
 }
 
-// runPreflight names the account, asks it what it has, and compares.
+// runResolvedPush hands the staged body to a push running in the guarded mode.
 //
-// The order matters. The organisation is printed before any finding, because a
-// finding is a statement about one account and an environment key and a stored
-// profile can belong to different ones. A run that cannot name the account at
-// all stops here rather than reporting on an organisation it cannot identify.
-func runPreflight(cmd *cobra.Command, runner *voiceaiRunner, name string, requires generate.Requirements, env []string) (slngAccount, error) {
-	out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
-	resources, err := readResources(runner, requires.ServerNames())
-	if err != nil {
-		return slngAccount{}, err
+// Two flags separate it from runPush: --require-resolved, which says attach
+// exactly what this body carries rather than resolving names again, and
+// --expect-org, which says refuse before writing if the credential belongs to
+// another organisation. A matching profile name is not evidence of that: an
+// exported key and a stored profile can resolve to different organisations, and
+// nothing else on screen would say which one was written to.
+//
+// runPreflight used to live here. deployResolution owns that flow now, because
+// resolving a published version, checking a binding against it and reading the
+// agent it would replace are all part of the same ordered run, and splitting
+// them across two functions made the order the thing nobody could see.
+func runResolvedPush(bin, staged string, env []string, key, organisation string, opts deployOptions) (pushResult, error) {
+	// An empty organisation is refused here rather than sent. `--expect-org`
+	// with nothing after it is a malformed command line, and the guarded push
+	// refuses the flag's absence anyway, so the useful message is this one: the
+	// account could not be identified, which is a credential problem rather than
+	// a push problem.
+	if organisation == "" {
+		return pushResult{}, fmt.Errorf(
+			"this run could not establish which organisation it resolved, and a checked deployment has to name it so the push refuses if its own credential belongs to another: check the key or the profile with `%s`",
+			target.SlngWhoami)
 	}
-	fmt.Fprintf(out, "%s: organisation %s\n", name, resources.Account)
+	return runPushWith(bin, staged, env, key, opts, []string{
+		target.SlngRequireResolvedFlag, target.SlngExpectOrgFlag, organisation,
+	})
+}
 
-	report := comparePreflight(requires, resources)
-	// Between comparing and rendering, because a gap unmute can close should be
-	// closed rather than reported. Secrets are the only kind it can: a missing
-	// tool, MCP server or trunk is made in the dashboard, and for those the
-	// report is the whole of what this command can do.
-	in := cmd.InOrStdin()
-	offerToFill(in, out, errOut, runner, &report, env, interactiveTerminal(in))
-	return resources.Account, renderPreflight(out, errOut, name, report)
+// buildDeployReport assembles the report from what the run established.
+func buildDeployReport(
+	name, deployName, agentID, action string, dryRun bool, outcome string,
+	deployment slngDeployment, preflight preflightReport,
+) deployReport {
+	// Every reference this deploy attaches, in one slice.
+	//
+	// Builtins as well as hosted references: both are attached, and a reader
+	// asking "what is running" wants the curated capability named too. It is
+	// one slice because the rows and the removals are two readings of the same
+	// set, and giving them separate arguments is what let a package's
+	// `end_call` be reported as attached and detached in one preview.
+	attaching := append(append([]resolvedTool(nil), deployment.Resolution.Tools...), deployment.Resolution.Builtins...)
+	return deployReport{
+		Target: name, Organisation: deployment.Account.String(),
+		Agent: deployName, AgentID: agentID, Action: action,
+		DryRun: dryRun, Outcome: outcome,
+		Tools: compareAttachments(attaching,
+			deployment.Proposed,
+			deployment.Live, deployment.LiveKnown, deployment.Previous),
+		MCP: compareMCPAttachments(deployment.Resolution.MCP, deployment.Resolution.Servers,
+			deployment.Refreshed, deployment.Live, deployment.LiveKnown),
+		Removals:             attachmentRemovals(deployment.Live, deployment.LiveKnown, attaching, deployment.Resolution.MCP),
+		Checks:               reportChecks(preflight.Findings, deferredBindings(deployment.Bindings)),
+		SideEffects:          deployment.SideEffects,
+		PreviousStateUnknown: !deployment.LiveKnown,
+	}
+}
+
+// printAttachedVersions names what a successful deploy actually attached, which
+// is the line an author needs after the fact: the push reports that it wrote,
+// and this reports which version of each tool it wrote.
+func printAttachedVersions(out io.Writer, name string, report deployReport) {
+	for _, row := range report.Tools {
+		label := row.Tool
+		if row.Source != row.Tool {
+			label = fmt.Sprintf("%s (%s)", row.Tool, row.Source)
+		}
+		fmt.Fprintf(out, "%s: attached %s v%d\n", name, label, row.ProposedVersion)
+	}
+	for _, row := range report.MCP {
+		fmt.Fprintf(out, "%s: attached %s %s\n", name, row.Server, row.Tool)
+	}
 }
 
 // noSlngTargetGuidance names what the package does declare and the block that
@@ -328,6 +505,14 @@ type pushResult struct {
 	// version is an object once a version was written and the string "unchanged"
 	// when the push changed nothing, so it cannot be one Go type.
 	Version json.RawMessage `json:"version"`
+
+	// ResolutionContract is the marker a push implementing the guarded contract
+	// returns, and its absence is what an older tool looks like from here.
+	//
+	// Zero means absent, and absent is a refusal rather than a fallback: a push
+	// that does not honour `--require-resolved` resolves every name again and
+	// attaches whatever is newest, which is not the version this run checked.
+	ResolutionContract int `json:"resolution_contract"`
 }
 
 // runPush shells out and returns the parsed document. A non-zero exit is not an
@@ -335,6 +520,13 @@ type pushResult struct {
 // JSON. Only output that will not parse is an error, because that means the tool
 // itself went wrong and there is nothing to report to the author.
 func runPush(bin, dir string, env []string, key string, opts deployOptions) (pushResult, error) {
+	return runPushWith(bin, dir, env, key, opts, nil)
+}
+
+// runPushWith is runPush plus whatever flags the caller adds after the standard
+// ones, which is how the guarded mode gets its two without a second copy of the
+// argv assembly.
+func runPushWith(bin, dir string, env []string, key string, opts deployOptions, extra []string) (pushResult, error) {
 	args := []string{}
 	if opts.profile != "" {
 		// A root option, so it goes before the subcommand. After it, it is an
@@ -356,6 +548,7 @@ func runPush(bin, dir string, env []string, key string, opts deployOptions) (pus
 	if opts.label != "" {
 		args = append(args, "--label", opts.label)
 	}
+	args = append(args, extra...)
 	push := exec.Command(bin, args...)
 	push.Env = env
 	if key != "" {
@@ -537,6 +730,15 @@ func printPushPlan(out io.Writer, name, deployName string, result pushResult) {
 	// Both of these are what an update destroys, so they are the point of a dry
 	// run: pushing REPLACES, it does not merge.
 	for _, removal := range result.Removals {
+		// The push has reported a removal with no name. Printing it produced
+		// "would detach , which this package no longer names", which tells a
+		// reader that something is being lost and refuses to say what. Unmute's
+		// own preview above walks the live agent and names every attachment it
+		// would detach, so the useful line here is the one that says this entry
+		// added nothing rather than a sentence with a hole in it.
+		if strings.TrimSpace(removal.Name) == "" {
+			continue
+		}
 		fmt.Fprintf(out, "%s: would detach %s, which this package no longer names\n", name, removal.Name)
 	}
 	for _, field := range result.Overwrites {

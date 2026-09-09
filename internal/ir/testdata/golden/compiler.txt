@@ -32,8 +32,8 @@ CASE mcp
 pipecat (pipecat): FAIL
   warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml, connections/twilio_sip.yaml
   warning: environment variables referenced but not declared in secrets: DEEPGRAM_API_KEY (agent.yaml models listen transcriber), ELEVEN_API_KEY (agent.yaml models speak front_desk), GET_INVOICE_URL (tools/get_invoice.yaml webhook.url_env), OPENAI_API_KEY (agent.yaml models think careful_reasoning), SIP_AUTH_PASSWORD (connections/twilio_sip.yaml environment sip_password), SIP_AUTH_USERNAME (connections/twilio_sip.yaml environment sip_username), SIP_FROM_NUMBER (connections/twilio_sip.yaml environment from_number), SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address), SLNG_API_KEY (agent.yaml models speak front_desk), TWILIO_ACCOUNT_SID (connections/primary_phone.yaml environment account_sid), TWILIO_AUTH_TOKEN (connections/primary_phone.yaml environment auth_token), TWILIO_PHONE_NUMBER (connections/primary_phone.yaml environment from_number)
+  error: pipecat target connects to the MCP server itself: tool "lookup_customer" needs url_env, the environment variable holding the server address
   error: tool "lookup_customer" mcp execution takes no description, input, or output: the server describes its own tools
-  error: tool "lookup_customer" url_env is required for mcp execution (the MCP server address env)
 
 CASE thinking_audio
 pipecat (pipecat): FAIL

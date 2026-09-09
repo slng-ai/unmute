@@ -106,6 +106,19 @@ type slngRef struct {
 	Tool        string `json:"tool"`
 	Description string `json:"description,omitempty"`
 	Invocation  string `json:"invocation,omitempty"`
+	// ToolID and Version are the two slots the platform owns, and ordinary
+	// compiled output leaves both empty: a compile has no account to resolve an
+	// id against, and writing a marker into a field typed `int >= 1` is how the
+	// string "latest" once got refused after a push had already filled in
+	// attachment_id.
+	//
+	// They are filled only by SlngResolvedBody, for the temporary copy a guarded
+	// push consumes. omitempty is load-bearing rather than tidy: it is what keeps
+	// `build/<target>/agent.json` byte-identical to what it was, so a reader
+	// diffing two compiles sees no phantom fields and the offline artifact stays
+	// account-independent.
+	ToolID  string `json:"tool_id,omitempty"`
+	Version int    `json:"version,omitempty"`
 	// Policy carries the announce sentence. Absent rather than null when there is
 	// nothing to say, because an empty policy object is a claim about the tool.
 	Policy *slngPolicy `json:"execution_policy,omitempty"`
@@ -118,6 +131,22 @@ type slngRef struct {
 	// ToolConfigOverrides is a seven-member union with no code member, so a code
 	// tool cannot be tuned per agent through config at all.
 	Config map[string]any `json:"config_overrides,omitempty"`
+
+	// origin is the package tool this reference was built from, and it is not
+	// always Tool: a hosted reference emits the name the organisation holds,
+	// which tools/order_status.yaml holding `slng: check_order` makes different
+	// from the file's own.
+	//
+	// Unexported, so it is never marshalled into the body: the platform has no
+	// field for where a reference came from, and a local path is not something
+	// to send. It exists because every reader that wanted the file back was
+	// indexing agent.Tools by the emitted name, which is right for a builtin and
+	// wrong for an alias.
+	origin string `json:"-"`
+	// hosted marks a `slng:` reference, so a reader does not have to index the
+	// agent to find out. resolvedVersion and resolvedID are filled only by the
+	// deployment copy; ordinary compiled output leaves both empty.
+	hosted bool `json:"-"`
 }
 
 // slngArguments is a named map so a nil one encodes as {} rather than null,
@@ -170,6 +199,18 @@ type slngMCP struct {
 	Server     string `json:"server"`
 	Tool       string `json:"tool_name"`
 	Invocation string `json:"invocation,omitempty"`
+	// ServerID and SchemaHash are the resolved half, filled only by
+	// SlngResolvedBody for the same reason and under the same omitempty rule as
+	// slngRef's two above.
+	//
+	// SchemaHash is copied from the snapshot the deploy checked and never
+	// computed here: it is the platform's own hash of the tool's input schema as
+	// its probe saw it, and a number of our own would refuse every attachment.
+	ServerID   string `json:"server_id,omitempty"`
+	SchemaHash string `json:"observed_schema_hash,omitempty"`
+	// origin is the package tool file the selection came from, kept out of the
+	// body the same way slngRef.origin is.
+	origin string `json:"-"`
 }
 
 // slngArtifacts is everything the driver needs to write: the body and the facts
@@ -394,14 +435,35 @@ func slngTools(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) ([]slngRef, []
 		}
 		if tool.Execution == ir.ToolMCP {
 			for _, exposed := range tool.MCPTools {
-				mcpRefs = append(mcpRefs, slngMCP{Server: mcpServerName(name, tool), Tool: exposed, Invocation: slngInvocation})
+				mcpRefs = append(mcpRefs, slngMCP{
+					Server: mcpServerName(name, tool), Tool: exposed,
+					Invocation: slngInvocation, origin: name,
+				})
 			}
 			continue
 		}
+		// The emitted name is the hosted one for a `slng:` reference and the
+		// file's own for everything else. A builtin is deliberately the second
+		// case: `builtin: {id: end_call}` is written as the tool end_call and
+		// the file's name is what the organisation must hold, which is what
+		// preflight says when it does not.
+		emitted, hosted := name, tool.Execution == ir.ToolSlngHosted
+		if hosted && tool.HostedName != "" {
+			emitted = tool.HostedName
+		}
 		ref := slngRef{
-			Tool:        name,
+			Tool:        emitted,
 			Description: tool.Description,
 			Invocation:  slngInvocation,
+			origin:      name,
+			hosted:      hosted,
+		}
+		// An attachment description is an override, so only an authored one is
+		// written. A hosted tool with no `description:` inherits the published
+		// one, and removing the field restores that inheritance rather than
+		// freezing whatever a committed mirror last said.
+		if hosted && !tool.DescriptionAuthored {
+			ref.Description = ""
 		}
 		if tool.Announce != "" {
 			ref.Policy = &slngPolicy{PreActionMessage: &slngPreAction{
@@ -440,7 +502,8 @@ func slngNotes(built slngArtifacts) []string {
 		notes = append(notes, "slng target: each MCP reference is written by name; the push resolves the server and copies each tool's schema hash from the platform's stored capability snapshot, so nothing connects to the server")
 	}
 	if len(built.Requires.Hosted) > 0 {
-		notes = append(notes, "slng target: every tool is referenced by name and none is created; the push resolves each name against the organisation, and `unmute pull` is what keeps the committed mirror in step with it")
+		notes = append(notes, "slng target: every tool is referenced by name and none is created; `unmute deploy` resolves each name against the organisation and attaches the version it checked")
+		notes = append(notes, "slng target: a hosted tool's description, parameters and credential requirements are the published version's, so this compile checked the reference's shape and left its existence, its argument contract and its vault entries to deployment")
 	}
 	notes = append(notes, "slng target: region "+built.Body.Region+" is written as declared")
 	return notes

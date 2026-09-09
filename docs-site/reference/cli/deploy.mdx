@@ -7,7 +7,11 @@ description: "Validate, compile and push a package to SLNG in one command."
 $ unmute deploy --help
 Compile a package and push it to SLNG.
 
-Validates the package, compiles each slng target, then pushes it with `voiceai agents push`. Nothing on SLNG is created until every check passes, so a run that reports problems has changed nothing.
+Validates the package, checks its published references, compiles each slng target,
+then performs a guarded push through `voiceai`. The agent is written only after
+its checks pass. A real deploy may first refresh MCP discovery or fill a Vault
+entry with consent; the deploy report records those changes. A dry run makes
+no remote changes.
 
 The credential is read from SLNG_API_KEY, falling back to VOICEAI_API_KEY and then to whatever profile `voiceai login` stored. The organisation a push resolved is always printed, because an environment key and a stored profile can belong to different ones.
 
@@ -55,28 +59,41 @@ Get one at [app.slng.ai/api-keys](https://app.slng.ai/api-keys).
 unmute deploy examples/slng-support
 ```
 
-If the package references a hosted tool with `slng:`, run
-[`unmute pull`](/reference/cli/pull) once first and commit what it writes.
-Deploy compiles from that committed copy, so a package whose mirror is missing
-is refused before the account is read.
+A `slng:` reference needs no `unmute pull` first, no mirror, and no hash:
+`unmute deploy` resolves it directly against your organisation, checks it,
+and attaches the version it checked. This needs a `voiceai` release that
+supports that checked, resolved push; an older one is refused with upgrade
+guidance before anything is written. See [Hosted tools](/build/tools/hosted).
 
 A clean run reads:
 
 ```text
-✓ slng (slng)
-slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
-slng: 7 requirements satisfied
+✓ slng (slng)  local checks only: a hosted tool's existence, its published description and argument contract, and every vault entry it needs, are confirmed by `unmute deploy`, not by this command
+slng: organisation Your Workspace (<org_id>)
+slng: <n> requirements satisfied
 slng: credential from SLNG_API_KEY
-slng: compiled examples/slng-support/build/slng (2 files)
-slng: agent created 01998a7c-4a1b-7f2e-9c33-8d5e1b0f7a62
-slng: version 4 labelled "slng 2026-08-27T09:12:44.010Z"
-slng: deployed. Talk to it: voiceai agents web-sessions create 01998a7c-4a1b-7f2e-9c33-8d5e1b0f7a62 --file session.json
+slng: compiled examples/slng-support/build/slng (3 files)
+slng: attached check_order v<n>
+slng: attached search_places_text v<n>
+slng: attached end_call v<n>
+slng: attached firecrawl-mcp-2 firecrawl_scrape
+slng: attached firecrawl-mcp-2 firecrawl_search
+slng: agent created <agent_id>
+slng: deployed. Talk to it: voiceai agents web-sessions create <agent_id> --file session.json
 ```
 
-No line names a tool, because a push creates none. Unmute writes tool
-*references* into the agent, so every tool it names already exists in your
-organisation. The `requirements satisfied` count is where those references
-were checked. See [Hosted tools](/build/tools/hosted).
+The first line is `validate`'s own row, and the sentence after it is there
+because a clean local result is narrower than a clean deploy: it says which
+checks this command has not made.
+
+Each `attached` line names a reference this run resolved and checked against
+your organisation, never one it created: every tool it names already existed,
+published, before this run started, and `v<n>` is the version this run
+checked and attached, which is always the latest published one. An MCP
+selection carries no version, because a server tool has none; what was checked
+for it is the schema hash SLNG's own snapshot recorded. The
+`requirements satisfied` count is the same account read, folded in with every
+Vault entry, MCP server and builtin the package needs.
 
 Only a `slng` target is deployed. A livekit or pipecat target compiles to a
 project that somebody else's platform runs, so it is `unmute compile` plus that
@@ -87,38 +104,46 @@ The organisation is printed on every run because an exported key and a stored
 profile can belong to different ones, and nothing else on screen would tell you
 which you just wrote to.
 
-## Four stages, and only the last one writes
+## Four stages
 
 **Validate.** The same checks as [`unmute validate`](/reference/cli/validate),
 against the slng target only. The slng target refuses what SLNG will not run,
 and hearing it here costs no network call.
 
 **Preflight.** Your organisation is asked what it already has, and the answer is
-compared with what the package needs. This happens *before* anything is written,
-so a run refused here leaves both `build/slng` and your organisation exactly as
-it found them.
+compared with what the package needs. A real run can refresh an unusable MCP
+snapshot or fill a missing Vault entry with consent before later checks finish.
+A dry run does neither.
 
 **Compile.** The same output as [`unmute compile --target slng`](/reference/cli/compile),
 written to `build/slng/`. Compiling as part of deploying is deliberate: it means
 you cannot push an artifact that is older than the package.
 
-**Push.** Handed to `voiceai agents push build/slng --json`. You can run that
-yourself; `unmute deploy` reads its result and prints it in unmute's format.
+**Push.** Checked references are staged with their resolved IDs and versions,
+then passed to `voiceai agents push` with `--require-resolved` and `--expect-org`.
+A direct push of `build/slng` skips Unmute's binding checks and resolved staging;
+use `unmute deploy` for this workflow.
 
 ## What the preflight checks
 
-Four reads, plus one per MCP server your package names. The cost does not grow
-with how many tools or secrets you declare.
+Four kinds of read, plus one per MCP server your package names and one per
+`slng:` reference, to check the published version it would attach. The cost
+does not grow with how many secrets you declare.
 
-| It checks | Against | If it is missing |
+| It checks | Against | If it is wrong |
 |---|---|---|
 | every `builtin:` tool | your organisation's tool list | create it in the SLNG dashboard, or rename the file |
+| every `slng:` reference | your organisation's tools, and its latest published version | missing entirely stops the run; a version behind a committed mirror only warns, because the agent calls the platform's latest either way |
+| every `inject:` argument on a `slng:` reference | that version's published parameters | the run stops, naming the tool, the argument, the version it checked, and the file that supplied it |
 | every MCP server | the servers attached to your organisation | attach it in the SLNG dashboard |
 | every MCP tool you expose | that server's last stored probe | correct the name, or expose a different tool |
-| every vault secret and variable | the vault, including whether it holds a value | `unmute deploy` offers to create it |
+| every vault secret and variable, including one a hosted tool or MCP server needs that the package never declares | the vault, including whether it holds a value | `unmute deploy` offers to create it |
 
-A `code` or `webhook` tool is **never** reported as missing. The push creates
-those, so their absence is the ordinary state of a first deploy.
+Unmute creates no tools or MCP servers. SLNG owns tool creation entirely, and
+an authored `local:` or `webhook:` block is refused before this step is
+reached, so there is no first-deploy grace period where an absent tool is
+expected: every name this preflight checks already exists, published, or the
+run stops.
 
 A control is never checked either. It reaches SLNG as a curated capability you
 attach to the agent in the dashboard, and the compiled body carries no reference
@@ -126,23 +151,64 @@ to it, so there is nothing for a check to resolve.
 
 <Warning>
 A `builtin:` reference carries **the tool file's own name**, not the builtin id
-it selects. `tools/hang_up.yaml` declaring `builtin: end_call` emits a reference
-to `hang_up`, which your organisation has never heard of. The fix is to rename
-the file; the preflight says so.
+it selects. A `slng:` reference carries the hosted name you wrote, so its local
+file name may differ. `tools/hang_up.yaml` declaring
+`builtin: end_call` emits a reference to `hang_up`, which your organisation has
+never heard of. The fix is to rename the file; the preflight says so.
 </Warning>
 
 ## When a check cannot be made
 
-An old `voiceai`, a restricted network, or a key without the right scope means a
-question goes unanswered. That is reported as a warning and the run continues to
-the push, which stays the authority on what your organisation will accept:
+Two different things can go wrong here, and they are not treated the same.
+
+**An old `voiceai` stops the run before any account read**, because it cannot
+make the checked, resolved push this command promises. It is refused with
+upgrade guidance rather than falling back to a push that resolves and attaches
+whatever is newest, unchecked. See [Deploy to SLNG](/deploy/slng).
+
+**A read that fails once the run is under way splits by what the rest of the
+run still covers**, and it splits per requirement rather than per listing. Each
+one says what covers it:
 
 ```text
-warning: slng: `voiceai mcp list` could not be run: insufficient scope; the push decides what it would have covered
+warning: slng: `voiceai secret list` could not be run: insufficient scope
+warning: slng: secret SLNG_TOOL_RENDER: the vault could not be listed. The push checks this name and its kind against a fresh read, so a missing one is still refused there; what neither run can tell you is whether the entry holds a value
 ```
 
-A check that could not be made is never reported as one that passed, and never
-stops a deploy. Only a resource *positively found absent* does that.
+An unreadable vault does not block a credential **your package declares**,
+because the push reads the vault again before it writes and refuses a missing
+name. Two limits on that, both worth knowing:
+
+- The push checks a name and its kind. It never reads whether the entry holds
+  a value, so neither run can tell you that.
+- The push reads the names in your package: the `{{$NAME}}` tokens in your
+  prompts and the credentials on your own tool bodies. A credential
+  **discovered** from a hosted tool's published contract, or from a hosted MCP
+  server's connection, is in neither, so it reaches no later check and an
+  unreadable vault blocks it here.
+
+A read this command's own promise depends on is the same case. `unmute deploy`
+attaches the published version and the MCP schema hash it resolved, under a
+mode that tells the push to check neither itself, so a read that failed here
+has no later step to catch it:
+
+```text
+Cannot deploy slng. 2 things to fix:
+
+  hosted tool (2)
+    check_order
+      tools/check_order.yaml references a tool SLNG hosts, so SLNG must already have one of that name
+      the account's tools could not be listed, so this reference was not resolved and no version was checked
+    search_places_text
+      tools/search_places_text.yaml references a tool SLNG hosts, so SLNG must already have one of that name
+      the account's tools could not be listed, so this reference was not resolved and no version was checked
+
+  nothing was compiled, created or changed.
+```
+
+A read that could not be made is never reported as satisfied, either way.
+Whether it also stops the run depends on whether anything downstream still
+checks what it would have covered.
 
 ## Creating missing secrets
 
@@ -175,8 +241,8 @@ creating it again would be refused.
 
 ## After a successful push
 
-The run says which number reaches the agent, read once from your organisation's
-SIP trunks:
+The run reports attached numbers from your organisation's SIP trunks. It does
+not verify the carrier's routing or place an inbound test call:
 
 ```text
 slng: inbound trunk 2_inbound reaches this agent on +447700900222
@@ -185,8 +251,7 @@ slng: inbound trunk 2_inbound reaches this agent on +447700900222
 Or, far more often on a first deploy, that none does yet:
 
 ```text
-slng: no number reaches this agent yet; a trunk is attached to an agent in the SLNG dashboard
-slng:   free inbound trunk 1_inbound on +447700900111
+slng: no number reaches this agent yet
 ```
 
 When a trunk is free and you are at a terminal, the run offers to point one at
@@ -211,8 +276,12 @@ Anything other than a listed number leaves it unattached, and a run with no
 terminal never asks and never attaches: a deploy that quietly claimed a phone
 number would be somebody's phone bill.
 
-Unmute still buys no numbers and configures no trunks. Both happen in the SLNG
-dashboard; this only chooses among trunks that already exist.
+Unmute buys no numbers and configures no carrier routing. Set up the connection
+in SLNG and route the carrier number to its SIP destination. Attachment alone
+does not redirect a number from Twilio Dev Phone or another webhook. Follow
+[Receive phone calls](/deploy/slng#receive-phone-calls), then confirm a real
+call appears in SLNG. Required injected inputs need valid defaults for inbound
+calls, since the carrier supplies no web-session arguments.
 
 `--call` places one outbound call from the agent you just deployed, which is how
 you hear a phone agent without waiting for someone to ring it:
@@ -233,17 +302,50 @@ live agent is **overwritten**.
 `--dry-run` names both, and changes nothing:
 
 ```text
-✓ slng (slng)
-slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
-slng: 7 requirements satisfied
+slng: <n> requirements satisfied
 slng: credential from SLNG_API_KEY
-slng: compiled examples/slng-support/build/slng (2 files)
+slng: compiled examples/slng-support/build/slng (3 files)
+slng: check_order v<n>, from v<m>
+slng:   would change argument_overrides.trace_id, which the agent has now and this package does not supply, so a replacement removes it and the model supplies the argument
+slng:   would change description, which the agent has now and this package does not declare, so a replacement removes it and the published description is used instead
+slng:   would change execution_policy.pre_action_message, from "Hold on." to this package's `announce:`
+slng:   would change invocation, which is "system" on the agent now and "model" in this package
+slng:   would change system arguments `caller`, which the agent supplies to this tool now and this package cannot declare, so a replacement removes them
+slng:   would change trigger on `call_start`, which the agent has now and this package cannot declare, so a replacement removes it and the tool is called by the model instead
+slng:   would change version, from <m> to <n>
+slng:   the published description differs between those two versions
+slng: search_places_text v<n>, new
+slng: would detach tool <tool_id> (description), which this package does not name
 slng: agent acme-orders-slng — update
-slng: reference end_call (existing attachment)
-slng: would detach refund, which this package no longer names
-slng: would overwrite system_prompt, which differs from what the agent has now
 slng: dry run, nothing was created or changed
 ```
+
+A preview names a version without the word `attached`, because nothing was:
+`v<n>, from v<m>` is a reference the agent already has at an older version,
+and `v<n>, new` is one it does not have at all. A first deployment shows no
+previous version rather than inventing one.
+
+The indented lines are what a replacement would alter on that attachment, and
+they exist for the settings only the dashboard could have added: a description
+typed there, an invocation switched to `system`, a `call_start` trigger, a
+system argument, an argument override the package no longer supplies or
+supplies a different value for. Each is named against the attachment it belongs
+to rather than left for the push to discard silently.
+
+A setting the package **can** declare is compared, not listed. The sentence
+spoken before a tool runs is `announce:` in the tool file, so a package whose
+announcement already matches the agent's shows no line for it, and one that
+differs shows the sentence being replaced. Only the parts of that setting a
+package has no key for, such as making the agent wait for the sentence, are
+reported as things a replacement clears.
+
+A detached reference is named by the identifier the live agent carries for it,
+because a tool the package no longer mentions may be knowable by nothing else.
+
+The published-description and published-parameter lines say the two versions'
+contracts differ. They say nothing about whether the tool behaves the same: a
+schema comparison cannot see a change that kept the same signature, and this
+output does not pretend otherwise.
 
 An agent's name comes from `name:` in `agent.yaml` joined to the target, so a
 run that resolves to `update` when you expected `create` means an agent of that
@@ -252,74 +354,44 @@ name already exists. `unmute deploy` warns and names it; change `name:`, or let
 
 ## When it refuses
 
-Nothing on SLNG is created until every check passes, so a refused deploy has
-changed nothing. Every problem is reported together, each with what to do and
-the dashboard page that fixes it:
-
-```text
-✗ Cannot deploy slng. 2 problems:
-
-  vault missing (2)
-    ACME_BRAND
-    REFUND_API_TOKEN
-    create them, then push again. a name that exists as a variable does not count: the platform's publish gate counts secrets only.
-    https://app.slng.ai/vault/secrets
-
-  sample missing (1)
-    check_order (code)
-    a code or api_request tool cannot publish until one successful run proves it. write samples/<tool>.json next to the tool bodies, then push with --run-samples.
-    samples for this target belong in examples/slng-support/build/slng/samples, and `unmute deploy --run-samples` runs them.
-
-  nothing was created or changed.
-```
+A refusal blocks the agent push. A real deploy may already have completed MCP
+refresh or consented Vault writes; inspect `deploy-report.json` for those
+changes. A dry run changes no remote state.
 
 The problems you will meet most:
 
 | It says | What to do |
 |---|---|
 | `vault missing` | create each name in [the vault](https://app.slng.ai/vault/secrets). A name that exists as a *variable* does not count. |
-| `no mirror of it is committed` | a `slng:` tool with nothing to compile. Run `unmute pull` and commit what it writes. |
-| `does not match the hash` | the committed mirror and the pin disagree. Run `unmute pull` and read the diff, or `git checkout` the mirror. |
-| `tool unresolved` | the package references a tool name your organisation cannot see. Rename the reference, or create the tool in the dashboard. Unmute creates none. |
+| `tool unresolved`, `this organisation has no tool of this name` | the package references a tool name your organisation cannot see. Rename the reference, or create the tool in the dashboard. Unmute creates none. |
+| `could not be listed`, `published contract was not checked` | this run could not read your organisation's tools, or the one published version it needed. Nothing is attached unverified: fix what blocked the read and run again. |
+| `--require-resolved`, naming `brew install` | the installed `voiceai` does not support a checked, resolved push. Upgrade it; see [Deploy to SLNG](/deploy/slng). |
 | `agent ambiguous` | two agents share the package's name. Pass `--agent-id`. |
-| `sample missing`, `samples not enabled` | see [Tool samples](#tool-samples). Neither reaches a push unmute makes. |
 
-The two mirror refusals come from `validate`, which runs first, so they stop
-the deploy before it reads your account.
+These problems stop the agent push. `no mirror of it is committed` and
+`does not match the hash` are
+not on this list: `unmute deploy` compiles only the slng target, which reads
+no mirror, so those two refusals belong to a `livekit` or `pipecat` compile of
+the same package. See [Hosted tools](/build/tools/hosted).
 
-## Tool samples
+## Trying a hosted tool
 
-<Note>
-  A push unmute makes creates no tool, so it never meets this gate. Unmute
-  writes tool references, and a referenced tool was published on SLNG before
-  your package named it. This section is here for a tool created another way,
-  and for reading the blocker above if the platform reports one.
-</Note>
-
-A `code` or `api_request` tool cannot be published until one successful run
-proves it works. That run needs a sample: one JSON object of arguments, named
-after the tool.
-
-```text
-build/slng/samples/check_order.json
-```
-
-```json
-{"order_id": "A-1001"}
-```
-
-Then:
+No sample is needed to deploy references to published tools. To exercise one
+separately, use the same account and supply arguments matching its contract:
 
 ```sh
-unmute deploy --run-samples
+export VOICEAI_API_KEY="$SLNG_API_KEY"
+voiceai tool run check_order --input - --confirm-side-effects <<'JSON'
+{"order_number":"A-1001"}
+JSON
 ```
 
-`--run-samples` executes each sample against your **real** dependencies, which is
-why it is a flag rather than the default. Samples survive a recompile:
-`samples/*.json` is preserved inside `build/<target>/` the way `.env` is.
+This executes the hosted tool against its real dependencies. The example
+assumes your organisation publishes `check_order` with an `order_number`
+parameter; change the name and input for your own tool.
 
 ## Where to go next
 
-<Card title="unmute dev" icon="play" href="/reference/cli/dev">
-  Run a package locally before you push it.
+<Card title="Test the deployed agent" icon="play" href="/deploy/slng">
+  Test in the browser, configure phone routing, and read call results.
 </Card>

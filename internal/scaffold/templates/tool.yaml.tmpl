@@ -5,16 +5,20 @@
 [[end]][[else if eq .ExecutionKind "knowledge"]]description: [[quote .Description]]
 knowledge:
   base: [[.KnowledgeBase]]
-[[else if eq .ExecutionKind "slng"]][[if .Description]]description: [[quote .Description]]
-[[end]]slng:[[if .SlngHash]]
+[[if .Announce]]announce: [[quote .Announce]]
+[[end]][[else if eq .ExecutionKind "slng"]][[if .Description]]description: [[quote .Description]]
+[[end]]slng:[[if .SlngName]] [[.SlngName]]
+[[else if .SlngHash]]
   hash: [[.SlngHash]]
 [[else]] {}
 [[end]]
-interruption: provider_default
+[[if .Announce]]announce: [[quote .Announce]]
+[[end]]interruption: provider_default
 effect: returns_data
 [[else if eq .ExecutionKind "mcp"]]mcp:
-  url_env: [[.URLEnv]]
-[[if .MCPTransport]]  transport: [[.MCPTransport]]
+[[if .URLEnv]]  url_env: [[.URLEnv]]
+[[end]][[if .MCPServer]]  server: [[.MCPServer]]
+[[end]][[if .MCPTransport]]  transport: [[.MCPTransport]]
 [[end]][[if .Auth]]  auth:
     type: [[.Auth.Type]]
     token_env: [[.Auth.TokenEnv]]
@@ -35,7 +39,8 @@ input:[[yamlBlock 2 .Input]]
     token_env: [[.Auth.TokenEnv]]
 [[if .Auth.Header]]    header: [[.Auth.Header]]
 [[end]][[end]]
-interruption: provider_default
+[[if .Announce]]announce: [[quote .Announce]]
+[[end]]interruption: provider_default
 effect: returns_data
 [[end]]
 [[if .Inject]]inject:[[pairs 2 .Inject]]

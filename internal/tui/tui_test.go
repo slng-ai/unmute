@@ -660,6 +660,87 @@ func TestV41NewToolDefaultsToEntryAgent(t *testing.T) {
 	}
 }
 
+// TestEditToolSlngArmOffersHostedNameNotHashOrSchemas is spec 007 T033: a
+// slng tool used to fall into editTool's default arm, offering "Webhook URL
+// env", "Input schema" and "Output schema" — three fields chooseToolExecution
+// already blanks the moment a tool becomes slng-executed, and none of which a
+// hosted tool ever takes. The legacy hash pin `unmute pull` stamps into the
+// file must never be offered either: the console does not edit it.
+func TestEditToolSlngArmOffersHostedNameNotHashOrSchemas(t *testing.T) {
+	data := scaffold.Data{Name: "agent", Instructions: scaffold.DefaultInstructions}
+	data.SetTarget(string(targetcap.LiveKit))
+	tool := scaffold.Tool{
+		Name: "check_order", Execution: "slng",
+		SlngHash: "f169d60d6496768081448551f1a84286a34569063a61c480b0aa12475759a00f",
+	}
+	var output bytes.Buffer
+	// The slng menu has six rows; "6" backs out of the first screen
+	// immediately, so this only inspects what that screen offered.
+	if err := editTool(newRunner(strings.NewReader("6\n"), &output, true), &data, &tool); err != nil {
+		t.Fatalf("editTool: %v\n%s", err, output.String())
+	}
+	for _, want := range []string{"Hosted tool", "Description", "Announcement", "Attached to"} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("the slng menu omits %q:\n%s", want, output.String())
+		}
+	}
+	for _, unwanted := range []string{"Webhook URL env", "Input schema", "Output schema", "hash", "Hash"} {
+		if strings.Contains(output.String(), unwanted) {
+			t.Errorf("the slng menu offers %q, which a hosted tool never takes:\n%s", unwanted, output.String())
+		}
+	}
+}
+
+// TestEditToolSlngArmEditsHostedNameDescriptionAndAnnounce drives the new arm
+// end to end: the hosted name is what the console writes as the scalar
+// `slng:` value, and it never touches SlngHash.
+func TestEditToolSlngArmEditsHostedNameDescriptionAndAnnounce(t *testing.T) {
+	data := scaffold.Data{Name: "agent", Instructions: scaffold.DefaultInstructions}
+	data.SetTarget(string(targetcap.LiveKit))
+	tool := scaffold.Tool{Name: "order_status", Execution: "slng"}
+	var output bytes.Buffer
+	sequence := "1\ncheck_order\n2\nLook up an order.\n3\nOne moment while I look that up.\n6\n"
+	if err := editTool(newRunner(strings.NewReader(sequence), &output, true), &data, &tool); err != nil {
+		t.Fatalf("editTool: %v\n%s", err, output.String())
+	}
+	if tool.SlngName != "check_order" {
+		t.Errorf("SlngName = %q, want check_order", tool.SlngName)
+	}
+	if tool.SlngHash != "" {
+		t.Errorf("SlngHash = %q, want empty: the console never writes one", tool.SlngHash)
+	}
+	if tool.Description != "Look up an order." {
+		t.Errorf("Description = %q, want it set", tool.Description)
+	}
+	if tool.Announce != "One moment while I look that up." {
+		t.Errorf("Announce = %q, want it set", tool.Announce)
+	}
+}
+
+// TestEditToolMCPArmEditsServerAndSelectedToolsWithNoURLEnv is spec 007 T033's
+// other half: server and an explicit tool selection are what an author picks
+// for a hosted MCP server, and a SLNG-only package needs no local URL env at
+// all — saving with it left blank must not be refused.
+func TestEditToolMCPArmEditsServerAndSelectedToolsWithNoURLEnv(t *testing.T) {
+	data := scaffold.Data{Name: "agent", Instructions: scaffold.DefaultInstructions}
+	data.SetTarget(string(targetcap.Slng))
+	tool := scaffold.Tool{Name: "web_search", Execution: "mcp"}
+	var output bytes.Buffer
+	sequence := "2\nfirecrawl-mcp-2\n4\nfirecrawl_scrape, firecrawl_search\n7\n"
+	if err := editTool(newRunner(strings.NewReader(sequence), &output, true), &data, &tool); err != nil {
+		t.Fatalf("editTool: %v\n%s", err, output.String())
+	}
+	if tool.MCPServer != "firecrawl-mcp-2" {
+		t.Errorf("MCPServer = %q, want firecrawl-mcp-2", tool.MCPServer)
+	}
+	if !slices.Equal(tool.MCPTools, []string{"firecrawl_scrape", "firecrawl_search"}) {
+		t.Errorf("MCPTools = %v, want the explicit selection", tool.MCPTools)
+	}
+	if tool.URLEnv != "" {
+		t.Errorf("URLEnv = %q, want empty: it was never visited and a SLNG-only package needs none", tool.URLEnv)
+	}
+}
+
 func TestV41ToolAttachmentsAreTargetIndependent(t *testing.T) {
 	data := scaffold.Data{Name: "agent", Instructions: scaffold.DefaultInstructions}
 	data.Agents = []scaffold.Agent{{Name: "billing", Instructions: "Handle billing.", Reason: data.Reason, Speak: data.Speak}}

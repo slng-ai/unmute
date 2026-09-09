@@ -59,6 +59,10 @@ const (
 )
 
 // blocks reports whether this state stops the run before the push.
+//
+// notChecked is deliberately absent: whether an unmade check stops a run
+// depends on whether the run needed it, which is a fact about the requirement
+// and not about the state. finding.blocks is where the two meet.
 func (s findingState) blocks() bool { return s == absent || s == empty || s == wrongKind }
 
 // finding is one requirement, compared.
@@ -71,6 +75,17 @@ type finding struct {
 	// Detail is the account's own words where it had any, and unmute's
 	// otherwise. It is the line that says what to do.
 	Detail string
+	// Required marks a check this deployment cannot proceed without, which makes
+	// an unmade one a refusal rather than a warning.
+	//
+	// The distinction is the whole reason this field exists. An unreadable trunk
+	// listing is tolerable: nothing in the package needs a trunk, so a deploy
+	// that could not read them has lost nothing. An unreadable published
+	// version is not: the deploy's promise is that the version it attaches is
+	// the version it checked, and it cannot keep that promise on a read that
+	// did not happen. Both used to be warnings, which meant the second one
+	// reported success for a deployment nothing had verified.
+	Required bool
 	// NearMiss is an account name that matches except for case. Names are matched
 	// exactly and are case-sensitive everywhere, and case is the mistake the two
 	// naming conventions in play actually produce: uppercase vault names beside
@@ -87,10 +102,16 @@ type preflightReport struct {
 }
 
 // blocked is every finding that stops the run.
+// blocks reports whether this finding stops the run before the push: a state
+// that is wrong on its own, or a required check that could not be made.
+func (f finding) blocks() bool {
+	return f.State.blocks() || (f.Required && f.State == notChecked)
+}
+
 func (r preflightReport) blocked() []finding {
 	var out []finding
 	for _, f := range r.Findings {
-		if f.State.blocks() {
+		if f.blocks() {
 			out = append(out, f)
 		}
 	}
@@ -148,10 +169,10 @@ func comparePreflight(requires generate.Requirements, resources slngResources) p
 	}
 
 	for _, requirement := range requires.Secrets {
-		report.Findings = append(report.Findings, compareVault(requirement, "secret", resources.Vault, vaultChecked))
+		report.Findings = append(report.Findings, compareVault(requirement, "secret", resources.Vault, vaultChecked, false))
 	}
 	for _, requirement := range requires.Variables {
-		report.Findings = append(report.Findings, compareVault(requirement, "variable", resources.Vault, vaultChecked))
+		report.Findings = append(report.Findings, compareVault(requirement, "variable", resources.Vault, vaultChecked, false))
 	}
 	return report
 }
@@ -306,10 +327,39 @@ func compareMCPTool(requirement generate.Requirement, resources slngResources, w
 	return found
 }
 
-func compareVault(requirement generate.Requirement, want string, vault []slngVaultEntry, wasChecked bool) finding {
+// compareVault compares one vault requirement against the account's listing.
+//
+// discovered says where the requirement came from, and it decides what an
+// unreadable listing means, because the push does not re-check the two the same
+// way. Its own vault check reads `requiredSecretNames`, which is the `{{$NAME}}`
+// tokens in the package's prompts plus the credential names on tool bodies
+// physically present in the package. So:
+//
+//   - A name the PACKAGE declares is in that set. An unreadable listing leaves
+//     it to the push, which reads the vault fresh and refuses a missing name,
+//     so refusing here would refuse a deployment that gets refused later with a
+//     worse message.
+//   - A name DISCOVERED from a published contract or a hosted MCP server's
+//     credentials is not in that set and never reaches the push's check. An
+//     unreadable listing leaves it unverified with nothing downstream to catch
+//     it, which is the same reasoning that makes a resolved version required.
+//
+// Neither case covers the value. The push compares a name and a kind and never
+// reads `has_value`, so an entry created and never populated satisfies it, and
+// that is what the unchecked wording below has to say rather than implying the
+// push repeats this whole check.
+func compareVault(requirement generate.Requirement, want string, vault []slngVaultEntry, wasChecked, discovered bool) finding {
 	found := finding{Requirement: requirement, Kind: want}
 	if !wasChecked {
-		found.State, found.Detail = notChecked, "the vault could not be listed, so the push decides this one"
+		if discovered {
+			// Required, so this blocks. Nothing else looks at it.
+			found.State, found.Required = notChecked, true
+			found.Detail = fmt.Sprintf("the vault could not be listed, and this entry is one `%s` reads rather than one the package declares, so the push does not check it either: nothing would catch it missing before a call does",
+				requirement.Name)
+			return found
+		}
+		found.State = notChecked
+		found.Detail = "the vault could not be listed. The push checks this name and its kind against a fresh read, so a missing one is still refused there; what neither run can tell you is whether the entry holds a value"
 		return found
 	}
 	names := make([]string, 0, len(vault))
@@ -321,9 +371,22 @@ func compareVault(requirement generate.Requirement, want string, vault []slngVau
 			continue
 		}
 		switch {
-		case entry.Kind != want:
+		case entry.Kind != "" && entry.Kind != want:
 			// Not "missing". Creating it again would be refused as a duplicate, and
 			// the author would have followed the advice and got nowhere.
+			//
+			// The kind is compared only when the listing REPORTED one. An
+			// account's real `secret list` carries the name and `has_value` and
+			// no kind at all, so an absent field read as a kind of "" made
+			// every populated entry a mismatch against a wanted "secret", and
+			// the deploy told the author to delete or rename an entry that was
+			// correct. An absent field is not evidence of a mismatch: it is the
+			// absence of evidence, and the two are opposite conclusions.
+			//
+			// What is left when the listing says nothing is the part that
+			// decides a deploy anyway, which is whether the name exists and
+			// holds a value. `want` still earns its place below, where it
+			// picks the create command's `--kind`.
 			found.State = wrongKind
 			found.Detail = fmt.Sprintf("the vault holds this name as a %s and the package needs a %s. Two different things share the name, so delete or rename one of them in the SLNG dashboard",
 				entry.Kind, want)
@@ -411,11 +474,17 @@ func renderPreflight(out, errOut io.Writer, name string, report preflightReport)
 	for _, note := range report.Notes {
 		notef(errOut, "%s: %s\n", name, note)
 	}
-	// A read that could not be made is a warning and never a refusal, and it says
-	// which question went unanswered. Silence here would be the report claiming a
-	// check it never made.
+	// A read that could not be made says which question went unanswered.
+	// Silence here would be the report claiming a check it never made.
+	//
+	// It used to end "the push decides what it would have covered", about every
+	// unread listing. That was untrue of most of them and self-contradicting on
+	// screen: a failed `tool list` printed it and was then followed, four lines
+	// down, by a refusal for the references it could not resolve. What each gap
+	// means belongs to the finding it produced, which says so per requirement,
+	// so this line names the read and stops there.
 	for _, missed := range report.Unchecked {
-		warnf(errOut, "%s: %s; the push decides what it would have covered\n", name, missed)
+		warnf(errOut, "%s: %s\n", name, missed)
 	}
 
 	if len(report.Findings) == 0 {
@@ -429,15 +498,28 @@ func renderPreflight(out, errOut io.Writer, name string, report preflightReport)
 		// stale joins unhealthy here rather than getting its own loop: both are
 		// facts about something the account has, neither stops the run, and a
 		// second loop would print them out of the order they were derived in.
+		//
+		// notChecked joins them for a different reason. A check that was not
+		// made and does not block still has to appear, and its own Detail is
+		// the only line that says what covers the gap for THAT requirement.
+		// Without it the run printed the failed read and then nothing, because
+		// the sentence that used to cover this was one blanket clause on the
+		// warning above claiming the push handles every unread listing, which
+		// it does not.
 		for _, found := range report.Findings {
-			if found.State == unhealthy || found.State == stale {
+			if found.State == unhealthy || found.State == stale || found.State == notChecked {
 				warnf(errOut, "%s: %s %s: %s\n", name, found.Kind, found.Requirement.Name, found.Detail)
 			}
 		}
 		return nil
 	}
 
-	fmt.Fprintf(errOut, "\nCannot deploy %s. %s the account does not have:\n", name, plural(len(blocked), "thing"))
+	// "to fix" rather than "the account does not have". Most of these are
+	// account gaps and some are not: two package files resolving to one hosted
+	// tool is a refusal an author fixes in their own package, and a heading
+	// naming the account sent them to the dashboard to look for something that
+	// was never there.
+	fmt.Fprintf(errOut, "\nCannot deploy %s. %s to fix:\n", name, plural(len(blocked), "thing"))
 	// Grouped by kind, and within a kind in the order the requirements were
 	// derived, which is sorted. Two runs of the same package read identically.
 	for _, kind := range kindOrder(blocked) {
@@ -450,21 +532,40 @@ func renderPreflight(out, errOut io.Writer, name string, report preflightReport)
 		}
 	}
 	fmt.Fprintln(errOut, "\n  nothing was compiled, created or changed.")
-	return fmt.Errorf("slng target %q: the account is missing %s", name, plural(len(blocked), "thing"))
+	return fmt.Errorf("slng target %q: %s to fix", name, plural(len(blocked), "thing"))
 }
 
-// kindOrder is the kinds present, in a fixed order rather than a map's. The
-// order runs from what an author fixes in the dashboard to what they can fix
-// from here, so the list ends with the ones `deploy` can offer to close.
+// kindOrder is the kinds present, in a fixed order rather than a map's, so two
+// runs of the same package read identically.
+//
+// The order runs from what an author fixes in their own package, through what
+// they fix in the dashboard, to the ones `deploy` can offer to close.
+//
+// A kind this list does not name is appended rather than dropped. That is not
+// tidiness: the list used to BE the filter, so a finding of an unnamed kind was
+// counted in "1 thing to fix" and then printed nowhere, and the refusal named a
+// number with nothing under it. A kind is a label on a finding, and a label
+// nobody added here is not a reason to hide the finding.
 func kindOrder(findings []finding) []string {
-	order := []string{"builtin tool", "hosted tool", "mcp server", "mcp tool", "secret", "variable"}
+	order := []string{"tool reference", "tool argument", "builtin tool", "hosted tool", "mcp server", "mcp tool", "secret", "variable"}
 	var present []string
+	seen := map[string]bool{}
 	for _, kind := range order {
+		seen[kind] = true
 		if len(findingsOfKind(findings, kind)) > 0 {
 			present = append(present, kind)
 		}
 	}
-	return present
+	var extra []string
+	for _, found := range findings {
+		if seen[found.Kind] {
+			continue
+		}
+		seen[found.Kind] = true
+		extra = append(extra, found.Kind)
+	}
+	sort.Strings(extra)
+	return append(present, extra...)
 }
 
 func findingsOfKind(findings []finding, kind string) []finding {

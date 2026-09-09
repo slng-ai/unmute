@@ -215,6 +215,19 @@ metadata. It does not provision production networking, secret storage,
 carrier numbers, carrier applications, SIP trunks, Redis, or replicas. Those
 belong to the operator.
 
+The slng target draws the same boundary a stage earlier. `internal/generate`
+compiles a `slng:` or `mcp:` reference to a name only, offline, with no
+socket to SLNG: it cannot know whether the organisation still publishes that
+name, whether an injected argument fits its parameters, or which Vault
+entries it needs, and its compile report names those as deferred rather than
+silently skipping them. Resolving a reference to a published tool, checking
+it, and discovering Vault requirements happen once, in `internal/cli`, when
+an author runs `unmute deploy`; that is the only place a credential is read
+or an account write happens. A committed mirror is the one exception, and it
+narrows rather than widens the boundary: `internal/ir` checks it offline for
+a selected code target only, because that target builds and runs the tool
+itself, and a `slng`-only compile needs none.
+
 Public run instructions are kept with the behavior they explain:
 
 - [local development](../docs-site/dev/overview.mdx)

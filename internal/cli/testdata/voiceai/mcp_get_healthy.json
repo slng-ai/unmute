@@ -1,0 +1,31 @@
+{
+  "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  "name": "firecrawl-mcp-2",
+  "url_template": "https://mcp.example.invalid/{{$FIRECRAWL_MCP_PATH}}",
+  "transport": "streamable_http",
+  "revision": 7,
+  "capability_status": "healthy",
+  "capability_observed_at": "2026-09-08T10:02:44Z",
+  "capability_tool_count": 2,
+  "next_refresh_at": "2026-09-08T10:07:44Z",
+  "auth": { "type": "bearer", "secret_name": "FIRECRAWL_API_KEY" },
+  "headers": [{ "name": "X-Workspace", "secret_name": "FIRECRAWL_WORKSPACE" }],
+  "capabilities": {
+    "truncated": false,
+    "pages_fetched": 1,
+    "tools": [
+      {
+        "name": "firecrawl_scrape",
+        "description": "Scrape one URL.",
+        "schema_hash": "1f2e3d4c5b6a70890123456789abcdef0123456789abcdef0123456789abcdef",
+        "input_schema": { "type": "object", "properties": { "url": { "type": "string" } }, "required": ["url"] }
+      },
+      {
+        "name": "firecrawl_search",
+        "description": "Search the web.",
+        "schema_hash": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        "input_schema": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] }
+      }
+    ]
+  }
+}

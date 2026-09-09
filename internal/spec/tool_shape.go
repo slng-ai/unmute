@@ -149,10 +149,14 @@ func checkToolBlockBody(file string, block keyLine, tool Tool) error {
 	if tool.ExecutionKind() != "" {
 		return nil
 	}
-	// `slng:` joins these two: its only field is written by `unmute pull`, so a
-	// package authored before the first pull has an empty block, and a bare
-	// `slng:` decodes to a nil pointer indistinguishable from an absent one.
-	if block.Key == "client" || block.Key == "provider_hosted" || block.Key == "slng" {
+	// A bare `slng:` decodes to a nil pointer indistinguishable from an absent
+	// one, the same as the two fieldless blocks below. Its message is its own,
+	// because the fix is not an empty body: it is the hosted name that empty
+	// body used to stand in for.
+	if block.Key == "slng" {
+		return fmt.Errorf("%s:%d: %s", file, block.Line, slngShapeAdvice)
+	}
+	if block.Key == "client" || block.Key == "provider_hosted" {
 		return fmt.Errorf("%s:%d: `%s:` needs an explicit empty body: write `%s: {}`", file, block.Line, block.Key, block.Key)
 	}
 	return fmt.Errorf("%s:%d: `%s:` block is empty: add its fields", file, block.Line, block.Key)

@@ -43,7 +43,7 @@
     "strict": true,
     "timeout_seconds": 10,
     "type": "api_request",
-    "url": "https://tools-agent-infra.onrender.com/tools/search-text",
+    "url": "https://tools.example.com/tools/search-text",
     "wait_for_response": true,
     "webhook_format": "raw"
   },

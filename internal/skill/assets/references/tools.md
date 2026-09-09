@@ -65,7 +65,7 @@ also the list of what you could have written.
 | `description` | yes, except on `builtin:` and `mcp:` | everywhere else |
 | `input` | yes, except on `builtin:`, `mcp:` and `knowledge:` | everywhere else |
 | `output` | no | everywhere except `builtin:`, `mcp:` and `knowledge:`, but see below |
-| `inject` | no | `webhook:` and `local:` only |
+| `inject` | no | `webhook:`, `local:` and `slng:` only |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` and `knowledge:` |
 | `announce` | no | `webhook:`, `local:`, `knowledge:` and `slng:` only |
@@ -98,30 +98,59 @@ If you need to show the refusal, YAML requires `client: {}` or
 
 ## SLNG-hosted tools
 
-The user says a tool already exists in their SLNG organisation. Write a
-reference to it, not a copy of it.
+The user says a tool already exists in their SLNG organisation. Write one
+line naming it, not a copy of it:
 
 ```yaml
 # tools/check_order.yaml
-description: Look up an order by its number and return its status and delivery date.
+slng: check_order
 
-slng:
-  hash: 336a66b9a564f472...
+announce: One moment while I look that up.
 ```
 
-Two rules, and both are things you can get wrong silently:
+`slng: check_order` is the whole reference. `check_order` is the tool's exact
+name **on the platform**. Write no `description:` and no `input:`: both are
+inherited from the published tool. A `description:` you do write overrides
+the platform's for this one attachment, which is the right move only when the
+user deliberately wants different words spoken than the platform's own
+description. Delete it later and inheritance comes back.
 
-1. **The file's name is the tool's name.** `tools/check_order.yaml` binds to a
-   tool called `check_order` in the organisation. There is no name field. This
-   is the same rule `builtin:` follows.
-2. **You do not type the hash.** `unmute pull` writes it, along with two files
-   beside the tool file: `tools/<name>.slng.json` and, for a code tool,
-   `tools/<name>.slng.py`. Write `slng: {}` and tell the user to run
-   `unmute pull`, then commit everything it writes.
+Two names, and keeping them straight is what a coding agent gets wrong first:
 
-The `.slng.` files are the platform's copy, mirrored. Never edit one: the change
-reaches nothing, and the next compile refuses because the hash no longer
-matches. Change the tool in the SLNG dashboard and pull again.
+1. **The tool file's own name is the package reference**, the one an agent's
+   `tools:` list attaches and every local diagnostic uses. It does not have
+   to match the hosted name: `tools/order_status.yaml` may hold
+   `slng: check_order`, so the agent attaches `order_status` and deployment
+   resolves `check_order`. This creates no tool and renames nothing on the
+   platform; use it when the user wants the file and the prompt to read
+   naturally without matching the platform's own naming.
+2. **The `slng:` scalar is the hosted name**, checked against the
+   organisation only when the user deploys. Get it wrong and the deploy
+   refuses, naming the organisation and what it does have; nothing checks it
+   offline, because only the organisation knows.
+
+`inject:` and `announce:` work exactly as they do on any other tool: see
+"Hidden values the model cannot see" and "Using `announce:`" below. Injected
+values keep their exact type, including `false` and `0`; the tool call
+remains model-invoked either way, never automatic.
+
+**No hash, no mirror, and no `unmute pull` for a package that deploys to
+SLNG only.** Never write `slng: {}` and tell the user to run `unmute pull`:
+that was the old shape, superseded by naming the tool directly. If the
+user's package also compiles to `livekit` or `pipecat`, which build and run
+the tool themselves, run `unmute pull` once to fetch a real copy into the
+package (`tools/<name>.slng.json`, and for a code tool `tools/<name>.slng.py`,
+plus generated `tools/<name>.slng.meta.json` holding the pin), then commit
+what it writes.
+
+The `.slng.` files a pull writes are the platform's copy, mirrored, never
+authored. Never edit one: the change reaches nothing, and the next compile of
+a code target refuses because the pin no longer matches. Change the tool on
+the platform and pull again.
+
+The legacy block, `slng:` with `hash:` under it, still loads and still
+resolves by the file's own name. It is what an older package carries. Do not
+write it into a new tool file; write the scalar name instead.
 
 ### Why this block exists
 
@@ -130,18 +159,30 @@ target `local:` and `webhook:` are refused: unmute creates no tool there, and a
 brand new tool starts in the SLNG dashboard. `slng:` is how a package reaches
 one that is already there.
 
-It costs no portability. The committed mirror carries the platform's own
-introspected schema and, for a code tool, its module, so the same package
-compiles to livekit and pipecat and runs the same tool inside the generated
-project.
+It costs no portability, for a package that wants livekit or pipecat too. A
+pulled mirror carries the platform's own introspected schema and, for a code
+tool, its module, so the same package compiles to livekit and pipecat and
+runs the same tool inside the generated project.
 
-One limit, and state it rather than discovering it: a hosted tool that declares
-Python dependencies compiles to slng, which installs a per-tool environment, and
-is **refused** on livekit and pipecat, which build one dependency list for the
-whole project. A hosted tool with no dependencies works on all three.
+One limit, and state it rather than letting the user discover it: a hosted
+tool that declares Python dependencies compiles to slng, which installs a
+per-tool environment, and is **refused** on livekit and pipecat, which build
+one dependency list for the whole project. A hosted tool with no dependencies
+works on all three. On a slng-only package this limit is invisible until
+deploy, because there is no mirror to read it from ahead of time.
 
-`unmute pull` is the only command that needs an SLNG credential. `validate` and
-`compile` read the committed mirror and work offline.
+**Say plainly what an offline `validate` or `compile` cannot tell the user,**
+for a `slng:` reference: whether the organisation still holds that name,
+whether an injected argument fits its published parameters, and which Vault
+entries it needs. `compile-report.json` names these under `deferred_checks`;
+`unmute deploy` completes all three before it changes the agent, and reports
+what it found. A clean `validate` or `compile` is not proof the reference
+exists on the platform.
+
+`unmute pull` needs an SLNG credential and is only needed when a code target
+runs a hosted tool itself. `validate` and `compile` work offline; a slng-only
+package needs no mirror at all. `deploy` and `resources` also need an account
+credential to reach the organisation.
 
 ## Knowledge bases
 
@@ -322,9 +363,11 @@ interruption: provider_default
 | Field | Required | What it is |
 |---|---|---|
 | `url_env` | yes | the `UPPER_SNAKE` name of a variable holding the base URL |
-| `base_url` | on slng | the literal `https://` host; SLNG stores the URL in the tool body and refuses a tool that names only `url_env` |
 | `path` | no | starts with `/`, is appended to that base URL, and may carry `{{variable}}` tokens |
-| `auth` | no | how the request authenticates; on slng an `api_key` with a custom `header` is sent as `bearer`, the header name is dropped |
+| `auth` | no | `bearer` or `api_key`; an API key may name a custom `header` |
+
+`webhook:` runs on LiveKit and Pipecat. For SLNG, create the request tool in
+the dashboard and reference it with `slng:`.
 
 `url_env` holds a **name**, never a URL. Writing the address there is refused.
 That is what lets staging and production run the same package against different
@@ -458,6 +501,7 @@ One block, and nothing else in the file.
 
 ```yaml tools/web_search.yaml
 mcp:
+  server: firecrawl-mcp-2
   url_env: FIRECRAWL_MCP_URL
   transport: streamable_http
   auth:
@@ -469,10 +513,17 @@ mcp:
 
 | Field | Required | What it is |
 |---|---|---|
-| `url_env` | yes | the `UPPER_SNAKE` name of the variable holding the server address |
+| `server` | no | the server's name on the platform, when it is not this tool's own file name. A platform name often carries a dash, which no tool file name can |
+| `url_env` | on livekit and pipecat; not read by slng | the `UPPER_SNAKE` name of the variable holding the server address |
 | `transport` | no | `sse` or `streamable_http` |
-| `auth` | no | `bearer` with `token_env`, or `api_key` with `token_env` and an optional `header` |
+| `auth` | no; never read by slng | `bearer` with `token_env`, or `api_key` with `token_env` and an optional `header` |
 | `tools` | on slng | non-empty, unique server tool names to offer; absent means all of them on the code targets, and is refused on slng |
+
+**On a package that only targets slng, write `server:` (when it differs from
+the file name) and `tools:`, and nothing else.** SLNG already has the server
+registered, with its own address and credential; `url_env`, `transport` and
+`auth` exist for livekit and pipecat, which dial the server themselves, and
+selecting one of those still requires them.
 
 `url_env` is a name, never an address. `transport` is optional because both
 platforms guess it from the URL: a path ending in `/mcp` is streamable HTTP,
@@ -688,6 +739,7 @@ without going through the step that checks who they are.
 | "our API needs a signed request" | `local:`, because webhook auth is bearer and api_key only |
 | "look something up in this spreadsheet of ours" | `local:`, and say the handler is a fixture unless they wire it up |
 | "use the Firecrawl MCP server" | `mcp:` with `tools:` naming what it may use |
+| "this tool already exists in our SLNG organisation" | `slng:` naming its exact platform name; code targets also need a pulled mirror |
 | "let it hang up" | `builtin:` with `id: end_call` |
 | "let the caller's app do it" | nothing yet. `client:` is gated on every target. Say so |
 

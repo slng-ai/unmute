@@ -40,6 +40,15 @@ type TargetValidation struct {
 	// do, so this states a fact about the route and never claims a failure
 	// (research D3). Reported at exit 0.
 	Prerequisites []targetcap.RouteAccountPrerequisite
+	// Scope names what this row's checks did not reach, so a clean result does
+	// not read as a promise this compiler never made. Set only on slng, and
+	// only when the package references something whose existence, contract or
+	// credentials only the account can confirm (a hosted tool, an MCP server,
+	// a builtin capability): unmute compiles a package offline and cannot ask
+	// the account anything, so those checks are deferred to `unmute deploy`,
+	// which is also where compile-report.json's own deferred_checks name them
+	// again in full. Empty on every row whose checks are already complete.
+	Scope string
 }
 
 type ForwardedBinding struct {
@@ -435,10 +444,16 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			errors = add(errors, fmt.Sprintf("tool %q base is legal for knowledge execution only", name))
 		}
 		if tool.Execution != ToolMCP {
-			if tool.Description == "" {
+			// A hosted reference is exempt from both, and for the same reason
+			// the mcp block above is: somebody else published this tool's
+			// description and its parameters, so a second copy here could
+			// disagree with them. Naming the tool is the whole reference. The
+			// code targets do need a local definition to build a call out of,
+			// and they ask for the mirror that carries one per target below.
+			if tool.Description == "" && tool.Execution != ToolSlngHosted {
 				errors = add(errors, fmt.Sprintf("tool %q description is required", name))
 			}
-			if tool.Execution != ToolKnowledge && tool.Input["type"] != "object" {
+			if tool.Execution != ToolKnowledge && tool.Execution != ToolSlngHosted && tool.Input["type"] != "object" {
 				errors = add(errors, fmt.Sprintf("tool %q input must be a JSON Schema object", name))
 			}
 			validateSchemaKeys(fmt.Sprintf("tool %q", name), "input", tool.Input, &schemas)
@@ -488,9 +503,11 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 				errors = add(errors, fmt.Sprintf("tool %q mcp execution takes no description, input, or output: the server describes its own tools", name))
 			}
 			// B3 (SCHEMA §5, 2026-07-16): url_env names the MCP server address.
-			if tool.URLEnv == "" {
-				errors = add(errors, fmt.Sprintf("tool %q url_env is required for mcp execution (the MCP server address env)", name))
-			} else if !envNamePattern.MatchString(tool.URLEnv) {
+			// Required by the code targets, which dial the server themselves,
+			// and asked for per target below. SLNG already has the server
+			// registered under `server:` with whatever credential it needs, so
+			// a package that only deploys there has no address to write.
+			if tool.URLEnv != "" && !envNamePattern.MatchString(tool.URLEnv) {
 				errors = add(errors, fmt.Sprintf("tool %q url_env must be an UPPER_SNAKE environment variable name", name))
 			}
 			if tool.Handler != "" {
@@ -527,7 +544,15 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			if tool.Handler != "" || tool.URLEnv != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler/url_env does not match execution %q: a hosted tool's definition is the platform's", name, tool.Execution))
 			}
-			validateHostedTool(name, tool, &errors)
+			// The mirror is checked per target, not here. A SLNG-only package
+			// references published tools by name and needs no mirror at all, so
+			// requiring one before a target has been selected refused packages
+			// that were correct. validateHostedMirror runs from validateTarget
+			// on a target that emits a project, which is the only reader a
+			// mirror has. The pin shape is target-independent and stays global.
+			if _, err := targetcap.CanonicalSlngPins(tool.Dependencies); err != nil {
+				errors = add(errors, fmt.Sprintf("tool %q mirrored dependency: %v", name, err))
+			}
 		case ToolKnowledge, ToolClient, ToolProviderHosted:
 			if tool.Handler != "" || tool.URLEnv != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler/url_env does not match execution %q", name, tool.Execution))
@@ -1955,6 +1980,13 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 			applyCapability(caps, targetcap.FieldToolKnowledge, provider, row)
 		case ToolSlngHosted:
 			applyCapability(caps, targetcap.FieldToolSlngHosted, provider, row)
+			// The committed mirror is the code targets' whole definition of this
+			// tool, so they are the targets that require one. On slng the
+			// published version supplies it and the mirror is read by nothing,
+			// which is what lets a SLNG-only package carry no mirror files.
+			if targetcap.EmitsProject(provider) {
+				validateHostedMirror(name, tool, &row.Errors)
+			}
 			// A mirrored request tool can carry a shape no generated project has.
 			// It fires by field name rather than by silence, because a dropped
 			// field is a tool that behaves differently on two targets and says
@@ -1983,6 +2015,13 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 		// both fields, and neither target is worse off for the other one existing.
 		if tool.Execution == ToolWebhook && targetcap.EmitsProject(provider) && tool.URLEnv == "" {
 			row.Errors = add(row.Errors, fmt.Sprintf("%s target reads a webhook base URL from the environment: tool %q needs url_env, keeping base_url for a hosted target", provider, name))
+		}
+		// The same split for an MCP server's address. A code driver connects to
+		// the server itself and reads the address out of the environment; SLNG
+		// holds the server already, under the name `server:` gives, with its own
+		// connection settings and credential.
+		if tool.Execution == ToolMCP && targetcap.EmitsProject(provider) && tool.URLEnv == "" {
+			row.Errors = add(row.Errors, fmt.Sprintf("%s target connects to the MCP server itself: tool %q needs url_env, the environment variable holding the server address", provider, name))
 		}
 		if tool.Interruption != ToolProviderDefault {
 			applyCapability(caps, targetcap.FieldToolInterruption, provider, row)

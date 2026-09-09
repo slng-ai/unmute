@@ -23,6 +23,46 @@ func TestValidateCommandPrintsEveryTargetAndWarnings(t *testing.T) { // V16, V18
 	}
 }
 
+// TestValidateNamesLocalCheckScopeOnTheSlngRow is T034: a clean slng row over
+// a package that references a hosted tool says its checks are local only, on
+// the same line the row already prints rather than as a new warning that
+// would fire on every correct slng package.
+func TestValidateNamesLocalCheckScopeOnTheSlngRow(t *testing.T) {
+	stdout, _, err := runValidateCommand(t, "--target", "slng", filepath.Join("..", "testdata", "slng_hosted"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "✓ slng (slng)") {
+		t.Fatalf("stdout does not carry the slng row at all:\n%s", stdout)
+	}
+	for _, line := range strings.Split(stdout, "\n") {
+		if !strings.HasPrefix(line, "✓ slng (slng)") {
+			continue
+		}
+		if !strings.Contains(line, "local checks only") {
+			t.Errorf("the slng row's own line does not name its scope:\n%s", line)
+		}
+	}
+	if strings.Contains(stdout, "Warnings:") {
+		t.Errorf("the scope note became a warning instead of riding the existing row:\n%s", stdout)
+	}
+}
+
+// TestValidateSlngRowCarriesNoScopeWithNoHostedTool is the other half: a
+// package that never references a hosted tool has nothing deferred, so its
+// slng row must print exactly as it always did.
+func TestValidateSlngRowCarriesNoScopeWithNoHostedTool(t *testing.T) {
+	stdout, _, err := runValidateCommand(t, "--target", "slng", filepath.Join("..", "testdata", "slng_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.HasPrefix(line, "✓ slng (slng)") && strings.TrimSpace(line) != "✓ slng (slng)" {
+			t.Errorf("a package with no hosted tool carries a scope note on its slng row: %q", line)
+		}
+	}
+}
+
 func TestValidateCommandFiltersTargetInstances(t *testing.T) { // V18
 	stdout, _, err := runValidateCommand(t, "--target", "pipecat", filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {

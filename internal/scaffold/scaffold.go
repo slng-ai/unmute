@@ -213,18 +213,33 @@ type Tool struct {
 	// never drops a tool's credentials. The console does not edit it.
 	Auth *spec.ToolAuth
 	// MCPTransport and MCPTools are the mcp block's optional fields, carried
-	// through maintenance for the same reason as Auth. The console does not
-	// edit them (SCHEMA N40).
+	// through maintenance for the same reason as Auth. MCPTools is edited by
+	// the console (the explicit tool selection); MCPTransport is not (SCHEMA
+	// N40).
 	MCPTransport string
 	MCPTools     []string
+	// MCPServer is the platform's name for an mcp: tool's server, when it
+	// differs from the tool's own name. Carried through maintenance and
+	// editable by the console, the same as MCPTools: both are what an author
+	// picks, unlike Transport and Auth, which are written by hand.
+	MCPServer string
 	// KnowledgeBase names the knowledge: entry a knowledge tool searches.
 	KnowledgeBase string
-	// SlngHash is a hosted tool's pin, carried verbatim through maintenance for
-	// the same reason as Auth: a key this struct does not hold is a key a
-	// rewrite deletes at exit 0, and losing this one turns a working package
-	// into one that refuses to compile until somebody re-runs the pull. The
-	// console does not edit it; `unmute pull` writes it.
-	SlngHash    string
+	// SlngName is a scalar hosted reference's exact platform name, from
+	// `slng: check_order`. Empty for a legacy `hash:` block, whose hosted name
+	// is the tool file's own. Editable by the console; SlngHash beside it
+	// never is.
+	SlngName string
+	// SlngHash is a legacy hosted reference's pin, carried verbatim through
+	// maintenance for the same reason as Auth: a key this struct does not hold
+	// is a key a rewrite deletes at exit 0, and losing this one turns a
+	// working package into one that refuses to compile until somebody re-runs
+	// the pull. The console does not edit it; `unmute pull` writes it.
+	SlngHash string
+	// Announce is one fixed sentence spoken as a webhook, local, knowledge or
+	// slng tool starts, so a slow call is not silence (ir.Tool.Announce).
+	// Editable by the console.
+	Announce    string
 	Input       string // JSON Schema object
 	Output      string // optional JSON Schema object
 	AttachTo    []string

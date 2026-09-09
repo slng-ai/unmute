@@ -101,13 +101,21 @@ func slngRunbookFor(agent *ir.Agent, tgt ir.Target, built slngArtifacts) slngRun
 	// the one the deploy reads is the failure the vault table's own agreement
 	// gate exists to prevent, and this list has the same two readers.
 	for _, hosted := range built.Requires.Hosted {
-		runbook.HostedRefs = append(runbook.HostedRefs,
-			fmt.Sprintf("`%s`, mirrored from version %d", hosted.Name, hosted.Version))
+		// A version only when a committed mirror recorded one, which is what a
+		// package also targeting livekit or pipecat has. Deployment resolves the
+		// latest published version and reports the one it attached, so a line
+		// claiming a version this package never pinned would be an invention.
+		if hosted.Version > 0 {
+			runbook.HostedRefs = append(runbook.HostedRefs,
+				fmt.Sprintf("`%s`, mirrored from version %d", hosted.Name, hosted.Version))
+			continue
+		}
+		runbook.HostedRefs = append(runbook.HostedRefs, fmt.Sprintf("`%s`", hosted.Name))
 	}
 	runbook.ToolCount = len(built.Body.ToolRefs)
 	for _, ref := range built.Body.ToolRefs {
 		runbook.ToolRefNames = append(runbook.ToolRefNames, ref.Tool)
-		if agent.Tools[ref.Tool].Execution == ir.ToolBuiltin {
+		if agent.Tools[ref.origin].Execution == ir.ToolBuiltin {
 			runbook.Builtins = append(runbook.Builtins, ref.Tool)
 		}
 	}

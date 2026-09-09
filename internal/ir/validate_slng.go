@@ -30,7 +30,102 @@ func validateSlngTarget(agent *Agent, resolved Target, row *TargetValidation) {
 	validateSlngVariables(agent, row)
 	for _, name := range slices.Sorted(maps.Keys(agent.Tools)) {
 		validateSlngTool(name, agent.Tools[name], row)
+		validateSlngInject(agent, name, agent.Tools[name], row)
 	}
+	row.Scope = slngDeferredScope(agent)
+}
+
+// slngDeferredScope names what an offline slng validate could not reach, so a
+// clean row does not read as a promise this compiler never made.
+//
+// Scoped to `slng:` hosted tools, which is what FR-003/FR-004 are about: a
+// hosted reference's existence, its published description and its argument
+// contract are the organisation's, and unmute compiles a package with no
+// network and no credential, so none of that is checked here. Not extended to
+// MCP servers or builtin capabilities, whose own deferred-check stories belong
+// to their own stories (US4 and earlier) rather than to this one. A package
+// with no hosted reference has nothing deferred: its slng row is already the
+// whole check, and stays silent about scope exactly as it always has.
+func slngDeferredScope(agent *Agent) string {
+	for _, tool := range agent.Tools {
+		if tool.Execution == ToolSlngHosted {
+			return "local checks only: a hosted tool's existence, its published description and argument contract, " +
+				"and every vault entry it needs, are confirmed by `unmute deploy`, not by this command"
+		}
+	}
+	return ""
+}
+
+// validateSlngInject holds an injected value to SLNG's attachment expression
+// contract, which is narrower than the pair list the code targets accept.
+//
+// An `argument_overrides` entry is a fixed scalar or one whole variable token,
+// and that is the platform's rule rather than ours: the value is stored on the
+// attachment and substituted when a call starts, so there is nothing to
+// concatenate a template into. A code target assembles the request itself and
+// can interpolate, so this check is per target and the same file keeps working
+// on livekit and pipecat.
+//
+// The refusals below are the shapes that would otherwise reach the platform and
+// be rejected at attach time, or worse, be stored and send the literal braces:
+//
+//   - `- greeting: "Order {{order_number}}"` is embedded interpolation. There is
+//     no expression to evaluate, so the model's argument would be the text.
+//   - `- limit: null` is the absence of a value written as a value.
+//   - `- flags: [a, b]` is a collection, and an override holds one scalar.
+//
+// A fixed `false` and a fixed `0` are values and are deliberately not on that
+// list: refusing them is the bug this check has to avoid, because both read as
+// empty to a careless predicate and both are legitimate arguments.
+func validateSlngInject(agent *Agent, name string, tool Tool, row *TargetValidation) {
+	for _, key := range slices.Sorted(maps.Keys(tool.Inject)) {
+		value := tool.Inject[key]
+		if value == nil {
+			row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
+				"tool %q injects %q with no value, and an argument override holds one fixed scalar or one whole variable token: write the value, or drop the entry and let the model supply the argument", name, key))
+			continue
+		}
+		switch typed := value.(type) {
+		case string:
+			validateSlngInjectText(agent, name, key, typed, row)
+		case bool, int, int64, uint64, float64:
+			// A fixed scalar. A non-finite float cannot arrive here from YAML
+			// as a float64 that JSON can carry, and if it ever does the
+			// marshal is what refuses it, with the value named.
+			if number, ok := typed.(float64); ok && (number != number || number > 1e308 || number < -1e308) {
+				row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
+					"tool %q injects %q with a number JSON cannot carry: write a finite number", name, key))
+			}
+		default:
+			row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
+				"tool %q injects %q with a %T, and an argument override holds one fixed scalar or one whole variable token: write a string, a number or a boolean, or record the value you need into its own variable and name that variable here",
+				name, key, value))
+		}
+	}
+}
+
+// validateSlngInjectText splits a string override into the two shapes SLNG
+// takes: text with no template in it at all, or exactly one whole token.
+func validateSlngInjectText(agent *Agent, name, key, value string, row *TargetValidation) {
+	refs := TemplateRefs(value)
+	if len(refs) == 0 {
+		return
+	}
+	// TemplateVar returns a name only when the whole value is one token, which
+	// is exactly the distinction this check needs and is already the predicate
+	// the code targets use to preserve an injected value's type.
+	if TemplateVar(value) != "" {
+		return
+	}
+	if len(refs) > 1 {
+		row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
+			"tool %q injects %q with %d template references in one value, and SLNG substitutes a whole override or nothing: name one variable on its own, or record the sentence you want into a variable and name that",
+			name, key, len(refs)))
+		return
+	}
+	row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
+		"tool %q injects %q as text with {{%s}} inside it, and SLNG stores an override and substitutes it whole: the braces would reach the tool as characters. Write `%s` on its own to send the value, or record the text you want into a variable and name that variable here",
+		name, key, refs[0], "{{"+refs[0]+"}}"))
 }
 
 // validateSlngRegions is the only region *value* check in the tree. Every other

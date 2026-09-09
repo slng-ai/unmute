@@ -46,8 +46,8 @@ This is a worked example rather than a quote, with `auth:` added to show the
 field. The real one ships in
 [`examples/slng-support`](https://github.com/slng-ai/unmute/tree/main/examples/slng-support):
 its `tools/web_search.yaml` names the same server and the same two tools, and
-carries no `auth:`. SLNG has nothing to do with it there: the platform reads
-the server by name from its own registration, not from `url_env` or `auth`, so
+carries no `url_env`, `transport` or `auth:`. The platform reads
+the server by name from its own registration, so
 those fields matter only for a code target. This package deploys to slng only,
 agent name `support`, alongside three other tools, so there was nothing for
 `auth:` to reach.
@@ -57,10 +57,16 @@ agent name `support`, alongside three other tools, so there was nothing for
 | Field | Required | What it is |
 |---|---|---|
 | `server` | no | the server's name on the platform, when that is not this tool's own file name |
-| `url_env` | yes | the UPPER_SNAKE name of the environment variable holding the server address |
+| `url_env` | yes on LiveKit and Pipecat; not read by SLNG | the UPPER_SNAKE name of the environment variable holding the server address |
 | `transport` | no | `sse` or `streamable_http` |
-| `auth` | no | `bearer` with `token_env`, or `api_key` with `token_env` and an optional `header` |
-| `tools` | no | non-empty, unique server tool names to offer; absent means all of them. Required on slng |
+| `auth` | no; never read by SLNG | `bearer` with `token_env`, or `api_key` with `token_env` and an optional `header` |
+| `tools` | no; required on slng | non-empty, unique server tool names to offer; absent means all of them |
+
+**A package that only targets slng needs none of `url_env`, `transport` or
+`auth`.** SLNG already has the server registered, with its own connection
+settings and credential; those three fields exist for LiveKit and Pipecat,
+which dial the server themselves. Selecting a code target still requires
+them, with their existing rules and refusals.
 
 `server` exists because the two names live in different namespaces. A tool file
 name is lowercase snake_case, and a server's name on the platform is whatever
@@ -135,9 +141,9 @@ running.
 A selection filter, not a contract. Firecrawl also exposes scraping and crawling
 tools; naming one keeps the rest out of a conversation that has to stay fast.
 
-The list is **not checked against the server**, because the server's tool list
-only exists at run time. A name the server does not expose is simply never
-offered, and the package still validates:
+On LiveKit and Pipecat, the list is **not checked against the server** during
+validation, because its tools are fetched at run time. A name the server does
+not expose is never offered, and the package still validates:
 
 ```text
 ✓ livekit (livekit)
@@ -147,6 +153,10 @@ offered, and the package still validates:
 Leave `tools` out and the agent gets everything the server exposes.
 An empty list entry or a name repeated twice is still an authoring error and is
 refused before the server is contacted.
+
+On SLNG, `unmute deploy` checks every selected name against the registered
+server's discovery snapshot. A missing tool blocks deployment. A real deploy
+can refresh an unusable snapshot once; a dry run never refreshes it.
 
 **SLNG has no "whole server" attachment, so `tools:` is required there.**
 Where LiveKit and Pipecat pass the server through and let it decide what it

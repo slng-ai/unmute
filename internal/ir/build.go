@@ -127,6 +127,18 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		// mirror was read from the package. An absent mirror stays absent:
 		// Validate owns that refusal, and it names the pull.
 		if built.Execution == ToolSlngHosted {
+			// Recorded before the fold below can supply one, so the slng driver
+			// can tell an override from an inheritance.
+			built.DescriptionAuthored = built.Description != ""
+			built.MirrorFailure = pkg.MirrorFailures[name]
+			// A scalar reference's pin is generated, not authored: buildTool
+			// already set MirrorPin from the legacy `hash:` line, and a scalar
+			// reference has none to have set it from, so this overrides it with
+			// the digest tools/<name>.slng.meta.json records instead.
+			if tool.Slng.Name != "" {
+				built.MirrorScalar = true
+				built.MirrorPin = pkg.MirrorMetaHash[name]
+			}
 			if mirror, ok := pkg.Mirrors[name]; ok {
 				built.Mirror = &mirror
 				built.MirrorBytes = pkg.MirrorBytes[name]
@@ -696,9 +708,17 @@ func buildTool(name string, raw packagespec.Tool) Tool {
 	case raw.Knowledge != nil:
 		tool.KnowledgeBase = raw.Knowledge.Base
 	case raw.Slng != nil:
-		// The pin is all the file carries. Everything else about a hosted tool
-		// comes from the mirror, which Build folds in at the call site because
-		// it belongs to the package rather than to this file.
+		// The hosted name and, for a legacy reference, the pin. Everything else
+		// about a hosted tool comes from the published version at deployment or
+		// from the mirror for a code target, and the mirror is folded in at the
+		// call site because it belongs to the package rather than to this file.
+		//
+		// An empty scalar cannot arrive here: spec refuses it at decode. An
+		// empty Name is the legacy block, whose hosted name is the file's own.
+		tool.HostedName = raw.Slng.Name
+		if tool.HostedName == "" {
+			tool.HostedName = name
+		}
 		tool.MirrorPin = raw.Slng.Hash
 	}
 	tool.Interruption = ToolInterruption(raw.Interruption)

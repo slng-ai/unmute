@@ -30,6 +30,23 @@ func Schema() (*jsonschema.Schema, error) {
 			Description: "One pair, written as `- key: value`. Exactly one key per list item: " +
 				"an item holding two is a dropped indent and is refused with its line.",
 		},
+		// ToolSlng is a third mismatch of the same kind, and the reflected
+		// struct is not one of the two shapes an author writes: the scalar name
+		// is not a property at all, and the legacy block takes `hash:` alone.
+		// UnmarshalYAML is what turns either into the struct.
+		reflect.TypeFor[ToolSlng](): {OneOf: []*jsonschema.Schema{
+			{
+				Type:        "string",
+				Description: "The hosted tool's exact name, as the organisation holds it. The file's own name stays the package reference, so the two may differ.",
+			},
+			{
+				Type:                 "object",
+				Properties:           map[string]*jsonschema.Schema{"hash": {Type: "string"}},
+				AdditionalProperties: falseSchema(),
+				Description: "The legacy form: the mirror pin `unmute pull` wrote, resolving the hosted tool by this file's own name. " +
+					"A scalar reference records its pin in generated metadata instead.",
+			},
+		}},
 	}}
 	// Both hooks below are derived before they are registered, because each one
 	// publishes a shape that includes the reflected struct: registering first
@@ -83,6 +100,10 @@ func taskItemSchema(options *jsonschema.ForOptions) (*jsonschema.Schema, error) 
 		task,
 	}}, nil
 }
+
+// falseSchema is `additionalProperties: false`, which jsonschema-go spells as a
+// schema that validates nothing rather than as a bool.
+func falseSchema() *jsonschema.Schema { return &jsonschema.Schema{Not: &jsonschema.Schema{}} }
 
 // ptr is the one-line address-of that jsonschema's *int fields need. Nothing in
 // this package needed one before.

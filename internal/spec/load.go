@@ -24,15 +24,17 @@ func Load(dir string) (*Package, error) {
 		return nil, fmt.Errorf("package path: %w", err)
 	}
 	pkg := &Package{
-		Root:        root,
-		Tools:       make(map[string]Tool),
-		Connections: make(map[string]Connection),
-		Markdown:    make(map[string]string),
-		Handlers:    make(map[string]string),
-		Documents:   make(map[string][]byte),
-		Mirrors:     make(map[string]Mirror),
-		MirrorBytes: make(map[string][]byte),
-		files:       make(map[string][]byte),
+		Root:           root,
+		Tools:          make(map[string]Tool),
+		Connections:    make(map[string]Connection),
+		Markdown:       make(map[string]string),
+		Handlers:       make(map[string]string),
+		Documents:      make(map[string][]byte),
+		Mirrors:        make(map[string]Mirror),
+		MirrorBytes:    make(map[string][]byte),
+		MirrorFailures: make(map[string]string),
+		MirrorMetaHash: make(map[string]string),
+		files:          make(map[string][]byte),
 	}
 	if err := pkg.readYAML("agent.yaml", &pkg.Agent); err != nil {
 		return nil, err
@@ -77,9 +79,11 @@ func Load(dir string) (*Package, error) {
 		}
 		// A hosted tool's definition travels with the package too, for the same
 		// reason: the code targets run the mirrored module, and every target
-		// checks the pin with no network.
+		// checks the pin with no network. A scalar reference's pin lives in
+		// generated metadata rather than in this file, so readMirror is told
+		// which one it is reading.
 		if tool.Slng != nil {
-			if err := pkg.readMirror(name); err != nil {
+			if err := pkg.readMirror(name, tool.Slng.Name != ""); err != nil {
 				return nil, err
 			}
 		}
@@ -254,21 +258,30 @@ func (p *Package) readYAML(name string, out any) error {
 // this state. Load stopping first would put an authoring rule in the wrong
 // package and produce a worse message.
 //
-// A mirror that IS there and cannot be parsed is a different thing and is
-// reported, because nobody wrote it by hand and a corrupt one is not a
-// migration.
-func (p *Package) readMirror(name string) error {
+// A mirror that IS there and cannot be read is a third state, recorded on
+// MirrorFailures rather than returned. Loading a package must not fail on a
+// file only a code target needs: a SLNG-only package names published tools and
+// has no use for a mirror, so a corrupt one beside it is the selected code
+// target's refusal to make, once there is a target to refuse for.
+//
+// scalar tells it whether to also read the generated pin a scalar reference
+// keeps in tools/<name>.slng.meta.json. A legacy reference's pin is its own
+// tool file's `hash:` line, read nowhere near here, so this is false for one.
+func (p *Package) readMirror(name string, scalar bool) error {
 	sidecar, module := MirrorPaths(name)
 	content, err := readWithin(p.Root, sidecar)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
-		return err
+		p.MirrorFailures[name] = fmt.Sprintf("%s could not be read: %v", sidecar, err)
+		return nil
 	}
 	var mirror Mirror
 	if err := json.Unmarshal(content, &mirror); err != nil {
-		return fmt.Errorf("%s: %w: it is written by `unmute pull` and not by hand, so run the pull again", sidecar, err)
+		p.MirrorFailures[name] = fmt.Sprintf(
+			"%s: %v: it is written by `unmute pull` and not by hand, so run the pull again", sidecar, err)
+		return nil
 	}
 	// The pin covers the sidecar and the module together, so the bytes both were
 	// read from are kept rather than re-encoded. A round trip through the struct
@@ -278,10 +291,45 @@ func (p *Package) readMirror(name string) error {
 		mirror.Code = string(code)
 		pinned = append(append([]byte{}, content...), code...)
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return err
+		p.MirrorFailures[name] = fmt.Sprintf("%s could not be read: %v", module, err)
+		return nil
 	}
 	p.Mirrors[name] = mirror
 	p.MirrorBytes[name] = pinned
+	if scalar {
+		return p.readMirrorMeta(name)
+	}
+	return nil
+}
+
+// readMirrorMeta reads a scalar reference's generated pin,
+// tools/<name>.slng.meta.json, the file `unmute pull` writes instead of a
+// `hash:` line because a scalar reference authors none.
+//
+// Absent is left absent for the same reason an absent sidecar is: `slng:
+// check_order` before the first pull is exactly this state, and ir.Validate is
+// what turns it into a refusal, once a selected target needs the mirror at
+// all. A file that IS there and will not decode joins the same MirrorFailures
+// map the sidecar and module use, because by the time a code target reads
+// either, "the committed mirror has a problem" is one message regardless of
+// which of the three files it is.
+func (p *Package) readMirrorMeta(name string) error {
+	path := MirrorMetaPath(name)
+	content, err := readWithin(p.Root, path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		p.MirrorFailures[name] = fmt.Sprintf("%s could not be read: %v", path, err)
+		return nil
+	}
+	var decoded MirrorMeta
+	if err := json.Unmarshal(content, &decoded); err != nil {
+		p.MirrorFailures[name] = fmt.Sprintf(
+			"%s: %v: it is written by `unmute pull` and not by hand, so run the pull again", path, err)
+		return nil
+	}
+	p.MirrorMetaHash[name] = decoded.Hash
 	return nil
 }
 

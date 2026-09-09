@@ -62,6 +62,28 @@ func TestSlngCoreValidatesClean(t *testing.T) {
 	if len(row.Errors) > 0 || len(row.Warnings) > 0 {
 		t.Fatalf("the slng baseline must be clean: errors=%#v warnings=%#v", row.Errors, row.Warnings)
 	}
+	// slng_core names no `slng:` tool, so there is nothing this row's own
+	// checks left for `unmute deploy` to confirm.
+	if row.Scope != "" {
+		t.Errorf("a package with no hosted tool has a non-empty Scope: %q", row.Scope)
+	}
+}
+
+// TestSlngScopeNamesDeferredHostedChecks is T034/FR-003-004: a clean slng row
+// over a package that references a hosted tool must say its checks are local
+// only, because an offline compile cannot confirm the tool exists, that its
+// published contract matches, or that its vault entries are present.
+func TestSlngScopeNamesDeferredHostedChecks(t *testing.T) {
+	agent, _ := hostedFixture(t, "slng_hosted")
+	row := validateSlng(t, agent)
+	if len(row.Errors) > 0 {
+		t.Fatalf("the hosted fixture's slng row must be clean: %v", row.Errors)
+	}
+	for _, want := range []string{"local checks only", "existence", "argument contract", "vault", "unmute deploy"} {
+		if !strings.Contains(row.Scope, want) {
+			t.Errorf("Scope = %q, want it to say %q", row.Scope, want)
+		}
+	}
 }
 
 // The four settings that used to pass in silence (research R5). Each is refused
@@ -557,6 +579,123 @@ func TestSlngAcceptsAPackageDeclaringNothingStructured(t *testing.T) {
 	for _, message := range row.Errors {
 		if strings.Contains(message, "emits no module of its own") {
 			t.Errorf("a package declaring nothing structured was refused: %q", message)
+		}
+	}
+}
+
+// TestSlngHoldsAnOverrideToItsOwnExpressionContract.
+//
+// An `argument_overrides` entry is a fixed scalar or one whole variable token.
+// That is the platform's rule, not ours: the value is stored on the attachment
+// and substituted when a call starts, so there is nothing for a template to be
+// concatenated into. A code target assembles the request itself and can
+// interpolate, which is why this is a per-target check and why the second half
+// of this test exists.
+func TestSlngHoldsAnOverrideToItsOwnExpressionContract(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value any
+		want  []string
+	}{
+		{
+			// The shape that would otherwise be stored and send the braces to
+			// the tool as characters.
+			name:  "embedded interpolation",
+			value: "Order {{order_number}}",
+			want:  []string{"as text with {{order_number}} inside it", "would reach the tool as characters", "on its own to send the value"},
+		},
+		{
+			name:  "two references in one value",
+			value: "{{first_name}} {{last_name}}",
+			want:  []string{"2 template references in one value", "name one variable on its own"},
+		},
+		{
+			name:  "a list",
+			value: []any{"a", "b"},
+			want:  []string{"one fixed scalar or one whole variable token", "record the value you need into its own variable"},
+		},
+		{
+			name:  "a mapping",
+			value: map[string]any{"a": "b"},
+			want:  []string{"one fixed scalar or one whole variable token"},
+		},
+		{
+			name:  "no value at all",
+			value: nil,
+			want:  []string{"with no value", "let the model supply the argument"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := slngAgent(t)
+			tool := agent.Tools["check_order"]
+			tool.Inject = map[string]any{"order_number": tc.value}
+			agent.Tools["check_order"] = tool
+			wantSlngError(t, validateSlng(t, agent), tc.want...)
+		})
+	}
+}
+
+// TestSlngAcceptsTheValuesAnOverrideIsMadeOf, and the two that matter most are
+// `false` and `0`: both read as empty to a careless predicate, and refusing
+// either would refuse a legitimate argument.
+func TestSlngAcceptsTheValuesAnOverrideIsMadeOf(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value any
+	}{
+		{"a fixed string", "MY_RANDOM_VALUE"},
+		{"a fixed false", false},
+		{"a fixed zero", 0},
+		{"a fixed number", 42},
+		{"one whole variable token", "{{customer_name}}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := slngAgent(t)
+			// A variable the token can name, declared the ordinary way.
+			tool := agent.Tools["check_order"]
+			tool.Inject = map[string]any{"order_number": tc.value}
+			agent.Tools["check_order"] = tool
+			row := validateSlng(t, agent)
+			for _, err := range row.Errors {
+				if strings.Contains(err, "order_number") {
+					t.Errorf("a legal override was refused: %s", err)
+				}
+			}
+		})
+	}
+}
+
+// TestCodeTargetsKeepTheirOwnExpressionRules is the other half: the SLNG
+// restrictions above must not reach livekit or pipecat, which build the request
+// themselves and can interpolate a value into a string.
+//
+// Without this, adding the platform's rule would have quietly narrowed what a
+// package targeting a code target could write, which is the opposite of what
+// this feature is for.
+func TestCodeTargetsKeepTheirOwnExpressionRules(t *testing.T) {
+	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "slng_hosted_code"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := agent.Tools["check_order"]
+	// Embedded interpolation, which SLNG refuses above.
+	tool.Inject = map[string]any{"order_number": "Order {{customer_name}}"}
+	agent.Tools["check_order"] = tool
+
+	for _, name := range []string{"livekit", "pipecat"} {
+		resolved, ok := agent.Targets[name]
+		if !ok {
+			t.Fatalf("the fixture declares no %s target", name)
+		}
+		report, _ := Validate(agent, []Target{resolved}, targetcap.Default())
+		for _, err := range report.PerTarget[0].Errors {
+			if strings.Contains(err, "inside it") || strings.Contains(err, "template references in one value") {
+				t.Errorf("%s inherited SLNG's override expression rule: %s", name, err)
+			}
 		}
 	}
 }

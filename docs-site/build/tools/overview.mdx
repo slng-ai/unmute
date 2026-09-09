@@ -121,12 +121,14 @@ code, version and gate pipeline, and unmute creates no tool there. A tool your
 SLNG organisation already has is reached with `slng:`; a brand new one starts in
 the SLNG dashboard. Both blocks work exactly as before on LiveKit and Pipecat.
 
-**`slng:` works everywhere because the definition travels.** `unmute pull` writes
-the platform's own schema, and for a code tool its module, into your package. The
-SLNG target then references the platform's copy by name, and the two code targets
-build a real tool out of the committed mirror with no network. One limit is not in
-this table: a hosted tool that declares Python dependencies is refused on LiveKit
-and Pipecat, which build one dependency list for the whole project. See
+**`slng:` needs nothing local, and works everywhere because the definition
+travels when it has to.** SLNG resolves a hosted reference by name at deploy
+time: no mirror, no hash, no `unmute pull`. LiveKit and Pipecat build and run
+the tool themselves, so they need a real copy; `unmute pull` is what fetches
+one, and for a code tool its module, into your package, with no network
+needed again after that. One limit is not in this table: a hosted tool that
+declares Python dependencies is refused on LiveKit and Pipecat, which build
+one dependency list for the whole project. See
 [Hosted tools](/build/tools/hosted).
 
 **`knowledge:` needs a runtime of ours to live in.** LiveKit and Pipecat compile to
@@ -205,10 +207,10 @@ not to.
 | `webhook` | `auth` | no | bearer or API-key authentication |
 | `local` | `handler` | no | package Python path; omitted means `tools/<tool-name>.py` |
 | `mcp` | `server` | no | the server's name on the platform, when it is not this tool's own name. Read it with `voiceai mcp list` |
-| `mcp` | `url_env` | yes | UPPER_SNAKE name holding the server URL |
+| `mcp` | `url_env` | yes on LiveKit and Pipecat; not read by SLNG | UPPER_SNAKE name holding the server URL |
 | `mcp` | `transport` | no | `sse` or `streamable_http`; omitted lets the SDK infer it from the URL |
-| `mcp` | `auth` | no | bearer or API-key authentication |
-| `mcp` | `tools` | no | non-empty, unique server tool names; omitted means all tools. Required on slng, which attaches one reference per tool and has no "whole server" attachment |
+| `mcp` | `auth` | no; never read by SLNG | bearer or API-key authentication |
+| `mcp` | `tools` | no; required on slng | non-empty, unique server tool names; omitted means all tools. Required on slng, which attaches one reference per tool and has no "whole server" attachment |
 | `builtin` | `id` | yes | an id from the closed registry, listed on the [prebuilt tools](/build/tools/prebuilt) page |
 | `builtin` | `instructions` | no | instruction applied by the prebuilt as it runs |
 | `client`, `provider_hosted` | none | | explicit empty block only |

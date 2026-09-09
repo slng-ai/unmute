@@ -45,6 +45,13 @@ func GenerateSlng(agent *ir.Agent, tgt ir.Target) (Artifact, error) {
 		return Artifact{}, err
 	}
 	files = append(files, File{Path: "README.md", Content: runbook})
+	// The report last, because it lists the files: it is derived from the two
+	// above and names itself, the same way both code targets' reports do.
+	report, err := slngReport(built, files)
+	if err != nil {
+		return Artifact{}, err
+	}
+	files = append(files, File{Path: "compile-report.json", Content: report})
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return Artifact{
 		Kind:     BodyTarget,

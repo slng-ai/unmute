@@ -1,0 +1,7 @@
+# A curated capability, here to prove a hosted reference and a builtin coexist
+# in one package. `current_datetime` and the other curated names are reached
+# this way and never with `slng:`, because there is no definition to mirror.
+description: End the call when the caller is finished or says goodbye.
+
+builtin:
+  id: end_call
