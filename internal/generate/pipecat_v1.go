@@ -240,7 +240,7 @@ type pipecatTool struct {
 	InputRequired   string // Python literal: the input schema's required list
 	Builtin         string // execution: builtin — prebuilt registry id (bodyless end tool)
 	KnowledgeBase   string // execution: knowledge — the base this tool searches
-	Instructions    string // builtin end_call goodbye → developer message before EndFrame
+	Instructions    string // builtin end_call goodbye → developer message before tool result
 	EndsCall        bool
 	Interruption    string // "cancel" | "continue" | "" (provider default)
 	ColdDestination string // set for a cold human_transfer: the resolved number/SIP URI (Daily SIP only)

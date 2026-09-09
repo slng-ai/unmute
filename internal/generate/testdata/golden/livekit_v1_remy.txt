@@ -443,6 +443,7 @@ from livekit.agents.beta.workflows import TaskCompletedEvent, TaskGroup
 from livekit.agents.voice import MetricsCollectedEvent
 from livekit.plugins import openai, silero, slng
 
+import dev_metrics
 from dev_metrics import dev_llm_node, dev_say, install_dev_metrics
 from tracing import setup_langfuse
 
@@ -985,6 +986,9 @@ async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent) -> Non
 # --- agents ----------------------------------------------------------------
 
 class Events(Agent):
+    def tts_node(self, text, model_settings):
+        return dev_metrics.dev_tts_node(self, text, model_settings)
+
     def llm_node(self, chat_ctx, tools, model_settings):
         return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
 
@@ -1029,10 +1033,14 @@ class Events(Agent):
             task_results = result.task_results
         finally:
             await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
+        dev_metrics.dev_task_returned(ctx, *task_results.values())
         return _group_status(task_results)
 
 
 class Greeter(Agent):
+    def tts_node(self, text, model_settings):
+        return dev_metrics.dev_tts_node(self, text, model_settings)
+
     def llm_node(self, chat_ctx, tools, model_settings):
         return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
 
@@ -1069,6 +1077,9 @@ class Greeter(Agent):
 
 
 class Reservations(Agent):
+    def tts_node(self, text, model_settings):
+        return dev_metrics.dev_tts_node(self, text, model_settings)
+
     def llm_node(self, chat_ctx, tools, model_settings):
         return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
 
@@ -1113,6 +1124,7 @@ class Reservations(Agent):
             task_results = result.task_results
         finally:
             await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
+        dev_metrics.dev_task_returned(ctx, *task_results.values())
         return _group_status(task_results)
 
 
@@ -1127,6 +1139,9 @@ def _task_result(values: dict, unserved_request: str) -> dict:
 
 class _RetryEmptyTaskResponseMixin:
     _response_tool_call_ids: set[str]
+
+    def tts_node(self, text, model_settings):
+        return dev_metrics.dev_tts_node(self, text, model_settings)
 
     async def update_chat_ctx(self, chat_ctx, *, exclude_invalid_function_calls=False):
         # History policy owns old tool records, including tools this task cannot run.
@@ -1329,6 +1344,7 @@ class ConfirmBooking(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
         except _StateRefused as refused:
             logger.warning("finish %s: %s", "confirm_booking", refused.message)
             return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
+        dev_metrics.dev_task_finished(ctx, _values)
         self.complete(_values)
         self._finish_call_id = ctx.function_call.call_id
 
@@ -1366,6 +1382,7 @@ class FindSlot(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
         except _StateRefused as refused:
             logger.warning("finish %s: %s", "find_slot", refused.message)
             return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
+        dev_metrics.dev_task_finished(ctx, _values)
         self.complete(_values)
         self._finish_call_id = ctx.function_call.call_id
 
@@ -1392,6 +1409,7 @@ class QualifyEvent(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
         except _StateRefused as refused:
             logger.warning("finish %s: %s", "qualify_event", refused.message)
             return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
+        dev_metrics.dev_task_finished(ctx, _values)
         self.complete(_values)
         self._finish_call_id = ctx.function_call.call_id
 
@@ -1726,6 +1744,7 @@ HANDOFF_CONTROLS = frozenset(
 )
 
 _operation_context: ContextVar[tuple | None] = ContextVar("unmute_dev_operation", default=None)
+_tts_context: ContextVar[tuple | None] = ContextVar("unmute_dev_tts", default=None)
 
 
 def metrics_enabled() -> bool:
@@ -1782,6 +1801,8 @@ class _Reporter:
         self.counter = 0
         self.order = 0
         self.speeches: dict[str, str] = {}
+        self.original_speeches: dict[str, str] = {}
+        self.task_results: dict[int, tuple] = {}
         self.handles: dict[str, SpeechHandle] = {}
         self.inputs: dict[object, dict] = {}
         self.input_anchors: dict[float, set[str]] = {}
@@ -1892,7 +1913,7 @@ class _Reporter:
             ("playback_latency", "playback_delay", "First audio frame forwarding to runtime playback start; excludes browser delivery on the default room output."),
         ):
             if field in native:
-                self.measurement(f"{response_id}-{handle.num_steps}-{field}", metric, native[field],
+                self.measurement(f"{response_id}-{handle.id}-{handle.num_steps}-{field}", metric, native[field],
                                  f"{source}.{field}", response_id=response_id, reason=reason)
 
     def metrics(self, event):
@@ -1903,11 +1924,12 @@ class _Reporter:
             context = _operation_context.get()
             operation_id = context[1] if context and context[0] is self else None
             operation = self.records.get(("operation", operation_id))
-            response_id = self.speeches.get(metric.speech_id)
+            response_id = self.original_speeches.get(metric.speech_id)
+            if response_id != self.speeches.get(metric.speech_id):
+                response_id = None
             # The SDK metric task inherits the context of this concrete node
             # invocation. Provider IDs can be empty or reused; they are metadata.
-            if operation_id is not None and operation and (not metric.speech_id or not operation["operation"].get("exchange_id")
-                              or operation["operation"].get("exchange_id") == response_id):
+            if operation_id is not None and operation and (not metric.speech_id or context[2] in (None, metric.speech_id)):
                 if response_id and not operation["operation"].get("exchange_id"):
                     self.bind_request(operation_id, response_id)
                     operation = self.records[("operation", operation_id)]
@@ -1930,7 +1952,10 @@ class _Reporter:
             # Each callback is a completed native synthesis request. A repeated
             # provider ID across segments never collapses their measurements.
             operation_id = self.new_id("tts")
-            response_id = self.speeches.get(metric.speech_id)
+            context = _tts_context.get()
+            response_id = context[1] if context and context[0] is self and context[2] == metric.speech_id else None
+            if response_id is None and self.speeches.get(metric.speech_id) == self.original_speeches.get(metric.speech_id):
+                response_id = self.original_speeches.get(metric.speech_id)
             fields = {"type": "tts", "name": "Speech synthesis", "state": "cancelled" if metric.cancelled else "ended"}
             if response_id:
                 fields["exchange_id"] = response_id
@@ -1946,7 +1971,7 @@ class _Reporter:
                              "LiveKit STTMetrics.duration", metadata=metric.metadata,
                              reason="Streaming STT does not measure request duration." if metric.streamed else None)
         elif isinstance(metric, EOUMetrics):
-            response_id = self.speeches.get(metric.speech_id)
+            response_id = self.original_speeches.get(metric.speech_id)
             if response_id:
                 self.eou_metrics[response_id] = metric
             self.end_of_turn(metric, response_id)
@@ -2028,6 +2053,7 @@ class _Reporter:
         if handle.id not in self.speeches:
             response_id = self.new_id("response")
             self.speeches[handle.id] = response_id
+            self.original_speeches[handle.id] = response_id
             self.handles[handle.id] = handle
             self.snapshot("exchange", response_id, role="response", state="open",
                           link_status="unavailable", playback="not_started")
@@ -2038,6 +2064,9 @@ class _Reporter:
         response_id = self.speeches.get(handle.id)
         if response_id is None or self.closed:
             return
+        if any(other_id != handle.id and self.speeches[other_id] == response_id and not other.done()
+               for other_id, other in self.handles.items()):
+            return
         state = "interrupted" if handle.interrupted else "ended"
         if handle.exception() is not None:
             state = "incomplete"
@@ -2045,6 +2074,39 @@ class _Reporter:
         if playback == "speaking":
             playback = "interrupted" if handle.interrupted else "ended"
         self.snapshot("exchange", response_id, state=state, playback=playback)
+
+    def task_finished(self, ctx, result):
+        # Keep the exact returned object alive until its delegate consumes it.
+        self.counter += 1
+        self.task_results[id(result)] = (result, self.speech(ctx.speech_handle), self.counter)
+
+    def task_returned(self, ctx, results):
+        completed = [self.task_results.pop(id(result)) for result in results if id(result) in self.task_results]
+        if not completed or self.closed:
+            return
+        # A group can revisit steps. Its last actual finish, among these exact
+        # result objects, supplies the caller turn that resumed the owner.
+        _, response_id, _ = max(completed, key=lambda entry: entry[2])
+        previous = self.speech(ctx.speech_handle)
+        if not response_id or previous == response_id:
+            return
+        playback = self.records[("exchange", previous)]["exchange"]["playback"]
+        self.snapshot("exchange", previous, state="ended", playback="ended" if playback == "speaking" else playback)
+        self.speeches[ctx.speech_handle.id] = response_id
+        self.snapshot("exchange", response_id, state="open")
+
+    def native_reply_latency(self, handle, native, source):
+        response_id = self.speech(handle)
+        if self.original_speeches.get(handle.id) == response_id:
+            if "e2e_latency" in native:
+                self.reply_latency(response_id, native["e2e_latency"], source)
+            return
+        # The SDK's resumed handle still measures from the pre-task caller.
+        # Only the final caller's native stop and this segment's start apply.
+        started = native.get("started_speaking_at")
+        stopped = self.user_metrics.get(response_id, {}).get("stopped_speaking_at")
+        if started is not None and stopped is not None:
+            self.reply_latency(response_id, started - stopped, "LiveKit ChatMessage.metrics speech anchors")
 
     def input_group(self):
         input_id = self.new_id("input")
@@ -2193,8 +2255,7 @@ class _Reporter:
         if response_id:
             native = item.metrics or {}
             self.node_metrics(handle, native, "LiveKit ChatMessage.metrics")
-            if "e2e_latency" in native:
-                self.reply_latency(response_id, native["e2e_latency"], "LiveKit ChatMessage.metrics.e2e_latency")
+            self.native_reply_latency(handle, native, "LiveKit ChatMessage.metrics.e2e_latency")
             started, stopped = native.get("started_speaking_at"), native.get("stopped_speaking_at")
             if started is not None:
                 self.first_speech(started, "LiveKit ChatMessage.metrics.started_speaking_at")
@@ -2233,8 +2294,7 @@ class _Reporter:
                     self.early_metrics = early
                     if self.request_steps.get((handle.id, handle.num_steps)):
                         self.node_metrics(handle, early, "LiveKit native early")
-                        if "e2e_latency" in early:
-                            self.reply_latency(response_id, early["e2e_latency"], "LiveKit native early e2e_latency")
+                        self.native_reply_latency(handle, early, "LiveKit native early e2e_latency")
 
     def close(self, event):
         session = self.session
@@ -2260,7 +2320,7 @@ class _Reporter:
         self.session = None
         # Clear only reporter-owned containers, never native metric dictionaries.
         self.early_metrics = None
-        for state in (self.records, self.speeches, self.handles, self.inputs, self.input_anchors,
+        for state in (self.records, self.speeches, self.original_speeches, self.task_results, self.handles, self.inputs, self.input_anchors,
                       self.items, self.native_segments, self.tool_calls, self.tool_operations,
                       self.ignored_tools, self.request_steps, self.user_metrics, self.eou_metrics,
                       self.speech_measurements, self.callbacks):
@@ -2298,8 +2358,9 @@ def dev_llm_node(agent, node, chat_ctx, tools, model_settings):
 
 
 async def _observe_llm(reporter, agent, node, chat_ctx, tools, model_settings):
-    operation_id = reporter.request(agent, _native_speech(agent.session))
-    token = _operation_context.set((reporter, operation_id))
+    handle = _native_speech(agent.session)
+    operation_id = reporter.request(agent, handle)
+    token = _operation_context.set((reporter, operation_id, handle.id if handle else None))
     stream = None
     state = "ended"
     try:
@@ -2326,6 +2387,41 @@ async def _observe_llm(reporter, agent, node, chat_ctx, tools, model_settings):
         finally:
             _operation_context.reset(token)
             reporter.request_done(operation_id, state)
+
+
+def dev_tts_node(agent, text, model_settings):
+    from livekit.agents import Agent
+
+    stream = Agent.default.tts_node(agent, text, model_settings)
+    reporter = getattr(agent.session, "_unmute_dev_reporter", None)
+    if reporter is None:
+        return stream
+    return _observe_tts(reporter, stream)
+
+
+async def _observe_tts(reporter, stream):
+    handle = _native_speech(reporter.session)
+    token = _tts_context.set((reporter, reporter.speech(handle), handle.id if handle else None))
+    try:
+        async for frame in stream:
+            yield frame
+    finally:
+        try:
+            await stream.aclose()
+        finally:
+            _tts_context.reset(token)
+
+
+def dev_task_finished(ctx, result):
+    reporter = getattr(ctx.session, "_unmute_dev_reporter", None)
+    if reporter is not None:
+        reporter.task_finished(ctx, result)
+
+
+def dev_task_returned(ctx, *results):
+    reporter = getattr(ctx.session, "_unmute_dev_reporter", None)
+    if reporter is not None:
+        reporter.task_returned(ctx, results)
 
 
 def dev_say(session, text: str, **kwargs):

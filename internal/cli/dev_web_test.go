@@ -393,7 +393,9 @@ func TestWaitForLocalAgentReadyRequiresReadyStatus(t *testing.T) {
 }
 
 func TestRunDevPipecatRejectsBusyAgentPort(t *testing.T) {
-	listener, err := net.Listen("tcp", "0.0.0.0:0")
+	// Match Python's --host 0.0.0.0. On macOS a generic tcp listener can
+	// bind IPv6 while this IPv4 port is occupied by an earlier worker.
+	listener, err := net.Listen("tcp4", "0.0.0.0:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -404,7 +406,7 @@ func TestRunDevPipecatRejectsBusyAgentPort(t *testing.T) {
 	}
 	cmd, _ := devTestCommand(t)
 	err = runDevPipecat(t.Context(), cmd, t.TempDir(), devWebRun{root: "pkg", botPort: port})
-	if err == nil || !strings.Contains(err.Error(), "already in use") {
+	if err == nil || !strings.Contains(err.Error(), "already in use") || !strings.Contains(err.Error(), "--bot-port") {
 		t.Fatalf("busy port error = %v", err)
 	}
 }

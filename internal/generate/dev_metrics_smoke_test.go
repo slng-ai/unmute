@@ -49,7 +49,12 @@ func checkStreamingOutput(t *testing.T, out []byte) {
 }
 
 func TestSmokeLiveKitDevStreaming(t *testing.T) {
-	checkStreamingOutput(t, runLiveKitSmokeScript(t, "remy", nil, nil, devStreamingLiveKitScript))
+	checkStreamingOutput(t, runLiveKitSmokeScript(t, "remy", nil, func(agent *ir.Agent) {
+		agent.Controls["do_find"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "find_slot", When: "Find a slot."}
+		owner := agent.Agents["reservations"]
+		owner.Tools = append(owner.Tools, "do_find")
+		agent.Agents["reservations"] = owner
+	}, devStreamingLiveKitScript))
 }
 
 func TestSmokePipecatDevStreaming(t *testing.T) {
@@ -78,6 +83,7 @@ import os
 import sys
 import time
 from contextlib import redirect_stdout
+from contextvars import copy_context
 from importlib.metadata import version
 from types import SimpleNamespace
 
@@ -303,13 +309,13 @@ class QuietGreeter(agent.Greeter):
         pass
 
 
-def make_session(model, speaker, *, recognizer=None):
+def make_session(model, speaker, *, recognizer=None, turn_detection="manual"):
     session = AgentSession(
         userdata=agent.Userdata(),
         stt=recognizer,
         llm=model,
         tts=speaker,
-        turn_handling={"turn_detection": "manual", "interruption": {"enabled": False}},
+        turn_handling={"turn_detection": turn_detection, "interruption": {"enabled": False}},
     )
     session.output.audio = AudioOutput()
     if recognizer:
@@ -570,6 +576,116 @@ class ToolModel(Model):
         self.calls += 1
         response.started.set()
         return ToolModelStream(self, response=response, chat_ctx=chat_ctx, tools=tools or [], conn_options=conn_options)
+
+
+async def check_task_return(capture, *, direct=False):
+    call_id = "livekit-task-return-direct" if direct else "livekit-task-return"
+
+    class Reservations(agent.Reservations):
+        def __init__(self):
+            Agent.__init__(self, instructions="Follow the reservation flow.")
+
+        async def on_enter(self):
+            pass
+
+        @function_tool
+        async def lookup(self) -> str:
+            """Read the current booking without changing it."""
+            return "found"
+
+    def tool(name, call_id, text=None):
+        return Response([llm.ChatChunk(id="same-provider-id", delta=llm.ChoiceDelta(
+            role="assistant", content=text, tool_calls=[llm.FunctionToolCall(call_id=call_id, name=name, arguments="{}")]))])
+
+    def answer(text):
+        return Response([llm.ChatChunk(id="same-provider-id", delta=llm.ChoiceDelta(role="assistant", content=text))])
+
+    responses = [
+        tool("lookup", "lookup", "Checking the diary."), tool("do_find" if direct else "do_reserve", "reserve"), answer("Which day?"),
+        *([] if direct else [tool("finish", "slot-finish")]), answer("Should I book it?"),
+        tool("finish", "booking-finish"), answer("Done, it’s in the diary."),
+    ]
+    model = ToolModel(responses)
+    speaker = Speaker()
+    speaker.release.set()
+    native, handles, messages = [], [], []
+    recognizer = Recognizer() if direct else None
+    async with make_session(model, speaker, recognizer=recognizer, turn_detection="stt" if direct else "manual") as session:
+        dev_metrics.install_dev_metrics(session, call_id=call_id)
+        session.on("metrics_collected", lambda event: native.append((event.metrics, copy_context())))
+        session.on("speech_created", lambda event: handles.append(event.speech_handle))
+        session.on("conversation_item_added", lambda event: messages.append(event.item) if isinstance(event.item, llm.ChatMessage) else None)
+        await session.start(Reservations())
+
+        async def caller(text):
+            if recognizer is None:
+                return session.generate_reply(user_input=text)
+            before = len(handles)
+            recognizer.push(stt.SpeechEventType.START_OF_SPEECH)
+            recognizer.push(stt.SpeechEventType.FINAL_TRANSCRIPT, text)
+            recognizer.push(stt.SpeechEventType.END_OF_SPEECH)
+            await until(lambda: capture.has_text(call_id, "user", text, final=True), "Caller STT did not arrive")
+            await until(lambda: len(handles) > before, "Caller turn created no response")
+            return handles[before]
+
+        owner = await caller("Book a table.")
+        await until(lambda: capture.has_text(call_id, "assistant", "Which day?", final=True), "First task did not ask")
+        await until(lambda: handles[-1].done(), "First task question did not finish playing")
+        first = await caller("Tomorrow.")
+        await until(lambda: capture.has_text(call_id, "assistant", "Should I book it?", final=True), "Second task did not ask")
+        await until(lambda: handles[-1].done(), "Confirmation question did not finish playing")
+        speaker.release.clear()
+        final = await caller("Yes, please, go for it.")
+        await until(lambda: capture.has_text(call_id, "assistant", "Done, it’s in the diary.", final=True), "Owner did not resume")
+        resumed = next(r["text"]["exchange_id"] for r in capture.latest(call_id, "text") if r["text"]["text"] == "Done, it’s in the diary.")
+        assert next(r["exchange"]["state"] for r in capture.latest(call_id, "exchange") if r["id"] == resumed) == "open"
+        assert not owner.done(), "Resumed speech ended while its audio was held"
+        speaker.release.set()
+        await until(lambda: owner.done() and first.done() and final.done(), "Generated delegate did not return")
+        assert owner.exception() is None and first.exception() is None and final.exception() is None
+        texts = capture.latest(call_id, "text")
+        caller = next(r["text"]["exchange_id"] for r in texts if r["text"]["text"] == "Yes, please, go for it.")
+        closing = next(r["text"]["exchange_id"] for r in texts if r["text"]["text"] == "Done, it’s in the diary.")
+        exchanges = {r["id"]: r["exchange"] for r in capture.latest(call_id, "exchange")}
+        assert exchanges[closing].get("input_id") == caller, "Task return attached spoken confirmation to the old caller turn"
+        operations = [r for r in capture.latest(call_id, "operation") if r["operation"]["type"] == "llm"]
+        assert len(operations) == len(responses) == model.calls
+        assert operations[0]["operation"]["exchange_id"] == operations[1]["operation"]["exchange_id"], "Ordinary tool chain was split"
+        assert operations[-1]["operation"]["exchange_id"] == operations[-2]["operation"]["exchange_id"] == closing
+        assert operations[0]["operation"]["exchange_id"] != closing
+        if direct:
+            user = next(item for item in messages if item.role == "user" and item.text_content == "Yes, please, go for it.")
+            reply = next(item for item in messages if item.role == "assistant" and item.text_content == "Done, it’s in the diary.")
+            latency = measured(capture, call_id, "reply_latency", exchange_id=closing)
+            assert len(latency) == 1 and latency[0]["measurement"]["value"] == reply.metrics["started_speaking_at"] - user.metrics["stopped_speaking_at"]
+        for operation in operations:
+            values = measured(capture, call_id, "request_duration", operation_id=operation["id"])
+            assert len(values) == 1 and values[0]["measurement"]["exchange_id"] == operation["operation"]["exchange_id"]
+        assert [text for text, _ in capture.messages(call_id, "assistant")] == ["Checking the diary.", "Which day?", "Should I book it?", "Done, it’s in the diary."]
+        # Replay delayed real SDK callbacks in the immutable context captured
+        # where each request ran, after the same native handle has resumed.
+        previous = operations[0]["operation"]["exchange_id"]
+        old_llm, old_llm_context = next((metric, context) for metric, context in native if isinstance(metric, LLMMetrics))
+        old_tts, old_tts_context = next((metric, context) for metric, context in native if isinstance(metric, TTSMetrics))
+        assert old_llm.speech_id == old_tts.speech_id == owner.id
+        old_llm_context.run(session.emit, "metrics_collected", MetricsCollectedEvent(metrics=old_llm.model_copy(update={"duration": 0.654})))
+        assert measured(capture, call_id, "request_duration", operation_id=operations[0]["id"])[0]["measurement"]["value"] == 0.654
+        old_tts_context.run(session.emit, "metrics_collected", MetricsCollectedEvent(metrics=old_tts))
+        tts_operations = [r for r in capture.latest(call_id, "operation") if r["operation"]["type"] == "tts"]
+        assert tts_operations[-1]["operation"]["exchange_id"] == previous, "Delayed synthesis moved into the resumed response"
+        assert tts_operations[-2]["operation"]["exchange_id"] == closing, "Resumed synthesis stayed on the old response"
+        final_eou = measured(capture, call_id, "turn_detection", exchange_id=closing)
+        expected_eou = measured(capture, call_id, "turn_detection", exchange_id=previous)[0]["measurement"]["value"] if direct else 0.125
+        session.emit("metrics_collected", MetricsCollectedEvent(metrics=EOUMetrics(
+            timestamp=time.time(), speech_id=owner.id, end_of_utterance_delay=0.125,
+            transcription_delay=0.025, on_user_turn_completed_delay=0)))
+        assert measured(capture, call_id, "turn_detection", exchange_id=previous)[0]["measurement"]["value"] == expected_eou
+        assert measured(capture, call_id, "turn_detection", exchange_id=closing) == final_eou, "Old endpoint metrics moved to the final caller"
+        # A reused speech ID alone proves neither pre-task nor resumed request.
+        before = len(capture.latest(call_id, "measurement"))
+        session.emit("metrics_collected", MetricsCollectedEvent(metrics=old_llm))
+        added = capture.latest(call_id, "measurement")[before:]
+        assert added and all(not record["measurement"].get("exchange_id") for record in added)
 
 
 async def collect_overlapping_tool_metrics(capture):
@@ -1032,6 +1148,8 @@ async def main(capture):
     await check_task_retry(capture)
     await check_passthrough(capture)
     await check_livekit_metrics(capture)
+    await check_task_return(capture)
+    await check_task_return(capture, direct=True)
     await check_metrics_while_model_is_open(capture)
     await check_livekit_lifecycle(capture)
     await check_disabled(capture)

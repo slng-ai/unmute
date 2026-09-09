@@ -2050,13 +2050,28 @@ class DevReporter:
     def finish(self, *, error=False):
         if not self.enabled or self._closed:
             return
+        # Completed text and synthesis prove the response finished generating,
+        # not that the browser played it. Keep playback unknown, and require
+        # every associated operation to have succeeded before ending a response.
+        final_text, final_tts, unfinished = set(), set(), set()
+        for (kind, _identity), record in self._records.items():
+            payload = record[kind]
+            response = payload.get("exchange_id")
+            if kind == "text" and payload["speaker"] == "assistant":
+                (final_text if payload["state"] == "final" else unfinished).add(response)
+            elif kind == "operation":
+                if payload["state"] not in ("ended", "returned"):
+                    unfinished.add(response)
+                elif payload["type"] == "tts":
+                    final_tts.add(response)
+        completed = (final_text & final_tts) - unfinished
         for (kind, identity), record in list(self._records.items()):
             if kind == "text" and record[kind]["state"] == "provisional":
                 self._update(kind, identity, state="incomplete")
             elif kind == "operation" and record[kind]["state"] == "running":
                 self._update(kind, identity, state="incomplete")
             elif kind == "exchange" and record[kind]["state"] == "open":
-                self._update(kind, identity, state="incomplete")
+                self._update(kind, identity, state="ended" if identity in completed else "incomplete")
             elif kind == "measurement" and record[kind]["state"] == "pending":
                 self._update(kind, identity, state="unavailable", reason="The call ended before this measurement arrived.")
         self._update("call", "call", state="error" if error or self._error else "ended")

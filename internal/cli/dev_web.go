@@ -132,9 +132,11 @@ var pipecatLookPath = exec.LookPath
 
 func runDevPipecat(ctx context.Context, cmd *cobra.Command, outDir string, run devWebRun) error {
 	run = run.withStream()
-	portProbe, err := net.Listen("tcp", net.JoinHostPort("0.0.0.0", run.botPort))
+	// The Python runner binds IPv4. A generic tcp probe may bind IPv6 and
+	// miss an old IPv4 worker, whose /status would then pass readiness.
+	portProbe, err := net.Listen("tcp4", net.JoinHostPort("0.0.0.0", run.botPort))
 	if err != nil {
-		return fmt.Errorf("dev %s: local agent port %s is already in use: %w", run.root, run.botPort, err)
+		return fmt.Errorf("dev %s: local agent port %s is already in use; stop that runtime or choose another --bot-port: %w", run.root, run.botPort, err)
 	}
 	_ = portProbe.Close()
 

@@ -903,7 +903,7 @@ async def {{.MethodName}}(params: FunctionCallParams{{range .Args}}, {{.Name}}: 
 {{if .Builtin}}{{if .Instructions}}    await params.llm.push_frame(
         LLMMessagesAppendFrame(
             [{"role": "developer", "content": {{pyq .Instructions}}}],
-            run_llm=True,
+            run_llm=False,
         )
     )
 {{end}}    await params.result_callback({"ended": True})
@@ -927,7 +927,7 @@ async def {{.MethodName}}(params: FunctionCallParams{{range .Args}}, {{.Name}}: 
         )
         response.raise_for_status()
         await params.result_callback(response.json())
-{{end}}{{if .EndsCall}}    await params.llm.push_frame(EndFrame())
+{{end}}{{if .EndsCall}}    await params.pipeline_worker.end()
 {{end}}{{end}}{{else}}
 
 class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.Tracing (or $.NeedsFunctionCalls $.NeedsMCP)}}TracedLLMWorker{{else}}LLMWorker{{end}}):
@@ -1078,14 +1078,14 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                 await params.llm.push_frame(
                     LLMMessagesAppendFrame(
                         [{"role": "developer", "content": "Tell the caller nobody can take the call right now, apologize, and say goodbye."}],
-                        run_llm=True,
+                        run_llm=False,
                     )
                 )
                 await params.result_callback(self.call_context["_transfer_result"])
             except BaseException as exc:
                 failure_error = exc
             try:
-                await params.llm.push_frame(EndFrame())
+                await params.pipeline_worker.end()
             except BaseException:
                 if failure_error is None:
                     raise
@@ -1140,14 +1140,14 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                 await params.llm.push_frame(
                     LLMMessagesAppendFrame(
                         [{"role": "developer", "content": "Tell the caller nobody can take the call right now, apologize, and say goodbye."}],
-                        run_llm=True,
+                        run_llm=False,
                     )
                 )
                 await params.result_callback(self.call_context["_transfer_result"])
             except BaseException as exc:
                 failure_error = exc
             try:
-                await params.llm.push_frame(EndFrame())
+                await params.pipeline_worker.end()
             except BaseException:
                 if failure_error is None:
                     raise
@@ -1162,7 +1162,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}{{else if .Builtin}}{{if .Instructions}}        await params.llm.push_frame(
             LLMMessagesAppendFrame(
                 [{"role": "developer", "content": {{pyq .Instructions}}}],
-                run_llm=True,
+                run_llm=False,
             )
         )
 {{end}}        await params.result_callback({"ended": True})
@@ -1201,7 +1201,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             )
             response.raise_for_status()
             await params.result_callback(response.json())
-{{end}}{{if and .EndsCall (not .ColdDestination)}}        await params.llm.push_frame(EndFrame())
+{{end}}{{if and .EndsCall (not .ColdDestination)}}        await params.pipeline_worker.end()
 {{end}}{{end}}{{$agentPromptExpr := .RuntimePromptExpr}}{{$agentSlngHeaders := .SlngHeaders}}{{range $d := .Delegates}}
     @_direct_tool
     async def {{$d.MethodName}}(self, params: FunctionCallParams):

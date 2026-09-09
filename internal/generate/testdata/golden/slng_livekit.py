@@ -32,6 +32,7 @@ from livekit.agents import (
 from livekit.agents.voice import MetricsCollectedEvent
 from livekit.plugins import deepgram, elevenlabs, openai, silero
 
+import dev_metrics
 from dev_metrics import dev_llm_node, dev_say, install_dev_metrics
 
 
@@ -744,6 +745,9 @@ class _SlngScoped:
 # --- agents ----------------------------------------------------------------
 
 class Billing(_SlngScoped, IgnorePhrasesMixin, Agent):
+    def tts_node(self, text, model_settings):
+        return dev_metrics.dev_tts_node(self, text, model_settings)
+
     # This agent's own cache scope, sent by _SlngScoped on every request.
     _slng_scope = "safe-core-router-v3:billing"
 
@@ -774,6 +778,9 @@ class Billing(_SlngScoped, IgnorePhrasesMixin, Agent):
 
 
 class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
+    def tts_node(self, text, model_settings):
+        return dev_metrics.dev_tts_node(self, text, model_settings)
+
     # This agent's own cache scope, sent by _SlngScoped on every request.
     _slng_scope = "safe-core-router-v3:intake"
 
@@ -822,6 +829,7 @@ class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
             result = await Collect(chat_ctx=owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
         finally:
             await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
+        dev_metrics.dev_task_returned(ctx, result)
         return _task_status(result)
 
     @function_tool
@@ -834,6 +842,7 @@ class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
             task_results["confirm"] = await Confirm(chat_ctx=llm.ChatContext())
         finally:
             await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
+        dev_metrics.dev_task_returned(ctx, *task_results.values())
         return _group_status(task_results)
 
 
@@ -848,6 +857,9 @@ def _task_result(values: dict, unserved_request: str) -> dict:
 
 class _RetryEmptyTaskResponseMixin:
     _response_tool_call_ids: set[str]
+
+    def tts_node(self, text, model_settings):
+        return dev_metrics.dev_tts_node(self, text, model_settings)
 
     async def update_chat_ctx(self, chat_ctx, *, exclude_invalid_function_calls=False):
         # History policy owns old tool records, including tools this task cannot run.
@@ -1061,6 +1073,7 @@ class Collect(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict])
         except _StateRefused as refused:
             logger.warning("finish %s: %s", "collect", refused.message)
             return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
+        dev_metrics.dev_task_finished(ctx, _values)
         self.complete(_values)
 
 class Confirm(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict]):
@@ -1089,6 +1102,7 @@ class Confirm(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict])
         except _StateRefused as refused:
             logger.warning("finish %s: %s", "confirm", refused.message)
             return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
+        dev_metrics.dev_task_finished(ctx, _values)
         self.complete(_values)
 
 

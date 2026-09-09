@@ -557,24 +557,16 @@ func setImportNeeds(data *pipecatData) {
 		for _, t := range a.Tools {
 			if t.ColdDestination != "" {
 				// Daily SIP cold: the bot announces via an LLM append (the REFER
-				// keeps it streaming, B14) and always needs EndFrame — the
-				// on_dialout_answered handler ends the bot's leg once the human
-				// answers, and the hangup failure branch pushes it too (T5).
+				// keeps it streaming, B14). The on_dialout_answered handler
+				// needs EndFrame to end the bot's leg once the human answers.
 				data.HasColdTransfer = true
 				data.NeedsAppendFrame = true
-				data.NeedsEndFrame = true
-				if data.CloudWebsocket != nil {
-					// The platform-terminated route needs EndFrame only when a failed
-					// transfer is asked to hang up. A completed transfer ends the stream at
-					// the carrier, so there is nothing here to end, and an EndFrame import
-					// that nothing pushes fails the emitted project's own lint gate.
-					data.NeedsEndFrame = t.HangupOnUnavailable || data.MaxDurationSecs > 0
-				}
+				data.NeedsEndFrame = data.NeedsEndFrame || data.CloudWebsocket == nil
 				continue
 			}
 			if t.Builtin != "" {
-				// prebuilt end_call: bodyless, speaks the goodbye then EndFrame.
-				data.NeedsEndFrame = true
+				// The tool result requests the goodbye; the native worker drains
+				// it before ending the whole session.
 				if t.Instructions != "" {
 					data.NeedsAppendFrame = true
 				}
@@ -596,9 +588,6 @@ func setImportNeeds(data *pipecatData) {
 			}
 			if t.Auth != nil {
 				data.AuthKinds.add(t.Auth.Kind) // one helper per scheme in use (V8)
-			}
-			if t.EndsCall {
-				data.NeedsEndFrame = true
 			}
 		}
 		for _, t := range a.Transfers {

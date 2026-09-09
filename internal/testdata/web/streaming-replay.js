@@ -372,6 +372,23 @@ const {chromium} = require(process.env.UNMUTE_SWEEP_PLAYWRIGHT || 'playwright');
       assert.equal(await page.locator('[data-id="late-second"]').evaluate(node=>node.closest('[data-exchange]').dataset.exchange),'proved-parent');
       assert.equal(await page.locator('[data-message="late-message"]').count(),1);
       assert.equal(await page.locator('[data-exchange^="unassigned:"]').count(),0,'proven links must not leave empty fallback groups');
+      // LiveKit can create speech before committing its caller's text. A task
+      // return also reuses that speech: explicit input links own display order.
+      for(const id of ['ordering-first','ordering-second']){
+        await emit('exchange',id,response());
+        await emit('text',id,{...answer(id),exchange_id:id,message_id:id,state:'final'});
+      }
+      const linkedReply={...response('ended'),input_id:'ordering-caller',link_status:'known'};
+      await emit('exchange','ordering-first',linkedReply); // input not received yet
+      await emit('exchange','ordering-caller',{role:'input',state:'ended',link_status:'unavailable'});
+      await emit('text','ordering-caller',segment('Yes, please, go for it.','final',{exchange_id:'ordering-caller',message_id:'ordering-caller'}));
+      await emit('exchange','ordering-second',linkedReply); // input already received
+      await emit('exchange','ordering-next',{role:'input',state:'ended',link_status:'unavailable'});
+      await emit('text','ordering-next',segment('Thank you.','final',{exchange_id:'ordering-next',message_id:'ordering-next'}));
+      await emit('exchange','ordering-first',{...linkedReply,playback:'ended'});
+      assert.deepEqual(await page.locator('#tlist [data-message^="ordering-"]').evaluateAll(nodes=>nodes.map(node=>node.dataset.message)),
+        ['ordering-caller','ordering-first','ordering-second','ordering-next'],
+        'linked replies follow their caller in stable order, including late input and reply updates');
       if(evidenceDir) await page.screenshot({path:path.join(evidenceDir,target+'-text-streaming.png')});
       await emit('text','unfinished',segment('Still here','provisional',{exchange_id:'input-2',message_id:'message-2',separator_before:' '}));
       await page.locator('#connect').click();
@@ -494,10 +511,25 @@ const {chromium} = require(process.env.UNMUTE_SWEEP_PLAYWRIGHT || 'playwright');
       assert.equal(await page.locator('body').getAttribute('data-state'),'connected');
       // A terminal dev snapshot must not suppress the later native close callback.
       await emit('call','call',{target,state:'ended',input_boundaries:'known',model_calls:'known',generated_text:'available'},undefined,currentCall);
+      assert.equal(await page.locator('body').getAttribute('data-state'),'connected','feed completion alone does not close active media');
       await closeNative();
-      assert.notEqual(await page.locator('body').getAttribute('data-state'),'connected');
+      assert.equal(await page.locator('body').getAttribute('data-state'),'idle','a completed agent hangup is not a connection failure');
       assert.equal(await page.locator('#mute').getAttribute('data-mic'),'unavailable');
       assert.equal((await mediaSnapshot()).closes,currentMedia.closes+1);
+      // The terminal feed snapshot can arrive just after the native disconnect.
+      await page.locator('#connect').click();
+      await page.locator('body[data-state="connected"]').waitFor();
+      await closeNative();
+      const afterRemoteClose=await mediaSnapshot();
+      if(target==='pipecat') assert.equal(await page.locator('body').getAttribute('data-state'),'error','unexplained connection loss remains an error');
+      await emit('call','call',{target,state:'ended',input_boundaries:'known',model_calls:'known',generated_text:'available'},undefined,`call-${call}`);
+      assert.equal(await page.locator('body').getAttribute('data-state'),'idle','late successful completion clears the disconnect error');
+      assert.deepEqual(await mediaSnapshot(),afterRemoteClose,'late completion cannot close media twice');
+      await page.locator('#connect').click();
+      await page.locator('body[data-state="connected"]').waitFor();
+      await closeNative();
+      await emit('call','call',{target,state:'error',input_boundaries:'known',model_calls:'known',generated_text:'available'},undefined,`call-${call}`);
+      if(target==='pipecat') assert.equal(await page.locator('body').getAttribute('data-state'),'error','failed calls must not become successful hangups');
       await page.locator('#connect').click();
       await page.locator('body[data-state="connected"]').waitFor();
       await control({t:'state',state:'failed',stream_id:streamID});
@@ -509,6 +541,18 @@ const {chromium} = require(process.env.UNMUTE_SWEEP_PLAYWRIGHT || 'playwright');
       await control({t:'state',state:'ready',stream_id:streamID});
       await page.locator('#connect').click();
       await page.locator('body[data-state="connected"]').waitFor();
+      if(target==='pipecat'){
+        await control({t:'state',state:'failed',stream_id:streamID});
+        const finished={target,state:'ended',input_boundaries:'known',model_calls:'known',generated_text:'available'};
+        await emit('call','call',finished,undefined,`call-${call}`);
+        await closeNative();
+        assert.equal(await page.locator('body').getAttribute('data-state'),'error','call completion does not hide runtime failure');
+        await emit('call','call',finished,undefined,`call-${call}`);
+        assert.equal(await page.locator('body').getAttribute('data-state'),'error','late completion does not hide runtime failure');
+        await control({t:'state',state:'ready',stream_id:streamID});
+        await page.locator('#connect').click();
+        await page.locator('body[data-state="connected"]').waitFor();
+      }
       seq++; // An unexplained data discontinuity is a gap even without a control.
       await emit('measurement','after-sequence-gap',measure('first_speech',.1,{scope:'call',exchange_id:undefined}),undefined,`call-${call}`);
       await checkpoint(visible('#feed-status',/incomplete|gap/i));
