@@ -20,6 +20,18 @@ import (
 // meaning.
 var updateSlngV1 = flag.Bool("update-slng-target", false, "rewrite the slng target goldens")
 
+func TestSlngSupportNeedsNoSessionArguments(t *testing.T) {
+	_, files := compileSlng(t, filepath.Join("..", "..", "examples", "slng-support"))
+	body := slngBodyOf(t, files)
+	defaults := body["template_defaults"].(map[string]any)
+	for name, raw := range body["template_variable_options"].(map[string]any) {
+		option := raw.(map[string]any)
+		if _, supplied := defaults[name]; option["required"] == true && !supplied {
+			t.Errorf("inbound example requires session argument %q without a default", name)
+		}
+	}
+}
+
 func TestSlngPreviewIncludesTheBuiltinDescription(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "slng-support"))
 	if err != nil {

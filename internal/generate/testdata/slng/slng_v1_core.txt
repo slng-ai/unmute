@@ -132,6 +132,8 @@ takes strings only, at most 32 of them.
 This agent declares: `customer_name`.
 A declared default can fill an omitted value. Supply any value a required
 tool binding uses when it has no default; otherwise session creation is refused.
+Inbound phone calls supply no session arguments. Every required injected input
+needs a valid default before SLNG can attach an inbound trunk.
 
 ```bash
 voiceai agents web-sessions create <agent_id> --file session.json

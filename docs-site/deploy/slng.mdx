@@ -47,7 +47,8 @@ rather than written in the package.
 
 [`slng-support`](https://github.com/slng-ai/unmute/tree/main/examples/slng-support)
 is the working example and the shape to copy: builtins and hosted tools, a
-greeting and a variable. If your agent needs a tool SLNG does not host yet,
+greeting and no required session inputs. If your agent needs a tool SLNG does
+not host yet,
 create it in the SLNG dashboard and reference it with `slng:`
 (see [Hosted tools](/build/tools/hosted)), or compile the package to
 `pipecat` or `livekit` instead, where the handler runs in the project you
@@ -137,9 +138,8 @@ mirror committed anywhere in the package.
     This is the step that needs the `voiceai` release described above. With
     one installed, a clean preview names the organisation it resolved,
     resolves `check_order`, `search_places_text` and `end_call` against it,
-    checks `search_places_text`'s injected `query` against that version's
-    published parameters, and reports the version it would attach for each
-    reference, without writing anything:
+    checks their published contracts and reports the version it would attach
+    for each reference, without writing anything:
 
     ```text
     slng: check_order v<n>
@@ -198,7 +198,7 @@ mirror committed anywhere in the package.
     ```sh
     export VOICEAI_API_KEY="$SLNG_API_KEY"
     cat > session.json <<'JSON'
-    {"arguments": {"customer_name": "Nicola"}, "participant_name": "you"}
+    {"arguments": {}, "participant_name": "you"}
     JSON
     voiceai agents web-sessions create <agent_id> --file session.json
     ```
@@ -220,14 +220,14 @@ mirror committed anywhere in the package.
     that the worker joined or a conversation happened. Setting `VOICEAI_API_KEY`
     above keeps this standalone command in the same account as your deploy.
 
-    Supply the agent id and the request body using `--file`. This example needs
-    the session argument shown above for its injected tool query.
+    Supply the agent id and the request body using `--file`. This example
+    needs no session arguments; the model supplies tool arguments from the
+    caller's request.
 
-    `arguments` is where this package's declared variables get their value for
-    one session, strings only, at most 32. This package declares
-    `customer_name`, which `search_places_text` injects as its `query`; the
-    greeting itself names nobody. Supply `customer_name`: its required tool
-    binding has no default, so a session without it is refused.
+    Other packages can use `arguments` to supply declared variables for one
+    web session. Inbound phone calls do not supply that payload. A required
+    injected input therefore needs a valid default before an inbound trunk
+    can be attached, or the tool must leave that argument to the model.
 
     Ask for the status of order A-1001, listen for the tool's announcement,
     then say goodbye. Read the resulting call using the returned `call_id`:

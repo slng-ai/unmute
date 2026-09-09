@@ -196,6 +196,12 @@ before writing a `builtin:`, `slng:` or `mcp:` name from memory.
 
 ## After a deploy, on a phone
 
+For SLNG inbound phone calls, a required injected session input needs a valid
+default: inbound dispatch has no web-session `arguments` payload. Otherwise
+SLNG refuses trunk attachment with `AGENT_RUNTIME_COMPILATION_FAILED`. Leave
+tool arguments that the caller supplies to the model instead. The
+`examples/slng-support` package requires no session inputs.
+
 Telephony is verified on a deployed agent against a real carrier. There is no
 local stand-in, and `unmute dev` is the browser loop only.
 

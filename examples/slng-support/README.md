@@ -15,25 +15,21 @@ deployment body, not a project you start and keep running.
   `acme-support-slng`: the package's name joined to the target's name.
 - **Agent.** `agent.yaml` defines one agent, `support`, whose prompt is in
   `instructions.md`. It reasons with a Gemini model, speaks with an SLNG
-  voice, and transcribes with Deepgram. The greeting names nobody, so it
-  reads the same whether or not a session supplies a name.
+  voice, and transcribes with Deepgram.
 - **Tools**, one of each kind SLNG supports. Every one is a reference: this
   target creates no tool, and no tool file carries a mirror.
   - `check_order` (`slng: check_order`): a tool SLNG already hosts, holding
     Python. The one line names it; description and parameters are inherited
     from the published tool.
   - `search_places_text` (`slng: search_places_text`): a tool SLNG already
-    hosts, holding a request configuration. Its `inject:` fills `query` from
-    `{{customer_name}}`, so the model never has to ask the caller to repeat a
-    name it already gave when the session started.
+    hosts, holding a request configuration. The model supplies its query
+    from the caller's request.
   - `web_search` (MCP): reaches the `firecrawl-mcp-2` server for
     `firecrawl_scrape` and `firecrawl_search`, naming only the server and the
     two tools; the server's own address and credential are SLNG's.
   - `end_call` (builtin): a capability SLNG curates, reached by name.
-- **A declared variable.** `customer_name`, `source: call_start`: the caller's
-  name, supplied when a session is dispatched. It has no `secrets:` entry and
-  no mirror to come from; `search_places_text` reads it straight off the
-  declared variable through `inject:`.
+- **Session inputs.** None required, so an inbound call needs no arguments
+  supplied by a web-session client.
 - **Secrets.** No `secrets:` block. The hosted request tool's own credential
   is SLNG's, not this package's: `unmute deploy` discovers it from the
   published tool and reports or offers to create it, rather than this file
@@ -109,23 +105,21 @@ web session instead:
 
 ```bash
 cat > session.json <<'JSON'
-{"arguments":{"customer_name":"Nicola"},"participant_name":"you"}
+{"arguments":{},"participant_name":"you"}
 JSON
 voiceai agents web-sessions create <agent_id> --file session.json
 ```
 
-`unmute deploy` prints this command with the agent id already filled in. A
-session's `arguments` supplies the required `customer_name`. That is what
-`search_places_text` injects as `query`.
+`unmute deploy` prints this command with the agent id already filled in.
+This example needs no session arguments.
 
 This command returns `livekit_url` and `livekit_token`; it does not open a
 browser or microphone. Connect a LiveKit client with those details to talk.
 A dispatch id alone does not prove the worker joined or a conversation happened.
 
 Ask “What is the status of order A-1001?” to exercise `check_order` and its
-announcement, then say goodbye to exercise `end_call`. To check injection,
-ask for a places search and inspect the tool call's `query`: it should be
-`Nicola`, the session value. Ask for a web search to exercise the MCP selection.
+announcement, then say goodbye to exercise `end_call`. Ask for nearby places
+to exercise `search_places_text`, or a web search to exercise the MCP selection.
 
 After the conversation, use the returned `call_id` to read the actual result:
 
@@ -133,3 +127,8 @@ After the conversation, use the returned `call_id` to read the actual result:
 voiceai agents calls list <agent_id> --json
 voiceai agents calls get <agent_id> <call_id> --json
 ```
+
+For an inbound phone test, choose a usable free trunk when `unmute deploy`
+offers one, then call its number. A required injected session input without a
+default would prevent SLNG from attaching an inbound trunk: a phone call does
+not supply the web session's `arguments`.
