@@ -53,9 +53,15 @@ os.environ["REDIS_URL"] = "redis://127.0.0.1:6379/0"
 os.environ["SALON_API_URL"] = "http://127.0.0.1:" + str(_server.server_address[1]) + "/"
 os.environ["SALON_API_TOKEN"] = "test-token-abc123"
 # A customer id with a slash and a space: proof that a rendered path segment is
-# URL-encoded and cannot rewrite the route.
+# URL-encoded and cannot rewrite the route. The phone is E.164 because the salon
+# types it that way and _save_result refuses anything else.
 os.environ["UNMUTE_CALL_START"] = json.dumps(
-    {"name": "Ada", "customer_phone": "cus/10 42", "appointment_time": "tomorrow at 3 pm"}
+    {
+        "name": "Ada",
+        "customer_id": "cus/10 42",
+        "customer_phone": "+34600111222",
+        "appointment_time": "tomorrow at 3 pm",
+    }
 )
 `
 
@@ -76,8 +82,13 @@ class _Params:
 state = bot.build_state()
 # Set here, not hydrated: this pipecat target has no telephony plane.
 state.dialed_number = "+15551230000"
-bot._save_result("verify_customer", state, {"customer_phone": state.customer_phone})
-agent = bot.ConciergeAgent(state=state, context=None, call_context=None, slng_session_id="smoke")
+# verify_customer assigns both fields, and the status is a required Literal.
+bot._save_result(
+    "verify_customer",
+    state,
+    {"customer_phone": state.customer_phone, "customer_status": "existing"},
+)
+agent = bot.ConciergeAgent(state=state, context=None, call_context=None)
 
 # 1. A tool whose injected values are all available: the request goes out.
 params = _Params()
@@ -88,7 +99,7 @@ assert captured["path"] == "/customers/cus%2F10%2042/appointments/confirm", capt
 assert captured["auth"] == "Bearer test-token-abc123", captured["auth"]
 assert captured["body"] == {
     "channel": "phone",
-    "customer_phone": "cus/10 42",
+    "customer_phone": "+34600111222",
     "dialed_number": "+15551230000",
 }, captured["body"]
 assert params.result["ok"] is True, params.result
@@ -108,7 +119,7 @@ asyncio.run(agent.reschedule_appointment(allowed))
 assert captured["count"] == 2, captured
 assert captured["path"] == "/customers/cus%2F10%2042/appointments", captured["path"]
 assert captured["body"] == {
-    "customer_phone": "cus/10 42",
+    "customer_phone": "+34600111222",
     "new_time": "Friday at 4",
 }, captured["body"]
 assert allowed.result["ok"] is True, allowed.result
@@ -129,8 +140,11 @@ import agent as generated  # noqa: E402
 userdata = generated.Userdata()
 generated._hydrate_call_start(userdata, generated._dispatched_call_start({}))
 userdata.dialed_number = "+15551230000"
+# verify_customer assigns both fields, and the status is a required Literal.
 generated._save_result(
-    "verify_customer", userdata, {"customer_phone": userdata.customer_phone}
+    "verify_customer",
+    userdata,
+    {"customer_phone": userdata.customer_phone, "customer_status": "existing"},
 )
 ctx = SimpleNamespace(userdata=userdata)
 desk = generated.Concierge()
@@ -143,7 +157,7 @@ assert captured["path"] == "/customers/cus%2F10%2042/appointments/confirm", capt
 assert captured["auth"] == "Bearer test-token-abc123", captured["auth"]
 assert captured["body"] == {
     "channel": "phone",
-    "customer_phone": "cus/10 42",
+    "customer_phone": "+34600111222",
     "dialed_number": "+15551230000",
 }, captured["body"]
 assert result["ok"] is True, result
@@ -160,7 +174,7 @@ userdata.reschedule_to = "Friday at 4"
 allowed = asyncio.run(desk.reschedule_appointment(ctx))
 assert captured["count"] == 2, captured
 assert captured["body"] == {
-    "customer_phone": "cus/10 42",
+    "customer_phone": "+34600111222",
     "new_time": "Friday at 4",
 }, captured["body"]
 assert allowed["ok"] is True, allowed
@@ -192,8 +206,13 @@ class _Params:
 state = bot.build_state()
 # Set here, not hydrated: this pipecat target has no telephony plane.
 state.dialed_number = "+15551230000"
-bot._save_result("verify_customer", state, {"customer_phone": state.customer_phone})
-agent = bot.ConciergeAgent(state=state, context=None, call_context=None, slng_session_id="smoke")
+# verify_customer assigns both fields, and the status is a required Literal.
+bot._save_result(
+    "verify_customer",
+    state,
+    {"customer_phone": state.customer_phone, "customer_status": "existing"},
+)
+agent = bot.ConciergeAgent(state=state, context=None, call_context=None)
 asyncio.run(agent.confirm_appointment(_Params()))
 
 assert captured["count"] == 1, captured
@@ -229,8 +248,11 @@ import agent as generated  # noqa: E402
 userdata = generated.Userdata()
 generated._hydrate_call_start(userdata, generated._dispatched_call_start({}))
 userdata.dialed_number = "+15551230000"
+# verify_customer assigns both fields, and the status is a required Literal.
 generated._save_result(
-    "verify_customer", userdata, {"customer_phone": userdata.customer_phone}
+    "verify_customer",
+    userdata,
+    {"customer_phone": userdata.customer_phone, "customer_status": "existing"},
 )
 asyncio.run(generated.Concierge().confirm_appointment(SimpleNamespace(userdata=userdata)))
 
