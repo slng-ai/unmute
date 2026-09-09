@@ -91,6 +91,11 @@ inject:
   - query: "{{customer_name}}"
 ```
 
+This snippet is separate from the phone-ready `slng-support` example. Declare
+`customer_name` under `variables:` with `type: str` and `source: call_start`,
+and supply it when starting a web session. For inbound phone calls, give it a
+valid default or leave `query` to the model: carriers supply no session inputs.
+
 Injected values keep their exact type, including `false` and `0`, and are
 never shown to the model. `{{customer_name}}` is resolved when a call starts;
 a fixed value such as `- limit: 0` is bound as written. Full rules for the
@@ -131,8 +136,8 @@ No different from any other tool. The same two lists:
 agents:
   support:
     instructions: instructions.md
-    model: reasoning
-    voice: front_desk
+    think: reasoning
+    speak: front_desk
     tools:
       - check_order
       - end_call

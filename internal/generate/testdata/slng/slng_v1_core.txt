@@ -116,8 +116,15 @@ This package's curated references: `end_call`.
 
 ## 3. Talk to it
 
-Use the agent id step 2 printed. It is not optional: the command creates a
-session for one named agent.
+For a browser test, open the deployed agent in the SLNG dashboard, choose
+**Test**, then **Web session**, fill any required inputs, and allow microphone
+access. See [the test panel guide](https://docs.slng.ai/dashboard/agent-infra#test-your-agent).
+
+For your own LiveKit client, use the agent id step 2 printed and the same account:
+
+```bash
+export VOICEAI_API_KEY="$SLNG_API_KEY"
+```
 
 Supply a request body with `--file`. Write a `session.json`, filling in any
 required session arguments:
@@ -146,6 +153,18 @@ cap at `max_session_seconds`, which the same response carries.
 There is no `unmute dev` for this target. `dev` runs the generated project
 locally, and this target generates no project: SLNG runs the agent. The web
 session above is how you talk to it.
+
+## Receive phone calls
+
+Follow [SLNG Telephony setup](https://docs.slng.ai/dashboard/telephony) to route
+your carrier number to SLNG, then select the existing inbound trunk during
+`unmute deploy` or in the dashboard. An attachment does not change carrier
+routing or prove a phone call connected. If the number still points at Twilio
+Dev Phone or an old webhook, the call will not reach this agent.
+
+Call the number and look for a new SLNG call record. If none appears, inspect
+carrier logs and SIP routing first. Outbound calls need a separate outbound
+connection.
 
 ## If the agent answers with silence
 

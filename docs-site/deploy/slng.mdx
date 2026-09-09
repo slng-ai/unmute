@@ -97,6 +97,12 @@ Follow these against `examples/slng-support` from a clone of the repository.
 It references two hosted tools and one MCP server, all three by name, with no
 mirror committed anywhere in the package.
 
+Those names belong to the organisation this example was written for. In a new
+organisation, publish the two tools and register the MCP server with its selected
+tools and credentials, or replace the references with your own. Run
+`unmute resources` to inspect your catalogue. Validation is offline and cannot
+prove those resources exist in your account.
+
 <Steps>
   <Step title="Validate">
     ```sh
@@ -192,8 +198,12 @@ mirror committed anywhere in the package.
 
   <Step title="Talk to it">
     There is no `unmute dev` for this target. `dev` runs a generated project
-    locally and this target generates none, so a browser session against the
-    live agent is how you hear it.
+    locally and this target generates none. Open the deployed agent in the
+    SLNG dashboard, click **Test**, choose **Web session**, and allow microphone
+    access. Fill any required inputs shown by the test panel; this example has
+    none. See [SLNG's test panel guide](https://docs.slng.ai/dashboard/agent-infra#test-your-agent).
+
+    To connect your own LiveKit client instead, create a session with the CLI:
 
     ```sh
     export VOICEAI_API_KEY="$SLNG_API_KEY"
@@ -323,8 +333,9 @@ Then delete the old agent, or point those places at the new id.
 
 ## When it refuses
 
-Every problem is reported together, each with what to do. Nothing is created
-until all of them clear.
+Problems name what to fix. The agent is written only after its required checks
+pass; a real deploy may already have refreshed MCP discovery or filled a Vault
+entry with your consent. Inspect `deploy-report.json` for completed changes.
 
 | It says | What to do |
 |---|---|
@@ -334,11 +345,38 @@ until all of them clear.
 | `--require-resolved` in the message, naming `brew install` | the installed `voiceai` does not support a checked, resolved push. See the warning near the top of this page. |
 | `agent ambiguous` | two agents share the package's name. Pass `--agent-id`. |
 
-Every one of these stops the run before anything is written, `--dry-run`
-included. A `slng:` tool's mirror is never checked here, because `unmute
+These problems block the agent push. A dry run makes no remote changes.
+A `slng:` tool's mirror is never checked here, because `unmute
 deploy` compiles only the slng target and that target reads no mirror; a
 `no mirror of it is committed` or `does not match the hash` refusal is
 [a `livekit` or `pipecat` compile's](/build/tools/hosted), not this command's.
+
+## Receive phone calls
+
+Phone setup has two separate parts:
+
+1. Configure an inbound connection in [SLNG Telephony](https://docs.slng.ai/dashboard/telephony).
+   Use the guided Twilio setup or your provider's SIP setup to route the number
+   to SLNG's inbound destination. A number still pointing at Twilio Dev Phone,
+   an old webhook or another application will not reach this agent.
+2. Run `unmute deploy` and select that free inbound trunk when prompted, or
+   assign it in the agent editor's **Telephony** tab. Choosing `0` leaves it
+   unattached. The CLI attaches an existing connection; it does not rewrite
+   your carrier's routing.
+
+An `attached` or `usable` result describes SLNG account state. It is not proof
+of a completed carrier call. Call the number, then check for a new call:
+
+```sh
+export VOICEAI_API_KEY="$SLNG_API_KEY"
+voiceai agents calls list <agent_id> --json
+voiceai agents calls get <agent_id> <call_id> --json
+```
+
+No new SLNG call means you should check carrier routing and SIP delivery first.
+A recorded call with an error gives you the next component to investigate.
+For outbound calls, assign an outbound connection separately; an inbound
+attachment does not enable outbound calls.
 
 ## When the agent answers with silence
 
@@ -360,10 +398,10 @@ read `call_end_reason`. A line like
 terminal failure: component=llm reason=hard_fail
 ```
 
-names the layer that failed, `llm`, `stt` or `tts`. That is a model or provider
-problem, not a problem with the body unmute wrote, and swapping that one binding
-is the fix. A short `call_duration_ms` with the agent never speaking is the same
-story.
+names the component to investigate: `llm`, `stt` or `tts`. Read its error and
+call details before changing a binding; a short duration alone does not identify
+the cause. If no new SLNG call appears, inspect the carrier's logs and incoming
+number routing first: the call may have failed before the agent started.
 
 A model SLNG does not have enabled for your organisation is rejected at push
 with `AGENT_MODEL_UNAVAILABLE`, naming the field. Unmute cannot check this: the

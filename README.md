@@ -214,9 +214,10 @@ Every key of every package file is listed under
 an optional argument. From inside the package you run them bare; from anywhere
 else you pass the path, as in `unmute dev my-agent`.
 
-`pull` is the only command that contacts SLNG on a package's behalf, and only a
-package that references a hosted tool needs it. `validate` and `compile` read
-the committed mirror and work offline.
+`validate` and `compile` work offline. SLNG deployment resolves hosted tools
+by name with `unmute deploy`: no hash, mirror or `pull` step is needed. Only
+LiveKit and Pipecat need `unmute pull` to fetch the hosted tools they run
+themselves. `deploy`, `pull` and `resources` use your SLNG account.
 
 Warnings go to standard error and still exit 0. Errors exit 1.
 

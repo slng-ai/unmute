@@ -501,8 +501,12 @@ files to the `voiceai` CLI, which must be on PATH
 
 ```bash
 export SLNG_API_KEY=...
-unmute deploy .
 unmute deploy . --dry-run                  # check everything, change nothing
+unmute deploy .
+export VOICEAI_API_KEY="$SLNG_API_KEY"
+cat > session.json <<'JSON'
+{"arguments": {}}
+JSON
 voiceai agents web-sessions create <agent_id> --file session.json
 ```
 
@@ -526,15 +530,17 @@ or pipecat project reads at run time. `VOICEAI_API_KEY` is the name the push too
 itself reads.
 
 **A push replaces.** A tool reference the package no longer names is detached and
-a differing field is overwritten, and the agent's name is its target instance
-name, so two packages that both call their slng target `slng` write the same
-live agent. `--dry-run` names what would go; `--agent-id` picks a different
+a differing field is overwritten. The deployed name is the package's `name:`
+joined to the target name, for example `acme-support-slng`. `--dry-run` names what would go; `--agent-id` picks a different
 agent.
 
 The web-session command takes the agent id `unmute deploy` printed, and a
 `--file` holding at least `{"arguments": {}}`: every field in that body is
-optional but the body itself is required. `arguments` is where the package's
-declared variables get their value for one session.
+optional in the API schema but required inputs without defaults must be
+supplied in `arguments`. The command returns LiveKit connection details, not
+a browser call. For a microphone test, open the deployed agent in the dashboard
+and choose **Test**, then **Web session**. Inbound phone setup also needs
+carrier routing to SLNG; attaching a trunk does not change that routing.
 
 Unmute writes no `llm_router_enabled` on this target: SLNG applies its own
 default. Do not add one. A model your organisation brought its own key for is
@@ -551,16 +557,17 @@ That is true of a curated builtin too.
 
 The push step resolves those names, which is why
 `voiceai agents create --file build/slng/agent.json` is the wrong command: it
-posts the body verbatim and the API refuses it. `unmute deploy` runs
-`voiceai agents push build/slng` instead, and that resolves names and mints
-attachment ids. It creates no tool: the body carries `tool_refs` only, so every
+posts the body verbatim and the API refuses it. `unmute deploy` resolves and
+checks references, then gives a temporary resolved body to a guarded `voiceai`
+push. A direct push skips Unmute's binding checks. It creates no tool: the body carries `tool_refs` only, so every
 tool the agent gets was published on SLNG before the package named it.
 
 That is why no sample is involved on this target. A sample proves a tool works
 before the platform publishes it, and a referenced tool is already published.
 `build/slng/samples/` and `.env` are still the two things a recompile preserves
-inside `build/`, and `voiceai tool run <tool> --input samples/<tool>.json` is
-how you exercise a hosted tool by hand.
+inside `build/`. To exercise a hosted tool by hand, write an input JSON file
+matching its published parameters, then run
+`voiceai tool run <tool> --input samples/<tool>.json --confirm-side-effects`.
 
 A `code` tool on slng runs in SLNG's sandbox, in the region serving the call,
 which is why it is fast. Whether it may reach the network is the platform's
@@ -572,12 +579,13 @@ server, and deploys today.
 
 An MCP reference resolves by name at push time: the push looks up the server's
 `server_id` and copies each tool's `observed_schema_hash` out of the platform's
-own stored capability snapshot. Nothing connects to the server. The one caveat
-is a stale or unhealthy snapshot, which the push refuses; refresh it first with
-`voiceai mcp run <server>`.
+own stored capability snapshot. A real deploy can refresh an unusable snapshot
+once through `voiceai mcp run <server>` and recheck it. A dry run never
+refreshes discovery; neither flow executes business tools as a check.
 
-A refused deploy has changed nothing, and reports every problem together with
-the dashboard page that fixes each: `vault missing`, a hosted tool the
+A refusal blocks the agent push. A real deploy may already have refreshed MCP
+discovery or filled a Vault entry with consent; `deploy-report.json` records
+those changes. Report the problems and their fixes: `vault missing`, a hosted tool the
 organisation does not have, an argument that does not fit a published
 tool's parameters, `agent ambiguous`, or an incompatible `voiceai`. All of
 these come from `unmute deploy` reading the account or resolving a

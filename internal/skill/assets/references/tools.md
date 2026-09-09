@@ -65,7 +65,7 @@ also the list of what you could have written.
 | `description` | yes, except on `builtin:` and `mcp:` | everywhere else |
 | `input` | yes, except on `builtin:`, `mcp:` and `knowledge:` | everywhere else |
 | `output` | no | everywhere except `builtin:`, `mcp:` and `knowledge:`, but see below |
-| `inject` | no | `webhook:` and `local:` only |
+| `inject` | no | `webhook:`, `local:` and `slng:` only |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` and `knowledge:` |
 | `announce` | no | `webhook:`, `local:`, `knowledge:` and `slng:` only |
@@ -179,10 +179,10 @@ entries it needs. `compile-report.json` names these under `deferred_checks`;
 what it found. A clean `validate` or `compile` is not proof the reference
 exists on the platform.
 
-`unmute pull` is the only command that needs an SLNG credential, and it is
-optional: only a package that also targets livekit or pipecat needs it.
-`validate` and `compile` work offline for a slng-only package with no mirror
-at all; `deploy` still needs the credential, to reach the organisation.
+`unmute pull` needs an SLNG credential and is only needed when a code target
+runs a hosted tool itself. `validate` and `compile` work offline; a slng-only
+package needs no mirror at all. `deploy` and `resources` also need an account
+credential to reach the organisation.
 
 ## Knowledge bases
 
@@ -363,9 +363,11 @@ interruption: provider_default
 | Field | Required | What it is |
 |---|---|---|
 | `url_env` | yes | the `UPPER_SNAKE` name of a variable holding the base URL |
-| `base_url` | on slng | the literal `https://` host; SLNG stores the URL in the tool body and refuses a tool that names only `url_env` |
 | `path` | no | starts with `/`, is appended to that base URL, and may carry `{{variable}}` tokens |
-| `auth` | no | how the request authenticates; on slng an `api_key` with a custom `header` is sent as `bearer`, the header name is dropped |
+| `auth` | no | `bearer` or `api_key`; an API key may name a custom `header` |
+
+`webhook:` runs on LiveKit and Pipecat. For SLNG, create the request tool in
+the dashboard and reference it with `slng:`.
 
 `url_env` holds a **name**, never a URL. Writing the address there is refused.
 That is what lets staging and production run the same package against different
@@ -737,7 +739,7 @@ without going through the step that checks who they are.
 | "our API needs a signed request" | `local:`, because webhook auth is bearer and api_key only |
 | "look something up in this spreadsheet of ours" | `local:`, and say the handler is a fixture unless they wire it up |
 | "use the Firecrawl MCP server" | `mcp:` with `tools:` naming what it may use |
-| "this tool already exists in our SLNG organisation" | `slng:` naming its exact platform name, one line, on a slng target only |
+| "this tool already exists in our SLNG organisation" | `slng:` naming its exact platform name; code targets also need a pulled mirror |
 | "let it hang up" | `builtin:` with `id: end_call` |
 | "let the caller's app do it" | nothing yet. `client:` is gated on every target. Say so |
 

@@ -51,9 +51,14 @@ Install the push tool once, so it is on your PATH:
 brew install slng-ai/tap/voiceai
 ```
 
-Both hosted tools already exist in the SLNG organisation this example was
-written against, so `validate` and `compile` work with no credential and no
-mirror to fetch first:
+This example references resources in the organisation it was written for.
+In your own organisation, publish `check_order` and `search_places_text`,
+register `firecrawl-mcp-2` with the two selected tools, and configure their
+credentials, or change these references to resources you already have.
+Unmute does not create them from this package. Inspect your catalogue with
+`unmute resources`.
+
+`validate` and `compile` work with no credential and no mirror to fetch first:
 
 ```bash
 unmute validate examples/slng-support
@@ -100,8 +105,12 @@ JSON
 
 That runs the copy SLNG already has, against its real dependencies.
 
-There is no `unmute dev` for this target. Talk to the deployed agent with a
-web session instead:
+There is no `unmute dev` for this target. For a browser test, open the deployed
+agent in the SLNG dashboard, choose **Test**, then **Web session**, and allow
+microphone access. This example needs no inputs. See the
+[test panel guide](https://docs.slng.ai/dashboard/agent-infra#test-your-agent).
+
+To use your own LiveKit client instead:
 
 ```bash
 cat > session.json <<'JSON'
@@ -128,7 +137,12 @@ voiceai agents calls list <agent_id> --json
 voiceai agents calls get <agent_id> <call_id> --json
 ```
 
-For an inbound phone test, choose a usable free trunk when `unmute deploy`
-offers one, then call its number. A required injected session input without a
+For an inbound phone test, first follow
+[SLNG Telephony setup](https://docs.slng.ai/dashboard/telephony) to route your
+carrier number to SLNG. Then choose the free trunk when `unmute deploy` offers
+it, and call the number. Attachment does not change carrier routing: a number
+still pointing at Twilio Dev Phone or an old webhook will not reach SLNG.
+If no new SLNG call record appears, inspect the carrier's call log and route.
+ A required injected session input without a
 default would prevent SLNG from attaching an inbound trunk: a phone call does
 not supply the web session's `arguments`.

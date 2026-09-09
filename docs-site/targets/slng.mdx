@@ -188,11 +188,10 @@ itself reads, so export whichever your shell already has.
 The organisation is printed on every run, because an exported key and a stored
 profile can belong to different ones.
 
-To drive the push tool directly:
-
-```sh
-voiceai agents push build/slng
-```
+Use `unmute deploy` for checked deployment. Running `voiceai agents push`
+directly bypasses Unmute's binding checks and resolved staging. For standalone
+`voiceai` commands, set `export VOICEAI_API_KEY="$SLNG_API_KEY"` to use the
+same account.
 
 ### Where your tools come from
 
@@ -237,9 +236,10 @@ say up front: which tools you want. Unmute compiles offline, so it cannot expand
 
 Once the list is there, the push looks up the server's name for its
 `server_id`, then copies each named tool's schema hash out of the platform's own
-stored capability snapshot. Nothing connects to the MCP server. The one caveat:
-the platform refuses a snapshot that is unhealthy or older than five minutes.
-Refresh it first with `voiceai mcp run <server>`.
+stored capability snapshot. A real `unmute deploy` can refresh an unusable
+snapshot once through `voiceai mcp run <server>`, then checks it again. A dry
+run never refreshes it and reports what needs attention. Discovery does not
+execute business tools.
 
 The runbook says which case your package is in.
 
@@ -287,9 +287,9 @@ a hosted tool that declares dependencies is refused on `livekit` and
 
 ## The Vault
 
-SLNG reads secrets from its own store. Unmute can create none of them, so the
-runbook lists what compiling the package could see, grouped by where each one
-came from, above the push command. No secret value reaches any emitted file or
+SLNG reads secrets from its own store. With your consent, `unmute deploy` can
+fill missing Vault entries through `voiceai`. The runbook lists what compiling
+the package could see, grouped by source, above the push command. No secret value reaches any emitted file or
 any command in the runbook.
 
 That list is only what a compile can read offline: a tool's declared `auth:`,
@@ -334,9 +334,9 @@ None is dropped quietly.
 | outbound calling, `on_voicemail` | a package declares no carrier state on SLNG; `unmute deploy` attaches an existing trunk after a push |
 | a warm human transfer | SLNG's curated transfer places a single blind transfer |
 
-An MCP tool works. Its one caveat: the platform's stored capability snapshot
-for that server has to be healthy and no older than five minutes, or the push
-refuses it.
+An MCP tool works when its selected names and discovery snapshot pass the
+platform checks. A real deploy may refresh an unusable snapshot once; a dry
+run reports it without refreshing.
 
 ## If the agent answers with silence
 
@@ -363,13 +363,16 @@ voiceai agents web-sessions create <agent_id> --file session.json
 ```
 
 The agent id is the one `unmute deploy` printed; `voiceai agents list` finds it
-again. The command returns LiveKit connection details, and a
-`livekit_dispatch_id` meaning a worker joined the room.
+again. The command returns LiveKit connection details; it does not open a
+microphone or prove the worker joined. For a browser test, open the agent in
+the SLNG dashboard, choose **Test**, then **Web session**, and allow microphone
+access. See [the test panel guide](https://docs.slng.ai/dashboard/agent-infra#test-your-agent).
 
-The `--file` is required even though every field in it is optional, because the
-endpoint declares a request body and the CLI sends none without it. A minimal
-`session.json` is `{"arguments": {}}`; `arguments` is where the package's
-declared variables get their value for one session.
+Supply the request body with `--file`. A minimal `session.json` is
+`{"arguments": {}}`; fill any required inputs without defaults in `arguments`.
+For inbound calls, those inputs need defaults because the carrier supplies no
+web-session payload. Follow [the phone setup](/deploy/slng#receive-phone-calls)
+for both carrier routing and trunk attachment.
 
 ## Where to go next
 

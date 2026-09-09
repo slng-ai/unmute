@@ -183,7 +183,9 @@ changing anything. `compile-report.json` lists them as deferred.
 hosted tool's definition into your package so a `livekit` or `pipecat` build of
 the same package has a tool to compile. A SLNG-only package needs no mirror.
 
-To try one on its own rather than deploying again:
+To try one on its own, first write a JSON input file matching its published
+parameters at `samples/<tool>.json`; this compiler creates no sample file.
+Use the same account with `export {{.CredentialEnv}}="${{.RouterKeyEnv}}"`.
 
 ```
 voiceai tool run <tool> --input samples/<tool>.json --confirm-side-effects
@@ -212,8 +214,15 @@ the API wants an identifier.
 {{end}}
 ## 3. Talk to it
 
-Use the agent id step 2 printed. It is not optional: the command creates a
-session for one named agent.
+For a browser test, open the deployed agent in the SLNG dashboard, choose
+**Test**, then **Web session**, fill any required inputs, and allow microphone
+access. See [the test panel guide](https://docs.slng.ai/dashboard/agent-infra#test-your-agent).
+
+For your own LiveKit client, use the agent id step 2 printed and the same account:
+
+```bash
+export {{.CredentialEnv}}="${{.RouterKeyEnv}}"
+```
 
 Supply a request body with `--file`. Write a `session.json`, filling in any
 required session arguments:
@@ -242,6 +251,18 @@ cap at `max_session_seconds`, which the same response carries.
 There is no `unmute dev` for this target. `dev` runs the generated project
 locally, and this target generates no project: SLNG runs the agent. The web
 session above is how you talk to it.
+
+## Receive phone calls
+
+Follow [SLNG Telephony setup](https://docs.slng.ai/dashboard/telephony) to route
+your carrier number to SLNG, then select the existing inbound trunk during
+`unmute deploy` or in the dashboard. An attachment does not change carrier
+routing or prove a phone call connected. If the number still points at Twilio
+Dev Phone or an old webhook, the call will not reach this agent.
+
+Call the number and look for a new SLNG call record. If none appears, inspect
+carrier logs and SIP routing first. Outbound calls need a separate outbound
+connection.
 
 ## If the agent answers with silence
 

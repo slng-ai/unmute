@@ -205,7 +205,11 @@ tool arguments that the caller supplies to the model instead. The
 Telephony is verified on a deployed agent against a real carrier. There is no
 local stand-in, and `unmute dev` is the browser loop only.
 
-`unmute deploy` reports which number reaches the agent after a successful push.
+`unmute deploy` reports attached numbers after a successful push; it does not
+verify carrier routing. Configure the number to send inbound calls to SLNG
+using [SLNG Telephony setup](https://docs.slng.ai/dashboard/telephony). A number
+still pointing at Twilio Dev Phone or another webhook will not reach the agent.
+If no new SLNG call appears, inspect carrier logs and SIP delivery first.
 When none does and an inbound trunk is free, it offers to attach one, which is a
 single-field PATCH on the agent and happens only when an operator picks a number
 at a terminal. A run with no terminal never attaches.
