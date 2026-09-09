@@ -153,15 +153,13 @@ func TestValidateTurnModelRejectsSpeakAndThinkFields(t *testing.T) { // V22
 	}
 }
 
-// N16: a language set on a vendor whose integration has no language slot must
-// fail at VALIDATE, not just generate (C6: gate before any artifact). gemini
-// warm_standby_enabled is real on livekit and inert on pipecat: pipecat-slng
-// 0.5.0 deferred it, so the kwarg is absorbed by **kwargs and discarded with no
-// error. A params: block is forwarded verbatim by design, so nothing else in the
-// compiler can notice that the package is promising a held-open socket and
-// getting none. A warning rather than a refusal, because a package that ships to
-// both targets authors one speak binding for both.
-func TestValidateWarmStandbyIsPipecatInert(t *testing.T) {
+// warm_standby_enabled reaches the plugin on both targets since pipecat-slng
+// 0.5.2, which took it as a constructor kwarg on SlngTTSService. Through 0.5.1
+// the Pipecat side absorbed it into **kwargs and discarded it with no error, so
+// the compiler warned; that warning is gone and this test is what stops it
+// coming back as a false one. A params: block is forwarded verbatim by design,
+// so nothing else in the compiler looks at this name at all.
+func TestValidateWarmStandbyIsSilentOnBothTargets(t *testing.T) {
 	withStandby := func(t *testing.T, provider Provider) []string {
 		t.Helper()
 		agent := safeAgent(t)
@@ -171,23 +169,15 @@ func TestValidateWarmStandbyIsPipecatInert(t *testing.T) {
 		target.Models.Speak["front_desk"] = b
 		report, err := Validate(agent, []Target{target}, targetcap.Default())
 		if err != nil {
-			t.Fatalf("an inert param must warn, never fail: %v %#v", err, report.PerTarget[0].Errors)
+			t.Fatalf("a param both targets implement must not fail: %v %#v", err, report.PerTarget[0].Errors)
 		}
 		return report.PerTarget[0].Warnings
 	}
 
-	warnings := strings.Join(withStandby(t, ProviderPipecat), "\n")
-	if !strings.Contains(warnings, "warm_standby_enabled") {
-		t.Errorf("pipecat did not warn that the param reaches nothing:\n%s", warnings)
-	}
-	// The warning has to say what to do instead, or it is just noise.
-	if !strings.Contains(warnings, "livekit") {
-		t.Errorf("the warning does not name the target where the param works:\n%s", warnings)
-	}
-
-	// On livekit the plugin implements it, so there is nothing to say.
-	if got := strings.Join(withStandby(t, ProviderLiveKit), "\n"); strings.Contains(got, "warm_standby_enabled") {
-		t.Errorf("warned about a param that works on this target:\n%s", got)
+	for _, provider := range []Provider{ProviderPipecat, ProviderLiveKit} {
+		if got := strings.Join(withStandby(t, provider), "\n"); strings.Contains(got, "warm_standby_enabled") {
+			t.Errorf("%v warned about a param it implements:\n%s", provider, got)
+		}
 	}
 
 	// And an unset param is silent everywhere.

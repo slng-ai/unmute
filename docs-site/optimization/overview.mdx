@@ -128,16 +128,16 @@ final transcript. That is why the scaffold and the examples take it.
 
 ### Hold the TTS connection open
 
-<Warning>
-  **LiveKit only.** The SLNG plugin for Pipecat does not implement this as of
-  `pipecat-slng` 0.5.1, and a params block is forwarded to the plugin as written,
-  so the setting is accepted and then discarded with no error. `unmute validate`
-  warns when a package sets it on the Pipecat target.
-</Warning>
+Off by default, and it works on both targets: on LiveKit since the SLNG plugin
+shipped it, and on Pipecat since `pipecat-slng` 0.5.2. It takes the provider's
+session setup off the front of every segment, which shows up most on the first
+segment of a call and on the fastest turns.
 
-Off by default. It takes the provider's session setup off the front of every
-segment, which shows up most on the first segment of a call and on the fastest
-turns.
+<Note>
+  It holds a second connection open while an utterance runs. A route that
+  already reuses a healthy connection has no setup cost to remove, so it pays
+  for the spare and gains nothing. Measure your own route with it on and off.
+</Note>
 
 ```yaml agent.yaml
 models:
@@ -149,8 +149,8 @@ models:
       language: en
       params:
         # Hold a socket open so the provider's setup is done before the text
-        # arrives. Off by default, and livekit only: on pipecat it is accepted
-        # and discarded, and unmute validate warns about it.
+        # arrives. Off by default, and it holds a second connection open while
+        # an utterance runs.
         warm_standby_enabled: true
         # Data residency. Pick the region nearest your callers.
         world_part_override: eu
@@ -316,8 +316,8 @@ models:
       language: en
       params:
         # Hold a socket open so the provider's setup is done before the text
-        # arrives. Off by default, and livekit only: on pipecat it is accepted
-        # and discarded, and unmute validate warns about it.
+        # arrives. Off by default, and it holds a second connection open while
+        # an utterance runs.
         warm_standby_enabled: true
         # Run the model near your callers. A world part, or a specific region
         # with region_override, which wins when both are set.
