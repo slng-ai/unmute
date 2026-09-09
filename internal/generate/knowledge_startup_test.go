@@ -722,8 +722,11 @@ func TestKnowledgeSettingsAreEmittedPerBase(t *testing.T) {
 			t.Errorf("emitted code still reads the global %s: settings are per base", forbidden)
 		}
 	}
-	// The splitter and the retriever both read the base's own values.
+	// The splitter and the retriever both read the base's own values. The table
+	// is typed, because an untyped one infers `str | int` for every value and ty
+	// refuses that at each int parameter it reaches.
 	for _, want := range []string{
+		`SETTINGS: dict[str, _Settings] = {`,
 		`settings = SETTINGS[name]`,
 		`chunk_size=settings["chunk_size"], chunk_overlap=settings["chunk_overlap"]`,
 		`settings = SETTINGS[name]`,

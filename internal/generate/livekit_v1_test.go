@@ -431,7 +431,10 @@ func TestV26LiveKitStaticCheckSurface(t *testing.T) {
 	// dl§V26 requires the checkers to be declared. The ruff version is pinned on
 	// purpose: unpinned, `uv` resolves whatever ruff shipped today, and 0.16
 	// widened its default rule selection enough to fail an unchanged generator.
-	for _, want := range []string{"[dependency-groups]", `"ruff==`, `"ty"`} {
+	// The floor is 3.11 because the shipped salon tools import `datetime.UTC`,
+	// and ty reads its Python version from this line: at 3.10 it reported the
+	// import as unresolved on every example.
+	for _, want := range []string{"[dependency-groups]", `"ruff==`, `"ty"`, `requires-python = ">=3.11"`} {
 		if !strings.Contains(artifactFile(t, toolFree, "pyproject.toml"), want) {
 			t.Errorf("pyproject.toml missing %q", want)
 		}
@@ -454,13 +457,24 @@ func TestV26LiveKitStaticCheckSurface(t *testing.T) {
 		") -> TracerProvider:",
 		"trace_provider: TracerProvider,",
 		"speech_metrics: Sequence[STTMetrics | TTSMetrics]",
+		// start_span returns the API span, not the SDK one on_start receives.
+		"self._turn: trace.Span | None = None",
+		// TracerProvider declares neither attribute, so a plain assignment is
+		// refused; the Pipecat template patches through setattr the same way.
+		`setattr(provider, "__unmute_turn_spans__", True)`,
 	} {
 		if !strings.Contains(configuredTracing, want) {
 			t.Errorf("configured tracing.py missing static-check-safe form %q", want)
 		}
 	}
-	if strings.Contains(configuredTracing, "TracerProvider | None") {
-		t.Error("configured tracing provider must not be typed as optional")
+	for _, forbidden := range []string{
+		"TracerProvider | None",
+		"provider.get_tracer = ",
+		"provider.__unmute_turn_spans__ = ",
+	} {
+		if strings.Contains(configuredTracing, forbidden) {
+			t.Errorf("configured tracing.py contains form ty refuses %q", forbidden)
+		}
 	}
 }
 

@@ -2340,7 +2340,7 @@ def dev_say(session, text: str, **kwargs):
 name = "unmute-remy-fixture"
 version = "0.1.0"
 description = "Generated LiveKit Agents project (unmute livekit driver)"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "httpx",
     "langfuse>=4,<5",
@@ -2416,7 +2416,7 @@ class CallTrace(SpanProcessor):
         self._attributes = attributes
         self._call: Span | None = None
         self._call_context: Context | None = None
-        self._turn: Span | None = None
+        self._turn: trace.Span | None = None
         self._turn_context: Context | None = None
         self._transcript: list[dict[str, str]] = []
 
@@ -2431,9 +2431,9 @@ class CallTrace(SpanProcessor):
     def begin(self) -> Context | None:
         """Open a turn, inside the call's trace rather than starting a new one."""
         self.end()
-        self._turn = self._tracer.start_span("turn", context=self._call_context)
-        self._turn.set_attributes(self._attributes)
-        self._turn_context = trace.set_span_in_context(self._turn)
+        turn = self._tracer.start_span("turn", context=self._call_context)
+        turn.set_attributes(self._attributes)
+        self._turn, self._turn_context = turn, trace.set_span_in_context(turn)
         return self._turn_context
 
     def end(self) -> None:
@@ -2512,8 +2512,10 @@ def install_turn_spans(provider: TracerProvider, call: CallTrace) -> None:
     if getattr(provider, "__unmute_turn_spans__", False):
         return
     get_tracer = provider.get_tracer
-    provider.get_tracer = lambda *a, **kw: TurnTracer(get_tracer(*a, **kw), call)
-    provider.__unmute_turn_spans__ = True
+    setattr(
+        provider, "get_tracer", lambda *a, **kw: TurnTracer(get_tracer(*a, **kw), call)
+    )
+    setattr(provider, "__unmute_turn_spans__", True)
 
 
 def _name_tool_spans(span: ReadableSpan) -> bool:
