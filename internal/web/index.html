@@ -492,6 +492,7 @@ function setRunState(state){
     if (!viewPinned && !flagged) showView("conversation");
   } else if (state === "failed"){
     ready = false;
+    connectionLost = false;
     el.connect.disabled = !transport && !connecting;
     if (!transport) setState("error", "error", "the agent did not start; see the output");
     if (!viewPinned) showView("logs");
@@ -635,7 +636,7 @@ function audioConstraint(){ return selectedDeviceId ? { deviceId: { exact: selec
 // Identified snapshots are the sole dev conversation source. Audio callbacks
 // retain connection and playback duties; they never guess which row owns text.
 let selectedCallID = null, connectionGeneration = 0, connecting = false;
-let locallyEnded = false;
+let locallyEnded = false, connectionLost = false;
 let feedFresh=false, historyGap=false, feedStream=null, feedSequence=0;
 const records = new Map(), recordNodes = new Map(), exchangeNodes = new Map(), messageNodes = new Map();
 
@@ -648,9 +649,11 @@ function node(tag, className, text){
 function setText(element, text){
   if (element.textContent !== text) element.textContent = text;
 }
-function ordered(parent, element, order){
+function ordered(parent, element, order, tie=0){
   element.dataset.order = String(order);
-  const before = Array.from(parent.children).find(child => child !== element && Number(child.dataset.order) > order) || null;
+  element.dataset.tie = String(tie);
+  const before = Array.from(parent.children).find(child => child !== element &&
+    (Number(child.dataset.order) > order || (Number(child.dataset.order) === order && Number(child.dataset.tie || 0) > tie))) || null;
   if (element.parentNode !== parent || element.nextElementSibling !== before) parent.insertBefore(element, before);
 }
 function clearTranscript(){
@@ -661,6 +664,7 @@ function clearTranscript(){
   records.clear(); recordNodes.clear(); exchangeNodes.clear(); messageNodes.clear();
   selectedCallID = null;
   locallyEnded = false;
+  connectionLost = false;
   historyGap = false;
   renderFeed();
   el.body.dataset.hasHistory = 'false';
@@ -714,7 +718,13 @@ function renderExchange(id){
   const view = exchangeNodes.get(id);
   if (!view) return;
   const record = records.get(id), data = record?.exchange;
-  if (record) ordered(el.tlist,view.element,record.order);
+  if (record){
+    const input=data?.role==='response' && data.link_status==='known' ? records.get('exchange:'+data.input_id) : null;
+    // Speech can be created before its input commits. A proven link places it
+    // after that input; source order keeps multiple replies to one input stable.
+    const linked=input?.exchange.role==='input';
+    ordered(el.tlist,view.element,linked?input.order:record.order,linked?record.order:0);
+  }
   let state = data?.state || 'unknown';
   if (locallyEnded && state === 'open') state = 'incomplete';
   const assistant = data?.role === 'response' || !!view.content.querySelector('[data-speaker="assistant"]');
@@ -887,10 +897,15 @@ function attachRecord(record){
   }
   else if (record.kind==='exchange'){
     exchangeNode(key,record.order);
-    renderExchange(key);
+    for (const id of exchangeNodes.keys()) renderExchange(id);
   }
   else if (record.kind==='call'){
     if (record.call.state!=='open') endConversation();
+    // The final runtime snapshot can arrive after WebRTC has disconnected.
+    if (connectionLost && ready && record.call.state==='ended'){
+      connectionLost=false;
+      setState('idle','ready','press connect and talk to your agent');
+    }
     for (const id of exchangeNodes.keys()) renderExchange(id);
   }
   renderData();
@@ -967,6 +982,11 @@ function stopMeter(){
 function teardown(state, hint){
   ++connectionGeneration;
   connecting = false;
+  connectionLost = state === 'disconnected';
+  if (connectionLost){
+    state = ready && records.get('call:call')?.call.state === 'ended' ? 'idle' : 'error';
+    hint = 'connection lost';
+  }
   endConversation();
   stopMeter();
   clearInterval(clientReadyTimer); clientReadyTimer = 0;
@@ -1188,7 +1208,7 @@ async function connectPipecat(session){
       el.remote.srcObject=e.streams[0];startMeter(e.streams[0]);
     });
     peer.addEventListener('connectionstatechange',()=>{
-      if (currentConnection(session) && ['failed','disconnected','closed'].includes(peer.connectionState)) teardown('error','connection lost');
+      if (currentConnection(session) && ['failed','disconnected','closed'].includes(peer.connectionState)) teardown('disconnected');
     });
     const channel = peer.createDataChannel('chat',{ordered:true});
     dc = channel;

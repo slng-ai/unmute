@@ -45,7 +45,7 @@ func TestPipecatV1LoggingIsConfiguredAtFirstBot(t *testing.T) {
 }
 
 // TestPipecatV1BuiltinEndCallTool covers the prebuilt end_call lowering: a
-// bodyless @tool that speaks the goodbye then ends via EndFrame, with no
+// bodyless @tool that drains the goodbye through the native worker, with no
 // url_env, handler, or httpx POST.
 func TestPipecatV1BuiltinEndCallTool(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
@@ -76,7 +76,7 @@ func TestPipecatV1BuiltinEndCallTool(t *testing.T) {
 	for _, want := range []string{
 		"async def end_call(self, params: FunctionCallParams):",
 		`"content": "Thank the caller and say goodbye."`,
-		"await params.llm.push_frame(EndFrame())",
+		"await params.result_callback({\"ended\": True})\n        await params.pipeline_worker.end()",
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing %q", want)
@@ -84,6 +84,13 @@ func TestPipecatV1BuiltinEndCallTool(t *testing.T) {
 	}
 	if strings.Contains(bot, `os.environ[""]`) {
 		t.Error("builtin tool must not emit a webhook POST")
+	}
+	body := bot[strings.Index(bot, "async def end_call("):]
+	if end := strings.Index(body, "\n\n"); end >= 0 {
+		body = body[:end]
+	}
+	if !strings.Contains(body, "run_llm=False") || strings.Contains(body, "run_llm=True") {
+		t.Error("only the tool result should trigger the goodbye")
 	}
 }
 
@@ -2673,28 +2680,42 @@ func TestV1_DailyColdTransferHandlesPrimitiveFailures(t *testing.T) {
 		t.Errorf("Daily transfer order = preflight %d, claim %d, announce %d, primitive %d", noPhoneAt, claimAt, announceAt, primitiveAt)
 	}
 
-	hangup := build(ir.OnUnavailableHangup)
-	for _, want := range []string{
-		"if error is not None:",
-		"nobody can take the call right now",
-		"The transfer could not be completed; the call is ending.",
-		"failure_error = None",
-		`logger.exception("failed to end call after transfer failure")`,
-		"await params.llm.push_frame(EndFrame())",
+	for name, hangup := range map[string]string{
+		"daily": build(ir.OnUnavailableHangup),
+		"cloud": artifactFile(t, cloudWebsocketArtifact(t, cloudWebsocketOptions{
+			inbound: true, transfer: true, connection: true,
+		}), "bot.py"),
 	} {
-		if !strings.Contains(hangup, want) {
-			t.Errorf("hangup bot.py missing %q", want)
-		}
-	}
-	terminalAt := strings.Index(hangup, `self.call_context["_transfer_result"] = {"failed": "The transfer could not be completed; the call is ending."}`)
-	if terminalAt < 0 {
-		t.Fatal("hangup bot.py has no terminal failure assignment")
-	}
-	failureBody := hangup[terminalAt:]
-	goodbyeAt := strings.Index(failureBody, "Tell the caller nobody can take the call right now")
-	endAt := strings.Index(failureBody, "await params.llm.push_frame(EndFrame())")
-	if goodbyeAt < 0 || endAt < goodbyeAt {
-		t.Error("hangup failure does not record terminal state, announce, then attempt EndFrame")
+		t.Run(name, func(t *testing.T) {
+			for _, want := range []string{
+				"nobody can take the call right now",
+				"The transfer could not be completed; the call is ending.",
+				"failure_error = None",
+				`logger.exception("failed to end call after transfer failure")`,
+				"await params.pipeline_worker.end()",
+			} {
+				if !strings.Contains(hangup, want) {
+					t.Errorf("hangup bot.py missing %q", want)
+				}
+			}
+			terminalAt := strings.Index(hangup, `self.call_context["_transfer_result"] = {"failed": "The transfer could not be completed; the call is ending."}`)
+			if terminalAt < 0 {
+				t.Fatal("hangup bot.py has no terminal failure assignment")
+			}
+			failureBody := hangup[terminalAt:]
+			goodbyeAt := strings.Index(failureBody, "Tell the caller nobody can take the call right now")
+			resultAt := strings.Index(failureBody, `await params.result_callback(self.call_context["_transfer_result"])`)
+			endAt := strings.Index(failureBody, "await params.pipeline_worker.end()")
+			if goodbyeAt < 0 || resultAt < goodbyeAt || endAt < resultAt {
+				t.Fatal("hangup failure must record terminal state, supply goodbye instructions, return the result, then drain")
+			}
+			if !strings.Contains(failureBody[:endAt], "run_llm=False") || strings.Contains(failureBody[:endAt], "run_llm=True") {
+				t.Error("only the failure result should trigger the goodbye")
+			}
+			if strings.Contains(hangup, "await params.llm.push_frame(EndFrame())") {
+				t.Error("a direct tool must drain its worker instead of stopping downstream processors")
+			}
+		})
 	}
 }
 

@@ -227,6 +227,7 @@ from livekit.agents.beta.tools import EndCallTool  # prebuilt end_call (beta)
 from livekit.agents.voice import MetricsCollectedEvent
 from livekit.plugins import {{join .PluginModules ", "}}
 
+import dev_metrics
 from dev_metrics import dev_llm_node, dev_say, install_dev_metrics
 {{if .Knowledge.Knowledge}}import knowledge
 {{end}}{{if .Tracing}}{{if eq .TracingProvider "coval"}}from tracing import setup_coval
@@ -1033,6 +1034,9 @@ class _SlngScoped:
 # --- agents ----------------------------------------------------------------
 {{range .Agents}}
 class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
+    def tts_node(self, text, model_settings):
+        return dev_metrics.dev_tts_node(self, text, model_settings)
+
 {{if not .SlngScope}}    def llm_node(self, chat_ctx, tools, model_settings):
         return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
 
@@ -1349,8 +1353,10 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
             await self._refresh_prompt()
 {{- end}}
 {{- if .Task}}
+        dev_metrics.dev_task_returned(ctx, result)
         return _task_status(result)
 {{- else if eq .Then "return"}}
+        dev_metrics.dev_task_returned(ctx, *task_results.values())
         return _group_status(task_results)
 {{- else if eq .Then "transfer"}}
         return {{.ThenClass}}(chat_ctx=owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
@@ -1371,6 +1377,9 @@ def _task_result(values: dict, {{.Unserved.Name}}: str) -> dict:
 
 class _RetryEmptyTaskResponseMixin:
     _response_tool_call_ids: set[str]
+
+    def tts_node(self, text, model_settings):
+        return dev_metrics.dev_tts_node(self, text, model_settings)
 
     async def update_chat_ctx(self, chat_ctx, *, exclude_invalid_function_calls=False):
         # History policy owns old tool records, including tools this task cannot run.
@@ -1631,6 +1640,7 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 {{- if .Transfers}}
         self._terminal_claimed = True
 {{- end}}
+        dev_metrics.dev_task_finished(ctx, _values)
         self.complete(_values)
 {{- if $.NeedsTaskGroups}}
         self._finish_call_id = ctx.function_call.call_id

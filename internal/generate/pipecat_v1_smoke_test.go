@@ -976,11 +976,20 @@ class FakeLLM:
             raise RuntimeError("announcement failed")
 
 
+class FakeWorker:
+    def __init__(self):
+        self.ends = 0
+
+    async def end(self):
+        self.ends += 1
+
+
 class Params:
     function_name = "send_to_billing"
 
     def __init__(self, llm):
         self.llm = llm
+        self.pipeline_worker = FakeWorker()
         self.results = []
 
     async def result_callback(self, result, **_kwargs):
@@ -1099,7 +1108,9 @@ async def main() -> None:
     }
     assert call_context["_transfer_result"] == terminal
     assert transport.attempts == 1
-    assert type(first.llm.frames[-1]).__name__ == "EndFrame"
+    assert first.pipeline_worker.ends == 1, "failure must still end when the goodbye request fails"
+    assert first.llm.frames[-1].run_llm is False, "the result alone should trigger the goodbye"
+    assert not any(type(frame).__name__ == "EndFrame" for frame in first.llm.frames)
 
     replay = Params(FakeLLM())
     await agent.send_to_billing(replay)
