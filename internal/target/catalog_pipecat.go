@@ -4,8 +4,9 @@ package target
 // ==1.8.0. Official services ship as pipecat-ai extras and take model/
 // voice/params nested in Class.Settings(...) (flat forms deprecated since
 // v0.0.105; verified against the per-service docs 2026-07-15). The SLNG
-// plugin is a standalone package with flat kwargs (verified against
-// github.com/slng-ai/pipecat-slng source 2026-07-15).
+// plugin is a standalone package with flat kwargs (verified against the
+// published pipecat_slng-0.5.2 wheel 2026-09-09; that release is tagged
+// v0.5.3 upstream but publishes as 0.5.2, so the pin names 0.5.2).
 
 const pipecatServicesDocs = "https://docs.pipecat.ai/api-reference/server/services/supported-services"
 
@@ -112,8 +113,8 @@ var pipecatCatalog = []Entry{
 	{
 		Framework: Pipecat, Role: Listen, Vendor: "slng",
 		Distributes: []string{"deepgram"},
-		Verified:    "2026-07-15", Docs: pipecatServicesDocs,
-		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.5.1"},
+		Verified:    "2026-09-09", Docs: pipecatServicesDocs,
+		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.5.2"},
 		Import:  "from pipecat_slng import SlngSTTService",
 		Call: &CallSpec{
 			Class: "SlngSTTService", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",
@@ -266,8 +267,8 @@ var pipecatCatalog = []Entry{
 	{
 		Framework: Pipecat, Role: Speak, Vendor: "slng",
 		Distributes: []string{"cartesia", "deepgram"},
-		Verified:    "2026-07-15", Docs: pipecatServicesDocs,
-		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.5.1"},
+		Verified:    "2026-09-09", Docs: pipecatServicesDocs,
+		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.5.2"},
 		Import:  "from pipecat_slng import SlngTTSService",
 		Call: &CallSpec{
 			Class: "SlngTTSService", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",

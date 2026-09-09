@@ -85,14 +85,14 @@ is no models listing endpoint, so a route has to be tried.
 
 ### 3. Hold the TTS socket open
 
-**LiveKit only.** The SLNG plugin does not implement it as of `pipecat-slng`
-0.5.1, and a `params:` block reaches the plugin verbatim, so on Pipecat the
-setting is accepted and discarded with no error. `unmute validate` warns. Do not author it on a package
-that only ships to Pipecat.
+Both targets. LiveKit since the SLNG plugin shipped it, Pipecat since
+`pipecat-slng` 0.5.2, which is the catalog floor.
 
 Off by default. It removes the provider's session setup from the front of every
 segment, which shows up most on the first segment of a call and on the fastest
-turns.
+turns. It holds a second connection open while an utterance runs, so a route
+that already reuses a healthy connection has no setup cost to remove and pays
+for the spare. Measure the route with it on and off before authoring it.
 
 ```yaml
 models:
@@ -103,10 +103,11 @@ models:
         warm_standby_enabled: true
 ```
 
-The plugin reports `standby_used` per segment, so whether it engaged is
-observable rather than assumed. Note what it does *not* do: LiveKit's
-`tts ttfb` tracks synthesis alone and never contained the connection handshake,
-so the saving on the socket wait is not all caller-visible.
+On LiveKit the plugin reports `standby_used` per segment, so whether it engaged
+is observable rather than assumed; the Pipecat plugin reports no equivalent, so
+there it is measured on the call or not at all. Note what it does *not* do:
+LiveKit's `tts ttfb` tracks synthesis alone and never contained the connection
+handshake, so the saving on the socket wait is not all caller-visible.
 
 ### 4. Set the silence window deliberately
 
@@ -169,9 +170,14 @@ with LiveKit's column; the inconsistency is the finding.
 That third stage was the largest until recently. A transcriber that never marks a
 transcript final leaves Pipecat waiting out a safety-net timer, one second by
 default, however fast the transcript arrived. Every Unmute package hit that until
-`pipecat-slng` 0.5.0; the Pipecat catalog rows now require 0.5.1 or newer. If you are
+`pipecat-slng` 0.5.0; the Pipecat catalog rows now require 0.5.2 or newer. If you are
 reading old advice that says `stop_secs` is the real window on Pipecat, that was
 true of the setting and not of the wait.
+
+A second wait of the same shape survived until 0.5.2. The bridge ends an
+utterance with `audio_end`, and the plugin was ending one only on `flushed`,
+which the Deepgram and Gradium routes never send, so every turn waited out the
+stop-frame timeout and the last words could be cut.
 
 `interruption.minimum_words` used to swap the default stop strategy for a plain
 timeout, which dropped the Smart Turn classifier and made turn taking worse. It
