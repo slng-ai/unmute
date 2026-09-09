@@ -98,10 +98,7 @@ func resolveHosted(
 	requires generate.Requirements, resources slngResources,
 ) []resolvedTool {
 	toolsChecked := checked(resources.Unchecked, target.SlngToolList)
-	catalogue := make([]string, 0, len(resources.Tools))
-	for _, tool := range resources.Tools {
-		catalogue = append(catalogue, tool.Name)
-	}
+	catalogue := hostedNames(resources.Tools)
 
 	resolved := make([]resolvedTool, 0, len(requires.Hosted))
 	for _, requirement := range requires.Hosted {
@@ -135,6 +132,15 @@ func resolveOneHosted(
 
 	candidates := eligibleTools(requirement.Name, resources.Tools)
 	switch {
+	case len(candidates) == 0 && slices.ContainsFunc(resources.Tools, func(tool slngAccountTool) bool {
+		return tool.Name == requirement.Name && !attachableByReference(tool)
+	}):
+		// The name is in the listing, as a capability SLNG curates. Calling it
+		// absent and then listing it as present is what this used to do.
+		found.State = wrongKind
+		found.Detail = curatedHostedDetail(requirement.Name)
+		out.finding = found
+		return out
 	case len(candidates) == 0:
 		found.State = absent
 		found.NearMiss = nearMiss(requirement.Name, catalogue)
@@ -178,9 +184,7 @@ func resolveOneHosted(
 	}
 	if identity.Source == "curated" {
 		found.State = wrongKind
-		found.Detail = fmt.Sprintf(
-			"this is a capability SLNG curates rather than a tool this organisation owns, and it has no published definition to attach by version: reach it with `builtin: %s` instead, which resolves by name and needs no version",
-			requirement.Name)
+		found.Detail = curatedHostedDetail(requirement.Name)
 		out.finding = found
 		return out
 	}

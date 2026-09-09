@@ -1107,3 +1107,66 @@ func TestMCPHealthIsThePlatformsOwnWord(t *testing.T) {
 		}
 	}
 }
+
+// GATE. A `slng:` reference to a curated capability is refused as the wrong
+// kind, and a curated name never appears in an "it has" list.
+//
+// Live organisation, 2026-09-09: `slng: user_phone_number` was refused with
+// "this organisation has no tool of this name (it has ..., `user_phone_number`,
+// ...)". The resolver rightly attaches only the organisation's own `code` and
+// `api_request` tools, but the list it printed was the whole listing, so the
+// sentence named the missing tool as present. Only `end_call` is reachable from
+// a package, as `builtin: end_call`; the rest are attached in the dashboard.
+func TestHostedReferenceToACuratedNameSaysSo(t *testing.T) {
+	resources := account()
+	resources.Tools = append(resources.Tools,
+		slngAccountTool{ID: "t1", Name: "check_order", Scope: "organisation", ToolType: "code", LatestVersion: 1},
+		slngAccountTool{ID: "g1", Name: "user_phone_number", Scope: "global", ToolType: "user_phone_number", LatestVersion: 1},
+	)
+	requirement := need("user_phone_number")
+	requirement.Source = "user_phone_number"
+
+	cases := []struct {
+		name  string
+		found finding
+	}{
+		{"resolve", resolveHosted(nil, nil, generate.Requirements{Hosted: []generate.Requirement{requirement}}, resources)[0].finding},
+		{"compare", compareHosted(requirement, resources.Tools, true)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.found.State != wrongKind {
+				t.Errorf("state %v, want wrongKind: %s", tc.found.State, tc.found.Detail)
+			}
+			for _, want := range []string{"curated", "`builtin: end_call`", "dashboard"} {
+				if !strings.Contains(tc.found.Detail, want) {
+					t.Errorf("detail lacks %q: %s", want, tc.found.Detail)
+				}
+			}
+			if strings.Contains(tc.found.Detail, "it has") {
+				t.Errorf("a curated name is refused for what it is, not listed as absent: %s", tc.found.Detail)
+			}
+		})
+	}
+
+	// The other half: a name nobody has still gets the list, and the list holds
+	// only what a `slng:` reference can attach.
+	unknown := need("refund")
+	unknown.Source = "refund"
+	for _, tc := range []struct {
+		name  string
+		found finding
+	}{
+		{"resolve", resolveHosted(nil, nil, generate.Requirements{Hosted: []generate.Requirement{unknown}}, resources)[0].finding},
+		{"compare", compareHosted(unknown, resources.Tools, true)},
+	} {
+		t.Run(tc.name+"/unknown", func(t *testing.T) {
+			if tc.found.State != absent {
+				t.Errorf("state %v, want absent: %s", tc.found.State, tc.found.Detail)
+			}
+			if !strings.Contains(tc.found.Detail, "(it has `check_order`)") {
+				t.Errorf("the list should hold only the organisation's own code and api_request tools: %s", tc.found.Detail)
+			}
+		})
+	}
+}
