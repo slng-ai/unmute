@@ -133,8 +133,11 @@ async def run(args: argparse.Namespace) -> None:
         api_key=os.environ["OPENAI_API_KEY"], model=model, reasoning_effort="none"
     )
     async with AgentSession(userdata=generated.Userdata(), llm=llm) as session:
-        await generated._prefetch(session.userdata, None)
-        print("prefetch:", state_of(session.userdata))
+        # A package that declares no `prefetch:` emits no _prefetch at all.
+        prefetch = getattr(generated, "_prefetch", None)
+        if prefetch is not None:
+            await prefetch(session.userdata, None)
+            print("prefetch:", state_of(session.userdata))
         # initial=False takes the handoff branch of on_enter, which opens with a
         # model turn rather than the greeting session.say would speak; there is
         # no TTS here to speak it.

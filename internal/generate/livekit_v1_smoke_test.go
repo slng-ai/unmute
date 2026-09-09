@@ -1754,3 +1754,200 @@ async def main():
 
 asyncio.run(main())
 `
+
+// TestSmokeLiveKitHarnessRecoversAGroupStepHandoff runs
+// scripts/text_run_livekit.py itself, because that harness drives the emitted
+// agent through session.run(), which is the one place a group step's handoff
+// surfaces as _TaskTransfer (RunResult reads a task completed with an exception
+// as a failed run). The sibling test above proves the deployed path, where no
+// RunResult exists, so it passes with or without the harness's recovery.
+// Reverting that recovery makes this test exit non-zero.
+func TestSmokeLiveKitHarnessRecoversAGroupStepHandoff(t *testing.T) {
+	if _, err := exec.LookPath("uv"); err != nil {
+		t.Skip("uv not available")
+	}
+	pkg, err := spec.Load(examplePackagePath("remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addLiveKitGroupStepHandoff(agent)
+	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
+	tgt.Version = "1.6.10"
+	artifact, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The harness takes a package directory and reads <pkg>/build/livekit.
+	dir := t.TempDir()
+	build := filepath.Join(dir, "pkg", "build", "livekit")
+	for _, file := range artifact.Files {
+		path := filepath.Join(build, file.Path)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, file.Content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	harness, err := os.ReadFile(filepath.Join("..", "..", "scripts", "text_run_livekit.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "text_run_livekit.py"), harness, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	script := withKnowledgeStub(livekitHarnessGroupHandoffSmokeScript)
+	if err := os.WriteFile(filepath.Join(dir, "smoke_check.py"), []byte(script), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("uv", "run", "--project", filepath.Join("pkg", "build", "livekit"), "python", "smoke_check.py")
+	cmd.Dir = dir
+	raw, err := cmd.CombinedOutput()
+	out := string(raw)
+	if err != nil {
+		t.Fatalf("the harness did not survive a group step's handoff: %v\n%s", err, out)
+	}
+	t.Logf("%s", out)
+
+	// 1 + 2: the recovery branch ran, so _TaskTransfer was raised and caught.
+	const handoffLine = "[handoff] -> Greeter (from a group step)"
+	handoff := strings.Index(out, handoffLine)
+	if handoff < 0 {
+		t.Fatalf("the harness never reported a group step's handoff:\n%s", out)
+	}
+	if got := strings.Count(out, "(from a group step)"); got != 1 {
+		t.Errorf("group-step handoff reported %d times, want 1", got)
+	}
+	// 3: the receiving agent is active once the handoff has landed.
+	rest := out[handoff:]
+	if !strings.HasPrefix(strings.TrimLeft(rest[len(handoffLine):], " \n"), "[assistant]") {
+		t.Errorf("the receiving agent did not speak after the handoff:\n%s", rest)
+	}
+	active := strings.Index(rest, "active agent: Greeter")
+	if active < 0 {
+		t.Fatalf("the caller did not reach the greeter after the handoff:\n%s", rest)
+	}
+	// 4: a later caller line still gets a reply, on the receiving agent.
+	tail := rest[active:]
+	next := strings.Index(tail, "=== turn")
+	if next < 0 {
+		t.Fatalf("no caller turn ran after the handoff:\n%s", tail)
+	}
+	for _, want := range []string{"[assistant]", "active agent: Greeter"} {
+		if !strings.Contains(tail[next:], want) {
+			t.Errorf("the turn after the handoff is missing %q:\n%s", want, tail[next:])
+		}
+	}
+	if !strings.Contains(out, "=== final state") {
+		t.Errorf("the harness did not finish every caller line:\n%s", out)
+	}
+}
+
+// livekitHarnessGroupHandoffSmokeScript calls the real harness's own run() with
+// a probe model in place of the package's openai binding, so the loop under
+// test is the shipped one and nothing here re-implements it.
+const livekitHarnessGroupHandoffSmokeScript = `"""Smoke check: the text harness survives a group step's handoff."""
+import argparse
+import asyncio
+import json
+import os
+import sys
+
+ROOT = os.path.abspath(".")
+PKG = os.path.join(ROOT, "pkg")
+BUILD = os.path.join(PKG, "build", "livekit")
+
+with open(os.path.join(BUILD, "compile-report.json")) as report:
+    for name in json.load(report)["required_env"]:
+        os.environ.setdefault(name, "smoke-placeholder")
+os.environ.setdefault("OPENAI_API_KEY", "smoke-placeholder")
+
+import text_run_livekit as harness  # noqa: E402
+
+sys.path.insert(0, BUILD)
+os.chdir(BUILD)
+
+import agent as generated  # noqa: E402
+from livekit.agents import DEFAULT_API_CONNECT_OPTIONS, llm  # noqa: E402
+from livekit.plugins import openai  # noqa: E402
+
+generated.slng.TTS = lambda **kwargs: None
+
+
+class ProbeStream(llm.LLMStream):
+    def __init__(self, llm_instance, *, chat_ctx, tools, delta):
+        super().__init__(
+            llm_instance, chat_ctx=chat_ctx, tools=tools, conn_options=DEFAULT_API_CONNECT_OPTIONS
+        )
+        self.delta = delta
+
+    async def _run(self):
+        self._event_ch.send_nowait(llm.ChatChunk(id="probe", delta=self.delta))
+
+
+def _call(name):
+    return llm.ChoiceDelta(
+        role="assistant",
+        tool_calls=[llm.FunctionToolCall(name=name, arguments="{}", call_id=name)],
+    )
+
+
+class ProbeLLM(llm.LLM):
+    """Reach the group's first step, hand off out of it, then just talk."""
+
+    def __init__(self):
+        super().__init__()
+        self.handed_off = False
+
+    @property
+    def model(self):
+        return "harness-handoff-probe"
+
+    @property
+    def provider(self):
+        return "test"
+
+    def chat(self, *, chat_ctx, tools=None, conn_options=DEFAULT_API_CONNECT_OPTIONS, **kwargs):
+        del conn_options, kwargs
+        tools = tools or []
+        names = {getattr(getattr(tool, "info", None), "name", "") for tool in tools}
+        if "do_reserve" in names:
+            delta = _call("do_reserve")
+        elif "finish" in names and "back_to_greeter" in names:
+            # A step's opening turn withholds its handoffs, so this is its second.
+            self.handed_off = True
+            delta = _call("back_to_greeter")
+        elif "to_reservations" in names and not self.handed_off:
+            delta = _call("to_reservations")
+        else:
+            delta = llm.ChoiceDelta(role="assistant", content="Go on, I am listening.")
+        return ProbeStream(self, chat_ctx=chat_ctx, tools=tools, delta=delta)
+
+
+openai.LLM = lambda **kwargs: ProbeLLM()
+
+asyncio.run(
+    harness.run(
+        argparse.Namespace(
+            package=PKG,
+            line=[
+                # Turn 1 reaches the group's first step, turn 2 hands off out
+                # of it, and turns 3 and 4 have to still get a reply.
+                "A table for two tonight, please.",
+                "Yes, tonight.",
+                "Actually, I want to start over.",
+                "Thanks for your help.",
+            ],
+            from_number="+15005550006",
+            model="harness-handoff-probe",
+        )
+    )
+)
+print("livekit harness group handoff smoke ok")
+`
