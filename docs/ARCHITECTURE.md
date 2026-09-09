@@ -169,21 +169,40 @@ path, including an interrupt during a build.
 
 ## Measurement boundary
 
-The emitted agent measures its own turns and prints one framed line per turn to
-stdout. The Go dev server reads those lines off the output it already relays. The
-line is the boundary: `internal/devmetrics` owns its shape in Go and is the only
-decoder, each target's `dev_metrics.py` is the producer, and neither imports the
-other. That makes it a contract two languages have to agree on, so it is written
-down and covered by an agreement test rather than inferred.
+The emitted agent prints a flushed, framed stdout line whenever recognized or
+generated text, activity, or a measurement changes. The line is the boundary:
+`internal/devmetrics` owns the typed Go contract and decoder; each target's
+`dev_metrics.py` produces it. Agreement fixtures and SDK smoke tests hold the
+two languages to the same contract.
+
+V2 records are full snapshots of calls, exchanges, text segments, operations,
+or measurements. A call ID, entity ID, revision and creation order let the page
+replace the right entity without guessing from words or arrival time. The dev
+bootstrap selects the call before media connects: LiveKit uses the room name;
+Pipecat receives the issued ID in its offer request data. Text finality, model
+completion, tool outcome and audio playback remain separate facts. Available
+SDK request identities determine model-call counts; an aggregate measurement
+alone cannot establish a count. Unknown associations stay unassigned.
+
+The existing `/api/events` SSE feed carries records and runtime output. Its
+bounded replay buffer counts full serialized event bytes. Server identity and
+data sequence identify the replay cursor; state and gap controls carry no SSE
+ID. Overflow closes the affected subscriber without blocking the producer.
+Eviction, restart or a missing sequence makes history visibly incomplete for
+the selected call, even after individual entities receive fresh snapshots.
+The audio connection stays separate. Old unversioned turn/session records remain
+readable in logs and do not attach to the identified conversation.
 
 Producers ship in every artifact and stay inert unless `UNMUTE_DEV_METRICS` is
 set, which only `unmute dev` does. Emitting them conditionally would make
 `build/<target>/` depend on which command last ran.
 
-Measurement stays inside the machine that produced it. There is no exporter, no
-collector, and no endpoint. Trace export to an external collector remains a
-separate opt-in feature, and the measurement path is built to read each
-framework's own events so that it cannot disturb it.
+This display path adds no external exporter or collector. The local
+`build/<target>/dev.log` contains the raw records, including recognized and
+generated transcript text; the visible measurement filter omits repeated text
+fragments. Dev records exclude audio, reasoning, prompts, tool payloads and
+secrets. Trace export remains a separate opt-in feature. Observation preserves
+the framework's native results, chunks, cancellation and speech handles.
 
 ## State and deployment boundaries
 
@@ -216,7 +235,7 @@ Start with these files rather than scanning the whole tree.
 | Driver dispatch and emitted artifacts | `internal/generate/artifact.go` |
 | LiveKit driver | `internal/generate/livekit_v1*.go`, `internal/generate/templates/livekit_v1/` |
 | Pipecat driver | `internal/generate/pipecat_v1*.go`, `internal/generate/templates/pipecat_v1/` |
-| Turn measurement contract | `internal/devmetrics/`, each driver's `dev_metrics.py.tmpl` |
+| Dev conversation and measurement contract | `internal/devmetrics/`, each driver's `dev_metrics.py.tmpl` |
 | Interactive console and styles | `internal/tui/`, `internal/style/` |
 | Package scaffolding | `internal/scaffold/` |
 | Shipped coding-agent skill | `internal/skill/assets/` |

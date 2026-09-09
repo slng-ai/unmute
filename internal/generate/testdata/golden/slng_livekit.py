@@ -32,7 +32,7 @@ from livekit.agents import (
 from livekit.agents.voice import MetricsCollectedEvent
 from livekit.plugins import deepgram, elevenlabs, openai, silero
 
-from dev_metrics import install_dev_metrics
+from dev_metrics import dev_llm_node, dev_say, install_dev_metrics
 
 
 logger = logging.getLogger("safe-core-fixture")
@@ -738,7 +738,7 @@ class _SlngScoped:
     _slng_scope: str
 
     def llm_node(self, chat_ctx, tools, model_settings):
-        return _slng_llm_node(self, chat_ctx, tools, model_settings)
+        return dev_llm_node(self, _slng_llm_node, chat_ctx, tools, model_settings)
 
 
 # --- agents ----------------------------------------------------------------
@@ -796,7 +796,7 @@ class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
         # caller asked for another one (B: salon handoffs, 2026-08-20).
             self.session.generate_reply(tools=[t.id for t in self.tools if t.id not in {"to_billing"}])
             return
-        await self.session.say("Hi, you have reached Acme Support. How can I help you today?")
+        await dev_say(self.session, "Hi, you have reached Acme Support. How can I help you today?")
     @function_tool
     async def lookup_customer(self, ctx: RunContext, email: Annotated[str, Field(description="Caller email address")], phone: Annotated[str, Field(description="Caller phone number in E.164 form")]) -> dict:
         """Look up a customer record by phone number or email. Returns the customer id and name."""
@@ -913,8 +913,8 @@ class _RetryEmptyTaskResponseMixin:
                 if getattr(self, "_slng_scope", None)
                 else Agent.default.llm_node
             )
-            async for chunk in node(
-                self, request_chat_ctx, request_tools, model_settings
+            async for chunk in dev_llm_node(
+                self, node, request_chat_ctx, request_tools, model_settings
             ):
                 if isinstance(chunk, str):
                     has_response = has_response or bool(chunk.strip())
@@ -1156,7 +1156,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     # Inert unless the dev loop set UNMUTE_DEV_METRICS. Reads session events, so
     # it never touches the tracer provider an opt-in trace export would own.
-    install_dev_metrics(session)
+    install_dev_metrics(session, call_id=ctx.room.name)
 
     @session.on("metrics_collected")
     def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:

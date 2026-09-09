@@ -28,7 +28,7 @@ from livekit.agents.beta.workflows import TaskCompletedEvent, TaskGroup
 from livekit.agents.voice import MetricsCollectedEvent
 from livekit.plugins import openai, silero, slng
 
-from dev_metrics import install_dev_metrics
+from dev_metrics import dev_llm_node, dev_say, install_dev_metrics
 
 
 logger = logging.getLogger("remy-fixture")
@@ -566,6 +566,9 @@ async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent) -> Non
 # --- agents ----------------------------------------------------------------
 
 class Events(Agent):
+    def llm_node(self, chat_ctx, tools, model_settings):
+        return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
+
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(
             instructions=EVENTS_PROMPT,
@@ -611,6 +614,9 @@ class Events(Agent):
 
 
 class Greeter(Agent):
+    def llm_node(self, chat_ctx, tools, model_settings):
+        return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
+
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN, initial: bool = False) -> None:
         self._initial = initial
         super().__init__(
@@ -630,7 +636,7 @@ class Greeter(Agent):
         # caller asked for another one (B: salon handoffs, 2026-08-20).
             self.session.generate_reply(tools=[t.id for t in self.tools if t.id not in {"to_reservations", "to_events"}])
             return
-        await self.session.say("Hi, this is Remy at Fern and Oak. Are you booking a table, or planning a private event?")
+        await dev_say(self.session, "Hi, this is Remy at Fern and Oak. Are you booking a table, or planning a private event?")
 
     @function_tool
     async def to_reservations(self, ctx: RunContext):
@@ -644,6 +650,9 @@ class Greeter(Agent):
 
 
 class Reservations(Agent):
+    def llm_node(self, chat_ctx, tools, model_settings):
+        return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
+
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(
             instructions=RESERVATIONS_PROMPT,
@@ -756,8 +765,8 @@ class _RetryEmptyTaskResponseMixin:
         request_chat_ctx = chat_ctx
         for attempt in range(3):
             has_response = False
-            async for chunk in Agent.default.llm_node(
-                self, request_chat_ctx, request_tools, model_settings
+            async for chunk in dev_llm_node(
+                self, Agent.default.llm_node, request_chat_ctx, request_tools, model_settings
             ):
                 if isinstance(chunk, str):
                     has_response = has_response or bool(chunk.strip())
@@ -1011,7 +1020,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     # Inert unless the dev loop set UNMUTE_DEV_METRICS. Reads session events, so
     # it never touches the tracer provider an opt-in trace export would own.
-    install_dev_metrics(session)
+    install_dev_metrics(session, call_id=ctx.room.name)
 
     @session.on("metrics_collected")
     def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:

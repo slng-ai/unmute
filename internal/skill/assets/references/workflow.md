@@ -193,29 +193,51 @@ A phone call is verified after deploy, against a real carrier, never with
 `unmute dev`. See `telephony.md` and `transfers.md` for what that means for a
 route and for a transfer.
 
-A dev run changes nothing outside the machine. It touches no carrier account, no
-phone number, and no deployed agent, so there is nothing for it to undo on the
-way out.
+`unmute dev` does not provision carrier resources or change a deployed agent.
+Configured model and tool calls still run, with their existing effects.
 
-**When the question is latency, do not guess.** A dev run measures every turn
-and shows the numbers under it in the browser: end to end, time to first byte per
-service, how long the reply took to stream out, and how long each tool took.
-Controls are left out of that last one on purpose: a task or a transfer hands
-the conversation on rather than doing work, and a task's own call lasts as long as
-the whole flow it started. The
-same records are in the run's log, one JSON line per turn, so this answers "which
-part was slow" without reading the whole log:
+**When the question is latency, read the available measurements.** The dev page
+streams caller text, generated reply text, running tools and native timing
+values as they arrive. Caller finality does not wait for the model. Generated
+text can be ahead of audio; retained words after an interruption are not proof
+that every word was spoken.
+
+Numbered SDK model calls show first response and full request duration at a
+glance, alongside reply latency, TTS first audio and tool duration. Debug details
+holds secondary timings such as speech duration and node timings, plus source
+metadata. Definitions live in the latency guide. Explicit task retries count
+as separate SDK calls; hidden provider retries do not. Never add overlapping
+stage timings to derive reply latency, which ends at runtime audio and excludes
+browser delivery. LiveKit's native node timings belong to the response step,
+not an arbitrary request. Pipecat audio-latency summaries without a proven
+response ID stay unassigned. Call first speech is separate, with its source's
+start boundary explained.
+
+Tools keep their own call identity through late results and repeated names.
+An intermediate result stays running; returned does not prove business success.
+Task and handoff controls are excluded from business tool timings. Only captured
+measurements are shown; missing and pending values have no placeholder. Measured
+zero stays visible. Missing coverage or a history gap labels model-call counts
+as observed even if some values recover.
+
+The local log carries identified v2 snapshots with revisions. Inspect only the
+measurement records with:
 
 ```sh
-grep '"kind":"turn"' build/<target>/dev.log
+grep '"kind":"measurement"' build/<target>/dev.log
 ```
 
-A value that is missing was not reported by that target rather than being zero.
-Nothing is sent anywhere; the measurements never leave the machine.
+`dev.log` also contains transcript snapshots. Normalized dev records exclude
+audio, reasoning, prompts and tool arguments/results; ordinary SDK output may
+contain other data. This dev path adds no exporter and stays separate from
+configured providers and optional tracing. Existing call-verification guidance
+still applies; a replay check does not describe a real caller's conversation.
 
-The browser also has a second view carrying everything the run printed, and it
-opens before the runtime starts, so a container build that fails is something to
-read there rather than a silent exit.
+Conversation and Logs share one media connection. Feed reconnects retain the
+conversation and expose unrecoverable gaps; they do not reconnect the mic.
+Scrolling back keeps the reading position, and Latest resumes following.
+The logs view is available while the runtime starts so startup failures remain
+readable.
 
 ## What to state when you finish
 

@@ -46,3 +46,12 @@ bin/
 # Python bytecode (emitted projects, smoke-test venvs)
 *.pyc
 .claude/worktrees/
+
+# Local build and test caches
+*.exe
+*.test
+*.out
+.venv/
+*.egg-info/
+node_modules/
+*.log

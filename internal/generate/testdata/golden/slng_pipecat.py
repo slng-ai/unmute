@@ -55,7 +55,7 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
 from pipecat.workers.runner import WorkerRunner
 
-from dev_metrics import dev_metrics_observer
+from dev_metrics import install_dev_metrics
 
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -752,28 +752,44 @@ def build_billing_tts():
 class BillingAgent(LLMWorker):
     """Agent: billing."""
 
-    def __init__(self, state=None, context=None, call_context=None, *, slng_session_id) -> None:
+    def __init__(self, state=None, context=None, call_context=None, dev_metrics=None, *, slng_session_id) -> None:
         self.state = state
-        self.context = context
+        if context is not None:
+            self.context = context
         # Kept on self because a task's headers are swapped in from a method
         # body, where the constructor's parameter is out of scope, and a whole
         # header dict has to carry this along with the scope.
         self._slng_session_id = slng_session_id
 
         llm = build_billing_llm(state, slng_session_id=slng_session_id)
-        super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
+        tts = build_billing_tts()
+        self._dev = dev_metrics
+        if self._dev:
+            self._dev.observe_llm(llm)
+            self._dev.observe_tts(tts)
+        super().__init__("billing", llm=llm, pipeline=Pipeline([llm, tts]), bridged=())
+
+    async def queue_frame(self, frame, *args, **kwargs) -> None:
+        if self._dev:
+            self._dev.stamp(frame)
+        await super().queue_frame(frame, *args, **kwargs)
 
     async def on_activated(self, args) -> None:
-        await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(system_instruction=BILLING_PROMPT,
-                extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:billing", "X-Slng-Session-Id": self._slng_session_id}}),
-        ))
-        await super().on_activated(args)
-        # Pipecat 1.8 only runs on activation when messages are nonempty.
-        # A handoff already shaped the shared context; request the reply
-        # without adding a synthetic message or waiting for the caller.
-        if args and args.get("run_llm") and not args.get("messages"):
-            await self.queue_frame(LLMRunFrame())
+        token = self._dev.enter_activation(args) if self._dev else None
+        try:
+            await self.queue_frame(LLMUpdateSettingsFrame(
+                delta=LLMSettings(system_instruction=BILLING_PROMPT,
+                    extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:billing", "X-Slng-Session-Id": self._slng_session_id}}),
+            ))
+            await super().on_activated(args)
+            # Pipecat 1.8 only runs on activation when messages are nonempty.
+            # A handoff already shaped the shared context; request the reply
+            # without adding a synthetic message or waiting for the caller.
+            if args and args.get("run_llm") and not args.get("messages"):
+                await self.queue_frame(LLMRunFrame())
+        finally:
+            if self._dev:
+                self._dev.exit_activation(token)
 
 
 
@@ -819,28 +835,44 @@ def build_intake_tts():
 class IntakeAgent(LLMWorker):
     """Agent: intake."""
 
-    def __init__(self, state=None, context=None, call_context=None, *, slng_session_id) -> None:
+    def __init__(self, state=None, context=None, call_context=None, dev_metrics=None, *, slng_session_id) -> None:
         self.state = state
-        self.context = context
+        if context is not None:
+            self.context = context
         # Kept on self because a task's headers are swapped in from a method
         # body, where the constructor's parameter is out of scope, and a whole
         # header dict has to carry this along with the scope.
         self._slng_session_id = slng_session_id
 
         llm = build_intake_llm(state, slng_session_id=slng_session_id)
-        super().__init__("intake", llm=llm, pipeline=Pipeline([llm, build_intake_tts()]), bridged=())
+        tts = build_intake_tts()
+        self._dev = dev_metrics
+        if self._dev:
+            self._dev.observe_llm(llm)
+            self._dev.observe_tts(tts)
+        super().__init__("intake", llm=llm, pipeline=Pipeline([llm, tts]), bridged=())
+
+    async def queue_frame(self, frame, *args, **kwargs) -> None:
+        if self._dev:
+            self._dev.stamp(frame)
+        await super().queue_frame(frame, *args, **kwargs)
 
     async def on_activated(self, args) -> None:
-        await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(system_instruction=INTAKE_PROMPT,
-                extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": self._slng_session_id}}),
-        ))
-        await super().on_activated(args)
-        # Pipecat 1.8 only runs on activation when messages are nonempty.
-        # A handoff already shaped the shared context; request the reply
-        # without adding a synthetic message or waiting for the caller.
-        if args and args.get("run_llm") and not args.get("messages"):
-            await self.queue_frame(LLMRunFrame())
+        token = self._dev.enter_activation(args) if self._dev else None
+        try:
+            await self.queue_frame(LLMUpdateSettingsFrame(
+                delta=LLMSettings(system_instruction=INTAKE_PROMPT,
+                    extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": self._slng_session_id}}),
+            ))
+            await super().on_activated(args)
+            # Pipecat 1.8 only runs on activation when messages are nonempty.
+            # A handoff already shaped the shared context; request the reply
+            # without adding a synthetic message or waiting for the caller.
+            if args and args.get("run_llm") and not args.get("messages"):
+                await self.queue_frame(LLMRunFrame())
+        finally:
+            if self._dev:
+                self._dev.exit_activation(token)
 
 
 
@@ -853,6 +885,7 @@ class IntakeAgent(LLMWorker):
         await self.activate_worker(
             "billing",
             args=LLMWorkerActivationArgs(
+                metadata=self._dev.activation_metadata() if self._dev else None,
                 messages=[],
                 run_llm=True,
             ),
@@ -1161,7 +1194,7 @@ def build_stt():
     )
 
 
-async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
+async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev) -> None:
     require_env()
     call_context = {}
     # One SLNG Context Router session id per call, passed as an argument from here
@@ -1177,7 +1210,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     # key, no network hop; the turn binding in targets.yaml is advisory.
     context = LLMContext()
     state = build_state(call_context)
-    agents = [BillingAgent(state=state, context=context, call_context=call_context, slng_session_id=slng_session_id), IntakeAgent(state=state, context=context, call_context=call_context, slng_session_id=slng_session_id)]
+    agents = [BillingAgent(state=state, context=context, call_context=call_context, dev_metrics=dev, slng_session_id=slng_session_id), IntakeAgent(state=state, context=context, call_context=call_context, dev_metrics=dev, slng_session_id=slng_session_id)]
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -1217,10 +1250,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         ),
     )
     bridge = BusBridgeProcessor(bus=runner.bus, worker_name=MAIN_NAME, name=f"{MAIN_NAME}::BusBridge")
+    dev.observe_aggregators(user_aggregator, assistant_aggregator)
     pipeline = Pipeline(
         [
             transport.input(),
-            build_stt(),
+            dev.observe_stt(build_stt()),
             user_aggregator,
             bridge,
             transport.output(),
@@ -1232,7 +1266,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         name=MAIN_NAME,
         # The worker builds its own latency observer only when tracing is enabled,
         # and does not re-expose its events, so this one is always ours.
-        observers=[dev_metrics_observer()],
+        observers=dev.observers(),
 
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )
@@ -1328,6 +1362,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     if worker_start_error is not None:
         raise worker_start_error
 
+
+
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
+    dev = install_dev_metrics(runner_args)
+    try:
+        await _run_bot(transport, runner_args, dev)
+    except Exception:
+        dev.finish(error=True)
+        raise
+    finally:
+        dev.finish()
 
 
 async def bot(runner_args: RunnerArguments) -> None:

@@ -1494,7 +1494,7 @@ func TestF3PipecatSingleAgentInline(t *testing.T) {
 	for _, want := range []string{
 		"async def lookup_customer(params: FunctionCallParams", // tool as a module-level direct function
 		"context = LLMContext(tools=[",                         // tools registered on the context
-		"build_appointment_desk_llm(),",                        // LLM inline in the pipeline
+		"dev.observe_llm(build_appointment_desk_llm()),",       // LLM inline in the pipeline
 		"worker = PipelineWorker(",                             // a plain PipelineWorker, no bus
 		`await worker.queue_frame(TTSSpeakFrame(`,              // text greeting queued directly
 	} {

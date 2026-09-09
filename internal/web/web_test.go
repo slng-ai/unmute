@@ -1,11 +1,6 @@
-// The dev page is one embedded file with no test runner, and adding one would
-// introduce a JavaScript toolchain this repository does not have anywhere else.
-// So the tests below assert that the shipped page still contains the code that
-// implements a behaviour; they cannot prove that pressing a key does the right
-// thing. That limit is a recorded decision, not an oversight: see the Assumptions
-// section of specs/016-dev-ui-metrics-logs/spec.md, which makes the manual
-// walkthrough in that feature's quickstart.md the gate for interface behaviour.
-// Treat these as tripwires against silent deletion, and walk the page by hand.
+// These Go-only checks guard the shipped page's protocol and asset boundaries.
+// They do not execute JavaScript. TestSmokeDevUIStreaming runs the unchanged
+// page in a real browser behind the smoke tag; the normal suite needs no Node.
 package web
 
 import (
@@ -27,31 +22,19 @@ func page(t *testing.T) string {
 	return string(raw)
 }
 
-func TestV16PipecatUsesRTVI2SegmentUpdates(t *testing.T) {
+func TestPipecatKeepsReadinessAndForwardsTheCallID(t *testing.T) {
 	source := page(t)
 	for _, want := range []string{
 		`type:"client-ready"`,
 		`version:"2.0.0"`,
-		`new Map()`,
-		`t === "bot-output"`,
-		`d.segment_id`,
+		`request_data`,
+		`unmute_dev_call_id`,
+		`session.call_id`,
+		`session.dev_events_version`,
 	} {
 		if !strings.Contains(source, want) {
-			t.Errorf("web client missing %q", want)
+			t.Errorf("dev call bootstrap/readiness missing %q", want)
 		}
-	}
-	if strings.Contains(source, `t === "bot-transcription"`) {
-		t.Error("web client still renders deprecated bot-transcription frames")
-	}
-}
-
-func TestV17LiveKitUpdatesTranscriptionSegment(t *testing.T) {
-	source := page(t)
-	if !strings.Contains(source, `setBotSegment(seg.id, text)`) {
-		t.Error("LiveKit remote transcription does not update by segment id")
-	}
-	if strings.Contains(source, `else pushTurn("bot", text)`) {
-		t.Error("LiveKit remote transcription still appends every update")
 	}
 }
 
@@ -111,16 +94,15 @@ func TestHoldToTalkCannotBeSwallowedByAFocusedButton(t *testing.T) {
 	source := page(t)
 	// SPACE activates a focused button and scrolls the page. Both would fire while
 	// holding to talk, and the first one ends the call. The handler must be at the
-	// document, must preventDefault, must ignore auto-repeat, and clicks must not
-	// leave focus on a button in the first place.
+	// document, must preventDefault and must ignore auto-repeat. Native transcript
+	// controls keep keyboard activation; the browser smoke checks both paths.
 	for _, want := range []string{
 		`document.addEventListener("keydown"`,
 		`document.addEventListener("keyup"`,
 		`e.preventDefault()`,
 		`e.repeat`,
 		`typingTarget(e.target)`,
-		`el.connect.blur()`,
-		`el.mute.blur()`,
+		`.transcript summary,.transcript button`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("hold-to-talk guard missing %q", want)
@@ -132,9 +114,9 @@ func TestPipecatWaitsForARealConnectionAndStartsFresh(t *testing.T) {
 	source := page(t)
 	for _, want := range []string{
 		`pcId = null;`,
-		`await waitForPeer(pc);`,
-		`clientReadyTimer = setInterval(sendClientReady, 500)`,
-		`t === "bot-ready"`,
+		`await waitForPeer(peer);`,
+		`clientReadyTimer=setInterval(sendClientReady,500)`,
+		`msg.type === "bot-ready"`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("Pipecat reconnect/ready contract missing %q", want)
@@ -189,52 +171,38 @@ func TestPageKeepsTheControlsOutsideBothViews(t *testing.T) {
 	}
 }
 
-func TestOneRowPerSpokenTurn(t *testing.T) {
+func TestTextSegmentsCarryTheirOwnFinality(t *testing.T) {
 	source := page(t)
 	for _, want := range []string{
-		`function renderUserTurn()`,                              // one row, rendered from two strings
-		`const text = joinSaid(userFinished, userLive)`,          // finished text plus live text
-		`userFinished = mergeFinished(userFinished, text)`,       // a finished piece appends
-		`if (piece.startsWith(done)) return piece`,               // a correction replaces what is shown
-		`if (done.endsWith(piece)) return done`,                  // a repeat is dropped
-		"return /^[,.!?;:…]/.test(b) ? a + b : a + \" \" + b",    // no gap before punctuation
-		`if (!botTurnEl){ closeUserTurn(); botTurnEl = pushTurn`, // the agent's first row ends the turn
+		`message_id`,
+		`separator_before`,
+		`dataset.state`,
+		`provisional`,
+		`incomplete`,
+		`textContent`,
 	} {
 		if !strings.Contains(source, want) {
-			t.Errorf("user turn accumulator missing %q", want)
+			t.Errorf("identified text/finality wire missing %q", want)
 		}
 	}
-	// The defect this replaced: a finished piece with no live row waiting pushed a
-	// row of its own, so one sentence arrived as one row per recognizer fragment.
-	// See specs/017-stt-single-line/spec.md.
-	if strings.Contains(source, "pushTurn(\"you\", text);\n") {
-		t.Error("a finished transcript piece pushes its own row again")
+	for _, retired := range []string{`mergeFinished`, `userFinished`, `closeUserTurn`} {
+		if strings.Contains(source, retired) {
+			t.Errorf("transcript still depends on word guesses or agent-driven finality: %q", retired)
+		}
 	}
 }
 
-func TestTurnsCarryTheirOwnTimings(t *testing.T) {
+func TestDevRecordsUseIdentityInsteadOfTheNewestReply(t *testing.T) {
 	source := page(t)
-	for _, want := range []string{
-		`function attachRecord(rec)`,
-		`if (botTurnEl) renderTurnTiming(botTurnEl, rec)`, // nearest in time, no id plumbed through
-		`else heldRecord = rec`,                           // a record can beat its transcript row
-		`claimHeldRecord(botTurnEl)`,
-		`heldRecord = null`,                       // a new conversation drops a stale one
-		`turn.parentNode.insertBefore(row, turn)`, // tools sit above the reply they preceded
-		`amount.textContent = secs(value)`,        // unreported renders as a dash
-	} {
+	for _, want := range []string{`new Map()`, `call_id`, `exchange_id`, `revision`} {
 		if !strings.Contains(source, want) {
-			t.Errorf("per-turn timings missing %q", want)
+			t.Errorf("dev record identity wire missing %q", want)
 		}
 	}
-	// secs() is the single place a number becomes text, and it must never invent
-	// a zero for something a target did not report.
-	if !strings.Contains(source, `function secs(v){ return v == null ? "—" : v.toFixed(2) + "s"; }`) {
-		t.Error("secs() no longer renders an absent value as a dash")
-	}
-	// A session record describes the run, not a turn, so it must not land on one.
-	if !strings.Contains(source, `if (!rec || rec.kind !== "turn") return;`) {
-		t.Error("attachRecord no longer rejects non-turn records")
+	for _, retired := range []string{`heldRecord`, `claimHeldRecord`, `if (botTurnEl) renderTurnTiming`} {
+		if strings.Contains(source, retired) {
+			t.Errorf("measurements still attach by newest reply: %q", retired)
+		}
 	}
 }
 
@@ -242,6 +210,12 @@ func TestTurnsCarryTheirOwnTimings(t *testing.T) {
 // it ships inside the binary and has to work with every external request blocked.
 func TestPageStaysSelfContained(t *testing.T) {
 	source := page(t)
+	// A user-opened guide is navigation, not a runtime dependency.
+	guide := `<a class="metrics-guide" href="https://unmute.ai/optimization/latency" target="_blank" rel="noopener">How to read latency ↗</a>`
+	if !strings.Contains(source, guide) {
+		t.Fatal("latency guide link is missing")
+	}
+	source = strings.Replace(source, guide, "", 1)
 	for _, forbidden := range []string{
 		"https://",
 		"http://cdn",

@@ -104,28 +104,50 @@ Pipecat logs default to `INFO`. Set `UNMUTE_LOG_LEVEL=DEBUG` only in a
 controlled environment because logs can contain caller speech, tool data, and
 phone details.
 
-## Latency measurements
+## Streaming conversation and measurements
 
-`dev_metrics.py` prints one line per turn to stdout, so you can see where a slow
-reply went. It prints nothing unless `UNMUTE_DEV_METRICS` is set, and `unmute
-dev` sets it for you. Nothing is sent anywhere: the line goes to stdout and that
-is all.
+`unmute dev` shows words and data as their sources provide them. Final caller
+words become normal text immediately. Agent words are labelled generated;
+visible text does not mean every word has played as audio. Ending a call keeps
+the conversation and marks unfinished work incomplete. Latest returns to the
+live end after you scroll back.
 
-```text
-UNMUTE_METRIC {"kind":"turn","seq":1,"e2e":1.057,"user_turn":0.412,"stages":[...],"tools":[...]}
+Each observed SDK model call has a number, with its first-response and full
+request duration visible beside it. TTS first-audio time and tool duration also
+stay visible. Debug details holds secondary timings and source metadata. See
+[Reading the latency numbers](https://unmute.ai/optimization/latency) for definitions. They can overlap and must not be added to obtain reply
+latency. Reply latency ends at the first runtime audio and excludes delivery to
+the browser. A tool's returned state does not prove business success; task and
+handoff controls are excluded from business tool timings.
+
+Only captured measurements are shown. Missing and pending values have no
+placeholder. A real zero is `0ms`, a
+positive value below one millisecond is `<1ms`, and other values use
+milliseconds or seconds. Counts describe observed SDK calls, including explicit
+task retries, rather than hidden provider retries. Missing source coverage or
+lost event history labels the count as observed. Values with no proven owner remain
+unassigned; they are never attached to the newest reply by timing or name.
+
+Pipecat reports service first-response and processing durations separately.
+Its native audio-latency summaries have no proven response ID and remain
+unassigned. Call first speech uses the native observer session-start boundary.
+
+The event feed reconnects separately from audio. Retained events can replay;
+a gap stays marked until the next call. Switching Conversation and Logs keeps
+the same microphone connection.
+
+The generated `dev_metrics.py` is inert unless `UNMUTE_DEV_METRICS` is enabled,
+as `unmute dev` does. Its identified v2 snapshots use `UNMUTE_METRIC ` framing.
+Raw values use seconds. To inspect measurements:
+
+```sh
+grep '"kind":"measurement"' build/pipecat/dev.log
 ```
 
-Read them with `grep UNMUTE_METRIC` on the run's output. Times are seconds.
-`e2e` is from the caller falling silent to the agent starting to speak, `stages`
-carries the time to first byte for each service, and `tools` carries how long
-each tool took, including tools reached through a remote tool source. Controls
-are not listed there: a task or a transfer hands the conversation somewhere else
-rather than doing a unit of work, and a task does not return until the
-flow it started has finished, so its duration is that flow's, not a tool's.
-
-A measurement Pipecat does not report is left out of the line rather than sent
-as zero, so a field you do not see was not measured, not instant. Pipecat
-reports no total streaming time per service here, only time to first byte.
+The local `dev.log` also contains transcript snapshots. The normalized dev
+records exclude audio, reasoning, prompts and tool arguments/results. Ordinary
+SDK output can contain other data. This path adds no exporter; configured
+provider calls and optional tracing keep their own existing behavior.
 
 ## Agent handoffs
 
@@ -406,7 +428,7 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
 from pipecat.workers.runner import WorkerRunner
 
-from dev_metrics import dev_metrics_observer
+from dev_metrics import install_dev_metrics
 
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -916,22 +938,39 @@ def build_billing_tts():
 class BillingAgent(LLMWorker):
     """Agent: billing."""
 
-    def __init__(self, state=None, context=None, call_context=None) -> None:
+    def __init__(self, state=None, context=None, call_context=None, dev_metrics=None) -> None:
         self.state = state
+        if context is not None:
+            self.context = context
 
         llm = build_billing_llm(state)
-        super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
+        tts = build_billing_tts()
+        self._dev = dev_metrics
+        if self._dev:
+            self._dev.observe_llm(llm)
+            self._dev.observe_tts(tts)
+        super().__init__("billing", llm=llm, pipeline=Pipeline([llm, tts]), bridged=())
+
+    async def queue_frame(self, frame, *args, **kwargs) -> None:
+        if self._dev:
+            self._dev.stamp(frame)
+        await super().queue_frame(frame, *args, **kwargs)
 
     async def on_activated(self, args) -> None:
-        await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(system_instruction=BILLING_PROMPT),
-        ))
-        await super().on_activated(args)
-        # Pipecat 1.8 only runs on activation when messages are nonempty.
-        # A handoff already shaped the shared context; request the reply
-        # without adding a synthetic message or waiting for the caller.
-        if args and args.get("run_llm") and not args.get("messages"):
-            await self.queue_frame(LLMRunFrame())
+        token = self._dev.enter_activation(args) if self._dev else None
+        try:
+            await self.queue_frame(LLMUpdateSettingsFrame(
+                delta=LLMSettings(system_instruction=BILLING_PROMPT),
+            ))
+            await super().on_activated(args)
+            # Pipecat 1.8 only runs on activation when messages are nonempty.
+            # A handoff already shaped the shared context; request the reply
+            # without adding a synthetic message or waiting for the caller.
+            if args and args.get("run_llm") and not args.get("messages"):
+                await self.queue_frame(LLMRunFrame())
+        finally:
+            if self._dev:
+                self._dev.exit_activation(token)
 
 
 
@@ -975,22 +1014,39 @@ def build_intake_tts():
 class IntakeAgent(LLMWorker):
     """Agent: intake."""
 
-    def __init__(self, state=None, context=None, call_context=None) -> None:
+    def __init__(self, state=None, context=None, call_context=None, dev_metrics=None) -> None:
         self.state = state
+        if context is not None:
+            self.context = context
 
         llm = build_intake_llm(state)
-        super().__init__("intake", llm=llm, pipeline=Pipeline([llm, build_intake_tts()]), bridged=())
+        tts = build_intake_tts()
+        self._dev = dev_metrics
+        if self._dev:
+            self._dev.observe_llm(llm)
+            self._dev.observe_tts(tts)
+        super().__init__("intake", llm=llm, pipeline=Pipeline([llm, tts]), bridged=())
+
+    async def queue_frame(self, frame, *args, **kwargs) -> None:
+        if self._dev:
+            self._dev.stamp(frame)
+        await super().queue_frame(frame, *args, **kwargs)
 
     async def on_activated(self, args) -> None:
-        await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(system_instruction=INTAKE_PROMPT),
-        ))
-        await super().on_activated(args)
-        # Pipecat 1.8 only runs on activation when messages are nonempty.
-        # A handoff already shaped the shared context; request the reply
-        # without adding a synthetic message or waiting for the caller.
-        if args and args.get("run_llm") and not args.get("messages"):
-            await self.queue_frame(LLMRunFrame())
+        token = self._dev.enter_activation(args) if self._dev else None
+        try:
+            await self.queue_frame(LLMUpdateSettingsFrame(
+                delta=LLMSettings(system_instruction=INTAKE_PROMPT),
+            ))
+            await super().on_activated(args)
+            # Pipecat 1.8 only runs on activation when messages are nonempty.
+            # A handoff already shaped the shared context; request the reply
+            # without adding a synthetic message or waiting for the caller.
+            if args and args.get("run_llm") and not args.get("messages"):
+                await self.queue_frame(LLMRunFrame())
+        finally:
+            if self._dev:
+                self._dev.exit_activation(token)
 
 
 
@@ -1003,6 +1059,7 @@ class IntakeAgent(LLMWorker):
         await self.activate_worker(
             "billing",
             args=LLMWorkerActivationArgs(
+                metadata=self._dev.activation_metadata() if self._dev else None,
                 messages=[],
                 run_llm=True,
             ),
@@ -1049,7 +1106,7 @@ def build_stt():
     )
 
 
-async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
+async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev) -> None:
     require_env()
     call_context = {}
 
@@ -1059,7 +1116,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     # key, no network hop; the turn binding in targets.yaml is advisory.
     context = LLMContext()
     state = build_state(call_context)
-    agents = [BillingAgent(state=state, context=context, call_context=call_context), IntakeAgent(state=state, context=context, call_context=call_context)]
+    agents = [BillingAgent(state=state, context=context, call_context=call_context, dev_metrics=dev), IntakeAgent(state=state, context=context, call_context=call_context, dev_metrics=dev)]
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -1099,10 +1156,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         ),
     )
     bridge = BusBridgeProcessor(bus=runner.bus, worker_name=MAIN_NAME, name=f"{MAIN_NAME}::BusBridge")
+    dev.observe_aggregators(user_aggregator, assistant_aggregator)
     pipeline = Pipeline(
         [
             transport.input(),
-            build_stt(),
+            dev.observe_stt(build_stt()),
             user_aggregator,
             bridge,
             transport.output(),
@@ -1114,7 +1172,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         name=MAIN_NAME,
         # The worker builds its own latency observer only when tracing is enabled,
         # and does not re-expose its events, so this one is always ours.
-        observers=[dev_metrics_observer()],
+        observers=dev.observers(),
 
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )
@@ -1210,6 +1268,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     if worker_start_error is not None:
         raise worker_start_error
 
+
+
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
+    dev = install_dev_metrics(runner_args)
+    try:
+        await _run_bot(transport, runner_args, dev)
+    except Exception:
+        dev.finish(error=True)
+        raise
+    finally:
+        dev.finish()
 
 
 async def bot(runner_args: RunnerArguments) -> None:
@@ -1407,145 +1476,612 @@ services:
       retries: 30
       start_period: 10s
 === dev_metrics.py ===
-"""Per-turn latency measurements for the local dev loop.
-
-Prints one JSON line per turn behind a sentinel the `unmute dev` server watches
-for, so the browser can show where a slow reply went without anything leaving
-this machine. No collector, no exporter, no network.
-
-Inert unless UNMUTE_DEV_METRICS is set. The dev loop sets it itself; a deployed
-artifact never does, so this file ships in every project and prints in none of
-them but yours.
-
-Measurements come from pipecat's own UserBotLatencyObserver, so the numbers are
-the ones the framework already computes rather than a second opinion. A stage
-pipecat does not report is left out of the record entirely: an absent measurement
-rendered as 0.00 reads as an unusually fast one.
-"""
+"""Call-scoped, immediate dev events. Inert outside the local dev loop."""
 
 from __future__ import annotations
 
+import contextvars
 import json
+import math
 import os
+import re
+import sys
+import time
 
-from pipecat.observers.user_bot_latency_observer import (
-    LatencyBreakdown,
-    UserBotLatencyObserver,
+from pipecat.frames.frames import (
+    CancelFrame,
+    ErrorFrame,
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    InterruptionFrame,
+    InterimTranscriptionFrame,
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
+    MetricsFrame,
+    TTSSpeakFrame,
+    TTSStoppedFrame,
+    TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
+from pipecat.metrics.metrics import ProcessingMetricsData, TextAggregationMetricsData, TTFBMetricsData
+from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 
 SENTINEL = "UNMUTE_METRIC"
 METRICS_ENV = "UNMUTE_DEV_METRICS"
+_METADATA = "unmute_dev"
 
-# Controls are not tools. A delegate or a transfer is the package handing the
-# conversation somewhere else rather than doing a unit of work and returning, and
-# a delegate does not return until the flow it started has finished, so its call
-# duration is that flow's duration. Reported beside real tool timings it reads as
-# one very slow tool, which is the opposite of the point.
+# Handoffs and delegate controls are not completed business tool calls.
 HANDOFF_CONTROLS = frozenset(
     {
         "to_billing",
     }
 )
 
-# Processor names carry their own role ("DeepgramSTTService"), so the mapping
-# lives here once instead of the browser guessing which service a number is.
-_STAGE_KINDS = (("stt", "stt"), ("llm", "llm"), ("tts", "tts"))
-
 
 def metrics_enabled() -> bool:
-    """True when the dev loop asked for measurements."""
     return os.environ.get(METRICS_ENV, "") not in ("", "0")
 
 
-def stage_kind(processor: str) -> str:
-    """Classify a pipecat processor name as stt, llm, tts, or other."""
-    lowered = processor.lower()
-    for needle, kind in _STAGE_KINDS:
-        if needle in lowered:
-            return kind
-    return "other"
-
-
 def _emit(record: dict) -> None:
-    # flush is required, not tidiness: Python block-buffers stdout when it is not
-    # a tty, which is both dev paths, so an unflushed line can sit in the buffer
-    # until the process exits and arrive long after the turn it describes.
-    print(f"{SENTINEL} {json.dumps(record, separators=(',', ':'))}", flush=True)
+    try:
+        print(f"{SENTINEL} {json.dumps(record, separators=(',', ':'))}", flush=True)
+    except (OSError, ValueError):
+        # A closed local output cannot interrupt the voice pipeline.
+        pass
 
 
-def turn_record(breakdown: LatencyBreakdown, seq: int, e2e: float | None) -> dict:
-    """Map one pipecat breakdown onto the record contract.
-
-    Pure so it can be checked against a real LatencyBreakdown without running a
-    pipeline. A measurement pipecat did not report is left out rather than set to
-    zero, which would read as an unusually fast stage.
-    """
-    record: dict = {"kind": "turn", "seq": seq}
-
-    if e2e is not None:
-        record["e2e"] = round(e2e, 4)
-    if breakdown.user_turn_secs is not None:
-        record["user_turn"] = round(breakdown.user_turn_secs, 4)
-    if breakdown.text_aggregation is not None:
-        record["text_aggregation"] = round(breakdown.text_aggregation.duration_secs, 4)
-
-    stages = []
-    for ttfb in breakdown.ttfb:
-        stage = {"name": ttfb.processor, "kind": stage_kind(ttfb.processor)}
-        if ttfb.model:
-            stage["model"] = ttfb.model
-        stage["ttfb"] = round(ttfb.duration_secs, 4)
-        stages.append(stage)
-    if stages:
-        record["stages"] = stages
-
-    # Tools reached through a remote tool source are here too: pipecat registers
-    # them like any other function, so they emit the same frames.
-    tools = [
-        {"name": call.function_name, "seconds": round(call.duration_secs, 4)}
-        for call in breakdown.function_calls
-        if call.function_name not in HANDOFF_CONTROLS
-    ]
-    if tools:
-        record["tools"] = tools
-
-    return record
+def _separator(previous, text, previous_includes_spaces, includes_spaces):
+    # Same boundary rule as Pipecat's concatenate_aggregated_text; retain the
+    # source chunks themselves, including their leading and trailing spaces.
+    if not previous or not text or (previous_includes_spaces and includes_spaces):
+        return ""
+    if not previous_includes_spaces and not includes_spaces:
+        return " "
+    return "" if previous[-1].isspace() or text[0].isspace() else " "
 
 
-def install_dev_metrics(observer: UserBotLatencyObserver) -> UserBotLatencyObserver:
-    """Attach the printers to an observer and return it, so it can be passed inline.
+class DevReporter:
+    """Observe native boundaries without replacing a service or its iterator."""
 
-    Returns the observer untouched when measurements are off, which keeps the
-    caller a single unconditional line.
-    """
-    if not metrics_enabled():
-        return observer
+    def __init__(self, runner_args):
+        self.enabled = metrics_enabled()
+        body = getattr(runner_args, "body", None)
+        call_id = body.get("unmute_dev_call_id") if isinstance(body, dict) else None
+        if self.enabled and not (
+            isinstance(call_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", call_id)
+        ):
+            print("WARNING Dev events unavailable: missing or invalid dev call identity.", file=sys.stderr, flush=True)
+            self.enabled = False
+        self.call_id = call_id
+        self._closed = False
+        self._error = False
+        self._handlers = []
+        self._serial = 0
+        self._records = {}
+        self._scope: contextvars.ContextVar[dict | None] = contextvars.ContextVar("unmute_dev_scope", default=None)
+        self._input = None
+        self._start_frames = set()
+        self._input_messages = {}
+        self._input_segments = {}
+        self._text_spacing = {}
+        self._interim = {}
+        self._requests = {}
+        self._tools = {}
+        self._tool_frames = set()
+        self._tts_contexts = {}
+        self._latency_observer = None
+        self._attached = set()
+        if self.enabled:
+            self._put("call", "call", {
+                "target": "pipecat", "state": "open", "input_boundaries": "partial",
+                "model_calls": "known", "generated_text": "available",
+            })
 
-    # on_latency_measured fires immediately before on_latency_breakdown inside the
-    # same pipecat handler, so the end-to-end number is stashed here and spent by
-    # the breakdown that follows it.
-    state: dict = {"seq": 0, "e2e": None}
+    def _id(self, prefix):
+        self._serial += 1
+        return f"{prefix}-{self._serial}"
 
-    @observer.event_handler("on_latency_measured")
-    async def _on_latency_measured(_observer, latency_seconds: float):
-        state["e2e"] = latency_seconds
+    def _put(self, kind, identity, payload):
+        if not self.enabled or self._closed:
+            return
+        old = self._records.get((kind, identity))
+        if old and old[kind] == payload:
+            return
+        record = {
+            "version": 2, "kind": kind, "call_id": self.call_id, "id": identity,
+            "revision": old["revision"] + 1 if old else 1,
+            "order": old["order"] if old else len(self._records) + 1,
+            kind: dict(payload),
+        }
+        self._records[kind, identity] = record
+        _emit(record)
 
-    @observer.event_handler("on_first_bot_speech_latency")
-    async def _on_first_bot_speech(_observer, latency_seconds: float):
-        _emit({"kind": "session", "first_speech": round(latency_seconds, 4)})
+    def _update(self, kind, identity, **changes):
+        old = self._records.get((kind, identity))
+        if old:
+            self._put(kind, identity, dict(old[kind], **changes))
 
-    @observer.event_handler("on_latency_breakdown")
-    async def _on_latency_breakdown(_observer, breakdown: LatencyBreakdown):
-        state["seq"] += 1
-        _emit(turn_record(breakdown, state["seq"], state["e2e"]))
-        state["e2e"] = None
+    def _frame_scope(self, frame):
+        value = frame.metadata.get(_METADATA)
+        return dict(value) if isinstance(value, dict) and value.get("call_id") == self.call_id else {}
 
-    return observer
+    def stamp(self, frame):
+        """Carry only captured cause, preserving all other frame metadata."""
+        if self.enabled and not self._closed and _METADATA not in frame.metadata:
+            scope = self._scope.get()
+            if scope:
+                frame.metadata[_METADATA] = dict(scope)
+        return frame
+
+    def activation_metadata(self, existing=None):
+        metadata = dict(existing or {})
+        scope = self._scope.get()
+        if self.enabled and not self._closed and scope:
+            metadata[_METADATA] = dict(scope)
+        return metadata
+
+    def enter_activation(self, args):
+        if not self.enabled or self._closed:
+            return None
+        metadata = (args or {}).get("metadata") or {}
+        scope = metadata.get(_METADATA)
+        if not isinstance(scope, dict) or scope.get("call_id") != self.call_id:
+            scope = None
+        return self._scope.set(scope)
+
+    def exit_activation(self, token):
+        if token is not None:
+            self._scope.reset(token)
+
+    def _listen(self, source, event):
+        def register(handler):
+            async def active(*args, **kwargs):
+                # An event task already scheduled at cleanup can still run.
+                if not self._closed:
+                    await handler(*args, **kwargs)
+
+            source.add_event_handler(event, active)
+            self._handlers.append((source, event, active))
+            return active
+        return register
+
+    def observers(self):
+        if not self.enabled or self._closed:
+            return []
+        if self._latency_observer is not None:
+            return [self._latency_observer]
+        observer = UserBotLatencyObserver()
+        self._latency_observer = observer
+
+        @self._listen(observer, "on_first_bot_speech_latency")
+        async def first_speech(_observer, seconds):
+            self._measure("call:first-speech", "first_speech", seconds, "pipecat-client-connected", scope="call")
+
+        @self._listen(observer, "on_latency_measured")
+        async def reply_latency(_observer, seconds):
+            self._measure(self._id("reply-latency"), "reply_latency", seconds, "pipecat-user-bot-latency",
+                          reason="The native audio callback does not identify its response.")
+
+        @self._listen(observer, "on_latency_breakdown")
+        async def breakdown_ready(_observer, breakdown):
+            if breakdown.user_turn_secs is not None:
+                self._measure(self._id("turn-detection"), "turn_detection", breakdown.user_turn_secs,
+                              "pipecat-vad-stop-to-turn-release",
+                              reason="The native breakdown does not identify its input.")
+            # TTFB, text aggregation and tools already arrived at their sources.
+            # The aggregate carries no request IDs and cannot refine ownership.
+
+        return [observer]
+
+    def _measure(self, identity, metric, value, source, *, scope="unassigned", exchange_id=None,
+                 operation_id=None, state=None, reason=None, model=None, provider=None):
+        valid = isinstance(value, (float, int)) and math.isfinite(value) and value >= 0
+        payload = {
+            "scope": scope, "metric": metric, "unit": "seconds", "source": source,
+            "state": state or ("measured" if valid else "unavailable"),
+        }
+        if valid and payload["state"] == "measured":
+            payload["value"] = value
+        elif value is not None:
+            reason = "The SDK did not provide a finite nonnegative measurement."
+        for key, field in (("exchange_id", exchange_id), ("operation_id", operation_id),
+                           ("reason", reason), ("model", model), ("provider", provider)):
+            if field:
+                payload[key] = field
+        self._put("measurement", identity, payload)
+
+    def _service_metrics(self, processor, role, frame, cause):
+        if not isinstance(frame, MetricsFrame):
+            return
+        if id(processor) in frame.metadata.get("unmute_dev_metric_inputs", []):
+            return
+        if frame.metadata.get("unmute_dev_metrics_reported") == self.call_id:
+            return
+        frame.metadata["unmute_dev_metrics_reported"] = self.call_id
+        for data in frame.data:
+            # This checks the emitting source, never the owner of an operation.
+            if data.processor != processor.name:
+                continue
+            if isinstance(data, TTFBMetricsData):
+                metric, source = "first_response", f"pipecat-{role}-ttfb"
+            elif isinstance(data, ProcessingMetricsData):
+                metric, source = "request_duration", f"pipecat-{role}-processing"
+            elif isinstance(data, TextAggregationMetricsData):
+                metric, source = "text_aggregation", "pipecat-text-aggregation"
+            else:
+                # TTFAT/TTFA embed the standalone TTFB again; token/audio usage
+                # and internal reasoning durations are not these nine timings.
+                continue
+            operation = cause.get("operation_id") if role == "llm" else None
+            response = cause.get("response_id")
+            input_id = cause.get("input_id")
+            scope = "operation" if operation else "response" if response else "input" if input_id else "unassigned"
+            identity = f"{operation}:{metric}" if operation else self._id(metric)
+            self._measure(identity, metric, data.value, source, scope=scope,
+                          operation_id=operation, exchange_id=response or input_id,
+                          model=data.model, provider=type(processor).__name__,
+                          reason="The callback carries no operation identity." if not operation else None)
+            if operation and data.model:
+                self._update("operation", operation, model=data.model)
+
+    def _attach(self, processor, role):
+        key = (id(processor), role)
+        if not self.enabled or self._closed or key in self._attached:
+            return False
+        self._attached.add(key)
+        if role in ("stt", "llm", "tts"):
+            @self._listen(processor, "on_before_process_frame")
+            async def metrics_input(_processor, frame):
+                if isinstance(frame, MetricsFrame):
+                    frame.metadata.setdefault("unmute_dev_metric_inputs", []).append(id(processor))
+
+            @self._listen(processor, "on_error")
+            async def source_error(_processor, frame):
+                if frame.fatal or not processor.is_usable:
+                    self._error = True
+                    self._update("call", "call", state="error")
+        return True
+
+    def _input_boundary(self, frame):
+        if isinstance(frame, UserStartedSpeakingFrame):
+            sibling = getattr(frame, "broadcast_sibling_id", None)
+            key = tuple(sorted((frame.id, sibling))) if sibling is not None else (frame.id,)
+            if key in self._start_frames:
+                return
+            self._start_frames.add(key)
+            if self._input:
+                self._update("exchange", self._input, state="incomplete")
+            self._input = self._id("input")
+            self._put("exchange", self._input, {
+                "role": "input", "state": "open", "link_status": "known",
+            })
+        # A speech-stop SystemFrame can overtake the final transcript. The
+        # user aggregator's context emission below is the commit boundary.
+
+    def _associate_text(self, identity, input_id):
+        record = self._records.get(("text", identity))
+        if not record:
+            return
+        message_id = self._input_messages.setdefault(input_id, record["text"]["message_id"])
+        segments = self._input_segments.setdefault(input_id, [])
+        if identity not in segments:
+            segments.append(identity)
+        previous = ""
+        previous_includes_spaces = False
+        for segment in segments:
+            text = self._records["text", segment]["text"]["text"]
+            includes_spaces = self._text_spacing[segment]
+            separator = _separator(previous, text, previous_includes_spaces, includes_spaces)
+            self._update("text", segment, exchange_id=input_id, message_id=message_id, separator_before=separator)
+            if text:
+                previous = text
+                previous_includes_spaces = includes_spaces
+
+    def observe_stt(self, stt):
+        if not self._attach(stt, "stt"):
+            return stt
+
+        @self._listen(stt, "on_before_process_frame")
+        async def stt_before(_processor, frame):
+            self._scope.set(self._frame_scope(frame) or None)
+
+        @self._listen(stt, "on_before_push_frame")
+        async def text_ready(_processor, frame):
+            self.stamp(frame)
+            self._service_metrics(stt, "stt", frame, self._frame_scope(frame))
+            if not isinstance(frame, (InterimTranscriptionFrame, TranscriptionFrame)):
+                return
+            existing = self._frame_scope(frame)
+            if existing.get("text_id"):
+                return
+            identity = self._interim.get(id(stt)) or self._id("user-text")
+            old = self._records.get(("text", identity))
+            message_id = old["text"]["message_id"] if old else self._id("user-message")
+            final = isinstance(frame, TranscriptionFrame)
+            payload = {
+                "message_id": message_id, "speaker": "user", "text": frame.text,
+                "state": "final" if final else "provisional", "origin": "recognition",
+                "separator_before": "",
+            }
+            if old and old["text"].get("exchange_id"):
+                payload["exchange_id"] = old["text"]["exchange_id"]
+            # finalized marks recognizer utterance timing, not segment finality.
+            self._put("text", identity, payload)
+            self._text_spacing[identity] = frame.includes_inter_frame_spaces
+            if payload.get("exchange_id"):
+                self._associate_text(identity, payload["exchange_id"])
+            frame.metadata[_METADATA] = {"call_id": self.call_id, "text_id": identity}
+            if final:
+                self._interim.pop(id(stt), None)
+            else:
+                self._interim[id(stt)] = identity
+
+        return stt
+
+    def observe_aggregators(self, user, assistant):
+        if not self._attach(user, "user"):
+            return
+
+        @self._listen(user, "on_before_process_frame")
+        async def user_before(_processor, frame):
+            self._input_boundary(frame)
+            scope = self._frame_scope(frame)
+            caller_frame = isinstance(frame, (InterimTranscriptionFrame, TranscriptionFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame))
+            input_id = scope.get("input_id") or (self._input if caller_frame else None)
+            if input_id:
+                scope["call_id"] = self.call_id
+                scope["input_id"] = input_id
+                if scope.get("text_id"):
+                    self._associate_text(scope["text_id"], input_id)
+                frame.metadata[_METADATA] = scope
+            self._scope.set(scope or None)
+
+        @self._listen(user, "on_before_push_frame")
+        async def user_push(_processor, frame):
+            self._input_boundary(frame)
+            scope = dict(self._scope.get() or {})
+            if isinstance(frame, UserStartedSpeakingFrame) and self._input:
+                scope.update(call_id=self.call_id, input_id=self._input)
+                self._scope.set(scope)
+                if scope.get("text_id"):
+                    self._associate_text(scope["text_id"], self._input)
+            self.stamp(frame)
+            if isinstance(frame, LLMContextFrame) and scope.get("input_id"):
+                self._update("exchange", scope["input_id"], state="ended")
+                if self._input == scope["input_id"]:
+                    self._input = None
+
+        @self._listen(assistant, "on_before_process_frame")
+        async def assistant_before(_processor, frame):
+            # A long-lived queue without captured cause stays unassigned.
+            self._scope.set(self._frame_scope(frame) or None)
+
+        @self._listen(assistant, "on_before_push_frame")
+        async def assistant_push(_processor, frame):
+            self.stamp(frame)
+
+    def _response(self, scope):
+        response = scope.get("response_id")
+        if response and ("exchange", response) in self._records:
+            return response
+        response = self._id("response")
+        payload = {
+            "role": "response", "state": "open", "playback": "unknown",
+            "link_status": "known" if scope.get("input_id") else "unavailable",
+        }
+        if scope.get("input_id"):
+            payload["input_id"] = scope["input_id"]
+        self._put("exchange", response, payload)
+        self._measure(f"{response}:reply-latency", "reply_latency", None,
+                      "pipecat-user-bot-latency", scope="response", exchange_id=response,
+                      reason="Pipecat reports audio latency without a response identity.")
+        return response
+
+    def _tool_event(self, llm, frame, cause):
+        if not isinstance(frame, (FunctionCallInProgressFrame, FunctionCallResultFrame, FunctionCallCancelFrame)):
+            return
+        if frame.function_name in HANDOFF_CONTROLS:
+            return
+        sibling = getattr(frame, "broadcast_sibling_id", None)
+        frame_key = tuple(sorted((frame.id, sibling))) if sibling is not None else (frame.id,)
+        if frame_key in self._tool_frames:
+            return
+        self._tool_frames.add(frame_key)
+        key = (id(llm), frame.tool_call_id)
+        if isinstance(frame, FunctionCallInProgressFrame):
+            operation = self._id("tool")
+            payload = {"type": "tool", "name": frame.function_name, "state": "running"}
+            for field, value in (("exchange_id", cause.get("response_id")),
+                                 ("parent_operation_id", cause.get("operation_id"))):
+                if value:
+                    payload[field] = value
+            self._put("operation", operation, payload)
+            self._tools[key] = {"id": operation, "scope": dict(cause), "started": time.monotonic(), "ended": False}
+            # This hook runs inside the actual native tool task. Its result and
+            # error callbacks inherit this cause; another tool has another task.
+            self._scope.set(dict(cause, tool_operation_id=operation))
+            return
+        tool = self._tools.get(key)
+        if not tool:
+            return
+        if isinstance(frame, FunctionCallResultFrame) and frame.properties and not frame.properties.is_final:
+            return
+        self._end_tool(tool, "cancelled" if isinstance(frame, FunctionCallCancelFrame) else "returned")
+
+    def _end_tool(self, tool, state):
+        if tool["ended"]:
+            return
+        tool["ended"] = True
+        operation = tool["id"]
+        self._update("operation", operation, state=state)
+        self._measure(f"{operation}:duration", "tool_duration", time.monotonic() - tool["started"],
+                      "pipecat-function-call-frames", scope="operation", operation_id=operation,
+                      exchange_id=tool["scope"].get("response_id"))
+
+    def observe_llm(self, llm):
+        if not self._attach(llm, "llm"):
+            return llm
+        pending = set()
+
+        @self._listen(llm, "on_before_process_frame")
+        async def llm_before(_processor, frame):
+            if isinstance(frame, (InterruptionFrame, CancelFrame)):
+                for operation in tuple(pending):
+                    self._end_request(operation, "cancelled")
+            scope = self._frame_scope(frame)
+            if isinstance(frame, LLMContextFrame):
+                scope.pop("tool_operation_id", None)
+                operation = self._id("llm")
+                scope.update(
+                    call_id=self.call_id, response_id=self._response(scope), operation_id=operation,
+                )
+                self._requests[operation] = {"scope": dict(scope), "text_id": None, "ended": False}
+                pending.add(operation)
+                self._put("operation", operation, {
+                    "exchange_id": scope["response_id"], "type": "llm",
+                    "name": llm.name, "state": "running",
+                })
+                for metric, source in (("first_response", "ttfb"), ("request_duration", "processing")):
+                    self._measure(f"{operation}:{metric}", metric, None, f"pipecat-llm-{source}",
+                                  scope="operation", operation_id=operation, exchange_id=scope["response_id"], state="pending")
+                frame.metadata[_METADATA] = dict(scope)
+            self._scope.set(scope or None)
+
+        @self._listen(llm, "on_before_push_frame")
+        async def llm_push(_processor, frame):
+            self.stamp(frame)
+            scope = self._frame_scope(frame)
+            self._service_metrics(llm, "llm", frame, scope)
+            self._tool_event(llm, frame, scope)
+            if isinstance(frame, ErrorFrame) and scope.get("tool_operation_id"):
+                for tool in self._tools.values():
+                    if tool["id"] == scope["tool_operation_id"]:
+                        self._end_tool(tool, "failed")
+                        return
+            operation = scope.get("operation_id")
+            request = self._requests.get(operation)
+            if isinstance(frame, LLMFullResponseStartFrame) and not request:
+                # Some services generate without a concrete context invocation.
+                self._update("call", "call", model_calls="partial")
+            if not request:
+                return
+            if type(frame) is LLMTextFrame:
+                if request["ended"]:
+                    return
+                identity = request["text_id"] or self._id("answer-text")
+                request["text_id"] = identity
+                old = self._records.get(("text", identity))
+                text = old["text"]["text"] if old else ""
+                separator = _separator(text, frame.text, request.get("includes_spaces", True), frame.includes_inter_frame_spaces)
+                self._put("text", identity, {
+                    "exchange_id": scope["response_id"], "message_id": identity,
+                    "speaker": "assistant", "text": text + separator + frame.text,
+                    "state": "provisional", "origin": "generated", "separator_before": "",
+                })
+                if frame.text:
+                    request["includes_spaces"] = frame.includes_inter_frame_spaces
+            elif isinstance(frame, LLMFullResponseEndFrame):
+                self._end_request(operation, "ended")
+                pending.discard(operation)
+            elif isinstance(frame, ErrorFrame):
+                self._end_request(operation, "failed")
+                pending.discard(operation)
+
+        return llm
+
+    def _end_request(self, operation, state):
+        request = self._requests.get(operation)
+        if not request or request["ended"]:
+            return
+        request["ended"] = True
+        self._update("operation", operation, state=state)
+        if request["text_id"]:
+            self._update("text", request["text_id"], state="final" if state == "ended" else "incomplete")
+        for metric in ("first_response", "request_duration"):
+            identity = f"{operation}:{metric}"
+            record = self._records.get(("measurement", identity))
+            if record and record["measurement"]["state"] == "pending":
+                self._update("measurement", identity, state="unavailable", reason=f"The request {state} before this measurement arrived.")
+        if state in ("cancelled", "failed"):
+            self._update("exchange", request["scope"]["response_id"], state="interrupted" if state == "cancelled" else "incomplete")
+
+    def observe_tts(self, tts):
+        if not self._attach(tts, "tts"):
+            return tts
+
+        @self._listen(tts, "on_before_process_frame")
+        async def tts_before(_processor, frame):
+            scope = self._frame_scope(frame)
+            if isinstance(frame, TTSSpeakFrame) and not scope.get("direct_text_id"):
+                identity = self._id("direct-text")
+                response = self._response(scope)
+                scope.update(call_id=self.call_id, response_id=response, direct_text_id=identity)
+                frame.metadata[_METADATA] = dict(scope)
+                self._put("text", identity, {
+                    "exchange_id": response, "message_id": identity, "speaker": "assistant",
+                    "text": frame.text, "state": "final", "origin": "generated", "separator_before": "",
+                })
+            self._scope.set(scope or None)
+
+        @self._listen(tts, "on_before_push_frame")
+        async def tts_push(_processor, frame):
+            self.stamp(frame)
+            self._service_metrics(tts, "tts", frame, self._frame_scope(frame))
+            if isinstance(frame, TTSStoppedFrame):
+                for operation in self._tts_contexts.pop((id(tts), frame.context_id), []):
+                    self._update("operation", operation, state="ended")
+
+        @self._listen(tts, "on_tts_request")
+        async def tts_request(_processor, context_id, _text):
+            cause = self._scope.get() or {}
+            operation = self._id("tts")
+            payload = {"type": "tts", "name": tts.name, "state": "running"}
+            if cause.get("response_id"):
+                payload["exchange_id"] = cause["response_id"]
+            self._put("operation", operation, payload)
+            self._tts_contexts.setdefault((id(tts), context_id), []).append(operation)
+
+        return tts
+
+    def finish(self, *, error=False):
+        if not self.enabled or self._closed:
+            return
+        for (kind, identity), record in list(self._records.items()):
+            if kind == "text" and record[kind]["state"] == "provisional":
+                self._update(kind, identity, state="incomplete")
+            elif kind == "operation" and record[kind]["state"] == "running":
+                self._update(kind, identity, state="incomplete")
+            elif kind == "exchange" and record[kind]["state"] == "open":
+                self._update(kind, identity, state="incomplete")
+            elif kind == "measurement" and record[kind]["state"] == "pending":
+                self._update(kind, identity, state="unavailable", reason="The call ended before this measurement arrived.")
+        self._update("call", "call", state="error" if error or self._error else "ended")
+        self._closed = True
+        for source, event, handler in self._handlers:
+            source.remove_event_handler(event, handler)
+        self._handlers.clear()
+        self._scope.set(None)
+        self._input = None
+        self._latency_observer = None
+        self._records.clear()
+        self._requests.clear()
+        self._interim.clear()
+        self._input_messages.clear()
+        self._input_segments.clear()
+        self._text_spacing.clear()
+        self._attached.clear()
+        self._start_frames.clear()
+        self._tools.clear()
+        self._tool_frames.clear()
+        self._tts_contexts.clear()
 
 
-def dev_metrics_observer() -> UserBotLatencyObserver:
-    """A latency observer wired to print, ready to pass to `observers=`."""
-    return install_dev_metrics(UserBotLatencyObserver())
+def install_dev_metrics(runner_args):
+    return DevReporter(runner_args)
 === pcc-deploy.toml ===
 agent_name = "safe-core-fixture-pipecat"
 secret_set = "safe-core-fixture-pipecat-secrets"

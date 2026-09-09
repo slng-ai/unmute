@@ -126,7 +126,7 @@ func TestPipecatRunbookRecordsWhyItsFloorDoesNotMove(t *testing.T) {
 // which target it is looking at.
 //
 // This was a coverage gap in the plan and it closed itself on the rebase: main's
-// dev_metrics work already emits `user_turn` on Pipecat from
+// dev_metrics work now emits `turn_detection` on Pipecat from
 // LatencyBreakdown.user_turn_secs, which the pinned pipecat 1.8.0 documents as
 // running "from when the user actually stopped speaking to when the turn was
 // released", including VAD silence, STT finalisation and the turn analyzer wait
@@ -143,11 +143,11 @@ func TestBothTargetsReportTheEndpointingWaitUnderOneKey(t *testing.T) {
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			metrics := generatedFile(t, loadTurnFixture(t, "", ir.PaceBalanced), tc.provider, "dev_metrics.py")
-			if !strings.Contains(metrics, `"user_turn"`) {
-				t.Errorf("emitted dev_metrics.py does not report a \"user_turn\" key, so the endpointing wait is bundled with the rest of the turn")
+			if !strings.Contains(metrics, `"turn_detection"`) {
+				t.Errorf("emitted dev_metrics.py does not report a \"turn_detection\" key, so the endpointing wait is bundled with the rest of the turn")
 			}
 			if !strings.Contains(metrics, tc.source) {
-				t.Errorf("emitted dev_metrics.py does not read %s, so \"user_turn\" is measuring something else", tc.source)
+				t.Errorf("emitted dev_metrics.py does not read %s, so \"turn_detection\" is measuring something else", tc.source)
 			}
 		})
 	}

@@ -937,7 +937,7 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 		"def _claim_terminal(self) -> bool:",
 		"async def back_to_greeter(self, ctx: RunContext):",
 		"if not self._claim_terminal():\n            return",
-		`await ctx.session.say("I will take you back to Remy.", allow_interruptions=False)`,
+		`await dev_say(ctx.session, "I will take you back to Remy.", allow_interruptions=False)`,
 		"self.complete(_TaskTransfer(Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))))",
 		"except BaseException:\n            self._terminal_claimed = False\n            raise",
 		"except _TaskTransfer as transfer:",
@@ -966,7 +966,7 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 			claim = transferMethod + relative
 		}
 	}
-	announce := strings.Index(taskBlock, "await ctx.session.say")
+	announce := strings.Index(taskBlock, "await dev_say(ctx.session,")
 	if claim < 0 || announce < 0 || claim > announce {
 		t.Errorf("transfer terminal claim at %d must precede announcement await at %d", claim, announce)
 	}
@@ -1510,7 +1510,7 @@ func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
 		t.Fatal("agent.py missing the end of to_reservations")
 	}
 	method := botpy[start : start+1+end]
-	announceAt := strings.Index(method, `        await ctx.session.say("I’ll connect you to reservations now.", allow_interruptions=False)`)
+	announceAt := strings.Index(method, `        await dev_say(ctx.session, "I’ll connect you to reservations now.", allow_interruptions=False)`)
 	returnAt := strings.Index(method, "        return Reservations(")
 	if announceAt < 0 || returnAt < 0 || announceAt >= returnAt {
 		t.Errorf("transfer must finish its announcement, then hand off:\n%s", method)
@@ -1544,7 +1544,7 @@ func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
 	if backEnd < 0 {
 		t.Fatal("agent.py missing the end of back_to_greeter")
 	}
-	if block := botpy[backStart : backStart+1+backEnd]; strings.Contains(block, "session.say(") {
+	if block := botpy[backStart : backStart+1+backEnd]; strings.Contains(block, "dev_say(") {
 		t.Errorf("an omitted announce must stay silent:\n%s", block)
 	}
 }
@@ -3051,8 +3051,8 @@ func TestLiveKitV1ToolAnnounceSpeaksBeforeTheWork(t *testing.T) {
 	agentpy := artifactFile(t, artifact, "agent.py")
 
 	for _, tc := range []struct{ method, line, work string }{
-		{"get_invoice", `self.session.say("Let me pull that invoice up.")`, "async with httpx.AsyncClient()"},
-		{"fetch_notes", `self.session.say("One moment while I find your notes.")`, "result = tools.fetch_notes.fetch_notes("},
+		{"get_invoice", `dev_say(self.session, "Let me pull that invoice up.")`, "async with httpx.AsyncClient()"},
+		{"fetch_notes", `dev_say(self.session, "One moment while I find your notes.")`, "result = tools.fetch_notes.fetch_notes("},
 	} {
 		body := livekitMethodBody(t, agentpy, tc.method)
 		sayAt := strings.Index(body, tc.line)
@@ -3063,13 +3063,13 @@ func TestLiveKitV1ToolAnnounceSpeaksBeforeTheWork(t *testing.T) {
 		if sayAt >= workAt {
 			t.Errorf("%s: the announcement must start before the work:\n%s", tc.method, body)
 		}
-		if strings.Contains(body, "await self.session.say(") {
+		if strings.Contains(body, "await dev_say(self.session, ") {
 			t.Errorf("%s: the announcement must not be awaited, it would block until playout:\n%s", tc.method, body)
 		}
 	}
 
 	// lookup_customer announces nothing, so its body stays speechless.
-	if silent := livekitMethodBody(t, agentpy, "lookup_customer"); strings.Contains(silent, ".say(") {
+	if silent := livekitMethodBody(t, agentpy, "lookup_customer"); strings.Contains(silent, "dev_say(") {
 		t.Errorf("a tool without announce must emit no speech:\n%s", silent)
 	}
 }

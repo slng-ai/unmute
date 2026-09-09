@@ -296,7 +296,7 @@ func TestSlngRouterSendsTheWholeBodyPerRequest(t *testing.T) {
 		if got := strings.Count(source, `"template_variables": _slng_template_variables(`); got != 1 {
 			t.Errorf("livekit writes the snapshot in %d places, want 1: a second copy is how a task sends a stale one", got)
 		}
-		if !strings.Contains(source, "return _slng_llm_node(self, chat_ctx, tools, model_settings)") {
+		if !strings.Contains(source, "return dev_llm_node(self, _slng_llm_node, chat_ctx, tools, model_settings)") {
 			t.Errorf("livekit's task retry path does not dispatch into the one node that builds the body:\n%s", source)
 		}
 	}

@@ -15,7 +15,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -410,7 +409,7 @@ func devWebMux(provider ir.Provider, agentName, botPort, liveKitURL string, stre
 // Since the page is served before the runtime exists, this has to be able to
 // answer that there is nothing to connect to yet. `ready: false` is the page's
 // instruction to keep the call control unavailable rather than offer a call that
-// cannot be placed; a ready answer carries exactly what it always did.
+// cannot be placed. A ready answer also identifies the call before media joins.
 func devSessionHandler(provider ir.Provider, agentName, liveKitURL string, stream *devStream) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -420,7 +419,12 @@ func devSessionHandler(provider ir.Provider, agentName, liveKitURL string, strea
 		}
 		switch provider {
 		case ir.ProviderPipecat:
-			_ = json.NewEncoder(w).Encode(map[string]any{"kind": "webrtc-offer", "offerUrl": "/api/offer", "ready": true})
+			callID, err := randomRoomName("unmute")
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"kind": "webrtc-offer", "offerUrl": "/api/offer", "ready": true, "call_id": callID, "dev_events_version": 2})
 		case ir.ProviderLiveKit:
 			room, err := randomRoomName("unmute")
 			if err != nil {
@@ -437,7 +441,7 @@ func devSessionHandler(provider ir.Provider, agentName, liveKitURL string, strea
 				http.Error(w, fmt.Sprintf("mint token: %v", err), http.StatusInternalServerError)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"kind": "livekit", "url": liveKitURL, "token": token, "room": room, "ready": true})
+			_ = json.NewEncoder(w).Encode(map[string]any{"kind": "livekit", "url": liveKitURL, "token": token, "room": room, "ready": true, "call_id": room, "dev_events_version": 2})
 		default:
 			http.Error(w, "unsupported transport", http.StatusInternalServerError)
 		}
@@ -462,57 +466,81 @@ func providerSessionKind(provider ir.Provider) string {
 // the browser's own reconnect carries Last-Event-ID for free.
 func devEventsHandler(stream *devStream) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		flusher, ok := w.(http.Flusher)
+		_, ok := w.(http.Flusher)
 		if !ok || stream == nil {
 			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 			return
 		}
+		sub, cancel, err := stream.Subscribe(r.Header.Get("Last-Event-ID"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		defer cancel()
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		// Localhost only, but the page is the only intended reader either way.
 		w.Header().Set("X-Accel-Buffering", "no")
 
-		after := 0
-		if raw := r.Header.Get("Last-Event-ID"); raw != "" {
-			if n, err := strconv.Atoi(raw); err == nil {
-				after = n
+		for _, ev := range sub.backlog {
+			select {
+			case <-sub.done:
+				return
+			case <-r.Context().Done():
+				return
+			default:
 			}
-		}
-		backlog, live, cancel := stream.Subscribe(after)
-		defer cancel()
-
-		for _, ev := range backlog {
 			if !writeDevEvent(w, ev) {
 				return
 			}
 		}
-		flusher.Flush()
+		sub.backlog = nil
 
 		for {
+			// An overflow wins over queued data: reconnect and replay instead of
+			// draining an already incomplete queue before noticing its closure.
+			select {
+			case <-sub.done:
+				return
+			default:
+			}
 			select {
 			case <-r.Context().Done():
 				return
-			case ev, open := <-live:
+			case <-sub.done:
+				return
+			case ev, open := <-sub.events:
 				if !open {
 					return
 				}
 				if !writeDevEvent(w, ev) {
 					return
 				}
-				flusher.Flush()
 			}
 		}
 	}
 }
 
 func writeDevEvent(w http.ResponseWriter, ev devEvent) bool {
+	controller := http.NewResponseController(w)
+	if err := controller.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return false
+	}
 	payload, err := json.Marshal(ev)
 	if err != nil {
-		return true // skip one unencodable event rather than dropping the stream
+		return false // reconnect/replay rather than silently skipping data
 	}
-	_, err = fmt.Fprintf(w, "id: %d\ndata: %s\n\n", ev.Seq, payload)
-	return err == nil
+	if ev.Seq > 0 {
+		_, err = fmt.Fprintf(w, "id: %s:%d\ndata: %s\n\n", ev.StreamID, ev.Seq, payload)
+	} else {
+		_, err = fmt.Fprintf(w, "data: %s\n\n", payload)
+	}
+	if err != nil || controller.Flush() != nil {
+		return false
+	}
+	// The next event may be minutes away. Bound writes, not idle listening.
+	return controller.SetWriteDeadline(time.Time{}) == nil
 }
 
 // covalSimulationHeader is the header Coval sets on a token request when it

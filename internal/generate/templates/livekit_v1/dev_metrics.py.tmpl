@@ -1,55 +1,28 @@
-"""Per-turn latency measurements for the local dev loop.
+"""Identified conversation updates for the local dev loop; no trace exporter.
 
-Prints one JSON line per turn behind a sentinel the `unmute dev` server watches
-for, so the browser can show where a slow reply went without anything leaving
-this machine. No collector, no exporter, no network.
-
-Inert unless UNMUTE_DEV_METRICS is set. The dev loop sets it itself; a deployed
-artifact never does, so this file ships in every project and prints in none of
-them but yours.
-
-Everything here comes off session events. Two of them:
-
-* ``conversation_item_added`` carries a ChatMessage whose ``metrics`` is
-  LiveKit's own MetricsReport, so the numbers are the framework's rather than a
-  second opinion. User messages and assistant messages report different halves
-  of a turn, so the user half is held and spent by the assistant message that
-  answers it.
-* ``tool_execution_updated`` is a lifecycle: started, then ended, paired by
-  ``call_id``. It comes from the shared tool executor, so a tool reached through
-  a remote tool source is timed exactly like a local one.
-
-Deliberately not an OpenTelemetry SpanProcessor. LiveKit's set_tracer_provider
-installs LiveKit's own tracer rather than the OpenTelemetry global, so a second
-provider does not conflict loudly, it simply wins and silently stops whatever
-was installed first from receiving spans. Reading events instead means this file
-cannot break an opt-in trace export, at the cost of two numbers that live only
-on spans (the endpointing delay, and per-node span durations). That trade is
-worth it: a measurement feature that quietly disables your tracing is worse than
-one that reports slightly less.
+Each flushed line replaces one entity. Observation is inert unless the dev
+server sets UNMUTE_DEV_METRICS. Runtime objects and scheduling stay native.
 """
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
+import math
 import os
+import re
 import time
+from contextvars import ContextVar
 
-from livekit.agents.llm import ChatMessage
-from livekit.agents.voice import (
-    AgentSession,
-    ConversationItemAddedEvent,
-    ToolExecutionUpdatedEvent,
-)
+from livekit.agents import llm
+from livekit.agents.metrics import EOUMetrics, LLMMetrics, STTMetrics, TTSMetrics
+from livekit.agents.voice import AgentSession, SpeechHandle, agent_activity
 
 SENTINEL = "UNMUTE_METRIC"
 METRICS_ENV = "UNMUTE_DEV_METRICS"
 
-# Controls are not tools. A delegate or a transfer is the package handing the
-# conversation somewhere else rather than doing a unit of work and returning, and
-# a delegate does not return until the flow it started has finished, so its call
-# duration is that flow's duration. Reported beside real tool timings it reads as
-# one very slow tool, which is the opposite of the point.
+# A delegate's duration is its sub-conversation, not a tool's execution time.
 {{- if .HandoffControls}}
 HANDOFF_CONTROLS = frozenset(
     {
@@ -62,169 +35,613 @@ HANDOFF_CONTROLS = frozenset(
 HANDOFF_CONTROLS: frozenset[str] = frozenset()
 {{- end}}
 
+_operation_context: ContextVar[tuple | None] = ContextVar("unmute_dev_operation", default=None)
+
 
 def metrics_enabled() -> bool:
-    """True when the dev loop asked for measurements."""
     return os.environ.get(METRICS_ENV, "") not in ("", "0")
 
 
 def _emit(record: dict) -> None:
-    # flush is required, not tidiness: Python block-buffers stdout when it is not
-    # a tty, which is both dev paths, so an unflushed line can sit in the buffer
-    # until the process exits and arrive long after the turn it describes.
-    print(f"{SENTINEL} {json.dumps(record, separators=(',', ':'))}", flush=True)
+    try:
+        print(f"{SENTINEL} {json.dumps(record, separators=(',', ':'))}", flush=True)
+    except (BrokenPipeError, OSError):
+        # Losing the local reader must not interrupt the conversation.
+        pass
 
 
-def _round(value: object) -> float | None:
-    """Seconds as a float, or None when the framework reported nothing."""
-    if isinstance(value, (int, float)):
-        return round(float(value), 4)
-    return None
-
-
-def _stage(name: str, kind: str, metadata: dict | None, ttfb=None, total=None) -> dict | None:
-    """One service in the turn. None when there is nothing to say about it."""
-    stage: dict = {"kind": kind}
-    metadata = metadata or {}
-    provider = metadata.get("model_provider")
-    stage["name"] = provider or name
-    if metadata.get("model_name"):
-        stage["model"] = metadata["model_name"]
-    ttfb_secs = _round(ttfb)
-    if ttfb_secs is not None:
-        stage["ttfb"] = ttfb_secs
-    total_secs = _round(total)
-    if total_secs is not None:
-        stage["total"] = total_secs
-    if "model" not in stage and "ttfb" not in stage and "total" not in stage:
+def _native_speech(session):
+    # ponytail: private reads pinned to LiveKit 1.6.10; replace with public
+    # identity/input events when available. Missing fields lose association,
+    # never speech. current_speech names playback, not this coroutine's work.
+    speech_var = getattr(agent_activity, "_SpeechHandleContextVar", None)
+    activity_var = getattr(agent_activity, "_AgentActivityContextVar", None)
+    activity = activity_var.get(None) if activity_var is not None else None
+    if activity is None or getattr(activity, "_session", None) is not session:
         return None
-    return stage
+    return speech_var.get(None) if speech_var is not None else None
 
 
-def turn_record(
-    seq: int,
-    user_metrics: dict,
-    metrics: dict,
-    *,
-    interrupted: bool = False,
-    tools: list | None = None,
-) -> dict:
-    """Map one turn's two MetricsReports onto the record contract.
-
-    ``user_metrics`` is the user message's report and ``metrics`` the assistant's;
-    LiveKit splits a turn across the two. Pure so it can be checked against a
-    real MetricsReport without running a session. A measurement LiveKit did not
-    report is left out rather than set to zero, which would read as an unusually
-    fast stage.
-    """
-    record: dict = {"kind": "turn", "seq": seq}
-
-    for key, source in (
-        ("e2e", metrics.get("e2e_latency")),
-        ("user_turn", user_metrics.get("end_of_turn_delay")),
-        ("transcription", user_metrics.get("transcription_delay")),
-    ):
-        value = _round(source)
-        if value is not None:
-            record[key] = value
-    if interrupted:
-        record["interrupted"] = True
-
-    # The agent's own speech window is the total time the reply took to stream
-    # out, which answers "how long until it stopped talking".
-    started = metrics.get("started_speaking_at")
-    stopped = metrics.get("stopped_speaking_at")
-    speech_total = None
-    if isinstance(started, (int, float)) and isinstance(stopped, (int, float)):
-        speech_total = max(0.0, stopped - started)
-
-    stages = [
-        _stage("stt", "stt", user_metrics.get("stt_metadata")),
-        _stage("llm", "llm", metrics.get("llm_metadata"), ttfb=metrics.get("llm_node_ttft")),
-        _stage(
-            "tts",
-            "tts",
-            metrics.get("tts_metadata"),
-            ttfb=metrics.get("tts_node_ttfb"),
-            total=speech_total,
-        ),
-    ]
-    stages = [stage for stage in stages if stage is not None]
-    if stages:
-        record["stages"] = stages
-
-    if tools:
-        record["tools"] = list(tools)
-
-    return record
+def _native_input(session):
+    # The ordinary STT event has no item ID. Inspect the receiving activity's
+    # actual input buffer; don't use text equality or a changing VAD anchor as
+    # an utterance boundary. A blocked handoff activity is not a safe source.
+    activity = getattr(session, "_activity", None)
+    if activity is None or getattr(activity, "_new_turns_blocked", True):
+        return None
+    recognition = getattr(activity, "_audio_recognition", None)
+    if recognition is None or getattr(recognition, "_hooks", None) is not activity:
+        return None
+    buffer = getattr(recognition, "_audio_transcript", None)
+    if not isinstance(buffer, str):
+        return None
+    return recognition, buffer, getattr(recognition, "_speech_start_time", None)
 
 
-def install_dev_metrics(session: AgentSession) -> AgentSession:
-    """Attach the printers to a session and return it.
+class _Reporter:
+    def __init__(self, session, call_id):
+        self.session = session
+        self.call_id = call_id
+        self.closed = False
+        self.started_at = time.time()
+        self.first_started_at = None
+        self.recognition_seen = False
+        self.audio_output = None
+        self.early_metrics = getattr(session, "_early_assistant_metrics", None)
+        self.records: dict[tuple[str, str], dict] = {}
+        self.counter = 0
+        self.order = 0
+        self.speeches: dict[str, str] = {}
+        self.handles: dict[str, SpeechHandle] = {}
+        self.inputs: dict[object, dict] = {}
+        self.input_anchors: dict[float, set[str]] = {}
+        self.items: dict[str, str | None] = {}
+        self.native_segments: dict[str, str] = {}
+        self.tool_calls: dict[str, tuple[str, str | None]] = {}
+        self.tool_operations: dict[str, tuple[str, float | None]] = {}
+        self.ignored_tools: set[str] = set()
+        self.request_steps: dict[tuple[str, int], list[str]] = {}
+        self.user_metrics: dict[str, dict] = {}
+        self.eou_metrics: dict[str, object] = {}
+        self.speech_measurements: dict[str, str] = {}
+        self.callbacks: list[tuple[str, object]] = []
+        self.snapshot("call", "call", target="livekit", state="open",
+                      input_boundaries="partial", model_calls="known", generated_text="available")
+        self.watch_audio()
 
-    Returns the session untouched when measurements are off, which keeps the
-    caller a single unconditional line.
-    """
-    if not metrics_enabled():
-        return session
+    def new_id(self, prefix):
+        self.counter += 1
+        return f"{prefix}-{self.counter}"
 
-    session_started_at = time.time()
-    state: dict = {"seq": 0, "user": {}, "first_speech_sent": False}
-    # call_id -> (tool name, start timestamp). The executor emits started before
-    # ended for every tool, local or remote.
-    running_tools: dict[str, tuple[str, float]] = {}
-    finished_tools: list[dict] = []
+    def snapshot(self, kind, entity_id, *, _replace=False, **fields):
+        if self.closed:
+            return
+        key = (kind, entity_id)
+        old = self.records.get(key)
+        payload = {**(old[kind] if old and not _replace else {}), **fields}
+        if old is not None and payload == old[kind]:
+            return
+        if old is None:
+            self.order += 1
+        record = {
+            "version": 2, "kind": kind, "call_id": self.call_id, "id": entity_id,
+            "revision": old["revision"] + 1 if old else 1,
+            "order": old["order"] if old else self.order, kind: payload,
+        }
+        self.records[key] = record
+        _emit(record)
 
-    @session.on("tool_execution_updated")
-    def _on_tool_execution(ev: ToolExecutionUpdatedEvent) -> None:
-        update = ev.update
+    def limited(self, **fields):
+        self.snapshot("call", "call", **fields)
+
+    def watch_audio(self):
+        session = self.session
+        if self.closed or session is None:
+            return
+        output = session.output.audio
+        if output is self.audio_output:
+            return
+        if self.audio_output is not None:
+            self.audio_output.off("playback_started", self.playback_started)
+        self.audio_output = output
+        if output is not None:
+            output.on("playback_started", self.playback_started)
+
+    def playback_started(self, event):
+        # This public timestamp is the exact value the native speech task uses
+        # for started_speaking_at; no observer clock is substituted for it.
+        self.first_speech(event.created_at, "LiveKit AudioOutput.playback_started.created_at")
+
+    def first_speech(self, started, source):
+        if self.closed:
+            return
+        if self.first_started_at is None or started < self.first_started_at:
+            self.first_started_at = started
+            self.measurement("first-speech", "first_speech", started - self.started_at,
+                             source, scope="call",
+                             reason="Reporter installation to the native first speech timestamp.")
+
+    def measurement(self, entity_id, metric, value, source, *, response_id=None,
+                    operation_id=None, scope=None, reason=None, metadata=None):
+        fields = {"metric": metric, "unit": "seconds", "source": source,
+                  "scope": scope or ("operation" if operation_id else "response" if response_id else "unassigned")}
+        if operation_id:
+            fields["operation_id"] = operation_id
+        if response_id:
+            fields["exchange_id"] = response_id
+        if isinstance(value, (float, int)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0:
+            fields.update(state="measured", value=value)
+        else:
+            fields["state"] = "unavailable"
+            reason = reason or "The SDK did not report this duration."
+        if reason:
+            fields["reason"] = reason
+        if metadata:
+            if metadata.model_name:
+                fields["model"] = metadata.model_name
+            if metadata.model_provider:
+                fields["provider"] = metadata.model_provider
+        self.snapshot("measurement", entity_id, _replace=True, **fields)
+
+    def reply_latency(self, response_id, value, source):
+        # One handle can speak in several tool/model steps. Its reply latency
+        # ends at its first audio, not a later step's first audio.
+        entity_id = f"{response_id}-reply_latency"
+        previous = self.records.get(("measurement", entity_id))
+        if previous and previous["measurement"].get("state") == "measured":
+            if value is None or value >= previous["measurement"]["value"]:
+                return
+        self.measurement(entity_id, "reply_latency", value, source, response_id=response_id,
+                         reason="End of caller speech to first runtime agent audio; excludes delivery to the browser.")
+
+    def node_metrics(self, handle, native, source):
+        response_id = self.speech(handle)
+        for field, metric, reason in (
+            ("llm_node_ttft", "first_response", "Response LLM node to first response; can include several task retries, not one SDK request."),
+            ("tts_node_ttfb", "first_response", "Response TTS node to first audio; native synthesis-start marker, or first input text for a custom node."),
+            ("playback_latency", "playback_delay", "First audio frame forwarding to runtime playback start; excludes browser delivery on the default room output."),
+        ):
+            if field in native:
+                self.measurement(f"{response_id}-{handle.num_steps}-{field}", metric, native[field],
+                                 f"{source}.{field}", response_id=response_id, reason=reason)
+
+    def metrics(self, event):
+        if self.closed:
+            return
+        metric = event.metrics
+        if isinstance(metric, LLMMetrics):
+            context = _operation_context.get()
+            operation_id = context[1] if context and context[0] is self else None
+            operation = self.records.get(("operation", operation_id))
+            response_id = self.speeches.get(metric.speech_id)
+            # The SDK metric task inherits the context of this concrete node
+            # invocation. Provider IDs can be empty or reused; they are metadata.
+            if operation_id is not None and operation and (not metric.speech_id or not operation["operation"].get("exchange_id")
+                              or operation["operation"].get("exchange_id") == response_id):
+                if response_id and not operation["operation"].get("exchange_id"):
+                    self.bind_request(operation_id, response_id)
+                    operation = self.records[("operation", operation_id)]
+                response_id = operation["operation"].get("exchange_id")
+                prefix = operation_id
+                if metric.request_id and len(metric.request_id) <= 128 and all(33 <= ord(c) <= 126 for c in metric.request_id):
+                    self.snapshot("operation", operation_id, source_request_id=metric.request_id)
+            else:
+                operation_id = None
+                prefix = self.new_id("llm-report")
+                self.limited(model_calls="partial")
+            self.measurement(f"{prefix}-first_response", "first_response", metric.ttft,
+                             "LiveKit LLMMetrics.ttft", response_id=response_id, operation_id=operation_id,
+                             reason="SDK first response; may precede visible answer text." if metric.ttft >= 0 else "The SDK reported no first response.",
+                             metadata=metric.metadata)
+            self.measurement(f"{prefix}-request_duration", "request_duration", metric.duration,
+                             "LiveKit LLMMetrics.duration", response_id=response_id, operation_id=operation_id,
+                             metadata=metric.metadata)
+        elif isinstance(metric, TTSMetrics):
+            # Each callback is a completed native synthesis request. A repeated
+            # provider ID across segments never collapses their measurements.
+            operation_id = self.new_id("tts")
+            response_id = self.speeches.get(metric.speech_id)
+            fields = {"type": "tts", "name": "Speech synthesis", "state": "cancelled" if metric.cancelled else "ended"}
+            if response_id:
+                fields["exchange_id"] = response_id
+            self.snapshot("operation", operation_id, **fields)
+            self.measurement(f"{operation_id}-first_response", "first_response", metric.ttfb,
+                             "LiveKit TTSMetrics.ttfb", response_id=response_id, operation_id=operation_id,
+                             reason="Time to first synthesized audio; not speech duration.", metadata=metric.metadata)
+            self.measurement(f"{operation_id}-request_duration", "request_duration", metric.duration,
+                             "LiveKit TTSMetrics.duration", response_id=response_id, operation_id=operation_id,
+                             metadata=metric.metadata)
+        elif isinstance(metric, STTMetrics):
+            self.measurement(self.new_id("stt-duration"), "request_duration", None if metric.streamed else metric.duration,
+                             "LiveKit STTMetrics.duration", metadata=metric.metadata,
+                             reason="Streaming STT does not measure request duration." if metric.streamed else None)
+        elif isinstance(metric, EOUMetrics):
+            response_id = self.speeches.get(metric.speech_id)
+            if response_id:
+                self.eou_metrics[response_id] = metric
+            self.end_of_turn(metric, response_id)
+
+    def bind_request(self, operation_id, response_id):
+        # A later SDK report carries both the inherited concrete invocation
+        # context and native speech ID. That is proof, even when the private
+        # speech context was unavailable at request start. Keep every entity ID.
+        self.snapshot("operation", operation_id, exchange_id=response_id)
+        segment_id = f"{operation_id}-text"
+        if ("text", segment_id) in self.records:
+            self.snapshot("text", segment_id, exchange_id=response_id)
+        for call_id, (parent, _) in list(self.tool_calls.items()):
+            if parent == operation_id:
+                self.tool_calls[call_id] = (parent, response_id)
+                if call_id in self.tool_operations:
+                    tool_id, _ = self.tool_operations[call_id]
+                    self.snapshot("operation", tool_id, exchange_id=response_id)
+                    if ("measurement", f"{tool_id}-duration") in self.records:
+                        self.snapshot("measurement", f"{tool_id}-duration", exchange_id=response_id)
+
+    def end_of_turn(self, metric, response_id):
+        prefix = response_id or self.new_id("eou")
+        native = self.user_metrics.get(response_id, {})
+        for name, field, value in (
+            ("turn_detection", "end_of_turn_delay", metric.end_of_utterance_delay),
+            ("transcription_delay", "transcription_delay", metric.transcription_delay),
+        ):
+            # EOUMetrics substitutes zero for missing anchors. ChatMessage keeps
+            # the original missing-vs-measured distinction, including true zero.
+            known = value != 0 or field in native
+            self.measurement(f"{prefix}-{name}", name, native.get(field, value) if known else None,
+                             "LiveKit EOUMetrics", response_id=response_id,
+                             reason="Native end-of-speech to end-of-turn decision." if name == "turn_detection" and known else
+                             None if known else "The native speech-end anchor was not available.")
+
+    def tool(self, event):
+        if self.closed:
+            return
+        update = event.update
         if update.type == "tool_call_started":
             call = update.function_call
             if call.name in HANDOFF_CONTROLS:
+                self.ignored_tools.add(call.call_id)
                 return
-            running_tools[call.call_id] = (call.name, ev.created_at)
-        elif update.type == "tool_call_ended":
-            # A handoff was never recorded as started, so this pops nothing and
-            # needs no second check against the set.
-            start = running_tools.pop(update.call_id, None)
-            if start is not None:
-                name, started_at = start
-                finished_tools.append(
-                    {"name": name, "seconds": round(ev.created_at - started_at, 4)}
-                )
+            if call.call_id in self.tool_operations:
+                return
+            operation_id = self.new_id("tool")
+            self.tool_operations[call.call_id] = (operation_id, event.created_at)
+            parent, response_id = self.tool_calls.get(call.call_id, (None, None))
+            fields = {"type": "tool", "name": call.name, "state": "running"}
+            if parent:
+                fields["parent_operation_id"] = parent
+            if response_id:
+                fields["exchange_id"] = response_id
+            self.snapshot("operation", operation_id, **fields)
+        elif update.type == "tool_call_ended" and update.call_id not in self.ignored_tools:
+            known = self.tool_operations.get(update.call_id)
+            if known is None:
+                operation_id = self.new_id("tool")
+                self.snapshot("operation", operation_id, type="tool", name="Tool call", state="incomplete")
+                known = self.tool_operations[update.call_id] = (operation_id, None)
+            operation_id, started_at = known
+            self.snapshot("operation", operation_id, state={"done": "returned", "error": "failed", "cancelled": "cancelled"}[update.status])
+            response_id = self.records[("operation", operation_id)]["operation"].get("exchange_id")
+            self.measurement(f"{operation_id}-duration", "tool_duration",
+                             event.created_at - started_at if started_at is not None else None,
+                             "LiveKit tool lifecycle", response_id=response_id, operation_id=operation_id)
 
-    @session.on("conversation_item_added")
-    def _on_item_added(ev: ConversationItemAddedEvent) -> None:
-        item = ev.item
-        if not isinstance(item, ChatMessage):
+    def speech(self, handle):
+        if self.closed:
+            return None
+        # RoomIO establishes its output during start; speech_created runs
+        # before that speech can produce audio, including direct greetings.
+        self.watch_audio()
+        if handle is None:
+            self.limited(model_calls="partial")
+            return None
+        if handle.id not in self.speeches:
+            response_id = self.new_id("response")
+            self.speeches[handle.id] = response_id
+            self.handles[handle.id] = handle
+            self.snapshot("exchange", response_id, role="response", state="open",
+                          link_status="unavailable", playback="not_started")
+            handle.add_done_callback(self.speech_done)
+        return self.speeches[handle.id]
+
+    def speech_done(self, handle):
+        response_id = self.speeches.get(handle.id)
+        if response_id is None or self.closed:
             return
-        metrics = dict(getattr(item, "metrics", None) or {})
+        state = "interrupted" if handle.interrupted else "ended"
+        if handle.exception() is not None:
+            state = "incomplete"
+        playback = self.records[("exchange", response_id)]["exchange"]["playback"]
+        if playback == "speaking":
+            playback = "interrupted" if handle.interrupted else "ended"
+        self.snapshot("exchange", response_id, state=state, playback=playback)
 
+    def input_group(self):
+        input_id = self.new_id("input")
+        self.snapshot("exchange", input_id, role="input", state="open", link_status="unavailable")
+        return {"id": input_id, "segment": None, "has_final": False, "ended": False}
+
+    def finish_input(self, group):
+        if not group["ended"]:
+            self.snapshot("exchange", group["id"], state="ended")
+            group["ended"] = True
+
+    def transcription(self, event):
+        if self.closed:
+            return
+        if event.transcript:
+            self.recognition_seen = True
+        if event.item_id:
+            input_id = self.items.get(event.item_id)
+            if input_id is None:
+                input_id = self.input_group()["id"]
+                self.items[event.item_id] = input_id
+            segment_id = self.native_segments.setdefault(event.item_id, self.new_id("text"))
+            old = self.records.get(("text", segment_id))
+            if old and old["text"]["state"] == "final" and not event.is_final:
+                return
+            self.text(segment_id, input_id, input_id, "user", event.transcript,
+                      "final" if event.is_final else "provisional", "recognition")
+            return
+
+        source = _native_input(self.session)
+        if source is None:
+            # No known source boundary: preserve this segment independently.
+            group = self.input_group()
+            self.text(self.new_id("text"), group["id"], group["id"], "user", event.transcript,
+                      "final" if event.is_final else "provisional", "recognition")
+            return
+        recognition, buffer, anchor = source
+        group = self.inputs.get(recognition)
+        if group is None or group["ended"] or (group["has_final"] and not buffer):
+            if group:
+                self.finish_input(group)
+            group = self.inputs[recognition] = self.input_group()
+        if isinstance(anchor, (int, float)):
+            self.input_anchors.setdefault(anchor, set()).add(group["id"])
+        segment_id = group["segment"]
+        if segment_id is None:
+            segment_id = group["segment"] = self.new_id("text")
+        self.text(segment_id, group["id"], group["id"], "user", event.transcript,
+                  "final" if event.is_final else "provisional", "recognition",
+                  separator=" " if group["has_final"] else "")
+        if event.is_final:
+            group["has_final"] = True
+            group["segment"] = None
+
+    def text(self, segment_id, response_id, message_id, speaker, text, state, origin, *, separator=""):
+        fields = {"message_id": message_id, "speaker": speaker, "text": text,
+                  "state": state, "origin": origin, "separator_before": separator}
+        if response_id:
+            fields["exchange_id"] = response_id
+        self.snapshot("text", segment_id, **fields)
+
+    def request(self, agent, handle):
+        session = self.session
+        if self.closed or session is None:
+            return None
+        response_id = self.speech(handle)
+        operation_id = self.new_id("llm")
+        fields = {"type": "llm", "name": "Model call", "state": "running"}
+        if response_id:
+            fields["exchange_id"] = response_id
+            self.request_steps.setdefault((handle.id, handle.num_steps), []).append(operation_id)
+        model = agent.llm if isinstance(agent.llm, llm.LLM) else session.llm
+        if isinstance(model, llm.LLM):
+            fields.update(model=model.model, provider=model.provider)
+        self.snapshot("operation", operation_id, **fields)
+        return operation_id
+
+    def chunk(self, operation_id, chunk):
+        if self.closed:
+            return
+        operation = self.records[("operation", operation_id)]["operation"]
+        response_id = operation.get("exchange_id")
+        content = chunk if isinstance(chunk, str) else None
+        if isinstance(chunk, llm.ChatChunk):
+            if chunk.id and len(chunk.id) <= 128 and all(33 <= ord(c) <= 126 for c in chunk.id):
+                self.snapshot("operation", operation_id, source_request_id=chunk.id)
+            if chunk.delta is not None:
+                content = chunk.delta.content
+                for tool in chunk.delta.tool_calls or []:
+                    if tool.name not in HANDOFF_CONTROLS:
+                        self.tool_calls.setdefault(tool.call_id, (operation_id, response_id))
+        if content:
+            segment_id = f"{operation_id}-text"
+            previous = self.records.get(("text", segment_id))
+            text = (previous["text"]["text"] if previous else "") + content
+            self.text(segment_id, response_id, operation_id, "assistant", text, "provisional", "generated")
+
+    def request_done(self, operation_id, state):
+        if self.closed:
+            return
+        self.snapshot("operation", operation_id, state=state)
+        operation = self.records[("operation", operation_id)]["operation"]
+        for metric in ("first_response", "request_duration"):
+            entity_id = f"{operation_id}-{metric}"
+            if ("measurement", entity_id) not in self.records:
+                self.measurement(entity_id, metric, None, "LiveKit LLM node",
+                                 response_id=operation.get("exchange_id"), operation_id=operation_id)
+        segment_id = f"{operation_id}-text"
+        if ("text", segment_id) in self.records:
+            self.snapshot("text", segment_id, state="final" if state == "ended" else "incomplete")
+
+    def item_added(self, event):
+        item = event.item
+        if not isinstance(item, llm.ChatMessage) or self.closed:
+            return
+        handle = _native_speech(self.session)
         if item.role == "user":
-            # The user half of the turn arrives first and is spent by the
-            # assistant message that answers it.
-            state["user"] = metrics
+            response_id = self.speech(handle) if handle else None
+            if response_id:
+                self.user_metrics[response_id] = item.metrics or {}
+                if response_id in self.eou_metrics:
+                    self.end_of_turn(self.eou_metrics[response_id], response_id)
+            input_id = self.items.get(item.id)
+            anchor = (item.metrics or {}).get("started_speaking_at")
+            candidates = self.input_anchors.get(anchor, set())
+            if input_id is None and len(candidates) == 1:
+                input_id = next(iter(candidates))
+            # Audio has already been shown from STT. Without a proven anchor,
+            # keep it independent instead of repeating it from the commit event.
+            if input_id is None and (not self.recognition_seen or (handle and handle.input_details.modality == "text")):
+                input_id = self.input_group()["id"]
+                self.text(self.new_id("text"), input_id, input_id, "user", item.raw_text_content or "",
+                          "final", "transcription")
+            self.items[item.id] = input_id
+            if input_id:
+                self.snapshot("exchange", input_id, state="ended")
+                for group in self.inputs.values():
+                    if group["id"] == input_id:
+                        group["ended"] = True
+                if response_id:
+                    self.snapshot("exchange", response_id, input_id=input_id, link_status="known")
             return
         if item.role != "assistant":
             return
+        response_id = self.speech(handle) if handle else None
+        if response_id:
+            native = item.metrics or {}
+            self.node_metrics(handle, native, "LiveKit ChatMessage.metrics")
+            if "e2e_latency" in native:
+                self.reply_latency(response_id, native["e2e_latency"], "LiveKit ChatMessage.metrics.e2e_latency")
+            started, stopped = native.get("started_speaking_at"), native.get("stopped_speaking_at")
+            if started is not None:
+                self.first_speech(started, "LiveKit ChatMessage.metrics.started_speaking_at")
+                if stopped is not None:
+                    if item.id not in self.speech_measurements:
+                        self.speech_measurements[item.id] = self.new_id("speech-duration")
+                    self.measurement(self.speech_measurements[item.id], "speech_duration", stopped - started,
+                                     "LiveKit ChatMessage.metrics", response_id=response_id,
+                                     reason="Time speaking this audio segment; not synthesis computation.")
+        generated = any(
+            kind == "text" and record["text"].get("exchange_id") == response_id
+            and record["text"]["origin"] == "generated"
+            for (kind, _), record in self.records.items()
+        ) if response_id else False
+        if not generated and item.raw_text_content and item.id not in self.items:
+            self.limited(generated_text="limited")
+            segment_id = self.new_id("text")
+            self.items[item.id] = response_id
+            self.text(segment_id, response_id, segment_id, "assistant", item.raw_text_content,
+                      "incomplete" if item.interrupted else "final", "transcription")
 
-        user_metrics = state["user"]
-        state["user"] = {}
-        state["seq"] += 1
-        _emit(
-            turn_record(
-                state["seq"],
-                user_metrics,
-                metrics,
-                interrupted=item.interrupted,
-                tools=finished_tools,
-            )
-        )
-        finished_tools.clear()
+    def agent_state(self, event):
+        if self.closed:
+            return
+        self.watch_audio()
+        if event.new_state == "speaking":
+            handle = _native_speech(self.session)
+            if handle is not None:
+                response_id = self.speech(handle)
+                self.snapshot("exchange", response_id, playback="speaking")
+                # Pinned private read: the model path replaces this dictionary
+                # immediately before the speaking event; direct say leaves it
+                # stale. Require both freshness and this handle's own LLM work.
+                early = getattr(self.session, "_early_assistant_metrics", None)
+                if isinstance(early, dict) and early is not self.early_metrics:
+                    self.early_metrics = early
+                    if self.request_steps.get((handle.id, handle.num_steps)):
+                        self.node_metrics(handle, early, "LiveKit native early")
+                        if "e2e_latency" in early:
+                            self.reply_latency(response_id, early["e2e_latency"], "LiveKit native early e2e_latency")
 
-        started = metrics.get("started_speaking_at")
-        if not state["first_speech_sent"] and isinstance(started, (int, float)):
-            state["first_speech_sent"] = True
-            _emit({"kind": "session", "first_speech": round(started - session_started_at, 4)})
+    def close(self, event):
+        session = self.session
+        if self.closed or session is None:
+            return
+        for (kind, entity_id), record in list(self.records.items()):
+            payload = record[kind]
+            if (kind == "text" and payload["state"] == "provisional") or (
+                kind == "operation" and payload["state"] == "running"
+            ) or (kind == "exchange" and payload["state"] == "open"):
+                self.snapshot(kind, entity_id, state="incomplete")
+        reason = event.reason.value
+        self.snapshot("call", "call", state="error" if event.error is not None or reason == "error" else "ended", reason=reason)
+        self.closed = True
+        if self.audio_output is not None:
+            self.audio_output.off("playback_started", self.playback_started)
+            self.audio_output = None
+        for event, callback in self.callbacks:
+            session.off(event, callback)
+        for handle in self.handles.values():
+            handle.remove_done_callback(self.speech_done)
+        setattr(session, "_unmute_dev_reporter", None)
+        self.session = None
+        # Clear only reporter-owned containers, never native metric dictionaries.
+        self.early_metrics = None
+        for state in (self.records, self.speeches, self.handles, self.inputs, self.input_anchors,
+                      self.items, self.native_segments, self.tool_calls, self.tool_operations,
+                      self.ignored_tools, self.request_steps, self.user_metrics, self.eou_metrics,
+                      self.speech_measurements, self.callbacks):
+            state.clear()
 
+
+def install_dev_metrics(session: AgentSession, *, call_id: str) -> AgentSession:
+    if not metrics_enabled():
+        return session
+    if not isinstance(call_id, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", call_id) is None:
+        raise ValueError("dev streaming requires the call ID issued by the dev server")
+    if getattr(session, "_unmute_dev_reporter", None) is not None:
+        return session
+    reporter = _Reporter(session, call_id)
+    setattr(session, "_unmute_dev_reporter", reporter)
+    for event, callback in (
+        ("user_input_transcribed", reporter.transcription),
+        ("speech_created", lambda event: reporter.speech(event.speech_handle)),
+        ("conversation_item_added", reporter.item_added),
+        ("agent_state_changed", reporter.agent_state),
+        ("metrics_collected", reporter.metrics),
+        ("tool_execution_updated", reporter.tool),
+        ("close", reporter.close),
+    ):
+        session.on(event, callback)
+        reporter.callbacks.append((event, callback))
     return session
+
+
+def dev_llm_node(agent, node, chat_ctx, tools, model_settings):
+    reporter = getattr(agent.session, "_unmute_dev_reporter", None)
+    if reporter is None:
+        return node(agent, chat_ctx, tools, model_settings)
+    return _observe_llm(reporter, agent, node, chat_ctx, tools, model_settings)
+
+
+async def _observe_llm(reporter, agent, node, chat_ctx, tools, model_settings):
+    operation_id = reporter.request(agent, _native_speech(agent.session))
+    token = _operation_context.set((reporter, operation_id))
+    stream = None
+    state = "ended"
+    try:
+        stream = node(agent, chat_ctx, tools, model_settings)
+        if inspect.isawaitable(stream):
+            stream = await stream
+        if isinstance(stream, str):
+            reporter.chunk(operation_id, stream)
+            yield stream
+        elif stream is not None:
+            async for chunk in stream:
+                reporter.chunk(operation_id, chunk)
+                yield chunk
+    except (asyncio.CancelledError, GeneratorExit):
+        state = "cancelled"
+        raise
+    except BaseException:
+        state = "failed"
+        raise
+    finally:
+        try:
+            if (close := getattr(stream, "aclose", None)) is not None:
+                await close()
+        finally:
+            _operation_context.reset(token)
+            reporter.request_done(operation_id, state)
+
+
+def dev_say(session, text: str, **kwargs):
+    handle = session.say(text, **kwargs)
+    reporter = getattr(session, "_unmute_dev_reporter", None)
+    if reporter is not None and isinstance(text, str):
+        response_id = reporter.speech(handle)
+        reporter.text(f"{response_id}-text", response_id, response_id, "assistant", text, "final", "generated")
+    return handle
