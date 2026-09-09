@@ -1039,6 +1039,9 @@ func TestLiveKitV1SharedGroupTaskTransferAndResults(t *testing.T) {
 	}
 	block := botpy[start : start+end]
 	for _, want := range []string{
+		// A group step's handoff returns the receiving agent through the
+		// delegate, so the delegate is typed to carry one.
+		"async def do_reserve(self, ctx: RunContext) -> dict | Agent:",
 		"group = TaskGroup(",
 		"summarize_chat_ctx=False,",
 		"on_task_completed=lambda event: _share_task_result(group, event),",

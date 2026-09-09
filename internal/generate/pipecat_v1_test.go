@@ -652,10 +652,12 @@ func TestV24PipecatStaticCheckSurface(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"from collections.abc import Sequence",
+		"from collections.abc import Mapping, Sequence",
 		"from opentelemetry.sdk.trace import Span, SpanProcessor, TracerProvider",
 		"def on_start(self, span: Span, parent_context: Context | None = None) -> None:",
-		"def start_call(attributes: dict[str, AttributeValue]) -> None:",
+		// Mapping, not dict: ty 0.0.40 reads the caller's literal as dict[str, str]
+		// and dict is invariant in its value type.
+		"def start_call(attributes: Mapping[str, AttributeValue]) -> None:",
 		"def said(self, role: str, text: str) -> None:",
 		"_TRACE_PROVIDER: TracerProvider | None = None",
 		`setattr(patched, "__langfuse_patch__", True)`,

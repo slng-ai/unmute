@@ -8,7 +8,7 @@ import base64
 {{if or .NeedsFunctionCalls .NeedsMCP}}import functools
 {{end}}import json
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 
 from opentelemetry import trace
@@ -59,7 +59,7 @@ class CallTrace(SpanProcessor):
         self._turn: Span | None = None
         self._transcript: list[dict[str, str]] = []
 
-    def start_call(self, attributes: dict[str, AttributeValue]) -> None:
+    def start_call(self, attributes: Mapping[str, AttributeValue]) -> None:
         """Point tracing at this call, forgetting the one the container ran before."""
         self._attributes = dict(attributes)
         self._call, self._turn = None, None
@@ -194,7 +194,7 @@ def setup_langfuse_tracing() -> TracerProvider:
     return provider
 
 
-def start_call(attributes: dict[str, AttributeValue]) -> None:
+def start_call(attributes: Mapping[str, AttributeValue]) -> None:
     """Name this call before its conversation span opens."""
     CALL.start_call(attributes)
 
