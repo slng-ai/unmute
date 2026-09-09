@@ -33,8 +33,8 @@ To keep synthesis compute in a world part or exact region, see
 
 | Where | `model:` | `voice:` |
 |---|---|---|
-| `unmute init`, and every example except `slng-support` | `deepgram/aura:2` | `aura-2-thalia-en` |
-| `slng-support`, which compiles to the `slng` target | `slng/deepgram/aura:2-en` | `aura-2-thalia-en` |
+| `unmute init`, and every example, `hotel-concierge` on the `slng` target included | `deepgram/aura:2` | `aura-2-thalia-en` |
+| the SLNG-hosted English copy, which runs in `us-central` only, so an `slng` package deploying to `eu-central` cannot name it | `slng/deepgram/aura:2-en` | `aura-2-thalia-en` |
 
 The `slng/` prefix picks a model SLNG hosts itself, and an id without it reaches
 the same vendor model through SLNG as a proxy. For **listening** the two differ

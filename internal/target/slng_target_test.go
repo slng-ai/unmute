@@ -24,7 +24,7 @@ func TestSlngPushCommandsAgree(t *testing.T) {
 	root := filepath.Join("..", "..")
 	surfaces := map[string]string{
 		"the emitted runbook": filepath.Join(root, "internal", "generate", "templates", "slng_v1", "README.md.tmpl"),
-		"the example README":  filepath.Join(root, "examples", "slng-support", "README.md"),
+		"the example README":  filepath.Join(root, "examples", "hotel-concierge", "README.md"),
 		"the docs-site page":  filepath.Join(root, "docs-site", "targets", "slng.mdx"),
 		"the shipped skill":   filepath.Join(root, "internal", "skill", "assets", "references", "package.md"),
 	}
@@ -129,7 +129,7 @@ func TestEveryVoiceaiCommandNamedExists(t *testing.T) {
 	root := filepath.Join("..", "..")
 	surfaces := []string{
 		filepath.Join(root, "internal", "generate", "templates", "slng_v1", "README.md.tmpl"),
-		filepath.Join(root, "examples", "slng-support", "README.md"),
+		filepath.Join(root, "examples", "hotel-concierge", "README.md"),
 		filepath.Join(root, "docs-site", "targets", "slng.mdx"),
 		filepath.Join(root, "internal", "skill", "assets", "references", "package.md"),
 	}

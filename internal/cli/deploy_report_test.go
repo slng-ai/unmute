@@ -605,6 +605,54 @@ func TestPreviewComparesTheAnnouncementItWouldWrite(t *testing.T) {
 	}
 }
 
+// TestPreviewComparesTheSenderItWouldWrite.
+//
+// `inject: from_number` on a builtin send_sms compiles to the attachment's
+// config_overrides, which the preview used to call, on sight, a setting "this
+// package cannot declare, so a replacement removes them". With the package's
+// own config handed in, the one field it declares is compared and said, and a
+// config the package declares nothing about keeps the old claim.
+func TestPreviewComparesTheSenderItWouldWrite(t *testing.T) {
+	const sender = "+447700900123"
+	proposed := map[string]map[string]any{"search_places_text": {"type": "send_sms", "from_number": sender}}
+	for _, tc := range []struct {
+		name     string
+		onAgent  map[string]any
+		declared map[string]map[string]any
+		want     string
+		wantNot  string
+	}{
+		{name: "the same sender on both sides",
+			onAgent: map[string]any{"type": "send_sms", "from_number": sender}, declared: proposed,
+			wantNot: "config_overrides"},
+		{name: "only the package has one", onAgent: nil, declared: proposed,
+			want: "config_overrides.from_number, the sender this package's `inject:` pins, which the agent does not have now"},
+		{name: "both, and they differ",
+			onAgent: map[string]any{"type": "send_sms", "from_number": "+447700900999"}, declared: proposed,
+			want: `config_overrides.from_number, from "+447700900999" to this package's ` + "`inject:`"},
+		{name: "the agent holds a field the package cannot write",
+			onAgent: map[string]any{"type": "send_sms", "from_number": sender, "body": "Thanks!"}, declared: proposed,
+			want: "config_overrides.body, which the agent has now and this package cannot declare"},
+		{name: "the package declares no config at all",
+			onAgent: map[string]any{"type": "send_sms", "from_number": sender}, declared: nil,
+			want: "config_overrides, this attachment's own settings for the tool, which the agent has now and this package cannot declare"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows := compareAttachments(
+				[]resolvedTool{resolvedAt(2)}, proposedSettings{Arguments: suppliesQuery, Config: tc.declared},
+				liveWith(func(a *slngLiveTool) { a.ConfigOverrides = tc.onAgent }), true, nil,
+			)
+			joined := strings.Join(rows[0].Changes, "\n")
+			if tc.wantNot != "" && strings.Contains(joined, tc.wantNot) {
+				t.Errorf("an unchanged sender was reported as a change:\n%s", joined)
+			}
+			if tc.want != "" && !strings.Contains(joined, tc.want) {
+				t.Errorf("the preview does not say %q:\n%s", tc.want, joined)
+			}
+		})
+	}
+}
+
 // TestPreviewNeverCallsOneAttachmentBothKeptAndDetached.
 //
 // buildDeployReport compared the rows against every reference it attaches,

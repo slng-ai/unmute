@@ -1,0 +1,11 @@
+# Two tools from a server the organisation registered. SLNG attaches one
+# reference per tool, so each is named: search for anything current, scrape to
+# read one page the search found. The server's address and credential are
+# SLNG's; this file carries neither. An `announce:` is refused here, because
+# the server owns each tool's speech, so the prompt asks the model to say it is
+# checking the web before it calls.
+mcp:
+  server: firecrawl-mcp-2
+  tools:
+    - firecrawl_search
+    - firecrawl_scrape

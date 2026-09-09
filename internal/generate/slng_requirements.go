@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/slng-ai/unmute/internal/ir"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 // What a compiled slng body needs the account to already have.
@@ -244,6 +245,14 @@ func slngVaultRequirements(agent *ir.Agent, built slngArtifacts) (secrets, varia
 		if tool.Mirror != nil {
 			for _, secret := range tool.Mirror.Secrets() {
 				addSecret(secret, "tools/"+name+".slng.json, the hosted tool reads it")
+			}
+		}
+		// SLNG's send_sms reads its Twilio credentials from the vault by fixed
+		// names and a package declares neither, so this is the only place the
+		// preflight can learn to check them.
+		if tool.Execution == ir.ToolBuiltin && tool.Builtin == "send_sms" {
+			for _, secret := range targetcap.SendSmsVaultSecrets {
+				addSecret(secret, "tools/"+name+".yaml, SLNG's send_sms reads it")
 			}
 		}
 		addVariable(tool.Description, "tools/"+name+".yaml description")

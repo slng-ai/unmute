@@ -10,7 +10,7 @@ command sends them:
 
 ```sh
 export SLNG_API_KEY=...
-unmute deploy examples/slng-support
+unmute deploy examples/hotel-concierge
 ```
 
 <Warning>
@@ -55,11 +55,11 @@ being told is better than having it disappear.
 To stop at the files:
 
 ```sh
-unmute compile examples/slng-support --target slng
+unmute compile examples/hotel-concierge --target slng
 ```
 
 ```text
-examples/slng-support/build/slng/
+examples/hotel-concierge/build/slng/
 ├── agent.json                # the agent create body
 ├── README.md                 # the runbook: what to create, what to run, what to watch
 └── compile-report.json       # what was compiled, and which checks were left to deployment
@@ -172,7 +172,7 @@ outline:
 
 ```sh
 export SLNG_API_KEY=...
-unmute deploy examples/slng-support
+unmute deploy examples/hotel-concierge
 ```
 
 An agent id comes back, and you need it to open a session. Read

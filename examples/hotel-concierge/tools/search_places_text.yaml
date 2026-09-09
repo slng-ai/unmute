@@ -1,0 +1,10 @@
+# The description is this package's and overrides the published one, so the
+# model learns when to reach for the tool in this agent's terms. The parameter
+# schema stays the platform's: one required text query.
+description: Find places near the hotel for a guest, such as restaurants, bars, cafés, pharmacies, shops and sights. Send one plain text query that names what the guest wants and the hotel's neighbourhood and city.
+
+slng: search_places_text
+
+# Spoken before the request goes out, so a slow lookup is not silence.
+announce: Let me have a look around the neighbourhood.
+effect: returns_data

@@ -56,7 +56,7 @@ Get one at [app.slng.ai/api-keys](https://app.slng.ai/api-keys).
 ## Usage
 
 ```sh
-unmute deploy examples/slng-support
+unmute deploy examples/hotel-concierge
 ```
 
 A `slng:` reference needs no `unmute pull` first, no mirror, and no hash:
@@ -72,8 +72,8 @@ A clean run reads:
 slng: organisation Your Workspace (<org_id>)
 slng: <n> requirements satisfied
 slng: credential from SLNG_API_KEY
-slng: compiled examples/slng-support/build/slng (3 files)
-slng: attached check_order v<n>
+slng: compiled examples/hotel-concierge/build/slng (3 files)
+slng: attached hotel_info v<n>
 slng: attached search_places_text v<n>
 slng: attached end_call v<n>
 slng: attached firecrawl-mcp-2 firecrawl_scrape
@@ -304,8 +304,8 @@ live agent is **overwritten**.
 ```text
 slng: <n> requirements satisfied
 slng: credential from SLNG_API_KEY
-slng: compiled examples/slng-support/build/slng (3 files)
-slng: check_order v<n>, from v<m>
+slng: compiled examples/hotel-concierge/build/slng (3 files)
+slng: hotel_info v<n>, from v<m>
 slng:   would change argument_overrides.trace_id, which the agent has now and this package does not supply, so a replacement removes it and the model supplies the argument
 slng:   would change description, which the agent has now and this package does not declare, so a replacement removes it and the published description is used instead
 slng:   would change execution_policy.pre_action_message, from "Hold on." to this package's `announce:`

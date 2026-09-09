@@ -224,6 +224,15 @@ func checkInject(pkg *packagespec.Package) error {
 			// mirror's schema, and the slng reference carries the values as
 			// argument_overrides on the attachment.
 			case "webhook", "local", "slng":
+			case "builtin":
+				// send_sms is the one builtin with a setting a package pins: the
+				// sender, which the slng driver writes to the attachment's config
+				// override. Validate holds it to that one key and to a literal
+				// E.164 number; here only the kind is decided.
+				if raw.Builtin == nil || raw.Builtin.ID != "send_sms" {
+					return fmt.Errorf("%s: tool %q is a builtin tool; inject is legal on webhook, local and slng tools, and on builtin send_sms for its sender",
+						pkg.Location(file, "inject:"), name)
+				}
 			default:
 				// An mcp tool's arguments are assembled by the MCP client from the
 				// server's schema; neither SDK exposes a per-call hook, so an

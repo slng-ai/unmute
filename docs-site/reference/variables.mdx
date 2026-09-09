@@ -108,7 +108,7 @@ assignment must satisfy the declared type's format.
 | Target | Supported variable types |
 |---|---|
 | LiveKit and Pipecat | All types and task assignments on this page |
-| SLNG | Basic scalars: `str`, `int`, `float`, `bool`, and their aliases |
+| SLNG | Basic scalars: `str`, `int`, `float`, `bool`, and their aliases. Also the only target that takes `source: conversation`, a value the model records mid-call |
 
 ## `shapes:` groups fields into a named type
 
@@ -146,6 +146,7 @@ including its fields.
 |---|---|---|
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
 | omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so write the prompt to read whole while it is still empty, or give it a `default:` |
+| `conversation` | the model, during the call, once the caller has given and confirmed the value | `slng` only. It becomes one of the agent's runtime variables, filled through SLNG's own `set_runtime_variables` tool and returned on the call record under `memory_variables`. It takes no `default:` and needs a `description:`, which the model reads. On `livekit` and `pipecat` a step's `assign:` records such a value instead |
 | `session_id` | the phone adapter | LiveKit `sip` or `connector` |
 | `call_id` | the phone adapter | LiveKit `sip` or `connector`, and both Pipecat Twilio routes |
 | `stream_id` | the phone adapter | LiveKit `connector`, and Pipecat `cloud-websocket` |
@@ -454,7 +455,9 @@ Keep injected keys out of both `input.properties` and `input.required`.
 Injection hides an argument from the model; it does not hide data a tool
 returns or data already present in the conversation.
 
-`inject` is legal on `webhook`, `local`, and hosted `slng` tools. See
+`inject` is legal on `webhook`, `local`, and hosted `slng` tools, and on
+`builtin: send_sms` for its one setting, the sender (see
+[Prebuilt tools](/build/tools/prebuilt)). See
 [Hosted tools](/build/tools/hosted) for the hosted attachment rules.
 
 When an injected variable is missing or unconfirmed, the tool refuses before

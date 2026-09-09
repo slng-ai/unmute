@@ -470,6 +470,13 @@ const (
 	VariableSourceDirection  VariableSource = "direction"
 	VariableSourceFromNumber VariableSource = "from_number"
 	VariableSourceToNumber   VariableSource = "to_number"
+	// VariableSourceConversation is a value the model records during the call:
+	// asked for, confirmed, then saved. It is what SLNG calls a runtime variable,
+	// filled through the platform's own set_runtime_variables tool and returned
+	// on the call record as a memory variable. The code targets record such a
+	// value through a task's `assign:` instead, so the capability table refuses
+	// this source there and names that.
+	VariableSourceConversation VariableSource = "conversation"
 )
 
 type AgentDef struct {

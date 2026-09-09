@@ -59,6 +59,10 @@ type slngRunbook struct {
 	// often misses: a variable declared in agent.yaml is a value supplied per
 	// call, not a constant.
 	VariableNames []string
+	// MemoryVariables are the `source: conversation` variables: the model
+	// records them during the call and the call record returns them, so a
+	// reader knows where to look for a value no session argument supplied.
+	MemoryVariables []string
 }
 
 // NeedsVault reports whether the package needs any Vault entry at all. A package
@@ -120,6 +124,9 @@ func slngRunbookFor(agent *ir.Agent, tgt ir.Target, built slngArtifacts) slngRun
 		}
 	}
 	runbook.VariableNames = slices.Sorted(maps.Keys(built.Body.Variables))
+	for _, variable := range built.Body.RuntimeVars {
+		runbook.MemoryVariables = append(runbook.MemoryVariables, variable.Name)
+	}
 	// The same value `unmute deploy` checks against the account. The runbook
 	// prints what the preflight looks for, so a table here that omitted a name
 	// would be a table that lies about what the push needs.

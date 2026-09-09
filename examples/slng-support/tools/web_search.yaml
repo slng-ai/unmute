@@ -1,5 +1,0 @@
-mcp:
-  server: firecrawl-mcp-2
-  tools:
-    - firecrawl_scrape
-    - firecrawl_search

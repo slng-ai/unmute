@@ -32,20 +32,33 @@ const (
 )
 
 type slngBody struct {
-	SchemaVersion int         `json:"schema_version"`
-	Name          string      `json:"name"`
-	SystemPrompt  string      `json:"system_prompt"`
-	Greeting      string      `json:"greeting"`
-	Language      string      `json:"language,omitempty"`
-	Region        string      `json:"region"`
-	Models        slngModels  `json:"models"`
-	Interruptions bool        `json:"enable_interruptions"`
-	ToolMode      string      `json:"tool_mode"`
-	ToolRefs      []slngRef   `json:"tool_refs"`
-	MCPRefs       []slngMCP   `json:"mcp_refs"`
-	RuntimeVars   []string    `json:"runtime_variables"`
-	Defaults      slngStrings `json:"template_defaults"`
-	Variables     slngOptions `json:"template_variable_options"`
+	SchemaVersion int        `json:"schema_version"`
+	Name          string     `json:"name"`
+	SystemPrompt  string     `json:"system_prompt"`
+	Greeting      string     `json:"greeting"`
+	Language      string     `json:"language,omitempty"`
+	Region        string     `json:"region"`
+	Models        slngModels `json:"models"`
+	Interruptions bool       `json:"enable_interruptions"`
+	ToolMode      string     `json:"tool_mode"`
+	ToolRefs      []slngRef  `json:"tool_refs"`
+	MCPRefs       []slngMCP  `json:"mcp_refs"`
+	// RuntimeVars are the package's `source: conversation` variables: values the
+	// model records during the call through the platform's own
+	// set_runtime_variables tool. Never nil, so a package with none says [] and
+	// not null (see the comment where the body is built).
+	RuntimeVars []slngRuntimeVar `json:"runtime_variables"`
+	Defaults    slngStrings      `json:"template_defaults"`
+	Variables   slngOptions      `json:"template_variable_options"`
+}
+
+// slngRuntimeVar is RuntimeVariableDefinition (agent_config.py): a name and a
+// description the model reads, nothing else. A runtime variable has no default
+// and no required flag, and its name may not collide with a template variable,
+// which the two loops in buildSlng keep apart by construction.
+type slngRuntimeVar struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 // slngStrings and slngOptions are named map types so a nil map still encodes as
@@ -246,7 +259,7 @@ func buildSlng(agent *ir.Agent, tgt ir.Target) (slngArtifacts, error) {
 		// Not omitempty and not nil: SLNG's create default for runtime_variables
 		// differs from the document's, and nothing in a package maps to it, so an
 		// explicit empty list says "none" rather than "unspecified".
-		RuntimeVars: []string{},
+		RuntimeVars: []slngRuntimeVar{},
 		Defaults:    slngStrings{},
 		Variables:   slngOptions{},
 	}}
@@ -291,6 +304,13 @@ func buildSlng(agent *ir.Agent, tgt ir.Target) (slngArtifacts, error) {
 	// default present.
 	for _, name := range slices.Sorted(maps.Keys(agent.Variables)) {
 		variable := agent.Variables[name]
+		// A value the model records is a runtime variable, and SLNG refuses a
+		// name that is both a runtime and a template variable, so it goes in one
+		// list and not the other.
+		if variable.Source == ir.VariableSourceConversation {
+			built.Body.RuntimeVars = append(built.Body.RuntimeVars, slngRuntimeVar{Name: name, Description: variable.Description})
+			continue
+		}
 		built.Body.Variables[name] = slngVariableOption{Required: true}
 		if text, ok := variable.Default.(string); ok {
 			built.Body.Defaults[name] = text
@@ -472,9 +492,24 @@ func slngTools(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) ([]slngRef, []
 			}}
 		}
 		ref.Arguments = slngArguments(tool.Inject)
+		// send_sms is the one builtin with a setting the package pins. SLNG wants
+		// the sender on the attachment's config override, not among the
+		// arguments (agent_runtime_compiler.py:1489-1492), and the model supplies
+		// recipient and body itself, so the arguments stay empty.
+		if tool.Execution == ir.ToolBuiltin && tool.Builtin == "send_sms" {
+			ref.Config = slngSendSmsConfig(tool)
+			ref.Arguments = slngArguments{}
+		}
 		refs = append(refs, ref)
 	}
 	return refs, mcpRefs, nil
+}
+
+// slngSendSmsConfig is SendSmsOverrides (shared_tool_contract.py): the union
+// tag and the sender. validate has already held from_number to a literal E.164
+// number, so this reads it and nothing more.
+func slngSendSmsConfig(tool ir.Tool) map[string]any {
+	return map[string]any{"type": "send_sms", "from_number": tool.Inject["from_number"]}
 }
 
 // mcpServerName is the platform's name for the server a tool reads.

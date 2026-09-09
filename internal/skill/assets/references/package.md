@@ -573,9 +573,10 @@ A `code` tool on slng runs in SLNG's sandbox, in the region serving the call,
 which is why it is fast. Whether it may reach the network is the platform's
 setting on that tool, recorded in the mirror under `config.egress`, and not
 something a package can ask for. A tool that must call a service is an
-`api_request` tool, created in the dashboard the same way. `examples/slng-support`
+`api_request` tool, created in the dashboard the same way. `examples/hotel-concierge`
 ships a hosted `code` tool, a hosted `api_request` tool, a builtin and an mcp
-server, and deploys today.
+server, plus template variables, an injected argument, a tool announcement, a
+model fallback, and deploys today.
 
 An MCP reference resolves by name at push time: the push looks up the server's
 `server_id` and copies each tool's `observed_schema_hash` out of the platform's

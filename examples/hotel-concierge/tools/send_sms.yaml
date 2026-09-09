@@ -1,0 +1,12 @@
+# SLNG's curated text-message capability, reached by name. The model supplies
+# the recipient and the body; the package pins the sender, which the platform
+# requires on the attachment, so the model can neither choose it nor see it.
+# Twilio credentials are the organisation's, read by SLNG from its own vault
+# under TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN; `unmute deploy` checks both.
+description: Send a text message to the guest's confirmed mobile number. Use it only after the guest has given the number, heard it read back, and agreed to it, and only with a short summary of what was arranged on this call.
+
+builtin:
+  id: send_sms
+
+inject:
+  - from_number: "+447450306381"
