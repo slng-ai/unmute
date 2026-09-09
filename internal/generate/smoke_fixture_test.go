@@ -61,14 +61,23 @@ func addReminderVariables(agent *ir.Agent) {
 // examples cut-down, 2026-08-24).
 func useWebhookTools(agent *ir.Agent) {
 	addReminderVariables(agent)
+	// The path segment is a plain string, not the salon's E.164 Phone: the smoke
+	// seeds it with a slash and a space to prove the segment is URL-encoded, and
+	// _save_result would refuse that shape on a Phone.
+	agent.Variables["customer_id"] = ir.Variable{
+		Type:        ir.PrimitiveString,
+		Default:     "",
+		Source:      ir.VariableSourceCallStart,
+		Description: "The customer's record id in the salon API.",
+	}
 	agent.Tools["confirm_appointment"] = webhookTool(
 		"Confirm that the existing appointment stays as booked. Call it when the customer says the time works.",
-		"/customers/{{customer_phone}}/appointments/confirm",
+		"/customers/{{customer_id}}/appointments/confirm",
 		map[string]any{"customer_phone": "{{customer_phone}}", "dialed_number": "{{dialed_number}}", "channel": "phone"},
 	)
 	agent.Tools["reschedule_appointment"] = webhookTool(
 		"Move the appointment to the slot the customer asked for.",
-		"/customers/{{customer_phone}}/appointments",
+		"/customers/{{customer_id}}/appointments",
 		map[string]any{"customer_phone": "{{customer_phone}}", "new_time": "{{reschedule_to}}"},
 	)
 	def := agent.Agents[agent.EntryAgent]
