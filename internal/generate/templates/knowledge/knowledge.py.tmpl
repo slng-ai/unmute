@@ -19,6 +19,7 @@ import os
 {{- end}}
 import time
 from pathlib import Path
+from typing import TypedDict
 
 
 from llama_index.core import SimpleDirectoryReader{{if .AnyEmbeds}}, StorageContext, VectorStoreIndex, load_index_from_storage{{end}}
@@ -56,7 +57,15 @@ INDEX_ROOT = Path(__file__).resolve().parent / "knowledge_index"
 # They are per base because a price list and a prose policy want different passage
 # sizes. Measured: a price list split at 90 tokens ranked an opening-hours passage
 # above the price a caller asked for.
-SETTINGS = {
+class _Settings(TypedDict):
+    mode: str
+    chunk_size: int
+    chunk_overlap: int
+    top_k: int
+    min_score: float
+
+
+SETTINGS: dict[str, _Settings] = {
 {{- range .Knowledge}}
     {{pyq .Name}}: {"mode": {{pyq .Mode}}, "chunk_size": {{.ChunkSize}}, "chunk_overlap": {{.ChunkOverlap}}, "top_k": {{.TopK}}, "min_score": {{.MinScore}}},
 {{- end}}

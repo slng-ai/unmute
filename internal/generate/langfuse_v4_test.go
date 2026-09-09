@@ -110,8 +110,10 @@ func TestLangfuseKeepsTheWholeCallInOneTrace(t *testing.T) {
 			"def install_turn_spans(provider: TracerProvider, call: CallTrace) -> None:",
 			"install_turn_spans(trace_provider, call)",
 			// The provider, because livekit decorates llm_node at import time
-			// and a tracer patch would miss it silently.
-			"provider.get_tracer = lambda",
+			// and a tracer patch would miss it silently. Through setattr, because
+			// TracerProvider declares no such attribute and ty refuses the plain
+			// assignment.
+			`provider, "get_tracer", lambda *a, **kw: TurnTracer(get_tracer(*a, **kw), call)`,
 		}, []string{
 			// A turn rooted on an empty Context starts its own trace, which is
 			// exactly the shape this reverted.
@@ -123,6 +125,7 @@ func TestLangfuseKeepsTheWholeCallInOneTrace(t *testing.T) {
 		}, []string{
 			// Pipecat's tree is already right, so nothing may re-parent it.
 			"provider.get_tracer = lambda",
+			`"get_tracer", lambda`,
 			"class TurnRootTracer:",
 		}},
 	} {

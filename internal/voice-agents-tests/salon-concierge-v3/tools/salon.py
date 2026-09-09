@@ -14,12 +14,14 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 _fresh = types.ModuleType("unmute_salon_state")
-_fresh.customers = set()
-_fresh.names = {"34111111111": "Robin Vega"}
-_fresh.customer_ids = {"34111111111": "cus_robin_vega"}
-_fresh.bookings = {}
-_fresh.complaints = {}
-_fresh.lock = threading.Lock()
+vars(_fresh).update(
+    customers=set(),
+    names={"34111111111": "Robin Vega"},
+    customer_ids={"34111111111": "cus_robin_vega"},
+    bookings={},
+    complaints={},
+    lock=threading.Lock(),
+)
 _state = sys.modules.setdefault("unmute_salon_state", _fresh)
 
 _SERVICES = {"haircut", "haircolor", "haircut_and_haircolor", "dry_cut"}
@@ -335,6 +337,7 @@ def _demo():
     assert find_or_create_customer("(555) 010-1010")["status"] == "created"
 
     spec = importlib.util.spec_from_file_location("salon_copy_two", __file__)
+    assert spec is not None and spec.loader is not None
     copy_two = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(copy_two)
     assert copy_two._state is _state
