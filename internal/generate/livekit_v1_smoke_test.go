@@ -1616,3 +1616,141 @@ func runLiveKitSmokeScript(t *testing.T, example string, mutate func(*ir.Target)
 	}
 	return out
 }
+
+// addLiveKitGroupStepHandoff gives the first step of remy's shared group a
+// handoff with no announcement, the shape the beam package hands off with.
+func addLiveKitGroupStepHandoff(agent *ir.Agent) {
+	task := agent.Tasks["find_slot"]
+	task.Tools = append(task.Tools, "back_to_greeter")
+	agent.Tasks["find_slot"] = task
+}
+
+// TestSmokeLiveKitV1GroupStepHandoffMovesTheCaller drives a compiled group step
+// to a handoff the way a deployed worker runs the session: session.start and
+// generate_reply, with no RunResult. The receiving agent becomes active and the
+// remaining step never takes a turn. session.run() is deliberately not used
+// here: RunResult reads a task that ended by handoff as a failed run, because
+// _TaskTransfer completes the member with an exception and the group's extra
+// hop lets the run close on the member's speech handle before the owner's
+// delegate has returned the new agent. That is the harness-only escape found on
+// 2026-09-09 (spec 007); a deployed worker creates no RunResult.
+func TestSmokeLiveKitV1GroupStepHandoffMovesTheCaller(t *testing.T) {
+	runLiveKitSmokeScript(t, "remy", func(target *ir.Target) {
+		target.Version = "1.6.10"
+	}, addLiveKitGroupStepHandoff, livekitGroupStepHandoffSmokeScript)
+}
+
+const livekitGroupStepHandoffSmokeScript = `"""Smoke check: a group step's handoff moves the caller and skips the remaining steps."""
+import asyncio
+import json
+import os
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import agent  # noqa: E402
+from livekit.agents import DEFAULT_API_CONNECT_OPTIONS, AgentSession, llm  # noqa: E402
+
+
+class ProbeStream(llm.LLMStream):
+    def __init__(self, llm_instance, *, chat_ctx, tools, delta):
+        super().__init__(
+            llm_instance, chat_ctx=chat_ctx, tools=tools, conn_options=DEFAULT_API_CONNECT_OPTIONS
+        )
+        self.delta = delta
+
+    async def _run(self):
+        self._event_ch.send_nowait(llm.ChatChunk(id="probe", delta=self.delta))
+
+
+def _call(name):
+    return llm.ChoiceDelta(
+        role="assistant",
+        tool_calls=[llm.FunctionToolCall(name=name, arguments="{}", call_id=name)],
+    )
+
+
+class ProbeLLM(llm.LLM):
+    """The owner starts the flow, the first step hands off, whoever is next speaks."""
+
+    def __init__(self):
+        super().__init__()
+        self.turns = []
+
+    @property
+    def model(self):
+        return "group-handoff-probe"
+
+    @property
+    def provider(self):
+        return "test"
+
+    def chat(self, *, chat_ctx, tools=None, conn_options=DEFAULT_API_CONNECT_OPTIONS, **kwargs):
+        del conn_options, kwargs
+        tools = tools or []
+        names = {getattr(getattr(tool, "info", None), "name", "") for tool in tools}
+        _, format_data = chat_ctx.to_provider_format(format="mistralai")
+        if "finish" in names:
+            who = (
+                "confirm_booking"
+                if format_data.instructions == agent.CONFIRM_BOOKING_PROMPT
+                else "find_slot"
+            )
+        elif "do_reserve" in names:
+            who = "owner"
+        else:
+            who = "greeter"
+        self.turns.append(who)
+        if who == "owner":
+            delta = _call("do_reserve")
+        elif who == "find_slot" and "back_to_greeter" in names:
+            delta = _call("back_to_greeter")
+        else:
+            # A step's opening turn withholds its handoffs, so the first
+            # find_slot turn asks a question and the second one hands off.
+            delta = llm.ChoiceDelta(role="assistant", content=who + " speaking.")
+        return ProbeStream(self, chat_ctx=chat_ctx, tools=tools, delta=delta)
+
+
+class ProbeReservations(agent.Reservations):
+    async def on_enter(self):
+        pass
+
+
+async def settled_on(session, probe, cls, who):
+    """Wait until cls is active, has taken its turn, and is listening again."""
+    for _ in range(400):
+        await asyncio.sleep(0.05)
+        if (
+            type(session.current_agent) is cls
+            and probe.turns[-1:] == [who]
+            and session.agent_state == "listening"
+        ):
+            return
+    raise AssertionError(
+        "expected "
+        + cls.__name__
+        + " listening; active "
+        + type(session.current_agent).__name__
+        + ", turns "
+        + repr(probe.turns)
+    )
+
+
+async def main():
+    agent.slng.TTS = lambda **kwargs: None
+    probe = ProbeLLM()
+    async with AgentSession(
+        userdata=agent.Userdata(), llm=probe, turn_handling={"turn_detection": "manual"}
+    ) as session:
+        await session.start(ProbeReservations())
+        session.generate_reply(user_input="A table for two tonight, please.")
+        await settled_on(session, probe, agent.FindSlot, "find_slot")
+        session.generate_reply(user_input="Actually, I want to start over.")
+        await settled_on(session, probe, agent.Greeter, "greeter")
+    assert probe.turns == ["owner", "find_slot", "find_slot", "greeter"], probe.turns
+    print("livekit group step handoff smoke ok")
+
+
+asyncio.run(main())
+`

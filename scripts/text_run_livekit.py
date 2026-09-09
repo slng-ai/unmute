@@ -84,6 +84,17 @@ def prompt_of(agent_obj) -> str:
     return (getattr(agent_obj, "instructions", "") or "").replace("\n", " | ")
 
 
+async def settle(session, timeout: float = 60.0) -> None:
+    """Wait until the agent has replied and is listening again."""
+    quiet = 0
+    for _ in range(int(timeout / 0.1)):
+        await asyncio.sleep(0.1)
+        quiet = quiet + 1 if session.agent_state == "listening" else 0
+        if quiet >= 10:
+            return
+    raise TimeoutError("the session did not settle after the handoff")
+
+
 def state_of(userdata) -> str:
     public = {
         name: value
@@ -128,10 +139,32 @@ async def run(args: argparse.Namespace) -> None:
         # model turn rather than the greeting session.say would speak; there is
         # no TTS here to speak it.
         await session.start(entry(initial=False), capture_run=True)
+        transfer = getattr(generated, "_TaskTransfer", None)
+        said: list = []
+        session.on("conversation_item_added", lambda ev: said.append(ev.item))
         for i, line in enumerate(args.line, 1):
             print(f"\n=== turn {i}: caller says {line!r}")
-            result = await session.run(user_input=line)
-            for item in events_of(result):
+            del said[:]
+            try:
+                result = await session.run(user_input=line)
+            except Exception as escaped:
+                if transfer is None or not isinstance(escaped, transfer):
+                    raise
+                # A group step handed off. LiveKit's RunResult reads a task that
+                # ended by handoff as a failed run, one hop before the receiving
+                # agent takes over; a deployed worker has no RunResult and moves
+                # the caller. Let the handoff land, then carry on.
+                print(
+                    "   [handoff] ->",
+                    type(escaped.agent).__name__,
+                    "(from a group step)",
+                )
+                await settle(session)
+                result = None
+                for item in said:
+                    if getattr(item, "role", None) == "assistant":
+                        print("  ", describe(item))
+            for item in events_of(result) if result is not None else []:
                 ev = (
                     item
                     if getattr(item, "type", None) == "agent_handoff"
