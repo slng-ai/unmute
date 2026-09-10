@@ -86,8 +86,8 @@ The reasoning that filled a body belongs where a reader finds it later: in the
 code comment beside the thing it explains, in the gate table above, or in the
 commit message. A body that lists every gate is a body nobody reads.
 
-**No tool attribution and no session link**, in a commit message or a pull
-request. `Co-Authored-By:` is fine.
+**No tool attribution, no co-author trailer and no session link**, in a commit
+message or a pull request. Who wrote it is the author field's job.
 
 ## A rule with no gate is a wish
 Standards here are not taste, they are things CI or a test can fail on. Writing a new rule into this file means wiring its check in the same PR, or tagging it `(advisory)` so it reads as guidance instead of law.
