@@ -3,6 +3,7 @@ package generate
 import (
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -34,6 +35,12 @@ var typedStateMarkers = []string{
 	"_SHAPE_DATE",
 	"_SHAPE_TIME",
 	"_SHAPE_ID",
+	"_shape_emailstr",
+	"class NameEmail",
+	"validate_email",
+	"email_validator",
+	"email-validator",
+	"model_validator",
 	"field(default_factory=list)",
 }
 
@@ -173,6 +180,127 @@ func TestTypedStatePutsNoShapeKeywordInAnEmittedSchema(t *testing.T) {
 	for kind, pattern := range ShapedPatterns() {
 		if !RawStringSafe(pattern) {
 			t.Errorf("the %s pattern %q cannot be written as a Python raw string", kind, pattern)
+		}
+	}
+}
+
+// Pydantic has its own EmailStr and NameEmail, and reaching for either is the
+// one mistake the gate above cannot catch.
+//
+// pydantic.EmailStr publishes `{"type": "string", "format": "email"}` and
+// NameEmail publishes `format: name-email`, which is exactly the keyword the
+// shaped-text design exists to keep off the wire. The emitted _schema() helper
+// resolves $ref and $defs and strips no keyword, and the gate above greps the
+// module's own source, so a Pydantic-native import would read clean there and
+// still send `format` to the provider. Only the first real call would say so.
+//
+// The types this compiler emits carry the same names on purpose, because those
+// are the names an author already knows. That is what makes the mistake easy,
+// and it is why this refuses the import by name rather than the annotation.
+func TestNoEmittedModuleImportsPydanticsOwnEmailTypes(t *testing.T) {
+	agent := loadTypedState(t)
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		module := withoutComments(emitted(t, agent, provider))
+		for _, line := range strings.Split(module, "\n") {
+			if !strings.HasPrefix(line, "from pydantic import ") {
+				continue
+			}
+			for _, name := range []string{"EmailStr", "NameEmail"} {
+				if !slices.Contains(strings.Split(strings.TrimPrefix(line, "from pydantic import "), ", "), name) {
+					continue
+				}
+				t.Errorf("%s imports Pydantic's own %s: it publishes a format keyword the "+
+					"provider rejects, and no local check would say so. Emit the alias or the "+
+					"class this compiler generates instead", provider, name)
+			}
+		}
+		// The generated ones are what the module has to be using.
+		if !strings.Contains(module, "AfterValidator(_shape_emailstr)") {
+			t.Errorf("%s does not emit this compiler's own EmailStr alias", provider)
+		}
+		if !strings.Contains(module, "class NameEmail(BaseModel):") {
+			t.Errorf("%s does not emit this compiler's own NameEmail class", provider)
+		}
+	}
+}
+
+// Every shaped kind carries exactly one check: a pattern the shared body wraps,
+// or a whole body for something no pattern can do.
+//
+// Neither is the failure worth a gate. shapedPatterns is a map, so a kind with
+// no row reads a zero value: the module would emit `re.compile(r"")`, which
+// matches everything, and a refusal saying only "expected " with no format after
+// it. Both is a kind whose emitted check depends on which branch the emitter
+// happens to test first.
+func TestEveryShapedKindCarriesOneCheck(t *testing.T) {
+	kinds := ir.ShapedTextOrder()
+	if len(kinds) == 0 {
+		t.Fatal("no shaped kinds, so this gate proves nothing")
+	}
+	patterns := ShapedPatterns()
+	var withPattern, withBody int
+	for _, kind := range kinds {
+		pattern, hasPattern := patterns[kind]
+		body := ShapedBody(kind)
+		switch {
+		case hasPattern && body != "":
+			t.Errorf("%s carries both a pattern and a body; the emitter would use one and the "+
+				"other would be a check nobody runs", kind)
+		case !hasPattern && body == "":
+			t.Errorf("%s carries no check at all: it would emit an empty pattern, which matches "+
+				"every value, and a refusal that names no format", kind)
+		case hasPattern:
+			withPattern++
+			if pattern == "" {
+				t.Errorf("%s carries an empty pattern", kind)
+			}
+		default:
+			withBody++
+			// The refusal token is what carries the one shared phrase into a
+			// hand-written body. Without it the body raises a sentence the model
+			// was never shown, which is the drift the single phrase prevents.
+			if !strings.Contains(body, shapedExpected) {
+				t.Errorf("%s carries a body that names no expected format, so its refusal and the "+
+					"description the model reads can say different things", kind)
+			}
+		}
+		if ShapedPhrase(kind) == "" {
+			t.Errorf("%s tells the model nothing about its format", kind)
+		}
+	}
+	// Both forms have to be exercised, or this gate passes on a tree where one
+	// of the two branches is dead.
+	if withPattern == 0 || withBody == 0 {
+		t.Errorf("%d pattern-checked and %d body-checked kinds; this gate needs both to mean anything",
+			withPattern, withBody)
+	}
+}
+
+// The one thing an email check must never do on the voice path is ask DNS.
+//
+// email-validator's check_deliverability defaults to true, which sends MX
+// queries for the domain. This validator runs where a value enters the state,
+// which is inside a turn: a slow or unreachable resolver would hold the caller
+// in silence, and it would refuse a real address whose mail server is having a
+// bad day. A caller giving an address nothing can post to today is still giving
+// the address they have.
+//
+// Asserted per call site rather than once, because the module has two: the alias
+// and the supplied pair's parser.
+func TestTheEmittedEmailCheckNeverAsksDNS(t *testing.T) {
+	agent := loadTypedState(t)
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		module := withoutComments(emitted(t, agent, provider))
+		// Counted on the open paren, so the import line, which names the
+		// function without calling it, is not one of these.
+		calls := strings.Count(module, "validate_email(")
+		if calls < 2 {
+			t.Fatalf("%s makes %d email checks, want the alias and the pair's parser", provider, calls)
+		}
+		if got := strings.Count(module, "check_deliverability=False"); got != calls {
+			t.Errorf("%s makes %d email checks and %d of them skip the DNS lookup; all of them "+
+				"have to, because this runs on the voice path and a resolver that hangs holds the "+
+				"caller in silence", provider, calls, got)
 		}
 	}
 }
@@ -557,13 +685,27 @@ func TestShapedTextAcceptsNoValueYet(t *testing.T) {
 		if checks == 0 {
 			t.Fatalf("%s emits no shaped-text check, so this gate proves nothing", provider)
 		}
-		if got := strings.Count(source, "if value and not _SHAPE_"); got != checks {
+		// Two forms let empty through, one per kind of check: a pattern-checked
+		// type only matches a value it has, and a library-checked one returns
+		// before it calls out. Counting one form alone said 3 of 4 the day
+		// EmailStr arrived, so the count is over both and the requirement is
+		// still that every emitted check carries one of them.
+		passes := strings.Count(source, "if value and not _SHAPE_") +
+			strings.Count(source, "if not value:\n        return value")
+		if passes != checks {
 			t.Errorf("%s emits %d shaped-text checks and %d of them pass an empty value through; "+
 				"all of them have to, because empty is how a declared value says nothing yet and the "+
-				"model has nothing else to send for a field no tool fills", provider, checks, got)
+				"model has nothing else to send for a field no tool fills", provider, checks, passes)
 		}
 		if strings.Contains(source, "if not _SHAPE_") {
 			t.Errorf("%s refuses an empty shaped value; that is what deadlocked a live call on both targets", provider)
+		}
+		// The supplied pair is the other place a value can enter, and it takes
+		// the empty string the same way rather than refusing it.
+		if !strings.Contains(source, `if not value.strip():`) {
+			t.Errorf("%s emits a NameEmail parser that refuses an empty string; a declared pair with "+
+				"nothing in it yet has to validate, or every prompt naming it raises instead of "+
+				"rendering the words a missing value renders", provider)
 		}
 	}
 }
@@ -578,7 +720,10 @@ func TestShapedTextTellsTheModelItsFormat(t *testing.T) {
 	agent := loadTypedState(t)
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		source := emitted(t, agent, provider)
-		for _, kind := range []ir.ShapedText{ir.ShapedPhone, ir.ShapedDate, ir.ShapedTime, ir.ShapedID} {
+		// The shared list, not a copy: a type this loop does not visit is a type
+		// whose description nobody checks, and the copy that used to live here
+		// would have gone on naming four.
+		for _, kind := range ir.ShapedTextOrder() {
 			alias := string(kind) + " = Annotated["
 			if !strings.Contains(source, alias) {
 				continue
@@ -645,6 +790,166 @@ func TestTaskFinishAllowsEscapeWithoutDomainArguments(t *testing.T) {
 		}
 		if !strings.Contains(source, `values.get("unserved_request")`) {
 			t.Error("unserved must bypass validation and save no domain values")
+		}
+	}
+}
+
+// The email checker is the one thing the declared-state block reaches for that
+// is neither stdlib nor Pydantic, so three facts about each emitted project have
+// to agree: the module imports it, the module calls it, and the project's
+// pyproject.toml asks for it.
+//
+// Each disagreement is its own failure and none of them is visible locally. An
+// import with no dependency is an ImportError at worker startup, which the
+// operator sees as an agent that never answers. A dependency with no import is a
+// package every image installs for nothing. And an import with no use fails the
+// ruff gate the emitted README tells the operator to run.
+//
+// Both targets, and a package with the types beside one without, so a driver
+// that simply stopped emitting the import could not pass this. Modelled on
+// TestPipecatHTTPXImportMatchesItsUseAndItsDependency, which holds the same
+// three-way agreement for httpx.
+func TestEmailValidatorImportMatchesItsUseAndItsDependency(t *testing.T) {
+	withTypes, withoutTypes := false, false
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		for _, pkg := range []struct {
+			name  string
+			agent func(*testing.T) *ir.Agent
+		}{
+			{"typed_state", loadTypedState},
+			{"simple-prompt", loadShapeless},
+		} {
+			t.Run(string(provider)+"/"+pkg.name, func(t *testing.T) {
+				agent := pkg.agent(t)
+				artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
+				if err != nil {
+					t.Fatalf("generate: %v", err)
+				}
+				name := "bot.py"
+				if provider == ir.ProviderLiveKit {
+					name = "agent.py"
+				}
+				source := artifactFile(t, artifact, name)
+				pyproject := artifactFile(t, artifact, "pyproject.toml")
+
+				imported := strings.Contains(source, "from email_validator import ")
+				// On the open paren, so the import line, which names the
+				// function without calling it, is not a use.
+				used := strings.Contains(source, "validate_email(")
+				declared := strings.Contains(pyproject, `"email-validator`)
+
+				if imported != used {
+					t.Errorf("%s imports the email checker = %v but calls it = %v: an unused import "+
+						"fails the emitted project's ruff gate, and a call with no import is a "+
+						"NameError on the first value that enters the state", name, imported, used)
+				}
+				if imported != declared {
+					t.Errorf("%s imports the email checker = %v but pyproject declares it = %v: an "+
+						"import with no dependency is an ImportError at worker startup, and a "+
+						"dependency with no import is a package every image installs for nothing",
+						name, imported, declared)
+				}
+				withTypes = withTypes || imported
+				withoutTypes = withoutTypes || !imported
+			})
+		}
+	}
+	if !withTypes || !withoutTypes {
+		t.Errorf("covered a package that needs the email checker = %v and one that does not = %v; "+
+			"this agreement needs both", withTypes, withoutTypes)
+	}
+}
+
+// A package whose only shaped type is the email one compiles no pattern, so it
+// must not import `re`.
+//
+// NeedsRe used to mean "any shaped type is used", which was the same thing until
+// a type arrived whose check is a library call. Left alone it would emit an
+// unused `import re`, which fails the ruff gate the emitted project runs, and it
+// would fail it only for a package nobody has written yet.
+func TestAnEmailOnlyPackageCompilesNoPattern(t *testing.T) {
+	agent := loadTypedState(t)
+	// Everything except the email pair, so nothing else pulls a pattern in.
+	trimmed := *agent
+	trimmed.Variables = map[string]ir.Variable{
+		"reminder_email": {Type: ir.PrimitiveString, Shape: &ir.TypeRef{Shaped: ir.ShapedEmail}},
+	}
+	trimmed.VariableOrder = []string{"reminder_email"}
+	trimmed.Shapes = map[string]ir.Shape{}
+	trimmed.Tasks = map[string]ir.Task{}
+
+	block, err := TypedState(&trimmed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !block.NeedsShaped {
+		t.Error("a package declaring EmailStr does not count as using a shaped type, so it emits no AfterValidator import")
+	}
+	if block.NeedsRe {
+		t.Error("a package whose only shaped type is checked by a library still asks for `import re`, " +
+			"which the emitted project's ruff gate refuses as unused")
+	}
+	if !block.NeedsEmailValidator {
+		t.Error("a package declaring EmailStr does not ask for the checker, so the import is a NameError")
+	}
+	if strings.Contains(block.Source, "re.compile(") {
+		t.Error("a package whose only shaped type is checked by a library still compiles a pattern")
+	}
+	// And the other direction: the pair alone needs the checker too, because its
+	// own parser reads the address whether or not any value is a bare EmailStr.
+	pair := *agent
+	pair.Variables = map[string]ir.Variable{
+		"booked_for": {Type: ir.PrimitiveString, Shape: &ir.TypeRef{Shape: "NameEmail"}},
+	}
+	pair.VariableOrder = []string{"booked_for"}
+	pair.Shapes = map[string]ir.Shape{"NameEmail": agent.Shapes["NameEmail"]}
+	pair.Tasks = map[string]ir.Task{}
+	block, err = TypedState(&pair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !block.NeedsEmailValidator || !block.NeedsModelValidator {
+		t.Errorf("a package declaring only the pair asks for the checker = %v and model_validator = %v; "+
+			"it needs both, because the class it emits carries a parser that calls one",
+			block.NeedsEmailValidator, block.NeedsModelValidator)
+	}
+}
+
+// The pair takes a value in three shapes, and two of them are the reason it
+// exists at all.
+//
+// The model fills the two fields, which is why the emitted schema stays an
+// object and carries no format keyword. But a tool that returns
+// "Fred Bloggs <fred@example.com>", a seeded call-start value and a dotted
+// assign that picks one string out of a result all hand over a single string. A
+// class with no parser would refuse every one of those on a value that reads
+// perfectly well, and would refuse it inside a finish handler, where the model
+// has nothing better to send.
+//
+// The parser is asserted on the emitted text here and driven against the real
+// library by the L4 smoke, which is the only place the display-name reading is
+// actually exercised.
+func TestTheEmittedPairReadsOneString(t *testing.T) {
+	agent := loadTypedState(t)
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		source := emitted(t, agent, provider)
+		for _, want := range []string{
+			// A string is read, anything else passes through to the fields.
+			"if not isinstance(value, str):",
+			// The display-name form is what needs the flag, and the flag is
+			// what needs email-validator 2.2.
+			"allow_display_name=True",
+			// With no name in front, the local part stands in, which is the
+			// answer Pydantic's own NameEmail gives for the same input.
+			`"name": info.display_name or info.local_part,`,
+			// The address is saved normalized, so a later tool does not have to
+			// normalize it again.
+			`"email": info.normalized,`,
+		} {
+			if !strings.Contains(source, want) {
+				t.Errorf("%s emits a NameEmail parser missing %q, so a value that arrives as one "+
+					"string is refused rather than read", provider, want)
+			}
 		}
 	}
 }

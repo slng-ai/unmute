@@ -46,6 +46,17 @@ agents:
           - appointment_slot_id: result.appointment_slot_id
           - appointment_service: result.appointment_service
 
+      - name: take_confirmation_contact
+        when: >-
+          The caller wants the booking confirmation emailed, or wants to change
+          where it goes. Its own step so a booking is never held up by it.
+        instructions: tasks/confirmation-contact.md
+        assign:
+          - confirmation_contact: result.confirmation_contact
+          - confirmation_email: result.confirmation_contact.email
+        context:
+          history: messages
+
       - name: reschedule_booking
         when: >-
           Apply the move after manage_booking has saved the exact appointment,
@@ -192,6 +203,22 @@ variables:
   appointment_service:
     type: Literal["haircut", "haircolor", "haircut_and_haircolor", "dry_cut"]
     description: The service selected with the caller.
+
+  confirmation_contact:
+    type: NameEmail
+    description: >-
+      Who the confirmation goes to, name and address held apart, so a prompt can
+      name the person without reading their address out loud. Here to find what
+      only a real call finds: whether a model can turn a spelled-out address into
+      the written form on the first try, and whether the refusal it gets back
+      when it cannot is one it can correct itself from.
+
+  confirmation_email:
+    type: EmailStr
+    default: ""
+    description: >-
+      The address on its own, taken off confirmation_contact rather than asked
+      for twice.
 
 prefetch:
   - name: today

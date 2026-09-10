@@ -29,6 +29,18 @@ agents:
         context:
           history: messages
 
+      - name: take_confirmation_contact
+        when: >-
+          Run when the caller wants the booking confirmation emailed to them, or
+          asks to change where it goes. Not needed for a caller who does not ask
+          for one, so it never blocks a booking.
+        instructions: tasks/confirmation-contact.md
+        assign:
+          - confirmation_contact: result.confirmation_contact
+          - confirmation_email: result.confirmation_contact.email
+        context:
+          history: messages
+
       - name: manage_booking
         when: The caller wants to create, modify, or cancel a booking.
         instructions: tasks/booking.md
@@ -198,6 +210,28 @@ variables:
       Inherits `customer_phone`'s confirming step, exactly as `customer_name`
       does, because a status found from a number nobody agreed to is as
       unconfirmed as that number was.
+
+  confirmation_contact:
+    type: NameEmail
+    description: >-
+      Who the confirmation goes to, name and email address held apart. The type
+      is one this compiler supplies, so the two parts are readable separately:
+      the agent can say whose name the booking is under without reading an
+      address out loud, which is what nobody wants over the phone.
+
+      Also takes the whole thing as one string, so a tool returning
+      `Fred Bloggs <fred@example.com>` needs nothing written here to be
+      understood. The address itself is checked by email-validator, with no DNS
+      lookup, because this runs inside a turn and a slow resolver would hold the
+      caller in silence.
+
+  confirmation_email:
+    type: EmailStr
+    default: ""
+    description: >-
+      The address on its own, plain text a tool can post to as it stands. Taken
+      off `confirmation_contact` rather than asked for again, so the caller
+      spells it out once and both values are filled from that one answer.
 
 prefetch:
   - name: today

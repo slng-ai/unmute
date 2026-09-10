@@ -35,8 +35,10 @@ const typedStateExpectedState = `{
     {"appointment_type": "haircut", "scheduled_date": "2026-03-19", "scheduled_time": "09:30"},
     {"appointment_type": "dry_cut", "scheduled_date": "2026-03-26", "scheduled_time": "14:00"}
   ],
+  "booked_for": {"email": "fred.bloggs@example.com", "name": "Fred Bloggs"},
   "caller_phone": "+34600111222",
-  "caller_reason": ["create_booking", "cancel_booking"]
+  "caller_reason": ["create_booking", "cancel_booking"],
+  "reminder_email": "fred.bloggs@example.com"
 }`
 
 // typedStateSmokeScript is the whole conversation, parameterised only by the
@@ -75,7 +77,11 @@ check_candidate_visibility()
 
 async def check_finish_handler():
     fresh = generated.` + stateExpr + `
-    ctx = SimpleNamespace(userdata=fresh, function_call=SimpleNamespace(call_id="finish-check"))
+    # session, because the emitted finish reports to the dev reporter through
+    # ctx.session. It has no reporter attached, which is the case a real run
+    # outside unmute dev is in.
+    ctx = SimpleNamespace(userdata=fresh, session=SimpleNamespace(),
+        function_call=SimpleNamespace(call_id="finish-check"))
     if generated.__name__ == "agent":
         task = generated.ConfirmNumber()
         assert await task.finish(ctx, caller_phone="wrong")
@@ -146,7 +152,8 @@ async def check_injection():
         from livekit.agents.llm.utils import build_legacy_openai_schema
         schema = build_legacy_openai_schema(task.inspect_state)["function"]["parameters"]
         assert set(schema["properties"]) == {"note"} and schema["required"] == ["note"],schema
-        result = await task.inspect_state(SimpleNamespace(userdata=fresh), note="authored")
+        result = await task.inspect_state(
+            SimpleNamespace(userdata=fresh, session=SimpleNamespace()), note="authored")
     else:
         worker = SimpleNamespace(context=generated.LLMContext(),state=fresh,_bind_state=lambda handler:handler,_book_finish_book=lambda *args:None)
         node = generated.DeskAgent._book_node_book(worker)
@@ -180,7 +187,12 @@ async def check_owner_return():
                 return run().__await__()
         generated.ConfirmNumber = Task
         try:
-            result = await owner.confirm_number(SimpleNamespace(userdata=fresh))
+            # A session on the context, because the emitted task return reports
+            # to the dev reporter through ctx.session. Without it this script
+            # stops here and every assertion below it, the email ones included,
+            # is never reached on this target.
+            result = await owner.confirm_number(
+                SimpleNamespace(userdata=fresh, session=SimpleNamespace()))
         finally:
             generated.ConfirmNumber = real_task
         visible = json.dumps({"messages":owner.chat_ctx.to_dict(),"result":result})
@@ -377,6 +389,90 @@ except generated._StateRefused as refused:
 else:
     raise AssertionError("a phone number of the wrong shape entered the state")
 
+# The two email types, against the real email-validator in this project. Nothing
+# below is reachable from a unit test: the library is what decides whether an
+# address is one, and the display-name reading is a flag on its own call.
+#
+# The step that takes them. reminder_email is not a field the model fills: it
+# comes off the pair through a dotted assign, so one answer fills both values and
+# the model is never asked for the address twice.
+generated._save_result(
+    "take_contact",
+    state,
+    {"booked_for": {"name": "Fred Bloggs", "email": "Fred.Bloggs@EXAMPLE.com"},
+     "summary": "recorded"},
+)
+# Normalized on the way in, which is what makes the saved value plain text a
+# later tool can use as it stands.
+assert state.reminder_email == "Fred.Bloggs@example.com", state.reminder_email
+assert generated._plain(state.booked_for)["email"] == "Fred.Bloggs@example.com", state.booked_for
+
+# A wrong address is refused where it enters, naming the field and the format,
+# with the library's own reason after it so the model can correct itself. And the
+# previous contents survive.
+kept = (state.reminder_email, generated._plain(state.booked_for))
+try:
+    generated._save_result(
+        "take_contact",
+        state,
+        {"booked_for": {"name": "Fred", "email": "fred dot bloggs at example dot com"},
+         "summary": "x"},
+    )
+except generated._StateRefused as refused:
+    assert "booked_for" in refused.message, refused.message
+    assert "an email address" in refused.message, refused.message
+else:
+    raise AssertionError("a value that is not an email address entered the state")
+assert (state.reminder_email, generated._plain(state.booked_for)) == kept
+
+# Then the value the run ends with, so the expected state below is one the
+# conversation produced.
+generated._save_result(
+    "take_contact",
+    state,
+    {"booked_for": {"name": "Fred Bloggs", "email": "fred.bloggs@example.com"},
+     "summary": "recorded"},
+)
+
+# The empty string is no value yet rather than a wrong one, on both of them.
+adapter = generated.TypeAdapter(generated.EmailStr)
+assert adapter.validate_python("") == ""
+assert generated._state_text("reminder_email", "") == "none recorded yet."
+empty_pair = generated.NameEmail.model_validate("")
+assert (empty_pair.name, empty_pair.email) == ("", ""), empty_pair
+
+# The pair, read out of one string in both spellings it arrives in. This is the
+# whole reason the class carries a parser: a tool that returns a formatted
+# contact, or a dotted assign that picks one string out of a result, hands over a
+# string and not two fields.
+pair = generated.NameEmail.model_validate("Fred Bloggs <fred.bloggs@example.com>")
+assert (pair.name, pair.email) == ("Fred Bloggs", "fred.bloggs@example.com"), pair
+bare = generated.NameEmail.model_validate("fred.bloggs@example.com")
+assert (bare.name, bare.email) == ("fred.bloggs", "fred.bloggs@example.com"), bare
+fields = generated.NameEmail.model_validate({"name": "Fred", "email": "fred@example.com"})
+assert (fields.name, fields.email) == ("Fred", "fred@example.com"), fields
+try:
+    generated.NameEmail.model_validate("Fred Bloggs <not-an-address>")
+except Exception as refused:
+    assert "an email address" in str(refused), str(refused)
+else:
+    raise AssertionError("a pair holding no address was accepted")
+
+# A prompt reads one part of the pair through the same flat walk a declared
+# shape's field goes through.
+probe = generated.` + stateExpr + `
+probe.booked_for = pair
+assert generated._state_lookup(probe, "booked_for__name")[1] == "Fred Bloggs"
+assert generated._render("For {{booked_for__name}}", probe) == "For Fred Bloggs"
+assert generated._state_lookup(probe, "booked_for__missing")[1] is None
+
+# And neither type puts a format keyword in the schema the model is sent, which
+# is the one thing a Pydantic-native EmailStr would have done.
+for adapters in generated._FINISH_TYPES.values():
+    for name, adapter in adapters.items():
+        rendered_schema = json.dumps(generated._schema(adapter))
+        assert "format" not in rendered_schema, (name, rendered_schema)
+
 # The state as a prompt reads it: compact JSON, never a Python repr.
 rendered = generated._state_text("appointments", state.appointments)
 assert rendered.startswith('[{"'), rendered
@@ -407,6 +503,9 @@ final = {
     "appointments": state.appointments,
     "caller_phone": state.caller_phone,
     "caller_reason": state.caller_reason,
+    "reminder_email": state.reminder_email,
+    # The pair is a model, so it is compared the way a prompt renders it.
+    "booked_for": generated._plain(state.booked_for),
 }
 assert final == EXPECTED, json.dumps(final, indent=2, sort_keys=True)
 print("typed state: the scripted conversation ends with the expected state")

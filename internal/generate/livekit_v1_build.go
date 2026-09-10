@@ -1749,6 +1749,14 @@ func livekitDeps(data livekitData) []string {
 	if data.Telephony != nil && data.Telephony.Transport == "connector" {
 		deps = append(deps, "aiohttp", "twilio")
 	}
+	// Only when a declared value is checked against it. A package with no email
+	// type installs nothing extra, which is the same bargain the knowledge
+	// dependencies strike above. Pinned at 2.2 because that is the release that
+	// reads a display name, which NameEmail's parser needs, and capped below 3
+	// so a major release cannot change what an address means mid-deploy.
+	if data.TypedState != nil && data.TypedState.NeedsEmailValidator {
+		deps = append(deps, "email-validator>=2.2,<3")
+	}
 	slices.Sort(deps)
 	return deps
 }

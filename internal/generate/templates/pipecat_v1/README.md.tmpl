@@ -368,11 +368,19 @@ declared set never enters the state: the previous contents stay as they were and
 the model is told which field and what was allowed, which is what lets it
 correct itself on the next turn.
 
-A text type with a validated shape (`Phone`, `Date`, `Time`, `Id`) is a `str` in
-the schema the model is sent, with its shape checked by a validator. That is
-deliberate: a `pattern` in the schema survives the strict tool-schema converter
-and the provider rejects it, so the shape is checked here instead.
-{{end}}
+A text type with a validated shape (`Phone`, `Date`, `Time`, `Id`, `EmailStr`)
+is a `str` in the schema the model is sent, with its shape checked by a
+validator. That is deliberate: a `pattern` in the schema survives the strict
+tool-schema converter and the provider rejects it, so the shape is checked here
+instead.
+{{if .TypedState.NeedsEmailValidator}}
+`EmailStr` and `NameEmail` are checked by `email-validator`, which is why this
+project depends on it. The check never asks DNS: it runs while the caller is on
+the line, so it reads the address and stops there rather than looking up whether
+the domain accepts mail. `NameEmail` holds a name and an address as two fields
+and also reads a single string, either `Fred Bloggs <fred@example.com>` or the
+address on its own, in which case the name is the part before the at sign.
+{{end}}{{end}}
 ## Required environment
 
 Set these before running (values are never written into the project):

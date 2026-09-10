@@ -55,7 +55,7 @@ func typeRefSchema() *jsonschema.Schema {
 			"list and shape is set; optional rides on whichever it is.",
 		Properties: map[string]*jsonschema.Schema{
 			"primitive": enum(PrimitiveString, PrimitiveNumber, PrimitiveBoolean, PrimitiveInteger),
-			"shaped":    enum(ShapedPhone, ShapedDate, ShapedTime, ShapedID),
+			"shaped":    enum(shapedTextOrder...),
 			"literal":   {Type: "array", Items: &jsonschema.Schema{Type: "string"}},
 			"list":      {Ref: typeRefPointer},
 			"shape":     {Type: "string"},
@@ -131,7 +131,7 @@ func enumOptions() *jsonschema.ForOptions {
 		reflect.TypeFor[SemanticEndpointing](): enum(SemanticEndpointingRequired, SemanticEndpointingPreferred, SemanticEndpointingOff),
 		reflect.TypeFor[Pace]():                enum(PaceSnappy, PaceBalanced, PacePatient),
 		reflect.TypeFor[PrimitiveType]():       enum(PrimitiveString, PrimitiveNumber, PrimitiveBoolean, PrimitiveInteger),
-		reflect.TypeFor[ShapedText]():          enum(ShapedPhone, ShapedDate, ShapedTime, ShapedID),
+		reflect.TypeFor[ShapedText]():          enum(shapedTextOrder...),
 		reflect.TypeFor[VariableSource](): enum(
 			VariableSourceCallStart, VariableSourceSessionID, VariableSourceCarrier,
 			VariableSourceConnection, VariableSourceCallID, VariableSourceStreamID,

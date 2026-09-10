@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -144,6 +145,27 @@ func TestBuildRefusesEveryTypeOutsideTheScope(t *testing.T) {
 			at: "type: UUID", col: 1, phrases: []string{`write "Id"`},
 		},
 		{
+			// The two names a person reaches for before they know the spelling.
+			// Both say what to write, and both name the pair as well, because an
+			// author asking for "email" often wants the name beside it.
+			name: "the lower-case email spelling",
+			blocks: `variables:
+  contact:
+    type: email
+`,
+			at: "type: email", col: 1,
+			phrases: []string{`write "EmailStr"`, `"NameEmail"`},
+		},
+		{
+			name: "the capitalised email spelling",
+			blocks: `variables:
+  contact:
+    type: Email
+`,
+			at: "type: Email", col: 1,
+			phrases: []string{`write "EmailStr"`, `"NameEmail"`},
+		},
+		{
 			name: "a secret as a type",
 			blocks: `variables:
   token:
@@ -182,7 +204,12 @@ func TestBuildRefusesEveryTypeOutsideTheScope(t *testing.T) {
     type: Customer
 `,
 			at: "type: Customer", col: 1,
-			phrases: []string{`no shape named "Customer" is declared`, `"shapes:"`, "Literal[...]", "list[...]"},
+			phrases: []string{
+				`no shape named "Customer" is declared`, `"shapes:"`, "Literal[...]", "list[...]",
+				// Every name the scope takes, or an author who mistyped one of
+				// them is never told it exists.
+				"EmailStr", "NameEmail",
+			},
 		},
 		// The column is the whole point of this one: the mistake is inside the
 		// expression and the line is identical either way.
@@ -379,6 +406,36 @@ variables:
 			phrases: []string{"declares no fields", "tells the model nothing"},
 		},
 		{
+			// Adding EmailStr to the shaped set reserves the name for free,
+			// through the same map reservedShapeName already reads.
+			name: "a shape named after the email text type",
+			blocks: `shapes:
+  - name: EmailStr
+    fields:
+      - address: str
+variables:
+  contact:
+    type: EmailStr
+`,
+			at:      "- name: EmailStr",
+			phrases: []string{"text types with a validated shape", "CapWords"},
+		},
+		{
+			// The supplied pair needs its own arm: it is a shape rather than a
+			// text type, and both declarations would generate one class name.
+			name: "a shape named after a shape the compiler supplies",
+			blocks: `shapes:
+  - name: NameEmail
+    fields:
+      - who: str
+variables:
+  contact:
+    type: NameEmail
+`,
+			at:      "- name: NameEmail",
+			phrases: []string{"shapes this compiler supplies", "same class", "CapWords"},
+		},
+		{
 			name: "a shape named after part of the grammar",
 			blocks: `shapes:
   - name: Literal
@@ -502,8 +559,36 @@ func TestBuildResolvesTheDeclaredShapes(t *testing.T) {
 	if got := agent.Variables["appointments"].Type; got != PrimitiveString {
 		t.Errorf("appointments Type = %q, want the primitive a prompt renders", got)
 	}
+	if got := agent.Variables["reminder_email"].Shape.String(); got != "EmailStr" {
+		t.Errorf("reminder_email resolves to %q", got)
+	}
+	// The supplied pair resolves as a shape reference, exactly like the declared
+	// one above, which is what lets every path, assign and per-target row read
+	// the catalog and know nothing about built-ins.
+	if got := agent.Variables["booked_for"].Shape.String(); got != "NameEmail" {
+		t.Errorf("booked_for resolves to %q", got)
+	}
+	supplied, ok := agent.Shapes["NameEmail"]
+	if !ok {
+		t.Fatalf("NameEmail was named and never reached the catalog: %v", sortedKeys(agent.Shapes))
+	}
+	if !supplied.Builtin {
+		t.Error("the NameEmail in the catalog is not marked as supplied, so it emits no parser")
+	}
+	if len(supplied.Fields) != 2 || supplied.Fields[0].Name != "name" || supplied.Fields[1].Name != "email" {
+		t.Errorf("NameEmail resolved %d fields, want name then email: %+v", len(supplied.Fields), supplied.Fields)
+	}
+	// The pair's own field carries the email type, which is how the alias counts
+	// as used in a package that declares no bare EmailStr.
+	if got := supplied.Fields[1].Type.Shaped; got != ShapedEmail {
+		t.Errorf("NameEmail.email lowers to %q, want EmailStr", got)
+	}
+
 	// And the order the block will number them in is the authored order.
-	want := []string{"count", "accepted", "caller_reason", "appointments", "caller_phone", "last_appointment"}
+	want := []string{
+		"count", "accepted", "caller_reason", "appointments", "caller_phone",
+		"last_appointment", "reminder_email", "booked_for",
+	}
 	if len(agent.VariableOrder) != len(want) {
 		t.Fatalf("VariableOrder = %v, want %v", agent.VariableOrder, want)
 	}
@@ -604,6 +689,54 @@ variables:
 `)
 	if _, err := Build(pkg); err != nil {
 		t.Fatalf("assign into a sub-field of a shaped result was refused: %v", err)
+	}
+}
+
+// The same walk into a shape the compiler supplies rather than one this package
+// declares, and it is the seeded catalog that makes it work: FieldPath reads
+// agent.Shapes and nothing else, so a reference with no entry there is told it
+// has no fields to name.
+//
+// The picked field's type has to fit where it lands, which is the other half:
+// the pair's `email` is an EmailStr, so it assigns into an EmailStr and is
+// refused by a Date. That is assignableInto, the same predicate a prefetch
+// entry uses.
+func TestBuildAssignAcceptsASubFieldOfASuppliedShape(t *testing.T) {
+	for _, tc := range []struct {
+		name, declared, want string
+	}{
+		{name: "into the field's own type", declared: "EmailStr"},
+		{
+			name:     "into a type the field does not fit",
+			declared: "Date",
+			want:     `the result field is EmailStr and the variable is Date`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg := typedPackageWithTasks(t, `variables:
+  booked_for:
+    type: NameEmail
+  reminder_email:
+    type: `+tc.declared+`
+`, `    tasks:
+      - name: book
+        when: The caller wants an appointment.
+        instructions: instructions.md
+        assign:
+          - booked_for: result.contact
+          - reminder_email: result.contact.email
+`)
+			_, err := Build(pkg)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("assign into a field of a supplied shape was refused: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got %v, want a refusal saying %q", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -851,4 +984,92 @@ func TestTaskResultDerivationPaths(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The shaped-type vocabulary is named on four surfaces: the ShapedText
+// constants, the spelling map an author's `type:` resolves through, the derived
+// debug schema's enum, and the emitted aliases in internal/generate. They used
+// to be four hand-written lists, which is how a fifth type gets half-added: a
+// name missing from the spelling map resolves as an undeclared shape, one
+// missing from the enum quietly stops being described in the debug schema, and
+// one missing from the emission order is written into an annotation no module
+// defines.
+//
+// They all read shapedTextOrder now. This gate is what keeps that true, because
+// the cheap way to add a type is still to declare a constant and stop.
+func TestEveryShapedTypeReachesEverySurface(t *testing.T) {
+	order := ShapedTextOrder()
+	if len(order) == 0 {
+		t.Fatal("no shaped text types, so this gate proves nothing")
+	}
+	// One constant, one spelling, and the spelling is the constant's own text:
+	// the name an author writes is the name a refusal prints.
+	for _, kind := range order {
+		resolved, ok := shapedSpellings[string(kind)]
+		if !ok {
+			t.Errorf("%q is a shaped type an author cannot write: add it to shapedSpellings", kind)
+			continue
+		}
+		if resolved != kind {
+			t.Errorf("the spelling %q resolves to %q", kind, resolved)
+		}
+	}
+	if len(shapedSpellings) != len(order) {
+		t.Errorf("%d spellings for %d shaped types; every spelling is one type's own name",
+			len(shapedSpellings), len(order))
+	}
+	// The refusal vocabulary offers every one of them, plus every supplied
+	// shape. An author who mistyped a name is told what the scope takes, and a
+	// name absent from that list is a name nobody discovers.
+	offered := scopeNames(nil)
+	for _, name := range append(shapedNames(order), BuiltinShapeNames()...) {
+		if !slices.Contains(offered, name) {
+			t.Errorf("the refusal vocabulary does not offer %q: %v", name, offered)
+		}
+	}
+	// The derived schema publishes the same set, in the same order.
+	published := typeRefSchema().Properties["shaped"].Enum
+	if len(published) != len(order) {
+		t.Fatalf("the debug schema publishes %d shaped types for %d: %v", len(published), len(order), published)
+	}
+	for i, kind := range order {
+		if published[i] != kind {
+			t.Errorf("the debug schema publishes %v at %d, want %q", published[i], i, kind)
+		}
+	}
+	// And every supplied shape is a shape a `type:` resolves to, is marked as
+	// supplied, and declares at least one field. A supplied shape with none
+	// would generate a class that tells the model nothing, which is refused for
+	// an authored one and would be silent here.
+	for _, name := range BuiltinShapeNames() {
+		shape := builtinShapes[name]
+		if shape.Name != name {
+			t.Errorf("the supplied shape keyed %q calls itself %q", name, shape.Name)
+		}
+		if !shape.Builtin {
+			t.Errorf("the supplied shape %q is not marked as supplied, so it emits no parser", name)
+		}
+		if len(shape.Fields) == 0 {
+			t.Errorf("the supplied shape %q declares no fields", name)
+		}
+		if reason := reservedShapeName(name); reason == "" {
+			t.Errorf("an author may declare a shape called %q, and both would generate one class", name)
+		}
+		ref, err := resolveType(name, nil)
+		if err != nil {
+			t.Errorf("%q does not resolve as a type: %v", name, err)
+			continue
+		}
+		if ref.Shape != name {
+			t.Errorf("%q resolves to %+v, want a reference to the shape of that name", name, ref)
+		}
+	}
+}
+
+func shapedNames(order []ShapedText) []string {
+	out := make([]string, 0, len(order))
+	for _, kind := range order {
+		out = append(out, string(kind))
+	}
+	return out
 }
