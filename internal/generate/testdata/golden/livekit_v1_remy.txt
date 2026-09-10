@@ -101,8 +101,10 @@ request duration visible beside it. TTS first-audio time and tool duration also
 stay visible. Debug details holds secondary timings and source metadata. See
 [Reading the latency numbers](https://unmute.ai/optimization/latency) for definitions. They can overlap and must not be added to obtain reply
 latency. Reply latency ends at the first runtime audio and excludes delivery to
-the browser. A tool's returned state does not prove business success; task and
-handoff controls are excluded from business tool timings.
+the browser. A tool's returned state does not prove business success. A call into a task, or a
+handoff to another agent, gets a row of its own and no duration, because it
+hands control over rather than returning a result; that row is what accounts
+for the model call following it.
 
 Only captured measurements are shown. Missing and pending values have no
 placeholder. A real zero is `0ms`, a
@@ -1745,7 +1747,8 @@ from livekit.agents.voice import AgentSession, SpeechHandle, agent_activity
 SENTINEL = "UNMUTE_METRIC"
 METRICS_ENV = "UNMUTE_DEV_METRICS"
 
-# A delegate's duration is its sub-conversation, not a tool's execution time.
+# A delegate's duration is its sub-conversation, not a tool's execution time,
+# so a control gets a row and no duration.
 HANDOFF_CONTROLS = frozenset(
     {
         "back_to_greeter",
@@ -1823,7 +1826,7 @@ class _Reporter:
         self.native_segments: dict[str, str] = {}
         self.tool_calls: dict[str, tuple[str, str | None]] = {}
         self.tool_operations: dict[str, tuple[str, float | None]] = {}
-        self.ignored_tools: set[str] = set()
+        self.control_tools: set[str] = set()
         self.request_steps: dict[tuple[str, int], list[str]] = {}
         self.user_metrics: dict[str, dict] = {}
         self.eou_metrics: dict[str, object] = {}
@@ -2027,21 +2030,25 @@ class _Reporter:
         update = event.update
         if update.type == "tool_call_started":
             call = update.function_call
-            if call.name in HANDOFF_CONTROLS:
-                self.ignored_tools.add(call.call_id)
-                return
             if call.call_id in self.tool_operations:
                 return
-            operation_id = self.new_id("tool")
+            # A control hands over to a task instead of returning a result, so
+            # it gets a row and no duration. Hiding it left the model call it
+            # causes with no visible cause; timing it read as a tool that ran
+            # for the whole flow, once for 51 seconds.
+            kind = "handoff" if call.name in HANDOFF_CONTROLS else "tool"
+            if kind == "handoff":
+                self.control_tools.add(call.call_id)
+            operation_id = self.new_id(kind)
             self.tool_operations[call.call_id] = (operation_id, event.created_at)
             parent, response_id = self.tool_calls.get(call.call_id, (None, None))
-            fields = {"type": "tool", "name": call.name, "state": "running"}
+            fields = {"type": kind, "name": call.name, "state": "running"}
             if parent:
                 fields["parent_operation_id"] = parent
             if response_id:
                 fields["exchange_id"] = response_id
             self.snapshot("operation", operation_id, **fields)
-        elif update.type == "tool_call_ended" and update.call_id not in self.ignored_tools:
+        elif update.type == "tool_call_ended":
             known = self.tool_operations.get(update.call_id)
             if known is None:
                 operation_id = self.new_id("tool")
@@ -2049,6 +2056,8 @@ class _Reporter:
                 known = self.tool_operations[update.call_id] = (operation_id, None)
             operation_id, started_at = known
             self.snapshot("operation", operation_id, state={"done": "returned", "error": "failed", "cancelled": "cancelled"}[update.status])
+            if update.call_id in self.control_tools:
+                return
             response_id = self.records[("operation", operation_id)]["operation"].get("exchange_id")
             self.measurement(f"{operation_id}-duration", "tool_duration",
                              event.created_at - started_at if started_at is not None else None,
@@ -2209,8 +2218,7 @@ class _Reporter:
             if chunk.delta is not None:
                 content = chunk.delta.content
                 for tool in chunk.delta.tool_calls or []:
-                    if tool.name not in HANDOFF_CONTROLS:
-                        self.tool_calls.setdefault(tool.call_id, (operation_id, response_id))
+                    self.tool_calls.setdefault(tool.call_id, (operation_id, response_id))
         if content:
             segment_id = f"{operation_id}-text"
             previous = self.records.get(("text", segment_id))
@@ -2335,7 +2343,7 @@ class _Reporter:
         self.early_metrics = None
         for state in (self.records, self.speeches, self.original_speeches, self.task_results, self.handles, self.inputs, self.input_anchors,
                       self.items, self.native_segments, self.tool_calls, self.tool_operations,
-                      self.ignored_tools, self.request_steps, self.user_metrics, self.eou_metrics,
+                      self.control_tools, self.request_steps, self.user_metrics, self.eou_metrics,
                       self.speech_measurements, self.callbacks):
             state.clear()
 

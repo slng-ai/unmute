@@ -288,3 +288,22 @@ func TestPlaybackDelayKeepsItsOwnQuantity(t *testing.T) {
 		t.Fatal("playback delay became another quantity")
 	}
 }
+
+// A control hands over to a task rather than returning a result, so it carries
+// an operation type of its own: a row the reader can see, with no duration. A
+// decoder that refuses the type drops the row, and the model call the control
+// caused reads as a duplicate.
+func TestHandoffIsAnOperationTypeOfItsOwn(t *testing.T) {
+	row := `{"version":2,"kind":"operation","call_id":"call-a","id":"handoff-1","revision":1,"order":1,` +
+		`"operation":{"type":"handoff","name":"verify_customer","state":"running"}}`
+	record, found, err := Extract([]byte(Sentinel + row))
+	if err != nil || !found {
+		t.Fatalf("a handoff row was refused: %v", err)
+	}
+	if record.Operation.Type != "handoff" {
+		t.Errorf("type %q, want handoff", record.Operation.Type)
+	}
+	if _, _, err := Extract([]byte(Sentinel + strings.Replace(row, `"handoff"`, `"transfer"`, 1))); err == nil {
+		t.Error("accepted an operation type no producer emits")
+	}
+}

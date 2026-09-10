@@ -119,6 +119,10 @@ those states separate and marks interruptions or incomplete replies.
 Model and tool activity appears before answer text. Each tool call has its own
 row, even when two calls use the same name. Reported outcomes update that row;
 `returned` means a result arrived, not that the business action succeeded.
+A call into a task, or a handoff to another agent, gets its own row too,
+labelled `HANDOFF`, and carries no duration: it hands control over rather than
+returning a result. That row is what accounts for the model call that follows
+it.
 A reply summary shows its reported latency and model-call count. Each `LLM 1`,
 `LLM 2`, and later row shows its own first-response and full-duration values
 without expanding anything. TTS first-audio time and tool duration stay visible

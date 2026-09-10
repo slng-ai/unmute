@@ -653,6 +653,19 @@ async def check_task_return(capture, *, direct=False):
         assert operations[0]["operation"]["exchange_id"] == operations[1]["operation"]["exchange_id"], "Ordinary tool chain was split"
         assert operations[-1]["operation"]["exchange_id"] == operations[-2]["operation"]["exchange_id"] == closing
         assert operations[0]["operation"]["exchange_id"] != closing
+        # A delegate hands over to a task rather than returning a result: it
+        # gets a row of its own, so the model call it causes has a visible
+        # cause, and no duration, because the call stays open for the whole
+        # flow. An ordinary tool beside it is still timed.
+        timed = {r["measurement"].get("operation_id") for r in capture.latest(call_id, "measurement")
+                 if r["measurement"]["metric"] == "tool_duration"}
+        controls = [r for r in capture.latest(call_id, "operation") if r["operation"]["type"] == "handoff"]
+        assert [r["operation"]["name"] for r in controls] == ["do_find" if direct else "do_reserve"], controls
+        assert controls[0]["id"] not in timed, "a delegate was timed as a tool"
+        assert controls[0]["operation"].get("exchange_id") == operations[0]["operation"]["exchange_id"], controls
+        lookups = [r for r in capture.latest(call_id, "operation")
+                   if r["operation"]["type"] == "tool" and r["operation"]["name"] == "lookup"]
+        assert len(lookups) == 1 and lookups[0]["id"] in timed, lookups
         if direct:
             user = next(item for item in messages if item.role == "user" and item.text_content == "Yes, please, go for it.")
             reply = next(item for item in messages if item.role == "assistant" and item.text_content == "Done, it’s in the diary.")
@@ -1546,7 +1559,10 @@ async def exercise(enabled):
         assert PRIVATE_THOUGHT not in capture.getvalue()
         for line in capture.getvalue().splitlines():
             if line.startswith(SENTINEL):
-                print(line)
+                # The line and its newline in one write: pipecat keeps logging
+                # from background tasks, and stderr merges into this stream, so
+                # a bare print lets a log line land inside a record.
+                print(line + "\n", end="")
     else:
         assert not capture.records(), "metrics disabled but frames were emitted"
         assert probe.requests[0].finished.is_set() and probe.audio
@@ -1615,7 +1631,10 @@ async def exercise_recognition_boundaries():
                 await asyncio.wait_for(task, timeout=5)
         for line in capture.getvalue().splitlines():
             if line.startswith(SENTINEL):
-                print(line)
+                # The line and its newline in one write: pipecat keeps logging
+                # from background tasks, and stderr merges into this stream, so
+                # a bare print lets a log line land inside a record.
+                print(line + "\n", end="")
 
 
 # Append to devStreamingPipecatScript, then call await exercise_live_metrics()
@@ -1772,7 +1791,10 @@ async def exercise_live_metrics(call_id="pipecat-live-metrics"):
             await asyncio.wait_for(task, timeout=5)
     for line in capture.getvalue().splitlines():
         if line.startswith(SENTINEL):
-            print(line)
+            # The line and its newline in one write: pipecat keeps logging from
+            # background tasks, and stderr merges into this stream, so a bare
+            # print lets a log line land inside a record.
+            print(line + "\n", end="")
 
 
 import dev_metrics
@@ -1848,7 +1870,14 @@ async def exercise_native_handoff():
                 assert tools[identity]["state"] == "returned"
                 assert tools[identity].get("parent_operation_id") == previous.get("parent_operation_id")
                 assert tools[identity].get("exchange_id") == previous.get("exchange_id")
-            assert not any(r["operation"].get("name") == "to_billing" for r in capture.latest("operation"))
+            # The control that caused the receiver's model call has a row of
+            # its own, so a reader can account for that call, and no duration,
+            # because it hands over rather than returning a result.
+            controls = [r for r in capture.latest("operation") if r["operation"].get("name") == "to_billing"]
+            assert len(controls) == 1 and controls[0]["operation"]["type"] == "handoff", controls
+            assert not [r for r in capture.latest("measurement")
+                        if r["measurement"]["metric"] == "tool_duration"
+                        and r["measurement"].get("operation_id") == controls[0]["id"]], "a control was timed as a tool"
         finally:
             for release in probe.tool_release.values():
                 release.set()
@@ -1857,7 +1886,10 @@ async def exercise_native_handoff():
             await asyncio.wait_for(task, timeout=5)
     for line in capture.getvalue().splitlines():
         if line.startswith(SENTINEL):
-            print(line)
+            # The line and its newline in one write: pipecat keeps logging from
+            # background tasks, and stderr merges into this stream, so a bare
+            # print lets a log line land inside a record.
+            print(line + "\n", end="")
 
 
 def event_handlers(source, event):
@@ -1944,7 +1976,10 @@ async def exercise_native_lifecycle():
                 bot.install_dev_metrics = original_install
         for line in capture.getvalue().splitlines():
             if line.startswith(SENTINEL):
-                print(line)
+                # The line and its newline in one write: pipecat keeps logging
+                # from background tasks, and stderr merges into this stream, so
+                # a bare print lets a log line land inside a record.
+                print(line + "\n", end="")
 
     # Reuse native tool-call IDs on a new reporter/call, with a late callback
     # from the previous call still retained above. IDs are scoped by call_id.
