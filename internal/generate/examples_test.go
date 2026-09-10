@@ -1863,3 +1863,33 @@ func TestNoPromptCarriesASpecimenPhoneNumber(t *testing.T) {
 		}
 	}
 }
+
+// The same rule for an email address, which arrived with the email types.
+//
+// A prompt that collects an address wants to show the model what one looks
+// like, and an address is more tempting to illustrate than a number because it
+// has a shape a sentence struggles to describe. It is the same leak: the model
+// cannot tell an illustration from the value it is holding, and reading a
+// stranger's address back to a caller who says yes sends the confirmation to
+// the stranger. The format already reaches the model through the type's own
+// description, which is emitted beside the field and needs no help from prose.
+//
+// Written as its own test rather than a second pattern in the one above, so a
+// failure names which kind of specimen was found.
+func TestNoPromptCarriesASpecimenEmailAddress(t *testing.T) {
+	// Something before an at sign, then a dotted domain. Loose on the local
+	// part and strict about the dot, so a prompt saying "an at sign" in words is
+	// not a finding and neither is a bare domain like a website in a greeting.
+	specimen := regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`)
+	for path, source := range promptFiles(t) {
+		for i, line := range strings.Split(source, "\n") {
+			if found := specimen.FindString(line); found != "" {
+				t.Errorf("%s:%d writes the email address %q. A model cannot tell it from a value it is "+
+					"holding and reads it out, and a caller agreeing to a stranger's address is how the "+
+					"confirmation goes to the stranger: describe the shape in words, and let the type's "+
+					"own description carry the format",
+					path, i+1, strings.TrimSpace(found))
+			}
+		}
+	}
+}

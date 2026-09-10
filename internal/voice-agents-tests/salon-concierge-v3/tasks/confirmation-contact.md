@@ -10,8 +10,10 @@ Currently on file: {{confirmation_contact.name}} at {{confirmation_email}}.
    it. A yes means finish with what is already there.
 2. Otherwise ask for the name the confirmation should be addressed to, then the
    email address.
-3. Read the address back before you record it. Say the part before the at sign
-   letter by letter, then the domain.
+3. Read the address back before you record it. Put a space between the
+   characters of the part before the at sign, so the caller hears each one, and
+   say the domain the ordinary way. That is where a mishearing gets caught,
+   rather than after the confirmation has gone to a stranger.
 4. Once they have agreed it is right, call finish with the name and the address
    together.
 

@@ -137,6 +137,9 @@ uv run --project internal/voice-agents-tests/salon-concierge-v3/build/livekit \
   --line "The 3 PM one works."
 ```
 
+Only the think model's key has to be real. The script fills in the names a text
+run never reaches, speech, phone and tracing, and prints which ones it filled.
+
 After every caller line it prints the tool calls, the handoffs, the assistant
 lines, the active agent, that agent's complete rendered prompt, and declared
 state. Read the requests in order. A value that appears in no caller line or
