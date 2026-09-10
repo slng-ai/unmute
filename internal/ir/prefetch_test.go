@@ -795,16 +795,6 @@ func TestBuildPrefetchRefusesAValueWithFields(t *testing.T) {
 				"    fields:\n      - phone_number: Phone\n",
 			want: []string{"declared Customer | None", "resolves one plain value before the greeting"},
 		},
-		{
-			// And through a shape the compiler supplies, which reaches this
-			// branch only because internal/ir seeds it into the catalog: it is
-			// two fields whichever file declared it, so a pre-fetch handing it
-			// one plain value has nothing to put in the other.
-			name: "a supplied shape is filled by the step that produces it",
-			from: "  caller_name:\n    type: string\n    default: \"\"\n",
-			to:   "  caller_name:\n    type: NameEmail\n",
-			want: []string{"declared NameEmail", "resolves one plain value before the greeting"},
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := patchPrefetchCore(t, tc.from, tc.to)
@@ -835,15 +825,6 @@ func TestBuildPrefetchFillsShapedText(t *testing.T) {
 			name: "the clock fills a Date",
 			from: "  booking_date:\n    type: string\n    default: \"\"\n",
 			to:   "  booking_date:\n    type: Date\n    default: \"\"\n",
-		},
-		{
-			// An EmailStr is one plain value, so a lookup returning an address
-			// fills it. Worth its own case because the check is a library call
-			// rather than a pattern, and the predicate that decides this reads
-			// the kind rather than the check.
-			name: "a lookup fills an EmailStr",
-			from: "  caller_name:\n    type: string\n    default: \"\"\n",
-			to:   "  caller_name:\n    type: EmailStr\n    default: \"\"\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

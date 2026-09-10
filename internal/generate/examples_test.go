@@ -1586,13 +1586,7 @@ func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 	} {
 		for name, body := range bodies {
 			for _, ref := range ir.TemplateRefs(body) {
-				// A path reaches the IR flat, as customer__status, and the name
-				// the package declares is its root. ir.PathRoot is what knows
-				// that, rather than this test re-deriving it: reading the flat
-				// form as a whole name called every path undeclared the first
-				// time a shipped example used one.
-				root := ir.PathRoot(ref)
-				if _, declared := resolved.Variables[root]; !declared {
+				if _, declared := resolved.Variables[ref]; !declared {
 					t.Errorf("%s %q references {{%s}}, which the package does not declare", kind, name, ref)
 				}
 			}

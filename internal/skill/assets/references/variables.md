@@ -54,25 +54,10 @@ helps the model choose the right value; it does not expose the saved value.
 | `Date` | Text in `YYYY-MM-DD` format |
 | `Time` | A 24-hour time in `HH:MM` format |
 | `Id` | 1 to 64 characters; starts with an ASCII letter or digit, followed by letters, digits, `.`, `-`, `_`, or `:` |
-| `EmailStr` | A valid email address. The saved value is the normalized form |
-| `NameEmail` | An object with a `name` field and an `email` field |
 
 Aliases: `string` means `str`, `integer` means `int`, `number` means `float`,
 and `boolean` means `bool`. Text-format checks are separate from business
 checks such as phone ownership, calendar validity, or record existence.
-
-The two email types are checked with the `email-validator` package, which the
-generated project declares when you use either of them. The check reads the
-address only; it never looks up whether the domain accepts mail, because it runs
-while the caller is on the line.
-
-`NameEmail` is an object type the compiler supplies. Do not declare it under
-`shapes:`, and do not declare your own `name`/`email` shape instead: the name is
-refused, and the supplied one already parses a single string. It takes the two
-fields, or one string in either of two forms, `Fred Bloggs
-<fred.bloggs@example.com>` or the address on its own, in which case `name`
-becomes the part before the at sign. Read one part with `{{contact.name}}` or a
-dotted assignment, exactly as for a shape you declared.
 
 | Form | Value |
 |---|---|
@@ -139,9 +124,8 @@ Refused, each with its line:
 - The same field name declared twice in one shape.
 - A shape with no `name:`, no `fields:`, or a name another shape already
   uses.
-- A shape named the same as a primitive, a shaped text type, a shape the
-  compiler supplies such as `NameEmail`, `Literal`, `list`, or `None`. Give it a
-  name of its own, in `CapWords`.
+- A shape named the same as a primitive, a shaped text type, `Literal`,
+  `list`, or `None`. Give it a name of its own, in `CapWords`.
 - A shape that refers to itself, directly or through another shape. Nothing
   can render an object with no bottom, and the model would be asked to fill
   one in.
@@ -292,10 +276,9 @@ permission, and it prints no warning: the entry is named in
 It resolves before anybody speaks, so all it has is one value: a formatted
 clock reading, the number the call carries, one field of a tool result.
 
-Assignable: a plain type, shaped text (`Phone`, `Date`, `Time`, `Id`,
-`EmailStr`), and a `Literal` when the tool's own result field declares the same
-set. Refused: a `list[...]`, a declared shape or `NameEmail`, naming the step to
-assign it from instead.
+Assignable: a plain type, shaped text (`Phone`, `Date`, `Time`, `Id`), and a
+`Literal` when the tool's own result field declares the same set. Refused: a
+`list[...]` or a declared shape, naming the step to assign it from instead.
 
 Do not reach for a pre-fetch to seed a list. A list is what a call accumulates
 while it runs, one entry per thing that happened, appended by the step that

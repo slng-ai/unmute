@@ -24,13 +24,6 @@ func TestPlaceholderPathIsWalkedOnBothTargets(t *testing.T) {
 			"_state_text(*_prompt_value(",
 			"{{last_appointment__appointment_type}}",
 			`"last_appointment__appointment_type"`,
-			// A path into a shape the compiler supplies flattens and walks
-			// exactly like one into a declared shape. It only can because
-			// internal/ir seeds the shape into the catalog: a reference with no
-			// entry there is refused at build with "which has no fields to
-			// name", so a prompt could never read one part of the pair.
-			"{{booked_for__name}}",
-			`"booked_for__name"`,
 		} {
 			if !strings.Contains(module, want) {
 				t.Errorf("%s does not emit %q", provider, want)

@@ -48,7 +48,7 @@ before saving it.
 
 | Type | What it holds |
 |---|---|
-| `str` | Free text, such as names and notes |
+| `str` | Free text, including names, notes, and email addresses |
 | `int` | A whole number |
 | `float` | A number that may have a decimal part |
 | `bool` | `true` or `false` |
@@ -56,8 +56,6 @@ before saving it.
 | `Date` | Date text in `YYYY-MM-DD` format |
 | `Time` | A 24-hour time in `HH:MM` format |
 | `Id` | A short identifier with a defined character set |
-| `EmailStr` | A valid email address, saved as plain text |
-| `NameEmail` | A person and their email address, held as two fields |
 
 `string`, `integer`, `number`, and `boolean` are aliases for `str`, `int`,
 `float`, and `bool`.
@@ -71,10 +69,6 @@ before saving it.
 | `list[T]` | A list of values of type `T` |
 | `T \| None` | A value of type `T`, or `null` when absence is a valid result |
 
-`NameEmail` is an object type too, so `{{contact.name}}` and `{{contact.email}}`
-read its parts. You do not declare it under `shapes:`. It is refused as a shape
-name, because it already means something.
-
 Here, `T` stands for the type you choose. Use `Literal` for a fixed set of
 choices, a shape for related fields, and a list for several values. The next
 section shows how to define your own object type.
@@ -85,8 +79,7 @@ record existence and availability.
 
 <Note>
 LiveKit and Pipecat support all these types. The SLNG target supports basic
-scalar variables: `str`, `int`, `float`, `bool`, and their aliases. It runs no
-code of your package, so it has nowhere to check a shape.
+scalar variables: `str`, `int`, `float`, `bool`, and their aliases.
 </Note>
 
 ## Group related fields into a shape

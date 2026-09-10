@@ -30,86 +30,26 @@ import (
 // alias carries it as its description. Two strings would be two things to keep
 // in step, and the day they drift the model is told one format and refused
 // against another.
-//
-// A kind carries exactly one of two checks: a `regex`, which the emitter wraps
-// in the shared pattern body, or a `body`, which is the whole emitted function
-// body for a check no pattern can make. An email address is the second case.
-// Writing one as a regex is a well known way to reject real addresses, and the
-// library that gets it right is the one Pydantic itself reaches for, so the
-// emitted project asks for `email-validator` when a package declares the type
-// and never otherwise.
-//
-// Neither and both are refused by TestEveryShapedKindCarriesOneCheck, because a
-// kind with neither reads a zero-value row: it would emit `re.compile(r"")` and
-// a refusal saying only "expected ".
 var shapedPatterns = map[ir.ShapedText]struct {
 	regex  string
-	body   string
 	phrase string
 }{
 	ir.ShapedPhone: {
-		regex:  `^\+[1-9]\d{6,14}$`,
-		phrase: "a phone number in E.164, one leading plus and 7 to 15 digits, like +34600111222",
+		`^\+[1-9]\d{6,14}$`,
+		"a phone number in E.164, one leading plus and 7 to 15 digits, like +34600111222",
 	},
 	ir.ShapedDate: {
-		regex:  `^\d{4}-\d{2}-\d{2}$`,
-		phrase: "a day written year-month-day, like 2026-03-19",
+		`^\d{4}-\d{2}-\d{2}$`,
+		"a day written year-month-day, like 2026-03-19",
 	},
 	ir.ShapedTime: {
-		regex:  `^([01]\d|2[0-3]):[0-5]\d$`,
-		phrase: "a time of day on the 24-hour clock, like 09:30 or 17:45",
+		`^([01]\d|2[0-3]):[0-5]\d$`,
+		"a time of day on the 24-hour clock, like 09:30 or 17:45",
 	},
 	ir.ShapedID: {
-		regex:  `^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`,
-		phrase: "an identifier: letters, digits, and then any of dot, dash, underscore or colon",
+		`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`,
+		"an identifier: letters, digits, and then any of dot, dash, underscore or colon",
 	},
-	ir.ShapedEmail: {
-		body:   emailShapeBody,
-		phrase: "an email address, like name@example.com",
-	},
-}
-
-// emailShapeBody is the emitted body for EmailStr. It is written out here rather
-// than assembled from parts because it is Python somebody has to be able to
-// read.
-//
-// check_deliverability=False is not a preference. The library's default is True,
-// which sends DNS queries for the domain's mail servers, and this validator runs
-// on the voice path: a slow resolver would hold the caller in silence, and a
-// caller giving an address the compiler cannot post to today is still giving the
-// address they have.
-//
-// The normalized form is what gets saved, which is what makes the value plain
-// text a later tool can use without normalizing it again.
-const emailShapeBody = `    # Empty is not a wrong value, it is no value yet, exactly as for the
-    # pattern-checked types. Refusing it deadlocked a live call on both targets.
-    if not value:
-        return value
-    try:
-        info = validate_email(value, check_deliverability=False)
-    except EmailNotValidError as exc:
-        # The library's own sentence names what it stopped at, which is more than
-        # the phrase can, so it rides along after it and the model can correct
-        # itself from one refusal instead of guessing.
-        raise ValueError(` + shapedExpected + ` + ": " + str(exc)) from exc
-    return info.normalized`
-
-// shapedExpected is the token a validator body writes where the refusal's
-// "expected <phrase>" belongs. One phrase reaches the model as the alias
-// description and the refusal as this text, so the two cannot drift.
-const shapedExpected = "__SHAPED_EXPECTED__"
-
-// patternShapeBody is the shared body for a text type checked by a pattern.
-func patternShapeBody(upper string) string {
-	return `    # Empty is not a wrong value, it is no value yet. It is what a declared
-    # variable holds before anything fills it, what an empty prompt reference
-    # renders as words, and what a tool hands back for a field it could not fill. Refusing
-    # it here deadlocked a live call on both targets: the model had nothing else
-    # to send, so every retry was refused the same way and the step never
-    # finished. A wrong value is still refused; an absent one is not wrong.
-    if value and not _SHAPE_` + upper + `.match(value):
-        raise ValueError(` + shapedExpected + `)
-    return value`
 }
 
 // ShapedPhrase is what a text type wants, as the emitted description says it.
@@ -133,29 +73,18 @@ func RawStringSafe(pattern string) bool {
 	return !strings.Contains(pattern, `"`) && !strings.HasSuffix(pattern, `\`)
 }
 
-// ShapedPatterns is every **pattern-checked** text type's regex, for that gate.
-// A kind checked by a library call is absent, because it has no pattern to hold
-// to the raw-string rule; ShapedBody is how the gate sees it instead.
+// ShapedPatterns is every text type's check, for that gate.
 func ShapedPatterns() map[ir.ShapedText]string {
 	out := make(map[ir.ShapedText]string, len(shapedPatterns))
 	for kind, row := range shapedPatterns {
-		if row.regex != "" {
-			out[kind] = row.regex
-		}
+		out[kind] = row.regex
 	}
 	return out
 }
 
-// ShapedBody is the emitted validator body for a text type checked by something
-// other than a pattern, empty for the pattern-checked ones. Exported so one gate
-// can hold every kind to carrying exactly one of the two.
-func ShapedBody(kind ir.ShapedText) string { return shapedPatterns[kind].body }
-
 // shapedOrder fixes the order the aliases are emitted in, so the same package
-// renders the same bytes twice. It reads internal/ir's list rather than keeping
-// its own, because a kind missing here emits no alias at all while PyAnno still
-// writes its name into an annotation, which is a NameError at import.
-var shapedOrder = ir.ShapedTextOrder()
+// renders the same bytes twice.
+var shapedOrder = []ir.ShapedText{ir.ShapedPhone, ir.ShapedDate, ir.ShapedTime, ir.ShapedID}
 
 // TypedStateBlock is what a driver renders: the Python, plus what each
 // template's import block needs to know without re-deriving it.
@@ -168,81 +97,13 @@ type TypedStateBlock struct {
 	Values []TypedStateValue
 	// Empty is what a value with no contents renders as, so the runbook quotes
 	// the string rather than paraphrasing it.
-	Empty string
-	// NeedsRe says a **pattern-checked** text type is used, so the module
-	// compiles a regex. EmailStr is checked by a library call and compiles none,
-	// which is why this is no longer "any shaped type is used": an unused
-	// `import re` fails the ruff gate the emitted README promises.
-	NeedsRe bool
-	// NeedsShaped says any text type with a validated shape is used, which is
-	// what needs AfterValidator and typing.Annotated.
-	NeedsShaped    bool
+	Empty          string
+	NeedsRe        bool
 	NeedsJSON      bool
 	NeedsAnnotated bool
 	NeedsField     bool
 	NeedsLiteral   bool
-	// NeedsModelValidator says a compiler-supplied class carries a parser, which
-	// is the one place this block reaches for Pydantic's model_validator.
-	NeedsModelValidator bool
-	// NeedsEmailValidator says the block calls email-validator, which is the one
-	// thing here that is not stdlib or Pydantic. It drives both the import in
-	// each template and the dependency in each emitted pyproject.toml, so those
-	// three cannot disagree: an import with no dependency is a startup
-	// ImportError, and a dependency with no import is a package the image
-	// installs for nothing.
-	NeedsEmailValidator bool
 }
-
-// builtinClassBody is the extra body a compiler-supplied class carries after its
-// fields, empty for an authored shape and for a built-in that needs none.
-//
-// Keyed by name rather than by a field on ir.Shape holding Python, because the
-// emitted Python belongs in the file that emits Python. A built-in with no entry
-// here emits a plain class, which is a class with no parser rather than a
-// broken one, and TestBuiltinShapesAllEmitAParser refuses that silence.
-func builtinClassBody(class ir.Shape) string {
-	if !class.Builtin {
-		return ""
-	}
-	return builtinClassBodies[class.Name]
-}
-
-// nameEmailParser lets one string stand in for the pair.
-//
-// The model fills the two fields, which is why the schema stays an object and
-// carries no format keyword. This is for the other way in: a tool that returns
-// "Fred Bloggs <fred@example.com>" or a bare address, a seeded call-start value,
-// and a dotted assign that picks one string out of a result. Without it those
-// all fail validation on a value that is perfectly readable.
-//
-// allow_display_name is what reads the name out of the angle-bracket form, and
-// it needs email-validator 2.2 or newer. With no name to read, the local part
-// stands in, which is Pydantic's own answer for the same input.
-const nameEmailParser = `    @model_validator(mode="before")
-    @classmethod
-    def _read_one_string(cls, value):
-        if not isinstance(value, str):
-            return value
-        if not value.strip():
-            # No value yet, not a wrong one. Both fields stay empty and every
-            # prompt naming them renders the words a missing value renders.
-            return {"name": "", "email": ""}
-        try:
-            info = validate_email(
-                value, check_deliverability=False, allow_display_name=True
-            )
-        except EmailNotValidError as exc:
-            raise ValueError(
-                "expected an email address, on its own or with a name in front of"
-                " it, like Fred Bloggs <fred@example.com>: " + str(exc)
-            ) from exc
-        return {
-            "name": info.display_name or info.local_part,
-            "email": info.normalized,
-        }
-`
-
-var builtinClassBodies = map[string]string{"NameEmail": nameEmailParser}
 
 // TypedStateValue is one declared value as the runbook names it.
 type TypedStateValue struct {
@@ -282,23 +143,7 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 		return TypedStateBlock{}, nil
 	}
 	block.Empty = ir.StateEmptyText()
-	// Per used kind and not "any kind is used": EmailStr is checked by a library
-	// call and compiles no pattern, so a package declaring only that one has no
-	// `re` to import and the emitted ruff gate refuses an unused one.
-	for kind := range used {
-		block.NeedsShaped = true
-		block.NeedsRe = block.NeedsRe || shapedPatterns[kind].regex != ""
-		block.NeedsEmailValidator = block.NeedsEmailValidator || kind == ir.ShapedEmail
-	}
-	for _, class := range classes {
-		if builtinClassBody(class) == "" {
-			continue
-		}
-		block.NeedsModelValidator = true
-		// A supplied parser reads the address itself, so it needs the library
-		// whether or not any declared value is an EmailStr on its own.
-		block.NeedsEmailValidator = true
-	}
+	block.NeedsRe = len(used) > 0
 	block.NeedsJSON = true
 	block.NeedsLiteral = declaresLiteral(agent)
 	// A shaped text type is itself an Annotated alias, so using one needs the
@@ -307,15 +152,12 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 	// every shipped one declaring a shaped type also declares one of the other
 	// two, so the import arrived for another reason.
 	block.NeedsField = fieldCarriesDescription(agent, classes)
-	block.NeedsAnnotated = block.NeedsShaped || block.NeedsField
+	block.NeedsAnnotated = block.NeedsRe || block.NeedsField
 
 	var b strings.Builder
 	b.WriteString(`# --- declared state ----------------------------------------------------------
 # Generated from the ` + "`shapes:`" + ` and the typed ` + "`variables:`" + ` in agent.yaml. Both
-# target frameworks already depend on Pydantic, so nothing here adds one. The one
-# exception is EmailStr, which is checked by email-validator: declaring it puts
-# that package in this project's pyproject.toml, and declaring no email type
-# leaves both the import and the dependency out.
+# target frameworks already depend on Pydantic, so nothing here adds one.
 #
 # Emitted from one place in the compiler for both targets, so the classes, the
 # checks and the refusal wording cannot differ between them.
@@ -326,19 +168,20 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 		}
 		row := shapedPatterns[kind]
 		lower := strings.ToLower(string(kind))
-		upper := strings.ToUpper(lower)
-		check, body := "", row.body
-		if row.regex != "" {
-			check = "_SHAPE_" + upper + " = re.compile(" + pyRaw(row.regex) + ")\n\n\n"
-			body = patternShapeBody(upper)
-		}
-		// The phrase is substituted rather than formatted in, because a body is
-		// Python and a stray percent sign in one would otherwise be read as a
-		// verb. One token, one owner: shapedExpected.
-		body = strings.ReplaceAll(body, shapedExpected, pyQuote("expected "+row.phrase))
 		fmt.Fprintf(&b, `
-%sdef _shape_%s(value: str) -> str:
-%s
+_SHAPE_%s = re.compile(%s)
+
+
+def _shape_%s(value: str) -> str:
+    # Empty is not a wrong value, it is no value yet. It is what a declared
+    # variable holds before anything fills it, what an empty prompt reference
+    # renders as words, and what a tool hands back for a field it could not fill. Refusing
+    # it here deadlocked a live call on both targets: the model had nothing else
+    # to send, so every retry was refused the same way and the step never
+    # finished. A wrong value is still refused; an absent one is not wrong.
+    if value and not _SHAPE_%s.match(value):
+        raise ValueError(%s)
+    return value
 
 
 # AfterValidator and never a pattern= constraint: a pattern reaches the schema
@@ -357,7 +200,8 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
     Field(description=%s),
 ]
 `,
-			check, lower, body, string(kind), lower, pyQuote(row.phrase))
+			strings.ToUpper(lower), pyRaw(row.regex), lower, strings.ToUpper(lower),
+			pyQuote("expected "+row.phrase), string(kind), lower, pyQuote(row.phrase))
 	}
 	for _, class := range classes {
 		b.WriteString("\n\nclass " + class.Name + "(BaseModel):\n")
@@ -366,9 +210,6 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 		}
 		for _, field := range class.Fields {
 			b.WriteString("    " + field.Name + ": " + pyFieldAnno(field) + "\n")
-		}
-		if body := builtinClassBody(class); body != "" {
-			b.WriteString("\n" + body)
 		}
 	}
 	b.WriteString(`
@@ -792,16 +633,6 @@ func emittedClassNames(agent *ir.Agent) map[string]string {
 		"Annotated": "the typing module", "Literal": "the typing module",
 		"NodeConfig": "the framework", "LLMWorker": "the framework",
 	}
-	// The second net behind ir's reservedShapeName, which refuses the
-	// declaration. This one catches a name that reaches the catalog some other
-	// way, and it names the built-in rather than the framework, so the refusal
-	// says something the author can act on.
-	for _, name := range ir.BuiltinShapeNames() {
-		if _, ok := agent.Shapes[name]; ok && agent.Shapes[name].Builtin {
-			continue
-		}
-		taken[name] = "a shape this compiler supplies"
-	}
 	for _, name := range sortedKeys(agent.Agents) {
 		taken[pyName(name)] = fmt.Sprintf("agent %q", name)
 	}
@@ -1010,11 +841,8 @@ func StateNeedsDataclassField(agent *ir.Agent) bool {
 func PydanticImports(needsField bool, typed *TypedStateBlock) string {
 	var names []string
 	if typed != nil {
-		if typed.NeedsShaped {
+		if typed.NeedsRe {
 			names = append(names, "AfterValidator")
-		}
-		if typed.NeedsModelValidator {
-			names = append(names, "model_validator")
 		}
 		names = append(names, "BaseModel", "TypeAdapter", "ValidationError")
 		needsField = needsField || typed.NeedsField

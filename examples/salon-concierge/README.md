@@ -15,7 +15,7 @@ down complaints, and puts a caller through to a manager when they ask for one.
 | `targets.yaml` | the two targets, one per telephony plane |
 | `instructions.md` | the concierge prompt |
 | `agents/complaint-specialist.md` | the customer care prompt |
-| `tasks/` | the verification, booking, confirmation contact and complaint task prompts |
+| `tasks/` | the verification, booking and complaint task prompts |
 | `tools/` | one file per tool: local Python over one in-memory store, plus the `end_call` builtin |
 | `knowledge/refunds/`, `knowledge/services/` | two document sets, each its own index |
 | `connections/` | the two carrier connections |
@@ -25,10 +25,8 @@ call. Customer care is a second agent because it holds a document set and a
 permission the concierge must not have: the refund policy and the complaint
 record.
 
-**Four tasks, one of them shared.** Verification confirms who is calling.
+**Three tasks, one of them shared.** Verification confirms who is calling.
 Booking does create, modify and cancel in one task and saves a typed Appointment.
-Taking the confirmation contact is its own step, so a caller who does not want an
-email never has to give one and a booking is never held up by a missing address.
 Customer care records complaints in its own task and appends typed Complaint
 values. Customer care offers verification too, and
 it does that with a bare name in its own `tasks:` list rather than a second copy:
@@ -53,15 +51,6 @@ move or cancellation succeeds. The owner and customer care read those values
 through explicit prompt references, including `{{appointment}}`, so a later
 complaint can refer to the updated date without asking again. Tools inject the
 confirmed phone number. No value is automatically added to a prompt.
-
-**An email address checked where it enters.** `confirmation_contact` is a
-`NameEmail`, which holds the name and the address as two fields, so the agent can
-say whose name the booking is under without reading an address out loud.
-`confirmation_email` is an `EmailStr` taken off that pair with a dotted
-assignment, so the caller spells the address out once and both values are filled
-from the one answer. The address is checked by `email-validator`, which the two
-emitted projects declare because this package uses the types, and the check never
-asks DNS: it runs while the caller is on the line.
 
 **Ordering carried by the prompt.** `manage_booking` runs after verification,
 but not because the compiler holds it back: the concierge's own instructions

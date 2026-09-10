@@ -41,57 +41,10 @@ var primitiveSpellings = map[string]PrimitiveType{
 
 // shapedSpellings is the closed set of text-with-a-shape types.
 var shapedSpellings = map[string]ShapedText{
-	"Phone":    ShapedPhone,
-	"Date":     ShapedDate,
-	"Time":     ShapedTime,
-	"Id":       ShapedID,
-	"EmailStr": ShapedEmail,
-}
-
-// shapedTextOrder is every text type with a validated shape, in the order every
-// surface names them. One list, read by four: the refusal vocabulary below, the
-// derived schema's two enums, and the emitted aliases in internal/generate.
-// They were four hand-written lists, and a type missing from one of them is
-// invisible in a refusal, absent from the debug schema, or emitted as a name no
-// module defines. ShapedTextOrder is the exported reader.
-var shapedTextOrder = []ShapedText{ShapedPhone, ShapedDate, ShapedTime, ShapedID, ShapedEmail}
-
-// ShapedTextOrder is every text type with a validated shape, in a fixed order,
-// so one package renders the same bytes twice and one refusal reads the same way
-// every run.
-func ShapedTextOrder() []ShapedText { return slices.Clone(shapedTextOrder) }
-
-// BuiltinShapeNames is every shape the compiler supplies, sorted. Read by the
-// refusal vocabulary and by the gates that hold the surfaces in step.
-func BuiltinShapeNames() []string { return slices.Sorted(maps.Keys(builtinShapes)) }
-
-// builtinShapes is the closed set of shapes the compiler supplies. A name here
-// resolves the way a declared one does, so a path into it, a dotted assign and
-// the per-target rows all read the resolved catalog and need nothing of their
-// own. The entry is copied into the catalog only when a type expression names
-// it, which is what keeps a package declaring none byte-identical.
-//
-// NameEmail is Pydantic's own name for the pair, and it is a shape rather than a
-// text type for one reason: the two parts have to be readable separately, so a
-// prompt can say who the booking is under without reading an address out loud.
-var builtinShapes = map[string]Shape{
-	"NameEmail": {
-		Name:    "NameEmail",
-		Builtin: true,
-		Description: "A person and their email address. Accepts either the address on its own or a " +
-			"display name in front of it, and holds the two parts separately.",
-		Fields: []Field{
-			{
-				Name: "name", Type: &TypeRef{Primitive: PrimitiveString},
-				Description: "The person's name as they gave it. When only an address is known this is the " +
-					"part of it before the at sign.",
-			},
-			{
-				Name: "email", Type: &TypeRef{Shaped: ShapedEmail},
-				Description: "The email address on its own, with no name around it.",
-			},
-		},
-	},
+	"Phone": ShapedPhone,
+	"Date":  ShapedDate,
+	"Time":  ShapedTime,
+	"Id":    ShapedID,
 }
 
 // refusedTypes is every name a person reaches for that this scope does not
@@ -106,19 +59,17 @@ var refusedTypes = map[string]string{
 	"date":              `write "Date", which is text with a validated shape`,
 	"time":              `write "Time", which is text with a validated shape`,
 	"UUID":              `write "Id", which is text with a validated shape`,
-	"email":             `write "EmailStr", which is text with a validated shape, or "NameEmail" to hold a name beside the address`,
-	"Email":             `write "EmailStr", which is text with a validated shape, or "NameEmail" to hold a name beside the address`,
 	"SecretStr":         "a secret never travels through state: it reaches a tool through that tool's own *_env field",
 	"PaymentCardNumber": "card numbers are outside the declared type scope, and nothing in this compiler should carry one",
-	"dict":              `declare the fields as a shape under "shapes:" and name that shape here, or name one of the shapes this compiler supplies`,
-	"Dict":              `declare the fields as a shape under "shapes:" and name that shape here, or name one of the shapes this compiler supplies`,
+	"dict":              `declare the fields as a shape under "shapes:" and name that shape here`,
+	"Dict":              `declare the fields as a shape under "shapes:" and name that shape here`,
 	"set":               `write "list[...]", which is the one collection this scope takes`,
 	"tuple":             `write "list[...]", which is the one collection this scope takes`,
 	"List":              `write "list[...]", in lower case, which is Python's own spelling now`,
 	"Optional":          `write "T | None"`,
 	"Union":             `write "A | B", and only "| None" is meaningful in this scope`,
 	"Any":               "name the type: a value the compiler cannot describe is a value no prompt can render and no guard can test",
-	"BaseModel":         `name one of the shapes declared under "shapes:", or one of the shapes this compiler supplies`,
+	"BaseModel":         `name one of the shapes declared under "shapes:"`,
 }
 
 // buildShapes resolves the authored `shapes:` list into the resolved catalog.
@@ -197,9 +148,6 @@ func reservedShapeName(name string) string {
 	if _, ok := shapedSpellings[name]; ok {
 		return "it is one of the text types with a validated shape"
 	}
-	if _, ok := builtinShapes[name]; ok {
-		return "it is one of the shapes this compiler supplies, and both would generate the same class"
-	}
 	if _, ok := refusedTypes[name]; ok {
 		return "a type expression cannot use that name"
 	}
@@ -208,58 +156,6 @@ func reservedShapeName(name string) string {
 		return "it is part of the type grammar"
 	}
 	return ""
-}
-
-// seedBuiltinShapes copies every compiler-supplied shape a resolved type names
-// into the catalog, so the rest of the compiler reads one map and knows nothing
-// about built-ins.
-//
-// This is load-bearing rather than tidy. FieldPath, checkPathFields,
-// checkAssignments, the per-target rows and the class emitter all treat the
-// catalog as the only source of field-bearing types, so a reference with no
-// entry would be told it has no fields to name, would emit no class while the
-// annotation still names one, and would pass the slng gate that starts from
-// whether the catalog is empty.
-//
-// Transitive, because a built-in shape may hold another one. Nothing is copied
-// for a package that names none, which is what keeps its output byte-identical.
-func seedBuiltinShapes(agent *Agent) {
-	var pending []string
-	collect := func(ref *TypeRef) {
-		for at := ref; at != nil; at = at.List {
-			if at.Shape == "" {
-				continue
-			}
-			if _, ok := agent.Shapes[at.Shape]; ok {
-				continue
-			}
-			if _, ok := builtinShapes[at.Shape]; ok {
-				pending = append(pending, at.Shape)
-			}
-		}
-	}
-	for _, name := range sortedKeys(agent.Shapes) {
-		for _, field := range agent.Shapes[name].Fields {
-			collect(field.Type)
-		}
-	}
-	for _, name := range sortedKeys(agent.Variables) {
-		if shape := agent.Variables[name].Shape; shape != nil {
-			collect(shape)
-		}
-	}
-	for len(pending) > 0 {
-		name := pending[0]
-		pending = pending[1:]
-		if _, ok := agent.Shapes[name]; ok {
-			continue
-		}
-		shape := builtinShapes[name]
-		agent.Shapes[name] = shape
-		for _, field := range shape.Fields {
-			collect(field.Type)
-		}
-	}
 }
 
 // resolveType turns one authored type expression into a resolved TypeRef.
@@ -397,12 +293,6 @@ func resolveAtom(atom packagespec.TypeAtom, declared map[string]bool) (*TypeRef,
 	if declared[atom.Name] {
 		return &TypeRef{Shape: atom.Name}, nil
 	}
-	// After the declared set, so a package that declared a shape of this name
-	// would resolve to its own. It cannot: reservedShapeName refuses the
-	// declaration first. The order says which one wins if that ever changes.
-	if _, ok := builtinShapes[atom.Name]; ok {
-		return &TypeRef{Shape: atom.Name}, nil
-	}
 	return nil, &packagespec.TypeError{Col: atom.Col, Msg: fmt.Sprintf(
 		"no shape named %q is declared. Declare it under %q, or write one of %s",
 		atom.Name, "shapes:", strings.Join(scopeNames(declared), ", "))}
@@ -429,12 +319,7 @@ func firstCol(arg packagespec.TypeExpr, fallback int) int {
 // scopeNames is the whole vocabulary a refusal offers, in a fixed order so the
 // message is the same every run.
 func scopeNames(declared map[string]bool) []string {
-	names := []string{"str", "int", "float", "bool"}
-	for _, shaped := range shapedTextOrder {
-		names = append(names, string(shaped))
-	}
-	names = append(names, BuiltinShapeNames()...)
-	names = append(names, "Literal[...]", "list[...]")
+	names := []string{"str", "int", "float", "bool", "Phone", "Date", "Time", "Id", "Literal[...]", "list[...]"}
 	names = append(names, slices.Sorted(maps.Keys(declared))...)
 	return names
 }

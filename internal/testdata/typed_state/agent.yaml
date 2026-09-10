@@ -5,18 +5,11 @@
 # resolves, generates a class, and reaches a prompt. Deliberately small: one
 # agent, two steps, one shape.
 #
-# The variables are one per thing the state block has to get right. A list
+# The three variables are one per thing the state block has to get right. A list
 # of literals renders as compact JSON and refuses an entry outside the set. A
 # list of shapes is what an append writes into. And `caller_phone` carries a
 # `confirm:`, so it renders in exactly one prompt and stays unconfirmed until
 # the caller has agreed, which the block's own filter has to reproduce.
-#
-# The last two cover the email types, which are the only ones checked by a
-# library rather than a pattern. `reminder_email` is the plain address, so the
-# module compiles no regex for it and still has to import the checker.
-# `booked_for` is the pair, which is a shape this compiler supplies rather than
-# one this file declares, so a path into it proves the seeded catalog resolves
-# the same way a declared shape does.
 version: 1
 
 name: typed-state
@@ -63,15 +56,6 @@ variables:
     type: Appointment | None
     description: The appointment most recently booked on this call, so a prompt can name one part of it.
 
-  reminder_email:
-    type: EmailStr
-    default: ""
-    description: Where the caller wants the reminder sent, saved only once they have spelled it out.
-
-  booked_for:
-    type: NameEmail
-    description: Who the appointment is under, with their name and their email address held apart.
-
 agents:
   desk:
     instructions: instructions.md
@@ -97,19 +81,6 @@ agents:
           - last_appointment: result.appointment
         context:
           history: reset
-
-      # Its own step rather than two more fields on `book`, for the reason a
-      # real agent would split them: the caller gives an address by spelling it
-      # out, which is a turn of its own, and a step whose finish demands every
-      # field refuses the whole booking when one of them is missing.
-      - name: take_contact
-        when: The caller wants the confirmation sent to them.
-        instructions: tasks/contact.md
-        assign:
-          - booked_for: result.booked_for
-          - reminder_email: result.booked_for.email
-        context:
-          history: messages
 
       - name: record_flags
         when: Record the count and agreement.

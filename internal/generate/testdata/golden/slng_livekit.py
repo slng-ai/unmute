@@ -260,10 +260,7 @@ def _render(text: str, userdata, *, quote_values: bool = False, site: str = "") 
 
 # --- declared state ----------------------------------------------------------
 # Generated from the `shapes:` and the typed `variables:` in agent.yaml. Both
-# target frameworks already depend on Pydantic, so nothing here adds one. The one
-# exception is EmailStr, which is checked by email-validator: declaring it puts
-# that package in this project's pyproject.toml, and declaring no email type
-# leaves both the import and the dependency out.
+# target frameworks already depend on Pydantic, so nothing here adds one.
 #
 # Emitted from one place in the compiler for both targets, so the classes, the
 # checks and the refusal wording cannot differ between them.
