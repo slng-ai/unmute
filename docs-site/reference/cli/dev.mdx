@@ -44,12 +44,14 @@ steps for the route you chose.
 </ResponseField>
 
 <ResponseField name="--port" type="string" default="8765">
-  The port of the local page you talk through.
+  The port of the local page you talk through. Left unset, a busy default gives
+  way to a free port, and the printed URL names it.
 </ResponseField>
 
 <ResponseField name="--bot-port" type="string" default="7860">
   The host port the agent uses. Pipecat passes it to the local `uv` process.
-  Compose paths receive it as `UNMUTE_DEV_PORT`.
+  Compose paths receive it as `UNMUTE_DEV_PORT`. Left unset, a busy default
+  gives way to a free port.
 </ResponseField>
 
 <ResponseField name="--no-open">

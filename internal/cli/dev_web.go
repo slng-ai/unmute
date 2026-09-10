@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -95,8 +96,24 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 	childEnv := packageEnv(root, cmd.ErrOrStderr())
 	// compose.dev.yaml publishes the bot on ${UNMUTE_DEV_PORT}; --bot-port sets it.
 	childEnv = setChildEnv(childEnv, "UNMUTE_DEV_PORT", botPort)
+	// The stack carries the pid of the process that started it, so the next run
+	// can tell a stack whose session died from one another session still uses.
+	childEnv = setChildEnv(childEnv, "UNMUTE_DEV_PID", strconv.Itoa(os.Getpid()))
+	// Each session is its own Compose project, so two sessions need two port
+	// sets. Pick a free one unless the author pinned any of the three.
+	if resolved.Provider == ir.ProviderLiveKit &&
+		envValue(childEnv, "LIVEKIT_HOST_PORT") == "" &&
+		envValue(childEnv, "LIVEKIT_TCP_HOST_PORT") == "" &&
+		envValue(childEnv, "LIVEKIT_UDP_HOST_PORT") == "" {
+		base := freeLiveKitPorts()
+		childEnv = setChildEnv(childEnv, "LIVEKIT_HOST_PORT", strconv.Itoa(base))
+		childEnv = setChildEnv(childEnv, "LIVEKIT_TCP_HOST_PORT", strconv.Itoa(base+1))
+		childEnv = setChildEnv(childEnv, "LIVEKIT_UDP_HOST_PORT", strconv.Itoa(base+2))
+	}
 
-	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	// SIGHUP is the closed terminal. Left out, it killed the process before the
+	// deferred teardown, and the stack stayed up holding its ports.
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
 	run := devWebRun{
@@ -109,8 +126,12 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 		logPath:     filepath.Join(outDir, "dev.log"),
 		uiPort:      uiPort,
 		botPort:     botPort,
-		noOpen:      noOpen,
-		verbose:     verbose,
+		// A port the author typed is a port they meant; a default that is busy is
+		// most likely another session, and any free one will do instead.
+		uiPortPinned:  cmd.Flags().Changed("port"),
+		botPortPinned: cmd.Flags().Changed("bot-port"),
+		noOpen:        noOpen,
+		verbose:       verbose,
 	}
 	if resolved.Provider == ir.ProviderPipecat {
 		if _, err := pipecatLookPath("uv"); err != nil {
@@ -135,9 +156,13 @@ func runDevPipecat(ctx context.Context, cmd *cobra.Command, outDir string, run d
 	// The Python runner binds IPv4. A generic tcp probe may bind IPv6 and
 	// miss an old IPv4 worker, whose /status would then pass readiness.
 	portProbe, err := net.Listen("tcp4", net.JoinHostPort("0.0.0.0", run.botPort))
+	if err != nil && !run.botPortPinned {
+		portProbe, err = net.Listen("tcp4", "0.0.0.0:0")
+	}
 	if err != nil {
 		return fmt.Errorf("dev %s: local agent port %s is already in use; stop that runtime or choose another --bot-port: %w", run.root, run.botPort, err)
 	}
+	run.botPort = strconv.Itoa(portProbe.Addr().(*net.TCPAddr).Port)
 	_ = portProbe.Close()
 
 	logSink, closeLog, err := openDevLog(cmd, run)
@@ -198,8 +223,12 @@ type devWebRun struct {
 	logPath     string
 	uiPort      string
 	botPort     string
-	noOpen      bool
-	verbose     bool
+	// pinned means the author passed the flag, so a busy port is a refusal and
+	// not a reason to pick another one.
+	uiPortPinned  bool
+	botPortPinned bool
+	noOpen        bool
+	verbose       bool
 	// stream carries the run's output to the page. Both runners tee their log
 	// sink into it, so startup output reaches the browser before there is a
 	// runtime to talk to.
@@ -230,9 +259,15 @@ type devWebServer struct {
 // failing build is not.
 func startDevWebServer(cmd *cobra.Command, run devWebRun) (*devWebServer, error) {
 	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", run.uiPort))
+	if err != nil && !run.uiPortPinned {
+		ln, err = net.Listen("tcp", "127.0.0.1:0")
+	}
 	if err != nil {
 		return nil, fmt.Errorf("dev %s: dev server: %w", run.root, err)
 	}
+	// The URL names the port actually bound, which differs from the flag after a
+	// fallback and for `--port 0`.
+	uiPort := strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
 	liveKitURL := "ws://127.0.0.1:7880"
 	if port := envValue(run.env, "LIVEKIT_HOST_PORT"); port != "" {
 		liveKitURL = "ws://127.0.0.1:" + port
@@ -241,7 +276,7 @@ func startDevWebServer(cmd *cobra.Command, run devWebRun) (*devWebServer, error)
 	web := &devWebServer{srv: srv, errCh: make(chan error, 1)}
 	go func() { web.errCh <- srv.Serve(ln) }()
 
-	uiURL := fmt.Sprintf("http://localhost:%s/?agent=%s", run.uiPort, url.QueryEscape(run.agentName))
+	uiURL := fmt.Sprintf("http://localhost:%s/?agent=%s", uiPort, url.QueryEscape(run.agentName))
 	out := cmd.OutOrStdout()
 	u := style.For(out)
 	fmt.Fprintf(out, "\n  %s %s\n    %s\n\n",
@@ -304,14 +339,18 @@ func runDevCompose(ctx context.Context, cmd *cobra.Command, run devWebRun) error
 	defer closeLog()
 
 	// Teardown runs on every path, even a ctrl-c mid-build: a background context
-	// so cancellation of ctx cannot abort the `down` itself.
+	// so cancellation of ctx cannot abort the `down` itself. Five seconds is the
+	// stop grace: an idle worker exits in milliseconds, and a worker mid-call
+	// would otherwise drain for minutes in a loop somebody just stopped.
 	defer func() {
-		downCtx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		downCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		down := composeCommand(downCtx, "docker", composeArgs(run.composeFile, run.project, "down", "--remove-orphans", "--timeout", "30")...)
+		down := composeCommand(downCtx, "docker", composeArgs(run.composeFile, run.project, "down", "--remove-orphans", "--timeout", "5")...)
 		down.Env = run.env
 		down.Stdout, down.Stderr = logSink, logSink
-		_ = down.Run()
+		if err := down.Run(); err != nil {
+			warnDownFailed(cmd.ErrOrStderr(), run.project)
+		}
 	}()
 
 	// Serve before building. The build is the part that fails, and its output is
@@ -321,6 +360,8 @@ func runDevCompose(ctx context.Context, cmd *cobra.Command, run devWebRun) error
 		return err
 	}
 	defer web.close()
+
+	reapAbandonedStacks(ctx, run.env, logSink, cmd.ErrOrStderr())
 
 	spin := startSpinner(cmd.ErrOrStderr(), "building and starting the container")
 	up := composeCommand(ctx, "docker", composeArgs(run.composeFile, run.project, "up", "--build", "--detach", "--remove-orphans", "--wait")...)

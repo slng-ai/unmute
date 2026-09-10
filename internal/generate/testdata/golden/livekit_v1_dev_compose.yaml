@@ -17,6 +17,11 @@ services:
       - "${LIVEKIT_HOST_PORT:-7880}:7880"
       - "${LIVEKIT_TCP_HOST_PORT:-7881}:${LIVEKIT_TCP_HOST_PORT:-7881}"
       - "${LIVEKIT_UDP_HOST_PORT:-7882}:${LIVEKIT_UDP_HOST_PORT:-7882}/udp"
+    # The `unmute dev` process that started this stack. The next run stops a
+    # stack whose process is gone; a stack started by hand has no pid and is
+    # left alone.
+    labels:
+      - "unmute.dev.pid=${UNMUTE_DEV_PID:-}"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/"]
       interval: 2s
@@ -45,6 +50,8 @@ services:
       - UNMUTE_DEV_METRICS
       # optional: set by `unmute dev`; absent otherwise
       - UNMUTE_LOCAL_RUN
+    labels:
+      - "unmute.dev.pid=${UNMUTE_DEV_PID:-}"
     depends_on:
       livekit_server:
         condition: service_healthy

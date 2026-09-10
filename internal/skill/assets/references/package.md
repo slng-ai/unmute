@@ -17,10 +17,10 @@ What an author writes, file by file. This is the surface you work in.
 Nothing in `agent.yaml` is specific to a runtime. That lives in `targets.yaml`.
 Keeping them apart is what makes one package compile to two orchestrators.
 
-For parallel local LiveKit packages, give each stack a different three-port
-set with `LIVEKIT_HOST_PORT`, `LIVEKIT_TCP_HOST_PORT`, and
-`LIVEKIT_UDP_HOST_PORT`. Moving only the signaling port is not enough for
-browser WebRTC.
+Two local LiveKit packages run side by side: each `unmute dev` picks a free
+set of three server ports. To pin a set, give all of `LIVEKIT_HOST_PORT`,
+`LIVEKIT_TCP_HOST_PORT`, and `LIVEKIT_UDP_HOST_PORT`. Moving only the
+signaling port is not enough for browser WebRTC.
 
 YAML decoding is strict. An unknown field is an error with the file and the
 line, not a shrug. A field you half remember is worth checking rather than

@@ -90,7 +90,9 @@ unmute: dev examples/salon-concierge: target instance "nope" is not declared
 | `--port` | `8765` | the local web page you talk through |
 | `--bot-port` | `7860` | the host port the local agent runtime uses |
 
-Change both when a port is busy:
+When a default port is busy, most often because another session holds it, a
+free one is chosen and the printed URL names it. Pass the flag to pin a port; a
+pinned port that is busy is a refusal:
 
 ```sh
 unmute dev examples/salon-concierge --target pipecat --port 8790 --bot-port 7890
@@ -268,18 +270,29 @@ directly, so it skips the pre-fetch, marks nothing as awaiting confirmation,
 and lets a local run act on a number it never read back. That is a path a
 real call cannot take.
 
-## One run per package at a time
+## More than one session at a time
 
-LiveKit's Compose project name comes from the package path and target name. A
-second Pipecat run instead fails clearly if the selected local port is busy.
+Each `unmute dev` run of a LiveKit package is its own Compose project, named
+from the package path and the target. Two runs from the same path share one
+project, so the second replaces the first. Two runs from different paths, such
+as two checkouts of the same agent, run side by side: each picks a free set of
+LiveKit server ports and a free page port.
 
-Two different LiveKit packages can run together when their server ports do not
-overlap. Move signaling, TCP fallback, and UDP media as one set:
+To pin the LiveKit ports yourself, move signaling, TCP fallback, and UDP media
+as one set:
 
 ```sh
 LIVEKIT_HOST_PORT=7890 LIVEKIT_TCP_HOST_PORT=7891 LIVEKIT_UDP_HOST_PORT=7892 \
   unmute dev my-other-agent --target livekit --port 8766
 ```
+
+A run stops its own stack when it ends, including on ctrl-c and on a closed
+terminal. A stack whose `unmute dev` process was killed outright is stopped by
+the next run, which says so. When a stack cannot be stopped, the run prints the
+`docker compose` command to run by hand.
+
+A second Pipecat run picks a free agent port the same way when `--bot-port` is
+not passed.
 
 ## Where to go next
 

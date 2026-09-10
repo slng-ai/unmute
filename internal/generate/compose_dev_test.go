@@ -109,6 +109,9 @@ func TestLiveKitDevComposeGolden(t *testing.T) {
 		"LIVEKIT_URL=ws://livekit_server:7880",
 		"LIVEKIT_API_SECRET=secret",
 		"condition: service_healthy",
+		// The pid label is how the next `unmute dev` tells a stack whose session
+		// died from one another session still uses.
+		`- "unmute.dev.pid=${UNMUTE_DEV_PID:-}"`,
 	} {
 		if !strings.Contains(compose, want) {
 			t.Errorf("livekit compose.dev.yaml missing %q:\n%s", want, compose)

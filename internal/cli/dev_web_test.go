@@ -405,9 +405,16 @@ func TestRunDevPipecatRejectsBusyAgentPort(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd, _ := devTestCommand(t)
-	err = runDevPipecat(t.Context(), cmd, t.TempDir(), devWebRun{root: "pkg", botPort: port})
+	// A port the author typed is refused when busy.
+	err = runDevPipecat(t.Context(), cmd, t.TempDir(), devWebRun{root: "pkg", botPort: port, botPortPinned: true})
 	if err == nil || !strings.Contains(err.Error(), "already in use") || !strings.Contains(err.Error(), "--bot-port") {
 		t.Fatalf("busy port error = %v", err)
+	}
+	// The default, left unset, gives way to a free port: the run gets past the
+	// probe and fails later, on the empty log path this bare run carries.
+	err = runDevPipecat(t.Context(), cmd, t.TempDir(), devWebRun{root: "pkg", botPort: port})
+	if err == nil || strings.Contains(err.Error(), "already in use") || !strings.Contains(err.Error(), "open log") {
+		t.Fatalf("unpinned busy port error = %v, want the run to move past the probe", err)
 	}
 }
 
