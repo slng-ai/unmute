@@ -72,6 +72,55 @@ or a dotted assignment, the same way you read a field of a shape you declared.
 It cannot be declared under `shapes:`: the name is refused, because a second
 declaration would produce a second type of the same name.
 
+### How a type is enforced
+
+A declared type does two jobs, in two different places.
+
+**The model is told, not constrained.** Every text type reaches the model as a
+plain string carrying a sentence about the format. This is the whole schema the
+model receives for a `Phone`:
+
+```json
+{
+  "description": "a phone number in E.164, one leading plus and 7 to 15 digits, like +34600111222",
+  "type": "string"
+}
+```
+
+There is no `pattern` and no `format` keyword. Either one would travel to the
+provider, and one target sends its schema with strict mode on, where both are
+rejected. That failure shows up on your first real call and in no local check,
+so the format lives in the description instead.
+
+**The value is checked where it is saved.** The generated project validates
+every declared field before anything enters call state. A value that does not
+fit is refused, nothing is written, the previous contents stand, and the format
+sentence goes back to the model as the tool result. The model reads what was
+wrong and corrects itself on the next turn.
+
+The sentence the model reads and the sentence it gets back on a refusal come
+from one place, so the two cannot describe different formats.
+
+The three families of type behave differently:
+
+| Family | What the model receives | Where it is checked |
+|---|---|---|
+| `Phone`, `Date`, `Time`, `Id`, `EmailStr` | `type: string` plus the format sentence | When the value is saved |
+| `Literal[...]` | An `enum` holding your exact values | The provider limits what it can generate, and it is checked again on save |
+| A shape, `NameEmail`, `list[...]` | The real object or array, each field carrying its own format sentence | On save, field by field |
+
+### What checking costs
+
+Nothing you can hear. Checking runs inside the process and makes no network
+request: roughly 0.2 microseconds for the pattern types and 18 microseconds for
+`EmailStr`, which calls a library instead of matching a pattern. No model
+request is made to check anything.
+
+The one thing that does cost a model request is a refusal. The tool result goes
+back, the model rereads the format and tries again, and the caller waits through
+that turn. So a type that refuses something a caller can legitimately say is a
+type worth changing, not a prompt worth rewording.
+
 ### Text types and their limits
 
 | Type | Format checked when saving |
@@ -558,6 +607,26 @@ writing one into the list.
 
 The same path form works in a prompt placeholder too: see [Naming one part of
 a value](#naming-one-part-of-a-value).
+
+### A value the caller may not give is declared `| None`
+
+Every field a step assigns goes through its declared type whether the model
+sent it or not. A field the model leaves out arrives as `None`, and so does one
+it sends as an explicit null. A type without `| None` refuses both, which
+refuses the whole finish call: nothing is saved, the model is told why and gets
+another go, and the caller waits through that round trip.
+
+Declare the option in the type, `Time | None`, for any value the caller may
+simply not give. Do not try to solve it in the description: no wording reliably
+stops a model saying "nothing" when there is nothing.
+
+An empty string is still right for a value that is always asked for and may not
+be known yet, which is why every text type accepts one. The difference is
+whether absence is a legal outcome of the step. If it is, say so in the type.
+
+Absence is already legal in one other place, and needs nothing: an appending
+assign, `name+:`, whose field is optional on its own and drops an absent entry
+instead of writing it into the list.
 
 ## A handoff can read selected declared values
 
