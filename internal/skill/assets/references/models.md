@@ -168,7 +168,7 @@ Four things are required and none has a default:
   itself passed. The refusal names the agent or task that produced the long value.
 - `upstream`, saying who actually serves the model.
 - `params.world_part_override`, from the router's own region set: `eu`, `us`,
-  `india`, `indonesia`. Speech gateways use a different set under the same key,
+  `india`, `indonesia`. Speech gateways use a different set under `params.world_part`,
   such as `in` for India. The compiler consumes this into the base URL and names
   the substitution in the compile report.
 
@@ -384,7 +384,7 @@ from the caller's location, including fallback models and tools.
 
 ### Choose an SLNG speech gateway
 
-Put `world_part_override` in the SLNG model's `params:`. The same YAML works for
+Put `world_part` in the SLNG model's `params:`. The same YAML works for
 listen and speak models on LiveKit and Pipecat:
 
 ```yaml agent.yaml
@@ -394,27 +394,27 @@ models:
       provider: slng
       model: "slng/deepgram/nova:3-multi"
       params:
-        world_part_override: eu-north
+        world_part: eu-north
   speak:
     voice:
       provider: slng
       model: "deepgram/aura:2"
       voice: "aura-2-thalia-en"
       params:
-        world_part_override: eu-north
+        world_part: eu-north
 ```
 
 The accepted values are `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`,
 `za`, `il`, `jp`, `sg`, `id`, `in`, and `au`. Unmute consumes the key and emits
 the host `{world_part}.api.slng.ai`: `slng_base_url="eu-north.api.slng.ai"` on
 LiveKit and `base_url="eu-north.api.slng.ai"` on Pipecat. It sends no scheme or
-path and does not forward `world_part_override` to the plugin.
+path and does not forward `world_part` to the plugin.
 
-Omitting `world_part_override` keeps the existing default URL. An empty,
+Omitting `world_part` keeps the existing default URL. An empty,
 non-string, or unknown value is refused. The old speech values `na`, `eu`, and
 `ap` are refused too: choose one of the new values explicitly. There is no
 automatic mapping from the old broad areas. `params.base_url` and
-`params.slng_base_url` cannot be combined with `params.world_part_override`;
+`params.slng_base_url` cannot be combined with `params.world_part`;
 remove the explicit URL or the world part.
 
 A gateway choice alone is not a data residency guarantee.

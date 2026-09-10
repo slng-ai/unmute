@@ -168,7 +168,7 @@ truncating, because two truncated scopes could land on the same string.
 
 <Warning>
   These four are the router's own regions. SLNG **speech gateways** use a
-  different set under the same `world_part_override` key: for example, `in`
+  different set under `params.world_part`: for example, `in`
   selects the Indian speech gateway, while this router requires `india`.
   See [speech gateway values](/optimization/regional-infrastructure#choose-a-speech-gateway).
   The compiler refuses a value the router does not serve and names the four.

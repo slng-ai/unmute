@@ -67,8 +67,8 @@ const (
 )
 
 // SlngRouterRegions are the router's own regions, in the order the public docs
-// list them. SLNG speech gateways share params.world_part_override but use
-// SlngSpeechWorldParts, a different accepted set.
+// list them. SLNG speech gateways use params.world_part and SlngSpeechWorldParts,
+// a different accepted set.
 var SlngRouterRegions = []string{"eu", "us", "india", "indonesia"}
 
 // SlngRouterBaseURL maps a router region onto its regional Chat Completions

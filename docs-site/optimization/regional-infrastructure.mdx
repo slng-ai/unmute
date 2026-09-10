@@ -58,7 +58,7 @@ Each part of the call has its own location:
 | Media or telephony ingress | The first platform edge that receives the caller's audio. | Platform region controls and carrier settings. |
 | Worker region | The generated LiveKit or Pipecat process. | `deployment_region` in `targets.yaml`. |
 | Model service | The provider serving STT, the LLM, or TTS. | That provider's supported endpoint or deployment settings, per model. |
-| Model gateway | An API that routes requests to a model service. | The gateway's own location setting; SLNG speech uses `params.world_part_override`. |
+| Model gateway | An API that routes requests to a model service. | The gateway's own location setting; SLNG speech uses `params.world_part`. |
 
 Setting one row does not set the others. A gateway location also does not by
 itself guarantee where the underlying model processes data. Tools, tracing,
@@ -74,7 +74,7 @@ Carrier routing remains a separate choice.
 ## Choose a speech gateway
 
 **SLNG provides 13 regional speech gateways through one model setting.** On
-LiveKit and Pipecat, set `params.world_part_override` on each SLNG `listen` or
+LiveKit and Pipecat, set `params.world_part` on each SLNG `listen` or
 `speak` model to choose its gateway. This gives both speech roles the same
 configuration shape across the two frameworks.
 
@@ -85,21 +85,21 @@ models:
       provider: slng
       model: "deepgram/nova:3"
       params:
-        world_part_override: eu-north
+        world_part: eu-north
   speak:
     voice:
       provider: slng
       model: "deepgram/aura:2"
       voice: "aura-2-thalia-en"
       params:
-        world_part_override: eu-north
+        world_part: eu-north
 ```
 
 Unmute turns the value into the host `{world_part}.api.slng.ai` in generated
 services. Here, it emits `slng_base_url="eu-north.api.slng.ai"` on LiveKit and
 `base_url="eu-north.api.slng.ai"` on Pipecat for both speech models. The plugin
 receives the host without a scheme or path; Unmute consumes
-`world_part_override` rather than passing it to the plugin.
+`world_part` rather than passing it to the plugin.
 
 ### Available SLNG world parts
 
@@ -122,11 +122,11 @@ and Pipecat. Set the world part on each model separately.
 | `in` | India | `in.api.slng.ai` |
 | `au` | Australia | `au.api.slng.ai` |
 
-Omitting `world_part_override` keeps the existing default URL. An empty,
+Omitting `world_part` keeps the existing default URL. An empty,
 non-string, or unknown value is refused. The old speech values `na`, `eu`, and
 `ap` are refused too: choose one of the new values explicitly. There is no
 automatic mapping from the old broad areas. `params.base_url` and
-`params.slng_base_url` cannot be combined with `params.world_part_override`;
+`params.slng_base_url` cannot be combined with `params.world_part`;
 remove the explicit URL or the world part.
 
 This setting changes generated SLNG speech services on LiveKit and Pipecat.
@@ -137,9 +137,10 @@ keeps its own deployment settings.
 
 For a `think` model with `provider: slng`, the
 [Context Router](/optimization/context-router) has its own gateway locations:
-`eu`, `us`, `india`, and `indonesia`. It uses the same `world_part_override`
-key but a different set of values: speech uses `in`, for example, while the
-router uses `india`. The LLM behind the router keeps its own provider settings.
+`eu`, `us`, `india`, and `indonesia`. Set `params.world_part_override` for the
+router and `params.world_part` for speech. Their values also differ: speech
+uses `in`, for example, while the router uses `india`. The LLM behind the router
+keeps its own provider settings.
 
 ## Place the worker near your users and models
 

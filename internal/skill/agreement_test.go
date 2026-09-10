@@ -519,12 +519,12 @@ func TestRegionalGuidanceStaysExplicit(t *testing.T) {
 	} {
 		content = strings.Join(strings.Fields(content), " ")
 		for _, want := range []string{
-			"world_part_override",
+			"world_part",
 			"{world_part}.api.slng.ai",
 			`slng_base_url="eu-north.api.slng.ai"`,
 			`base_url="eu-north.api.slng.ai"`,
-			"Omitting `world_part_override` keeps the existing default URL.",
-			"`params.slng_base_url` cannot be combined with `params.world_part_override`",
+			"Omitting `world_part` keeps the existing default URL.",
+			"`params.slng_base_url` cannot be combined with `params.world_part`",
 			"`na`, `eu`, and `ap` are refused",
 		} {
 			if !strings.Contains(content, want) {

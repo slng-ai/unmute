@@ -16,18 +16,21 @@ func TestValidateSlngSpeechGateway(t *testing.T) {
 				want   string
 			}{
 				{"unset", nil, ""},
-				{"gateway", map[string]any{"world_part_override": "in"}, ""},
+				{"gateway", map[string]any{"world_part": "in"}, ""},
+				{"retired world part", map[string]any{"world_part_override": "eu-north"}, "world_part_override is no longer supported"},
+				{"both world part keys", map[string]any{"world_part_override": "eu-north", "world_part": "in"}, "world_part_override is no longer supported"},
+				{"retired null world part", map[string]any{"world_part_override": nil}, "world_part_override is no longer supported"},
 				{"retired region", map[string]any{"region_override": "ap-south-1"}, "region_override is no longer supported"},
-				{"retired region with gateway", map[string]any{"world_part_override": "in", "region_override": "ap-south-1"}, "region_override is no longer supported"},
+				{"retired region with gateway", map[string]any{"world_part": "in", "region_override": "ap-south-1"}, "region_override is no longer supported"},
 				{"retired null region", map[string]any{"region_override": nil}, "region_override is no longer supported"},
-				{"empty", map[string]any{"world_part_override": ""}, "choose one of"},
-				{"null", map[string]any{"world_part_override": nil}, "choose one of"},
-				{"number", map[string]any{"world_part_override": 1}, "choose one of"},
-				{"list", map[string]any{"world_part_override": []string{"in"}}, "choose one of"},
-				{"unknown", map[string]any{"world_part_override": "atlantis"}, "choose one of"},
-				{"legacy", map[string]any{"world_part_override": "eu"}, "replace legacy"},
-				{"explicit URL", map[string]any{"world_part_override": "in", "base_url": "custom.test"}, "remove params.base_url"},
-				{"explicit LiveKit URL", map[string]any{"world_part_override": "in", "slng_base_url": "custom.test"}, "remove params.slng_base_url"},
+				{"empty", map[string]any{"world_part": ""}, "choose one of"},
+				{"null", map[string]any{"world_part": nil}, "choose one of"},
+				{"number", map[string]any{"world_part": 1}, "choose one of"},
+				{"list", map[string]any{"world_part": []string{"in"}}, "choose one of"},
+				{"unknown", map[string]any{"world_part": "atlantis"}, "choose one of"},
+				{"legacy", map[string]any{"world_part": "eu"}, "replace legacy"},
+				{"explicit URL", map[string]any{"world_part": "in", "base_url": "custom.test"}, "remove params.base_url"},
+				{"explicit LiveKit URL", map[string]any{"world_part": "in", "slng_base_url": "custom.test"}, "remove params.slng_base_url"},
 			} {
 				t.Run(string(provider)+"/"+site+"/"+tc.name, func(t *testing.T) {
 					if site == "fallback" && provider == ProviderPipecat {
@@ -51,7 +54,7 @@ func TestValidateSlngSpeechGateway(t *testing.T) {
 						if err != nil {
 							t.Fatal(got)
 						}
-					} else if err == nil || !strings.Contains(got, tc.want) || !strings.Contains(got, "world_part_override") || !strings.Contains(got, binding.Model) {
+					} else if err == nil || !strings.Contains(got, tc.want) || !strings.Contains(got, "params.world_part ") || !strings.Contains(got, binding.Model) {
 						t.Fatalf("want %q and model name in gateway refusal; got %s", tc.want, got)
 					}
 				})

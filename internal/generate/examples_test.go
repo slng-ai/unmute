@@ -976,7 +976,7 @@ func TestPublicExamplesValidateAndGenerate(t *testing.T) {
 						bindings = append(bindings, fallback.Binding)
 					}
 					for _, binding := range bindings {
-						if binding.Provider == "slng" && binding.Params["world_part_override"] != "eu-north" {
+						if binding.Provider == "slng" && binding.Params["world_part"] != "eu-north" {
 							t.Errorf("target %q speech model %q must use the eu-north gateway", resolved.Name, binding.Model)
 						}
 					}

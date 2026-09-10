@@ -18,7 +18,7 @@ func TestSlngSpeechGateways(t *testing.T) {
 			for _, part := range []string{"us-east", "us-west", "br", "eu-west", "eu-north", "gb", "za", "il", "jp", "sg", "id", "in", "au"} {
 				t.Run(string(fw)+"/"+string(role)+"/"+part, func(t *testing.T) {
 					binding := ir.Binding{Provider: "slng", Model: "sarvam/saaras:v3", Language: "en-IN",
-						Params: map[string]any{"world_part_override": part}}
+						Params: map[string]any{"world_part": part}}
 					if role == target.Speak {
 						binding.Model, binding.Voice = "sarvam/bulbul:v3", "shubh"
 						binding.Params["warm_standby_enabled"] = true
@@ -38,8 +38,8 @@ func TestSlngSpeechGateways(t *testing.T) {
 							t.Errorf("missing %s in %s", want, args)
 						}
 					}
-					if strings.Contains(args, "world_part_override") || strings.Count(args, "base_url=") != 1 {
-						t.Errorf("gateway must replace the legacy override exactly once: %s", args)
+					if strings.Contains(args, "world_part") || strings.Count(args, "base_url=") != 1 {
+						t.Errorf("world_part must become one base URL argument: %s", args)
 					}
 					if role == target.Speak && (!strings.Contains(args, `voice="shubh"`) || !strings.Contains(args, "warm_standby_enabled=True")) {
 						t.Errorf("lost speak params: %s", args)
@@ -67,9 +67,9 @@ func TestSlngSpeechGatewayKeepsDeployment(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			tgt.Models.Listen.Params = map[string]any{"world_part_override": "in"}
+			tgt.Models.Listen.Params = map[string]any{"world_part": "in"}
 			for name, binding := range tgt.Models.Speak {
-				binding.Params = map[string]any{"world_part_override": "au"}
+				binding.Params = map[string]any{"world_part": "au"}
 				tgt.Models.Speak[name] = binding
 			}
 			after, err := Generate(agent, tgt, target.Default())
@@ -92,7 +92,7 @@ func TestSlngSpeechGatewayKeepsDeployment(t *testing.T) {
 			if provider == ir.ProviderLiveKit {
 				tgt.Models.ListenFallbacks = []ir.ListenFallback{{Name: "backup", Binding: ir.Binding{
 					Provider: "slng", Model: "sarvam/saaras:v3", Placement: ir.PlacementAPI,
-					Params: map[string]any{"world_part_override": "sg"},
+					Params: map[string]any{"world_part": "sg"},
 				}}}
 				fallback, err := Generate(agent, tgt, target.Default())
 				if err != nil {
@@ -113,10 +113,10 @@ func TestSlngSpeechGatewayUsesTargetOverride(t *testing.T) {
 	}
 	model := pkg.Agent.Models.Listen["transcriber"]
 	model.Provider, model.Model = "slng", "sarvam/saaras:v3"
-	model.Params = map[string]any{"world_part_override": "in"}
+	model.Params = map[string]any{"world_part": "in"}
 	pkg.Agent.Models.Listen["transcriber"] = model
 	override := pkg.Targets["livekit"]
-	model.Params = map[string]any{"world_part_override": "jp"}
+	model.Params = map[string]any{"world_part": "jp"}
 	override.Models["transcriber"] = model
 	pkg.Targets["livekit"] = override
 	agent, err := ir.Build(pkg)

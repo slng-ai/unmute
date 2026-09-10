@@ -1602,7 +1602,7 @@ func slngRouterRegionErrors(profile string, binding Binding) []string {
 	region, _ := value.(string)
 	if _, ok := targetcap.SlngRouterBaseURL(region); !ok {
 		return []string{fmt.Sprintf(
-			"think.%s params.world_part_override %q is not a router region: one of %s. These four are the router's own set; SLNG speech gateways share this key but use a different set of world parts",
+			"think.%s params.world_part_override %q is not a router region: one of %s. These four are the router's own set; SLNG speech gateways use params.world_part with a different set of world parts",
 			profile, region, regions)}
 	}
 	return nil

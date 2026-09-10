@@ -441,7 +441,7 @@ provider keeps its own endpoint and location settings. Set those on the model
 using fields the selected target's plugin supports.
 
 SLNG listen and speak entries choose their API gateway with
-`params.world_part_override`, which emits `{world_part}.api.slng.ai` on LiveKit
+`params.world_part`, which emits `{world_part}.api.slng.ai` on LiveKit
 and Pipecat. `models.md` has the accepted world parts and model YAML. A gateway
 choice does not set the worker region or guarantee where a provider processes
 speech.

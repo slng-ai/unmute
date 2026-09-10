@@ -171,7 +171,7 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 			}
 			flat(pyKV{Key: key, Value: pyQuote(url)})
 			// New gateway codes are not the SDK's legacy routing headers.
-			params = withoutParams(params, []string{"world_part_override"})
+			params = withoutParams(params, []string{"world_part"})
 		}
 	}
 	voice := cmp.Or(binding.Voice, binding.VoiceID)
