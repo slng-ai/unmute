@@ -105,6 +105,46 @@ def state_of(userdata) -> str:
     return json.dumps(public, ensure_ascii=False, default=str)
 
 
+def seed_unused_env(package: Path, build: Path) -> None:
+    """Fill the env this run never reaches, so only the model key is needed.
+
+    The emitted module checks every name in its compile report at import and
+    exits naming the ones missing. A scripted text run reaches no STT, no TTS,
+    no telephony, no tracing backend and no Redis, so demanding real values for
+    those means hand-writing a fifteen-line .env before the one question this
+    script answers can be asked. The smoke runners already seed placeholders
+    the same way.
+
+    Only names nothing else supplies. The emitted module calls load_dotenv()
+    without override, so anything seeded here would beat the package's own .env:
+    a placeholder set on top of a real key would send the run at a provider with
+    a credential that cannot work, and the failure would look like the provider
+    refusing the key. Names are read from the .env, values never are.
+    """
+    report = build / "compile-report.json"
+    if not report.exists():
+        return
+    supplied = set()
+    dotenv = package / ".env"
+    if dotenv.exists():
+        for line in dotenv.read_text().splitlines():
+            name = line.split("=", 1)[0].strip()
+            if name and not name.startswith("#"):
+                supplied.add(name)
+    required = json.loads(report.read_text()).get("required_env", [])
+    seeded = [
+        name
+        for name in required
+        if name not in os.environ and name not in supplied
+    ]
+    for name in seeded:
+        os.environ[name] = "text-run-placeholder"
+    if seeded:
+        # Said out loud, because a placeholder that looks like a credential is
+        # how somebody concludes a provider is broken.
+        print(f"seeded placeholders for {len(seeded)} unused variables: {', '.join(seeded)}")
+
+
 async def run(args: argparse.Namespace) -> None:
     package = Path(args.package).resolve()
     build = package / "build" / "livekit"
@@ -113,6 +153,7 @@ async def run(args: argparse.Namespace) -> None:
     sys.path.insert(0, str(build))
     os.chdir(build)
     os.environ["UNMUTE_CALL_FACTS"] = json.dumps({"from_number": args.from_number})
+    seed_unused_env(package, build)
 
     import agent as generated  # noqa: PLC0415 - after sys.path and cwd are set
     from livekit.agents import AgentSession  # noqa: PLC0415
