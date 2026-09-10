@@ -48,6 +48,8 @@ case-sensitive. Choose a built-in type or compose a type using the forms below.
 | `Date` | Date text with the format below |
 | `Time` | Time text with the format below |
 | `Id` | Identifier text with the format below |
+| `EmailStr` | Email address text, checked as described below |
+| `NameEmail` | An object with a `name` field and an `email` field |
 
 Aliases: `string` means `str`, `integer` means `int`, `number` means `float`,
 and `boolean` means `bool`.
@@ -65,6 +67,11 @@ and `boolean` means `bool`.
 a `Literal` expression, or a shape name. A shape name refers to an object type
 you define in the package; see [`shapes:`](#shapes-groups-fields-into-a-named-type).
 
+`NameEmail` is a supplied object type. Read one part with a dotted placeholder
+or a dotted assignment, the same way you read a field of a shape you declared.
+It cannot be declared under `shapes:`: the name is refused, because a second
+declaration would produce a second type of the same name.
+
 ### Text types and their limits
 
 | Type | Format checked when saving |
@@ -73,11 +80,22 @@ you define in the package; see [`shapes:`](#shapes-groups-fields-into-a-named-ty
 | `Date` | Four digits, a hyphen, two digits, a hyphen, two digits (`YYYY-MM-DD`) |
 | `Time` | Hours `00` to `23`, a colon, and minutes `00` to `59` |
 | `Id` | 1 to 64 characters; starts with an ASCII letter or digit; subsequent characters may also be `.`, `-`, `_`, or `:` |
+| `EmailStr` | A valid email address. The saved value is the normalized form |
 
 These checks validate text format. Use tools to check calendar validity,
 record existence, phone ownership, and other business rules. Store timezone
 separately from date and time. Use `str` for external identifiers requiring
 other characters, and preserve the exact value returned by the tool.
+
+An address is checked with the `email-validator` package, which the generated
+project declares when your package uses either email type. The check reads the
+address only. It does not look up whether the domain accepts mail, because the
+check runs while the caller is on the line.
+
+`NameEmail` accepts the two fields, and also a single string in either of two
+forms: `Fred Bloggs <fred.bloggs@example.com>`, or the address on its own, in
+which case `name` becomes the part before the at sign. The `email` field is
+checked as `EmailStr`.
 
 ### Lists and absent values
 
@@ -99,8 +117,8 @@ Scalar variables may have a `default:` matching their type. Use a default
 when an initial value is useful. Otherwise leave the variable unset until
 call-start data, prefetch, or a task supplies it.
 
-Shapes start unset and lists start empty. Fill them through call-start data
-or task assignments. An empty text value is treated as missing; a successful
+Shapes start unset and lists start empty, and so does `NameEmail`. Fill them
+through call-start data or task assignments. An empty text value is treated as missing; a successful
 assignment must satisfy the declared type's format.
 
 ## Target support
@@ -108,7 +126,7 @@ assignment must satisfy the declared type's format.
 | Target | Supported variable types |
 |---|---|
 | LiveKit and Pipecat | All types and task assignments on this page |
-| SLNG | Basic scalars: `str`, `int`, `float`, `bool`, and their aliases. Also the only target that takes `source: conversation`, a value the model records mid-call |
+| SLNG | Basic scalars: `str`, `int`, `float`, `bool`, and their aliases. A text type with a checked format, a shape and `NameEmail` are all refused, because SLNG runs no code from your package and has nowhere to check one. Also the only target that takes `source: conversation`, a value the model records mid-call |
 
 ## `shapes:` groups fields into a named type
 
@@ -242,9 +260,9 @@ A tool entry reads fields from the tool's declared `output:` schema. Its
 arguments may be fixed scalars or reference values saved by earlier entries.
 The receiving variables must already be declared, with no `source:` of their
 own. Prefetch fills scalar values, including `Phone`, `Date`, `Time`, `Id`,
-and a compatible `Literal`. Shapes, lists, and nullable bare scalars such as
-`str | None` must be saved through a task; for prefetched text, leave a `str`
-variable unset until the value is available.
+`EmailStr`, and a compatible `Literal`. Shapes, `NameEmail`, lists, and nullable
+bare scalars such as `str | None` must be saved through a task; for prefetched
+text, leave a `str` variable unset until the value is available.
 
 A reference to a variable assigned by a later prefetch entry is refused.
 Entries run in authored order. `writes: true` entries appear in the compile
@@ -362,9 +380,9 @@ fields, first save the selected item in its own variable.
 
 | Referenced value | Prompt text |
 |---|---|
-| Text, including `Phone`, `Date`, `Time`, and `Id` | The text itself |
+| Text, including `Phone`, `Date`, `Time`, `Id`, and `EmailStr` | The text itself |
 | Number or boolean | JSON text, such as `2` or `true` |
-| Shape or list | Compact JSON; an empty list renders as `[]` |
+| Shape, `NameEmail`, or list | Compact JSON; an empty list renders as `[]` |
 | Unset, `null`, or empty string | `none recorded yet.` |
 | A field inside an absent shape | `none recorded yet.` |
 

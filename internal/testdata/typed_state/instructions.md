@@ -22,3 +22,6 @@ record of what this call has already established.
 
 The service most recently booked on this call, if any, is
 {{last_appointment.appointment_type}}.
+
+The appointment is under the name {{booked_for.name}}, and the reminder goes to
+{{reminder_email}}.

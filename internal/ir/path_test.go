@@ -38,13 +38,20 @@ func TestBuildResolvesAPlaceholderPath(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		mutate func(pkg *packagespec.Package)
-		want   string
+		// flat is the emitted form an accepted path must be stored as, dotted
+		// the authored form that must be gone. Per case, because each one names
+		// its own path and a single expectation would pass on the fixture's
+		// other placeholders.
+		flat, dotted string
+		want         string
 	}{
 		{
 			name: "a field of a shaped variable, stored in its emitted form",
 			mutate: func(pkg *packagespec.Package) {
 				pkg.Markdown["instructions.md"] += "\nThe last booking, if any, was on {{last_appointment.scheduled_date}}.\n"
 			},
+			flat:   "{{last_appointment__scheduled_date}}",
+			dotted: "{{last_appointment.scheduled_date}}",
 		},
 		{
 			name: "an unknown field lists the fields the shape declares",
@@ -74,6 +81,23 @@ func TestBuildResolvesAPlaceholderPath(t *testing.T) {
 				pkg.Markdown["tasks/confirm_number.md"] += "\n{{caller_phone.digits}}\n"
 			},
 			want: "references {{caller_phone.digits}}: caller_phone is Phone, which has no fields to name; write {{caller_phone}}",
+		},
+		{
+			// A path into a shape the compiler supplies, which resolves through
+			// the same catalog a declared shape does.
+			name: "a field of a supplied shape",
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Markdown["instructions.md"] += "\nThe address on file is {{booked_for.email}}.\n"
+			},
+			flat:   "{{booked_for__email}}",
+			dotted: "{{booked_for.email}}",
+		},
+		{
+			name: "an unknown field of a supplied shape lists what it declares",
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Markdown["instructions.md"] += "\n{{booked_for.address}}\n"
+			},
+			want: `shape "NameEmail" declares no field "address"`,
 		},
 		{
 			name: "the greeting rule is about the root",
@@ -109,8 +133,8 @@ func TestBuildResolvesAPlaceholderPath(t *testing.T) {
 					t.Fatalf("Build refused a legal path: %v", err)
 				}
 				got := agent.Agents["desk"].Instructions
-				if !strings.Contains(got, "{{last_appointment__scheduled_date}}") || strings.Contains(got, "{{last_appointment.scheduled_date}}") {
-					t.Errorf("the IR does not carry the path in its emitted form:\n%s", got)
+				if !strings.Contains(got, tc.flat) || strings.Contains(got, tc.dotted) {
+					t.Errorf("the IR does not carry %s as %s:\n%s", tc.dotted, tc.flat, got)
 				}
 				return
 			}

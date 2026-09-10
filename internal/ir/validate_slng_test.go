@@ -571,6 +571,49 @@ func TestSlngRefusesAShapedTextType(t *testing.T) {
 		"declare the value as one of the primitive types")
 }
 
+// TestSlngRefusesAnEmailType is the same pair of rows reached by the two email
+// types, and it is separate because each arrives by its own route.
+//
+// EmailStr is a text type with a validated shape, so it rides the shaped row.
+// NameEmail is a shape the compiler supplies, and the only reason it rides the
+// declared-shape row is that internal/ir seeds it into the catalog when a type
+// names it: a reference with no entry there would leave the catalog empty, and
+// the row that starts from whether the catalog is empty would pass a package
+// this target cannot emit.
+func TestSlngRefusesAnEmailType(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		shapes  map[string]Shape
+		ref     *TypeRef
+		phrases []string
+	}{
+		{
+			name:    "the plain address",
+			ref:     &TypeRef{Shaped: ShapedEmail},
+			phrases: []string{"a value whose text has a validated shape", "declare the value as one of the primitive types"},
+		},
+		{
+			name:    "the name and address pair",
+			shapes:  map[string]Shape{"NameEmail": builtinShapes["NameEmail"]},
+			ref:     &TypeRef{Shape: "NameEmail"},
+			phrases: []string{"a value with a declared shape", "compile to livekit or pipecat"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := slngAgent(t)
+			if tc.shapes != nil {
+				agent.Shapes = tc.shapes
+			}
+			variable := agent.Variables["caller_phone"]
+			variable.Shape = tc.ref
+			agent.Variables["caller_phone"] = variable
+
+			row := validateSlng(t, agent)
+			wantSlngError(t, row, tc.phrases...)
+		})
+	}
+}
+
 // TestSlngAcceptsAPackageDeclaringNothingStructured is the control. Both rows
 // above must fire only on a package that declares one, or every slng package in
 // the tree stops validating.

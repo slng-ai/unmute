@@ -278,6 +278,14 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		// driver still declares.
 		data.Deps = append(data.Deps, "twilio>=9,<10")
 	}
+	// Only when a declared value is checked against it, and pinned for the same
+	// reasons the LiveKit driver pins it: 2.2 is the release that reads a display
+	// name, and the cap keeps a major release from changing what an address
+	// means. Declared here rather than in the template so the two targets ask
+	// for the same version from one place.
+	if data.TypedState != nil && data.TypedState.NeedsEmailValidator {
+		data.Deps = append(data.Deps, "email-validator>=2.2,<3")
+	}
 	slices.Sort(data.Deps)
 	data.RequiredEnv = env.sorted()
 	var supplied []string

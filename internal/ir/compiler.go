@@ -428,11 +428,16 @@ type TypeRef struct {
 
 // ShapedText is text whose shape is checked where the value enters the state
 // and never written into the schema the model is sent. A phone number, a day, a
-// time of day and an identifier all have a shape, and none of them may express
-// it as a schema keyword: one target's strict converter strips neither `format`
-// nor `pattern`, strict is that target's default, and the provider rejects
-// both. So each of these lowers to `str` in the schema and to a validator in
-// generated Python.
+// time of day, an identifier and an email address all have a shape, and none of
+// them may express it as a schema keyword: one target's strict converter strips
+// neither `format` nor `pattern`, strict is that target's default, and the
+// provider rejects both. So each of these lowers to `str` in the schema and to a
+// validator in generated Python.
+//
+// The check itself is a pattern for four of them and a library call for
+// ShapedEmail, which is why internal/generate holds either a regex or a
+// validator body per kind. An email address is not a regex anybody should
+// hand-write, and the one library that gets it right is the one Pydantic uses.
 type ShapedText string
 
 const (
@@ -440,6 +445,7 @@ const (
 	ShapedDate  ShapedText = "Date"
 	ShapedTime  ShapedText = "Time"
 	ShapedID    ShapedText = "Id"
+	ShapedEmail ShapedText = "EmailStr"
 )
 
 // Shape is one resolved named group of fields, generated as one Pydantic class
@@ -448,6 +454,12 @@ type Shape struct {
 	Name        string  `json:"name" yaml:"name"`
 	Description string  `json:"description,omitempty" yaml:"description,omitempty"`
 	Fields      []Field `json:"fields" yaml:"fields"`
+	// Builtin says the compiler supplies this shape rather than an author. It
+	// reaches the catalog only when a type expression names it, so a package
+	// naming none carries the catalog it always carried and emits the same
+	// bytes. The generated class carries a parser the authored ones do not, and
+	// the name is refused as a shape name so the two can never collide.
+	Builtin bool `json:"builtin,omitempty" yaml:"builtin,omitempty"`
 }
 
 // Field is one resolved member of a shape. Description reaches the model, which

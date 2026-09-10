@@ -34,10 +34,25 @@ func TestLiveKitRefreshesTheOwnerPromptAfterAStepWritesState(t *testing.T) {
 			strings.Count(got, "async def _refresh_prompt(self) -> None:"))
 	}
 
-	// Every assign site calls it. Counting the calls against the assign sites
-	// is what catches a new step added without one.
-	if calls := strings.Count(got, "await self._refresh_prompt()"); calls != 4 {
-		t.Errorf("got %d refresh calls, want one for each assigning task on both owners", calls)
+	// Every assign site calls it. Derived from the package rather than written
+	// as a number, because the number was 4 and a step added to the package made
+	// it 5: a hardcoded count fails on a step that was added correctly and says
+	// nothing about one added without a refresh.
+	agent := loadExample(t, "salon-concierge-v3")
+	want := 0
+	for _, name := range sortedKeys(agent.Agents) {
+		for _, attached := range agent.Agents[name].Tools {
+			if task, ok := agent.Tasks[attached]; ok && len(task.Assign) > 0 {
+				want++
+			}
+		}
+	}
+	if want == 0 {
+		t.Fatal("the package has no assigning task attached to an agent, so this gate proves nothing")
+	}
+	if calls := strings.Count(got, "await self._refresh_prompt()"); calls != want {
+		t.Errorf("got %d refresh calls, want one for each of the %d assigning tasks attached to an owner",
+			calls, want)
 	}
 
 	// The call comes after the writes, not before: refreshing first renders the

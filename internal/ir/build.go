@@ -116,6 +116,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		}
 		out.Variables[name] = resolved
 	}
+	// Before anything reads the catalog: checkAssignments walks a path through
+	// it, and so do the prompt and prefetch checks further down.
+	seedBuiltinShapes(out)
 	if err := checkInject(pkg); err != nil {
 		return nil, err
 	}
