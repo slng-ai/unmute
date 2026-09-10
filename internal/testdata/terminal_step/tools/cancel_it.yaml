@@ -1,0 +1,46 @@
+description: Cancel the caller's booking.
+
+input:
+  type: object
+  properties:
+    reference:
+      type: string
+      description: The reference of the booking to cancel.
+    confirmed:
+      type: boolean
+      description: True only after the caller agrees to the cancellation.
+  required:
+    - reference
+    - confirmed
+
+output:
+  type: object
+  properties:
+    status:
+      type: string
+      enum:
+        - cancelled
+        - not_confirmed
+        - not_found
+    summary:
+      type: string
+    booking:
+      type: object
+      description: Present and complete on cancelled, absent otherwise.
+      properties:
+        reference:
+          type: string
+        service:
+          type: string
+        action:
+          type: string
+          enum:
+            - cancel
+  required:
+    - status
+    - summary
+
+local:
+  handler: tools/desk.py
+
+effect: returns_data

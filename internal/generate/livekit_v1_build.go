@@ -109,7 +109,43 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			}
 			if len(d.Steps) > 0 && !d.Isolated {
 				data.NeedsTaskGroups = true
+				data.GroupStops = true
 			}
+		}
+	}
+	// A delegate carries a turn when any step of it can end on its own tool:
+	// that step consumed a caller turn the owner never saw, and the owner has to
+	// see it to answer what was actually said.
+	for i := range data.Agents {
+		for j := range data.Agents[i].Delegates {
+			delegate := &data.Agents[i].Delegates[j]
+			carries := delegate.Task != nil && len(agent.Tasks[delegate.Task.ID].Finish) > 0
+			for _, step := range delegate.Steps {
+				carries = carries || len(agent.Tasks[step.ID].Finish) > 0
+			}
+			delegate.CarriesTurn = carries
+			data.CarriesTurn = data.CarriesTurn || carries
+			if carries && delegate.Then == "return" {
+				delegate.When += terminalOwnerRule
+			}
+		}
+	}
+	data.TerminalSteps = runbookTerminalSteps(agent)
+	data.SkippableSteps = runbookSkippableSteps(agent)
+	data.ListeningSteps = runbookListeningSteps(agent)
+	for _, task := range agent.Tasks {
+		if len(task.Finish) > 0 {
+			data.NeedsTerminal = true
+			// The step's settled event is an asyncio.Event, and the handoff that
+			// waits on it uses wait_for. An import with no use fails the emitted
+			// project's ruff gate; a use with no import fails at worker start.
+			data.NeedsAsyncio = true
+		}
+		if task.Withdraws {
+			data.NeedsWithdrawal = true
+		}
+		if task.Opening == ir.OpeningListen {
+			data.NeedsOpeningListen = true
 		}
 	}
 	for _, name := range sortedKeys(used) {
@@ -806,7 +842,9 @@ func applyLiveKitConversation(c *ir.Conversation, data *livekitData) {
 		}
 	}
 	data.MaxDurationSecs = durationSecs(c.MaxDuration)
-	data.NeedsAsyncio = data.MaxDurationSecs > 0 ||
+	// Or-ed rather than assigned: a terminal step needs asyncio too, and this
+	// used to be the only writer.
+	data.NeedsAsyncio = data.NeedsAsyncio || data.MaxDurationSecs > 0 ||
 		(data.InactivityEndSecs > 0 && data.InactivityNudgeSecs > 0)
 }
 
@@ -1029,9 +1067,14 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 	default:
 		return livekitDelegate{}, fmt.Errorf("delegate %q group %q: livekit driver cannot lower then %q", ref, c.Group, group.Then)
 	}
-	for _, step := range group.Steps {
-		delegate.Steps = append(delegate.Steps, livekitStep{Class: pyName(step), ID: step, Desc: humanize(step)})
-		delegate.CanTaskTransfer = delegate.CanTaskTransfer || livekitTaskCanTransfer(agent, agent.Tasks[step])
+	for i, step := range group.Steps {
+		delegate.Steps = append(delegate.Steps, livekitStep{
+			Class: pyName(step.Task), ID: step.Task, Desc: humanize(step.Task),
+			SkipWhenConfirmed: step.SkipWhenConfirmed,
+			Terminal:          len(agent.Tasks[step.Task].Finish) > 0,
+			EndsFlow:          pyLiteral(i == len(group.Steps)-1),
+		})
+		delegate.CanTaskTransfer = delegate.CanTaskTransfer || livekitTaskCanTransfer(agent, agent.Tasks[step.Task])
 	}
 	return delegate, nil
 }
@@ -1089,6 +1132,10 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 		})
 	}
 	built.Typed = true
+	built.Terminal = len(task.Finish) > 0
+	built.Withdraws = task.Withdraws
+	built.Opening = string(task.Opening)
+	built.Announce = task.Announce
 	built.ResultExpr = livekitResultExpr(built)
 	for _, ref := range task.Tools {
 		tool, ok := agent.Tools[ref]
@@ -1116,11 +1163,38 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 		if err != nil {
 			return livekitTask{}, fmt.Errorf("task %q: %w", name, err)
 		}
+		for _, entry := range task.Finish {
+			if entry.Tool != ref {
+				continue
+			}
+			lowered.Terminal = &livekitTerminal{Step: name, Success: pySuccessLiteral(entry.Success)}
+		}
 		if lowered.Builtin != "" {
 			built.Prebuilt = append(built.Prebuilt, lowered)
 		} else {
 			built.Tools = append(built.Tools, lowered)
 		}
+	}
+	// The step's own handoff methods, as a Python set literal, so a terminal
+	// tool can tell whether the model called one beside it in the same
+	// response. Built after the loop because a transfer's method name is
+	// decided by its own lowering, not by the reference.
+	if transfers := livekitStepTransfers(built.Transfers); transfers != "" {
+		for i := range built.Tools {
+			if built.Tools[i].Terminal != nil {
+				built.Tools[i].Terminal.Transfers = transfers
+			}
+		}
+	}
+	var terminals []string
+	for _, tool := range built.Tools {
+		if tool.Terminal != nil {
+			terminals = append(terminals, pyQuote(tool.Method))
+		}
+	}
+	if len(terminals) > 0 && len(built.Transfers) > 0 {
+		sort.Strings(terminals)
+		built.TerminalTools = "{" + strings.Join(terminals, ", ") + "}"
 	}
 	return built, nil
 }
@@ -1645,7 +1719,7 @@ func livekitTaskPrompt(task ir.Task, result []livekitArg) string {
 	for i, r := range result {
 		names[i] = r.Name
 	}
-	return task.Instructions + taskFinishContract("finish", names)
+	return task.Instructions + taskFinishContractFor("finish", names, task.EndsOnTools())
 }
 
 func livekitGreetingFor(c *ir.Conversation) *livekitGreeting {
@@ -1766,4 +1840,39 @@ func nullableType(anno string) string {
 		return anno
 	}
 	return anno + " | None"
+}
+
+// livekitStepTransfers is the step's handoff method names as a Python set
+// literal, or "" when the step has none. Read by a terminal tool to see whether
+// the model called a handoff in the same response: the handoff owns the ending
+// then, once the save has settled.
+func livekitStepTransfers(transfers []livekitTransfer) string {
+	names := make([]string, 0, len(transfers))
+	for _, transfer := range transfers {
+		names = append(names, pyQuote(transfer.Method))
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
+	return "{" + strings.Join(names, ", ") + "}"
+}
+
+// pySuccessLiteral is one terminal entry's success pairs as a Python dict of
+// field to allowed values, sorted so the same package emits the same bytes.
+func pySuccessLiteral(success map[string][]string) string {
+	fields := make([]string, 0, len(success))
+	for field := range success {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
+		values := make([]string, 0, len(success[field]))
+		for _, value := range success[field] {
+			values = append(values, pyQuote(value))
+		}
+		parts = append(parts, pyQuote(field)+": ("+strings.Join(values, ", ")+",)")
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
 }

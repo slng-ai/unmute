@@ -174,6 +174,13 @@ type TypedStateBlock struct {
 	// which is why this is no longer "any shaped type is used": an unused
 	// `import re` fails the ruff gate the emitted README promises.
 	NeedsRe bool
+	// NeedsTerminal says a task ends on its own tool, which is the one thing
+	// that emits the terminal helpers. False for a package writing no `finish:`,
+	// so that package emits the bytes it emitted before the key existed.
+	NeedsTerminal bool
+	// NeedsWithdrawal says some group step carries `skip_when_confirmed:`, which
+	// is the one thing that emits the confirmation helpers.
+	NeedsWithdrawal bool
 	// NeedsShaped says any text type with a validated shape is used, which is
 	// what needs AfterValidator and typing.Annotated.
 	NeedsShaped    bool
@@ -277,6 +284,14 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 		return TypedStateBlock{}, err
 	}
 	finish := finishTypes(agent)
+	for _, task := range agent.Tasks {
+		if len(task.Finish) > 0 {
+			block.NeedsTerminal = true
+		}
+		if task.Withdraws {
+			block.NeedsWithdrawal = true
+		}
+	}
 	used := usedShapedText(agent)
 	if len(classes) == 0 && len(agent.Variables) == 0 && len(finish) == 0 && len(agent.Tasks) == 0 {
 		return TypedStateBlock{}, nil
@@ -634,6 +649,106 @@ def _save_batch(state, values, *, step=None, inputs=None):
         state._prefetch_provenance = provenance
 
 `)
+	if block.NeedsTerminal {
+		b.WriteString(`
+def _success_word(value):
+    """One result value as a success pair reads it.
+
+    The pairs come out of YAML as text, so a boolean has to read as the word the
+    author wrote rather than as Python's own spelling of it: True never matches
+    the word true, and the step would silently never end.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return "" if value is None else str(value)
+
+
+def _terminal_success(result, success):
+    """Whether a tool result means this step is done.
+
+    Every field is required and its value has to be one of the listed ones.
+    Anything else is an ordinary result and goes back to the model, which is
+    what keeps a failed booking a conversation rather than a saved one.
+    """
+    if not isinstance(result, dict):
+        return False
+    # The loop variable is name, not field: a package declaring a list imports
+    # dataclasses' own field, and a loop variable of that name shadows it.
+    for name, values in success.items():
+        if _success_word(result.get(name)) not in values:
+            return False
+    return True
+
+
+def _merge_retained(step, args, retained):
+    """The model's finish arguments with the tool's own values put back.
+
+    Reached only when a save was refused and the model is repairing it. A field
+    the tool returned validly is the authoritative one: the model cannot
+    manufacture a booking reference, and a repair that retyped one would record
+    a booking nobody made. A retained value that does not validate is left to
+    the model, because refusing here would leave the step with no way out.
+    """
+    out = dict(args)
+    for name, adapter in _FINISH_TYPES.get(step, {}).items():
+        if name not in retained:
+            continue
+        try:
+            _typed(name, adapter, retained[name])
+        except _StateRefused:
+            continue
+        out[name] = retained[name]
+    return out
+
+
+`)
+	}
+	if block.NeedsWithdrawal {
+		b.WriteString(`
+def _is_confirmed(state, name):
+    """Whether a value is confirmed right now.
+
+    Both halves matter: a value nobody has agreed to is unconfirmed, and so is
+    one that was withdrawn. A group reads this once, as it starts, to decide
+    whether the step that confirms it has to run.
+    """
+    value = getattr(state, name, None)
+    return name not in getattr(state, "_unconfirmed", ()) and value is not None and value != ""
+
+
+def _withdraw_confirmation(state, step):
+    """Withdraw what this step confirms, because this step is about to run again.
+
+    A step a group may skip cannot be trusted to have confirmed anything once it
+    is entered: the caller is correcting the value, or the step is running
+    because the confirmation had already lapsed. Values derived from a withdrawn
+    one follow it, through the same dependency pass a save runs.
+
+    Scoped to the steps a group names with skip_when_confirmed:, so a package
+    that names none behaves exactly as it did.
+    """
+    withdrawn = {name for name, owner in _STATE_CONFIRM.items() if owner == step}
+    if not withdrawn:
+        return
+    unconfirmed = set(getattr(state, "_unconfirmed", ())) | withdrawn
+    # Dependencies are acyclic, so one pass per entry settles them. The same
+    # loop _save_batch runs, deliberately not shared with it: sharing would mean
+    # editing a function every package emits, and every package that writes none
+    # of this has to keep emitting exactly what it emitted.
+    for _ in range(len(_STATE_DEPENDENCIES) + 1):
+        before = set(unconfirmed)
+        for name, reads in _STATE_DEPENDENCIES.items():
+            if any(source in unconfirmed for source in reads):
+                unconfirmed.add(name)
+        if before == unconfirmed:
+            break
+    if hasattr(state, "_unconfirmed"):
+        state._unconfirmed = unconfirmed
+    logger.info("withdrew confirmation on entering " + step)
+
+
+`)
+	}
 	b.WriteString(`
 
 _STATE_STRUCTURED = {`)

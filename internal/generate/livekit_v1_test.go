@@ -1044,7 +1044,7 @@ func TestLiveKitV1SharedGroupTaskTransferAndResults(t *testing.T) {
 		"async def do_reserve(self, ctx: RunContext) -> dict | Agent:",
 		"group = TaskGroup(",
 		"summarize_chat_ctx=False,",
-		"on_task_completed=lambda event: _share_task_result(group, event),",
+		"on_task_completed=lambda event: _share_task_result(group, event, _flow),",
 		"try:\n            group = TaskGroup(",
 		"result = await group",
 		"except _TaskTransfer as transfer:\n            return transfer.agent",
@@ -1194,13 +1194,13 @@ func TestV1LiveKitCompletedFlowEndsOnce(t *testing.T) {
 	// Shared TaskGroups repair that exact output through the SDK callback, without
 	// returning from finish() and triggering another child-model turn.
 	for _, want := range []string{
-		"async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent) -> None:",
+		"async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent, flow: dict) -> None:",
 		`finish_call_id = getattr(event.agent_task, "_finish_call_id", None)`,
 		"and not item.is_error",
 		"and item.call_id == finish_call_id",
 		"shared_ctx.remove(shared_output)",
 		"exclude_invalid_function_calls=False",
-		"on_task_completed=lambda event: _share_task_result(group, event)",
+		"on_task_completed=lambda event: _share_task_result(group, event, _flow)",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("shared task result repair missing %q", want)

@@ -25,7 +25,8 @@ call. Customer care is a second agent because it holds a document set and a
 permission the concierge must not have: the refund policy and the complaint
 record.
 
-**Four tasks, one of them shared.** Verification confirms who is calling.
+**Four tasks, one of them shared, two of them steps of the booking group.**
+Verification confirms who is calling.
 Booking does create, modify and cancel in one task and saves a typed Appointment.
 Taking the confirmation contact is its own step, so a caller who does not want an
 email never has to give one and a booking is never held up by a missing address.
@@ -63,9 +64,24 @@ from the one answer. The address is checked by `email-validator`, which the two
 emitted projects declare because this package uses the types, and the check never
 asks DNS: it runs while the caller is on the line.
 
-**Ordering carried by the prompt.** `manage_booking` runs after verification,
-but not because the compiler holds it back: the concierge's own instructions
-say to run verification first and never start booking until it has succeeded.
+**One booking flow, two steps, no request between them.** `book` is a task group:
+verification, then booking. The concierge calls it once and does not choose
+between the two steps, and the group does not ask the concierge which comes
+next. Verification carries `skip_when_confirmed: customer_phone`, so a second
+booking on the same call goes straight to the booking step; a caller who
+corrects their number gets verification again, because entering that step
+withdraws the confirmation it made.
+
+**Both steps end on their own tools.** `verify_customer` names its lookup under
+`finish:`, and `manage_booking` names its three mutations. When one of those
+returns a result the package calls a success, the step saves its `assign:` from
+that result and hands over, with no model request in between and without the
+result reaching the model. A result that is not a success, a `not_confirmed` or
+a `slot_unavailable`, goes back to the model and the step stays open.
+
+Together those two facts take three model requests out of one booking: the
+verification `finish`, the concierge's routing call, and the booking `finish`.
+The one request left on the turn that books is the concierge saying it is done.
 
 **Facts resolved before the greeting.** The `prefetch:` block reads the date,
 the weekday and the salon's local time off one clock reading, and the caller's

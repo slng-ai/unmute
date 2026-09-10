@@ -177,6 +177,13 @@ type Variable struct {
 	Type    string
 	Default string // optional JSON primitive, rendered verbatim
 	Source  string
+	// Confirm names the step that confirms this value. Carried for the reason
+	// every other field here is: a key this struct does not hold is a key
+	// `unmute maintain` deletes at exit 0, and dropping this one turns a
+	// skippable group step into a compile refusal on the next build.
+	Confirm string
+	// Description is what the model reads about the value. Same reason.
+	Description string
 }
 
 // Shape is one declared shape: a named group of fields a variable's type:
@@ -335,13 +342,19 @@ type Task struct {
 	When     string
 	Announce string
 	Assign   []spec.Pair // ordered saved-variable assignments
+	// Finish and Opening are carried for one reason: a key this struct does not
+	// hold is a key `unmute maintain` deletes from the author's file at exit 0.
+	Finish  []spec.FinishEntry
+	Opening string
 }
 
 func (t Task) PromptPath() string { return "tasks/" + t.Name + ".md" }
 
 type TaskGroup struct {
-	Name         string
-	Steps        []string
+	Name string
+	// Steps carries the authored shape, bare name or item, for the same reason
+	// Task.Finish is carried: the console rewrites agent.yaml from this struct.
+	Steps        []spec.StepItem
 	ContextScope string
 	Then         string
 	ThenTarget   string
@@ -962,6 +975,16 @@ func parseTemplate(name string, raw []byte) (*template.Template, error) {
 		"yamlBlock": blockYAML,
 		"pairs": func(indent int, pairs []spec.Pair) (string, error) {
 			content, err := yaml.Marshal(pairs)
+			if err != nil {
+				return "", err
+			}
+			return blockYAML(indent, string(content))
+		},
+		// finishBlock writes a task's terminal tools back through the same
+		// marshaller that read them, so a success value authored as one word
+		// comes back as one word rather than as a one-item list.
+		"finishBlock": func(indent int, entries []spec.FinishEntry) (string, error) {
+			content, err := yaml.Marshal(entries)
 			if err != nil {
 				return "", err
 			}

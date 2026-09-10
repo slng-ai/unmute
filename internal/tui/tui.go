@@ -2125,7 +2125,7 @@ func editTaskGroups(runner *fieldRunner, data *scaffold.Data) error {
 	for {
 		options := make([]menuChoice, 0, len(data.TaskGroups)+2)
 		for _, group := range data.TaskGroups {
-			options = append(options, newChoice(group.Name+"  ·  "+strings.Join(group.Steps, " → "), "view:"+group.Name))
+			options = append(options, newChoice(group.Name+"  ·  "+strings.Join(stepNames(group.Steps), " → "), "view:"+group.Name))
 		}
 		options = append(options, newChoice("Add task group", "add"), newChoice("← Back", actionBack))
 		choice, _, err := runner.selectOne("Ordered task groups", "", options, true)
@@ -2159,7 +2159,7 @@ func editTaskGroups(runner *fieldRunner, data *scaffold.Data) error {
 		if err != nil || back {
 			continue
 		}
-		group.Steps = []string{data.Tasks[0].Name}
+		group.Steps = []spec.StepItem{{Task: data.Tasks[0].Name}}
 		data.TaskGroups = append(data.TaskGroups, group)
 		if err := editTaskGroupDetails(runner, data, group.Name); err != nil {
 			return err
@@ -2184,7 +2184,7 @@ func editTaskGroupDetails(runner *fieldRunner, data *scaffold.Data, name string)
 			completion += " to " + group.ThenTarget
 		}
 		choice, _, err := runner.selectOne(name, "Edit this saved task group or remove it.", []menuChoice{
-			newChoice("Ordered steps  ·  "+strings.Join(group.Steps, " → "), "steps"),
+			newChoice("Ordered steps  ·  "+strings.Join(stepNames(group.Steps), " → "), "steps"),
 			newChoice("Context between steps  ·  "+group.ContextScope, "context"),
 			newChoice("Completion  ·  "+completion, "completion"),
 			newChoice("Transfer target  ·  "+cmp.Or(group.ThenTarget, "not applicable"), "target"),
@@ -2198,12 +2198,12 @@ func editTaskGroupDetails(runner *fieldRunner, data *scaffold.Data, name string)
 		}
 		switch choice {
 		case "steps":
-			selected, back, err := pickReferences(runner, "Ordered steps", "Toggle tasks in the order they should run.", taskNames(data), group.Steps, false)
+			selected, back, err := pickReferences(runner, "Ordered steps", "Toggle tasks in the order they should run.", taskNames(data), stepNames(group.Steps), false)
 			if err != nil {
 				return err
 			}
 			if !back {
-				group.Steps = selected
+				group.Steps = keepStepSettings(group.Steps, selected)
 			}
 		case "context":
 			options := []menuChoice{
@@ -3145,7 +3145,7 @@ func deleteResource(data *scaffold.Data, kind, name string) error {
 			data.Tools[i].AttachTasks = slices.DeleteFunc(data.Tools[i].AttachTasks, func(n string) bool { return n == name })
 		}
 		for i := range data.TaskGroups {
-			data.TaskGroups[i].Steps = slices.DeleteFunc(data.TaskGroups[i].Steps, func(n string) bool { return n == name })
+			data.TaskGroups[i].Steps = slices.DeleteFunc(data.TaskGroups[i].Steps, func(step spec.StepItem) bool { return step.Task == name })
 		}
 		data.TaskGroups = slices.DeleteFunc(data.TaskGroups, func(item scaffold.TaskGroup) bool { return len(item.Steps) == 0 })
 	case "group":
@@ -3481,4 +3481,34 @@ func (r *fieldRunner) describe(description string) string {
 		fmt.Fprintln(r.out, "Type :back to return.")
 	}
 	return description
+}
+
+// stepNames is a group's steps as the names the console lists, dropping the
+// per-step settings the menu does not edit.
+func stepNames(steps []spec.StepItem) []string {
+	names := make([]string, 0, len(steps))
+	for _, step := range steps {
+		names = append(names, step.Task)
+	}
+	return names
+}
+
+// keepStepSettings rebuilds a group's steps from the names the author just
+// picked, carrying each kept step's own settings across. Without it, reordering
+// the steps in the console would silently drop every `skip_when_confirmed:` in
+// the group, which is the failure the round-trip gate exists to catch.
+func keepStepSettings(existing []spec.StepItem, selected []string) []spec.StepItem {
+	settings := map[string]spec.StepItem{}
+	for _, step := range existing {
+		settings[step.Task] = step
+	}
+	out := make([]spec.StepItem, 0, len(selected))
+	for _, name := range selected {
+		if kept, ok := settings[name]; ok {
+			out = append(out, kept)
+			continue
+		}
+		out = append(out, spec.StepItem{Task: name})
+	}
+	return out
 }

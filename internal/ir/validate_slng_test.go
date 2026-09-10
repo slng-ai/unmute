@@ -742,3 +742,48 @@ func TestCodeTargetsKeepTheirOwnExpressionRules(t *testing.T) {
 		}
 	}
 }
+
+// The three keys spec 010 adds are code-target keys, for the same reason every
+// other task key is: the slng target writes one agent with one prompt, so there
+// is no step to end, no step to skip, and no step opening to choose.
+//
+// Each is its own row because each is fixed differently, and a row that said
+// "tasks are refused" would be the refusal the author already had.
+func TestSlngRefusesFinish(t *testing.T) {
+	agent := slngAgent(t)
+	if agent.Tasks == nil {
+		agent.Tasks = map[string]Task{}
+	}
+	agent.Tasks["take_booking"] = Task{
+		Instructions: "Book the caller in.",
+		Finish:       []TerminalTool{{Tool: "book_it", Success: map[string][]string{"status": {"booked"}}}},
+	}
+
+	row := validateSlng(t, agent)
+	wantSlngError(t, row, "a step that ends on its tool", "compile to livekit or pipecat")
+}
+
+func TestSlngRefusesAGroupSkip(t *testing.T) {
+	agent := slngAgent(t)
+	if agent.TaskGroups == nil {
+		agent.TaskGroups = map[string]TaskGroup{}
+	}
+	agent.TaskGroups["book"] = TaskGroup{
+		Steps:        []GroupStep{{Task: "verify", SkipWhenConfirmed: "caller_phone"}},
+		ContextScope: ContextShared, Then: GroupReturn, Merge: GroupMergeResults,
+	}
+
+	row := validateSlng(t, agent)
+	wantSlngError(t, row, "a skippable group step", "compile to livekit or pipecat")
+}
+
+func TestSlngRefusesAListeningOpening(t *testing.T) {
+	agent := slngAgent(t)
+	if agent.Tasks == nil {
+		agent.Tasks = map[string]Task{}
+	}
+	agent.Tasks["take_note"] = Task{Instructions: "Take a note.", Opening: OpeningListen, Announce: "What shall I pass on?"}
+
+	row := validateSlng(t, agent)
+	wantSlngError(t, row, "a step opening", "compile to livekit or pipecat")
+}

@@ -55,7 +55,7 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 // single-agent shape the compiler tests need.
 func examplePackagePath(name string) string {
 	switch name {
-	case "remy", "safe_core", "daily_carrier", "simple-prompt", "typed_state", "typed_inputs", "prefetch_core":
+	case "remy", "safe_core", "daily_carrier", "simple-prompt", "typed_state", "typed_inputs", "prefetch_core", "terminal_step":
 		return filepath.Join("..", "testdata", name)
 	case "salon-concierge-v2", "salon-concierge-v3":
 		// Not a shipped example. It is a package we run against real providers,
@@ -297,8 +297,19 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 			t.Errorf("booking is split again into %q; one task owns draft, confirm and apply", name)
 		}
 	}
-	if len(resolved.TaskGroups) != 0 {
-		t.Errorf("task groups = %v, want none: the booking flow is one task", slices.Sorted(maps.Keys(resolved.TaskGroups)))
+	// One group, two steps: verification and the one booking task. The steps are
+	// not split further, which is what the loop above holds; the group is what
+	// removes the owner request between them (spec 010).
+	group, grouped := resolved.TaskGroups["book"]
+	if !grouped {
+		t.Fatalf("task groups = %v, want a book group holding verification and the booking step",
+			slices.Sorted(maps.Keys(resolved.TaskGroups)))
+	}
+	if len(group.Steps) != 2 || group.Steps[0].Task != "verify_customer" || group.Steps[1].Task != "manage_booking" {
+		t.Errorf("book steps = %+v, want verify_customer then manage_booking", group.Steps)
+	}
+	if group.Steps[0].SkipWhenConfirmed != "customer_phone" {
+		t.Errorf("verification is not skippable: %+v; a second booking would ask for the number again", group.Steps[0])
 	}
 	// The one task has to reach every step it absorbed: read the diary, resolve a
 	// relative date, offer times, and write exactly one of the three mutations.
@@ -367,9 +378,18 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if got := slices.Sorted(maps.Keys(booking.Result)); !slices.Equal(got, []string{"appointment"}) {
 		t.Errorf("booking result = %v, want the typed appointment saved after success", got)
 	}
-	bookingDelegate, ok := resolved.Controls["manage_booking"].(*ir.Delegate)
-	if !ok || bookingDelegate.Task != "manage_booking" || bookingDelegate.Group != "" {
-		t.Fatalf("manage_booking = %#v, want a delegate to the single booking task", resolved.Controls["manage_booking"])
+	bookingDelegate, ok := resolved.Controls["book"].(*ir.Delegate)
+	if !ok || bookingDelegate.Group != "book" || bookingDelegate.Task != "" {
+		t.Fatalf("book = %#v, want a delegate to the booking group", resolved.Controls["book"])
+	}
+	// Both steps end on their own tools, which is the pair of requests spec 010
+	// removes. A step that stops declaring finish: goes back to asking the model
+	// to call it.
+	if got := resolved.Tasks["verify_customer"].EndsOnTools(); !slices.Equal(got, []string{"find_or_create_customer"}) {
+		t.Errorf("verify_customer ends on %v, want its lookup", got)
+	}
+	if got := booking.EndsOnTools(); !slices.Equal(got, []string{"cancel_booking", "create_booking", "modify_booking"}) {
+		t.Errorf("manage_booking ends on %v, want its three mutations", got)
 	}
 	// The clock tool's input and output schema used to be pinned here. Its
 	// replacement has no schema to pin: the clock is not a tool. What is worth
@@ -573,8 +593,12 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if !ok {
 		t.Fatalf("verify_customer = %#v, want delegate", resolved.Controls["verify_customer"])
 	}
+	// The standalone trigger is now the correction path only: every other route
+	// into verification goes through the booking group, which runs the step
+	// itself. Saying "run this when the status is unavailable" beside a group
+	// that decides that itself is how an owner ends up doing it twice.
 	requireText("verification delegate", verificationDelegate.When,
-		"reads the phone number back", "needs a yes before it looks anyone up")
+		"explicitly corrects their phone number", "not a phone correction")
 	if slices.Contains(ir.AssignedVars(verification.Assign), "customer_name") {
 		t.Error("verify_customer still assigns customer_name")
 	}
@@ -656,11 +680,11 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if len(resolved.Agents) != 2 {
 		t.Errorf("the example has %d agents, want 2: %v", len(resolved.Agents), slices.Sorted(maps.Keys(resolved.Agents)))
 	}
-	if _, ok := resolved.Controls["manage_booking"].(*ir.Delegate); !ok {
-		t.Fatalf("manage_booking = %T, want a delegate", resolved.Controls["manage_booking"])
+	if _, ok := resolved.Controls["book"].(*ir.Delegate); !ok {
+		t.Fatalf("book = %T, want a delegate", resolved.Controls["book"])
 	}
-	if !slices.Contains(resolved.Agents[resolved.EntryAgent].Tools, "manage_booking") {
-		t.Errorf("the entry agent does not hold manage_booking: %v", resolved.Agents[resolved.EntryAgent].Tools)
+	if !slices.Contains(resolved.Agents[resolved.EntryAgent].Tools, "book") {
+		t.Errorf("the entry agent does not hold the booking flow: %v", resolved.Agents[resolved.EntryAgent].Tools)
 	}
 }
 

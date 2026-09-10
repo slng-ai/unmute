@@ -42,6 +42,28 @@ output:
         - invalid
         - not_found
         - slot_unavailable
+    appointment:
+      type: object
+      description: >-
+        The saved booking, present and complete on success and absent otherwise.
+        The step saves this without asking the model for it.
+      properties:
+        booking_id:
+          type: string
+        service:
+          type: string
+          enum:
+            - haircut
+            - hair-color
+            - blowout
+        date:
+          type: string
+        time:
+          type: string
+        action:
+          type: string
+          enum:
+            - modify
     summary:
       type: string
   required:

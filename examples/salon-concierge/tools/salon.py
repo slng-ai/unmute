@@ -98,7 +98,7 @@ def find_or_create_customer(phone):
     if not normalized_phone:
         return {
             "customer_phone": "",
-            "status": "invalid",
+            "customer_status": "invalid",
             "summary": "A valid phone number of 10 to 15 digits is required.",
         }
     with _state.lock:
@@ -106,7 +106,7 @@ def find_or_create_customer(phone):
         _state.customers.add(normalized_phone)
     return {
         "customer_phone": _e164(normalized_phone),
-        "status": "existing" if known else "created",
+        "customer_status": "existing" if known else "created",
         "summary": (
             "The existing customer was verified."
             if known
@@ -177,6 +177,23 @@ def check_availability(service, date):
     return {"slots": slots, "status": "available" if slots else "full"}
 
 
+def _appointment(booking_id, service, slot_id, action):
+    """The saved shape of one successful booking action.
+
+    Returned only on success, and complete when it is returned: the step saves
+    it without the model in between, so a half-filled record here is a
+    half-filled record in the call state.
+    """
+    parts = _slot_parts(slot_id)
+    return {
+        "booking_id": booking_id,
+        "service": service,
+        "date": parts[0] if parts else "",
+        "time": parts[2] if parts else "",
+        "action": action,
+    }
+
+
 def create_booking(customer_phone, service, slot_id, confirmed=False):
     if confirmed is not True:
         return {
@@ -212,7 +229,12 @@ def create_booking(customer_phone, service, slot_id, confirmed=False):
             "created_at": timestamp,
             "updated_at": timestamp,
         }
-    return {"booking_id": booking_id, "status": "booked", "summary": "Booking saved."}
+    return {
+        "booking_id": booking_id,
+        "status": "booked",
+        "summary": "Booking saved.",
+        "appointment": _appointment(booking_id, service, slot_id, "create"),
+    }
 
 
 def modify_booking(customer_phone, booking_id, service, slot_id, confirmed=False):
@@ -250,7 +272,12 @@ def modify_booking(customer_phone, booking_id, service, slot_id, confirmed=False
             start_time=f"{parts[0]}T{parts[2]}:00",
             updated_at=_now(),
         )
-    return {"booking_id": booking_id, "status": "modified", "summary": "Booking updated."}
+    return {
+        "booking_id": booking_id,
+        "status": "modified",
+        "summary": "Booking updated.",
+        "appointment": _appointment(booking_id, service, slot_id, "modify"),
+    }
 
 
 def cancel_booking(customer_phone, booking_id, confirmed=False):
@@ -276,7 +303,13 @@ def cancel_booking(customer_phone, booking_id, confirmed=False):
                 "summary": "The booking was already cancelled.",
             }
         booking.update(status="cancelled", updated_at=_now())
-    return {"booking_id": booking_id, "status": "cancelled", "summary": "Booking cancelled."}
+        cancelled = _appointment(booking_id, booking["service"], booking["slot_id"], "cancel")
+    return {
+        "booking_id": booking_id,
+        "status": "cancelled",
+        "summary": "Booking cancelled.",
+        "appointment": cancelled,
+    }
 
 
 def record_complaint(customer_phone, summary, requested_resolution=""):
@@ -303,7 +336,7 @@ def _demo():
 
     for phone in ("123456", "1234567", "123456789", "1234567890123456", ""):
         invalid = find_or_create_customer(phone)
-        assert invalid["status"] == "invalid" and not invalid["customer_phone"]
+        assert invalid["customer_status"] == "invalid" and not invalid["customer_phone"]
     assert _normalize_phone("(555) 010-1010") == "5550101010"
     assert _normalize_phone("123456789012345") == "123456789012345"
 
@@ -313,12 +346,12 @@ def _demo():
 
     created = find_or_create_customer("+1 555 010 1010")
     repeated = find_or_create_customer("15550101010")
-    assert created["status"] == "created"
-    assert repeated["status"] == "existing"
+    assert created["customer_status"] == "created"
+    assert repeated["customer_status"] == "existing"
     assert repeated["customer_phone"] == created["customer_phone"] == "+15550101010"
     customer = created["customer_phone"]
-    assert find_or_create_customer("1-555-010-1010")["status"] == "existing"
-    assert find_or_create_customer("(555) 010-1010")["status"] == "created"
+    assert find_or_create_customer("1-555-010-1010")["customer_status"] == "existing"
+    assert find_or_create_customer("(555) 010-1010")["customer_status"] == "created"
 
     spec = importlib.util.spec_from_file_location("salon_copy_two", __file__)
     assert spec is not None and spec.loader is not None
@@ -328,17 +361,17 @@ def _demo():
     assert copy_two.find_or_create_customer("15550101010")["customer_phone"] == customer
     fresh_phone = "15550109999"
     from_copy = copy_two.find_or_create_customer(fresh_phone)
-    assert from_copy["status"] == "created"
-    assert find_or_create_customer(fresh_phone)["status"] == "existing"
+    assert from_copy["customer_status"] == "created"
+    assert find_or_create_customer(fresh_phone)["customer_status"] == "existing"
 
     with ThreadPoolExecutor(max_workers=16) as pool:
         for suffix in range(20, 30):
             concurrent = list(
                 pool.map(lambda _: find_or_create_customer(f"1555010 20{suffix}"), range(16))
             )
-            assert {result["status"] for result in concurrent} <= {"created", "existing"}
+            assert {result["customer_status"] for result in concurrent} <= {"created", "existing"}
             assert len({result["customer_phone"] for result in concurrent}) == 1
-            assert [result["status"] for result in concurrent].count("created") == 1
+            assert [result["customer_status"] for result in concurrent].count("created") == 1
 
     before = (set(_state.customers), dict(_state.names))
     seeded = look_up_customer("+34 111 111 111")

@@ -939,8 +939,29 @@ def _hydrate_call_start(userdata, values: dict) -> None:
     return None
 
 
-async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent) -> None:
-    """Fill LiveKit's empty task tool output before the next shared task."""
+class _GroupStop(Exception):
+    """Internal signal that a group step ended unserved, so the group stops.
+
+    Raised from the completion callback, which the framework runs inside its own
+    try: the group completes with this exception and it comes back out of
+    `await group`, with the results the group had reached.
+    """
+
+    def __init__(self, results: dict) -> None:
+        super().__init__()
+        self.results = results
+
+
+async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent, flow: dict) -> None:
+    """Fill LiveKit's empty task tool output before the next shared task.
+
+    `flow` is the delegate's own record of the run: the results it has reached,
+    and any caller turn a step consumed. The group's own results are not
+    readable from here, and a group that stops early has to hand back what it
+    did do.
+    """
+    flow["results"][event.task_id] = event.result
+    flow["carried"].append(getattr(event.agent_task, "_carried_turn", None))
     finish_call_id = getattr(event.agent_task, "_finish_call_id", None)
     if finish_call_id is None:
         raise RuntimeError("completed task has no successful finish call")
@@ -987,6 +1008,12 @@ async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent) -> Non
         shared_ctx,
         exclude_invalid_function_calls=False,
     )
+    if isinstance(event.result, dict) and event.result.get("unserved_request"):
+        # The step could not serve what the caller asked. Running the next one
+        # would answer a question nobody asked, so the group stops here and the
+        # owner is handed the unserved status with the results so far.
+        logger.info("group stopped: " + event.task_id + " ended unserved")
+        raise _GroupStop(dict(flow["results"]))
 
 
 # --- agents ----------------------------------------------------------------
@@ -1027,16 +1054,21 @@ class Events(Agent):
     async def do_event(self, ctx: RunContext) -> dict:
         """The caller is ready to plan their event; run the events flow. When this flow finishes it returns a status. Continue with the caller. Do not run this flow again for the same request. A completed status means the step finished. Read any saved values through your own prompt references. An unserved status means the step could not help. Ask the caller what they need, then use your tools or a handoff."""
         owner_ctx = self.chat_ctx.copy()
+        # What the group reached, recorded as it goes: a group that stops early
+        # still owes the owner the steps it did run.
+        _flow = {"results": {}, "carried": []}
         try:
             group = TaskGroup(
                 summarize_chat_ctx=False,
-                on_task_completed=lambda event: _share_task_result(group, event),
+                on_task_completed=lambda event: _share_task_result(group, event, _flow),
             )
             await group.update_chat_ctx(owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True), exclude_invalid_function_calls=False)
             group.add(lambda: QualifyEvent(), id="qualify_event", description="qualify event")
             group.add(lambda: ConfirmBooking(), id="confirm_booking", description="confirm booking")
             result = await group
             task_results = result.task_results
+        except _GroupStop as stop:
+            task_results = stop.results
         finally:
             await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
         dev_metrics.dev_task_returned(ctx, *task_results.values())
@@ -1118,16 +1150,21 @@ class Reservations(Agent):
     async def do_reserve(self, ctx: RunContext) -> dict:
         """The caller is ready to book a table; run the reservation flow. When this flow finishes it returns a status. Continue with the caller. Do not run this flow again for the same request. A completed status means the step finished. Read any saved values through your own prompt references. An unserved status means the step could not help. Ask the caller what they need, then use your tools or a handoff."""
         owner_ctx = self.chat_ctx.copy()
+        # What the group reached, recorded as it goes: a group that stops early
+        # still owes the owner the steps it did run.
+        _flow = {"results": {}, "carried": []}
         try:
             group = TaskGroup(
                 summarize_chat_ctx=False,
-                on_task_completed=lambda event: _share_task_result(group, event),
+                on_task_completed=lambda event: _share_task_result(group, event, _flow),
             )
             await group.update_chat_ctx(owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True), exclude_invalid_function_calls=False)
             group.add(lambda: FindSlot(), id="find_slot", description="find slot")
             group.add(lambda: ConfirmBooking(), id="confirm_booking", description="confirm booking")
             result = await group
             task_results = result.task_results
+        except _GroupStop as stop:
+            task_results = stop.results
         finally:
             await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
         dev_metrics.dev_task_returned(ctx, *task_results.values())
@@ -1322,6 +1359,9 @@ class ConfirmBooking(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
         if isinstance(chat_ctx, llm.ChatContext):
             self._chat_ctx = chat_ctx.copy()
         self._response_tool_call_ids: set[str] = set()
+        # The call id of the ending that committed. A group reads it to fill its
+        # own tool output, and a handoff called beside a terminal tool reads it
+        # to know whether the step's work actually landed.
         self._finish_call_id: str | None = None
 
     async def on_enter(self) -> None:
@@ -1360,6 +1400,9 @@ class FindSlot(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
         if isinstance(chat_ctx, llm.ChatContext):
             self._chat_ctx = chat_ctx.copy()
         self._response_tool_call_ids: set[str] = set()
+        # The call id of the ending that committed. A group reads it to fill its
+        # own tool output, and a handoff called beside a terminal tool reads it
+        # to know whether the step's work actually landed.
         self._finish_call_id: str | None = None
 
     async def on_enter(self) -> None:
@@ -1398,6 +1441,9 @@ class QualifyEvent(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
         if isinstance(chat_ctx, llm.ChatContext):
             self._chat_ctx = chat_ctx.copy()
         self._response_tool_call_ids: set[str] = set()
+        # The call id of the ending that committed. A group reads it to fill its
+        # own tool output, and a handoff called beside a terminal tool reads it
+        # to know whether the step's work actually landed.
         self._finish_call_id: str | None = None
 
     async def on_enter(self) -> None:

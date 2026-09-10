@@ -137,6 +137,8 @@ Let the owner confirm it once, using its own placeholders. If the task waits
 for another turn, it may receive a new request before saving the first result.
 An `unserved` status does not undo an action already completed by a tool.
 
+Better still, let the tool end the step. See [End on a tool](#end-on-a-tool).
+
 For requests that another agent can handle, a task may declare `handoffs:`.
 Taking one ends the task and any remaining task-group steps. See
 [Handoffs](/build/orchestration/handoffs).
@@ -188,6 +190,78 @@ agents:
 ```
 
 Task names are unique across the package.
+
+## End on a tool
+
+A step that runs a tool and then asks the model to call `finish` spends a whole
+model request on a decision the tool already made. `finish:` names the tools
+that end the step:
+
+```yaml agent.yaml
+      - name: manage_booking
+        instructions: tasks/booking.md
+        tools:
+          - check_availability
+          - create_booking
+          - cancel_booking
+        finish:
+          - tool: create_booking
+            success:
+              - status: booked
+          - tool: cancel_booking
+            success:
+              - status: cancelled
+        assign:
+          - appointment: result.appointment
+```
+
+When one of those tools returns a result in which every `success:` field holds
+one of its allowed values, the step saves its `assign:` from that result and
+ends. The result never reaches the model. Anything else is an ordinary result:
+it goes back to the model and the step stays open, which is what keeps a failed
+booking a conversation rather than a saved one.
+
+A `success:` item is `field: value`, or a list of values that are alternatives.
+Items on different fields are all required. Every value has to be one the tool
+declares in its own output `enum:`, so a typo is a refusal at compile time
+rather than a step that never ends by itself.
+
+`result.<field>` in `assign:` names an output property of every listed tool, so
+one tool returning `appointment` and another returning nothing is refused.
+
+Three things follow from a step that ends on its tool:
+
+- **The mutations close.** Once one of them succeeds, none of the step's
+  `finish:` tools runs again in that invocation. A new booking is a new request
+  from the caller, and a new invocation of the step.
+- **`finish` is still there.** The model calls it for a request the step cannot
+  serve, for values the step already holds, and for recording a result whose
+  save was refused.
+- **The step's prompt stops telling the model to finish.** The generated tail
+  says so; your own instructions should not contradict it.
+
+## Open by listening
+
+A step's first turn is a model request. When the step opens with one fixed
+question, `opening: listen` speaks that question and waits, and makes no
+request:
+
+```yaml agent.yaml
+      - name: take_stylist_note
+        when: The caller wants a note left for the stylist.
+        announce: What would you like me to pass on to your stylist?
+        opening: listen
+        instructions: tasks/stylist-note.md
+```
+
+The line is the `announce:` line, spoken once and recorded as the step's own
+first turn, so a caller answering it is answering something the step can see.
+The default is `generate`, which is what every step did before this key: the
+model opens the step from its instructions.
+
+A listening step with no `announce:` is a warning, not a refusal: the caller
+hears nothing until they speak, which is occasionally what you want and usually
+a mistake.
 
 ## Announce a task
 

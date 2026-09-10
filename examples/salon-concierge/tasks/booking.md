@@ -98,13 +98,11 @@ appointment. Changing the requested date does not start a new verification.
 6. On a no, or on a second unclear answer, use the finish escape and save
    nothing. If they change a detail, treat it as a new request: check
    availability again and ask the question again.
-7. As soon as create_booking returns booked, modify_booking returns modified,
-   or cancel_booking returns cancelled, immediately call finish with appointment.
-   Copy booking_id from the successful tool result, service, date and time from
-   the chosen booking or slot, and action as create, modify or cancel. Copy IDs
-   exactly. A slot ID contains pipes; never replace its separators.
-   Do not speak a success message or wait for another caller turn before finish.
-   The concierge confirms the result and does not repeat the details.
+7. A booking tool that succeeds ends this step by itself: booked, modified and
+   cancelled each save the appointment the tool returned and hand control back.
+   Do not call finish after one, do not speak a success message, and do not wait
+   for another caller turn. The concierge confirms the result and does not
+   repeat the details.
 8. If a slot becomes unavailable, offer another real slot and get a new yes.
    If the action cannot be completed, use the finish escape without saving an
    appointment. Never save proposed details as a successful booking.

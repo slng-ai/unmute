@@ -176,7 +176,10 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		})
 	}
 	for name, variable := range pkg.Agent.Variables {
-		data.Variables = append(data.Variables, scaffold.Variable{Name: name, Type: variable.Type, Default: jsonText(variable.Default), Source: variable.Source})
+		data.Variables = append(data.Variables, scaffold.Variable{
+			Name: name, Type: variable.Type, Default: jsonText(variable.Default), Source: variable.Source,
+			Confirm: variable.Confirm, Description: variable.Description,
+		})
 	}
 	sort.Slice(data.Variables, func(i, j int) bool { return data.Variables[i].Name < data.Variables[j].Name })
 
@@ -277,13 +280,15 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 			IncludeToolCalls: task.Context.IncludeToolCalls,
 			Agent:            cmp.Or(definers[name], "assistant"),
 			When:             task.When, Announce: task.Announce,
-			Assign: append([]packagespec.Pair(nil), task.Assign...),
+			Assign:  append([]packagespec.Pair(nil), task.Assign...),
+			Finish:  append([]packagespec.FinishEntry(nil), task.Finish...),
+			Opening: task.Opening,
 		})
 	}
 	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.TaskGroups)) {
 		group := pkg.Agent.TaskGroups[name]
 		data.TaskGroups = append(data.TaskGroups, scaffold.TaskGroup{
-			Name: name, Steps: append([]string(nil), group.Steps...), ContextScope: group.ContextScope,
+			Name: name, Steps: append([]packagespec.StepItem(nil), group.Steps...), ContextScope: group.ContextScope,
 			Then: group.Then, ThenTarget: group.ThenTarget, When: group.When, Announce: group.Announce,
 			Agent: cmp.Or(owners[name], "assistant"),
 		})

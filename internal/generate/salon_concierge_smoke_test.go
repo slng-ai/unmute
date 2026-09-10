@@ -114,15 +114,23 @@ async def main():
     async def ignore(*args, **kwargs):
         pass
 
-    ctx = SimpleNamespace(userdata=state)
+    # session and the call's own function call, because a step that ends on its
+    # tool records the id it committed under and looks at what else the model
+    # called in the same response.
+    ctx = SimpleNamespace(
+        userdata=state,
+        session=SimpleNamespace(),
+        function_call=SimpleNamespace(call_id="journey-call", name="journey"),
+        speech_handle=SimpleNamespace(chat_items=[]),
+    )
     worker = None
     if generated.__name__ == "bot":
         worker = SimpleNamespace(
             state=state, context=generated.LLMContext(), queue_frame=ignore, flush_pipeline=ignore,
-            _manage_booking_snapshot=([], []),
+            _book_snapshot=([], []),
         )
-        worker._manage_booking_complete_manage_booking = partial(
-            generated.ConciergeAgent._manage_booking_complete_manage_booking, worker
+        worker._book_complete_manage_booking = partial(
+            generated.ConciergeAgent._book_complete_manage_booking, worker
         )
 
     async def save_slot(slot):
@@ -136,9 +144,11 @@ async def main():
             await task.finish(ctx, **validated_arguments(task.finish, values))
             assert task.done(), "finish did not save the exact tool result"
         else:
-            worker._manage_booking_active_step = "manage_booking"
-            worker._manage_booking_results = {}
-            result, _ = await generated.ConciergeAgent._manage_booking_finish_manage_booking(worker, values, None)
+            worker._book_plan = ["verify_customer", "manage_booking"]
+            worker._book_carried_turn = None
+            worker._book_active_step = "manage_booking"
+            worker._book_results = {}
+            result, _ = await generated.ConciergeAgent._book_finish_manage_booking(worker, values, None)
             assert result == {"status": "ok"}, result
         assert state.appointment_slot_id == slot["slot_id"]
         prompt = generated._render(generated.CONCIERGE_PROMPT, state, site="agent:concierge")
@@ -350,10 +360,18 @@ def recording_task(task_type, chat_ctx=None):
     return RecordingTask()
 
 
-def run_context(userdata, call_id):
+def run_context(userdata, call_id, siblings=()):
+    """One tool call's context.
+
+    The speech handle's chat items are what a step that ends on its own tool
+    reads to see whether the model called a handoff beside it. Empty is one call
+    on its own, which is every journey here except the compound one.
+    """
     return SimpleNamespace(
         userdata=userdata,
-        function_call=SimpleNamespace(call_id=call_id),
+        session=SimpleNamespace(),
+        function_call=SimpleNamespace(call_id=call_id, name=call_id),
+        speech_handle=SimpleNamespace(chat_items=list(siblings)),
     )
 
 
@@ -367,40 +385,44 @@ async def create_then_cancel(userdata):
     ).isoformat()
     available = await task.check_availability(ctx, date=requested, service="haircut")
     slot_id = available["slots"][-1]["slot_id"]
+    # The tool ends the step: it saves the appointment it returned and hands the
+    # owner a status, and there is no finish call in between. That missing call
+    # is the request spec 010 removes.
     created = await task.create_booking(
         ctx, confirmed=True, service="haircut", slot_id=slot_id
     )
-    assert created["status"] == "booked", created
-    appointment = appointment_value("create", created["booking_id"], slot_id)
-    await task.finish(ctx, appointment=appointment)
-    assert task.completions == [{"appointment": appointment, "unserved_request": ""}]
+    assert created == {"status": "completed"}, created
+    # The step completed with the values the tool returned, and the model was
+    # never asked for them: one completion, no finish call.
+    assert len(task.completions) == 1, task.completions
+    assert task.completions[0]["appointment"]["action"] == "create", task.completions
+    saved = userdata.appointment
+    assert saved["action"] == "create" and saved["service"] == "haircut", saved
+    booking_id = saved["booking_id"]
+    appointment = appointment_value("create", booking_id, slot_id)
     check_saved_appointment(agent, userdata, appointment)
 
     task = recording_task(agent.ManageBooking)
     requested = (date.fromisoformat(requested) + timedelta(days=1)).isoformat()
     available = await task.check_availability(ctx, date=requested, service="haircut")
     slot_id = available["slots"][0]["slot_id"]
-    moved = await task.modify_booking(ctx, booking_id=created["booking_id"],
+    moved = await task.modify_booking(ctx, booking_id=booking_id,
                                       service="haircut", slot_id=slot_id, confirmed=True)
-    assert moved["status"] == "modified", moved
-    appointment = appointment_value("modify", created["booking_id"], slot_id)
-    await task.finish(ctx, appointment=appointment)
+    assert moved == {"status": "completed"}, moved
+    appointment = appointment_value("modify", booking_id, slot_id)
     check_saved_appointment(agent, userdata, appointment)
 
     task = recording_task(agent.ManageBooking)
     listed = await task.list_bookings(ctx)
-    assert [item["booking_id"] for item in listed["bookings"]] == [
-        created["booking_id"]
-    ]
+    assert [item["booking_id"] for item in listed["bookings"]] == [booking_id]
     cancelled = await task.cancel_booking(
-        ctx, booking_id=created["booking_id"], confirmed=True
+        ctx, booking_id=booking_id, confirmed=True
     )
-    assert cancelled["status"] == "cancelled", cancelled
-    appointment = appointment_value("cancel", created["booking_id"], slot_id)
-    await task.finish(ctx, appointment=appointment)
-    assert task.completions == [{"appointment": appointment, "unserved_request": ""}]
+    assert cancelled == {"status": "completed"}, cancelled
+    # A read tool does not end the step; only a mutation the package listed does.
+    appointment = appointment_value("cancel", booking_id, slot_id)
     check_saved_appointment(agent, userdata, appointment)
-    return created["booking_id"], slot_id
+    return booking_id, slot_id
 
 
 async def split_verification_then_intent_change():
@@ -420,13 +442,14 @@ async def split_verification_then_intent_change():
     userdata = agent.Userdata()
     verification = recording_task(agent.VerifyCustomer, chat_ctx)
     ctx = run_context(userdata, "verification-finish")
+    # The lookup ends the step itself, so what comes back is the status, and the
+    # values it saved are on the state rather than in a finish call.
     verified = await verification.find_or_create_customer(ctx, phone="3035550199")
-    finish_result = {"customer_phone": verified["customer_phone"], "customer_status": verified["status"]}
-    await verification.finish(ctx, **finish_result)
-    assert verification.completions == [
-        {**finish_result, "unserved_request": ""}
-    ]
-    userdata.customer_phone = verified["customer_phone"]
+    assert verified == {"status": "completed"}, verified
+    assert len(verification.completions) == 1, verification.completions
+    saved_phone = userdata.customer_phone
+    assert saved_phone == "+3035550199", saved_phone
+    assert userdata.customer_status == "created", userdata.customer_status
 
     complaint = "Actually, I need to complain about my last visit."
     chat_ctx.add_message(role="user", content=complaint)
@@ -437,7 +460,7 @@ async def split_verification_then_intent_change():
     assert isinstance(transfer, agent._TaskTransfer)
     assert isinstance(transfer.agent, agent.ComplaintSpecialist)
     transfer.agent._activity = quiet_activity()
-    assert userdata.customer_phone == verified["customer_phone"]
+    assert userdata.customer_phone == saved_phone
     complaint_messages = [
         item.raw_text_content
         for item in transfer.agent.chat_ctx.items
@@ -458,19 +481,19 @@ async def split_verification_then_intent_change():
                  requested_resolution="A manager callback")
     await complaint_task.finish(run_context(userdata, "complaint-finish"), complaint=value)
     assert userdata.complaints == [value]
-    return verified
+    return {"customer_phone": saved_phone, "customer_status": userdata.customer_status}
 
 
 async def main():
     customer = tool_modules["find_or_create_customer"].find_or_create_customer(
         "2025550187"
     )
-    assert customer["status"] == "created"
+    assert customer["customer_status"] == "created"
     actions.clear()
     userdata = agent.Userdata(customer_phone=customer["customer_phone"])
     await agent._prefetch(userdata, None)
     agent._save_result(
-        "verify_customer", userdata, {"customer_phone": customer["customer_phone"], "customer_status": customer["status"]}
+        "verify_customer", userdata, {"customer_phone": customer["customer_phone"], "customer_status": customer["customer_status"]}
     )
     booking_id, slot_id = await create_then_cancel(userdata)
     booking_actions = [name for name, _, _ in actions]
@@ -497,7 +520,7 @@ async def main():
         "record_complaint",
     ]
     assert intent_actions[0][1] == {"phone": "3035550199"}
-    assert verified["status"] == "created"
+    assert verified["customer_status"] == "created"
     assert complaint_rows() == [
         (
             digits(verified["customer_phone"]),
@@ -585,9 +608,11 @@ async def booking_flow(worker, context, *, action, booking_id=""):
     # already a no-op from quiet(worker), so a flow_manager stand-in exposing
     # just that worker is enough.
     flow_manager = SimpleNamespace(worker=worker)
-    worker._manage_booking_results = {}
-    worker._manage_booking_active_step = "manage_booking"
-    worker._manage_booking_snapshot = (
+    worker._book_results = {}
+    worker._book_plan = ["verify_customer", "manage_booking"]
+    worker._book_carried_turn = None
+    worker._book_active_step = "manage_booking"
+    worker._book_snapshot = (
         [dict(message) for message in context.get_messages()],
         context.tools,
     )
@@ -631,11 +656,11 @@ async def booking_flow(worker, context, *, action, booking_id=""):
     assert result["status"] == expected_status, result
     appointment = appointment_value(action, booking_id, slot_id)
     result_fields = {"appointment": appointment, "unserved_request": ""}
-    finished, next_node = await worker._manage_booking_finish_manage_booking(
+    finished, next_node = await worker._book_finish_manage_booking(
         result_fields, None
     )
     assert finished == {"status": "ok"} and next_node is None
-    assert worker._manage_booking_results == {"manage_booking": result_fields}
+    assert worker._book_results == {"manage_booking": result_fields}
     check_saved_appointment(bot, worker.state, appointment)
     return booking_id, slot_id
 
@@ -653,18 +678,25 @@ async def split_verification_then_intent_change():
         state=state, context=context, call_context={}
     )
     await quiet(concierge)
-    concierge._verify_customer_results = {}
-    concierge._verify_customer_active_step = "verify_customer"
-    concierge._verify_customer_snapshot = (
+    concierge._book_results = {}
+    concierge._book_plan = ["verify_customer", "manage_booking"]
+    concierge._book_carried_turn = None
+    concierge._book_active_step = "verify_customer"
+    concierge._book_snapshot = (
         [dict(message) for message in context.get_messages()],
         context.tools,
     )
     verified = await bot._flow_tool_find_or_create_customer(
         {"phone": "3035550199"}, SimpleNamespace(worker=concierge)
     )
-    saved = {"customer_phone": verified["customer_phone"], "customer_status": verified["status"]}
-    finished, next_node = await concierge._verify_customer_finish_verify_customer(saved, None)
-    assert finished == {"status": "ok"} and next_node is None
+    saved = {"customer_phone": verified["customer_phone"], "customer_status": verified["customer_status"]}
+    finished, next_node = await concierge._book_finish_verify_customer(saved, None)
+    # Verification is the group's first step, so finishing it hands over to the
+    # booking node rather than returning to the owner. It is the owner request
+    # between the two that this package no longer makes.
+    assert finished == {"status": "completed"}, finished
+    assert next_node is not None and next_node["name"] == "manage_booking", next_node
+    assert concierge._book_active_step == "manage_booking"
     assert state.customer_phone == verified["customer_phone"]
     # E.164, not raw digits and not spoken groups. The step returns the number in
     # the one shape tasks/verify-customer.md requires and the customer_phone
@@ -688,11 +720,13 @@ async def split_verification_then_intent_change():
         activations.append((name, args, deactivate_self))
 
     specialist.activate_worker = activate
-    specialist._manage_booking_results = {}
-    specialist._manage_booking_active_step = "manage_booking"
-    specialist._manage_booking_snapshot = (snapshot, context.tools)
+    specialist._book_results = {}
+    specialist._book_plan = ["verify_customer", "manage_booking"]
+    specialist._book_carried_turn = None
+    specialist._book_active_step = "manage_booking"
+    specialist._book_snapshot = (snapshot, context.tools)
     transferred, next_node = (
-        await specialist._manage_booking_transfer_manage_booking_to_complaints({}, None)
+        await specialist._book_transfer_manage_booking_to_complaints({}, None)
     )
     assert transferred == {"transferred": True} and next_node is NO_RESPONSE
     assert len(activations) == 1
@@ -730,12 +764,12 @@ async def main():
     customer = tool_modules["find_or_create_customer"].find_or_create_customer(
         "2025550187"
     )
-    assert customer["status"] == "created"
+    assert customer["customer_status"] == "created"
     actions.clear()
     state = bot.State(customer_phone=customer["customer_phone"])
     await bot._prefetch(state, None)
     bot._save_result(
-        "verify_customer", state, {"customer_phone": customer["customer_phone"], "customer_status": customer["status"]}
+        "verify_customer", state, {"customer_phone": customer["customer_phone"], "customer_status": customer["customer_status"]}
     )
     context = LLMContext()
     worker = bot.ConciergeAgent(
@@ -773,7 +807,7 @@ async def main():
         "record_complaint",
     ]
     assert intent_actions[0][1] == {"phone": "3035550199"}
-    assert verified["status"] == "created"
+    assert verified["customer_status"] == "created"
     assert complaint_rows() == [
         (
             digits(verified["customer_phone"]),

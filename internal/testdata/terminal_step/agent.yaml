@@ -1,0 +1,177 @@
+# The fixture for spec 010: a step that ends on its own tool, a group that skips
+# a step whose confirmation already holds, and a step that opens by listening.
+#
+# It is deliberately small and deliberately complete: one package carries all
+# three keys, both context scopes, and a handoff out of a step, because the
+# interaction between a terminal tool and a handoff in the same response is the
+# part with no other fixture to prove it on.
+
+version: 1
+
+name: terminal-step-fixture
+
+entry_agent: desk
+
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+
+agents:
+  desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: desk
+    tasks:
+      # Ends on its lookup. Confirms customer_phone, and is the step a group
+      # skips when that confirmation already holds.
+      - name: verify
+        when: The caller has not been identified, or corrects their number.
+        instructions: tasks/verify.md
+        tools:
+          - look_up
+        finish:
+          - tool: look_up
+            success:
+              - status: [existing, created]
+        assign:
+          - customer_phone: result.customer_phone
+
+      # Ends on either of its two mutations, and can hand the caller out.
+      - name: book
+        instructions: tasks/book.md
+        tools:
+          - book_it
+          - cancel_it
+        handoffs:
+          - to_care
+        finish:
+          - tool: book_it
+            success:
+              - status: booked
+          - tool: cancel_it
+            success:
+              - status: cancelled
+        assign:
+          - booking: result.booking
+
+      # Opens by speaking one fixed line and waiting, with the step's own
+      # history reset, which is the pair that proves the line survives.
+      - name: take_note
+        when: The caller wants a note left for the stylist.
+        announce: What would you like me to pass on?
+        opening: listen
+        instructions: tasks/take_note.md
+        context:
+          history: reset
+        assign:
+          - note: result.note
+    task_groups:
+      - do_book
+      - do_book_alone
+    handoffs:
+      - to_care
+
+  care:
+    instructions: agents/care.md
+    think: reasoning
+    speak: desk
+
+handoffs:
+  to_care:
+    to: care
+    when: The caller raises a complaint or asks for a manager.
+    context:
+      history: messages
+
+task_groups:
+  do_book:
+    when: The caller wants to make, change or cancel a booking.
+    steps:
+      - task: verify
+        skip_when_confirmed: customer_phone
+      - book
+    context_scope: shared
+    then: return
+
+  # The same two steps with each one starting fresh, so the group exits are
+  # proven in both scopes rather than in the one the shipped example uses.
+  do_book_alone:
+    when: The caller wants to book without the earlier conversation in scope.
+    steps:
+      - task: verify
+        skip_when_confirmed: customer_phone
+      - book
+    context_scope: isolated
+    then: return
+
+shapes:
+  - name: Booking
+    description: One saved booking action.
+    fields:
+      - name: reference
+        type: str
+        description: The booking reference the tool returned.
+      - name: service
+        type: str
+        description: The service booked, as the tool spelled it.
+      - name: action
+        type: Literal["create", "cancel"]
+        description: What the tool did.
+
+variables:
+  customer_phone:
+    type: Phone
+    default: ""
+    confirm: verify
+    description: >-
+      The caller's number in E.164, saved once the lookup recognises it.
+
+  booking:
+    type: Booking | None
+    description: The latest successful booking action.
+
+  note:
+    type: string
+    default: ""
+    description: What the caller asked to pass on to the stylist.
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.3
+  speak:
+    desk:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-orion-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: livekit
+      model: turn-detector-mini
+
+tools:
+  - look_up
+  - book_it
+  - cancel_it
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, this is the front desk. How can I help?"
+  interruption:
+    enabled: true
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 4m

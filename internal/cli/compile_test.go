@@ -491,3 +491,60 @@ func TestWriteArtifactFilesPreservesPlatformConfig(t *testing.T) {
 //
 // The second half is the constitution's rule that no report holds a secret
 // value: the upstream line names each credential *variable* and never reads it.
+
+// A step that ends on its own tool, a group step the group may skip and a step
+// that opens by listening are all facts a reader has to be able to get back out
+// of a build. They go in the report, and nothing about them reaches stdout:
+// `compile` prints the file list and the things somebody has to fix.
+func TestCompileNamesATerminalToolInTheReportAndNotOnStdout(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent")
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "terminal_step"))); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := runCompileCommand(t, "--target", "livekit", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stream := range []struct{ name, text string }{{"stdout", stdout}, {"stderr", stderr}} {
+		for _, quiet := range []string{"ends_on", "skip_when_confirmed", "opening"} {
+			if strings.Contains(stream.text, quiet) {
+				t.Errorf("%s mentions %q, and a written key is not news:\n%s", stream.name, quiet, stream.text)
+			}
+		}
+	}
+
+	report, err := os.ReadFile(filepath.Join(dir, "build", "livekit", "compile-report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"task_details"`, `"ends_on"`, `"book_it"`, `"cancel_it"`, `"look_up"`,
+		`"opening": "listen"`,
+	} {
+		if !strings.Contains(string(report), want) {
+			t.Errorf("compile-report.json missing %q:\n%s", want, report)
+		}
+	}
+}
+
+// The same for a group step the group may skip, and on the other target, so
+// neither report can quietly stop saying it.
+func TestCompileNamesASkippableStepInTheReport(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent")
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "terminal_step"))); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runCompileCommand(t, "--target", "pipecat", dir); err != nil {
+		t.Fatal(err)
+	}
+	report, err := os.ReadFile(filepath.Join(dir, "build", "pipecat", "compile-report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"task_groups"`, `"do_book"`, `"skip_when_confirmed": "customer_phone"`} {
+		if !strings.Contains(string(report), want) {
+			t.Errorf("compile-report.json missing %q:\n%s", want, report)
+		}
+	}
+}

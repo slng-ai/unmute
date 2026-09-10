@@ -42,12 +42,13 @@ async def main():
     state = bot.build_state()
     state.customer_phone = "+15005550006"
     owner = bot.ConciergeAgent(state=state, context=context)
+    # Two calls, not three. The step ends on its lookup, so there is no finish
+    # call to script: the request that used to make it is the one this feature
+    # removes, and a model that made it anyway would be calling a function the
+    # node no longer advertises.
     scripted = [
         ("verify_customer", {}),
         ("find_or_create_customer", {"phone": "+15005550006"}),
-        ("finish_verify_customer_verify_customer", {
-            "customer_phone": "+15005550006", "customer_status": "created",
-        }),
     ]
 
     async def complete(ctx):
@@ -93,7 +94,9 @@ async def main():
         assert state.customer_status == "created"
         request = requests[-1]
         assert "Verification status: created." in request["messages"][0]["content"]
-        assert "manage_booking" in [tool["function"]["name"] for tool in request["tools"]]
+        # The booking step runs inside the book group now, so what the owner
+        # advertises is the flow rather than the step.
+        assert "book" in [tool["function"]["name"] for tool in request["tools"]]
         result = next(message for message in request["messages"]
                       if message.get("role") == "tool" and message.get("tool_call_id") == "probe-1")
         assert json.loads(result["content"]) == {"status": "completed"}, result

@@ -125,8 +125,13 @@ func TestEmittedFinishCarriesTheUnservedRequest(t *testing.T) {
 	if finishes == 0 {
 		t.Fatal("agent.py: no task finish emitted")
 	}
-	if got := strings.Count(livekit, `_save_result(`) - 1; got != finishes {
-		t.Errorf("agent.py: %d of %d finishes route their arguments through _save_result", got, finishes)
+	// Every finish saves through the one validator, and so does every step that
+	// ends on its own tool: the count is the finishes plus the terminal endings,
+	// less the one definition in the shared block.
+	terminal := strings.Count(livekit, "async def _end_on_")
+	if got := strings.Count(livekit, `_save_result(`) - 1; got != finishes+terminal {
+		t.Errorf("agent.py: %d saves for %d finishes and %d terminal endings; every one has to go through the validator",
+			got, finishes, terminal)
 	}
 	if !strings.Contains(livekit, unservedOwnerRule) {
 		t.Error("agent.py: no delegate tells its owner to read the handed-back request")

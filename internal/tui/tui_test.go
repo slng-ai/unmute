@@ -1088,7 +1088,7 @@ func TestRunAddTaskAndOrderedGroup(t *testing.T) {
 	if len(got.Agent.Data.Tasks) != 1 || got.Agent.Data.Tasks[0].Name != "collect" {
 		t.Fatalf("tasks = %#v", got.Agent.Data.Tasks)
 	}
-	if len(got.Agent.Data.TaskGroups) != 1 || !reflect.DeepEqual(got.Agent.Data.TaskGroups[0].Steps, []string{"collect"}) {
+	if len(got.Agent.Data.TaskGroups) != 1 || !reflect.DeepEqual(got.Agent.Data.TaskGroups[0].Steps, []spec.StepItem{{Task: "collect"}}) {
 		t.Fatalf("task groups = %#v", got.Agent.Data.TaskGroups)
 	}
 }
@@ -1384,7 +1384,7 @@ func TestV25SavedResourcesOfferDelete(t *testing.T) {
 		data.Agents = []scaffold.Agent{{Name: "billing", Instructions: "Billing", Reason: data.Reason, Speak: data.Speak}}
 		data.Handoffs = []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing", When: "Billing", History: "full"}}
 		data.Tasks = []scaffold.Task{{Name: "collect", Instructions: "Collect", History: "full", Agent: "assistant", When: "Collect"}}
-		data.TaskGroups = []scaffold.TaskGroup{{Name: "flow", Steps: []string{"collect"}, ContextScope: "shared", Then: "return", Agent: "assistant", When: "Flow"}}
+		data.TaskGroups = []scaffold.TaskGroup{{Name: "flow", Steps: []spec.StepItem{{Task: "collect"}}, ContextScope: "shared", Then: "return", Agent: "assistant", When: "Flow"}}
 		data.Channels = []scaffold.Channel{{Name: "phone", Kind: "telephony", Inbound: true}}
 		data.HumanTransfers = []scaffold.HumanTransfer{{Name: "to_human", Agent: "assistant", When: "Human", Destination: "support", Value: "SUPPORT_PHONE_NUMBER", Mode: "cold"}}
 		data.Fallbacks = []scaffold.ModelFallback{{Name: "backup", Profile: "assistant_model", Binding: data.Reason}}
@@ -1427,7 +1427,7 @@ func TestV25DeleteResourceCleansReferences(t *testing.T) {
 	data.Tools = []scaffold.Tool{{Name: "lookup", AttachTo: []string{"billing"}, AttachTasks: []string{"collect"}}}
 	data.Handoffs = []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing"}}
 	data.Tasks = []scaffold.Task{{Name: "collect", Tools: []string{"lookup"}, Model: "billing_model", Assign: []spec.Pair{{Key: "customer_id", Value: "result.result"}}, Agent: "billing"}}
-	data.TaskGroups = []scaffold.TaskGroup{{Name: "flow", Steps: []string{"collect"}, Agent: "billing"}}
+	data.TaskGroups = []scaffold.TaskGroup{{Name: "flow", Steps: []spec.StepItem{{Task: "collect"}}, Agent: "billing"}}
 	data.HumanTransfers = []scaffold.HumanTransfer{{Name: "human", Agent: "billing"}}
 	data.Fallbacks = []scaffold.ModelFallback{{Name: "backup", Profile: "billing_model"}}
 
@@ -1451,7 +1451,7 @@ func TestV25InvalidSavedResourcesRemainAvailableForRepair(t *testing.T) {
 		open func(*fieldRunner, *scaffold.Data) error
 	}{
 		{"handoff without second agent", scaffold.Data{Handoffs: []scaffold.Handoff{{Name: "broken", Source: "assistant", To: "missing"}}}, editHandoffs},
-		{"group without tasks", scaffold.Data{TaskGroups: []scaffold.TaskGroup{{Name: "broken", Steps: []string{"missing"}}}}, editTaskGroups},
+		{"group without tasks", scaffold.Data{TaskGroups: []scaffold.TaskGroup{{Name: "broken", Steps: []spec.StepItem{{Task: "missing"}}}}}, editTaskGroups},
 		{"transfer without phone", scaffold.Data{HumanTransfers: []scaffold.HumanTransfer{{Name: "broken", Agent: "assistant"}}}, editHumanTransfers},
 	}
 	for _, tc := range tests {

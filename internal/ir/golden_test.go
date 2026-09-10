@@ -86,7 +86,7 @@ func thenReturnGolden(t *testing.T) compilerGoldenCase {
 		Context: TaskContext{History: HistoryFull},
 	}
 	agent.TaskGroups["collect_then_return"] = TaskGroup{
-		Steps: []string{"collect"}, ContextScope: ContextShared, Then: GroupReturn, Merge: GroupMergeResults,
+		Steps: []GroupStep{{Task: "collect"}}, ContextScope: ContextShared, Then: GroupReturn, Merge: GroupMergeResults,
 	}
 	// wantFail was true while this ran against the vapi target, whose driver
 	// gated group-return shaping. That target is retired; Pipecat shapes it, so

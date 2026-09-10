@@ -817,7 +817,10 @@ class IntakeAgent(TracedLLMWorker):
         """Run the triage group."""
         self._run_triage_visit = object()
         self._run_triage_results = {}
-        self._run_triage_active_step = "collect"
+        # The steps this invocation will run, decided once as the flow starts.
+        self._run_triage_plan = ["collect"]
+
+        self._run_triage_active_step = self._run_triage_plan[0]
         flow = FlowManager(
             llm=self.llm,
             context_aggregator=LLMContextAggregatorPair(self.context),
@@ -838,7 +841,19 @@ class IntakeAgent(TracedLLMWorker):
         # context.history on this task. Shaped after the snapshot above, so the
         # finish path restores the owner's own context whatever this step saw.
         self.context.set_messages([dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")])
-        await flow.initialize(self._run_triage_node_collect())
+        await flow.initialize(self._run_triage_node(self._run_triage_active_step))
+
+    def _run_triage_node(self, name) -> NodeConfig:
+        """One step's node by name, because the chain is decided at run time."""
+        return {
+            "collect": self._run_triage_node_collect,
+        }[name]()
+
+    def _run_triage_next(self, name):
+        """The step after this one in this invocation's plan, or None."""
+        plan = self._run_triage_plan
+        position = plan.index(name) + 1
+        return plan[position] if position < len(plan) else None
 
     def _run_triage_node_collect(self) -> NodeConfig:
         self.context.set_messages([])
@@ -880,7 +895,16 @@ class IntakeAgent(TracedLLMWorker):
             logger.warning("finish {}: {}", "collect", refused.message)
             return {"refused": f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."}, None
         self._run_triage_results["collect"] = _values
-        self._run_triage_active_step = None
+        _next = self._run_triage_next("collect")
+        if self._run_triage_results["collect"].get("unserved_request"):
+            # The step could not serve what the caller asked. Running the next
+            # one would answer a question nobody asked, so the flow stops here
+            # and the owner is handed the unserved status.
+            logger.info("group stopped: collect ended unserved")
+            _next = None
+        self._run_triage_active_step = _next
+        if _next is not None:
+            return _task_status(self._run_triage_results["collect"]), self._run_triage_node(_next)
         # then: return — restore the owner's pre-flow context (messages and
         # tools); only a completed or unserved status crosses back.
         messages, tools = self._run_triage_snapshot

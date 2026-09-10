@@ -23,7 +23,7 @@ output:
       description: >-
         The confirmed number in E.164: a plus sign then digits, no spaces or
         punctuation. Return it exactly as it comes back, character for character.
-    status:
+    customer_status:
       type: string
       enum:
         - existing
@@ -33,7 +33,7 @@ output:
       type: string
   required:
     - customer_phone
-    - status
+    - customer_status
     - summary
 
 local:

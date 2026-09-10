@@ -1,3 +1,12 @@
+{{- /* terminal_guard closes a step's mutations once one of them has succeeded.
+It sits before the handler body, not after it: a second create_booking that
+ran and was then refused is a second booking. A new intentional action needs a
+new invocation of the step. */ -}}
+{{define "terminal_guard"}}{{if .Terminal}}
+        if self._terminal is not None:
+            logger.info({{pyq (printf "terminal tool refused: %s cannot run again in this step" .Method)}})
+            return {"refused": {{pyq (printf "%s already succeeded in this step. Call finish to record it; a new action is a new request from the caller." .Method)}}}
+{{- end}}{{end -}}
 {{define "opening_guard_note"}}        # This opening turn withholds the agent's own handoffs (B3: an agent that can
         # hand the call back before it has said anything ping-pongs). The framework's
         # on-enter tool flag would hide them for the rest of the call instead, because
@@ -36,6 +45,7 @@ agents and tasks share the shape (T15). */ -}}
         if refusal:
             return {"refused": refusal}
 {{- end}}
+{{- template "terminal_guard" .}}
 {{- if .Announce}}
         # Cover the wait: say() returns a SpeechHandle, so speech starts and the
         # request goes out behind it. Deliberately not awaited: awaiting the
@@ -56,7 +66,11 @@ agents and tasks share the shape (T15). */ -}}
 {{- if .EndsConversation}}
             self.session.shutdown()  # effect: ends_conversation
 {{- end}}
+{{- if .Terminal}}
+            return await self._end_on_{{.Method}}(ctx, resp.json())
+{{- else}}
             return resp.json()
+{{- end}}
 {{end -}}
 {{- /* local_tool calls the handler copied from the source package (SCHEMA §5:
 the file defines a callable named like the tool; sync or async). */ -}}
@@ -69,6 +83,7 @@ the file defines a callable named like the tool; sync or async). */ -}}
         if refusal:
             return {"refused": refusal}
 {{- end}}
+{{- template "terminal_guard" .}}
 {{- if .Announce}}
         # Not awaited, on purpose: see the same line in webhook_tool.
         dev_say(self.session, {{pyq .Announce}})
@@ -79,7 +94,11 @@ the file defines a callable named like the tool; sync or async). */ -}}
 {{- if .EndsConversation}}
         self.session.shutdown()  # effect: ends_conversation
 {{- end}}
+{{- if .Terminal}}
+        return await self._end_on_{{.Method}}(ctx, result)
+{{- else}}
         return result
+{{- end}}
 {{end -}}
 {{- /* knowledge_tool renders one knowledge lookup as a @function_tool method.
 The index is built in prewarm and read from the job's userdata, so a lookup
@@ -107,6 +126,7 @@ The result is a pydantic model, so it is dumped to a dict for the model. */ -}}
         if refusal:
             return {"refused": refusal}
 {{- end}}
+{{- template "terminal_guard" .}}
 {{- if .Announce}}
         # Not awaited, on purpose: see the same line in webhook_tool.
         dev_say(self.session, {{pyq .Announce}})
@@ -117,7 +137,11 @@ The result is a pydantic model, so it is dumped to a dict for the model. */ -}}
 {{- if .EndsConversation}}
         self.session.shutdown()  # effect: ends_conversation
 {{- end}}
+{{- if .Terminal}}
+        return await self._end_on_{{.Method}}(ctx, result.model_dump() if hasattr(result, "model_dump") else result)
+{{- else}}
         return result.model_dump() if hasattr(result, "model_dump") else result
+{{- end}}
 {{end -}}
 {{- /* method_tool dispatches on execution. Every arm is written out, including
 the one that renders the same body as a webhook: this dispatch's final else IS
@@ -897,7 +921,68 @@ class IgnorePhrasesMixin:
         return _filtered()
 
 {{end}}
-{{if .HasTaskTransfers}}class _TaskTransfer(Exception):
+{{if .GroupStops}}class _GroupStop(Exception):
+    """Internal signal that a group step ended unserved, so the group stops.
+
+    Raised from the completion callback, which the framework runs inside its own
+    try: the group completes with this exception and it comes back out of
+    `await group`, with the results the group had reached.
+    """
+
+    def __init__(self, results: dict) -> None:
+        super().__init__()
+        self.results = results
+
+
+{{end}}{{if .NeedsTerminal}}def _newest_caller_turn(chat_ctx):
+    """The caller turn a terminal tool call answered.
+
+    Carried into the owner's restored context when the step ends on its tool,
+    because the owner never saw it: the step consumed the turn and the owner's
+    snapshot was taken before it arrived. Without it the owner reads a completed
+    status with no request in front of it, and a compound request loses the half
+    the step did not own.
+    """
+    for item in reversed(chat_ctx.items):
+        if getattr(item, "type", None) == "message" and item.role == "user":
+            return item
+    return None
+
+
+def _insert_carried_turn(owner_ctx, carried):
+    """Put the caller turn a step consumed back in front of the owner, once.
+
+    Only the newest one: a group whose steps each carried a turn has already
+    answered the earlier ones. Skipped when the owner already holds the item,
+    which is what a shared group leaves behind.
+    """
+    for item in reversed(carried):
+        if item is None:
+            continue
+        if owner_ctx.get_by_id(item.id) is None:
+            owner_ctx.insert(item)
+            logger.info("carried the caller's turn back to the owner")
+        return
+
+
+def _sibling_call(ctx, names):
+    """Whether this response also called one of the named tools.
+
+    The framework adds every function call of a response to the speech handle
+    before it starts any of their bodies, so a tool can see what it was called
+    beside. Its own call is skipped by id.
+    """
+    for item in ctx.speech_handle.chat_items:
+        if getattr(item, "type", None) != "function_call":
+            continue
+        if item.call_id == ctx.function_call.call_id:
+            continue
+        if item.name in names:
+            return True
+    return False
+
+
+{{end}}{{if .HasTaskTransfers}}class _TaskTransfer(Exception):
     """Internal signal that a task handed the caller to another agent."""
 
     def __init__(self, agent: Agent) -> None:
@@ -906,18 +991,40 @@ class IgnorePhrasesMixin:
 
 
 {{end -}}
-{{if .NeedsTaskGroups}}async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent) -> None:
-    """Fill LiveKit's empty task tool output before the next shared task."""
+{{if .NeedsTaskGroups}}async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent, flow: dict) -> None:
+    """Fill LiveKit's empty task tool output before the next shared task.
+
+    `flow` is the delegate's own record of the run: the results it has reached,
+    and any caller turn a step consumed. The group's own results are not
+    readable from here, and a group that stops early has to hand back what it
+    did do.
+    """
+    flow["results"][event.task_id] = event.result
+    flow["carried"].append(getattr(event.agent_task, "_carried_turn", None))
     finish_call_id = getattr(event.agent_task, "_finish_call_id", None)
     if finish_call_id is None:
+{{- if .NeedsTerminal}}
+        # A step can end without a finish call at all: a transfer out of it, or
+        # a tool that ended it and could not record an id. There is no output of
+        # ours to fill, and nothing to fail about.
+        return
+{{- else}}
         raise RuntimeError("completed task has no successful finish call")
+{{- end}}
     task_output = next(
         (
             item
             for item in reversed(event.agent_task.chat_ctx.items)
             if isinstance(item, llm.FunctionCallOutput)
+{{- if not .NeedsTerminal}}
             and item.name == "finish"
+{{- end}}
             and not item.is_error
+{{- if .NeedsTerminal}}
+            # Matched on the call id alone. The name used to be checked too, and
+            # the only ending was `finish`; a step that ends on its own tool
+            # produces an output under that tool's name and the same id.
+{{- end}}
             and item.call_id == finish_call_id
         ),
         None,
@@ -954,6 +1061,14 @@ class IgnorePhrasesMixin:
         shared_ctx,
         exclude_invalid_function_calls=False,
     )
+{{- if .GroupStops}}
+    if isinstance(event.result, dict) and event.result.get("unserved_request"):
+        # The step could not serve what the caller asked. Running the next one
+        # would answer a question nobody asked, so the group stops here and the
+        # owner is handed the unserved status with the results so far.
+        logger.info("group stopped: " + event.task_id + " ended unserved")
+        raise _GroupStop(dict(flow["results"]))
+{{- end}}
 
 
 {{end -}}
@@ -1324,22 +1439,83 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
     async def {{.Method}}(self, ctx: RunContext){{if or .Task (eq .Then "return")}} -> dict{{if .CanTaskTransfer}} | Agent{{end}}{{end}}:
         {{triple .When}}{{template "delegate_announce" .}}
         owner_ctx = self.chat_ctx.copy()
+{{- if .CarriesTurn}}
+        # Filled by a step that ended on its own tool, and read in the finally
+        # below. A list because a group runs several steps and the last one to
+        # carry a turn is the one the owner has not seen.
+        _carried: list = []
+{{- end}}
+{{- if and .Steps (not .Isolated)}}
+        # What the group reached, recorded as it goes: a group that stops early
+        # still owes the owner the steps it did run.
+        _flow = {"results": {}, "carried": {{if .CarriesTurn}}_carried{{else}}[]{{end}}}
+{{- end}}
         try:
 {{- if .Task}}
+{{- if .CarriesTurn}}
+            _step = {{.Task.Class}}(chat_ctx=owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
+            result = await _step
+            _carried.append(getattr(_step, "_carried_turn", None))
+{{- else}}
             result = await {{.Task.Class}}(chat_ctx=owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
+{{- end}}
 {{- else if .Isolated}}
             task_results = {}
 {{- range .Steps}}
-            task_results[{{pyq .ID}}] = await {{.Class}}(chat_ctx=llm.ChatContext())
+{{- if .SkipWhenConfirmed}}
+            if _is_confirmed(ctx.userdata, {{pyq .SkipWhenConfirmed}}):
+                logger.info({{pyq (printf "skipped %s: %s is already confirmed" .ID .SkipWhenConfirmed)}})
+            else:
+{{- end}}
+{{- if $.CarriesTurn}}
+            {{if .SkipWhenConfirmed}}    {{end}}_step = {{.Class}}(chat_ctx=llm.ChatContext(){{if .Terminal}}, ends_flow={{.EndsFlow}}{{end}})
+            {{if .SkipWhenConfirmed}}    {{end}}task_results[{{pyq .ID}}] = await _step
+            {{if .SkipWhenConfirmed}}    {{end}}_carried.append(getattr(_step, "_carried_turn", None))
+{{- else}}
+            {{if .SkipWhenConfirmed}}    {{end}}task_results[{{pyq .ID}}] = await {{.Class}}(chat_ctx=llm.ChatContext())
+{{- end}}
 {{- end}}
 {{- else}}
             group = TaskGroup(
                 summarize_chat_ctx=False,
-                on_task_completed=lambda event: _share_task_result(group, event),
+                on_task_completed=lambda event: _share_task_result(group, event, _flow),
             )
             await group.update_chat_ctx(owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True), exclude_invalid_function_calls=False)
+{{- if .CarriesTurn}}
+            # The steps this invocation will run, decided once as the group
+            # starts. A step whose confirmation already holds is not added at
+            # all, and the last one that is knows it ends the flow.
+            _plan = [
+                name
+                for name, confirmed in (
 {{- range .Steps}}
+                    ({{pyq .ID}}, {{if .SkipWhenConfirmed}}{{pyq .SkipWhenConfirmed}}{{else}}""{{end}}),
+{{- end}}
+                )
+                if not (confirmed and _is_confirmed(ctx.userdata, confirmed))
+            ]
+{{- range .Steps}}
+            if {{pyq .ID}} in _plan:
+                group.add(lambda: {{.Class}}({{if .Terminal}}ends_flow=_plan[-1] == {{pyq .ID}}{{end}}), id={{pyq .ID}}, description={{pyq .Desc}})
+{{- if .SkipWhenConfirmed}}
+            else:
+                logger.info({{pyq (printf "skipped %s: %s is already confirmed" .ID .SkipWhenConfirmed)}})
+{{- end}}
+{{- end}}
+{{- else}}
+{{- range .Steps}}
+{{- if .SkipWhenConfirmed}}
+            # Decided once, as the group starts, which is what the key says. A
+            # step whose confirmation lapses mid-flow is the next invocation's
+            # question, not this one's.
+            if _is_confirmed(ctx.userdata, {{pyq .SkipWhenConfirmed}}):
+                logger.info({{pyq (printf "skipped %s: %s is already confirmed" .ID .SkipWhenConfirmed)}})
+            else:
+                group.add(lambda: {{.Class}}(), id={{pyq .ID}}, description={{pyq .Desc}})
+{{- else}}
             group.add(lambda: {{.Class}}(), id={{pyq .ID}}, description={{pyq .Desc}})
+{{- end}}
+{{- end}}
 {{- end}}
             result = await group
             task_results = result.task_results
@@ -1348,7 +1524,14 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
         except _TaskTransfer as transfer:
             return transfer.agent
 {{- end}}
+{{- if and .Steps (not .Isolated)}}
+        except _GroupStop as stop:
+            task_results = stop.results
+{{- end}}
         finally:
+{{- if .CarriesTurn}}
+            _insert_carried_turn(owner_ctx, _carried)
+{{- end}}
             await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
 {{- if .RefreshOwnerPrompt}}
             await self._refresh_prompt()
@@ -1565,13 +1748,29 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
     # than by a mixin of its own, because that mixin already owns llm_node here.
     _slng_scope = {{pyq .SlngScope}}
 
-{{end}}    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
+{{end}}    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN{{if .Terminal}}, ends_flow: bool = True{{end}}) -> None:
         super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}}{{if or .Prebuilt .MCPServers}}, tools=[{{template "tools_list" .}}]{{end}})
         if isinstance(chat_ctx, llm.ChatContext):
             self._chat_ctx = chat_ctx.copy()
         self._response_tool_call_ids: set[str] = set()
-{{- if $.NeedsTaskGroups}}
+{{- if or $.NeedsTaskGroups .Terminal}}
+        # The call id of the ending that committed. A group reads it to fill its
+        # own tool output, and a handoff called beside a terminal tool reads it
+        # to know whether the step's work actually landed.
         self._finish_call_id: str | None = None
+{{- end}}
+{{- if .Terminal}}
+        # Per invocation, because a task instance is built per invocation: the
+        # tool that ended the step and what it returned, an event a sibling
+        # handoff waits on, and the caller turn that arrived with the tool call.
+        self._terminal: tuple[str, dict] | None = None
+        self._terminal_settled = asyncio.Event()
+        self._carried_turn = None
+        # Whether ending this step ends the whole flow. A step with another one
+        # after it hands over silently: the next step opens and speaks. The last
+        # step gives the owner something to answer, because otherwise the caller
+        # hears nothing at all after the action they asked for.
+        self._ends_flow = ends_flow
 {{- end}}
 {{- if .Transfers}}
         self._terminal_claimed = False
@@ -1584,6 +1783,12 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 {{- end}}
 
     async def on_enter(self) -> None:
+{{- if .Withdraws}}
+        # Entered, so whatever it confirms is being decided again. Withdrawn
+        # before the prompt renders, so this step never reads a confirmation it
+        # is about to replace.
+        _withdraw_confirmation(self.session.userdata, {{pyq .Name}})
+{{- end}}
 {{- if .Summary}}
         await self.update_chat_ctx(await _summarize(self.chat_ctx, {{template "llmexpr" .Summary}}))
 {{- else}}
@@ -1592,17 +1797,89 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 {{- if .PromptExpr}}
         await self.update_instructions({{.PromptExpr}})
 {{- end}}
+{{- if eq .Opening "listen"}}
+        # opening: listen. The step speaks one fixed line and waits, so no
+        # request is made to open it. Said here rather than at the seam, so the
+        # line is in this step's context whatever its history policy is, and
+        # said once.
+{{- if .Announce}}
+        self.session.say({{pyq .Announce}})
+{{- end}}
+{{- else}}
         # The task's own instructions describe this step; let them drive the opening.
 {{- if .Transfers}}
 {{template "opening_guard_note" .}}        self.session.generate_reply({{template "opening_tools" .}})
 {{- else}}
         self.session.generate_reply()
 {{- end}}
-{{range .Tools}}{{template "method_tool" .}}{{end}}
-{{range .Transfers}}
+{{- end}}
+{{range .Tools}}{{if .Terminal}}
+    async def _end_on_{{.Method}}(self, ctx: RunContext, result: dict):
+        """End this step on a validated result from {{.Method}}.
+
+        The result never reaches the model: a tool that said what it did has
+        already made the decision the model would have been asked to confirm.
+        Anything that is not a success goes back as an ordinary result, which is
+        what keeps a failed action a conversation rather than a saved one.
+        """
+        if not _terminal_success(result, {{.Terminal.Success}}):
+            return result
+        self._terminal = ({{pyq .Method}}, result)
+        self._carried_turn = _newest_caller_turn(self.chat_ctx)
+        try:
+            _values = _save_result({{pyq .Terminal.Step}}, ctx.userdata, result)
+        except _StateRefused as refused:
+            # The action happened and the save did not. The step stays open so
+            # the model can repair it, and its mutations stay closed so the
+            # repair cannot run the action a second time.
+            self._terminal_settled.set()
+            logger.warning({{pyq (printf "terminal %s: not recorded: " .Method)}} + refused.message)
+            return {
+                **result,
+                "refused": "Not recorded: "
+                + refused.message
+                + ". Call finish with the values this tool returned; recover a missing one with a read tool of this step, or finish with unserved_request saying the action happened and its details could not be saved.",
+            }
+        self._finish_call_id = ctx.function_call.call_id
+        self._terminal_settled.set()
+        logger.info({{pyq (printf "step %s ended on %s" .Terminal.Step .Method)}})
+{{- if .Terminal.Transfers}}
+        if _sibling_call(ctx, {{.Terminal.Transfers}}):
+            # A handoff was called in the same response. It owns the ending: the
+            # save is committed, and completing here would race it.
+            return None
+{{- end}}
+        dev_metrics.dev_task_finished(ctx, _values)
+        if not self.done():
+            self.complete(_values)
+        if self._ends_flow:
+            # The flow is over and nobody else is going to speak. The framework
+            # requires a reply when a tool returns a value, and that reply is
+            # the owner confirming what happened: the one this step still owes
+            # the caller. The request it does not make is the finish call.
+            return _task_status(_values)
+        # None, so the framework requires no reply: the next step opens the next
+        # turn, and this is the request the whole feature exists to remove.
+        return None
+{{end}}{{end}}{{range .Tools}}{{template "method_tool" .}}{{end}}
+{{$terminals := .TerminalTools}}{{range .Transfers}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext):
         {{triple .When}}
+{{- if $terminals}}
+        if _sibling_call(ctx, {{$terminals}}):
+            # A tool that ends this step was called in the same response. The
+            # caller asked for two things at once, and the booking has to be
+            # committed before the caller is moved: a transfer that went first
+            # would leave the step's own work unrecorded.
+            try:
+                await asyncio.wait_for(self._terminal_settled.wait(), timeout=30.0)
+            except asyncio.TimeoutError:
+                self._terminal_settled.set()
+            if self._finish_call_id is None:
+                logger.info("handoff held: the step's own action did not complete")
+                return "The action did not complete, so the caller was not moved. Read the tool result and continue."
+{{- end}}
         if not self._claim_terminal():
             return
 
@@ -1634,7 +1911,18 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
             return
 {{- end}}
         try:
+{{- if .Terminal}}
+            _args = {{"{"}}{{range .Result}}{{pyq .Name}}: {{.Name}}, {{end}}{{pyq $.Unserved.Name}}: {{$.Unserved.Name}}{{"}"}}
+            if self._terminal is not None:
+                # Repairing a save the tool already made. The tool's own values
+                # win where they validate: the model cannot manufacture a
+                # reference, and a repair that retyped one would record an
+                # action nobody took.
+                _args = _merge_retained({{pyq .Name}}, _args, self._terminal[1])
+            _values = _save_result({{pyq .Name}}, ctx.userdata, _args)
+{{- else}}
             _values = _save_result({{pyq .Name}}, ctx.userdata, {{"{"}}{{range .Result}}{{pyq .Name}}: {{.Name}}, {{end}}{{pyq $.Unserved.Name}}: {{$.Unserved.Name}}{{"}"}})
+{{- end}}
         except _StateRefused as refused:
             logger.warning("finish %s: %s", {{pyq .Name}}, refused.message)
             return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."

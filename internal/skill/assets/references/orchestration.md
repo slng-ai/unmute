@@ -348,6 +348,67 @@ is usually the one worth keeping.
 
 Denied on the `slng` target, which writes one agent with no steps.
 
+### Ending a step on its tool
+
+A step that runs a tool and then asks the model to call `finish` spends a model
+request on a decision the tool already made. Name the tools that end the step:
+
+```yaml agent.yaml
+      - name: manage_booking
+        instructions: tasks/booking.md
+        tools:
+          - check_availability
+          - create_booking
+          - cancel_booking
+        finish:
+          - tool: create_booking
+            success:
+              - status: booked
+          - tool: cancel_booking
+            success:
+              - status: cancelled
+        assign:
+          - appointment: result.appointment
+```
+
+A result meeting every `success:` pair saves `assign:` and ends the step, with
+no request in between, and never reaches the model. Anything else goes back to
+the model and the step stays open.
+
+Rules worth knowing before you write one:
+
+- Every `success:` value has to be one the tool declares in its output `enum:`,
+  and every `assign:` field has to be an output property of **every** listed
+  tool. Both are compile-time refusals.
+- After one listed tool succeeds, none of them runs again in that invocation. A
+  second booking is a new invocation of the step.
+- `finish` stays for a request the step cannot serve, for values it already
+  holds, and for a save the validator refused.
+- Do not also write "call finish as soon as the tool succeeds" in the step's
+  prompt. The generated tail says the opposite, and the two contradict.
+
+Denied on the `slng` target.
+
+### Opening a step by listening
+
+When a step opens with one fixed question, `opening: listen` speaks it and
+waits, and costs no request:
+
+```yaml agent.yaml
+      - name: take_stylist_note
+        when: The caller wants a note left for the stylist.
+        announce: What would you like me to pass on to your stylist?
+        opening: listen
+        instructions: tasks/stylist-note.md
+```
+
+The line is the `announce:` line, spoken once and recorded as the step's own
+first turn. The default, `generate`, is what every step did before this key. A
+listening step with no `announce:` warns: the caller hears nothing until they
+speak. Tell the step's prompt that the question has already been asked.
+
+Denied on the `slng` target.
+
 ## Order steps with the prompt
 
 There is no field that holds a task back until a variable exists. Put the
@@ -543,6 +604,28 @@ saves no value and the default spoken-message history is right.
 | `merge` | `results` | how the steps' results are combined |
 
 **Choose the conversation each member receives:**
+
+A step is a bare task name, or an item that says how the group treats it:
+
+```yaml agent.yaml
+    steps:
+      - task: identify_customer
+        skip_when_confirmed: customer_id
+      - select_appointment
+```
+
+`skip_when_confirmed:` names a variable that step confirms, through `confirm:`
+on the variable. The group skips the step when the variable is confirmed as the
+group starts, which is what makes a second booking on one call cost nothing. A
+variable nobody confirms, or one another step confirms, is refused.
+
+The side effect is the point: a step some group names this way withdraws what it
+confirms every time it is entered, standalone entry included, so a caller
+correcting the value re-verifies it and the next run does not skip on the
+strength of what they just replaced. Denied on the `slng` target.
+
+A group also stops when a step ends unserved: the later steps do not run and the
+owner is handed the unserved status.
 
 - `context_scope: shared` lets later tasks inherit the group's running
   conversation, filtered by each task's own `context.history`.

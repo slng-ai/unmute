@@ -334,6 +334,20 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		// two packages sharing a label would share one set of credentials.
 		data.SecretSet = data.AgentName + "-secrets"
 	}
+	data.TerminalSteps = runbookTerminalSteps(agent)
+	data.SkippableSteps = runbookSkippableSteps(agent)
+	data.ListeningSteps = runbookListeningSteps(agent)
+	for _, task := range agent.Tasks {
+		if len(task.Finish) > 0 {
+			data.NeedsTerminal = true
+		}
+		if task.Withdraws {
+			data.NeedsWithdrawal = true
+		}
+		if task.Opening == ir.OpeningListen {
+			data.NeedsOpeningListen = true
+		}
+	}
 	return data, nil
 }
 
@@ -968,10 +982,13 @@ func pipecatCtxExpr(c ir.TaskContext) (expr string, needsLastN bool) {
 func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, env *envSet) (pipecatDelegate, error) {
 	delegate := pipecatDelegate{
 		MethodName: ref,
-		When:       delegateReason(c),
+		When:       delegateReason(c) + pipecatTerminalOwnerRule(agent, c),
 		Announce:   c.Announce,
 	}
 	steps := []string{c.Task}
+	// skips runs parallel to steps: one entry per step, empty where the step
+	// always runs. A single task is never a group step, so it never skips.
+	skips := []string{""}
 	if c.Task != "" {
 		delegate.Task = c.Task
 		delegate.Then = "return" // a single task always returns (SCHEMA 4.7)
@@ -988,15 +1005,38 @@ func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, e
 		delegate.Then = string(group.Then)
 		delegate.ThenTarget = group.ThenTarget
 		delegate.Isolated = group.ContextScope == ir.ContextIsolated
-		steps = group.Steps
+		steps, skips = nil, nil
+		for _, step := range group.Steps {
+			steps = append(steps, step.Task)
+			skips = append(skips, step.SkipWhenConfirmed)
+		}
 	}
-	for _, step := range steps {
+	for i, step := range steps {
 		task, err := buildTask(agent, tgt, step, agent.Tasks[step], env, "finish_"+ref+"_"+step)
 		if err != nil {
 			return pipecatDelegate{}, err
 		}
+		task.SkipWhenConfirmed = skips[i]
 		delegate.HasTransfers = delegate.HasTransfers || len(task.Transfers) > 0
+		delegate.CarriesTurn = delegate.CarriesTurn || len(task.Terminals) > 0
+
 		delegate.StepTasks = append(delegate.StepTasks, task)
+	}
+	delegate.RuntimeChain = delegate.Group != ""
+	for _, step := range delegate.StepTasks {
+		delegate.HasSkips = delegate.HasSkips || step.SkipWhenConfirmed != ""
+	}
+	if delegate.RuntimeChain {
+		var scopes []string
+		for _, step := range delegate.StepTasks {
+			if step.SlngHeaders == "" {
+				continue
+			}
+			scopes = append(scopes, pyQuote(step.Name)+": "+step.SlngHeaders)
+		}
+		if len(scopes) > 0 {
+			delegate.StepScopes = "{" + strings.Join(scopes, ", ") + "}"
+		}
 	}
 	for i := range delegate.StepTasks[:len(delegate.StepTasks)-1] {
 		delegate.StepTasks[i].NextName = delegate.StepTasks[i+1].Name
@@ -1022,7 +1062,7 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 	// The node's finish function is the only way out of the step, and its name is
 	// per-step here, so the prompt has to name it (livekitTaskPrompt does the
 	// same for a plain `finish`).
-	prompt := task.Instructions + taskFinishContract(finishName, sortedResultNames(task.Result))
+	prompt := task.Instructions + taskFinishContractFor(finishName, sortedResultNames(task.Result), task.EndsOnTools())
 	built := pipecatTask{
 		Name: name, FinishName: finishName, Prompt: prompt,
 		// The node is built when the step is entered, not at session start, so a
@@ -1071,9 +1111,49 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 		if err != nil {
 			return pipecatTask{}, err
 		}
+		for _, entry := range task.Finish {
+			if entry.Tool != ref {
+				continue
+			}
+			lowered.Terminal = true
+			built.Terminals = append(built.Terminals, pipecatTerminal{
+				Tool: ref, Success: pySuccessLiteral(entry.Success), NeedsState: lowered.NeedsState,
+			})
+		}
 		built.Tools = append(built.Tools, lowered)
 	}
+	// The step's own handoff function names, so a terminal tool can tell whether
+	// the model called one beside it in the same response. Both handlers run on
+	// this framework, and only one of them may move the flow.
+	if transfers := pipecatStepTransfers(built.Transfers); transfers != "" {
+		names := make([]string, 0, len(built.Terminals))
+		for i := range built.Terminals {
+			built.Terminals[i].Transfers = transfers
+			names = append(names, pyQuote(built.Terminals[i].Tool))
+		}
+		if len(names) > 0 {
+			sort.Strings(names)
+			built.TerminalTools = "{" + strings.Join(names, ", ") + "}"
+		}
+	}
+	built.Withdraws = task.Withdraws
+	built.Opening = string(task.Opening)
+	built.Announce = task.Announce
 	return built, nil
+}
+
+// pipecatStepTransfers is the step's transfer function names as a Python set
+// literal, or "" when the step has none.
+func pipecatStepTransfers(transfers []pipecatTransfer) string {
+	names := make([]string, 0, len(transfers))
+	for _, transfer := range transfers {
+		names = append(names, pyQuote(transfer.MethodName))
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
+	return "{" + strings.Join(names, ", ") + "}"
 }
 
 // resultProperties builds the finish function's JSON-schema properties from a
@@ -1833,4 +1913,21 @@ func (e *envSet) sorted() []string {
 	}
 	slices.Sort(names)
 	return names
+}
+
+// pipecatTerminalOwnerRule is the owner sentence a flow with a step that ends on
+// its own tool needs, or "" for every other flow. Same rule the LiveKit delegate
+// carries, appended the same way: the owner is handed the caller's own words
+// immediately before the status, and has to know that is what they are.
+func pipecatTerminalOwnerRule(agent *ir.Agent, c *ir.Delegate) string {
+	terminal := c.Task != "" && len(agent.Tasks[c.Task].Finish) > 0
+	if group, ok := agent.TaskGroups[c.Group]; ok {
+		for _, step := range group.Steps {
+			terminal = terminal || len(agent.Tasks[step.Task].Finish) > 0
+		}
+	}
+	if !terminal {
+		return ""
+	}
+	return terminalOwnerRule
 }

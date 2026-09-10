@@ -950,7 +950,18 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         if self._dev:
             self._dev.observe_llm(llm)
             self._dev.observe_tts(tts)
-        super().__init__({{pyq .Name}}, llm=llm, pipeline=Pipeline([llm, tts]), bridged=())
+        super().__init__({{pyq .Name}}, llm=llm, pipeline=Pipeline([llm, tts]), bridged=()){{if $.NeedsTerminal}}
+        # Every tool the model called in one response, recorded before any of
+        # their handlers run. A step that ends on its own tool has to know
+        # whether a handoff was called beside it: this framework runs both
+        # handlers and whichever finishes first would otherwise close the step
+        # under the other one.
+        self._response_calls: tuple[str, ...] = ()
+
+        @llm.event_handler("on_function_calls_started")
+        async def _record_calls(service, function_calls):  # noqa: ARG001
+            self._response_calls = tuple(call.function_name for call in function_calls)
+{{end}}
 {{if .MCPSources}}        # MCP tool sources. The clients are built here and connected in
         # start_mcp() before this worker is ever activated, because the server
         # names its own tools and build_tools() has to be able to list them.
@@ -1214,8 +1225,26 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         await self.queue_frame(TTSSpeakFrame({{pyq $d.Announce}}))
 {{end}}        self._{{$d.MethodName}}_visit = object()
         self._{{$d.MethodName}}_results = {}
-        self._{{$d.MethodName}}_active_step = {{pyq (index $d.StepTasks 0).Name}}
-        flow = FlowManager(
+{{if $d.CarriesTurn}}        # Per invocation: the tool that ended a step and what it returned, an
+        # event a sibling handoff waits on, and the caller turn the step
+        # consumed on its way out.
+        self._{{$d.MethodName}}_terminal = None
+        self._{{$d.MethodName}}_settled = asyncio.Event()
+        self._{{$d.MethodName}}_carried_turn = None
+{{end}}{{if $d.RuntimeChain}}        # The steps this invocation will run, decided once as the flow starts.
+{{if $d.HasSkips}}        # A step whose confirmation already holds is not entered at all.
+        self._{{$d.MethodName}}_plan = [
+            name
+            for name, confirmed in (
+{{range $d.StepTasks}}                ({{pyq .Name}}, {{if .SkipWhenConfirmed}}{{pyq .SkipWhenConfirmed}}{{else}}""{{end}}),
+{{end}}            )
+            if not (confirmed and _is_confirmed(self.state, confirmed))
+        ]
+{{else}}        self._{{$d.MethodName}}_plan = [{{range $i, $t := $d.StepTasks}}{{if $i}}, {{end}}{{pyq $t.Name}}{{end}}]
+{{end}}
+        self._{{$d.MethodName}}_active_step = self._{{$d.MethodName}}_plan[0]
+{{else}}        self._{{$d.MethodName}}_active_step = {{pyq (index $d.StepTasks 0).Name}}
+{{end}}        flow = FlowManager(
             llm=self.llm,
             context_aggregator=LLMContextAggregatorPair(self.context),
             worker=self,
@@ -1242,22 +1271,53 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}{{if (index $d.StepTasks 0).CtxExpr}}        # context.history on this task. Shaped after the snapshot above, so the
         # finish path restores the owner's own context whatever this step saw.
         self.context.set_messages({{(index $d.StepTasks 0).CtxExpr}})
-{{end}}        await flow.initialize(self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
-{{range $t := $d.StepTasks}}
+{{end}}{{if $d.RuntimeChain}}        await flow.initialize(self._{{$d.MethodName}}_node(self._{{$d.MethodName}}_active_step))
+{{else}}        await flow.initialize(self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
+{{end}}{{if $d.RuntimeChain}}
+    def _{{$d.MethodName}}_node(self, name) -> NodeConfig:
+        """One step's node by name, because the chain is decided at run time."""
+        return {
+{{range $d.StepTasks}}            {{pyq .Name}}: self._{{$d.MethodName}}_node_{{.Name}},
+{{end}}        }[name]()
+
+    def _{{$d.MethodName}}_next(self, name):
+        """The step after this one in this invocation's plan, or None."""
+        plan = self._{{$d.MethodName}}_plan
+        position = plan.index(name) + 1
+        return plan[position] if position < len(plan) else None
+{{end}}{{range $t := $d.StepTasks}}
     def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:
-{{if $t.Reset}}        self.context.set_messages([])
+{{if $t.Withdraws}}        # Entered, so whatever it confirms is being decided again. Withdrawn
+        # before role_message renders, so this step never reads a confirmation
+        # it is about to replace.
+        _withdraw_confirmation(self.state, {{pyq $t.Name}})
+{{end}}{{if $t.Reset}}        self.context.set_messages([])
 {{else if $t.CtxExpr}}        self.context.set_messages({{$t.CtxExpr}})
 {{end}}        return NodeConfig(
             name={{pyq $t.Name}},
             role_message={{$t.PromptExpr}},
-            task_messages=[{"role": "developer", "content": "Begin this step."}],
-            functions=[
+{{if eq $t.Opening "listen"}}            # opening: listen. The line is seeded as this step's own first turn and
+            # spoken by the pre-action, and no completion is run: the caller
+            # answers a question that cost no model request. Seeded rather than
+            # left to the pre-action's own context write, because a step with
+            # history: reset replaces the message list after pre-actions run.
+            task_messages=[{{if $t.Announce}}{"role": "assistant", "content": {{pyq $t.Announce}}}{{else}}{"role": "developer", "content": "Wait for the caller."}{{end}}],
+            respond_immediately=False,
+{{if $t.Announce}}            pre_actions=[
+                {
+                    "type": "tts_say",
+                    "text": {{pyq $t.Announce}},
+                    "append_text_to_context": False,
+                }
+            ],
+{{end}}{{else}}            task_messages=[{"role": "developer", "content": "Begin this step."}],
+{{end}}            functions=[
 {{range $t.Tools}}                FlowsFunctionSchema(
                     name={{pyq .Name}},
                     description={{pyq .Description}},
                     properties={{.InputProps}},
                     required={{.InputRequired}},
-                    handler={{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq .Name}}, {{if .NeedsState}}self._bind_state(_flow_tool_{{.Name}}){{else}}_flow_tool_{{.Name}}{{end}}){{else}}{{if .NeedsState}}self._bind_state(_flow_tool_{{.Name}}){{else}}_flow_tool_{{.Name}}{{end}}{{end}},
+                    handler={{if .Terminal}}_flow_visit(self, {{pyq $d.MethodName}}, {{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq .Name}}, self._{{$d.MethodName}}_terminal_{{$t.Name}}_{{.Name}}){{else}}self._{{$d.MethodName}}_terminal_{{$t.Name}}_{{.Name}}{{end}}){{else}}{{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq .Name}}, {{if .NeedsState}}self._bind_state(_flow_tool_{{.Name}}){{else}}_flow_tool_{{.Name}}{{end}}){{else}}{{if .NeedsState}}self._bind_state(_flow_tool_{{.Name}}){{else}}_flow_tool_{{.Name}}{{end}}{{end}}{{end}},
                 ),
 {{end}}{{range $t.Transfers}}                FlowsFunctionSchema(
                     name={{pyq .MethodName}},
@@ -1280,7 +1340,18 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{range $x := $t.Transfers}}    async def _{{$d.MethodName}}_transfer_{{$t.Name}}_{{$x.MethodName}}(self, args, flow_manager):
         if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
             return {"status": "already handled"}, NO_RESPONSE
-        self._{{$d.MethodName}}_active_step = None
+{{if $t.TerminalTools}}        if any(name in {{$t.TerminalTools}} for name in self._response_calls):
+            # A tool that ends this step was called in the same response. The
+            # caller asked for two things at once, and the step's own work has
+            # to be committed before the caller is moved.
+            try:
+                await asyncio.wait_for(self._{{$d.MethodName}}_settled.wait(), timeout=30.0)
+            except asyncio.TimeoutError:
+                self._{{$d.MethodName}}_settled.set()
+            if {{pyq $t.Name}} not in self._{{$d.MethodName}}_results:
+                logger.info("handoff held: the step's own action did not complete")
+                return {"status": "not transferred: the action did not complete"}, None
+{{end}}        self._{{$d.MethodName}}_active_step = None
         flow_messages = None
         flow_tools = None
         try:
@@ -1325,6 +1396,51 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}            raise
         return {"transferred": True}, NO_RESPONSE
 
+{{end}}{{range $t.Terminals}}    async def _{{$d.MethodName}}_terminal_{{$t.Name}}_{{.Tool}}(self, args, flow_manager):
+        """Run {{.Tool}} and end this step when it says it did the work.
+
+        The result never reaches the model on a success: the tool has already
+        made the decision the model would have been asked to confirm. Anything
+        else goes back as an ordinary result and the step stays open.
+        """
+        if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
+            return {"status": "already handled"}, NO_RESPONSE
+        if self._{{$d.MethodName}}_terminal is not None:
+            logger.info({{pyq (printf "terminal tool refused: %s cannot run again in this step" .Tool)}})
+            return {"refused": {{pyq (printf "%s already succeeded in this step. Call finish to record it; a new action is a new request from the caller." .Tool)}}}, None
+        result = await _flow_tool_{{.Tool}}(args, flow_manager{{if .NeedsState}}, state=self.state{{end}})
+        if not _terminal_success(result, {{.Success}}):
+            return result, None
+        self._{{$d.MethodName}}_terminal = ({{pyq .Tool}}, result)
+        self._{{$d.MethodName}}_carried_turn = _newest_caller_message(self.context.get_messages())
+        try:
+            _values = _save_result({{pyq $t.Name}}, self.state, result)
+        except _StateRefused as refused:
+            # The action happened and the save did not. The step stays open so
+            # the model can repair it, and its mutations stay closed so the
+            # repair cannot run the action a second time.
+            self._{{$d.MethodName}}_settled.set()
+            logger.warning({{pyq (printf "terminal %s: not recorded: " .Tool)}} + refused.message)
+            return {
+                **result,
+                "refused": "Not recorded: "
+                + refused.message
+                + ". Call finish with the values this tool returned; recover a missing one with a read tool of this step, or finish with unserved_request saying the action happened and its details could not be saved.",
+            }, None
+        self._{{$d.MethodName}}_settled.set()
+        logger.info({{pyq (printf "step %s ended on %s" $t.Name .Tool)}})
+{{if .Transfers}}        if any(name in {{.Transfers}} for name in self._response_calls):
+            # A handoff was called in the same response. It owns the ending: the
+            # save is committed, and advancing here would race its transition.
+            # Recorded first, because the handoff reads this to know the step's
+            # own work actually landed.
+            self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = _values
+            return _task_status(_values), NO_RESPONSE
+{{end}}        # The finish handler owns the advance. It saves the same values a second
+        # time, which writes exactly what is already there, rather than this
+        # wrapper carrying its own copy of the step-completion tail.
+        return await self._{{$d.MethodName}}_finish_{{$t.Name}}(result, flow_manager)
+
 {{end}}    async def _{{$d.MethodName}}_finish_{{$t.Name}}(self, args, flow_manager):
         if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
             return {"status": "already handled"}, NO_RESPONSE
@@ -1341,8 +1457,25 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             return {"refused": f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."}, None
         self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = _values
 {{else}}        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
-{{end}}        self._{{$d.MethodName}}_active_step = {{if $t.NextName}}{{pyq $t.NextName}}{{else}}None{{end}}
-{{if $t.NextName}}{{if $t.SlngNextHeaders}}        # The next step is a different prompt site, so it asks under a different
+{{end}}{{if $d.RuntimeChain}}        _next = self._{{$d.MethodName}}_next({{pyq $t.Name}})
+        if self._{{$d.MethodName}}_results[{{pyq $t.Name}}].get("unserved_request"):
+            # The step could not serve what the caller asked. Running the next
+            # one would answer a question nobody asked, so the flow stops here
+            # and the owner is handed the unserved status.
+            logger.info({{pyq (printf "group stopped: %s ended unserved" $t.Name)}})
+            _next = None
+        self._{{$d.MethodName}}_active_step = _next
+        if _next is not None:
+{{if $d.StepScopes}}            # The next step is a different prompt site, so it asks under a
+            # different cache scope. Queued before the node is handed back.
+            _scope = {{$d.StepScopes}}.get(_next)
+            if _scope is not None:
+                await self.queue_frame(LLMUpdateSettingsFrame(
+                    delta=LLMSettings(extra={"extra_headers": _scope}),
+                ))
+{{end}}            return _task_status(self._{{$d.MethodName}}_results[{{pyq $t.Name}}]), self._{{$d.MethodName}}_node(_next)
+{{else}}        self._{{$d.MethodName}}_active_step = {{if $t.NextName}}{{pyq $t.NextName}}{{else}}None{{end}}
+{{end}}{{if and $t.NextName (not $d.RuntimeChain)}}{{if $t.SlngNextHeaders}}        # The next step is a different prompt site, so it asks under a different
         # cache scope. Queued before the node is handed back, for the same reason
         # the first step's was.
         await self.queue_frame(LLMUpdateSettingsFrame(
@@ -1408,7 +1541,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             ),
             deactivate_self=True,
         )
-{{else}}        self.context.set_messages(messages + [{
+{{else}}        self.context.set_messages(messages{{if $d.CarriesTurn}} + _carried_messages(messages, self._{{$d.MethodName}}_carried_turn){{end}} + [{
             "role": "developer",
             "content": json.dumps(_group_status(self._{{$d.MethodName}}_results)),
         }])
@@ -1426,7 +1559,35 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         )
 {{end}}{{end}}
 {{end}}{{end}}{{if and (not .Inline) .HasFlows}}
-def _settle_task_call(messages, name, status):
+{{if .NeedsTerminal}}def _newest_caller_message(messages):
+    """The caller turn a terminal tool call answered.
+
+    Carried back to the owner when the step ends on its own tool, because the
+    owner never saw it: the step consumed the turn and the owner's snapshot was
+    taken before it arrived.
+    """
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            return dict(message)
+    return None
+
+
+def _carried_messages(messages, carried):
+    """That turn as a list to splice in, empty when there is nothing to carry.
+
+    Skipped when the restored context already holds it, which is what a shared
+    group leaves behind, so the owner never reads the same sentence twice.
+    """
+    if not carried:
+        return []
+    for message in messages:
+        if message.get("role") == "user" and message.get("content") == carried.get("content"):
+            return []
+    logger.info("carried the caller's turn back to the owner")
+    return [carried]
+
+
+{{end}}def _settle_task_call(messages, name, status):
     """Replace this invocation's running reply before restoring the owner."""
     for message in reversed(messages):
         for call in message.get("tool_calls", []):

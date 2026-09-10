@@ -299,9 +299,11 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 			"def _flow_tool_cancel_booking(", "def _flow_tool_check_availability(",
 			"def _flow_tool_create_booking(", "def _flow_tool_find_or_create_customer(",
 			"def _flow_tool_list_bookings(", "async def _prefetch(",
-			"_manage_booking_active_step", "_manage_booking_results",
-			"_manage_booking_snapshot", "_manage_booking_finish_manage_booking",
-			"_manage_booking_transfer_manage_booking_to_complaints",
+			// The booking step runs inside the `book` group now, so the flow's
+			// symbols are named after the group rather than after the task.
+			"_book_active_step", "_book_results",
+			"_book_snapshot", "_book_finish_manage_booking",
+			"_book_transfer_manage_booking_to_complaints",
 			"_verify_customer_results", "_verify_customer_snapshot",
 			"_verify_customer_finish_verify_customer",
 		}},

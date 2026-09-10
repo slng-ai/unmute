@@ -227,7 +227,7 @@ func TestValidateTaskGroupKeepsMemberContext(t *testing.T) {
 		Context: TaskContext{History: HistorySummary, Summarizer: "group_only_summarizer"},
 	}
 	agent.TaskGroups["collect_then_end"] = TaskGroup{
-		Steps: []string{"collect"}, ContextScope: ContextShared, Then: GroupEnd, Merge: GroupMergeResults,
+		Steps: []GroupStep{{Task: "collect"}}, ContextScope: ContextShared, Then: GroupEnd, Merge: GroupMergeResults,
 	}
 	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
 	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "missing reason binding") {
@@ -3443,5 +3443,36 @@ func TestValidateTurnBindingWithLiveFieldsIsSilent(t *testing.T) {
 	}
 	if got := turnDeadFieldWarnings("detector", model); len(got) > 0 {
 		t.Errorf("a turn binding using only live fields warned: %v", got)
+	}
+}
+
+// A step that opens by listening and has nothing to say leaves the caller in
+// silence until they speak first. A warning rather than a refusal: it is a
+// legitimate shape when the caller is already mid-sentence, and the author is
+// told both ways out of it.
+func TestValidateWarnsOnASilentListenOpening(t *testing.T) {
+	agent := slngAgent(t)
+	agent.Tasks = map[string]Task{
+		"take_note": {Instructions: "Take a note.", Opening: OpeningListen},
+	}
+	report, _ := Validate(agent, []Target{targetFor(agent, ProviderSlng)}, targetcap.Default())
+	row := reportFor(report, ProviderSlng)
+	joined := strings.Join(row.Warnings, "\n")
+	for _, want := range []string{
+		"take_note opens by listening and has no announce:",
+		"the caller hears nothing until they speak",
+		"add an announce: line or drop opening: listen",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("no warning says %q; got:\n%s", want, joined)
+		}
+	}
+	// A step that speaks its line warns about nothing.
+	agent.Tasks["take_note"] = Task{Instructions: "Take a note.", Opening: OpeningListen, Announce: "What shall I pass on?"}
+	report, _ = Validate(agent, []Target{targetFor(agent, ProviderSlng)}, targetcap.Default())
+	for _, warning := range reportFor(report, ProviderSlng).Warnings {
+		if strings.Contains(warning, "opens by listening") {
+			t.Errorf("a step with an announce still warns: %s", warning)
+		}
 	}
 }

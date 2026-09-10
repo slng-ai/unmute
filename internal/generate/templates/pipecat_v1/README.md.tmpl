@@ -179,7 +179,33 @@ receiving agent. It does not return through the task owner. A task definition
 has `tools:` and `handoffs:` and no other list, so a task or an escalation on a
 task is unwritable rather than rejected: there is no key to put one in.
 
-A task that lists no handoff still has a way out. Every node's
+{{if or .TerminalSteps .SkippableSteps .ListeningSteps}}{{if .TerminalSteps}}### Steps that end on their own tool
+
+{{range .TerminalSteps}}`{{.Step}}` ends when {{.Tools}} returns a result the package calls a
+success. The step saves its `assign:` from that result and moves on with no
+model request in between, and the result never reaches the model. Anything that
+is not a success goes back to the model as an ordinary result.
+
+{{end}}After one of those tools succeeds, none of that step's own mutations runs again
+in the same invocation: a repair cannot book a second appointment. The model's
+`finish` is still there for a request the step cannot serve, for values it
+already holds, and for recording a result whose save was refused.
+
+{{end}}{{if .SkippableSteps}}### Group steps that can be skipped
+
+{{range .SkippableSteps}}`{{.Group}}` skips `{{.Step}}` when `{{.Variable}}` is confirmed as the group
+starts, and runs it otherwise. Every entry of `{{.Step}}`, standalone included,
+withdraws that confirmation until it saves the value again.
+
+{{end}}A group also stops when a step ends unserved: the later steps do not run and the
+owner is handed the unserved status.
+
+{{end}}{{if .ListeningSteps}}### Steps that open by listening
+
+{{range .ListeningSteps}}`{{.Step}}` speaks its `announce:` line once and waits for the caller. No
+opening request is made.
+
+{{end}}{{end}}{{end}}A task that lists no handoff still has a way out. Every node's
 `role_message` here ends with one generated rule: when the caller asks for
 something none of the step's tools can do, and no handoff on the step covers it,
 call that node's `finish_<task>_<step>` function right away with the closest

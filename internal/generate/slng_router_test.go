@@ -83,7 +83,7 @@ func routerFixture(t *testing.T) *ir.Agent {
 		Context:      ir.TaskContext{History: ir.HistoryFull},
 	}
 	agent.TaskGroups["triage"] = ir.TaskGroup{
-		Steps: []string{"collect", "confirm"}, ContextScope: ir.ContextIsolated,
+		Steps: []ir.GroupStep{{Task: "collect"}, {Task: "confirm"}}, ContextScope: ir.ContextIsolated,
 		Then: ir.GroupReturn, Merge: ir.GroupMergeResults,
 	}
 	agent.Controls["run_collect"] = &ir.Delegate{
@@ -553,7 +553,7 @@ func TestSlngRouterTaskAddsNoModelObject(t *testing.T) {
 	withoutTask := routerFixture(t)
 	delete(withoutTask.Tasks, "confirm")
 	withoutTask.TaskGroups["triage"] = ir.TaskGroup{
-		Steps: []string{"collect"}, ContextScope: ir.ContextIsolated,
+		Steps: []ir.GroupStep{{Task: "collect"}}, ContextScope: ir.ContextIsolated,
 		Then: ir.GroupReturn, Merge: ir.GroupMergeResults,
 	}
 	for _, tc := range routerTargets() {

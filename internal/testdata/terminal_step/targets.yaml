@@ -1,0 +1,9 @@
+targets:
+  livekit:
+    provider: livekit
+    version: "1.6.10"
+    sdk_language: python
+
+  pipecat:
+    provider: pipecat
+    version: "1.8.0"
