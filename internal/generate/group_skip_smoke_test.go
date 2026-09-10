@@ -26,6 +26,7 @@ func groupSmokeScript(module, stateExpr string) string {
 import asyncio
 import json
 import os
+import time
 from types import SimpleNamespace
 
 for name in json.load(open("compile-report.json"))["required_env"]:
@@ -97,15 +98,53 @@ async def check_livekit_handoff_branches():
     moved = await step.to_care(transfer_ctx)
     assert moved is None
     assert step.done()
-    # A tool failure keeps the step open and the transfer refuses to move.
+    # A tool failure keeps the step open and the transfer refuses to move. The
+    # failure settles the wait itself: the handoff answers promptly rather than
+    # sitting out the timeout.
     failing = verified_state()
     ctx.userdata = failing
     transfer_ctx.userdata = failing
     held = generated.Book()
-    held._terminal_settled.set()
-    answer = await held.to_care(transfer_ctx)
+    held._begin_terminal()
+    started = time.monotonic()
+    not_confirmed = {"status": "not_confirmed", "summary": "The caller has not agreed yet."}
+    failed, answer = await asyncio.gather(
+        held._end_on_book_it(ctx, not_confirmed), held.to_care(transfer_ctx)
+    )
+    assert failed == not_confirmed
     assert isinstance(answer, str) and "was not moved" in answer, answer
+    assert time.monotonic() - started < 5, "the handoff waited for the timeout, not the settlement"
     assert not held.done()
+    # A handoff that arrives in a later response while the mutation is still
+    # running waits for it, and then owns the ending: the booking is committed
+    # and the caller is moved, once.
+    later = verified_state()
+    waiting = generated.Book()
+    slow_ctx = SimpleNamespace(
+        userdata=later, session=SimpleNamespace(), function_call=booking_call,
+        speech_handle=SimpleNamespace(chat_items=[booking_call]),
+    )
+    alone_ctx = SimpleNamespace(
+        userdata=later, session=SimpleNamespace(), function_call=transfer_call,
+        speech_handle=SimpleNamespace(chat_items=[transfer_call]),
+    )
+    original_tool = generated.tools.book_it.book_it
+
+    async def slow_book_it(*args, **kwargs):
+        await asyncio.sleep(0.1)
+        return original_tool(*args, **kwargs)
+
+    generated.tools.book_it.book_it = slow_book_it
+    try:
+        ended, moved = await asyncio.gather(
+            waiting.book_it(slow_ctx, confirmed=True, service="haircut"),
+            waiting.to_care(alone_ctx),
+        )
+    finally:
+        generated.tools.book_it.book_it = original_tool
+    assert ended is None and moved is None, (ended, moved)
+    assert later.booking["reference"] == "bkg_0001"
+    assert waiting.done()
     # A save failure is the same answer, and the result stays in front of the
     # model with the repair instruction.
     refusing = generated.Book()

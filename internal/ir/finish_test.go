@@ -177,6 +177,74 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
 			phrases: []string{"book_it", "take_booking", "does not list under tools:"},
 		},
 		{
+			// propertyResultField types an output as text unless the schema
+			// says integer, number or boolean, so an object read as text and
+			// passed, and the mismatch surfaced after the business tool ran.
+			name:      "an object output on a plain destination",
+			variables: finishVariables,
+			task: `      - name: take_booking
+        when: The caller wants an appointment.
+        instructions: steps.md
+        tools:
+          - book_it
+        finish:
+          - tool: book_it
+            success:
+              - status: booked
+        assign:
+          - booking_reference: result.reference
+`,
+			output: `  type: object
+  properties:
+    status:
+      type: string
+      enum:
+        - booked
+        - slot_unavailable
+    reference:
+      type: object
+      properties:
+        id:
+          type: string
+  required:
+    - status
+    - reference
+`,
+			phrases: []string{"book_it", "reference", "object", "one plain value"},
+		},
+		{
+			name:      "an array output on a plain destination",
+			variables: finishVariables,
+			task: `      - name: take_booking
+        when: The caller wants an appointment.
+        instructions: steps.md
+        tools:
+          - book_it
+        finish:
+          - tool: book_it
+            success:
+              - status: booked
+        assign:
+          - booking_reference: result.reference
+`,
+			output: `  type: object
+  properties:
+    status:
+      type: string
+      enum:
+        - booked
+        - slot_unavailable
+    reference:
+      type: array
+      items:
+        type: string
+  required:
+    - status
+    - reference
+`,
+			phrases: []string{"book_it", "reference", "array", "one plain value"},
+		},
+		{
 			name:      "a success field with no enum",
 			variables: finishVariables,
 			task: `      - name: take_booking

@@ -1067,13 +1067,13 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 	default:
 		return livekitDelegate{}, fmt.Errorf("delegate %q group %q: livekit driver cannot lower then %q", ref, c.Group, group.Then)
 	}
-	for i, step := range group.Steps {
+	for _, step := range group.Steps {
 		delegate.Steps = append(delegate.Steps, livekitStep{
 			Class: pyName(step.Task), ID: step.Task, Desc: humanize(step.Task),
 			SkipWhenConfirmed: step.SkipWhenConfirmed,
 			Terminal:          len(agent.Tasks[step.Task].Finish) > 0,
-			EndsFlow:          pyLiteral(i == len(group.Steps)-1),
 		})
+		delegate.HasSkips = delegate.HasSkips || step.SkipWhenConfirmed != ""
 		delegate.CanTaskTransfer = delegate.CanTaskTransfer || livekitTaskCanTransfer(agent, agent.Tasks[step.Task])
 	}
 	return delegate, nil

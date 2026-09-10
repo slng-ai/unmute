@@ -841,8 +841,21 @@ class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
         owner_ctx = self.chat_ctx.copy()
         try:
             task_results = {}
-            task_results["collect"] = await Collect(chat_ctx=llm.ChatContext())
-            task_results["confirm"] = await Confirm(chat_ctx=llm.ChatContext())
+            # The steps this invocation will run, decided once as it starts.
+            _plan = ["collect", "confirm"]
+            _steps = {
+                "collect": lambda: Collect(chat_ctx=llm.ChatContext()),
+                "confirm": lambda: Confirm(chat_ctx=llm.ChatContext()),
+            }
+            for _id in _plan:
+                _step = _steps[_id]()
+                task_results[_id] = await _step
+                if isinstance(task_results[_id], dict) and task_results[_id].get("unserved_request"):
+                    # The step could not serve what the caller asked. Running
+                    # the next one would answer a question nobody asked, so the
+                    # sequence stops here, the same way a shared group does.
+                    logger.info("group stopped: " + _id + " ended unserved")
+                    break
         finally:
             await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
         dev_metrics.dev_task_returned(ctx, *task_results.values())

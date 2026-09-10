@@ -11,13 +11,14 @@ import (
 func TestAGroupSkipsAConfirmedStep(t *testing.T) {
 	livekit := terminalModule(t, "livekit", "agent.py")
 	for _, want := range []string{
+		// The shared group decides per step as it is built.
+		`if _is_confirmed(ctx.userdata, "customer_phone"):`,
+		`logger.info("skipped verify: customer_phone is already confirmed")`,
+		// The isolated sequence decides once, as a plan it then walks.
 		`if not (confirmed and _is_confirmed(ctx.userdata, confirmed))`,
 		`("verify", "customer_phone"),`,
-		`if "verify" in _plan:`,
-		`logger.info("skipped verify: customer_phone is already confirmed")`,
-		// The last step that will actually run knows it ends the flow, so the
-		// owner is asked to confirm rather than the caller hearing nothing.
-		`ends_flow=_plan[-1] == "book"`,
+		`if "verify" not in _plan:`,
+		"for _id in _plan:",
 	} {
 		if !strings.Contains(livekit, want) {
 			t.Errorf("livekit agent.py missing %q", want)
@@ -113,7 +114,9 @@ func TestAGroupStopsOnUnserved(t *testing.T) {
 func TestAHandoffWaitsForATerminalCallToSettle(t *testing.T) {
 	livekit := terminalModule(t, "livekit", "agent.py")
 	for _, want := range []string{
-		`if _sibling_call(ctx, {"book_it", "cancel_it"}):`,
+		// Waits on a mutation in flight from any response, or one called
+		// beside it in this response and not started yet.
+		`if self._terminal_pending or _sibling_call(ctx, {"book_it", "cancel_it"}):`,
 		"await asyncio.wait_for(self._terminal_settled.wait(), timeout=30.0)",
 		"if self._finish_call_id is None:",
 		"The action did not complete, so the caller was not moved.",
@@ -131,7 +134,7 @@ func TestAHandoffWaitsForATerminalCallToSettle(t *testing.T) {
 	}
 	pipecat := terminalModule(t, "pipecat", "bot.py")
 	for _, want := range []string{
-		`if any(name in {"book_it", "cancel_it"} for name in self._response_calls):`,
+		`if self._do_book_pending or any(name in {"book_it", "cancel_it"} for name in self._response_calls):`,
 		"await asyncio.wait_for(self._do_book_settled.wait(), timeout=30.0)",
 		`if "book" not in self._do_book_results:`,
 		`return {"status": "not transferred: the action did not complete"}, None`,

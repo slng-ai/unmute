@@ -177,6 +177,14 @@ func terminalPropertyFits(tool, field string, property map[string]any, want *Typ
 	if want != nil && want.Shape == "" && want.List == nil && want.Shaped == "" && len(want.Literal) == 0 {
 		want, wantPrimitive = nil, want.Primitive
 	}
+	// Everything from here down holds one plain value. propertyResultField
+	// types an output as text unless the schema says integer, number or
+	// boolean, so an object or an array read as text and passed: the mismatch
+	// surfaced only after the business tool had already run.
+	if word, _ := property["type"].(string); word == "object" || word == "array" {
+		return fmt.Errorf("%s returns %s as %s; the destination holds one plain value, so the tool has to return one",
+			tool, field, word)
+	}
 	// Plain: the same predicate a step's assign: and a pre-fetch are held to, so
 	// three checks cannot drift into three answers.
 	if err := assignableInto(want, wantPrimitive, propertyResultField(property)); err != nil {

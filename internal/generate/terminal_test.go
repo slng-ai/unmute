@@ -93,7 +93,11 @@ func TestTerminalToolEndsTheStepOnBothTargets(t *testing.T) {
 		"async def _do_book_terminal_book_book_it(self, args, flow_manager):",
 		"result = await _flow_tool_book_it(args, flow_manager, state=self.state)",
 		`_values = _save_result("book", self.state, result)`,
-		"return await self._do_book_finish_book(result, flow_manager)",
+		// The wrapper saves once and hands the saved values to the finish
+		// handler's tail. Going through the finish handler saved twice, and a
+		// second save is a second entry on every list an assign appends to.
+		"return await self._do_book_advance_book(_values)",
+		"async def _do_book_advance_book(self, _values):",
 	} {
 		if !strings.Contains(pipecat, want) {
 			t.Errorf("pipecat bot.py missing %q", want)
@@ -186,8 +190,13 @@ func TestTheCarriedTurnReachesTheOwnerOnce(t *testing.T) {
 	pipecat := terminalModule(t, "pipecat", "bot.py")
 	for _, want := range []string{
 		"def _newest_caller_message(messages):",
-		"def _carried_messages(messages, carried):",
-		"_carried_messages(messages, self._do_book_carried_turn)",
+		// Decided where the turn is captured, by counting the caller's turns
+		// against the owner's snapshot: matching on text dropped a caller who
+		// said the same word twice.
+		"def _caller_turns(messages):",
+		"self._do_book_snapshot_turns = _caller_turns(self.context.get_messages())",
+		"if _caller_turns(_messages) > self._do_book_snapshot_turns:",
+		"_carried_messages(self._do_book_carried_turn)",
 	} {
 		if !strings.Contains(pipecat, want) {
 			t.Errorf("pipecat bot.py missing %q", want)

@@ -212,6 +212,11 @@ type livekitDelegate struct {
 	// front of the owner. False for every delegate whose steps all end the way
 	// they always did, which is what keeps their emitted method unchanged.
 	CarriesTurn bool
+	// HasSkips says some step of this group carries `skip_when_confirmed:`. An
+	// isolated sequence builds its plan as a filtered comprehension only then,
+	// so a group with no skippable step never names the confirmation helper the
+	// package does not emit, which the emitted project's own ruff gate refuses.
+	HasSkips bool
 	// RefreshOwnerPrompt re-renders the owning agent's prompt after this step's
 	// `assign:` writes, because the owner's prompt is rendered in on_enter and
 	// the owner is entered once per call. See livekitAgent.RefreshPrompt.
@@ -275,12 +280,8 @@ type livekitStep struct {
 	// SkipWhenConfirmed is the variable whose confirmation lets the group skip
 	// this step, empty when the step always runs.
 	SkipWhenConfirmed string
-	// Terminal says this step can end on its own tool, so its class takes the
-	// ends_flow argument.
+	// Terminal says this step can end on its own tool.
 	Terminal bool
-	// EndsFlow is the compile-time answer for an isolated sequence, whose steps
-	// are awaited in order and cannot be skipped past.
-	EndsFlow string
 }
 
 // livekitTerminal is one tool a step ends on.

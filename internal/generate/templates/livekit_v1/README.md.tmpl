@@ -173,7 +173,9 @@ is not a success goes back to the model as an ordinary result.
 {{end}}After one of those tools succeeds, none of that step's own mutations runs again
 in the same invocation: a repair cannot book a second appointment. The model's
 `finish` is still there for a request the step cannot serve, for values it
-already holds, and for recording a result whose save was refused.
+already holds, and for recording a result whose save was refused; that repair
+keeps the values the tool returned. The step says nothing after its tool: the
+next step opens, or the owner speaks once when the flow returns.
 
 {{end}}{{if .SkippableSteps}}### Group steps that can be skipped
 

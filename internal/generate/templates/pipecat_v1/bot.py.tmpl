@@ -1229,6 +1229,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         # event a sibling handoff waits on, and the caller turn the step
         # consumed on its way out.
         self._{{$d.MethodName}}_terminal = None
+        self._{{$d.MethodName}}_pending = False
         self._{{$d.MethodName}}_settled = asyncio.Event()
         self._{{$d.MethodName}}_carried_turn = None
 {{end}}{{if $d.RuntimeChain}}        # The steps this invocation will run, decided once as the flow starts.
@@ -1261,7 +1262,10 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         # restoration erases that call and the unchanged request delegates again.
         await self.flush_pipeline()
         self._{{$d.MethodName}}_snapshot = (copy.deepcopy(self.context.get_messages()), self.context.tools)
-{{if (index $d.StepTasks 0).SlngHeaders}}        # The step's own cache scope, queued before the node is entered so it is
+{{if $d.CarriesTurn}}        # How many caller turns the owner has seen, so a step that ends on its
+        # tool can tell whether the turn it consumed is one the owner never saw.
+        self._{{$d.MethodName}}_snapshot_turns = _caller_turns(self.context.get_messages())
+{{end}}{{if (index $d.StepTasks 0).SlngHeaders}}        # The step's own cache scope, queued before the node is entered so it is
         # ahead of the frame that triggers the step's first completion. That
         # first request is the one that collided: it asks with the task's prompt,
         # so it has to ask under the task's scope, not this agent's.
@@ -1285,9 +1289,22 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         plan = self._{{$d.MethodName}}_plan
         position = plan.index(name) + 1
         return plan[position] if position < len(plan) else None
+{{end}}{{if $d.CarriesTurn}}
+    def _{{$d.MethodName}}_settle(self):
+        """The running mutation is over, one way or another."""
+        self._{{$d.MethodName}}_pending = False
+        self._{{$d.MethodName}}_settled.set()
 {{end}}{{range $t := $d.StepTasks}}
     def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:
-{{if $t.Withdraws}}        # Entered, so whatever it confirms is being decided again. Withdrawn
+{{if $d.CarriesTurn}}        # This step's own ending, whatever the step before it did. Held on the
+        # flow rather than the step, so the tool that ended the previous step
+        # closed this one's mutations too: a verified caller was told their
+        # first booking had already succeeded.
+        self._{{$d.MethodName}}_terminal = None
+        self._{{$d.MethodName}}_pending = False
+        self._{{$d.MethodName}}_settled.clear()
+        self._{{$d.MethodName}}_carried_turn = None
+{{end}}{{if $t.Withdraws}}        # Entered, so whatever it confirms is being decided again. Withdrawn
         # before role_message renders, so this step never reads a confirmation
         # it is about to replace.
         _withdraw_confirmation(self.state, {{pyq $t.Name}})
@@ -1340,14 +1357,18 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{range $x := $t.Transfers}}    async def _{{$d.MethodName}}_transfer_{{$t.Name}}_{{$x.MethodName}}(self, args, flow_manager):
         if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
             return {"status": "already handled"}, NO_RESPONSE
-{{if $t.TerminalTools}}        if any(name in {{$t.TerminalTools}} for name in self._response_calls):
-            # A tool that ends this step was called in the same response. The
-            # caller asked for two things at once, and the step's own work has
-            # to be committed before the caller is moved.
+{{if $t.TerminalTools}}        if self._{{$d.MethodName}}_pending or any(name in {{$t.TerminalTools}} for name in self._response_calls):
+            # A tool that ends this step is running, or was called in the same
+            # response and has not started yet. The caller asked for two things
+            # at once, and the step's own work has to be committed before the
+            # caller is moved.
             try:
                 await asyncio.wait_for(self._{{$d.MethodName}}_settled.wait(), timeout=30.0)
             except asyncio.TimeoutError:
-                self._{{$d.MethodName}}_settled.set()
+                self._{{$d.MethodName}}_settle()
+            if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
+                # The flow moved on while this handoff waited.
+                return {"status": "already handled"}, NO_RESPONSE
             if {{pyq $t.Name}} not in self._{{$d.MethodName}}_results:
                 logger.info("handoff held: the step's own action did not complete")
                 return {"status": "not transferred: the action did not complete"}, None
@@ -1408,18 +1429,41 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         if self._{{$d.MethodName}}_terminal is not None:
             logger.info({{pyq (printf "terminal tool refused: %s cannot run again in this step" .Tool)}})
             return {"refused": {{pyq (printf "%s already succeeded in this step. Call finish to record it; a new action is a new request from the caller." .Tool)}}}, None
-        result = await _flow_tool_{{.Tool}}(args, flow_manager{{if .NeedsState}}, state=self.state{{end}})
+        # In flight from here until settled, whichever response called it: a
+        # handoff or a finish arriving while it runs waits for it rather than
+        # moving the caller past an action nobody recorded.
+        _visit = self._{{$d.MethodName}}_visit
+        self._{{$d.MethodName}}_pending = True
+        self._{{$d.MethodName}}_settled.clear()
+        try:
+            result = await _flow_tool_{{.Tool}}(args, flow_manager{{if .NeedsState}}, state=self.state{{end}})
+        except BaseException:
+            self._{{$d.MethodName}}_settle()
+            raise
+        if self._{{$d.MethodName}}_visit is not _visit or self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
+            # The flow moved while the tool ran. Nothing here may write state
+            # a later step now owns, so the result goes back as it is.
+            self._{{$d.MethodName}}_settle()
+            return result, None
         if not _terminal_success(result, {{.Success}}):
+            # A failed action has nothing to save, and it still settles: a
+            # handoff waiting beside it stops waiting and leaves the caller here.
+            self._{{$d.MethodName}}_settle()
             return result, None
         self._{{$d.MethodName}}_terminal = ({{pyq .Tool}}, result)
-        self._{{$d.MethodName}}_carried_turn = _newest_caller_message(self.context.get_messages())
+        _messages = self.context.get_messages()
+        if _caller_turns(_messages) > {{if $t.Reset}}0{{else}}self._{{$d.MethodName}}_snapshot_turns{{end}}:
+            # The turn this call answered arrived after the owner's snapshot, so
+            # the owner never saw it. Counted rather than matched on its text,
+            # because a caller who says the same word twice has said it twice.
+            self._{{$d.MethodName}}_carried_turn = _newest_caller_message(_messages)
         try:
             _values = _save_result({{pyq $t.Name}}, self.state, result)
         except _StateRefused as refused:
             # The action happened and the save did not. The step stays open so
             # the model can repair it, and its mutations stay closed so the
             # repair cannot run the action a second time.
-            self._{{$d.MethodName}}_settled.set()
+            self._{{$d.MethodName}}_settle()
             logger.warning({{pyq (printf "terminal %s: not recorded: " .Tool)}} + refused.message)
             return {
                 **result,
@@ -1427,7 +1471,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                 + refused.message
                 + ". Call finish with the values this tool returned; recover a missing one with a read tool of this step, or finish with unserved_request saying the action happened and its details could not be saved.",
             }, None
-        self._{{$d.MethodName}}_settled.set()
+        self._{{$d.MethodName}}_settle()
         logger.info({{pyq (printf "step %s ended on %s" $t.Name .Tool)}})
 {{if .Transfers}}        if any(name in {{.Transfers}} for name in self._response_calls):
             # A handoff was called in the same response. It owns the ending: the
@@ -1436,15 +1480,31 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             # own work actually landed.
             self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = _values
             return _task_status(_values), NO_RESPONSE
-{{end}}        # The finish handler owns the advance. It saves the same values a second
-        # time, which writes exactly what is already there, rather than this
-        # wrapper carrying its own copy of the step-completion tail.
-        return await self._{{$d.MethodName}}_finish_{{$t.Name}}(result, flow_manager)
+{{end}}        # Saved once, above. The advance is the finish handler's own tail,
+        # shared rather than copied, and it saves nothing itself: a second save
+        # wrote a second entry onto every list an assign appends to.
+        return await self._{{$d.MethodName}}_advance_{{$t.Name}}(_values)
 
 {{end}}    async def _{{$d.MethodName}}_finish_{{$t.Name}}(self, args, flow_manager):
         if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
             return {"status": "already handled"}, NO_RESPONSE
-{{if $t.Typed}}        # Validated before anything is recorded: a value that does not fit its
+{{if $t.Terminals}}        if self._{{$d.MethodName}}_pending:
+            # A tool that ends this step is still running, and its result
+            # decides the step. Wait for it rather than ending the step under it
+            # and leaving what it did unrecorded.
+            try:
+                await asyncio.wait_for(self._{{$d.MethodName}}_settled.wait(), timeout=30.0)
+            except asyncio.TimeoutError:
+                self._{{$d.MethodName}}_settle()
+            if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
+                return {"status": "already handled"}, NO_RESPONSE
+        args = dict(args)
+        if self._{{$d.MethodName}}_terminal is not None:
+            # Repairing a save the tool already made. The tool's own values win
+            # where they validate: the model cannot manufacture a reference, and
+            # a repair that retyped one would record an action nobody took.
+            args = _merge_retained({{pyq $t.Name}}, args, self._{{$d.MethodName}}_terminal[1])
+{{end}}{{if $t.Typed}}        # Validated before anything is recorded: a value that does not fit its
         # declared type never enters the state, the previous contents stand, and
         # the message goes back to the model so it can correct itself on the next
         # turn instead of the step recording something wrong. This framework
@@ -1455,7 +1515,11 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         except _StateRefused as refused:
             logger.warning("finish {}: {}", {{pyq $t.Name}}, refused.message)
             return {"refused": f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."}, None
-        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = _values
+{{if $t.Terminals}}        return await self._{{$d.MethodName}}_advance_{{$t.Name}}(_values)
+
+    async def _{{$d.MethodName}}_advance_{{$t.Name}}(self, _values):
+        """Move the flow on with this step's saved values: the next step, the owner, or the end."""
+{{end}}        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = _values
 {{else}}        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
 {{end}}{{if $d.RuntimeChain}}        _next = self._{{$d.MethodName}}_next({{pyq $t.Name}})
         if self._{{$d.MethodName}}_results[{{pyq $t.Name}}].get("unserved_request"):
@@ -1541,7 +1605,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             ),
             deactivate_self=True,
         )
-{{else}}        self.context.set_messages(messages{{if $d.CarriesTurn}} + _carried_messages(messages, self._{{$d.MethodName}}_carried_turn){{end}} + [{
+{{else}}        self.context.set_messages(messages{{if $d.CarriesTurn}} + _carried_messages(self._{{$d.MethodName}}_carried_turn){{end}} + [{
             "role": "developer",
             "content": json.dumps(_group_status(self._{{$d.MethodName}}_results)),
         }])
@@ -1572,17 +1636,20 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
     return None
 
 
-def _carried_messages(messages, carried):
+def _caller_turns(messages):
+    """How many turns the caller has taken in this message list."""
+    return sum(1 for message in messages if message.get("role") == "user")
+
+
+def _carried_messages(carried):
     """That turn as a list to splice in, empty when there is nothing to carry.
 
-    Skipped when the restored context already holds it, which is what a shared
-    group leaves behind, so the owner never reads the same sentence twice.
+    Whether there is one was decided where it was captured, by counting the
+    caller's turns against the owner's snapshot rather than matching text, so a
+    caller who repeated a word is not read as having said it once.
     """
     if not carried:
         return []
-    for message in messages:
-        if message.get("role") == "user" and message.get("content") == carried.get("content"):
-            return []
     logger.info("carried the caller's turn back to the owner")
     return [carried]
 
