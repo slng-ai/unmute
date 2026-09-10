@@ -178,8 +178,8 @@ There is no local telephony run, so never offer one. Flags:
 
 | Flag | What it does |
 |---|---|
-| `--port` | port for the local dev UI (default `8765`) |
-| `--bot-port` | host port for the local agent runtime (default `7860`) |
+| `--port` | port for the local dev UI (default `8765`; a busy default gives way to a free port) |
+| `--bot-port` | host port for the local agent runtime (default `7860`; a busy default gives way to a free port) |
 | `--target` | target instance name; required without a TTY when the package declares more than one |
 | `--var name=value` | seed a `call_start` variable, repeatable |
 | `--no-open` | do not open the browser automatically |

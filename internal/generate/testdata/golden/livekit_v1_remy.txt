@@ -78,8 +78,10 @@ cp .env.example .env          # then fill in the selected provider values
 uv run python -m livekit.agents start agent.py   # run the worker
 ```
 
-`unmute dev` uses local LiveKit ports `7880`–`7882`. To run beside another
-LiveKit stack, move all three together:
+`unmute dev` publishes the local LiveKit server on ports `7880` to `7882`. When
+they are busy, most often because another `unmute dev` session holds them, it
+moves to the next free set of three (`7890` to `7892`, and so on). To pin the
+set yourself, set all three together:
 
 ```sh
 LIVEKIT_HOST_PORT=7890 LIVEKIT_TCP_HOST_PORT=7891 LIVEKIT_UDP_HOST_PORT=7892 \
@@ -1673,6 +1675,11 @@ services:
       - "${LIVEKIT_HOST_PORT:-7880}:7880"
       - "${LIVEKIT_TCP_HOST_PORT:-7881}:${LIVEKIT_TCP_HOST_PORT:-7881}"
       - "${LIVEKIT_UDP_HOST_PORT:-7882}:${LIVEKIT_UDP_HOST_PORT:-7882}/udp"
+    # The `unmute dev` process that started this stack. The next run stops a
+    # stack whose process is gone; a stack started by hand has no pid and is
+    # left alone.
+    labels:
+      - "unmute.dev.pid=${UNMUTE_DEV_PID:-}"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/"]
       interval: 2s
@@ -1703,6 +1710,8 @@ services:
       - UNMUTE_DEV_METRICS
       # optional: set by `unmute dev`; absent otherwise
       - UNMUTE_LOCAL_RUN
+    labels:
+      - "unmute.dev.pid=${UNMUTE_DEV_PID:-}"
     depends_on:
       livekit_server:
         condition: service_healthy

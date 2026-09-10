@@ -139,9 +139,10 @@ use the current directory.
     `--verbose` to follow the same log in your terminal while it runs.
   </Accordion>
   <Accordion title="Port already in use">
-    Another dev run is holding the port. Either stop it, or pass different
-    ports: `--port 8790` for the web page and `--bot-port 7890` for the agent
-    container.
+    This only happens for a port you passed yourself. With no `--port` or
+    `--bot-port`, `unmute dev` picks a free one and prints the URL. Either stop
+    the run holding the port, or pass another one: `--port 8790` for the web
+    page and `--bot-port 7890` for the agent.
   </Accordion>
 </AccordionGroup>
 
