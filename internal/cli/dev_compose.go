@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -151,11 +152,18 @@ func reapAbandonedStacks(ctx context.Context, env []string, logSink, errW io.Wri
 	}
 }
 
-// processAlive reports whether pid is running. EPERM means it is, under another
-// user.
+// processAlive reports whether pid is running, through the documented idiom: a
+// signal 0 on the os.Process, since FindProcess always succeeds on Unix. EPERM
+// means alive under another user. Windows cannot send a signal 0, so there
+// every pid reads as alive and nothing is ever reaped, which is the safe side.
+// (syscall.Kill itself is not defined on Windows and broke the release build.)
 func processAlive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = process.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, syscall.EPERM) || runtime.GOOS == "windows"
 }
 
 // warnDownFailed names the one thing the reader has to do when a stack could not

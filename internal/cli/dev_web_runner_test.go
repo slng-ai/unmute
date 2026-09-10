@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -173,6 +174,9 @@ func TestDevComposeReportsAFailedDown(t *testing.T) {
 // caught like ctrl-c, or the process dies before the deferred teardown and the
 // stack keeps its ports. Were it not caught, this test binary would die here.
 func TestDevWebTearsDownOnHangup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no SIGHUP on Windows")
+	}
 	dir := copySafeCore(t)
 	tmp := t.TempDir()
 	script := filepath.Join(tmp, "docker")
@@ -198,7 +202,8 @@ func TestDevWebTearsDownOnHangup(t *testing.T) {
 		for time.Now().Before(deadline) {
 			raw, _ := os.ReadFile(trace)
 			if strings.Contains(string(raw), " logs ") {
-				_ = syscall.Kill(os.Getpid(), syscall.SIGHUP)
+				self, _ := os.FindProcess(os.Getpid())
+				_ = self.Signal(syscall.SIGHUP)
 				return
 			}
 			time.Sleep(10 * time.Millisecond)
