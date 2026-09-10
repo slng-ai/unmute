@@ -340,7 +340,7 @@ models:
     detector:
       provider: local
       model: silero
-      pace: snappy
+      pace: balanced
 
 tools:
   - find_or_create_customer
