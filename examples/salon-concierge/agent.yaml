@@ -99,6 +99,10 @@ agents:
         handoffs:
           - to_concierge
           - to_complaints
+        finish:
+          - tool: record_complaint
+            success:
+              - status: recorded
         assign:
           - complaints+: result.complaint
         context:

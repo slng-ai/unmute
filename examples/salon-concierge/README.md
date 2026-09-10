@@ -31,16 +31,7 @@ Booking does create, modify and cancel in one task and saves a typed Appointment
 Taking the confirmation contact is its own step, so a caller who does not want an
 email never has to give one and a booking is never held up by a missing address.
 Customer care records complaints in its own task and appends typed Complaint
-values. Customer care offers verification too, and
-it does that with a bare name in its own `tasks:` list rather than a second copy:
-
-```yaml
-  complaint_specialist:
-    tasks:
-      - verify_customer
-```
-
-so there is one definition, one prompt, and one name in the emitted project.
+values. It does not verify anyone: see "One agent verifies" below.
 
 **Spoken messages across every task and handoff.** Each context block declares
 `history: messages`, also the framework default. The receiver gets the caller
@@ -72,16 +63,33 @@ booking on the same call goes straight to the booking step; a caller who
 corrects their number gets verification again, because entering that step
 withdraws the confirmation it made.
 
-**Both steps end on their own tools.** `verify_customer` names its lookup under
-`finish:`, and `manage_booking` names its three mutations. When one of those
-returns a result the package calls a success, the step saves its `assign:` from
-that result and hands over, with no model request in between and without the
-result reaching the model. A result that is not a success, a `not_confirmed` or
-a `slot_unavailable`, goes back to the model and the step stays open.
+**Three steps end on their own tools.** `verify_customer` names its lookup
+under `finish:`, `manage_booking` names its three mutations, and
+`handle_complaint` names `record_complaint`. When one of those returns a result
+the package calls a success, the step saves its `assign:` from that result and
+hands over, with no model request in between and without the result reaching
+the model. A result that is not a success, a `not_confirmed` or a
+`slot_unavailable`, goes back to the model and the step stays open.
 
-Together those two facts take three model requests out of one booking: the
+Together those facts take three model requests out of one booking: the
 verification `finish`, the concierge's routing call, and the booking `finish`.
 The one request left on the turn that books is the concierge saying it is done.
+Recording a complaint loses its `finish` the same way.
+
+Each of those tools returns the record it saved, whole, on success:
+`create_booking` returns the `appointment` and `record_complaint` returns the
+`complaint`. That is what makes the step's `assign:` possible without the
+model, and it is the reason the model can never retype an id it was handed.
+
+**One agent verifies.** `verify_customer` is on the concierge and nowhere else.
+A live call had the complaint specialist run it again on a caller it had
+already verified, with its own prompt and the step's `when:` both saying not
+to: a step in reach beats a prompt rule. Every tool that needs the number
+refuses while it is unconfirmed, so the gate is still there.
+
+**One agent asks for agreement.** The specialist says the complaint back and
+asks once; `handle_complaint` records what was agreed and asks nothing. Both
+asking cost the caller a whole turn to learn nothing.
 
 **Two rules live in the booking backend, not the prompt.** `create_booking`
 refuses with `has_booking` while the caller already holds one, unless the model

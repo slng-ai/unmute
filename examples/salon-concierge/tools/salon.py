@@ -348,13 +348,25 @@ def record_complaint(customer_phone, summary, requested_resolution=""):
         if caller not in _state.customers:
             return {"complaint_id": "", "status": "customer_not_found"}
         complaint_id = f"cmp_{uuid4().hex[:12]}"
+        clean_resolution = " ".join(str(requested_resolution).split())
         _state.complaints[complaint_id] = {
             "customer_phone": caller,
             "summary": clean_summary,
-            "requested_resolution": " ".join(str(requested_resolution).split()),
+            "requested_resolution": clean_resolution,
             "created_at": _now(),
         }
-    return {"complaint_id": complaint_id, "status": "recorded"}
+    return {
+        "complaint_id": complaint_id,
+        "status": "recorded",
+        # The saved record, complete on success and absent otherwise. The step
+        # saves this without asking the model to reassemble it, which is a model
+        # request that decided nothing and a chance to retype the id.
+        "complaint": {
+            "complaint_id": complaint_id,
+            "summary": clean_summary,
+            "requested_resolution": clean_resolution,
+        },
+    }
 
 
 def _demo():
@@ -488,7 +500,16 @@ def _demo():
     assert (
         record_complaint("555 000 0000", "Uneven cut.")["status"] == "customer_not_found"
     )
-    complaint = record_complaint(customer, "My cut was uneven.")
+    complaint = record_complaint(customer, "My cut  was   uneven.", "A redo")
+    # The saved record comes back whole on success: the step saves this without
+    # a model request in between, so a half-filled record here is a half-filled
+    # record in the call state.
+    assert complaint["complaint"] == {
+        "complaint_id": complaint["complaint_id"],
+        "summary": "My cut was uneven.",
+        "requested_resolution": "A redo",
+    }, complaint
+    assert "complaint" not in record_complaint(customer, "   ")
     assert complaint["status"] == "recorded"
     assert _state.complaints[complaint["complaint_id"]]["customer_phone"] == "15550101010"
 

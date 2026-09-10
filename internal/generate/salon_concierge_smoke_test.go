@@ -465,12 +465,15 @@ async def split_verification_then_intent_change():
         requested_resolution="A manager callback",
         summary="The last visit did not meet expectations.",
     )
-    assert recorded["status"] == "recorded"
-    value = dict(complaint_id=recorded["complaint_id"],
-                 summary="The last visit did not meet expectations.",
-                 requested_resolution="A manager callback")
-    await complaint_task.finish(run_context(userdata, "complaint-finish"), complaint=value)
-    assert userdata.complaints == [value]
+    # The tool ends the step: nothing comes back, the step completed once, and
+    # the record the tool returned is on the list. One entry, not two: this
+    # assign appends, so a second save would be visible here.
+    assert recorded is None, recorded
+    assert len(complaint_task.completions) == 1, complaint_task.completions
+    assert len(userdata.complaints) == 1, userdata.complaints
+    value = userdata.complaints[0]
+    assert value["summary"] == "The last visit did not meet expectations.", value
+    assert value["requested_resolution"] == "A manager callback", value
     return {"customer_phone": saved_phone, "customer_status": userdata.customer_status}
 
 
@@ -608,7 +611,7 @@ class Flow:
 bot.FlowManager = Flow
 
 
-async def enter_book(worker):
+async def enter(worker, name):
     """Run the real delegate entry and return the node it opened on.
 
     Through the delegate rather than hand-seeded attributes: the first live
@@ -619,8 +622,12 @@ async def enter_book(worker):
     async def resolved(*_args, **_kwargs):
         pass
 
-    await worker.book(SimpleNamespace(result_callback=resolved))
+    await getattr(worker, name)(SimpleNamespace(result_callback=resolved))
     return Flow.nodes[-1]
+
+
+async def enter_book(worker):
+    return await enter(worker, "book")
 
 
 def handlers(node):
@@ -809,19 +816,23 @@ async def split_verification_then_intent_change():
         state=state, context=context, call_context={}
     )
     await quiet(complaint_worker)
-    value = dict(summary="The last visit did not meet expectations.",
-                 requested_resolution="A manager callback")
-    recorded = await bot._flow_tool_record_complaint(
-        value, SimpleNamespace(worker=complaint_worker), state=state)
-    assert recorded["status"] == "recorded"
-    value["complaint_id"] = recorded["complaint_id"]
-    complaint_worker._handle_complaint_active_step = "handle_complaint"
-    complaint_worker._handle_complaint_results = {}
-    complaint_worker._handle_complaint_snapshot = (context.get_messages(), context.tools)
-    result, _ = await complaint_worker._handle_complaint_finish_handle_complaint(
-        {"complaint": value}, None)
-    assert result == {"status": "ok"}, result
-    assert state.complaints == [value], state.complaints
+    node = await enter(complaint_worker, "handle_complaint")
+    assert node["name"] == "handle_complaint", node["name"]
+    result, next_node = await handlers(node)["record_complaint"](
+        {
+            "summary": "The last visit did not meet expectations.",
+            "requested_resolution": "A manager callback",
+        },
+        SimpleNamespace(worker=complaint_worker),
+    )
+    # The tool ends the step: it saves the record it returned and hands the
+    # owner a status, with no finish call in between. One entry on the list,
+    # because this assign appends and a second save would show as two.
+    assert result == {"status": "ok"} and next_node is None, (result, next_node)
+    assert len(state.complaints) == 1, state.complaints
+    value = state.complaints[0]
+    assert value["summary"] == "The last visit did not meet expectations.", value
+    assert value["requested_resolution"] == "A manager callback", value
     return {"customer_phone": state.customer_phone, "customer_status": state.customer_status}
 
 
