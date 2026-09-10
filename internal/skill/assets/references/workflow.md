@@ -203,7 +203,10 @@ text can be ahead of audio; retained words after an interruption are not proof
 that every word was spoken.
 
 Numbered SDK model calls show first response and full request duration at a
-glance, alongside reply latency, TTS first audio and tool duration. Debug details
+glance, alongside reply latency, TTS first audio and tool duration. Every model
+call after the first follows a tool call or a control; a `HANDOFF` row is a call
+into a task or a handoff to another agent, carries no duration, and is the row
+that accounts for the call after it. Debug details
 holds secondary timings such as speech duration and node timings, plus source
 metadata. Definitions live in the latency guide. Explicit task retries count
 as separate SDK calls; hidden provider retries do not. Never add overlapping

@@ -37,8 +37,10 @@ request duration visible beside it. TTS first-audio time and tool duration also
 stay visible. Debug details holds secondary timings and source metadata. See
 [Reading the latency numbers](https://unmute.ai/optimization/latency) for definitions. They can overlap and must not be added to obtain reply
 latency. Reply latency ends at the first runtime audio and excludes delivery to
-the browser. A tool's returned state does not prove business success; task and
-handoff controls are excluded from business tool timings.
+the browser. A tool's returned state does not prove business success. A call into a task, or a
+handoff to another agent, gets a row of its own and no duration, because it
+hands control over rather than returning a result; that row is what accounts
+for the model call following it.
 
 Only captured measurements are shown. Missing and pending values have no
 placeholder. A real zero is `0ms`, a

@@ -228,6 +228,13 @@ const {chromium} = require(process.env.UNMUTE_SWEEP_PLAYWRIGHT || 'playwright');
       assert.equal(await toolA.evaluate(node=>node===window.preservedTool),true,'a tool outcome updates its existing row');
       await emit('operation','tool-a',operation('tool','lookup',{state:'returned'}),2);
       assert.equal(await page.locator(identity('operation','tool-a')+','+identity('operation','tool-b')).count(),2,'duplicate tool delivery adds no row');
+      // A control gets a row of its own, naming the cause of the model call
+      // that follows it, and is never counted as one: the summary below still
+      // reads three.
+      await emit('operation','handoff-a',operation('handoff','to_billing'));
+      await checkpoint(visible(identity('operation','handoff-a'),/handoff[\s\S]*to_billing[\s\S]*running/i));
+      await emit('operation','handoff-a',operation('handoff','to_billing',{state:'returned'}));
+      await checkpoint(visible(identity('operation','handoff-a'),/to_billing[\s\S]*returned/i));
       await emit('measurement','reply-latency',measure('reply_latency',3.93));
       await checkpoint(visible(replySelector+' .metrics-summary',/reply latency[\s\S]*3\.93s[\s\S]*3 model calls so far/i));
       assert.equal(await details.getAttribute('open'),null,'summary updates do not open details');

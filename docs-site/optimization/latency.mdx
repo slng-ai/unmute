@@ -192,7 +192,7 @@ repeating under every value in the conversation.
 | `transcription_delay` | Delay from speech ending to transcription, when reported. |
 | `text_aggregation` | Delay grouping text for speech. |
 | `playback_delay` | First audio forwarded to native playback start; excludes delivery to the browser. |
-| Tool duration | Time the identified tool ran, whether local or remote. |
+| Tool duration | Time the identified tool ran, whether local or remote. A call into a task or a handoff has none. |
 | First speech | A call-level interval: LiveKit starts at reporter installation; Pipecat starts at the native observer session boundary. |
 
 Expand **Debug details** for model, provider, request and source names, even
@@ -212,12 +212,19 @@ A reply might show:
 ```text
 Reply latency 3.93s · 3 model calls
   LLM 1 · ended   TTFT 880ms   request duration 1.14s
+  TOOL · lookup · returned    tool duration 1ms
   LLM 2 · ended   TTFT 890ms
+  HANDOFF · do_reserve · returned
   LLM 3 · ended   TTFT 930ms
   TTS · ended     TTFB 240ms
-  TOOL · lookup · returned    tool duration 1ms
   ▸ Debug details
 ```
+
+Every model call after the first follows a tool call or a control, and the row
+above it says which. A `HANDOFF` row is a call into a task, or a handoff to
+another agent. It carries no duration, because it hands control over rather
+than returning a result, and on LiveKit that call stays open until the task
+finishes.
 
 The three LLM rows describe three requests. Their first-response values do not
 add up to reply latency. The later request-duration value also does not replace

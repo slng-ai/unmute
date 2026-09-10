@@ -258,7 +258,7 @@ func (r Record) validate() error {
 		}
 	case KindOperation:
 		p := r.Operation
-		if p == nil || !validID(p.ExchangeID, true) || !validID(p.ParentOperationID, true) || !validID(p.SourceRequestID, true) || p.Name == "" || !one(p.Type, "llm", "stt", "tts", "tool") || !one(p.State, "running", "ended", "returned", "failed", "cancelled", "incomplete") {
+		if p == nil || !validID(p.ExchangeID, true) || !validID(p.ParentOperationID, true) || !validID(p.SourceRequestID, true) || p.Name == "" || !one(p.Type, "llm", "stt", "tts", "tool", "handoff") || !one(p.State, "running", "ended", "returned", "failed", "cancelled", "incomplete") {
 			return bad()
 		}
 	case KindMeasurement:
