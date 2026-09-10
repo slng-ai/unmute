@@ -1938,14 +1938,19 @@ class _Reporter:
         metric = event.metrics
         if isinstance(metric, LLMMetrics):
             context = _operation_context.get()
+            # Both reads repeat the `context and context[0] is self` guard rather
+            # than deriving the second from operation_id: a type checker cannot
+            # narrow an Optional through an intermediate variable, so the
+            # subscript below has to be guarded where it is written.
             operation_id = context[1] if context and context[0] is self else None
+            context_speech_id = context[2] if context and context[0] is self else None
             operation = self.records.get(("operation", operation_id))
             response_id = self.original_speeches.get(metric.speech_id)
             if response_id != self.speeches.get(metric.speech_id):
                 response_id = None
             # The SDK metric task inherits the context of this concrete node
             # invocation. Provider IDs can be empty or reused; they are metadata.
-            if operation_id is not None and operation and (not metric.speech_id or context[2] in (None, metric.speech_id)):
+            if operation_id is not None and operation and (not metric.speech_id or context_speech_id in (None, metric.speech_id)):
                 if response_id and not operation["operation"].get("exchange_id"):
                     self.bind_request(operation_id, response_id)
                     operation = self.records[("operation", operation_id)]
