@@ -159,6 +159,21 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 			env.addRead(name)
 		}
 	}
+	if vendor == "slng" && (role == targetcap.Listen || role == targetcap.Speak) {
+		url, err := targetcap.SlngSpeechBaseURL(params)
+		if err != nil {
+			return ServiceCall{}, entry, fmt.Errorf("%s %s binding: %w", fw, role, err)
+		}
+		if url != "" {
+			key := "base_url"
+			if fw == targetcap.LiveKit {
+				key = "slng_base_url"
+			}
+			flat(pyKV{Key: key, Value: pyQuote(url)})
+			// New gateway codes are not the SDK's legacy routing headers.
+			params = withoutParams(params, []string{"world_part_override"})
+		}
+	}
 	voice := cmp.Or(binding.Voice, binding.VoiceID)
 	if voice != "" {
 		if spec.Voice.Arg == "" {

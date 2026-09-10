@@ -168,9 +168,9 @@ Four things are required and none has a default:
   itself passed. The refusal names the agent or task that produced the long value.
 - `upstream`, saying who actually serves the model.
 - `params.world_part_override`, from the router's own region set: `eu`, `us`,
-  `india`, `indonesia`. **Not the speech world parts** `na`, `eu`, `ap`: the same
-  key, a different accepted set per role. The compiler consumes this into the
-  base URL and names the substitution in the compile report.
+  `india`, `indonesia`. Speech gateways use a different set under the same key,
+  such as `in` for India. The compiler consumes this into the base URL and names
+  the substitution in the compile report.
 
 `params.reasoning_effort: "none"` is not optional once the agent has tools **when
 the upstream serves OpenAI's own models**, for the same reason as a direct OpenAI
@@ -372,10 +372,20 @@ example binds to it today: both salon packages reach OpenAI directly, so an
 author who wants to see what the router is worth compiles one of them twice,
 once as it ships and once with the think binding pointed at the router.
 
-## Keep SLNG speech models in region
+## Keep models close to callers
 
-Put regional routing in the SLNG model's `params:`. The same YAML works for
-listen and speak models on both generated targets:
+Choose locations for STT, TTS and LLM services separately from the worker's
+deployment region. A nearby worker still waits on a distant model. Direct
+providers have their own regional endpoints and settings; use `endpoint_env`
+where the integration has an endpoint slot, or a supported provider parameter
+under `params`. Check the selected target's plugin before writing either.
+There is no shared region vocabulary across providers. Measure the full turn
+from the caller's location, including fallback models and tools.
+
+### Choose an SLNG speech gateway
+
+Put `world_part_override` in the SLNG model's `params:`. The same YAML works for
+listen and speak models on LiveKit and Pipecat:
 
 ```yaml agent.yaml
 models:
@@ -384,36 +394,38 @@ models:
       provider: slng
       model: "slng/deepgram/nova:3-multi"
       params:
-        world_part_override: eu
-        region_override: eu-north-1
+        world_part_override: eu-north
   speak:
     voice:
       provider: slng
       model: "deepgram/aura:2"
       voice: "aura-2-thalia-en"
       params:
-        world_part_override: eu
-        region_override: eu-north-1
+        world_part_override: eu-north
 ```
 
-`world_part_override` chooses a broad geography. `region_override` pins an
-exact SLNG model region. If both are present,
-`region_override` takes precedence over `world_part_override`. A world part is
-not a country boundary, so use the exact region when hard data isolation
-matters. Use a value from the
-[SLNG region reference](https://docs.slng.ai/region-override); Unmute forwards
-these provider params as written and does not validate them.
+The accepted values are `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`,
+`za`, `il`, `jp`, `sg`, `id`, `in`, and `au`. Unmute consumes the key and emits
+the host `{world_part}.api.slng.ai`: `slng_base_url="eu-north.api.slng.ai"` on
+LiveKit and `base_url="eu-north.api.slng.ai"` on Pipecat. It sends no scheme or
+path and does not forward `world_part_override` to the plugin.
 
-The generated runtime also has to support these params:
+Omitting `world_part_override` keeps the existing default URL. An empty,
+non-string, or unknown value is refused. The old speech values `na`, `eu`, and
+`ap` are refused too: choose one of the new values explicitly. There is no
+automatic mapping from the old broad areas. `params.base_url` and
+`params.slng_base_url` cannot be combined with `params.world_part_override`;
+remove the explicit URL or the world part.
 
-- LiveKit needs `livekit-plugins-slng` 1.6.7 or newer. See the
-  [SLNG LiveKit plugin guide](https://docs.slng.ai/agents/livekit-plugin).
-- Pipecat needs `pipecat-slng` 0.4.0 or newer. See the
-  [SLNG Pipecat plugin guide](https://docs.slng.ai/agents/pipecat-plugin).
+A gateway choice alone is not a data residency guarantee.
+The generated dependencies already support these host parameters; see the
+[SLNG LiveKit plugin guide](https://docs.slng.ai/agents/livekit-plugin) and the
+[SLNG Pipecat plugin guide](https://docs.slng.ai/agents/pipecat-plugin).
 
-These settings choose where SLNG runs STT and TTS. They do not choose where the
-agent worker runs; set that separately with `deployment_region` in
-`targets.yaml`. See `package.md` for the deployment rules.
+This only changes generated SLNG speech services on LiveKit and Pipecat. The
+SLNG hosted target and the Context Router's think values stay unchanged. Set
+the agent worker's `deployment_region` separately in `targets.yaml`;
+`package.md` has the deployment rules.
 
 ### LiveKit Responses API
 

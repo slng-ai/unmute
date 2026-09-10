@@ -50,7 +50,7 @@ asyncio.run(_instantiate())
 print("smoke ok:", ", ".join(classes))
 `
 
-const livekitRegionalSmokeScript = `"""Smoke check: the installed SLNG plugin accepts both regional controls."""
+const livekitRegionalSmokeScript = `"""Smoke check: SLNG uses the speech gateway without legacy region headers."""
 import json
 import os
 
@@ -63,17 +63,21 @@ from livekit.plugins import slng  # noqa: E402
 stt = slng.STT(
     api_key=os.environ["SLNG_API_KEY"],
     model="slng/deepgram/nova:3-multi",
-    world_part_override="eu",
+    slng_base_url="in.api.slng.ai",
 )
 tts = slng.TTS(
     api_key=os.environ["SLNG_API_KEY"],
     model="slng/deepgram/aura:2-en",
     voice="aura-2-thalia-en",
-    region_override="eu-north-1",
-    world_part_override="eu",
+    slng_base_url="eu-north.api.slng.ai",
 )
 assert type(stt).__name__ == "STT"
 assert type(tts).__name__ == "TTS"
+assert stt._model_endpoint.startswith("wss://in.api.slng.ai/")
+assert tts._opts.model_endpoint.startswith("wss://eu-north.api.slng.ai/")
+assert "X-World-Part-Override" not in stt._extra_headers
+assert "X-Region-Override" not in stt._extra_headers
+assert "X-Region-Override" not in tts._opts.extra_headers
 print("regional SLNG smoke ok")
 `
 

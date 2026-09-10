@@ -1,77 +1,150 @@
 ---
 title: "Regional infrastructure"
-description: "Keep the agent worker, media, and SLNG speech compute in the regions you intend."
+description: "Keep STT, LLM, and TTS services close to your users, with separate settings for model gateways, workers, and media."
 ---
 
-Regional voice agents have more than one place to configure. This complete
-`agent.yaml` keeps STT and TTS in Europe:
+Where your models run matters as much as where you deploy your agent. A nearby
+worker still waits on distant speech and reasoning services. Review the whole
+path from the caller to STT, the LLM, and TTS, for every provider you use.
+
+## Why model proximity matters
+
+A voice turn crosses several network boundaries: the caller sends audio through
+a media or telephony edge, the worker sends it to STT, the worker calls the LLM
+and tools, and TTS produces the audio that returns to the caller. Long trips
+between these services add delay throughout the conversation, even when the
+models themselves are fast.
+
+Start with where your users are. Keep the media edge, worker, and model services
+close to them and to one another where your providers offer that choice. Apply
+the same review to tools and other services the agent waits on. Moving only the
+worker leaves any long trips to remote models in place.
+
+Use geography as a starting point, then measure the time from the caller
+finishing a sentence to hearing the first reply from your users' locations.
+Network routes, model availability, and load can change which choice is fastest.
+Compare both typical calls and slow calls; a regional endpoint does not change
+the model's own processing time.
+
+## Choose a location for every model
+
+The same review applies whether you use SLNG or bind a provider directly.
+Choose each model separately, including fallback models where configured:
+
+| Model role | Where distance adds delay | What to check |
+|---|---|---|
+| [Speech to text](/models/stt), `listen` | Audio must reach the transcriber and its transcript must return to the worker. | The provider's streaming endpoint, the model's availability there, and final transcript latency. |
+| [Reasoning model](/models/llm), `think` | Every reply and tool decision waits on a model request. | The endpoint or deployment serving the LLM and its time to first token with your prompts and tools. |
+| [Text to speech](/models/tts), `speak` | Text must reach the voice model and the first audio must return. | The regional endpoint, availability of your model and voice, and time to first audio. |
+
+Unmute supports direct speech providers such as Deepgram, Cartesia, ElevenLabs,
+and Soniox, and reasoning providers such as OpenAI, Anthropic, and Mistral. The
+linked model pages list the providers supported by each target. Regional
+settings depend on the provider, model, account, and framework integration;
+there is no shared region parameter for all of them.
+
+For a direct provider, check its current documentation for regional endpoints
+or deployments, then use the settings supported by the selected integration.
+Do not copy another provider's parameter names. Some services select their
+location automatically or offer no regional choice. Measure the route you
+actually use before deciding whether to change providers or model deployments.
+
+## Separate the regional settings
+
+Each part of the call has its own location:
+
+| Location | What runs there | How you choose it |
+|---|---|---|
+| Media or telephony ingress | The first platform edge that receives the caller's audio. | Platform region controls and carrier settings. |
+| Worker region | The generated LiveKit or Pipecat process. | `deployment_region` in `targets.yaml`. |
+| Model service | The provider serving STT, the LLM, or TTS. | That provider's supported endpoint or deployment settings, per model. |
+| Model gateway | An API that routes requests to a model service. | The gateway's own location setting; SLNG speech uses `params.world_part_override`. |
+
+Setting one row does not set the others. A gateway location also does not by
+itself guarantee where the underlying model processes data. Tools, tracing,
+and storage keep their own locations too.
+
+LiveKit configures [realtime region pinning](https://docs.livekit.io/deploy/admin/regions/region-pinning/)
+separately from [agent deployment regions](https://docs.livekit.io/deploy/admin/regions/agent-deployment/).
+For Pipecat Cloud WebSocket telephony, Unmute derives the regional endpoint
+from `deployment_region`; that endpoint must match the worker's region. See
+[Pipecat's regions guide](https://docs.pipecat.ai/pipecat-cloud/guides/regions).
+Carrier routing remains a separate choice.
+
+## Choose a speech gateway
+
+**SLNG provides 13 regional speech gateways through one model setting.** On
+LiveKit and Pipecat, set `params.world_part_override` on each SLNG `listen` or
+`speak` model to choose its gateway. This gives both speech roles the same
+configuration shape across the two frameworks.
 
 ```yaml agent.yaml
-version: 1
-name: regional-assistant
-entry_agent: regional_assistant
-
-secrets:
-  - OPENAI_API_KEY
-  - SLNG_API_KEY
-
 models:
-  think:
-    reasoning:
-      provider: openai
-      model: gpt-5.6-terra
-      params:
-        reasoning_effort: "none"
   listen:
     transcriber:
       provider: slng
-      model: "slng/deepgram/nova:3-multi"
+      model: "deepgram/nova:3"
       params:
-        world_part_override: eu
+        world_part_override: eu-north
   speak:
     voice:
       provider: slng
-      model: "slng/deepgram/aura:2-en"
+      model: "deepgram/aura:2"
       voice: "aura-2-thalia-en"
       params:
-        world_part_override: eu
-        region_override: eu-north-1
-  turn:
-    detector:
-      provider: local
-      model: silero
-
-agents:
-  regional_assistant:
-    instructions: instructions.md
-    think: reasoning
-    speak: voice
-
-conversation:
-  greeting:
-    speaks_first: agent
-    text: "Hello. How can I help?"
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 1
-  max_sessions: 2
-  avg_session_duration: 5m
+        world_part_override: eu-north
 ```
 
-The listening model may use a model-supported region in the `eu` world part.
-The speaking model is pinned to `eu-north-1`. It also shows both settings on
-purpose: when both are set, `region_override` wins. `world_part_override` is
-ignored; it is not a fallback.
+Unmute turns the value into the host `{world_part}.api.slng.ai` in generated
+services. Here, it emits `slng_base_url="eu-north.api.slng.ai"` on LiveKit and
+`base_url="eu-north.api.slng.ai"` on Pipecat for both speech models. The plugin
+receives the host without a scheme or path; Unmute consumes
+`world_part_override` rather than passing it to the plugin.
 
-Unmute passes these `params` to the SLNG STT and TTS integrations on both
-LiveKit and Pipecat. They control where SLNG runs speech inference, not where
-the agent worker runs.
+### Available SLNG world parts
 
-Then place the generated workers in `targets.yaml`:
+All 13 world parts below work for SLNG `listen` and `speak` models on LiveKit
+and Pipecat. Set the world part on each model separately.
+
+| World part | Geography | Gateway host |
+|---|---|---|
+| `us-east` | Eastern United States | `us-east.api.slng.ai` |
+| `us-west` | Western United States | `us-west.api.slng.ai` |
+| `br` | Brazil | `br.api.slng.ai` |
+| `eu-west` | Western Europe | `eu-west.api.slng.ai` |
+| `eu-north` | Northern Europe | `eu-north.api.slng.ai` |
+| `gb` | United Kingdom | `gb.api.slng.ai` |
+| `za` | South Africa | `za.api.slng.ai` |
+| `il` | Israel | `il.api.slng.ai` |
+| `jp` | Japan | `jp.api.slng.ai` |
+| `sg` | Singapore | `sg.api.slng.ai` |
+| `id` | Indonesia | `id.api.slng.ai` |
+| `in` | India | `in.api.slng.ai` |
+| `au` | Australia | `au.api.slng.ai` |
+
+Omitting `world_part_override` keeps the existing default URL. An empty,
+non-string, or unknown value is refused. The old speech values `na`, `eu`, and
+`ap` are refused too: choose one of the new values explicitly. There is no
+automatic mapping from the old broad areas. `params.base_url` and
+`params.slng_base_url` cannot be combined with `params.world_part_override`;
+remove the explicit URL or the world part.
+
+This setting changes generated SLNG speech services on LiveKit and Pipecat.
+Choose the worker's `deployment_region` separately. The SLNG hosted target
+keeps its own deployment settings.
+
+### SLNG reasoning uses the Context Router
+
+For a `think` model with `provider: slng`, the
+[Context Router](/optimization/context-router) has its own gateway locations:
+`eu`, `us`, `india`, and `indonesia`. It uses the same `world_part_override`
+key but a different set of values: speech uses `in`, for example, while the
+router uses `india`. The LLM behind the router keeps its own provider settings.
+
+## Place the worker near your users and models
+
+Set the worker location in `targets.yaml`, using each platform's own region
+names:
 
 ```yaml targets.yaml
 targets:
@@ -80,12 +153,6 @@ targets:
     version: "1.6.10"
     sdk_language: python
     deployment_region: eu-central
-    pins:
-      livekit-plugins-slng: "1.6.7"
-    models:
-      detector:
-        provider: livekit
-        model: turn-detector-mini
 
   pipecat:
     provider: pipecat
@@ -93,149 +160,19 @@ targets:
     deployment_region: eu-central
 ```
 
-Unmute already installs `livekit-plugins-slng` at its catalog floor, `1.6.1` or
-newer, and `pipecat-slng` at `0.5.2` or newer, both of which carry regional
-overrides. The LiveKit `pins` entry above is optional: an escape hatch to
-require a newer patch than the floor when you need one. Pipecat has no
-equivalent field; its floor is fixed by Unmute directly. See the official
-[LiveKit SLNG plugin reference](https://docs.livekit.io/reference/python/livekit/plugins/slng/index.html)
-and [Pipecat SLNG source](https://github.com/slng-ai/pipecat-slng).
+The worker region and model gateway codes do not need to match. For example,
+a worker in `eu-central` can call SLNG speech through `eu-north.api.slng.ai`.
+Choose nearby locations from the platform's current
+[LiveKit](https://docs.livekit.io/deploy/admin/regions/agent-deployment/) or
+[Pipecat](https://docs.pipecat.ai/pipecat-cloud/guides/regions) region list, then
+measure the full call path.
 
-## Why regional alignment matters
-
-A voice turn crosses several network boundaries: the caller enters through a
-media or telephony edge, the worker sends audio to STT, the worker calls the LLM
-and tools, and the result goes to TTS before audio returns to the caller. Every
-long-distance boundary adds network travel to the turn.
-
-Place the media or telephony ingress, worker, and speech models near the users
-and near one another when the platforms offer matching regions. Apply the same
-review to the LLM, tools, tracing, storage, and other remote services. This
-reduces network latency and avoids sending voice data through regions you did
-not intend.
-
-[Coval's voice latency guide](https://www.coval.ai/blog/how-to-measure-voice-ai-latency-the-complete-guide/)
-explains how network hops add to a cascaded voice pipeline.
-[FutureAGI's Pipecat latency guide](https://futureagi.com/blog/how-to-optimize-pipecat-latency-2026/)
-also recommends regional routing for the voice gateway, STT, and TTS.
-
-## Separate regional layers
-
-These settings solve different parts of the call:
-
-| Location | What runs there | How you choose it |
-|---|---|---|
-| media or telephony ingress | the first platform edge that receives the caller's audio | LiveKit realtime region pinning; Pipecat derives its regional WebSocket endpoint from `deployment_region`; carrier settings are separate |
-| worker region | the generated LiveKit or Pipecat process | `deployment_region` in `targets.yaml` |
-| speech region | SLNG speech to text and text to speech compute | `world_part_override` or `region_override` under each model's `params` |
-| reasoning region | the [SLNG Context Router](/optimization/context-router), when the `think` role uses it | `world_part_override` under the think model's `params`, from the router's own set: `eu`, `us`, `india`, `indonesia` |
-
-The reasoning row shares a key with the speech row and not its values. SLNG
-speech serves the world parts `na`, `eu` and `ap`; the router serves `eu`, `us`,
-`india` and `indonesia`. One word covers all three SLNG roles because it answers
-the same question, and each role accepts the set it actually serves, so copying
-`na` from the speech table into a think binding is a compile error. The reasoning
-row applies only to a think binding whose provider is `slng`; a direct provider
-keeps its own regional settings.
-
-Setting one row does not set the others. The reasoning model, tools, tracing,
-carrier, database, and any other service also keep their own regional settings.
-Review each service before making a data residency claim. LiveKit documents
-[realtime region pinning](https://docs.livekit.io/deploy/admin/regions/region-pinning/),
-[realtime region groups](https://docs.livekit.io/deploy/admin/regions/endpoints/#region-groups),
-and [agent deployment regions](https://docs.livekit.io/deploy/admin/regions/agent-deployment/)
-separately. Pipecat documents its worker regions and matching regional
-WebSocket endpoints in its [regions guide](https://docs.pipecat.ai/pipecat-cloud/guides/regions).
-
-## World part, exact region, or both
-
-Use a world part when you want a regional boundary with room for SLNG to choose
-between eligible regions for capacity:
-
-```yaml
-params:
-  world_part_override: eu
-```
-
-Use an exact region when the speech request must stay pinned to one region:
-
-```yaml
-params:
-  region_override: eu-north-1
-```
-
-Use one exact string when the same package targets LiveKit and Pipecat. The
-LiveKit SLNG plugin also accepts an ordered list of exact model regions:
-
-```yaml
-params:
-  region_override:
-    - ap-south-1
-    - ap-southeast-2
-```
-
-Pipecat accepts one exact SLNG model region. This model-region list is separate
-from LiveKit's `deployment_region` list for agent workers.
-
-You may write both, but the exact region always wins:
-
-```yaml
-params:
-  world_part_override: eu
-  region_override: eu-north-1
-```
-
-The last form does not provide a fallback. With `world_part_override` alone,
-SLNG may spill between mapped, model-supported regions for capacity, but not
-outside the selected world part. Choose `region_override` for hard regional
-isolation.
-
-## Regional alignment options
-
-The codes below are not interchangeable. Each row groups the closest or
-same-world-part choices. Use each platform's location list to choose the
-shortest path for your users. A row does not promise the same data center or
-create a residency guarantee.
-
-| Geography | SLNG world part | SLNG exact model region | LiveKit worker | LiveKit realtime group | Pipecat worker / WebSocket |
-|---|---|---|---|---|---|
-| North America | `na` | `us-east-1` | `us-east` | `us` | `us-east` or `us-west` |
-| Europe | `eu` | `eu-north-1` | `eu-central` | `eu` | `eu-central` |
-| India | `ap` | `ap-south-1`, `asia-south1` | `ap-south` | `india` | `ap-south` |
-| Southeast Asia | `ap` | `asia-southeast2` | | `asia` | |
-| Australia | `ap` | `ap-southeast-2`, `australia-southeast1` | | `aus` | |
-
-A blank cell means the platform does not currently advertise a worker option
-near that SLNG model region. Availability is model-specific and can change. Check
-the official [SLNG region override guide](https://docs.slng.ai/region-override),
-[SLNG models by region](https://docs.slng.ai/models/by-region),
-[LiveKit agent regions](https://docs.livekit.io/deploy/admin/regions/agent-deployment/),
-[LiveKit realtime region groups](https://docs.livekit.io/deploy/admin/regions/endpoints/#region-groups),
-and [Pipecat regions](https://docs.pipecat.ai/pipecat-cloud/guides/regions)
-before deployment.
-
-The table intentionally excludes LiveKit SIP pinning and carrier-specific
-telephony regions because they use separate codes. They still affect latency:
-place the telephony ingress near the caller and align it with the media and
-worker regions. Pipecat's regional WebSocket endpoint should use the same region
-as its worker.
-
-### Other model providers
-
-SLNG uses `world_part_override` and `region_override`, but these names are not
-universal. Other STT, TTS, and LLM providers may offer a regional endpoint,
-project location, deployment, or provider-specific parameter. Not every
-provider or model supports regional pinning. Check that provider's documentation
-and configure every model separately; choosing a worker region does not pin the
-models it calls.
-
-## One worker region or several
+### One worker region or several
 
 Pipecat accepts one `deployment_region` per target. A second Pipecat region is a
 second target and agent name.
 
-LiveKit accepts either one region as a scalar, as in the full example above, or
-several regions as a list:
+LiveKit accepts either one region as a scalar or several regions as a list:
 
 ```yaml targets.yaml
 targets:
@@ -250,19 +187,22 @@ targets:
 
 Unmute emits one LiveKit create command per listed region. The deployments keep
 one dispatch name, so LiveKit may send a caller to another declared region when
-the nearest deployment is at capacity. This is useful for latency and capacity
-spill. For hard worker-region isolation, use separate agent names and explicit
-dispatch instead of one multi-region target.
+the nearest deployment is at capacity. For strict worker locality, use separate
+agent names and explicit dispatch. See LiveKit's
+[multi-region deployment guidance](https://docs.livekit.io/deploy/admin/regions/agent-deployment/#multi-region-deployments).
 
-Region names use each platform's own vocabulary and Unmute forwards them as
-written. A worker region such as `eu-central` and an SLNG speech region such as
-`eu-north-1` are different settings and do not need to use the same name.
+Adding worker regions leaves the model settings as authored. Review the model
+endpoints each deployment will call so that a nearby worker also has a short
+path to its STT, LLM, and TTS services.
 
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="Going live" icon="rocket" href="/deploy/going-live">
-    Deploy the package you have been optimizing.
+  <Card title="Optimizing your agent" icon="gauge-high" href="/optimization/overview">
+    Measure what the caller waits for.
+  </Card>
+  <Card title="Reasoning model" icon="brain" href="/models/llm">
+    Choose the model that decides what to say.
   </Card>
   <Card title="Speech to text" icon="mic" href="/models/stt">
     Choose the model that listens to the caller.

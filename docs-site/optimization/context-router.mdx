@@ -167,11 +167,11 @@ truncating, because two truncated scopes could land on the same string.
 | `indonesia` | `https://indonesia.context-router.slng.ai/v1` |
 
 <Warning>
-  These four are the router's own regions. SLNG **speech** uses world parts `na`,
-  `eu`, and `ap` under the same `world_part_override` key. One word covers all
-  three SLNG roles, and the accepted set is different per role, so `na` is right
-  for a `listen` or `speak` binding and wrong for this one. The compiler refuses a
-  value the router does not serve and names the four.
+  These four are the router's own regions. SLNG **speech gateways** use a
+  different set under the same `world_part_override` key: for example, `in`
+  selects the Indian speech gateway, while this router requires `india`.
+  See [speech gateway values](/optimization/regional-infrastructure#choose-a-speech-gateway).
+  The compiler refuses a value the router does not serve and names the four.
 </Warning>
 
 The key is consumed rather than forwarded: it becomes the base URL.

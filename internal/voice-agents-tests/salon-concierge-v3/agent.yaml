@@ -287,7 +287,7 @@ models:
       voice: "62ae83ad-4f6a-430b-af41-a9bede9286ca"
       language: en
       params:
-        world_part_override: eu
+        world_part_override: eu-west
         warm_standby_enabled: true
   listen:
     transcriber:
@@ -295,7 +295,7 @@ models:
       model: "soniox/speech-ai:rt-v5"
       language: en
       params:
-        world_part_override: eu
+        world_part_override: eu-west
   turn:
     detector:
       provider: local
