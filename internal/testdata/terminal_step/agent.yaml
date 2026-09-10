@@ -32,7 +32,9 @@ agents:
         finish:
           - tool: look_up
             success:
-              - status: [existing, created]
+              - status:
+                  - existing
+                  - created
         assign:
           - customer_phone: result.customer_phone
 

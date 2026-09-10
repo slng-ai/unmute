@@ -2,6 +2,7 @@ package generate
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -399,5 +400,101 @@ func TestSmokeStubbedNamesExistInTheEmittedModule(t *testing.T) {
 		if !strings.Contains(emitted, want) {
 			t.Errorf("bot.py no longer emits %q, so the prefetch smoke stub is not exercised", want)
 		}
+	}
+}
+
+// livekitRunContextStandIn is the RunContext the LiveKit salon smokes hand to an
+// emitted tool body, shared by both scripts so there is one shape to keep right.
+//
+// A real RunContext has a private constructor, so the smokes build their own.
+// That means every attribute the emitted modules read off it has to be here,
+// including the ones only the dev reporter reads: `dev_task_finished` is called
+// unconditionally by every emitted finish handler, and it reads `ctx.session`
+// before deciding it has no reporter attached. When that read was added, two
+// journey smokes died on `'types.SimpleNamespace' object has no attribute
+// 'session'` half an hour into an opt-in suite.
+// TestSmokeLiveKitRunContextStandInCarriesEveryAttributeRead is why that cannot
+// happen again.
+//
+// It lives in this untagged file so that gate can read it in the default suite.
+const livekitRunContextStandIn = `
+
+def run_context(userdata, call_id="smoke-call", siblings=()):
+    """The RunContext an emitted tool body is called with.
+
+    A real one is built by the framework; the fields here are the ones the
+    emitted modules read, and the gate in smoke_fixture_test.go pins that list.
+
+    The siblings are the other calls the model made in the same response, which
+    is what a step that ends on its own tool reads to see whether a handoff was
+    called beside it. Empty is one call on its own, which is every journey here
+    except the compound one.
+    """
+    return SimpleNamespace(
+        userdata=userdata,
+        session=SimpleNamespace(userdata=userdata, say=lambda *_a, **_k: None),
+        speech_handle=SimpleNamespace(
+            id="smoke-speech", num_steps=1, chat_items=list(siblings)
+        ),
+        function_call=SimpleNamespace(call_id=call_id, name=call_id),
+    )
+`
+
+// livekitCtxReadPattern finds every attribute read off a bare `ctx`. The word
+// boundary matters: `chat_ctx.copy()` and `shared_ctx.items` are ChatContext
+// reads that a plain `ctx\.` match swallowed.
+var livekitCtxReadPattern = regexp.MustCompile(`(^|[^A-Za-z0-9_])ctx\.([a-z_]+)`)
+
+// livekitJobContextReads are the reads that are not a RunContext at all: the
+// entrypoint's own JobContext, which no smoke script constructs or calls.
+//
+// The exclusion is written as a list rather than inferred, so a new JobContext
+// read is a deliberate line here and a new *RunContext* read fails the gate.
+var livekitJobContextReads = map[string]bool{
+	"room": true, "proc": true, "job": true, "connect": true,
+	"add_shutdown_callback": true, "wait_for_participant": true,
+}
+
+// TestSmokeLiveKitRunContextStandInCarriesEveryAttributeRead is the default-suite
+// gate for the stand-in above.
+//
+// The gates further up pin the names a smoke script *constructs* and the names it
+// *monkeypatches*. Neither notices when emitted code starts reading a new
+// attribute off an object the script hands in, which is a third way to break an
+// opt-in suite silently: `dev_task_finished` began reading `ctx.session`, both
+// journey smokes raised an AttributeError, and the default suite stayed green.
+//
+// Shape, not behaviour. `make smoke` still owns whether the Python runs.
+func TestSmokeLiveKitRunContextStandInCarriesEveryAttributeRead(t *testing.T) {
+	// Both packages a LiveKit salon smoke drives. v3 is here because it emits
+	// reset tasks the concierge does not, so it can read something v1 never does.
+	for _, example := range []string{"salon-concierge", "salon-concierge-v3"} {
+		t.Run(example, func(t *testing.T) {
+			pkg, err := spec.Load(examplePackagePath(example))
+			if err != nil {
+				t.Fatal(err)
+			}
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+			if err != nil {
+				t.Fatal(err)
+			}
+			// dev_metrics.py is where the read that broke the smokes lives, and
+			// agent.py is where the tool bodies the smokes call live.
+			for _, file := range []string{"agent.py", "dev_metrics.py"} {
+				for _, match := range livekitCtxReadPattern.FindAllStringSubmatch(artifactFile(t, artifact, file), -1) {
+					attr := match[2]
+					if livekitJobContextReads[attr] {
+						continue
+					}
+					if !strings.Contains(livekitRunContextStandIn, attr+"=") {
+						t.Errorf("%s reads ctx.%s, which the LiveKit smokes' run_context does not carry: add it to livekitRunContextStandIn, or list it in livekitJobContextReads if it is not a RunContext read", file, attr)
+					}
+				}
+			}
+		})
 	}
 }

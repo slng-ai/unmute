@@ -117,8 +117,10 @@ request duration visible beside it. TTS first-audio time and tool duration also
 stay visible. Debug details holds secondary timings and source metadata. See
 [Reading the latency numbers](https://unmute.ai/optimization/latency) for definitions. They can overlap and must not be added to obtain reply
 latency. Reply latency ends at the first runtime audio and excludes delivery to
-the browser. A tool's returned state does not prove business success; task and
-handoff controls are excluded from business tool timings.
+the browser. A tool's returned state does not prove business success. A call into a task, or a
+handoff to another agent, gets a row of its own and no duration, because it
+hands control over rather than returning a result; that row is what accounts
+for the model call following it.
 
 Only captured measurements are shown. Missing and pending values have no
 placeholder. A real zero is `0ms`, a
@@ -1518,7 +1520,8 @@ SENTINEL = "UNMUTE_METRIC"
 METRICS_ENV = "UNMUTE_DEV_METRICS"
 _METADATA = "unmute_dev"
 
-# Handoffs and delegate controls are not completed business tool calls.
+# Handoffs and delegate controls get a row and no duration: they hand over to
+# a task rather than returning a result.
 HANDOFF_CONTROLS = frozenset(
     {
         "to_billing",
@@ -1888,8 +1891,11 @@ class DevReporter:
     def _tool_event(self, llm, frame, cause):
         if not isinstance(frame, (FunctionCallInProgressFrame, FunctionCallResultFrame, FunctionCallCancelFrame)):
             return
-        if frame.function_name in HANDOFF_CONTROLS:
-            return
+        # A control hands over to a task instead of returning a result, so it
+        # gets a row and no duration. Hiding it left the model call it causes
+        # with no visible cause; timing it read as a tool that ran for the
+        # whole flow.
+        control = frame.function_name in HANDOFF_CONTROLS
         sibling = getattr(frame, "broadcast_sibling_id", None)
         frame_key = tuple(sorted((frame.id, sibling))) if sibling is not None else (frame.id,)
         if frame_key in self._tool_frames:
@@ -1897,17 +1903,22 @@ class DevReporter:
         self._tool_frames.add(frame_key)
         key = (id(llm), frame.tool_call_id)
         if isinstance(frame, FunctionCallInProgressFrame):
-            operation = self._id("tool")
-            payload = {"type": "tool", "name": frame.function_name, "state": "running"}
+            kind = "handoff" if control else "tool"
+            operation = self._id(kind)
+            payload = {"type": kind, "name": frame.function_name, "state": "running"}
             for field, value in (("exchange_id", cause.get("response_id")),
                                  ("parent_operation_id", cause.get("operation_id"))):
                 if value:
                     payload[field] = value
             self._put("operation", operation, payload)
-            self._tools[key] = {"id": operation, "scope": dict(cause), "started": time.monotonic(), "ended": False}
+            self._tools[key] = {"id": operation, "scope": dict(cause), "started": time.monotonic(),
+                                "ended": False, "control": control}
             # This hook runs inside the actual native tool task. Its result and
             # error callbacks inherit this cause; another tool has another task.
-            self._scope.set(dict(cause, tool_operation_id=operation))
+            # A control keeps the request's scope instead, so an error raised
+            # inside the delegate still marks the request failed, as before.
+            if not control:
+                self._scope.set(dict(cause, tool_operation_id=operation))
             return
         tool = self._tools.get(key)
         if not tool:
@@ -1922,6 +1933,8 @@ class DevReporter:
         tool["ended"] = True
         operation = tool["id"]
         self._update("operation", operation, state=state)
+        if tool["control"]:
+            return
         self._measure(f"{operation}:duration", "tool_duration", time.monotonic() - tool["started"],
                       "pipecat-function-call-frames", scope="operation", operation_id=operation,
                       exchange_id=tool["scope"].get("response_id"))

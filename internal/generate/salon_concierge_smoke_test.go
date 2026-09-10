@@ -101,6 +101,7 @@ for name in json.load(open("compile-report.json"))["required_env"]:
 import ` + module + ` as generated  # noqa: E402
 from tools import check_availability, create_booking, find_or_create_customer, list_bookings  # noqa: E402
 
+` + livekitRunContextStandIn + `
 
 async def main():
     state = generated.` + stateExpr + `
@@ -114,15 +115,7 @@ async def main():
     async def ignore(*args, **kwargs):
         pass
 
-    # session and the call's own function call, because a step that ends on its
-    # tool records the id it committed under and looks at what else the model
-    # called in the same response.
-    ctx = SimpleNamespace(
-        userdata=state,
-        session=SimpleNamespace(),
-        function_call=SimpleNamespace(call_id="journey-call", name="journey"),
-        speech_handle=SimpleNamespace(chat_items=[]),
-    )
+    ctx = run_context(state)
     worker = None
     if generated.__name__ == "bot":
         worker = SimpleNamespace(
@@ -333,7 +326,7 @@ for local in ("", "0", "1"):
          {"os": os, "server": server})
     after = (server._num_idle_processes, server._initialize_process_timeout)
     assert after == ((1, 60.0) if local == "1" else before), after
-` + salonStoreSmokePrelude + `
+` + salonStoreSmokePrelude + livekitRunContextStandIn + `
 
 def quiet_activity():
     """A stand-in for the AgentActivity a real session would attach. Every
@@ -359,20 +352,6 @@ def recording_task(task_type, chat_ctx=None):
 
     return RecordingTask()
 
-
-def run_context(userdata, call_id, siblings=()):
-    """One tool call's context.
-
-    The speech handle's chat items are what a step that ends on its own tool
-    reads to see whether the model called a handoff beside it. Empty is one call
-    on its own, which is every journey here except the compound one.
-    """
-    return SimpleNamespace(
-        userdata=userdata,
-        session=SimpleNamespace(),
-        function_call=SimpleNamespace(call_id=call_id, name=call_id),
-        speech_handle=SimpleNamespace(chat_items=list(siblings)),
-    )
 
 
 async def create_then_cancel(userdata):
