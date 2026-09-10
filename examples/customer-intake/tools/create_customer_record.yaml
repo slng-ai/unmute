@@ -1,0 +1,65 @@
+description: >-
+  Open the customer record once the caller's number is agreed and their details
+  are taken. Call it silently, once, and read the reference number back from
+  what it returns rather than inventing one.
+
+# One argument the model fills, and it is the only one the model could get
+# right: everything else was already said and saved, and asking the model to
+# retype it is how a digit changes between the turn it was agreed on and the
+# turn it was written down.
+input:
+  type: object
+  properties:
+    summary:
+      type: string
+      description: One sentence in the caller's own words saying what they rang about.
+  required:
+    - summary
+
+# Four values straight out of state, one of them through a dotted path. An
+# injected value is hidden from the model, so none of these may also be an
+# `input.properties` key: the compiler refuses that, which is what stops a
+# parameter quietly having two sources.
+#
+# caller_phone carries `confirm: verify_contact`, so while the caller has not
+# agreed to the number, this whole tool refuses itself and the refusal names
+# the step to run first.
+#
+# today_date is deliberately not here. Every injected value is guarded, and the
+# guard's advice is the step that supplies it. Nothing supplies a clock reading,
+# so a pre-fetch that was stepped over would leave this tool refusing itself for
+# a reason no step can fix, on a call that is otherwise fine. The handler stamps
+# its own date instead, and the model relaying it back is where the Date type
+# gets checked.
+inject:
+  - phone: "{{caller_phone}}"
+  - email: "{{caller_email}}"
+  - name: "{{contact.name}}"
+  - enquiry: "{{enquiry}}"
+
+output:
+  type: object
+  properties:
+    record_id:
+      type: string
+    opened_on:
+      type: string
+    enquiry:
+      type: string
+    status:
+      type: string
+      enum:
+        - created
+        - duplicate
+        - invalid
+  required:
+    - record_id
+    - opened_on
+    - enquiry
+    - status
+
+local:
+  handler: tools/intake.py
+
+interruption: provider_default
+effect: returns_data

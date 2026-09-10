@@ -1,0 +1,25 @@
+# Both code targets, same source, no `connection:` on either. That is what makes
+# this a browser package: `unmute dev` runs it, no carrier account is needed, and
+# the `source: from_number` prefetch entry is seeded by `--source` instead of by
+# a route.
+targets:
+  livekit:
+    provider: livekit
+    version: "1.6.10"
+    sdk_language: python
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+
+  pipecat:
+    provider: pipecat
+    version: "1.8.0"
+    models:
+      detector:
+        provider: local
+        model: silero
+        # No endpointing_delay here on purpose. It sets the floor, and every
+        # Pipecat pace already resolves the floor to 200ms; writing it again
+        # would read like a decision while changing nothing. The pace on the
+        # base binding is what moves this target, through the ceiling.

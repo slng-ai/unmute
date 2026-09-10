@@ -164,11 +164,21 @@ async def run(args: argparse.Namespace) -> None:
         # The entry agent is the one class whose constructor takes `initial`.
         import inspect  # noqa: PLC0415
 
-        entry = next(
-            cls
-            for _, cls in inspect.getmembers(generated, inspect.isclass)
-            if "initial" in inspect.signature(cls).parameters
-        )
+        def takes_initial(cls) -> bool:
+            # getmembers returns everything the module imported too, and some of
+            # those are C-level types inspect.signature refuses outright: a
+            # package declaring an EmailStr imports email_validator, whose
+            # EmailNotValidError raised ValueError here and killed the run before
+            # the first turn. The entry agent is defined in the generated module,
+            # so anything from elsewhere is not it.
+            if getattr(cls, "__module__", None) != generated.__name__:
+                return False
+            try:
+                return "initial" in inspect.signature(cls).parameters
+            except (ValueError, TypeError):
+                return False
+
+        entry = next(cls for _, cls in inspect.getmembers(generated, inspect.isclass) if takes_initial(cls))
     model = args.model or _openai_model(package / "agent.yaml")
     llm = openai.LLM(
         api_key=os.environ["OPENAI_API_KEY"], model=model, reasoning_effort="none"
@@ -226,10 +236,19 @@ async def run(args: argparse.Namespace) -> None:
 def _openai_model(agent_yaml: Path) -> str:
     import re  # noqa: PLC0415
 
-    found = re.search(r"provider: openai\n\s+model: (\S+)", agent_yaml.read_text())
+    # Comment lines between the two keys are skipped. A `#` explaining why a
+    # package is on the model it is on belongs next to the model, and without
+    # this the pair stopped matching and the run refused a package that is a
+    # direct openai one.
+    found = re.search(
+        r"provider: openai\n(?:[ \t]*#.*\n)*\s+model: (\S+)", agent_yaml.read_text()
+    )
     if not found:
         sys.exit("the package's think binding is not a direct openai one; pass --model")
-    return found.group(1)
+    # `unmute init` writes the id quoted and the salon packages write it bare.
+    # Both are the same YAML; the quotes are not part of the model id, and sent
+    # as one the provider answers "invalid model ID" rather than naming them.
+    return found.group(1).strip("\"'")
 
 
 if __name__ == "__main__":

@@ -1072,6 +1072,97 @@ func TestDailyRouteWorkDoesNotReachOtherTargets(t *testing.T) {
 	}
 }
 
+// TestCustomerIntakeCoversEveryDeclaredType holds the one thing about
+// customer-intake that no other gate would notice.
+//
+// The package is already enrolled in about a dozen checks by existing there:
+// it validates, generates, lints clean, is block style, quotes no retired CLI
+// output, carries no specimen phone number or address, resolves every link, and
+// names the one model id and the two framework versions this repository
+// teaches. None of them notices if somebody simplifies a variable away and the
+// package quietly stops covering the types it exists to cover. A reader sent
+// here to see how a type is declared and used would then find that type is not
+// here.
+//
+// The vocabulary is read from ir rather than copied, so a type added to the
+// scope fails this until the example covers it too. That is deliberate: the
+// example is the reader-facing half of the same list four surfaces already
+// share (internal/ir/shape_test.go TestEveryShapedTypeReachesEverySurface).
+func TestCustomerIntakeCoversEveryDeclaredType(t *testing.T) {
+	agent := loadExample(t, "customer-intake")
+
+	shaped := map[ir.ShapedText]string{}
+	var literal, list, declared, supplied string
+	for name, variable := range agent.Variables {
+		if variable.Shape == nil {
+			continue
+		}
+		switch reference := variable.Shape; {
+		case reference.Shaped != "":
+			shaped[reference.Shaped] = name
+		case len(reference.Literal) != 0:
+			literal = name
+		case reference.List != nil:
+			list = name
+		case reference.Shape != "":
+			if agent.Shapes[reference.Shape].Builtin {
+				supplied = name
+			} else {
+				declared = name
+			}
+		}
+	}
+
+	for _, kind := range ir.ShapedTextOrder() {
+		if shaped[kind] == "" {
+			t.Errorf("no customer-intake variable declares %s, so the example no longer shows it", kind)
+		}
+	}
+	for _, missing := range []struct{ what, got string }{
+		{`a Literal[...]`, literal},
+		{`a list[...]`, list},
+		{"a shape declared under shapes:", declared},
+		{"a shape the compiler supplies, such as NameEmail", supplied},
+	} {
+		if missing.got == "" {
+			t.Errorf("no customer-intake variable declares %s", missing.what)
+		}
+	}
+
+	// The other half of the package's purpose: a saved value reaching a tool
+	// without passing through the model. A dotted path is checked by name
+	// because it is the form a reader is least likely to guess, and the flat
+	// spelling is what the emitted substitution actually reads.
+	tool, ok := agent.Tools["create_customer_record"]
+	if !ok {
+		t.Fatal("customer-intake no longer declares create_customer_record")
+	}
+	if len(tool.Inject) == 0 {
+		t.Error("create_customer_record injects nothing, so the example shows no value reaching a tool from state")
+	}
+	var dotted bool
+	for _, value := range tool.Inject {
+		text, _ := value.(string)
+		dotted = dotted || strings.Contains(text, "contact__name")
+	}
+	if !dotted {
+		t.Error("create_customer_record no longer injects a dotted path, which is the form worth showing")
+	}
+	// A guard whose advice names no runnable step cannot be cleared, so the
+	// tool would refuse itself for the rest of the call. Every injected value is
+	// guarded, so every one of them has to be supplied by something.
+	for key := range tool.Inject {
+		if key == "opened_on" {
+			t.Error("today_date is injected again: nothing supplies a clock reading, so a pre-fetch " +
+				"that was stepped over leaves this tool refusing itself with advice no step can follow")
+		}
+	}
+	if got := agent.Variables["caller_phone"].Confirm; got != "verify_contact" {
+		t.Errorf("caller_phone confirm = %q, want verify_contact: the unconfirmed-inject refusal is "+
+			"the third thing this example exists to show", got)
+	}
+}
+
 func TestPublicExamplePackages(t *testing.T) {
 	root := filepath.Join("..", "..", "examples")
 	entries, err := os.ReadDir(root)
@@ -1109,7 +1200,22 @@ func TestPublicExamplePackages(t *testing.T) {
 	// 2026-08-28, and a reader who wants a package to run scaffolds one with
 	// `unmute init`. simple-prompt lives on as internal/testdata/simple-prompt,
 	// because it is the minimal single-agent shape a dozen tests compile.
-	want := []string{"hotel-concierge", "salon-concierge", "salon-concierge-single-prompt"}
+	//
+	// customer-intake is the fourth, added 2026-09-10. One agent, browser only,
+	// one local tool, and every declared type once each. salon-concierge already
+	// uses all of them, but across two agents, five tasks, tracing, knowledge
+	// documents and two phone routes, so a reader asking only "how do I collect
+	// typed information and hand it to a tool" had nothing that answers only
+	// that. The two packages built for typed state, salon-concierge-v2 and -v3,
+	// are under internal/voice-agents-tests and are deliberately not
+	// reader-facing. TestCustomerIntakeCoversEveryDeclaredType is what stops it
+	// quietly losing the coverage it exists for.
+	want := []string{
+		"customer-intake",
+		"hotel-concierge",
+		"salon-concierge",
+		"salon-concierge-single-prompt",
+	}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
