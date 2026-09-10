@@ -73,6 +73,22 @@ Adding a map-typed authored field fails `TestNoNewDictionaryInTheAuthoringSurfac
 - [`docs/SELF_VERIFY.md`](docs/SELF_VERIFY.md) is how to check runtime behaviour **without** a person on the phone, and it is what to do before asking for a live call. Its first rule: find the layer the defect lives in and reproduce it there. A provider defect is usually one HTTP request, so it needs no audio, no tunnel and no simulated caller — [`scripts/replay_router_scopes.py`](scripts/replay_router_scopes.py) is the worked example. A prompt or seam defect lives in the model's turns, and [`scripts/text_run_livekit.py`](scripts/text_run_livekit.py) drives the emitted LiveKit agent through a scripted text conversation with the real model and real local tools, no audio, so read three of those before asking for a call. Coval evaluates conversations you push to it, so verification never waits on inbound reachability.
 - After somebody runs `unmute dev` and talks to the agent, read the call back yourself with [`scripts/read_langfuse_trace.py`](scripts/read_langfuse_trace.py): transcript, tool calls and per-span latency, newest trace by default. Needs the package on `tracing.provider: langfuse`, which `examples/salon-concierge` is. Never describe a call from what you were told about it when the spans are one command away. A call is one trace and one session, with a `turn` span per exchange inside it. Add `--check-v4` after any change to tracing: it fails the run when the call splits into several traces, when its root carries no conversation, when a turn recorded the caller and not the reply, or when an observation is missing the session ID or trace name, none of which is visible in the Langfuse UI.
 
+## Commits and pull requests (advisory)
+Plain words, short. Write it the way you would say it out loud, not the way a
+release note reads. A pull request body is two parts and nothing else:
+
+- **What's in** — the shape an author writes, in a fence, and one paragraph on
+  what it does. What was wrong before, if it takes a line.
+- **How it works** — five to ten lines. The decisions somebody would otherwise
+  ask about.
+
+The reasoning that filled a body belongs where a reader finds it later: in the
+code comment beside the thing it explains, in the gate table above, or in the
+commit message. A body that lists every gate is a body nobody reads.
+
+**No tool attribution and no session link**, in a commit message or a pull
+request. `Co-Authored-By:` is fine.
+
 ## A rule with no gate is a wish
 Standards here are not taste, they are things CI or a test can fail on. Writing a new rule into this file means wiring its check in the same PR, or tagging it `(advisory)` so it reads as guidance instead of law.
 
