@@ -536,7 +536,7 @@ func TestPreflightTaskAndOrderedGroup(t *testing.T) {
 				Name: "collect", Instructions: "Return the caller tier.", History: "full", Agent: "assistant", When: "Classify the caller.",
 			}}
 			data.TaskGroups = []TaskGroup{{
-				Name: "triage", Steps: []string{"collect"}, ContextScope: "shared", Then: "return", Agent: "assistant", When: "Run triage.",
+				Name: "triage", Steps: []spec.StepItem{{Task: "collect"}}, ContextScope: "shared", Then: "return", Agent: "assistant", When: "Run triage.",
 			}}
 			dir := filepath.Join(t.TempDir(), "agent")
 			if _, err := Write(dir, data); err != nil {

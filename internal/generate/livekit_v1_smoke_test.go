@@ -455,6 +455,9 @@ async def main():
         duplicate_ctx.copy(),
         exclude_invalid_function_calls=False,
     )
+    # The delegate's own record of the run, which the callback writes into: a
+    # group that stops early still owes the owner the steps it did run.
+    duplicate_flow = {"results": {}, "carried": []}
     await agent._share_task_result(
         duplicate_group,
         agent.TaskCompletedEvent(
@@ -465,7 +468,9 @@ async def main():
             task_id="confirm",
             result=result,
         ),
+        duplicate_flow,
     )
+    assert duplicate_flow["results"] == {"confirm": result}
     patched_output = duplicate_group.chat_ctx.get_by_id(successful_output.id)
     assert isinstance(patched_output, llm.FunctionCallOutput)
     assert patched_output.name == "finish"

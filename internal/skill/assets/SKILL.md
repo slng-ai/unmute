@@ -46,6 +46,7 @@ one namespace. `references/orchestration.md` has the table.
 **Define each tool once.** Its contract lives in `tools/<name>.yaml`; `tools:` lists hold names only.
 
 **Task `assign:` and tool `output:` are different contracts.** Task finish fields come from destination variables; do not repeat their types.
+**A step that ends on a tool result should say so.** `finish:` names the tools that end it and what a successful result looks like, so it saves and moves on with no model request in between. `skip_when_confirmed:` skips a group step whose confirmation holds; `opening: listen` speaks one fixed question and waits. Code targets only; `references/orchestration.md` has the rules.
 
 Omitted task and handoff history means `messages`: spoken turns without tool records. With `reset`, name each needed saved value in the receiver's prompt as `{{variable}}`.
 

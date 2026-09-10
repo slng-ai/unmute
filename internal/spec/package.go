@@ -412,27 +412,40 @@ type Task struct {
 	// Announce is one fixed sentence the agent speaks as the task is entered, so
 	// the two model requests it takes to enter one are not silence. Spoken at
 	// the very start of the step, before anything else runs.
-	Announce string   `json:"announce,omitempty" yaml:"announce,omitempty"`
-	Assign   []Pair   `json:"assign,omitempty" yaml:"assign,omitempty"`
-	Tools    []string `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Handoffs []string `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
+	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
+	Assign   []Pair `json:"assign,omitempty" yaml:"assign,omitempty"`
+	// Finish names the tools this step ends on. When one of them returns a
+	// result meeting every `success:` pair, the step saves `assign:` from that
+	// result and ends, so the model is not asked to call `finish` for a decision
+	// the tool already made. The model's own `finish` is still there for a
+	// request this step cannot serve and for values it already holds.
+	Finish   []FinishEntry `json:"finish,omitempty" yaml:"finish,omitempty"`
+	Tools    []string      `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Handoffs []string      `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
 	// Think names an entry of `models.think`, overriding the profile the task
 	// would otherwise inherit. Spelled the way every other think pointer is.
 	Think   string      `json:"think,omitempty" yaml:"think,omitempty"`
 	Context TaskContext `json:"context,omitempty" yaml:"context,omitempty"`
+	// Opening is how the step's first turn happens: `generate` (the default, and
+	// what an omitted key means) has the model open it, `listen` speaks the
+	// `announce:` line once and waits for the caller. Listening costs no model
+	// request, which is what it is for.
+	Opening string `json:"opening,omitempty" yaml:"opening,omitempty"`
 }
 
 // TaskGroup is one entry under `task_groups:`: an ordered run of task steps. It
 // carries its own trigger, because an agent names a group and nothing else sits
 // between the two to hold one.
 type TaskGroup struct {
-	Steps        []string `json:"steps" yaml:"steps"`
-	When         string   `json:"when,omitempty" yaml:"when,omitempty"`
-	Announce     string   `json:"announce,omitempty" yaml:"announce,omitempty"`
-	ContextScope string   `json:"context_scope" yaml:"context_scope"`
-	Then         string   `json:"then" yaml:"then"`
-	ThenTarget   string   `json:"then_target,omitempty" yaml:"then_target,omitempty"`
-	Merge        string   `json:"merge,omitempty" yaml:"merge,omitempty"`
+	// Steps is the ordered run. Each item is a bare task name, or a mapping
+	// naming the task and how the group treats it.
+	Steps        []StepItem `json:"steps" yaml:"steps"`
+	When         string     `json:"when,omitempty" yaml:"when,omitempty"`
+	Announce     string     `json:"announce,omitempty" yaml:"announce,omitempty"`
+	ContextScope string     `json:"context_scope" yaml:"context_scope"`
+	Then         string     `json:"then" yaml:"then"`
+	ThenTarget   string     `json:"then_target,omitempty" yaml:"then_target,omitempty"`
+	Merge        string     `json:"merge,omitempty" yaml:"merge,omitempty"`
 }
 
 type TaskContext struct {

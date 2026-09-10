@@ -207,6 +207,16 @@ type livekitDelegate struct {
 	// Announce is one sentence spoken as the step is entered, rendered at the
 	// very start of the method, before anything else runs.
 	Announce string
+	// CarriesTurn says some step of this delegate can end on its own tool, so
+	// the delegate holds the caller turn that step consumed and puts it back in
+	// front of the owner. False for every delegate whose steps all end the way
+	// they always did, which is what keeps their emitted method unchanged.
+	CarriesTurn bool
+	// HasSkips says some step of this group carries `skip_when_confirmed:`. An
+	// isolated sequence builds its plan as a filtered comprehension only then,
+	// so a group with no skippable step never names the confirmation helper the
+	// package does not emit, which the emitted project's own ruff gate refuses.
+	HasSkips bool
 	// RefreshOwnerPrompt re-renders the owning agent's prompt after this step's
 	// `assign:` writes, because the owner's prompt is rendered in on_enter and
 	// the owner is entered once per call. See livekitAgent.RefreshPrompt.
@@ -267,6 +277,24 @@ type livekitStep struct {
 	Class string
 	ID    string
 	Desc  string
+	// SkipWhenConfirmed is the variable whose confirmation lets the group skip
+	// this step, empty when the step always runs.
+	SkipWhenConfirmed string
+	// Terminal says this step can end on its own tool.
+	Terminal bool
+}
+
+// livekitTerminal is one tool a step ends on.
+type livekitTerminal struct {
+	// Step is the task name, which is the key _save_result and _FINISH_TYPES
+	// are both indexed by.
+	Step string
+	// Success is the Python dict literal of field to allowed values.
+	Success string
+	// Transfers are the handoff methods of the same step, as a Python set
+	// literal. A terminal call beside one of these must not complete the step:
+	// the transfer does, once the save has settled.
+	Transfers string
 }
 
 type livekitTask struct {
@@ -289,6 +317,19 @@ type livekitTask struct {
 	// Typed marks a step whose result declares a shape, so its finish validates
 	// the arguments where they enter the state before anything is recorded.
 	Typed bool
+	// Terminal is true when any of this task's tools ends the step. It gates the
+	// per-invocation state and the repair merge in `finish`.
+	Terminal bool
+	// Withdraws is true when some group names this task with
+	// `skip_when_confirmed:`, so entering it withdraws what it confirms.
+	Withdraws bool
+	// Opening is how the step's first turn happens: "generate" or "listen".
+	Opening string
+	// Announce is the line a listening step speaks itself.
+	Announce string
+	// TerminalTools is this step's own terminal tool methods as a Python set
+	// literal, read by a handoff to see whether one was called beside it.
+	TerminalTools string
 	// ResultExpr is the dict the finish hands back: the validated values when
 	// Typed, and the inline literal built from the arguments otherwise. One
 	// expression rather than four inline copies, so the typed case is one branch
@@ -322,7 +363,11 @@ type livekitTool struct {
 	HostedRequest bool
 	// HostedHeaders are the fixed headers the platform stores on a request tool,
 	// rendered as a Python dict literal. Empty when it stores none.
-	HostedHeaders    string
+	HostedHeaders string
+	// Terminal is set when the task that holds this tool names it under
+	// `finish:`. It carries what the emitted wrapper needs and nothing else, so
+	// a tool nobody made terminal renders exactly as it did before this field.
+	Terminal         *livekitTerminal
 	Builtin          string // execution: builtin — prebuilt registry id (renders into tools=, not a method)
 	KnowledgeBase    string // execution: knowledge — the base this tool searches
 	Instructions     string // builtin end_call closing message → end_instructions
@@ -520,6 +565,28 @@ type livekitData struct {
 	HasColdTransfer     bool // get_job_context import
 	HasWarmTransfer     bool // WarmTransferTask import + trunk env + room_options (B14)
 	HasTaskTransfers    bool // _TaskTransfer sentinel + task delegate catch paths
+	// NeedsTerminal, NeedsWithdrawal and NeedsOpeningListen gate spec 010's
+	// three keys. Each one is false for a package that writes none of them, so
+	// the helper, the wrapper and the opening are absent rather than emitted and
+	// unused, which is what keeps every other package byte-identical
+	// (TestPackagesWritingNoNewKeyEmitTheSameBytes).
+	NeedsTerminal bool // any task declares finish:, so the terminal helpers are emitted
+	// The runbook rows for the three keys. Empty for a package writing none,
+	// which is what keeps its README the README it had.
+	TerminalSteps  []runbookTerminalStep
+	SkippableSteps []runbookSkippableStep
+	ListeningSteps []runbookListeningStep
+	// CarriesTurn says some delegate holds a caller turn back for its owner,
+	// which is the one thing that emits _insert_carried_turn and widens
+	// _share_task_result.
+	CarriesTurn     bool
+	NeedsWithdrawal bool // some group step carries skip_when_confirmed:
+	// GroupStops emits the _GroupStop sentinel and the check that raises it. It
+	// follows NeedsTaskGroups rather than any new key: a group stopping when a
+	// step ends unserved is a change for every package that declares one, and
+	// the pull request names it.
+	GroupStops         bool
+	NeedsOpeningListen bool // any task declares opening: listen
 	// HasToolAnnouncements gates the README section only: the emitted speech is
 	// per-tool and needs no import, so nothing in agent.py reads this.
 	HasToolAnnouncements bool
@@ -562,6 +629,9 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTaskNestedResult:      true, // dict finish arg
 	targetcap.FieldTaskGroup:             true, // beta.workflows TaskGroup (warn: experimental)
 	targetcap.FieldTaskGroupReturn:       true, // N13 snapshot/restore + task_results
+	targetcap.FieldTaskFinish:            true, // a step ends on a validated tool result (spec 010)
+	targetcap.FieldTaskOpening:           true, // opening: listen speaks a fixed line and waits
+	targetcap.FieldGroupSkip:             true, // a group step whose confirmation holds is skipped
 	targetcap.FieldContextIsolated:       true, // standalone-AgentTask sequence (T13)
 	targetcap.FieldTransferAnnounce:      true, // awaited outgoing reply before handoff (N44)
 	targetcap.FieldDelegateAnnounce:      true, // unawaited session.say() at the start of the method, matching the tool idiom
@@ -884,13 +954,18 @@ func pyTriple(s string) string {
 }
 
 type livekitReportJSON struct {
-	Target      string                `json:"target"`
-	Provider    string                `json:"provider"`
-	Version     string                `json:"version"`
-	Supported   *reportSupported      `json:"supported,omitempty"`
-	EntryAgent  string                `json:"entry_agent"`
-	Agents      []string              `json:"agents"`
-	Tasks       []string              `json:"tasks,omitempty"`
+	Target     string           `json:"target"`
+	Provider   string           `json:"provider"`
+	Version    string           `json:"version"`
+	Supported  *reportSupported `json:"supported,omitempty"`
+	EntryAgent string           `json:"entry_agent"`
+	Agents     []string         `json:"agents"`
+	Tasks      []string         `json:"tasks,omitempty"`
+	// TaskDetails names every step that ends on its own tool and every step
+	// whose opening is not the default; TaskGroups names every group step the
+	// group may skip. Both omitted when the package writes none of it.
+	TaskDetails []reportTaskDetail    `json:"task_details,omitempty"`
+	TaskGroups  []reportTaskGroup     `json:"task_groups,omitempty"`
 	Files       []string              `json:"generated_files"`
 	Regions     []string              `json:"deployment_regions,omitempty"`
 	RequiredEnv []string              `json:"required_env"`
@@ -924,6 +999,7 @@ func livekitReport(agent *ir.Agent, data livekitData, files []File, bindings []i
 		Target: data.Target, Provider: "livekit", Version: data.Version,
 		Supported: supportedRange(targetcap.LiveKit), EntryAgent: data.EntryClass,
 		Agents: agents, Tasks: tasks, Files: generated,
+		TaskDetails: reportTaskDetails(agent), TaskGroups: reportTaskGroups(agent),
 		// Forwarded without checking, so it must be readable back (constitution).
 		Regions: data.DeploymentRegions, RequiredEnv: data.RequiredEnv,
 		Bindings: bindings, Sizing: sizing, PrefetchWrites: PrefetchWrites(agent),

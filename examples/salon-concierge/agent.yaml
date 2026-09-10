@@ -15,14 +15,19 @@ agents:
     tasks:
       - name: verify_customer
         when: >-
-          Run only when saved customer_status is unavailable or invalid, or the
-          caller explicitly corrects their phone number. Existing or created means
-          verification is complete for the whole call, including later booking changes
-          and complaints. When verification is needed, it reads the phone number back
-          and needs a yes before it looks anyone up.
+          Run only when the caller explicitly corrects their phone number. Every
+          other route into verification goes through the booking flow, which
+          runs this step itself when the saved number is not confirmed. A change
+          of date, time or service is not a phone correction.
         instructions: tasks/verify-customer.md
         tools:
           - find_or_create_customer
+        finish:
+          - tool: find_or_create_customer
+            success:
+              - customer_status:
+                  - existing
+                  - created
         assign:
           - customer_phone: result.customer_phone
           - customer_status: result.customer_status
@@ -42,7 +47,6 @@ agents:
           history: messages
 
       - name: manage_booking
-        when: The caller wants to create, modify, or cancel a booking.
         instructions: tasks/booking.md
         tools:
           - list_bookings
@@ -52,10 +56,22 @@ agents:
           - cancel_booking
         handoffs:
           - to_complaints
+        finish:
+          - tool: create_booking
+            success:
+              - status: booked
+          - tool: modify_booking
+            success:
+              - status: modified
+          - tool: cancel_booking
+            success:
+              - status: cancelled
         assign:
           - appointment: result.appointment
         context:
           history: messages
+    task_groups:
+      - book
     handoffs:
       - to_complaints
     escalations:
@@ -69,7 +85,12 @@ agents:
       - look_up_refund_policy
       - end_call
     tasks:
-      - verify_customer
+      # Deliberately not verify_customer. The concierge is the only agent that
+      # verifies: a live call had this specialist run verification again on a
+      # caller it had already verified, costing two model requests and fourteen
+      # seconds, with its own prompt saying not to. A step in reach beats a
+      # prompt rule, so the step is not listed here. Every tool that needs the
+      # number refuses while it is unconfirmed, and to_concierge is the way back.
       - name: handle_complaint
         when: The verified caller wants a complaint recorded.
         instructions: tasks/complaint.md
@@ -78,6 +99,10 @@ agents:
         handoffs:
           - to_concierge
           - to_complaints
+        finish:
+          - tool: record_complaint
+            success:
+              - status: recorded
         assign:
           - complaints+: result.complaint
         context:
@@ -124,6 +149,21 @@ shapes:
       - complaint_id: Id
       - summary: str
       - requested_resolution: str
+
+# One booking request, start to finish, with no owner request between the two
+# steps. Verification is skipped when the caller's number is already confirmed,
+# which is every booking after the first on a call.
+task_groups:
+  book:
+    when: >-
+      The caller wants to create, move or cancel a booking. Includes a change to
+      an appointment just made.
+    steps:
+      - task: verify_customer
+        skip_when_confirmed: customer_phone
+      - manage_booking
+    context_scope: shared
+    then: return
 
 variables:
   customer_status:
@@ -309,7 +349,7 @@ models:
     detector:
       provider: local
       model: silero
-      pace: snappy
+      pace: balanced
 
 tools:
   - find_or_create_customer

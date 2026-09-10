@@ -124,11 +124,26 @@ func (s pipecatMCPSource) ParamsClass() string {
 // its instructions, tools, and a uniquely named finish function derived from the
 // result schema (V1). Nodes are emitted inline in the owning delegate's methods.
 type pipecatTask struct {
-	Name        string // node id (the task's snake_case id)
-	FinishName  string // LLM-visible "finish_<delegate>_<task>" — unique so a sticky handler registration can never run a stale step (V1)
-	NextName    string // next step's node in this delegate's chain; "" on the last step
-	Prompt      string
-	PromptExpr  string // the node's role_message: the quoted prompt, or a render call when it names a variable
+	Name       string // node id (the task's snake_case id)
+	FinishName string // LLM-visible "finish_<delegate>_<task>" — unique so a sticky handler registration can never run a stale step (V1)
+	NextName   string // next step's node in this delegate's chain; "" on the last step
+	// SkipWhenConfirmed is the variable whose confirmation lets the group skip
+	// this step, empty when the step always runs.
+	SkipWhenConfirmed string
+	Prompt            string
+	PromptExpr        string // the node's role_message: the quoted prompt, or a render call when it names a variable
+	// Terminals are the tools this step ends on, one emitted wrapper each.
+	Terminals []pipecatTerminal
+	// TerminalTools is the same set as a Python literal, read by a handoff of
+	// this step to see whether one was called beside it.
+	TerminalTools string
+	// Withdraws is true when some group names this task with
+	// `skip_when_confirmed:`, so entering it withdraws what it confirms.
+	Withdraws bool
+	// Opening is how the step's first turn happens: "generate" or "listen".
+	Opening string
+	// Announce is the line a listening step speaks itself.
+	Announce    string
 	Tools       []pipecatTool
 	Transfers   []pipecatTransfer
 	ResultProps string // Python literal: JSON-schema properties for finish args
@@ -179,6 +194,26 @@ type pipecatDelegate struct {
 	ThenTarget   string          // target agent for then: transfer
 	Isolated     bool            // context_scope: isolated (per-node context RESET)
 	HasTransfers bool            // a step can abort the remaining Flow and hand off
+	// CarriesTurn says some step of this flow can end on its own tool, so the
+	// flow holds that step's per-invocation terminal state and hands the caller
+	// turn it consumed back to the owner.
+	CarriesTurn bool
+	// RuntimeChain says this flow decides its next step as it runs rather than
+	// at compile time. True for every group: a group may now skip a step whose
+	// confirmation holds, and it stops when a step ends unserved, and neither is
+	// knowable when the chain is written. A single-task delegate keeps the
+	// compile-time form, byte for byte.
+	RuntimeChain bool
+	// HasSkips says some step of this flow carries `skip_when_confirmed:`. It
+	// picks the shape of the plan, not whether there is one: a group with no
+	// skippable step lists its steps rather than filtering them, so a package
+	// that declares no skip never names the confirmation helper it does not
+	// emit, which the emitted project's own ruff gate would refuse.
+	HasSkips bool
+	// StepScopes is the per-step router cache scope as a Python dict literal,
+	// read only by a flow whose next step is not known until run
+	// time. Empty unless some step is router-bound.
+	StepScopes string
 	// Announce is one sentence spoken as the step is entered, queued at the
 	// very start of the method, before anything else runs.
 	Announce string
@@ -209,8 +244,24 @@ type pipecatAssign struct {
 // POSTs to url_env, local awaits the user's handler from tools/<name>.py (V13).
 // Inside a Flow node the same tool is instead a module-level flows handler; the
 // InputProps/InputRequired literals carry its schema onto the FlowsFunctionSchema.
+// pipecatTerminal is one tool a step ends on, as the emitted wrapper reads it.
+type pipecatTerminal struct {
+	Tool string
+	// Success is the Python dict literal of output field to allowed values.
+	Success string
+	// Transfers is the step's own handoff function names as a Python set
+	// literal, empty when the step has none.
+	Transfers string
+	// NeedsState mirrors the tool's own flag, because the wrapper calls the
+	// module-level flow tool itself rather than going through the bound shim.
+	NeedsState bool
+}
+
 type pipecatTool struct {
-	Name          string
+	Name string
+	// Terminal is true when the step that holds this tool names it under
+	// `finish:`, which swaps the node's handler for the step's own wrapper.
+	Terminal      bool
 	MethodName    string
 	Description   string
 	URLEnv        string
@@ -600,12 +651,23 @@ type pipecatData struct {
 	// timeout rather than on the smart-turn analyzer's verdict. Unlike LiveKit,
 	// this target loses its ceiling with the analyzer, because the ceiling IS the
 	// analyzer's own stop_secs. The runbook says so.
-	SemanticOff              bool
-	NeedsTurnStrategies      bool // interruption min-words strategy
-	NeedsEndFrame            bool
-	NeedsAppendFrame         bool
-	HasFlows                 bool // any delegate (tasks run as Flows on the owner, C8)
-	HasTaskTransfers         bool // a task can transfer; imports the public NO_RESPONSE sentinel
+	SemanticOff         bool
+	NeedsTurnStrategies bool // interruption min-words strategy
+	NeedsEndFrame       bool
+	NeedsAppendFrame    bool
+	HasFlows            bool // any delegate (tasks run as Flows on the owner, C8)
+	HasTaskTransfers    bool // a task can transfer; imports the public NO_RESPONSE sentinel
+	// The same three gates the LiveKit data carries, for the same reason: a
+	// package writing none of spec 010's keys emits the bytes it emitted before
+	// the feature existed.
+	NeedsTerminal bool // any task declares finish:
+	// The runbook rows for the three keys. Empty for a package writing none,
+	// which is what keeps its README the README it had.
+	TerminalSteps            []runbookTerminalStep
+	SkippableSteps           []runbookSkippableStep
+	ListeningSteps           []runbookListeningStep
+	NeedsWithdrawal          bool // some group step carries skip_when_confirmed:
+	NeedsOpeningListen       bool // any task declares opening: listen
 	HasTransferAnnouncements bool // target worker owns exact handoff speech before its reply
 	// HasToolAnnouncements gates the announce parameter and the queued frame
 	// inside _direct_tool, so a package where no tool announces emits the wrapper
@@ -666,6 +728,9 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTaskNestedResult:     true, // forwarded json_schema properties
 	targetcap.FieldTaskGroup:            true, // linear dynamic-flow chain
 	targetcap.FieldTaskGroupReturn:      true, // snapshot/restore + results injection
+	targetcap.FieldTaskFinish:           true, // a step ends on a validated tool result (spec 010)
+	targetcap.FieldTaskOpening:          true, // opening: listen speaks a fixed line and waits
+	targetcap.FieldGroupSkip:            true, // a group step whose confirmation holds is skipped
 	targetcap.FieldContextIsolated:      true, // per-node ContextStrategy RESET
 	targetcap.FieldDelegateAnnounce:     true, // TTSSpeakFrame queued at the start of the method, matching the tool idiom
 	targetcap.FieldPrefetch:             true, // _prefetch between build_state and the agent construction
@@ -920,6 +985,11 @@ type pipecatReportJSON struct {
 	PrefetchWrites []PrefetchWrite  `json:"prefetch_writes,omitempty"`
 	Variables      []reportVariable `json:"variables,omitempty"`
 	Secrets        []reportSecret   `json:"secrets,omitempty"`
+	// TaskDetails and TaskGroups say the same things the LiveKit report says,
+	// in the same shape: every step that ends on its own tool, every non-default
+	// opening, and every group step the group may skip.
+	TaskDetails []reportTaskDetail `json:"task_details,omitempty"`
+	TaskGroups  []reportTaskGroup  `json:"task_groups,omitempty"`
 	// Prerequisites are inspectable for the same reason the forwarded region is:
 	// a fact the compiler acted on has to be readable back out.
 	Prerequisites []targetcap.RouteAccountPrerequisite `json:"route_prerequisites,omitempty"`
@@ -946,6 +1016,7 @@ func pipecatReport(agent *ir.Agent, data pipecatData, files []File, bindings []i
 		Regions: regionList(data.DeploymentRegion), RequiredEnv: data.RequiredEnv,
 		Bindings: bindings, Sizing: sizing, PrefetchWrites: PrefetchWrites(agent),
 		Variables: reportVariables(agent), Secrets: reportSecrets(agent),
+		TaskDetails: reportTaskDetails(agent), TaskGroups: reportTaskGroups(agent),
 		Prerequisites: data.Prerequisites,
 		Notes:         data.Notes,
 	}, "", "  ")

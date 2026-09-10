@@ -919,6 +919,17 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		if task.Model != "" {
 			applyCapability(caps, targetcap.FieldTaskModel, provider, row)
 		}
+		if len(task.Finish) > 0 {
+			applyCapability(caps, targetcap.FieldTaskFinish, provider, row)
+		}
+		if task.Opening != "" && task.Opening != OpeningGenerate {
+			applyCapability(caps, targetcap.FieldTaskOpening, provider, row)
+		}
+		if task.Opening == OpeningListen && task.Announce == "" {
+			row.Warnings = append(row.Warnings, fmt.Sprintf(
+				"%s opens by listening and has no announce:, so the caller hears nothing until they speak; "+
+					"add an announce: line or drop opening: listen", name))
+		}
 		if taskContexts[name] {
 			validateContext(task.Context, provider, caps, row)
 		}
@@ -927,6 +938,11 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		applyCapability(caps, targetcap.FieldTaskGroup, provider, row)
 	}
 	for _, group := range agent.TaskGroups {
+		for _, step := range group.Steps {
+			if step.SkipWhenConfirmed != "" {
+				applyCapability(caps, targetcap.FieldGroupSkip, provider, row)
+			}
+		}
 		if group.Then == GroupReturn {
 			applyCapability(caps, targetcap.FieldTaskGroupReturn, provider, row)
 		}

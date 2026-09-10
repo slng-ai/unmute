@@ -399,3 +399,102 @@ func TestMaintainKeepsNonalphabeticalToolOrder(t *testing.T) {
 		t.Errorf("scaffold.Data.Tools order = %v, want %v", gotNames, want)
 	}
 }
+
+// The same silent loss, over spec 010's three keys. A key scaffold.Data does not
+// carry is a key `unmute maintain` deletes from the author's file at exit 0, and
+// the three it added are exactly the kind nobody notices going: the package
+// still compiles, it just quietly makes three model requests again.
+func TestMaintainKeepsATasksFinish(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "pkg")
+	data := scaffold.Data{
+		Name: "pkg", AgentName: "acme-desk",
+		Tasks: []scaffold.Task{{
+			Name: "collect", Instructions: "Collect the details.", Agent: "assistant",
+			When: "Collect first.", History: "full", Opening: "listen",
+			Announce: "What is the reference?",
+			Finish: []spec.FinishEntry{{
+				Tool:    "look_up",
+				Success: []spec.SuccessPair{{Field: "status", Values: []string{"found"}}},
+			}},
+			Tools: []string{"look_up"},
+		}},
+		Tools: []scaffold.Tool{{
+			Name: "look_up", Description: "Look one record up.", Execution: "local",
+			Input:       `{"type":"object","properties":{"reference":{"type":"string"}},"required":["reference"]}`,
+			Output:      `{"type":"object","properties":{"status":{"type":"string","enum":["found"]}},"required":["status"]}`,
+			AttachTasks: []string{"collect"},
+		}},
+	}
+	data.SetTarget("livekit")
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+
+	agent, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var collect *scaffold.Task
+	for i := range agent.data.Tasks {
+		if agent.data.Tasks[i].Name == "collect" {
+			collect = &agent.data.Tasks[i]
+		}
+	}
+	if collect == nil {
+		t.Fatal("the task did not survive the round trip at all")
+	}
+	if len(collect.Finish) != 1 || collect.Finish[0].Tool != "look_up" {
+		t.Errorf("finish = %+v, want the terminal tool carried through", collect.Finish)
+	}
+	if len(collect.Finish) == 1 {
+		success := collect.Finish[0].Success
+		if len(success) != 1 || success[0].Field != "status" || len(success[0].Values) != 1 || success[0].Values[0] != "found" {
+			t.Errorf("success = %+v, want status: found", success)
+		}
+	}
+	if collect.Opening != "listen" {
+		t.Errorf("opening = %q, want listen", collect.Opening)
+	}
+}
+
+func TestMaintainKeepsAGroupStepSkip(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "pkg")
+	data := scaffold.Data{
+		Name: "pkg", AgentName: "acme-desk",
+		Tasks: []scaffold.Task{
+			{Name: "verify", Instructions: "Verify.", Agent: "assistant", When: "Verify first.", History: "full"},
+			{Name: "collect", Instructions: "Collect.", Agent: "assistant", History: "full"},
+		},
+		TaskGroups: []scaffold.TaskGroup{{
+			Name: "flow", Agent: "assistant", When: "Run the flow.",
+			ContextScope: "shared", Then: "return",
+			Steps: []spec.StepItem{
+				{Task: "verify", SkipWhenConfirmed: "caller_phone"},
+				{Task: "collect"},
+			},
+		}},
+		Variables: []scaffold.Variable{{
+			Name: "caller_phone", Type: "str", Default: `""`, Confirm: "verify",
+			Description: "The number the caller agreed to.",
+		}},
+	}
+	data.SetTarget("livekit")
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+
+	agent, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agent.data.TaskGroups) != 1 {
+		t.Fatalf("task groups = %+v", agent.data.TaskGroups)
+	}
+	steps := agent.data.TaskGroups[0].Steps
+	if len(steps) != 2 || steps[0].SkipWhenConfirmed != "caller_phone" {
+		t.Errorf("steps = %+v, want the skip carried through", steps)
+	}
+	if steps[1].SkipWhenConfirmed != "" {
+		t.Errorf("a bare step gained a skip: %+v", steps[1])
+	}
+}

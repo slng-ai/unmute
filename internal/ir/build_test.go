@@ -21,7 +21,7 @@ func TestGroupOnlyTaskValidatesAssignments(t *testing.T) {
 	}, "Collect the customer ID.")
 	delete(pkg.Callables, "collect")
 	pkg.Agent.TaskGroups = map[string]packagespec.TaskGroup{"collect_group": {
-		Steps: []string{"collect"}, When: "Collect", ContextScope: "shared", Then: "return",
+		Steps: []packagespec.StepItem{{Task: "collect"}}, When: "Collect", ContextScope: "shared", Then: "return",
 	}}
 	owner := pkg.Agent.Agents["intake"]
 	owner.TaskGroups = []string{"collect_group"}
@@ -1014,7 +1014,7 @@ func TestUnreachableControlIsRefused(t *testing.T) {
 				addTask(pkg, "check_balance")
 				pkg.Agent.TaskGroups = map[string]packagespec.TaskGroup{}
 				pkg.Agent.TaskGroups["closing"] = packagespec.TaskGroup{
-					Steps: []string{"check_balance"}, ContextScope: "shared", Then: "return",
+					Steps: []packagespec.StepItem{{Task: "check_balance"}}, ContextScope: "shared", Then: "return",
 				}
 			},
 			want: `task group "closing" is declared but no agent reaches it`,

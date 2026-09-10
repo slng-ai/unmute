@@ -44,6 +44,8 @@ agents:
 [[end]][[end]][[$taskHandoffs := $.TaskHandoffs .Name]][[if $taskHandoffs]]        handoffs:
 [[range $taskHandoffs]]          - [[.]]
 [[end]][[end]][[if .Model]]        think: [[.Model]]
+[[end]][[if .Finish]]        finish:[[finishBlock 10 .Finish]]
+[[end]][[if .Opening]]        opening: [[.Opening]]
 [[end]][[if .Assign]]        assign:[[pairs 10 .Assign]]
 [[end]]        context:
           history: [[if .History]][[.History]][[else]]messages[[end]]
@@ -84,8 +86,10 @@ agents:
     when: [[quote .When]]
 [[if .Announce]]    announce: [[quote .Announce]]
 [[end]]    steps:
-[[range .Steps]]      - [[.]]
-[[end]]    context_scope: [[.ContextScope]]
+[[range .Steps]][[if .SkipWhenConfirmed]]      - task: [[.Task]]
+        skip_when_confirmed: [[.SkipWhenConfirmed]]
+[[else]]      - [[.Task]]
+[[end]][[end]]    context_scope: [[.ContextScope]]
     then: [[.Then]]
 [[if .ThenTarget]]    then_target: [[.ThenTarget]]
 [[end]]    merge: results
@@ -107,6 +111,8 @@ shapes:
     type: [[.Type]]
 [[if .Default]]    default: [[.Default]]
 [[end]][[if .Source]]    source: [[.Source]]
+[[end]][[if .Confirm]]    confirm: [[.Confirm]]
+[[end]][[if .Description]]    description: [[quote .Description]]
 [[end]][[end]]
 [[end]][[if .DeclaredSecrets]]# Every runtime value you supply, by environment variable name. A secret has no
 # other fields, and a value never appears in a package file: put the values in

@@ -1,0 +1,35 @@
+description: >-
+  Look one customer up by the phone number the caller agreed to, creating a
+  record when there is none. The lookup decides whether a number is usable.
+
+input:
+  type: object
+  properties:
+    phone:
+      type: string
+      description: The number the caller agreed to, digits only.
+  required:
+    - phone
+
+output:
+  type: object
+  properties:
+    customer_phone:
+      type: string
+    status:
+      type: string
+      enum:
+        - existing
+        - created
+        - invalid
+    summary:
+      type: string
+  required:
+    - customer_phone
+    - status
+    - summary
+
+local:
+  handler: tools/desk.py
+
+effect: returns_data

@@ -361,40 +361,58 @@ async def create_then_cancel(userdata):
     ).isoformat()
     available = await task.check_availability(ctx, date=requested, service="haircut")
     slot_id = available["slots"][-1]["slot_id"]
+    # The tool ends the step: it saves the appointment it returned and hands the
+    # owner a status, and there is no finish call in between. That missing call
+    # is the request spec 010 removes.
     created = await task.create_booking(
-        ctx, confirmed=True, service="haircut", slot_id=slot_id
+        ctx, confirmed=True, service="haircut", slot_id=slot_id, additional=False
     )
-    assert created["status"] == "booked", created
-    appointment = appointment_value("create", created["booking_id"], slot_id)
-    await task.finish(ctx, appointment=appointment)
-    assert task.completions == [{"appointment": appointment, "unserved_request": ""}]
+    # Nothing comes back: the framework asks this step for no reply, and the
+    # owner speaks once when the delegate returns. A value here made the step
+    # speak first and the owner speak again.
+    assert created is None, created
+    # The step completed with the values the tool returned, and the model was
+    # never asked for them: one completion, no finish call.
+    assert len(task.completions) == 1, task.completions
+    assert task.completions[0]["appointment"]["action"] == "create", task.completions
+    saved = userdata.appointment
+    assert saved["action"] == "create" and saved["service"] == "haircut", saved
+    booking_id = saved["booking_id"]
+    appointment = appointment_value("create", booking_id, slot_id)
     check_saved_appointment(agent, userdata, appointment)
 
+    # A second create while the caller holds a booking is the tool's own
+    # refusal, whatever the model meant by it: a live call answered "move it to
+    # the day after tomorrow" with a second booking. An ordinary result, so the
+    # step stays open for modify_booking.
     task = recording_task(agent.ManageBooking)
     requested = (date.fromisoformat(requested) + timedelta(days=1)).isoformat()
     available = await task.check_availability(ctx, date=requested, service="haircut")
     slot_id = available["slots"][0]["slot_id"]
-    moved = await task.modify_booking(ctx, booking_id=created["booking_id"],
+    refused = await task.create_booking(
+        ctx, confirmed=True, service="haircut", slot_id=slot_id, additional=False
+    )
+    assert refused["status"] == "has_booking", refused
+    assert [row["booking_id"] for row in refused["existing"]] == [booking_id], refused
+    assert task.completions == [], task.completions
+    moved = await task.modify_booking(ctx, booking_id=booking_id,
                                       service="haircut", slot_id=slot_id, confirmed=True)
-    assert moved["status"] == "modified", moved
-    appointment = appointment_value("modify", created["booking_id"], slot_id)
-    await task.finish(ctx, appointment=appointment)
+    assert moved is None, moved
+    assert userdata.appointment["booking_id"] == booking_id
+    appointment = appointment_value("modify", booking_id, slot_id)
     check_saved_appointment(agent, userdata, appointment)
 
     task = recording_task(agent.ManageBooking)
     listed = await task.list_bookings(ctx)
-    assert [item["booking_id"] for item in listed["bookings"]] == [
-        created["booking_id"]
-    ]
+    assert [item["booking_id"] for item in listed["bookings"]] == [booking_id]
     cancelled = await task.cancel_booking(
-        ctx, booking_id=created["booking_id"], confirmed=True
+        ctx, booking_id=booking_id, confirmed=True
     )
-    assert cancelled["status"] == "cancelled", cancelled
-    appointment = appointment_value("cancel", created["booking_id"], slot_id)
-    await task.finish(ctx, appointment=appointment)
-    assert task.completions == [{"appointment": appointment, "unserved_request": ""}]
+    assert cancelled is None, cancelled
+    # A read tool does not end the step; only a mutation the package listed does.
+    appointment = appointment_value("cancel", booking_id, slot_id)
     check_saved_appointment(agent, userdata, appointment)
-    return created["booking_id"], slot_id
+    return booking_id, slot_id
 
 
 async def split_verification_then_intent_change():
@@ -414,13 +432,14 @@ async def split_verification_then_intent_change():
     userdata = agent.Userdata()
     verification = recording_task(agent.VerifyCustomer, chat_ctx)
     ctx = run_context(userdata, "verification-finish")
+    # The lookup ends the step itself, so what comes back is the status, and the
+    # values it saved are on the state rather than in a finish call.
     verified = await verification.find_or_create_customer(ctx, phone="3035550199")
-    finish_result = {"customer_phone": verified["customer_phone"], "customer_status": verified["status"]}
-    await verification.finish(ctx, **finish_result)
-    assert verification.completions == [
-        {**finish_result, "unserved_request": ""}
-    ]
-    userdata.customer_phone = verified["customer_phone"]
+    assert verified is None, verified
+    assert len(verification.completions) == 1, verification.completions
+    saved_phone = userdata.customer_phone
+    assert saved_phone == "+3035550199", saved_phone
+    assert userdata.customer_status == "created", userdata.customer_status
 
     complaint = "Actually, I need to complain about my last visit."
     chat_ctx.add_message(role="user", content=complaint)
@@ -431,7 +450,7 @@ async def split_verification_then_intent_change():
     assert isinstance(transfer, agent._TaskTransfer)
     assert isinstance(transfer.agent, agent.ComplaintSpecialist)
     transfer.agent._activity = quiet_activity()
-    assert userdata.customer_phone == verified["customer_phone"]
+    assert userdata.customer_phone == saved_phone
     complaint_messages = [
         item.raw_text_content
         for item in transfer.agent.chat_ctx.items
@@ -446,25 +465,28 @@ async def split_verification_then_intent_change():
         requested_resolution="A manager callback",
         summary="The last visit did not meet expectations.",
     )
-    assert recorded["status"] == "recorded"
-    value = dict(complaint_id=recorded["complaint_id"],
-                 summary="The last visit did not meet expectations.",
-                 requested_resolution="A manager callback")
-    await complaint_task.finish(run_context(userdata, "complaint-finish"), complaint=value)
-    assert userdata.complaints == [value]
-    return verified
+    # The tool ends the step: nothing comes back, the step completed once, and
+    # the record the tool returned is on the list. One entry, not two: this
+    # assign appends, so a second save would be visible here.
+    assert recorded is None, recorded
+    assert len(complaint_task.completions) == 1, complaint_task.completions
+    assert len(userdata.complaints) == 1, userdata.complaints
+    value = userdata.complaints[0]
+    assert value["summary"] == "The last visit did not meet expectations.", value
+    assert value["requested_resolution"] == "A manager callback", value
+    return {"customer_phone": saved_phone, "customer_status": userdata.customer_status}
 
 
 async def main():
     customer = tool_modules["find_or_create_customer"].find_or_create_customer(
         "2025550187"
     )
-    assert customer["status"] == "created"
+    assert customer["customer_status"] == "created"
     actions.clear()
     userdata = agent.Userdata(customer_phone=customer["customer_phone"])
     await agent._prefetch(userdata, None)
     agent._save_result(
-        "verify_customer", userdata, {"customer_phone": customer["customer_phone"], "customer_status": customer["status"]}
+        "verify_customer", userdata, {"customer_phone": customer["customer_phone"], "customer_status": customer["customer_status"]}
     )
     booking_id, slot_id = await create_then_cancel(userdata)
     booking_actions = [name for name, _, _ in actions]
@@ -476,10 +498,12 @@ async def main():
         "check_availability",
         "create_booking",
         "check_availability",
+        # The second create ran and was refused by the backend: has_booking.
+        "create_booking",
         "modify_booking",
         "list_bookings",
         "cancel_booking",
-    ]
+    ], booking_actions
     assert booking_rows() == [
         (booking_id, digits(customer["customer_phone"]), "haircut", slot_id, "cancelled")
     ]
@@ -491,7 +515,7 @@ async def main():
         "record_complaint",
     ]
     assert intent_actions[0][1] == {"phone": "3035550199"}
-    assert verified["status"] == "created"
+    assert verified["customer_status"] == "created"
     assert complaint_rows() == [
         (
             digits(verified["customer_phone"]),
@@ -572,66 +596,165 @@ async def quiet(worker):
         worker.llm.push_frame = no_op
 
 
+class Flow:
+    """Stands in for FlowManager and records the node the delegate started on."""
+
+    nodes = []
+
+    def __init__(self, **_kwargs):
+        pass
+
+    async def initialize(self, node):
+        Flow.nodes.append(node)
+
+
+bot.FlowManager = Flow
+
+
+async def enter(worker, name):
+    """Run the real delegate entry and return the node it opened on.
+
+    Through the delegate rather than hand-seeded attributes: the first live
+    failure of this feature lived in what the entry sets up and what a step
+    transition leaves behind, and a stand-in that wrote those attributes
+    itself could not have seen it.
+    """
+    async def resolved(*_args, **_kwargs):
+        pass
+
+    await getattr(worker, name)(SimpleNamespace(result_callback=resolved))
+    return Flow.nodes[-1]
+
+
+async def enter_book(worker):
+    return await enter(worker, "book")
+
+
+def handlers(node):
+    """The handlers registered on a node, by function name."""
+    return {function.name: function.handler for function in node["functions"]}
+
+
+def owner_status(context):
+    return json.loads(context.get_messages()[-1]["content"])
+
+
 async def booking_flow(worker, context, *, action, booking_id=""):
     # Every mutation and lookup tool below speaks an announcement through
-    # flow_manager.worker.queue_frame before doing its work (2026-08-23,
-    # "Speak before a tool runs, on both code drivers"). worker.queue_frame is
-    # already a no-op from quiet(worker), so a flow_manager stand-in exposing
+    # flow_manager.worker.queue_frame before doing its work. worker.queue_frame
+    # is already a no-op from quiet(worker), so a flow_manager stand-in exposing
     # just that worker is enough.
     flow_manager = SimpleNamespace(worker=worker)
-    worker._manage_booking_results = {}
-    worker._manage_booking_active_step = "manage_booking"
-    worker._manage_booking_snapshot = (
-        [dict(message) for message in context.get_messages()],
-        context.tools,
-    )
+    node = await enter_book(worker)
+    # The number is confirmed, so the plan skips verification and opens on the
+    # booking step: the owner request between the two is the one this package
+    # no longer makes.
+    assert worker._book_plan == ["manage_booking"], worker._book_plan
+    assert node["name"] == "manage_booking", node["name"]
+    step = handlers(node)
     if action == "create":
         # Same as the LiveKit side: the date was pre-fetched before verification.
         assert worker.state.booking_date, "the pre-fetch landed no booking_date"
         requested = (
             date.fromisoformat(worker.state.booking_date) + timedelta(days=1)
         ).isoformat()
-        available = await bot._flow_tool_check_availability(
+        available = await step["check_availability"](
             {"service": "haircut", "date": requested}, flow_manager
         )
         slot_id = available["slots"][-1]["slot_id"]
-        result = await bot._flow_tool_create_booking(
-            {"confirmed": True, "service": "haircut", "slot_id": slot_id},
-            flow_manager,
-            state=worker.state,
+        result, next_node = await step["create_booking"](
+            {"confirmed": True, "service": "haircut", "slot_id": slot_id, "additional": False}, flow_manager
         )
-        booking_id = result["booking_id"]
+        booking_id = worker.state.appointment["booking_id"]
     elif action == "modify":
         requested = (date.fromisoformat(worker.state.appointment["date"]) + timedelta(days=1)).isoformat()
-        available = await bot._flow_tool_check_availability(
+        available = await step["check_availability"](
             {"service": "haircut", "date": requested}, flow_manager)
         slot_id = available["slots"][0]["slot_id"]
-        result = await bot._flow_tool_modify_booking(
+        result, next_node = await step["modify_booking"](
             {"booking_id": booking_id, "confirmed": True, "service": "haircut", "slot_id": slot_id},
-            flow_manager, state=worker.state)
+            flow_manager)
     else:
-        listed = await bot._flow_tool_list_bookings(
-            {}, flow_manager, state=worker.state
-        )
+        listed = await step["list_bookings"]({}, flow_manager)
         assert [item["booking_id"] for item in listed["bookings"]] == [booking_id]
         slot_id = shared_state.bookings[booking_id]["slot_id"]
-        result = await bot._flow_tool_cancel_booking(
-            {"booking_id": booking_id, "confirmed": True},
-            flow_manager,
-            state=worker.state,
+        result, next_node = await step["cancel_booking"](
+            {"booking_id": booking_id, "confirmed": True}, flow_manager
         )
 
-    expected_status = {"create": "booked", "modify": "modified", "cancel": "cancelled"}[action]
-    assert result["status"] == expected_status, result
+    # The tool ended the step: the model was never asked for a finish call, the
+    # values the tool returned are saved, and the flow is back with the owner.
+    assert result == {"status": "ok"} and next_node is None, (result, next_node)
     appointment = appointment_value(action, booking_id, slot_id)
-    result_fields = {"appointment": appointment, "unserved_request": ""}
-    finished, next_node = await worker._manage_booking_finish_manage_booking(
-        result_fields, None
-    )
-    assert finished == {"status": "ok"} and next_node is None
-    assert worker._manage_booking_results == {"manage_booking": result_fields}
+    assert worker._book_results["manage_booking"]["appointment"] == appointment, worker._book_results
+    assert worker._book_active_step is None
     check_saved_appointment(bot, worker.state, appointment)
+    assert owner_status(context) == {"status": "completed"}, context.get_messages()[-1]
     return booking_id, slot_id
+
+
+async def verify_then_create():
+    """An unverified caller books: verification ends on its lookup, the booking
+    step opens, and its first mutation runs.
+
+    Both Pipecat traces the review supplied failed here. The tool that ended
+    verification had closed the booking step's mutations, and the caller's
+    first booking was refused as if it were a second one.
+    """
+    state = bot.State()
+    await bot._prefetch(state, None)
+    context = LLMContext()
+    context.add_message({"role": "user", "content": "A haircut tomorrow please, my number is 303 555 0199."})
+    worker = bot.ConciergeAgent(state=state, context=context, call_context={})
+    await quiet(worker)
+    flow_manager = SimpleNamespace(worker=worker)
+    node = await enter_book(worker)
+    assert worker._book_plan == ["verify_customer", "manage_booking"], worker._book_plan
+    assert node["name"] == "verify_customer"
+    status, node = await handlers(node)["find_or_create_customer"]({"phone": "3035550199"}, flow_manager)
+    assert status == {"status": "completed"} and node["name"] == "manage_booking", (status, node)
+    assert state.customer_phone == "+3035550199", state.customer_phone
+    # Entering the booking step leaves verification's ending behind.
+    assert worker._book_terminal is None and not worker._book_pending
+    step = handlers(node)
+    requested = (date.fromisoformat(state.booking_date) + timedelta(days=1)).isoformat()
+    available = await step["check_availability"]({"service": "haircut", "date": requested}, flow_manager)
+    slot_id = available["slots"][0]["slot_id"]
+    context.add_message({"role": "user", "content": "Yes, book it."})
+    result, next_node = await step["create_booking"](
+        {"confirmed": True, "service": "haircut", "slot_id": slot_id, "additional": False}, flow_manager
+    )
+    assert result == {"status": "ok"} and next_node is None, (result, next_node)
+    booking_id = state.appointment["booking_id"]
+    check_saved_appointment(bot, state, appointment_value("create", booking_id, slot_id))
+    # The caller's yes arrived after the owner's snapshot, so it is carried back
+    # once, right above the status, and the first line is not repeated.
+    messages = context.get_messages()
+    assert owner_status(context) == {"status": "completed"}, messages[-1]
+    assert messages[-2] == {"role": "user", "content": "Yes, book it."}, messages[-3:]
+    assert sum(1 for message in messages if message.get("role") == "user") == 2, messages
+
+    # A second create while the caller holds a booking is the tool's own
+    # refusal, an ordinary result: the step stays open, and modify_booking keeps
+    # the booking's identity.
+    node = await enter_book(worker)
+    assert worker._book_plan == ["manage_booking"], worker._book_plan
+    step = handlers(node)
+    refused, next_node = await step["create_booking"](
+        {"confirmed": True, "service": "haircut", "slot_id": slot_id, "additional": False}, flow_manager
+    )
+    assert refused["status"] == "has_booking" and next_node is None, refused
+    assert worker._book_active_step == "manage_booking" and worker._book_terminal is None
+    moved_date = (date.fromisoformat(requested) + timedelta(days=1)).isoformat()
+    available = await step["check_availability"]({"service": "haircut", "date": moved_date}, flow_manager)
+    moved_slot = available["slots"][0]["slot_id"]
+    result, next_node = await step["modify_booking"](
+        {"booking_id": booking_id, "confirmed": True, "service": "haircut", "slot_id": moved_slot},
+        flow_manager,
+    )
+    assert result == {"status": "ok"} and next_node is None, (result, next_node)
+    check_saved_appointment(bot, state, appointment_value("modify", booking_id, moved_slot))
+    return booking_id, moved_slot
 
 
 async def split_verification_then_intent_change():
@@ -647,19 +770,18 @@ async def split_verification_then_intent_change():
         state=state, context=context, call_context={}
     )
     await quiet(concierge)
-    concierge._verify_customer_results = {}
-    concierge._verify_customer_active_step = "verify_customer"
-    concierge._verify_customer_snapshot = (
-        [dict(message) for message in context.get_messages()],
-        context.tools,
+    flow_manager = SimpleNamespace(worker=concierge)
+    node = await enter_book(concierge)
+    assert node["name"] == "verify_customer"
+    finished, next_node = await handlers(node)["find_or_create_customer"](
+        {"phone": "3035550199"}, flow_manager
     )
-    verified = await bot._flow_tool_find_or_create_customer(
-        {"phone": "3035550199"}, SimpleNamespace(worker=concierge)
-    )
-    saved = {"customer_phone": verified["customer_phone"], "customer_status": verified["status"]}
-    finished, next_node = await concierge._verify_customer_finish_verify_customer(saved, None)
-    assert finished == {"status": "ok"} and next_node is None
-    assert state.customer_phone == verified["customer_phone"]
+    # Verification is the group's first step, so ending it hands over to the
+    # booking node rather than returning to the owner. It is the owner request
+    # between the two that this package no longer makes.
+    assert finished == {"status": "completed"}, finished
+    assert next_node is not None and next_node["name"] == "manage_booking", next_node
+    assert concierge._book_active_step == "manage_booking"
     # E.164, not raw digits and not spoken groups. The step returns the number in
     # the one shape tasks/verify-customer.md requires and the customer_phone
     # variable documents, and it has to reach the variable unchanged: a second
@@ -670,29 +792,19 @@ async def split_verification_then_intent_change():
     )
 
     complaint = "Actually, I need to complain about my last visit."
-    snapshot = [dict(message) for message in context.get_messages()]
     context.add_message({"role": "user", "content": complaint})
-    specialist = bot.ConciergeAgent(
-        state=state, context=context, call_context={}
-    )
-    await quiet(specialist)
     activations = []
 
     async def activate(name, *, args, deactivate_self):
         activations.append((name, args, deactivate_self))
 
-    specialist.activate_worker = activate
-    specialist._manage_booking_results = {}
-    specialist._manage_booking_active_step = "manage_booking"
-    specialist._manage_booking_snapshot = (snapshot, context.tools)
-    transferred, next_node = (
-        await specialist._manage_booking_transfer_manage_booking_to_complaints({}, None)
-    )
-    assert transferred == {"transferred": True} and next_node is NO_RESPONSE
+    concierge.activate_worker = activate
+    transferred, after = await handlers(next_node)["to_complaints"]({}, flow_manager)
+    assert transferred == {"transferred": True} and after is NO_RESPONSE
     assert len(activations) == 1
     assert activations[0][0] == "complaint_specialist"
     assert activations[0][2] is True
-    assert specialist.state is state and state.customer_phone == verified["customer_phone"]
+    assert state.customer_phone == "+3035550199"
     complaint_messages = [
         message.get("content")
         for message in context.get_messages()
@@ -704,32 +816,36 @@ async def split_verification_then_intent_change():
         state=state, context=context, call_context={}
     )
     await quiet(complaint_worker)
-    value = dict(summary="The last visit did not meet expectations.",
-                 requested_resolution="A manager callback")
-    recorded = await bot._flow_tool_record_complaint(
-        value, SimpleNamespace(worker=complaint_worker), state=state)
-    assert recorded["status"] == "recorded"
-    value["complaint_id"] = recorded["complaint_id"]
-    complaint_worker._handle_complaint_active_step = "handle_complaint"
-    complaint_worker._handle_complaint_results = {}
-    complaint_worker._handle_complaint_snapshot = (context.get_messages(), context.tools)
-    result, _ = await complaint_worker._handle_complaint_finish_handle_complaint(
-        {"complaint": value}, None)
-    assert result == {"status": "ok"}, result
-    assert state.complaints == [value], state.complaints
-    return verified
+    node = await enter(complaint_worker, "handle_complaint")
+    assert node["name"] == "handle_complaint", node["name"]
+    result, next_node = await handlers(node)["record_complaint"](
+        {
+            "summary": "The last visit did not meet expectations.",
+            "requested_resolution": "A manager callback",
+        },
+        SimpleNamespace(worker=complaint_worker),
+    )
+    # The tool ends the step: it saves the record it returned and hands the
+    # owner a status, with no finish call in between. One entry on the list,
+    # because this assign appends and a second save would show as two.
+    assert result == {"status": "ok"} and next_node is None, (result, next_node)
+    assert len(state.complaints) == 1, state.complaints
+    value = state.complaints[0]
+    assert value["summary"] == "The last visit did not meet expectations.", value
+    assert value["requested_resolution"] == "A manager callback", value
+    return {"customer_phone": state.customer_phone, "customer_status": state.customer_status}
 
 
 async def main():
     customer = tool_modules["find_or_create_customer"].find_or_create_customer(
         "2025550187"
     )
-    assert customer["status"] == "created"
+    assert customer["customer_status"] == "created"
     actions.clear()
     state = bot.State(customer_phone=customer["customer_phone"])
     await bot._prefetch(state, None)
     bot._save_result(
-        "verify_customer", state, {"customer_phone": customer["customer_phone"], "customer_status": customer["status"]}
+        "verify_customer", state, {"customer_phone": customer["customer_phone"], "customer_status": customer["customer_status"]}
     )
     context = LLMContext()
     worker = bot.ConciergeAgent(
@@ -760,14 +876,25 @@ async def main():
         (booking_id, digits(customer["customer_phone"]), "haircut", slot_id, "cancelled")
     ]
 
+    fresh_id, fresh_slot = await verify_then_create()
+    fresh_actions = [name for name, _, _ in actions[len(booking_actions):]]
+    assert fresh_actions == [
+        "find_or_create_customer",
+        "check_availability",
+        "create_booking",
+        "create_booking",
+        "check_availability",
+        "modify_booking",
+    ], fresh_actions
+
     verified = await split_verification_then_intent_change()
-    intent_actions = actions[len(booking_actions):]
+    intent_actions = actions[len(booking_actions) + len(fresh_actions):]
     assert [name for name, _, _ in intent_actions] == [
         "find_or_create_customer",
         "record_complaint",
     ]
     assert intent_actions[0][1] == {"phone": "3035550199"}
-    assert verified["status"] == "created"
+    assert verified["customer_status"] == "existing", verified
     assert complaint_rows() == [
         (
             digits(verified["customer_phone"]),
@@ -775,10 +902,10 @@ async def main():
             "A manager callback",
         )
     ]
-    assert booking_rows() == [
-        (booking_id, digits(customer["customer_phone"]), "haircut", slot_id, "cancelled")
-    ]
-
+    assert set(booking_rows()) == {
+        (booking_id, digits(customer["customer_phone"]), "haircut", slot_id, "cancelled"),
+        (fresh_id, "3035550199", "haircut", fresh_slot, "booked"),
+    }, booking_rows()
 
 asyncio.run(main())
 print("pipecat salon journeys smoke ok")

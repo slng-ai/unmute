@@ -47,6 +47,25 @@ func Schema() (*jsonschema.Schema, error) {
 					"A scalar reference records its pin in generated metadata instead.",
 			},
 		}},
+		// SuccessPair is Pair with a value that may be a list: `- status: booked`
+		// or `- status: [booked, moved]`. Reflection sees Field and Values and
+		// would publish `{field: ..., values: ...}`, which no author writes and
+		// the decoder refuses.
+		reflect.TypeFor[SuccessPair](): {
+			Type:          "object",
+			MinProperties: ptr(1),
+			MaxProperties: ptr(1),
+			AdditionalProperties: &jsonschema.Schema{OneOf: []*jsonschema.Schema{
+				{Type: "string"},
+				{Type: "number"},
+				{Type: "boolean"},
+				{Type: "array", MinItems: ptr(1), Items: &jsonschema.Schema{OneOf: []*jsonschema.Schema{
+					{Type: "string"}, {Type: "number"}, {Type: "boolean"},
+				}}},
+			}},
+			Description: "One success condition, written `- field: value` or `- field: [value, value]`. " +
+				"Exactly one field per item; several values on one field are alternatives.",
+		},
 	}}
 	// Both hooks below are derived before they are registered, because each one
 	// publishes a shape that includes the reflected struct: registering first
@@ -61,7 +80,27 @@ func Schema() (*jsonschema.Schema, error) {
 		return nil, err
 	}
 	options.TypeSchemas[reflect.TypeFor[TaskItem]()] = item
+	step, err := stepItemSchema(options)
+	if err != nil {
+		return nil, err
+	}
+	options.TypeSchemas[reflect.TypeFor[StepItem]()] = step
 	return jsonschema.For[Package](options)
+}
+
+// stepItemSchema publishes the two shapes a group's `steps:` item may take: a
+// bare task name, or the mapping that says how the group treats the step.
+// Reflection sees only the mapping, and a package written the way every group
+// was written before `skip_when_confirmed:` existed failed the published schema.
+func stepItemSchema(options *jsonschema.ForOptions) (*jsonschema.Schema, error) {
+	long, err := jsonschema.For[StepItem](options)
+	if err != nil {
+		return nil, err
+	}
+	return &jsonschema.Schema{OneOf: []*jsonschema.Schema{
+		{Type: "string", Description: "The name of a task the group always runs."},
+		long,
+	}}, nil
 }
 
 // fieldSchema publishes the two shapes one item of a shape's `fields:` may

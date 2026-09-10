@@ -300,9 +300,11 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 			"def _flow_tool_cancel_booking(", "def _flow_tool_check_availability(",
 			"def _flow_tool_create_booking(", "def _flow_tool_find_or_create_customer(",
 			"def _flow_tool_list_bookings(", "async def _prefetch(",
-			"_manage_booking_active_step", "_manage_booking_results",
-			"_manage_booking_snapshot", "_manage_booking_finish_manage_booking",
-			"_manage_booking_transfer_manage_booking_to_complaints",
+			// The booking step runs inside the `book` group now, so the flow's
+			// symbols are named after the group rather than after the task.
+			"_book_active_step", "_book_results",
+			"_book_snapshot", "_book_finish_manage_booking",
+			"_book_transfer_manage_booking_to_complaints",
 			"_verify_customer_results", "_verify_customer_snapshot",
 			"_verify_customer_finish_verify_customer",
 		}},
@@ -417,17 +419,24 @@ func TestSmokeStubbedNamesExistInTheEmittedModule(t *testing.T) {
 // It lives in this untagged file so that gate can read it in the default suite.
 const livekitRunContextStandIn = `
 
-def run_context(userdata, call_id="smoke-call"):
+def run_context(userdata, call_id="smoke-call", siblings=()):
     """The RunContext an emitted tool body is called with.
 
     A real one is built by the framework; the fields here are the ones the
     emitted modules read, and the gate in smoke_fixture_test.go pins that list.
+
+    The siblings are the other calls the model made in the same response, which
+    is what a step that ends on its own tool reads to see whether a handoff was
+    called beside it. Empty is one call on its own, which is every journey here
+    except the compound one.
     """
     return SimpleNamespace(
         userdata=userdata,
         session=SimpleNamespace(userdata=userdata, say=lambda *_a, **_k: None),
-        speech_handle=SimpleNamespace(id="smoke-speech", num_steps=1),
-        function_call=SimpleNamespace(call_id=call_id),
+        speech_handle=SimpleNamespace(
+            id="smoke-speech", num_steps=1, chat_items=list(siblings)
+        ),
+        function_call=SimpleNamespace(call_id=call_id, name=call_id),
     )
 `
 

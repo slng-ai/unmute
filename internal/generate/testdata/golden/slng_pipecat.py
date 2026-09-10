@@ -1011,7 +1011,10 @@ class IntakeAgent(LLMWorker):
         """Run the triage group."""
         self._run_triage_visit = object()
         self._run_triage_results = {}
-        self._run_triage_active_step = "collect"
+        # The steps this invocation will run, decided once as the flow starts.
+        self._run_triage_plan = ["collect", "confirm"]
+
+        self._run_triage_active_step = self._run_triage_plan[0]
         flow = FlowManager(
             llm=self.llm,
             context_aggregator=LLMContextAggregatorPair(self.context),
@@ -1039,7 +1042,20 @@ class IntakeAgent(LLMWorker):
         # context.history on this task. Shaped after the snapshot above, so the
         # finish path restores the owner's own context whatever this step saw.
         self.context.set_messages([dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")])
-        await flow.initialize(self._run_triage_node_collect())
+        await flow.initialize(self._run_triage_node(self._run_triage_active_step))
+
+    def _run_triage_node(self, name) -> NodeConfig:
+        """One step's node by name, because the chain is decided at run time."""
+        return {
+            "collect": self._run_triage_node_collect,
+            "confirm": self._run_triage_node_confirm,
+        }[name]()
+
+    def _run_triage_next(self, name):
+        """The step after this one in this invocation's plan, or None."""
+        plan = self._run_triage_plan
+        position = plan.index(name) + 1
+        return plan[position] if position < len(plan) else None
 
     def _run_triage_node_collect(self) -> NodeConfig:
         self.context.set_messages([])
@@ -1081,14 +1097,40 @@ class IntakeAgent(LLMWorker):
             logger.warning("finish {}: {}", "collect", refused.message)
             return {"refused": f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."}, None
         self._run_triage_results["collect"] = _values
-        self._run_triage_active_step = "confirm"
-        # The next step is a different prompt site, so it asks under a different
-        # cache scope. Queued before the node is handed back, for the same reason
-        # the first step's was.
+        _next = self._run_triage_next("collect")
+        if self._run_triage_results["collect"].get("unserved_request"):
+            # The step could not serve what the caller asked. Running the next
+            # one would answer a question nobody asked, so the flow stops here
+            # and the owner is handed the unserved status.
+            logger.info("group stopped: collect ended unserved")
+            _next = None
+        self._run_triage_active_step = _next
+        if _next is not None:
+            # The next step is a different prompt site, so it asks under a
+            # different cache scope. Queued before the node is handed back.
+            _scope = {"collect": {"X-Slng-Agent-Id": "safe-core-router-v3:task.collect", "X-Slng-Session-Id": self._slng_session_id}, "confirm": {"X-Slng-Agent-Id": "safe-core-router-v3:task.confirm", "X-Slng-Session-Id": self._slng_session_id}}.get(_next)
+            if _scope is not None:
+                await self.queue_frame(LLMUpdateSettingsFrame(
+                    delta=LLMSettings(extra={"extra_headers": _scope}),
+                ))
+            return _task_status(self._run_triage_results["collect"]), self._run_triage_node(_next)
+        # then: return — restore the owner's pre-flow context (messages and
+        # tools); only a completed or unserved status crosses back.
+        messages, tools = self._run_triage_snapshot
+        _settle_task_call(messages, "run_triage", _group_status(self._run_triage_results))
         await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:task.confirm", "X-Slng-Session-Id": self._slng_session_id}}),
+            delta=LLMSettings(system_instruction=INTAKE_PROMPT,
+                # The owner's cache scope goes back with its prompt. A leaked
+                # task scope is the same defect pointing the other way.
+                extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": self._slng_session_id}}),
         ))
-        return _task_status(self._run_triage_results["collect"]), self._run_triage_node_confirm()
+        await self.flush_pipeline()
+        self.context.set_messages(messages + [{
+            "role": "developer",
+            "content": json.dumps(_group_status(self._run_triage_results)),
+        }])
+        self.context.set_tools(tools)
+        return {"status": "ok"}, None
 
     def _run_triage_node_confirm(self) -> NodeConfig:
         self.context.set_messages([])
@@ -1123,7 +1165,23 @@ class IntakeAgent(LLMWorker):
             logger.warning("finish {}: {}", "confirm", refused.message)
             return {"refused": f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."}, None
         self._run_triage_results["confirm"] = _values
-        self._run_triage_active_step = None
+        _next = self._run_triage_next("confirm")
+        if self._run_triage_results["confirm"].get("unserved_request"):
+            # The step could not serve what the caller asked. Running the next
+            # one would answer a question nobody asked, so the flow stops here
+            # and the owner is handed the unserved status.
+            logger.info("group stopped: confirm ended unserved")
+            _next = None
+        self._run_triage_active_step = _next
+        if _next is not None:
+            # The next step is a different prompt site, so it asks under a
+            # different cache scope. Queued before the node is handed back.
+            _scope = {"collect": {"X-Slng-Agent-Id": "safe-core-router-v3:task.collect", "X-Slng-Session-Id": self._slng_session_id}, "confirm": {"X-Slng-Agent-Id": "safe-core-router-v3:task.confirm", "X-Slng-Session-Id": self._slng_session_id}}.get(_next)
+            if _scope is not None:
+                await self.queue_frame(LLMUpdateSettingsFrame(
+                    delta=LLMSettings(extra={"extra_headers": _scope}),
+                ))
+            return _task_status(self._run_triage_results["confirm"]), self._run_triage_node(_next)
         # then: return — restore the owner's pre-flow context (messages and
         # tools); only a completed or unserved status crosses back.
         messages, tools = self._run_triage_snapshot

@@ -1,0 +1,51 @@
+description: Book one appointment for the verified caller.
+
+input:
+  type: object
+  properties:
+    service:
+      type: string
+      enum:
+        - haircut
+        - blowout
+    confirmed:
+      type: boolean
+      description: True only after the caller agrees to this exact booking.
+  required:
+    - service
+    - confirmed
+
+inject:
+  - customer_phone: "{{customer_phone}}"
+
+output:
+  type: object
+  properties:
+    status:
+      type: string
+      enum:
+        - booked
+        - not_confirmed
+        - slot_unavailable
+    summary:
+      type: string
+    booking:
+      type: object
+      description: Present and complete on booked, absent otherwise.
+      properties:
+        reference:
+          type: string
+        service:
+          type: string
+        action:
+          type: string
+          enum:
+            - create
+  required:
+    - status
+    - summary
+
+local:
+  handler: tools/desk.py
+
+effect: returns_data

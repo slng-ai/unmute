@@ -447,7 +447,9 @@ agents:
 | `name` | the task's name; unique across the whole package, checked before anything else |
 | `instructions` | the task's own prompt file |
 | `when` | the situation the model reads to decide whether to run the task. Absent makes the task a definition only, valid solely as a step of a task group; an agent naming such a task by bare name is refused |
-| `announce` | optional exact spoken text, said as the task is entered |
+| `announce` | optional exact spoken text, said as the task is entered, or spoken by the step itself when `opening` is `listen` |
+| `opening` | `generate` or `listen`; omitted means `generate`. `listen` speaks the `announce` line and waits for the caller, making no model request. See [End on a tool and open by listening](/build/orchestration/tasks#open-by-listening) |
+| `finish` | a list of the tools that end this step. Each item is `tool:` and a `success:` list of one-key `field: value` items, where a value may be a list of alternatives. A tool returning a result that meets every pair ends the step and saves `assign:` from it. Every value has to be one the tool declares in its output `enum:` |
 | `assign` | a list of one-key `variable: result.<field>` pairs. It derives the finish field's type and description from the destination and saves valid values together. The right side may be a dotted path into a declared shape |
 | `tools` | tool files this task may call; definitions never go here |
 | `handoffs` | entries under [`handoffs:`](#handoffs-escalations) this task may trigger |
@@ -538,7 +540,7 @@ task_groups:
 
 | Field | Values |
 |---|---|
-| `steps` | task names, in order, at least one |
+| `steps` | the ordered run, at least one. Each step is a task name, or an item with `task:` and optionally `skip_when_confirmed:` naming a variable that step confirms. The group skips such a step when the variable is confirmed as the group starts |
 | `when` | the situation the model reads |
 | `announce` | optional exact spoken text, said as the group is entered |
 | `context_scope` | `shared` or `isolated` |

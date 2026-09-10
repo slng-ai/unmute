@@ -17,10 +17,18 @@ input:
     confirmed:
       type: boolean
       description: True only after the caller agrees to this exact booking change
+    additional:
+      type: boolean
+      description: >-
+        True only when the caller asked for another appointment on top of one
+        they already hold, false otherwise. A caller with a booking is refused
+        with has_booking unless this is true, because a change to their
+        booking is modify_booking.
   required:
     - service
     - slot_id
     - confirmed
+    - additional
 
 inject:
   - customer_phone: "{{customer_phone}}"
@@ -38,6 +46,29 @@ output:
         - invalid
         - customer_not_found
         - slot_unavailable
+        - has_booking
+    appointment:
+      type: object
+      description: >-
+        The saved booking, present and complete on success and absent otherwise.
+        The step saves this without asking the model for it.
+      properties:
+        booking_id:
+          type: string
+        service:
+          type: string
+          enum:
+            - haircut
+            - hair-color
+            - blowout
+        date:
+          type: string
+        time:
+          type: string
+        action:
+          type: string
+          enum:
+            - create
     summary:
       type: string
   required:

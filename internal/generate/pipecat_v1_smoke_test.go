@@ -526,7 +526,11 @@ async def main() -> None:
         context.set_tools(task_tools)
         owner._run_verify_snapshot = ([dict(message) for message in owner_messages], owner_tools)
         owner._run_verify_results = {}
-        owner._run_verify_active_step = "verify"
+        # The plan the delegate computes as the flow starts. A group decides its
+        # next step at run time now, because a step whose confirmation holds is
+        # skipped and a step that ends unserved stops the flow.
+        owner._run_verify_plan = ["verify", "complete"]
+        owner._run_verify_active_step = owner._run_verify_plan[0]
 
     reset_task_context()
     announcements = []

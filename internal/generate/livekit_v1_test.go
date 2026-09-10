@@ -1044,7 +1044,7 @@ func TestLiveKitV1SharedGroupTaskTransferAndResults(t *testing.T) {
 		"async def do_reserve(self, ctx: RunContext) -> dict | Agent:",
 		"group = TaskGroup(",
 		"summarize_chat_ctx=False,",
-		"on_task_completed=lambda event: _share_task_result(group, event),",
+		"on_task_completed=lambda event: _share_task_result(group, event, _flow),",
 		"try:\n            group = TaskGroup(",
 		"result = await group",
 		"except _TaskTransfer as transfer:\n            return transfer.agent",
@@ -1093,8 +1093,13 @@ func TestLiveKitV1IsolatedGroupTaskAgentTransfer(t *testing.T) {
 	block := botpy[start:]
 	for _, want := range []string{
 		"try:\n            task_results = {}",
-		`task_results["find_slot"] = await FindSlot(chat_ctx=llm.ChatContext())`,
-		`task_results["confirm_booking"] = await ConfirmBooking(chat_ctx=llm.ChatContext())`,
+		// Walked as a plan so the sequence can stop when a step ends unserved,
+		// the same way a shared group does.
+		`_plan = ["find_slot", "confirm_booking"]`,
+		`"find_slot": lambda: FindSlot(chat_ctx=llm.ChatContext()),`,
+		`"confirm_booking": lambda: ConfirmBooking(chat_ctx=llm.ChatContext()),`,
+		"for _id in _plan:",
+		`if isinstance(task_results[_id], dict) and task_results[_id].get("unserved_request"):`,
 		"except _TaskTransfer as transfer:\n            return transfer.agent",
 	} {
 		if !strings.Contains(block, want) {
@@ -1194,13 +1199,13 @@ func TestV1LiveKitCompletedFlowEndsOnce(t *testing.T) {
 	// Shared TaskGroups repair that exact output through the SDK callback, without
 	// returning from finish() and triggering another child-model turn.
 	for _, want := range []string{
-		"async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent) -> None:",
+		"async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent, flow: dict) -> None:",
 		`finish_call_id = getattr(event.agent_task, "_finish_call_id", None)`,
 		"and not item.is_error",
 		"and item.call_id == finish_call_id",
 		"shared_ctx.remove(shared_output)",
 		"exclude_invalid_function_calls=False",
-		"on_task_completed=lambda event: _share_task_result(group, event)",
+		"on_task_completed=lambda event: _share_task_result(group, event, _flow)",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("shared task result repair missing %q", want)
@@ -1347,8 +1352,8 @@ func TestLiveKitV1IsolatedGroup(t *testing.T) {
 	for _, want := range []string{
 		// the isolated flow: fresh AgentTasks, results dict, typed return
 		"async def do_reserve(self, ctx: RunContext) -> dict:",
-		`task_results["find_slot"] = await FindSlot(chat_ctx=llm.ChatContext())`,
-		`task_results["confirm_booking"] = await ConfirmBooking(chat_ctx=llm.ChatContext())`,
+		`"find_slot": lambda: FindSlot(chat_ctx=llm.ChatContext()),`,
+		`"confirm_booking": lambda: ConfirmBooking(chat_ctx=llm.ChatContext()),`,
 		"return _group_status(task_results)",
 		// do_event stays shared, so TaskGroup is still imported and used
 		"from livekit.agents.beta.workflows import TaskCompletedEvent, TaskGroup",

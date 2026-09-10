@@ -937,7 +937,7 @@ func addPipecatTaskTransferFixture(agent *ir.Agent) {
 		Context:      ir.TaskContext{History: ir.HistoryFull},
 	}
 	agent.TaskGroups["verification"] = ir.TaskGroup{
-		Steps: []string{"verify", "complete"}, ContextScope: ir.ContextShared,
+		Steps: []ir.GroupStep{{Task: "verify"}, {Task: "complete"}}, ContextScope: ir.ContextShared,
 		Then: ir.GroupReturn, Merge: ir.GroupMergeResults,
 	}
 	agent.Controls["run_verify"] = &ir.Delegate{
@@ -984,7 +984,11 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 		`async def on_activated(self, args) -> None:`,
 		`self.context.set_messages([dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")])`,
 		`return {"transferred": True}, NO_RESPONSE`,
-		`return _task_status(self._run_verify_results["verify"]), self._run_verify_node_complete()`,
+		// The chain is a plan now, decided as the flow starts, because a group
+		// may skip a step whose confirmation holds and stops when one ends
+		// unserved. The next step is looked up rather than named.
+		`return _task_status(self._run_verify_results["verify"]), self._run_verify_node(_next)`,
+		`def _run_verify_next(self, name):`,
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing task-transfer invariant %q", want)
@@ -1012,8 +1016,8 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 	}
 	finishBody := bot[finishAt:nextFinishAt]
 	stepGuardAt := strings.Index(finishBody, `if self._run_verify_active_step != "verify":`)
-	advanceAt := strings.Index(finishBody, `self._run_verify_active_step = "complete"`)
-	nextAt := strings.Index(finishBody, "self._run_verify_node_complete()")
+	advanceAt := strings.Index(finishBody, "self._run_verify_active_step = _next")
+	nextAt := strings.Index(finishBody, "self._run_verify_node(_next)")
 	if stepGuardAt < 0 || advanceAt < stepGuardAt || nextAt < advanceAt {
 		t.Fatalf("finish must reject stale calls and claim the next step before building its transition:\n%s", finishBody)
 	}
@@ -1071,7 +1075,7 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 		Context: ir.TaskContext{History: ir.HistoryFull},
 	}
 	agent.TaskGroups["triage"] = ir.TaskGroup{
-		Steps: []string{"collect"}, ContextScope: ir.ContextIsolated, Then: ir.GroupReturn, Merge: ir.GroupMergeResults,
+		Steps: []ir.GroupStep{{Task: "collect"}}, ContextScope: ir.ContextIsolated, Then: ir.GroupReturn, Merge: ir.GroupMergeResults,
 	}
 	assignedTask := agent.Tasks["collect"]
 	assignedTask.Assign = []ir.AssignTo{{Var: "verified", Field: "verified_flag"}}

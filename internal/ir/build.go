@@ -275,10 +275,19 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: task %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
+		finish, err := terminalTools(name, raw, out, result)
+		if err != nil {
+			return nil, fmt.Errorf("%s: task %q: %w", pkg.Location("agent.yaml", name), name, err)
+		}
+		opening, err := taskOpening(raw.Opening)
+		if err != nil {
+			return nil, fmt.Errorf("%s: task %q: %w", pkg.Location("agent.yaml", name), name, err)
+		}
 		out.Tasks[name] = Task{
 			Assign:       assign,
 			Instructions: instructions, Tools: attached(raw.Tools, raw.Handoffs), Model: raw.Think, Result: result,
 			Context: buildTaskContext(raw.Context),
+			Finish:  finish, Opening: opening, Announce: strings.TrimSpace(raw.Announce),
 		}
 	}
 
@@ -290,10 +299,20 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 
 	for _, name := range sortedKeys(pkg.Agent.TaskGroups) {
 		raw := pkg.Agent.TaskGroups[name]
+		steps := make([]GroupStep, 0, len(raw.Steps))
 		for _, step := range raw.Steps {
-			if _, ok := out.Tasks[step]; !ok {
-				return nil, missing(pkg, "agent.yaml", "task", step)
+			if _, ok := out.Tasks[step.Task]; !ok {
+				return nil, missing(pkg, "agent.yaml", "task", step.Task)
 			}
+			if err := checkSkipWhenConfirmed(step, out); err != nil {
+				return nil, fmt.Errorf("%s: task group %q: %w", pkg.Location("agent.yaml", name), name, err)
+			}
+			if step.SkipWhenConfirmed != "" {
+				task := out.Tasks[step.Task]
+				task.Withdraws = true
+				out.Tasks[step.Task] = task
+			}
+			steps = append(steps, GroupStep{Task: step.Task, SkipWhenConfirmed: step.SkipWhenConfirmed})
 		}
 		if raw.ThenTarget != "" {
 			if _, ok := out.Agents[raw.ThenTarget]; !ok {
@@ -305,7 +324,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 			merge = GroupMergeResults
 		}
 		out.TaskGroups[name] = TaskGroup{
-			Steps: raw.Steps, ContextScope: ContextScope(raw.ContextScope), Then: GroupThen(raw.Then),
+			Steps: steps, ContextScope: ContextScope(raw.ContextScope), Then: GroupThen(raw.Then),
 			ThenTarget: raw.ThenTarget, Merge: merge,
 		}
 	}
@@ -1872,7 +1891,7 @@ func checkReachability(pkg *packagespec.Package) error {
 		groups[name] = true
 		raw := pkg.Agent.TaskGroups[name]
 		for _, step := range raw.Steps {
-			visitTask(step)
+			visitTask(step.Task)
 		}
 		if raw.ThenTarget != "" {
 			visitAgent(raw.ThenTarget)

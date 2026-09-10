@@ -71,8 +71,11 @@ const (
 	FieldTask                Field = "tasks"
 	FieldTaskModel           Field = "tasks.model"
 	FieldTaskNestedResult    Field = "tasks.result.nested"
+	FieldTaskFinish          Field = "tasks.finish"
+	FieldTaskOpening         Field = "tasks.opening"
 	FieldTaskGroup           Field = "task_groups"
 	FieldTaskGroupReturn     Field = "task_groups.then.return"
+	FieldGroupSkip           Field = "task_groups.steps.skip_when_confirmed"
 	FieldContextIsolated     Field = "task_groups.context_scope.isolated"
 	FieldTransferAnnounce    Field = "controls.agent_transfer.announce"
 	FieldContextNoToolCalls  Field = "context.include_tool_calls.false"
@@ -343,10 +346,13 @@ func Default() Table {
 				deny(Slng, slngNoTasks("a per-task model")),
 			),
 			FieldTaskNestedResult: field(deny(Slng, slngNoTasks("a nested task result"))),
+			FieldTaskFinish:       field(deny(Slng, slngNoTasks("a step that ends on its tool"))),
+			FieldTaskOpening:      field(deny(Slng, slngNoTasks("a step opening"))),
 			FieldTaskGroup: field(
 				deny(Slng, slngNoTasks("a task group")),
 			),
 			FieldTaskGroupReturn:  field(deny(Slng, slngNoTasks("a task group return step"))),
+			FieldGroupSkip:        field(deny(Slng, slngNoTasks("a skippable group step"))),
 			FieldContextIsolated:  field(deny(Slng, slngNoTasks("an isolated task context"))),
 			FieldTransferAnnounce: field(deny(Slng, slngNoHandoff("a transfer announcement"))),
 			// A step announcement is refused for the task reason too: with one

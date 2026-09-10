@@ -506,6 +506,25 @@ type Task struct {
 	Model        string                 `json:"model,omitempty" yaml:"model,omitempty"`
 	Result       map[string]ResultField `json:"result" yaml:"result"`
 	Context      TaskContext            `json:"context" yaml:"context"`
+	// Finish names the tools this step ends on, empty when the task declares
+	// none. A step with entries here ends on a validated tool result rather than
+	// on a model-chosen `finish` call, which is the request this feature removes.
+	Finish []TerminalTool `json:"finish,omitempty" yaml:"finish,omitempty"`
+	// Opening is how the step's first turn happens. OpeningGenerate is the
+	// default and is what every package written before this key compiled to.
+	Opening TaskOpening `json:"opening,omitempty" yaml:"opening,omitempty"`
+	// Announce is the fixed line a listening step speaks itself. It sits here as
+	// well as on the delegate because a listening step speaks it after its own
+	// history policy has been applied, which is inside the step and not at the
+	// seam; the delegate's copy is cleared for such a step so it is spoken once.
+	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
+	// Withdraws is true when some task group names this task with
+	// `skip_when_confirmed:`. Such a task withdraws confirmation of the values it
+	// confirms whenever it is entered, standalone entry included, so a skip
+	// decision is never taken on a confirmation this same step is about to
+	// replace. Scoped this way on purpose: a package naming no skip keeps
+	// today's behaviour exactly.
+	Withdraws bool `json:"withdraws,omitempty" yaml:"withdraws,omitempty"`
 }
 
 type ResultField struct {
@@ -520,8 +539,29 @@ type ResultField struct {
 	Schema map[string]any `json:"schema,omitempty" yaml:"schema,omitempty"`
 }
 
+// GroupStep is one resolved step of a group: the task, and whether the group may
+// skip it.
+type GroupStep struct {
+	Task string `json:"task" yaml:"task"`
+	// SkipWhenConfirmed is the variable whose confirmation lets the group skip
+	// this step, empty when the step always runs.
+	SkipWhenConfirmed string `json:"skip_when_confirmed,omitempty" yaml:"skip_when_confirmed,omitempty"`
+}
+
+// TaskOpening is how a step's first turn happens.
+type TaskOpening string
+
+const (
+	// OpeningGenerate has the model open the step, which is what every package
+	// did before this key existed and what an omitted key still means.
+	OpeningGenerate TaskOpening = "generate"
+	// OpeningListen speaks the step's announce line and waits for the caller,
+	// making no request of the model.
+	OpeningListen TaskOpening = "listen"
+)
+
 type TaskGroup struct {
-	Steps        []string     `json:"steps" yaml:"steps"`
+	Steps        []GroupStep  `json:"steps" yaml:"steps"`
 	ContextScope ContextScope `json:"context_scope" yaml:"context_scope"`
 	Then         GroupThen    `json:"then" yaml:"then"`
 	ThenTarget   string       `json:"then_target,omitempty" yaml:"then_target,omitempty"`

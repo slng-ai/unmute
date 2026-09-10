@@ -64,12 +64,57 @@ each task's finish arguments and saves the values needed later.
 
 | Field | Required | Values |
 |---|---|---|
-| `steps` | yes | one or more task names, in order |
+| `steps` | yes | one or more steps, in order: a task name, or an item |
 | `when` | when an agent can run it | the situation the model reads |
 | `context_scope` | yes | `shared` or `isolated` |
 | `then` | yes | `return`, `transfer`, or `end` |
 | `then_target` | with `transfer` | an agent name |
 | `merge` | no | `results`; omission means the same |
+
+## Skip a step whose work is already done
+
+A step is a bare task name, or an item that says how the group treats it:
+
+```yaml agent.yaml
+    steps:
+      - task: identify_customer
+        skip_when_confirmed: customer_id
+      - select_appointment
+      - finalize_appointment
+```
+
+The group skips that step when the named variable is confirmed at the moment
+the group starts, and runs it otherwise. A bare step always runs. This is what
+makes a second booking on one call cost nothing: the caller is identified once.
+
+`skip_when_confirmed:` names a variable the skipped step itself confirms, with
+`confirm:` on the variable. Anything else is refused: a variable nobody
+confirms would leave the step running forever or never, and a variable another
+step confirms would let this group skip somebody else's work.
+
+There is a side effect, and it is the point. A step some group names this way
+withdraws the confirmation of the values it confirms every time it is entered,
+including on its own outside the group. So a caller correcting their number
+re-verifies it, and the next group run does not skip the step on the strength
+of the number they just replaced. Values derived from a withdrawn one follow it.
+
+## What stops a group
+
+A group stops when a step ends unserved, whichever `context_scope` it has: the
+later steps do not run, and the owner is handed the unserved status. Running
+the next step would answer a question nobody asked.
+
+A step's handoff also ends the group, and the caller is moved. When the model
+calls a handoff in the same response as a tool that ends the step, or while
+that tool is still running, the step's own work is committed first and the
+caller is moved after: the booking is not lost on the way out. If that work
+does not complete, the caller is not moved and the model is told so.
+
+A request the caller makes at a `reset` or an isolated boundary reaches nobody:
+the step that hears it has no way to pass words on other than
+`unserved_request`, and an isolated step's context does not carry back. Keep the
+request in the caller's own words in `unserved_request` and let the owner act on
+it.
 
 ## Context between steps
 

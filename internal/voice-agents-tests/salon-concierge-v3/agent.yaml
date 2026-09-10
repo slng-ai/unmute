@@ -57,6 +57,20 @@ agents:
         context:
           history: messages
 
+      # The listening opening, on a step that suits it: one fixed question and
+      # nothing to work out before asking it. The step speaks the line itself
+      # and waits, so entering it costs no model request, and `history: reset`
+      # is the pair that proves the line survives the step's own policy.
+      - name: take_stylist_note
+        when: The caller wants a note left for the stylist about their appointment.
+        announce: What would you like me to pass on to your stylist?
+        opening: listen
+        instructions: tasks/stylist-note.md
+        context:
+          history: reset
+        assign:
+          - stylist_note: result.stylist_note
+
       - name: reschedule_booking
         when: >-
           Apply the move after manage_booking has saved the exact appointment,
@@ -156,6 +170,12 @@ shapes:
           done. Say this value out loud in the tense it is written in.
 
 variables:
+  stylist_note:
+    type: string
+    default: ""
+    description: >-
+      What the caller asked to pass on to their stylist, in their own words.
+
   today_date:
     type: Date
     default: ""
