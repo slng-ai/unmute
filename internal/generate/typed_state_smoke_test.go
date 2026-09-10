@@ -434,6 +434,37 @@ generated._save_result(
      "summary": "recorded"},
 )
 
+# What the model actually writes when a caller says an address out loud, and
+# what it gets back for each mistake. This is the layer the remaining risk lives
+# in: the model hears "fred dot bloggs at example dot com" and has one turn to
+# write it. A refusal that said only "expected an email address" would leave it
+# guessing which part was wrong, so every one of these has to name the defect.
+for said in (
+    "fred dot bloggs at example dot com",
+    "fred.bloggs at example.com",
+    "fred.bloggs@example",
+    "fred bloggs@example.com",
+    "Fred Bloggs fred.bloggs@example.com",
+    "fred.bloggs@example..com",
+):
+    try:
+        generated.TypeAdapter(generated.EmailStr).validate_python(said)
+    except Exception as refused:
+        reason = str(refused)
+        assert "expected an email address" in reason, (said, reason)
+        # The library's own sentence, which is the half that says what to fix.
+        # Its wording is the library's, so this asserts that something specific
+        # followed the phrase rather than matching any one message.
+        tail = reason.split("expected an email address, like name@example.com: ", 1)
+        assert len(tail) == 2 and len(tail[1].split("[type=")[0].strip()) > 10, (said, reason)
+    else:
+        raise AssertionError("a spoken address written down wrong was accepted: " + repr(said))
+
+# And the one written form a model reaches for that the pair does read.
+assert generated.NameEmail.model_validate(
+    "Fred Bloggs <fred.bloggs@example.com>"
+).name == "Fred Bloggs"
+
 # The empty string is no value yet rather than a wrong one, on both of them.
 adapter = generated.TypeAdapter(generated.EmailStr)
 assert adapter.validate_python("") == ""
