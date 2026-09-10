@@ -380,6 +380,9 @@ Rules worth knowing before you write one:
 - Every `success:` value has to be one the tool declares in its output `enum:`,
   and every `assign:` field has to be an output property of **every** listed
   tool. Both are compile-time refusals.
+- One tool is one entry, and one field is one `success:` item. Naming a tool
+  twice, or one field twice in an entry, is refused: each dropped a set of
+  conditions in silence and left a step that never ended by itself.
 - After one listed tool succeeds, none of them runs again in that invocation. A
   second booking is a new invocation of the step.
 - `finish` stays for a request the step cannot serve, for values it already
@@ -625,6 +628,11 @@ A step is a bare task name, or an item that says how the group treats it:
 on the variable. The group skips the step when the variable is confirmed as the
 group starts, which is what makes a second booking on one call cost nothing. A
 variable nobody confirms, or one another step confirms, is refused.
+
+One step of the group has to run whatever happens, so a group whose every step
+carries the key is refused. A `confirm:` also has to name a task an agent runs,
+so a step with no `when:` cannot be the confirming step of a skip: give it a
+`when:`, the way the salon's own verification step has one.
 
 The side effect is the point: a step some group names this way withdraws what it
 confirms every time it is entered, standalone entry included, so a caller

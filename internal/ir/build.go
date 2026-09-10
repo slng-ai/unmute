@@ -314,6 +314,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 			}
 			steps = append(steps, GroupStep{Task: step.Task, SkipWhenConfirmed: step.SkipWhenConfirmed})
 		}
+		if err := checkGroupRuns(steps); err != nil {
+			return nil, fmt.Errorf("%s: task group %q: %w", pkg.Location("agent.yaml", name), name, err)
+		}
 		if raw.ThenTarget != "" {
 			if _, ok := out.Agents[raw.ThenTarget]; !ok {
 				return nil, missing(pkg, "agent.yaml", "then_target", raw.ThenTarget)

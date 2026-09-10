@@ -92,6 +92,10 @@ makes a second booking on one call cost nothing: the caller is identified once.
 confirms would leave the step running forever or never, and a variable another
 step confirms would let this group skip somebody else's work.
 
+One step has to run whatever happens, so a group whose every step carries
+`skip_when_confirmed:` is refused. On a call where all of those confirmations
+held it would run nothing at all.
+
 There is a side effect, and it is the point. A step some group names this way
 withdraws the confirmation of the values it confirms every time it is entered,
 including on its own outside the group. So a caller correcting their number

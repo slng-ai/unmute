@@ -46,6 +46,13 @@ func terminalTools(taskName string, raw packagespec.Task, agent *Agent, result m
 		return nil, nil
 	}
 	out := make([]TerminalTool, 0, len(raw.Finish))
+	// One tool is one entry. A second entry for the same tool loses a set of
+	// conditions in silence: LiveKit lowers the later entry over the earlier
+	// one, and Pipecat emits two handler methods under one name, so whichever
+	// set the author wrote first stops being checked at all. Checked after the
+	// two below, so a misspelled tool named twice is told it is not a tool
+	// rather than that it is written twice.
+	named := map[string]bool{}
 	for _, entry := range raw.Finish {
 		if !slices.Contains(raw.Tools, entry.Tool) {
 			return nil, fmt.Errorf("finish names %q, which %q does not list under tools:; add it there or name one it has",
@@ -55,9 +62,21 @@ func terminalTools(taskName string, raw packagespec.Task, agent *Agent, result m
 		if !ok {
 			return nil, fmt.Errorf("finish names %q, which is not a tool of this package", entry.Tool)
 		}
+		if named[entry.Tool] {
+			return nil, fmt.Errorf("finish names %q twice; one tool is one entry, so merge them into one: several values on one field are alternatives, written %q",
+				entry.Tool, "- field: [one, other]")
+		}
+		named[entry.Tool] = true
 		properties, _ := tool.Output["properties"].(map[string]any)
 		success := map[string][]string{}
 		for _, pair := range entry.Success {
+			// Two items on one field would both have to hold, and no single
+			// result holds two values at once. The resolved map keeps the last,
+			// so the first was silently dropped rather than unsatisfiable.
+			if _, twice := success[pair.Field]; twice {
+				return nil, fmt.Errorf("%s checks %s twice under one success:; one field is one item, so give it every value that counts, %q",
+					entry.Tool, pair.Field, "- "+pair.Field+": [one, other]")
+			}
 			declared, err := declaredEnum(entry.Tool, properties, pair.Field)
 			if err != nil {
 				return nil, err
@@ -234,6 +253,29 @@ func taskOpening(word string) (TaskOpening, error) {
 	default:
 		return "", fmt.Errorf("opening: is %s or %s, and this says %q", OpeningGenerate, OpeningListen, word)
 	}
+}
+
+// checkGroupRuns holds the floor every skip decision needs: one step the group
+// always runs.
+//
+// A group whose every step carries `skip_when_confirmed:` runs nothing at all on
+// a call where each of those confirmations happens to hold, and neither driver
+// has a floor under that: the Pipecat plan reads its first entry off an empty
+// list and the LiveKit group is awaited with no step added. The shape is wrong
+// rather than the call unlucky, so it is refused here.
+func checkGroupRuns(steps []GroupStep) error {
+	if len(steps) == 0 {
+		return nil // Validate refuses an empty `steps:` with its own message
+	}
+	if slices.ContainsFunc(steps, func(step GroupStep) bool { return step.SkipWhenConfirmed == "" }) {
+		return nil
+	}
+	names := make([]string, 0, len(steps))
+	for _, step := range steps {
+		names = append(names, step.Task)
+	}
+	return fmt.Errorf("every step can be skipped (%s), so a call where all of those confirmations hold runs none of them; leave one step bare, naming no skip_when_confirmed:",
+		strings.Join(names, ", "))
 }
 
 // checkSkipWhenConfirmed holds the one thing a skip decision reads: a

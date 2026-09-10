@@ -229,6 +229,11 @@ rather than a step that never ends by itself.
 `result.<field>` in `assign:` names an output property of every listed tool, so
 one tool returning `appointment` and another returning nothing is refused.
 
+One tool is one entry, and one field is one item. Naming a tool twice, or
+checking one field twice inside the same entry, is refused too: each of those
+used to drop a set of conditions without saying anything, leaving a step that
+never ended on its own.
+
 Three things follow from a step that ends on its tool:
 
 - **The mutations close.** Once one of them succeeds, none of the step's

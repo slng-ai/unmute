@@ -379,6 +379,53 @@ variables:
 `,
 			phrases: []string{"book_it returns booking without service", "the shape Booking declares it"},
 		},
+		{
+			// Two entries for one tool lost a set of conditions in silence:
+			// LiveKit lowers the later over the earlier and Pipecat emits two
+			// handler methods under one name, so the first stopped being
+			// checked at all.
+			name:      "one tool named twice",
+			variables: finishVariables,
+			task: `      - name: take_booking
+        when: The caller wants an appointment.
+        instructions: steps.md
+        tools:
+          - book_it
+        finish:
+          - tool: book_it
+            success:
+              - status: booked
+          - tool: book_it
+            success:
+              - status: slot_unavailable
+        assign:
+          - booking_reference: result.reference
+`,
+			output:  finishOKOutput,
+			phrases: []string{"finish names \"book_it\" twice", "one tool is one entry", "- field: [one, other]"},
+		},
+		{
+			// Two items on one field would both have to hold, which no single
+			// result does. The resolved map kept the last, so the author's
+			// first item was dropped rather than refused.
+			name:      "one field checked twice in one entry",
+			variables: finishVariables,
+			task: `      - name: take_booking
+        when: The caller wants an appointment.
+        instructions: steps.md
+        tools:
+          - book_it
+        finish:
+          - tool: book_it
+            success:
+              - status: booked
+              - status: slot_unavailable
+        assign:
+          - booking_reference: result.reference
+`,
+			output:  finishOKOutput,
+			phrases: []string{"book_it checks status twice", "one field is one item", "- status: [one, other]"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pkg := finishPackage(t, tc.variables, tc.task, tc.output)
@@ -561,6 +608,109 @@ func skipPackage(t *testing.T, skip, on string) *packagespec.Package {
 		t.Fatal(err)
 	}
 	rewritten := strings.Replace(string(source), "\ntools:\n", "\ntask_groups:\n  book:\n    when: The caller wants an appointment.\n    steps:\n"+steps+"    context_scope: shared\n    then: return\n\ntools:\n", 1)
+	if err := os.WriteFile(filepath.Join(pkg.Root, "agent.yaml"), []byte(rewritten), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := packagespec.Load(pkg.Root)
+	if err != nil {
+		t.Fatalf("the fixture itself does not load: %v", err)
+	}
+	return reloaded
+}
+
+// A group whose every step can be skipped runs nothing at all on a call where
+// each of those confirmations holds, and neither driver has a floor under that:
+// Pipecat reads the first entry off an empty plan and LiveKit awaits a group
+// with no step added. Refused at build, because the shape is wrong rather than
+// the call unlucky.
+func TestBuildRefusesAGroupWhoseEveryStepCanBeSkipped(t *testing.T) {
+	pkg := allSkippedPackage(t)
+	_, err := Build(pkg)
+	if err == nil {
+		t.Fatal("want a refusal")
+	}
+	for _, phrase := range []string{
+		"every step can be skipped",
+		"take_booking, second_step",
+		"runs none of them",
+		"leave one step bare",
+	} {
+		if !strings.Contains(err.Error(), phrase) {
+			t.Errorf("message does not say %q:\n%v", phrase, err)
+		}
+	}
+	if !strings.Contains(err.Error(), "agent.yaml") {
+		t.Errorf("message names no file:\n%v", err)
+	}
+}
+
+// One step of the two carrying a skip is the shipped shape and still compiles,
+// so the refusal above is about a group with no floor and not about skipping.
+func TestBuildAcceptsAGroupWithOneBareStep(t *testing.T) {
+	if _, err := Build(skipPackage(t, "confirmed_phone", "take_booking")); err != nil {
+		t.Fatalf("a group with one bare step must compile: %v", err)
+	}
+}
+
+// allSkippedPackage writes a two-step group in which each step carries its own
+// legitimate skip: two variables, each confirmed by the step that saves it, so
+// the only thing wrong with the package is that nothing is left to run.
+//
+// Both steps carry a `when:` because they have to. A `confirm:` has to name a
+// runnable task, and a task with no `when:` is a group step only, so a step
+// nothing else can trigger cannot be the confirming step of a skip. That is the
+// salon's own `verify_customer` shape, and it is what makes this group
+// reachable rather than hypothetical.
+func allSkippedPackage(t *testing.T) *packagespec.Package {
+	t.Helper()
+	variables := `variables:
+  booking_reference:
+    type: str
+    default: ""
+    description: The reference of the booking just made.
+
+  confirmed_phone:
+    type: str
+    default: ""
+    confirm: take_booking
+    description: The number the caller agreed to.
+
+  confirmed_email:
+    type: str
+    default: ""
+    confirm: second_step
+    description: The address the caller agreed to.
+
+`
+	task := `      - name: take_booking
+        when: The caller has not been identified.
+        instructions: steps.md
+        tools:
+          - book_it
+        assign:
+          - booking_reference: result.reference
+          - confirmed_phone: result.reference
+
+      - name: second_step
+        when: The caller has not given an address.
+        instructions: steps.md
+        tools:
+          - look_up
+        assign:
+          - confirmed_email: result.status
+
+    task_groups:
+      - book
+`
+	steps := "      - task: take_booking\n        skip_when_confirmed: confirmed_phone\n" +
+		"      - task: second_step\n        skip_when_confirmed: confirmed_email\n"
+	pkg := finishPackage(t, variables, task, finishOKOutput)
+	source, err := os.ReadFile(filepath.Join(pkg.Root, "agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewritten := strings.Replace(string(source), "\ntools:\n",
+		"\ntask_groups:\n  book:\n    when: The caller wants an appointment.\n    steps:\n"+steps+"    context_scope: shared\n    then: return\n\ntools:\n", 1)
 	if err := os.WriteFile(filepath.Join(pkg.Root, "agent.yaml"), []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)
 	}
