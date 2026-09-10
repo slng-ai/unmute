@@ -101,6 +101,7 @@ for name in json.load(open("compile-report.json"))["required_env"]:
 import ` + module + ` as generated  # noqa: E402
 from tools import check_availability, create_booking, find_or_create_customer, list_bookings  # noqa: E402
 
+` + livekitRunContextStandIn + `
 
 async def main():
     state = generated.` + stateExpr + `
@@ -114,7 +115,7 @@ async def main():
     async def ignore(*args, **kwargs):
         pass
 
-    ctx = SimpleNamespace(userdata=state)
+    ctx = run_context(state)
     worker = None
     if generated.__name__ == "bot":
         worker = SimpleNamespace(
@@ -323,7 +324,7 @@ for local in ("", "0", "1"):
          {"os": os, "server": server})
     after = (server._num_idle_processes, server._initialize_process_timeout)
     assert after == ((1, 60.0) if local == "1" else before), after
-` + salonStoreSmokePrelude + `
+` + salonStoreSmokePrelude + livekitRunContextStandIn + `
 
 def quiet_activity():
     """A stand-in for the AgentActivity a real session would attach. Every
@@ -348,13 +349,6 @@ def recording_task(task_type, chat_ctx=None):
             self.completions.append(result)
 
     return RecordingTask()
-
-
-def run_context(userdata, call_id):
-    return SimpleNamespace(
-        userdata=userdata,
-        function_call=SimpleNamespace(call_id=call_id),
-    )
 
 
 async def create_then_cancel(userdata):
