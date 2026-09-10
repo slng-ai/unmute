@@ -383,7 +383,14 @@ Rules worth knowing before you write one:
 - After one listed tool succeeds, none of them runs again in that invocation. A
   second booking is a new invocation of the step.
 - `finish` stays for a request the step cannot serve, for values it already
-  holds, and for a save the validator refused.
+  holds, and for a save the validator refused. A repair keeps the values the
+  tool returned; the model fills only what the tool could not.
+- The step says nothing after its tool. The next step opens, or the owner
+  speaks once when the flow returns, so write the owner's acknowledgement into
+  the owner's prompt and not into the step's.
+- A handoff the model calls beside one of these tools, or while one is still
+  running, waits for it: the caller is moved once the action is recorded, and
+  told the action did not complete when it did not.
 - Do not also write "call finish as soon as the tool succeeds" in the step's
   prompt. The generated tail says the opposite, and the two contradict.
 

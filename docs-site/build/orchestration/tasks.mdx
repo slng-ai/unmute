@@ -236,9 +236,13 @@ Three things follow from a step that ends on its tool:
   from the caller, and a new invocation of the step.
 - **`finish` is still there.** The model calls it for a request the step cannot
   serve, for values the step already holds, and for recording a result whose
-  save was refused.
+  save was refused. That repair keeps the values the tool returned, so a
+  reference the tool handed back is never retyped by the model.
 - **The step's prompt stops telling the model to finish.** The generated tail
   says so; your own instructions should not contradict it.
+- **The owner speaks.** The step says nothing after its tool. The next step
+  opens, or the owner speaks once when the flow returns, so the acknowledgement
+  belongs in the owner's prompt.
 
 ## Open by listening
 

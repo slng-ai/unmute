@@ -83,6 +83,14 @@ Together those two facts take three model requests out of one booking: the
 verification `finish`, the concierge's routing call, and the booking `finish`.
 The one request left on the turn that books is the concierge saying it is done.
 
+**Two rules live in the booking backend, not the prompt.** `create_booking`
+refuses with `has_booking` while the caller already holds one, unless the model
+passes `additional` because the caller asked for another appointment: a live
+call answered "move it to the day after tomorrow" with a second booking, prompt
+notwithstanding, and a change to a booking is `modify_booking`. And a slot
+earlier than the salon's own clock today is not offered and not accepted, after
+a call was offered 15:00 at four minutes past three.
+
 **Facts resolved before the greeting.** The `prefetch:` block reads the date,
 the weekday and the salon's local time off one clock reading, and the caller's
 number off the call, then looks up the caller's name and whether they are on

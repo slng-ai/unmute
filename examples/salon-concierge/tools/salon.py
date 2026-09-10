@@ -74,13 +74,24 @@ def _e164(digits):
     return "+" + digits
 
 
+def _slot_passed(requested_date, time) -> bool:
+    """True when this slot is earlier than the salon's clock reads right now.
+
+    The date check alone let a caller book 15:00 today at four minutes past
+    three: the prompt says not to offer a time that has gone, and a live call
+    showed the prompt is not enough. The backend refuses it too.
+    """
+    now = datetime.now(ZoneInfo(_SALON_TIMEZONE))
+    return requested_date < now.date() or (requested_date == now.date() and time <= now.strftime("%H:%M"))
+
+
 def _slot_parts(slot_id):
     try:
         date_text, service, time = str(slot_id).split("|")
         requested_date = date.fromisoformat(date_text)
     except (TypeError, ValueError):
         return None
-    if requested_date < _booking_today() or service not in _SERVICES or time not in _TIMES:
+    if _slot_passed(requested_date, time) or service not in _SERVICES or time not in _TIMES:
         return None
     return date_text, service, time
 
@@ -172,7 +183,7 @@ def check_availability(service, date):
     slots = [
         {"slot_id": f"{date}|{service}|{time}", "start_time": f"{date}T{time}:00"}
         for time in _TIMES
-        if f"{date}|{service}|{time}" not in used
+        if f"{date}|{service}|{time}" not in used and not _slot_passed(requested_date, time)
     ]
     return {"slots": slots, "status": "available" if slots else "full"}
 
@@ -194,7 +205,7 @@ def _appointment(booking_id, service, slot_id, action):
     }
 
 
-def create_booking(customer_phone, service, slot_id, confirmed=False):
+def create_booking(customer_phone, service, slot_id, confirmed=False, additional=False):
     if confirmed is not True:
         return {
             "booking_id": "",
@@ -213,6 +224,22 @@ def create_booking(customer_phone, service, slot_id, confirmed=False):
                 "booking_id": "",
                 "status": "customer_not_found",
                 "summary": "The customer is not verified.",
+            }
+        held = [
+            {"booking_id": held_id, "service": booking["service"], "start_time": booking["start_time"]}
+            for held_id, booking in _state.bookings.items()
+            if booking["customer_phone"] == caller and booking["status"] == "booked"
+        ]
+        if held and additional is not True:
+            # A live call answered "move it to the day after tomorrow" with a
+            # second booking, prompt notwithstanding. A caller who holds a
+            # booking is changing it unless they asked for another one, and the
+            # backend is where that rule holds.
+            return {
+                "booking_id": "",
+                "status": "has_booking",
+                "summary": "The customer already has a booking. Modify it, or pass additional true for a second appointment.",
+                "existing": held,
             }
         if _slot_taken(slot_id):
             return {
@@ -403,8 +430,10 @@ def _demo():
     assert booking["status"] == "booked"
     active = list_bookings(customer)["bookings"]
     assert len(active) == 1 and active[0]["booking_id"] == booking["booking_id"]
+    # Two callers want one slot: the second is refused the slot, not the booking.
+    rival = copy_two.find_or_create_customer("1555010 2099")["customer_phone"]
     assert (
-        copy_two.create_booking(customer, "haircut", first_slot, confirmed=True)["status"]
+        copy_two.create_booking(rival, "haircut", first_slot, confirmed=True)["status"]
         == "slot_unavailable"
     )
     assert first_slot not in {
@@ -412,6 +441,21 @@ def _demo():
     }
 
     second_slot = check_availability("haircut", second_date)["slots"][0]["slot_id"]
+    # A caller who holds a booking is changing it unless they asked for another.
+    refused = create_booking(customer, "haircut", second_slot, confirmed=True)
+    assert refused["status"] == "has_booking", refused
+    assert [row["booking_id"] for row in refused["existing"]] == [booking["booking_id"]]
+    assert len(list_bookings(customer)["bookings"]) == 1
+    extra = create_booking(customer, "haircut", second_slot, confirmed=True, additional=True)
+    assert extra["status"] == "booked", extra
+    assert cancel_booking(customer, extra["booking_id"], confirmed=True)["status"] == "cancelled"
+    # A slot earlier today is over, on the salon's clock and not the container's.
+    salon_now = datetime.now(ZoneInfo(_SALON_TIMEZONE)).strftime("%H:%M")
+    assert all(
+        slot["slot_id"].split("|")[2] > salon_now
+        for slot in check_availability("haircut", current_date)["slots"]
+    )
+    assert _slot_parts(f"{current_date}|haircut|00:00") is None
     assert (
         modify_booking(customer, booking["booking_id"], "haircut", second_slot)["status"]
         == "not_confirmed"

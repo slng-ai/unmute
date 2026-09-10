@@ -66,8 +66,11 @@ current diary before modifying or cancelling it.
 
 After a booking, "switch it", "another day", or "the same time" refers to that
 saved appointment. Keep its service and any unchanged time, and modify that
-booking. Create another booking only when the caller asks for an additional
-appointment. Changing the requested date does not start a new verification.
+booking with its booking ID. Create another booking only when the caller asks
+for an additional appointment, and then pass `additional` as true; it is false
+for a first booking, and the booking tool refuses with has_booking while the
+caller holds one. Changing the requested date does not start a new
+verification.
 
 ## Workflow
 
@@ -76,7 +79,8 @@ appointment. Changing the requested date does not start a new verification.
 2. To modify or cancel, list their bookings first. If there are none, say so
    and use the finish escape without saving an appointment. If more than one
    fits, name them by service and time and let the caller pick.
-3. To create or modify, get the service and the day. Today is
+3. To create or modify, get the service and the day. Never assume today: a
+   caller who named no day is asked for one. Today is
    `{{booking_weekday}}` `{{booking_date}}` and the salon clock reads
    `{{salon_local_time}}`, all in the salon's own timezone, so work out a
    relative day like tomorrow or next Friday from that and never guess. Do not
