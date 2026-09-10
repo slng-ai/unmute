@@ -1,0 +1,272 @@
+version: 1
+
+name: customer-intake
+
+entry_agent: intake
+
+agents:
+  intake:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tools:
+      - end_call
+    tasks:
+      # The confirming step for caller_phone. It has no tool: its whole job is
+      # to read the pre-fetched number back and hear a yes, which is what clears
+      # the unconfirmed mark and lets create_customer_record run at all.
+      - name: verify_contact
+        when: >-
+          Run once, before anything is written down. It reads the number the
+          call arrived on back to the caller and needs a yes. A caller ringing
+          from somebody else's phone gives their own number here instead.
+        instructions: tasks/verify-contact.md
+        assign:
+          - caller_phone: result.caller_phone
+        context:
+          history: messages
+
+      # One step, one pass: the name and the address arrive together as a
+      # NameEmail, and caller_email is picked off the same answer rather than
+      # asked for twice.
+      - name: take_details
+        when: >-
+          Run after verify_contact, when the number is agreed. Takes the name,
+          the email address, what the caller is ringing about, and a good time
+          to ring them back if they name one.
+        instructions: tasks/take-details.md
+        assign:
+          - contact: result.contact
+          - caller_email: result.contact.email
+          - enquiry: result.enquiry
+          - callback_time: result.callback_time
+          - notes+: result.note
+        context:
+          history: messages
+
+      # create_customer_record lives here and not on the agent. An agent holding
+      # every tool of its own step takes the short route and this assign never
+      # runs, which internal/ir/step_reach_test.go warns about.
+      - name: open_record
+        when: >-
+          Run once the number is agreed and the details are taken. Writes the
+          record and reads the reference number back.
+        instructions: tasks/open-record.md
+        tools:
+          - create_customer_record
+        assign:
+          - record: result.record
+          - record_id: result.record.record_id
+        context:
+          history: messages
+
+shapes:
+  - name: CustomerRecord
+    description: The record the intake desk opened for this caller.
+    fields:
+      - record_id: Id
+      - opened_on: Date
+      - enquiry: Literal["new_customer", "existing_customer", "complaint", "other"]
+
+# A description here is not a note to the next author. Every variable a step
+# assigns becomes a parameter on that step's finish call, and this text is the
+# only thing the model is told about it. So each one is written for the model,
+# short, and it reads whole when the value is empty. The reasoning an author
+# wants is in the `#` comments, which reach nothing.
+variables:
+  # confirm: names the step that must hear a yes. Until it does, this value
+  # renders in no prompt but that step's own, and every tool injecting it
+  # refuses itself with the step's name. Somebody may be ringing from a friend's
+  # phone, so a pre-fetched number is a proposal, not a fact.
+  #
+  # No `source:` on purpose: the prefetch entry receives the carrier's fact into
+  # this variable instead. That keeps the per-route refusal for a variable
+  # naming a source its target cannot supply exactly as strict as it is, and on
+  # a route with no caller ID the entry skips and this holds its default.
+  caller_phone:
+    type: Phone
+    default: ""
+    confirm: verify_contact
+    description: >-
+      The caller's number in E.164: a plus sign, then digits, with no spaces,
+      brackets or dashes.
+
+  # A shape the compiler supplies. It is a shape rather than a text type so the
+  # two parts read separately: the agent can use the name without saying the
+  # address out loud. It also takes the whole thing as one string, so a tool
+  # handing back a name in front of an address needs nothing written here.
+  contact:
+    type: NameEmail
+    description: >-
+      Who the caller is and where their confirmation goes, the name and the
+      email address held as two separate parts.
+
+  # Filled by a dotted assign off `contact`, so the caller spells the address
+  # out once and both values come from that one answer. Checked by
+  # email-validator with no DNS lookup, because this runs inside a turn and a
+  # slow resolver would hold the caller in silence.
+  caller_email:
+    type: EmailStr
+    default: ""
+    description: The caller's email address on its own, with no name around it.
+
+  # A value outside the set is refused where it enters and the refusal lists
+  # what was allowed, so the model corrects itself rather than writing something
+  # the record cannot hold.
+  enquiry:
+    type: Literal["new_customer", "existing_customer", "complaint", "other"]
+    default: ""
+    description: What the caller rang about, in one of the four words listed.
+
+  # The one value here the model has to convert rather than copy: a caller says
+  # "half four" or "after lunch" and this has to become 16:30 or nothing. A
+  # wrong one is refused with the format and the model gets one more go, which
+  # is the whole reason the type is not a plain string.
+  #
+  # `| None` because this is the one value the caller may simply not give, and
+  # the type has to say so. Every declared finish field goes through its type
+  # whether the model sent it or not, so an absent one arrives as None and a
+  # type without `| None` refuses the whole finish call. Declared as plain Time
+  # it cost a live call a round trip on "callback_time: Input should be a valid
+  # string", and rewording the description to ask for an empty string did not
+  # fix it: the next run sent an explicit null instead. No wording reliably
+  # stops a model saying "nothing" when there is nothing. The type is the fix.
+  callback_time:
+    type: Time | None
+    description: >-
+      A good time of day to ring the caller back, on the 24 hour clock. Leave it
+      out when the caller has not named one.
+
+  # Appended with `notes+:` rather than assigned, so a second remark does not
+  # overwrite the first. A list starts empty, which is why it takes no default.
+  notes:
+    type: list[str]
+    description: >-
+      Anything the caller added that no other field holds, one short entry per
+      thing they said.
+
+  # The model relays the tool's return into the finish call, and that is where
+  # the Id and the Date on it are actually checked. A wrong one is refused with
+  # the format, so the model can correct itself rather than saving a mangled
+  # reference.
+  record:
+    type: CustomerRecord
+    description: >-
+      The record create_customer_record wrote, exactly as it came back. Fill it
+      only after that tool succeeded.
+
+  # Taken off `record` with a dotted assign, so the reference can be read back
+  # to the caller without rendering the whole record into a prompt.
+  record_id:
+    type: Id
+    default: ""
+    description: The reference number for this caller's record, on its own.
+
+  # Read once from the clock before the greeting. No step assigns it, so its
+  # description is what a prompt reader sees rather than something the model
+  # fills in.
+  today_date:
+    type: Date
+    default: ""
+    description: Today's date at the desk, written year-month-day.
+
+prefetch:
+  - name: today
+    clock: now
+    # The zone sits on the entry, not the package: two entries could honestly
+    # want two zones. Not the container's clock, which is UTC and would name the
+    # wrong day for anybody who is not on it.
+    timezone: Europe/Madrid
+    assign:
+      - today_date: result.date
+
+  # Best effort. Neither code target here names a phone route, so on a browser
+  # run this is what `unmute dev --source from_number=...` seeds. A withheld
+  # number arrives empty or as a word, the entry skips, and verify_contact asks
+  # for one instead.
+  - name: caller
+    source: from_number
+    assign:
+      - caller_phone: result.value
+
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+  - LANGFUSE_SECRET_KEY
+  - LANGFUSE_PUBLIC_KEY
+  - LANGFUSE_BASE_URL
+
+# One call is one trace, with a turn span per exchange inside it, each carrying
+# what the caller said and what the agent replied. It is how you read back what
+# a value was when a step saved it, rather than reconstructing it from the
+# console. `scripts/read_langfuse_trace.py` prints the newest one.
+tracing:
+  provider: langfuse
+
+models:
+  think:
+    reasoning:
+      description: intake reasoning
+      provider: openai
+      # The same model salon-concierge runs on. The scaffold's own default was
+      # tried first and OpenAI answered "invalid model ID" on the first request
+      # from the account this was built on, so this package is on the id that
+      # is known to answer rather than on the one a new package starts with.
+      model: "gpt-5.6-luna"
+      # Forwarded to the provider as written. A reasoning model answering with
+      # function tools on chat completions needs this exact value, or OpenAI
+      # returns 400 on every turn.
+      params:
+        reasoning_effort: "none"
+  speak:
+    voice:
+      description: intake voice
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+      language: en
+  listen:
+    transcriber:
+      provider: slng
+      model: "deepgram/nova:3"
+      language: en
+  turn:
+    detector:
+      provider: local
+      model: silero
+      # patient, not snappy. This desk asks people to spell an email address and
+      # a name out loud, and they pause between characters. snappy closes the
+      # turn 1.2s after the caller stops, so on a real call the agent started
+      # talking in the middle of "c r o o n n i c o l a" and got cut off by the
+      # caller resuming: that is the "abandoned: interrupted mid-utterance" line
+      # in the console. patient waits 3.0s on Pipecat and 2.5s on LiveKit. The
+      # floor does not move on Pipecat either way, so this costs nothing on a
+      # turn where the caller really has finished.
+      pace: patient
+
+tools:
+  - create_customer_record
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    # Names no saved value on purpose. A greeting is held to values settled
+    # before the first word, and the only one this package has is the date.
+    text: "Hi, you're through to the intake desk. Can I take a couple of details from you?"
+  interruption:
+    enabled: true
+  inactivity:
+    nudge_after: 15s
+    end_after: 45s
+  max_duration: 10m
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 5
+  peak_starts_per_second: 1
+  avg_session_duration: 3m

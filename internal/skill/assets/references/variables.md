@@ -89,6 +89,58 @@ No variable is appended to prompts automatically. Use `{{name}}` or
 `{{name.field}}` in each prompt that needs it. An empty referenced value renders
 as `none recorded yet.`.
 
+## How a type is enforced
+
+A declared type does two jobs, in two different places, and knowing which is
+which is what stops an author writing the format into a prompt as well.
+
+**The model is told, not constrained.** Every text type reaches the model as a
+plain string carrying a sentence about the format. This is the whole schema the
+model receives for a `Phone`:
+
+```json
+{
+  "description": "a phone number in E.164, one leading plus and 7 to 15 digits, like ...",
+  "type": "string"
+}
+```
+
+The real description ends with an example number. It is left out here for the
+same reason no prompt may carry one: a model cannot always tell an illustration
+from a value it is holding, and it reads it out.
+
+No `pattern` and no `format` keyword. Either one would travel to the provider,
+and one target sends its schema with strict mode on, where both are rejected.
+That failure appears on the first real call and in no local check, so the format
+lives in the description instead.
+
+**The value is checked where it is saved.** The generated project validates
+every declared field before anything enters call state. A value that does not
+fit is refused, nothing is written, the previous contents stand, and the format
+sentence goes back to the model as the tool result, so it corrects itself on the
+next turn. The sentence the model reads and the sentence it gets back on a
+refusal come from one place and cannot disagree.
+
+Three families behave differently:
+
+| Family | What the model receives | Where it is checked |
+|---|---|---|
+| `Phone`, `Date`, `Time`, `Id`, `EmailStr` | `type: string` plus the format sentence | When the value is saved |
+| `Literal[...]` | An `enum` holding the exact values | The provider limits generation, and it is checked again on save |
+| A shape, `NameEmail`, `list[...]` | The real object or array, each field carrying its own format sentence | On save, field by field |
+
+**What it costs.** Checking runs in process and makes no network request:
+roughly 0.2 microseconds for the pattern types and 18 for `EmailStr`, which
+calls a library instead of matching a pattern. No model request is made to check
+anything. The one thing that does cost a model request is a refusal, so a type
+that refuses something a caller can legitimately say is a type worth changing,
+not a prompt worth rewording.
+
+**Do not restate a format in a prompt.** The description already carries it to
+the model, and a second copy in the prompt is a second thing to keep in step. A
+prompt should say what to ask for and how to say it out loud, not what shape to
+write down.
+
 ## `shapes:` groups fields into a named type
 
 A top-level list, declared once, each item naming a group of fields a
@@ -571,6 +623,30 @@ writing one into the list.
 
 The same path form works in a prompt placeholder too: see "Naming one part of
 a value" above.
+
+### A value the caller may not give is declared `| None`
+
+Every field a step assigns goes through its declared type whether the model
+sent it or not. A field the model leaves out arrives as `None`, and so does one
+it sends as an explicit null. A type without `| None` refuses both, which
+refuses the whole finish call: nothing is saved, the model is told why and gets
+another go, and the caller waits through a wasted round trip.
+
+So **declare the option in the type**, `Time | None`, for any value the caller
+may simply not give. Do not try to solve it in the description. A description
+saying "send an empty string when there is none" was tried on a live call and
+the next run sent an explicit null instead: no wording reliably stops a model
+saying "nothing" when there is nothing, and the type is the only place that
+settles it.
+
+An empty string is still the right thing for a value that is *always* asked for
+and may not be known yet, which is why every text type accepts one. The
+difference is whether absence is a legal outcome of the step. If it is, say so
+in the type.
+
+Absence is already legal in one other place, and needs nothing: an appending
+assign, `notes+:`, whose field is optional on its own and drops an absent entry
+instead of writing it into the list.
 
 ## Ordering a step that needs an earlier value
 

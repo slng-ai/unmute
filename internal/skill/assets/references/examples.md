@@ -1,6 +1,6 @@
 # Working examples
 
-Three packages ship with the Unmute repository. **They live in that repository,
+Four packages ship with the Unmute repository. **They live in that repository,
 not in the user's project.** Check before you reach for one:
 
 ```sh
@@ -17,6 +17,7 @@ table below to know what shape you are aiming at.
 
 | What the user wants | Package | What it shows |
 |---|---|---|
+| to collect typed information from a caller and use it | `examples/customer-intake` | the smallest package that saves declared values and hands them to a tool: one agent, three tasks, one local tool, browser audio on both code targets. Every type in the scope once each, a `NameEmail` split into a name and an address by a dotted assign, an appending `notes+:`, a `Literal` the model has to pick a word from, and a `Time` it has to convert rather than copy. Its tool takes one argument from the model and reads four values out of state through `inject:`, and the caller's number carries `confirm:`, so that tool refuses itself by name until the confirming step has run. **Read this before writing any package with `variables:`** |
 | one full release-readiness project | `examples/salon-concierge` | a verification task shared across agents by name, a booking task ordered after it by the agent's own prompt, two agents that hand the caller over, in-process tool state, Langfuse tracing, a cold manager transfer, browser audio, and an inbound phone route on each of its two targets; every tool is either local Python or the `end_call` builtin, so it starts with no external tool server |
 | to show what the optimizations are worth | `examples/salon-concierge-single-prompt` | the same salon with none of them: one prompt, every tool on every turn, no variables and no pre-fetch. Model, transport and turn taking are held identical to `salon-concierge`, so the only difference left is the structure. **A baseline to read against, never a shape to copy.** If a user asks what tasks or pre-fetch actually buy, diff it against `examples/salon-concierge` |
 | an agent SLNG hosts | `examples/hotel-concierge` | everything the slng target accepts, in one hotel concierge line: two `slng:` tools by name (a code tool and a request tool), two named tools from one `mcp:` server, one `builtin:`, five template variables with defaults reaching the greeting and the prompt, an `inject:` that pins the hotel's identifier so the model never asks for it, a tool `announce:` and a think `fallback:`. No mirror: the slng target creates no tool. Emits no runnable project, so there is no `unmute dev`: `unmute deploy` pushes it and a web session or an attached phone number talks to it. A `local:` or `webhook:` block is refused there, so send those to pipecat or livekit |
