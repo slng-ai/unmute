@@ -3260,3 +3260,37 @@ func TestPipecatFullOnlyPackageEmitsNoShaping(t *testing.T) {
 		t.Errorf("history: full does not strip old instructions on handoff:\n%s", handoff)
 	}
 }
+
+// TestAParamReachesTheSettingsByName is the passthrough every model page
+// promises: a `params:` key a Pipecat service's settings class declares is
+// written into that class by name, so naming a 1.9.0 setting on a page is a
+// thing an author can actually write rather than advice that compiles to
+// nothing.
+//
+// Deepgram's `version` is the case worth pinning: before 1.9.0 it was reachable
+// only as an untyped extra key, and the page now tells authors to write it.
+func TestAParamReachesTheSettingsByName(t *testing.T) {
+	agent := agentFor(t, "safe_core")
+	tgt := targetByProvider(t, agent, ir.ProviderPipecat)
+	listen := *tgt.Models.Listen
+	listen.Provider, listen.Model = "deepgram", "nova-3"
+	listen.Params = map[string]any{"version": "2021-03-17.0", "profanity_filter": true}
+	tgt.Models.Listen = &listen
+	artifact, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	settings := bot[strings.Index(bot, "DeepgramSTTService("):]
+	if end := strings.Index(settings, "\n    )\n"); end > 0 {
+		settings = settings[:end]
+	}
+	for _, want := range []string{`version="2021-03-17.0"`, "profanity_filter=True"} {
+		if !strings.Contains(settings, want) {
+			t.Errorf("the emitted transcriber does not carry %q:\n%s", want, settings)
+		}
+	}
+	if !strings.Contains(settings, "DeepgramSTTService.Settings(") {
+		t.Errorf("the params do not reach a settings class at all:\n%s", settings)
+	}
+}
