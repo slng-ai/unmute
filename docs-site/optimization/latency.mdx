@@ -202,6 +202,7 @@ repeating under every value in the conversation.
 | `text_aggregation` | Delay grouping text for speech. |
 | `playback_delay` | First audio forwarded to native playback start; excludes delivery to the browser. |
 | Tool duration | Time the identified tool ran, whether local or remote. A call into a task or a handoff has none. |
+| Reply time (Pipecat) | The same wait as reply latency, split into the parts that make it up. See [Where a reply's time went](#where-a-replys-time-went-on-pipecat). |
 | First speech | A call-level interval: LiveKit starts at reporter installation; Pipecat starts at the native observer session boundary. |
 
 Expand **Debug details** for model, provider, request and source names, even
@@ -213,6 +214,39 @@ creates a model request or replaces that request's own timing.
 A known count says how many SDK model calls were observed for the reply, with
 `so far` while it is open. A reply-level report alone shows no request count.
 Partial source coverage or a lost slice of history labels the count as `observed`.
+
+## Where a reply's time went, on Pipecat
+
+Pipecat splits each measured reply into the parts that make it up, and the dev
+page shows them in time order under the reply latency, in the call diagnostics:
+
+```text
+Reply time 1.02s · from the caller falling silent
+  200ms  endpointing wait     config: VAD stop_secs
+  120ms  transcription        DeepgramSTTService#0
+   40ms  pipeline             pipeline
+  660ms  LLM inference        OpenAILLMService#0
+```
+
+The parts account for the whole wait, so they add up to the total. That is what
+makes a gap visible: time that belongs to no service is a part of its own rather
+than quietly missing from the list. Each part names an owner, and the owner is
+one of four kinds:
+
+| Owner kind | What it means | Where to change it |
+|---|---|---|
+| service | a model you bound | the `models:` entry, or a different provider |
+| setting | a value you wrote | the setting the owner names, such as the silence window |
+| bot | the generated project's own code between the frameworks | usually nothing to change |
+| pipeline | time inside the framework that belongs to none of the above | usually nothing to change |
+
+The first line says what the interval was measured from: the caller falling
+silent, or the client connecting. A greeting is anchored on the second, so it is
+never compared with a reply to someone who spoke.
+
+This breakdown carries no reply identity, so it sits with the unassigned values
+rather than being attached to a reply by timing. LiveKit reports its own per
+request timings instead and has no equivalent split.
 
 ## Reading a slow turn
 
@@ -228,6 +262,11 @@ Reply latency 3.93s · 3 model calls
   TTS · ended     TTFB 240ms
   ▸ Debug details
 ```
+
+A tool that produced no result says why in its own row: `failed` with the error
+its handler raised, or `timed_out` with the deadline it ran past. A call that
+ends because something broke carries the error on the call itself, so the page
+says what stopped rather than only that something did.
 
 Every model call after the first follows a tool call or a control, and the row
 above it says which. A `HANDOFF` row is a call into a task, or a handoff to

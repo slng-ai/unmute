@@ -198,3 +198,83 @@ func TestAControlIsShownWithoutADuration(t *testing.T) {
 		})
 	}
 }
+
+// TestPipecatReportsWhereAReplysTimeWent holds the producer to the 1.9.0
+// breakdown: every part the framework names, the anchor it measured from, and
+// the framework's own total beside them.
+//
+// The total matters more than it looks. Re-deriving it from the parts would make
+// the decoder's "the parts add up" check unfailable, and a part dropped later
+// would then be a timeline quietly missing time. Carrying the framework's number
+// is what makes that check able to fail.
+//
+// The deprecated accessor is refused by name: `chronological_events` lists only
+// the services that reported a metric, is deprecated for removal in 2.0.0, and
+// prints a framework warning on every call.
+func TestPipecatReportsWhereAReplysTimeWent(t *testing.T) {
+	producer := artifactFile(t, generateFor(t, "safe_core", ir.ProviderPipecat), "dev_metrics.py")
+	for _, want := range []string{
+		"on_latency_breakdown",
+		"breakdown.contributions",
+		`"measured_from": str(breakdown.measured_from)`,
+		`"total_secs": breakdown.total_secs`,
+		`self._put("breakdown"`,
+		`"owner_kind": str(part.owner_kind)`,
+	} {
+		if !strings.Contains(producer, want) {
+			t.Errorf("the producer does not read %q, so the page cannot say where a reply's time went", want)
+		}
+	}
+	if strings.Contains(producer, "chronological_events") {
+		t.Error("the producer calls the deprecated event list, which warns on every call and names only the services that reported a metric")
+	}
+	if strings.Contains(producer, "sum(part[") {
+		t.Error("the producer re-derives the total from the parts, which makes the decoder's sum check unfailable")
+	}
+	// The record the page reads is the one the Go decoder types.
+	if !strings.Contains(producer, devmetrics.KindBreakdown) {
+		t.Errorf("the producer names no %q record", devmetrics.KindBreakdown)
+	}
+}
+
+// TestPipecatNamesWhyAToolProducedNoResult: a handler that raised and one that
+// ran past its deadline are different answers, and the framework reports them
+// differently. The deadline is read off the cancel frame's `run_llm`, which the
+// framework sets on exactly that one cancellation, rather than off log wording
+// that is nobody's contract.
+func TestPipecatNamesWhyAToolProducedNoResult(t *testing.T) {
+	producer := artifactFile(t, generateFor(t, "safe_core", ir.ProviderPipecat), "dev_metrics.py")
+	for _, want := range []string{
+		`getattr(frame, "run_llm", False)`,
+		`self._end_tool(tool, "timed_out"`,
+		`getattr(frame, "error", None)`,
+		`self._end_tool(tool, "failed", reason=str(error))`,
+		`self._end_tool(tool, "cancelled")`,
+		`self._end_tool(tool, "returned")`,
+	} {
+		if !strings.Contains(producer, want) {
+			t.Errorf("the producer does not carry %q, so a tool with no result says nothing about why", want)
+		}
+	}
+	// What ended the call, and how long the bot spoke: two things no service
+	// reports and the page had no answer for.
+	for _, want := range []string{
+		`self._update("call", "call", state="error",`,
+		`f"{processor.name}: {frame.error}"`,
+		`"speech_duration"`,
+		"BotStartedSpeakingFrame",
+		"BotStoppedSpeakingFrame",
+	} {
+		if !strings.Contains(producer, want) {
+			t.Errorf("the producer does not carry %q", want)
+		}
+	}
+	// LiveKit reports its own breakdown and its own tool states, and this change
+	// is Pipecat's observer. Its producer must not have grown any of it.
+	livekit := artifactFile(t, generateFor(t, "remy", ir.ProviderLiveKit), "dev_metrics.py")
+	for _, absent := range []string{"on_latency_breakdown", "breakdown.contributions", devmetrics.KindBreakdown} {
+		if strings.Contains(livekit, absent) {
+			t.Errorf("the LiveKit producer grew %q, which is the Pipecat observer's", absent)
+		}
+	}
+}

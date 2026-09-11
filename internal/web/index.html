@@ -197,6 +197,12 @@
   .measurements summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .measurement{padding:5px 0;display:flex;flex-direction:column;gap:2px}
   .measurement-label{color:var(--text)}
+  /* One reply's time, split into the parts that make it up. The durations are
+     in a column of their own so the long one is findable by eye. */
+  .breakdown{padding:5px 0;display:flex;flex-direction:column;gap:2px}
+  .breakdown-part{display:grid;grid-template-columns:auto 1fr;gap:2px 10px}
+  .breakdown-duration{color:var(--text);text-align:right;font-variant-numeric:tabular-nums}
+  .breakdown-owner{grid-column:2}
   .source-note{white-space:pre-line}
   .measurement-note,.source-note{font-size:10.5px;color:var(--muted)}
   [id="feed-status"]{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
@@ -525,7 +531,11 @@ function metricText(rec){
       return prefix+m.scope+' · '+m.metric.replaceAll('_',' ')+' '+secs(m.value)+' · '+
         [m.source,m.model,m.provider,m.operation_id,m.exchange_id,m.reason].filter(Boolean).join(' · ');
     }
-    if (rec.call) return prefix+rec.call.state;
+    if (rec.breakdown){
+      const b=rec.breakdown;
+      return prefix+'reply time '+secs(b.total_secs)+' · '+b.parts.map(p=>p.label+' '+secs(p.duration_secs)).join(' · ');
+    }
+    if (rec.call) return prefix+[rec.call.state,rec.call.reason].filter(Boolean).join(' · ');
     return ''; // raw transcript snapshots remain in dev.log, not repeated here
   }
   if (rec.kind === "session")
@@ -799,7 +809,9 @@ function renderData(){
       const terminal=locallyEnded || ['ended','interrupted','incomplete'].includes(records.get(groupID)?.exchange.state);
       const state=data.state==='running' ? terminal?'incomplete (last seen running)':(!feedFresh||historyGap)?'last seen running':data.state : data.state;
       row.dataset.state=state;
-      setText(row.firstChild,operationLabel(record)+' · '+state);
+      // A failure and a deadline are different answers to "where is the result",
+      // and each carries the text that explains it.
+      setText(row.firstChild,operationLabel(record)+' · '+state.replaceAll('_',' ')+(data.reason?' · '+data.reason:''));
       ordered(view.activity,row,record.order);
     } else {
       const operation=records.get('operation:'+data.operation_id);
@@ -812,13 +824,52 @@ function renderData(){
       ordered(primary?recordNodes.get('operation:'+operation.id).lastChild:view.values,row,record.order);
     }
   }
-  const call=all.find(r=>r.call)?.call;
+  // Where a reply's time went. The framework measures audio in to audio out and
+  // names every part of the wait, including the parts no service measures, but
+  // it carries no request id: this belongs with the reply latency it arrived
+  // with, in the same unassigned group, and never attached to a reply by timing.
+  for (const record of all.filter(r=>r.breakdown)){
+    const key='breakdown:'+record.id, data=record.breakdown;
+    const view=exchangeNode('unassigned',record.order);
+    let row=recordNodes.get(key);
+    if (!row){
+      row=node('div','breakdown');
+      row.dataset.kind=record.kind;row.dataset.id=record.id;
+      recordNodes.set(key,row);
+    }
+    row.replaceChildren(node('div','measurement-label','Reply time '+secs(data.total_secs)+' · '+
+      (data.measured_from==='client_connected'?'from the client connecting':'from the caller falling silent')));
+    for (const part of data.parts){
+      const line=node('div','breakdown-part');
+      line.append(node('span','breakdown-duration',secs(part.duration_secs)),node('span',undefined,part.label),
+        node('span','measurement-note breakdown-owner',part.owner));
+      row.append(line);
+    }
+    ordered(view.values,row,record.order);
+  }
+  const callRecord=all.find(r=>r.call), call=callRecord?.call;
+  // Why the call ended, when it ended badly. Without it the page says "error"
+  // and the answer is in a terminal the author has already closed.
+  if (call?.state==='error' && call.reason){
+    const view=exchangeNode('call-details',callRecord.order);
+    let row=recordNodes.get('call:reason');
+    if (!row){
+      row=node('div','measurement');
+      row.dataset.kind='call';row.dataset.id='reason';
+      row.append(node('span','measurement-label'));
+      recordNodes.set('call:reason',row);
+    }
+    setText(row.firstChild,'Call ended with an error · '+call.reason);
+    ordered(view.values,row,callRecord.order);
+  }
   for (const [id,view] of exchangeNodes){
     const exchange=records.get(id)?.exchange;
     const operations=all.filter(r=>r.operation && operationGroup(r.operation)===id);
     const measurements=all.filter(r=>r.measurement?.state==='measured' && measurementGroup(r.measurement)===id);
+    // Rows that are neither: the reply-time breakdowns, and the call's own error.
+    const breakdowns=id==='unassigned' ? all.filter(r=>r.breakdown).length : id==='call-details' && recordNodes.has('call:reason') ? 1 : 0;
     const response=exchange?.role==='response';
-    view.details.hidden=!(operations.length||measurements.length);
+    view.details.hidden=!(operations.length||measurements.length||breakdowns);
     if (response){
       const models=operations.filter(r=>r.operation.type==='llm');
       const complete=locallyEnded||exchange.state!=='open';
@@ -826,8 +877,8 @@ function renderData(){
       const count=models.length ? models.length+' model call'+(models.length===1?'':'s')+(historyGap||call?.model_calls!=='known'?' observed':complete?'':' so far') : '';
       setText(view.summary,[latency?'Reply latency '+secs(latency.measurement.value):'',count].filter(Boolean).join(' · ') || 'Response measurements');
     } else setText(view.summary,id==='call-details'?'Call measurements':id==='unassigned'?'Unassigned activity and measurements':'Input measurements');
-    view.summary.hidden=!(operations.length||measurements.length);
-    view.element.hidden=!(view.content.querySelector('.segment:not([hidden])') || operations.length || measurements.length || (response && exchange.state==='open'));
+    view.summary.hidden=!(operations.length||measurements.length||breakdowns);
+    view.element.hidden=!(view.content.querySelector('.segment:not([hidden])') || operations.length || measurements.length || breakdowns || (response && exchange.state==='open'));
     setText(view.note,operations.map(r=>[operationLabel(r),r.operation.name,r.operation.model,r.operation.provider,r.operation.source_request_id].filter(value=>value && value!=='unknown').join(' · '))
       .concat(measurements.filter(r=>r.measurement.operation_id).map(r=>{
         const m=r.measurement,op=records.get('operation:'+m.operation_id);
