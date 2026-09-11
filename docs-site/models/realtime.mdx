@@ -1,0 +1,142 @@
+---
+title: "Live model"
+description: "One model that listens, thinks and speaks, on Pipecat: the block, what it does with the greeting and the tools, and what a live package cannot carry yet."
+---
+
+<Note>
+  A live model is a Pipecat feature. LiveKit and slng refuse the binding by
+  name and say to compile to Pipecat, or to bind think, listen and speak models.
+</Note>
+
+The `realtime` section binds one model that does the three jobs the other
+sections split up: it hears the caller's audio, decides what to say and when,
+and speaks in its own voice. There is no transcriber, no speech synthesizer and
+no turn detector in the emitted pipeline, because the model does all of that
+itself.
+
+```yaml agent.yaml
+models:
+  realtime:
+    - name: live
+      provider: openai
+      model: gpt-live-1
+      voice: marin
+      think: fast          # runs the tools and the hard reasoning, at OpenAI
+  think:
+    fast:
+      provider: openai
+      model: gpt-5.6-terra
+
+agents:
+  desk:
+    instructions: instructions.md
+    realtime: live
+    tools:
+      - lookup_customer
+```
+
+An agent names the entry with `realtime:` in place of `think:` and `speak:`.
+Writing both forms on one agent is refused.
+
+## What a realtime entry takes
+
+| Field | What it is |
+|---|---|
+| `name` | the entry's name; shares one namespace with the other model sections |
+| `provider` | `openai` is the one vendor with a live service on Pipecat |
+| `model` | the live model's id, passed through as written |
+| `voice` | the voice the model speaks in, passed through as written |
+| `think` | optional: a `models.think` entry with `provider: openai` that runs the model's tools and its harder reasoning |
+| `description` | author note |
+
+Every other model field is refused on a live entry by name, with its line and
+column: `temperature`, `language`, `speed`, `params`, `pace`, `endpoint_env`.
+A live session has no slot for them, and refusing is what keeps a setting from
+being silently dropped. A realtime entry takes no per-target override either.
+
+## What the emitted bot does
+
+**One service where three stood.** The live service sits in the pipeline where
+the transcriber, the model and the synthesizer would sit. It receives the
+caller's audio directly and streams its own speech back. The voice activity
+detector still runs, for the speaking frames the idle timer and the latency
+measurement anchor on, but it ends no turn.
+
+**The instructions are fixed when the session starts.** The agent's rendered
+prompt, the model and the voice are set at session start and cannot change
+until the call ends. That is why a live package has one agent and no tasks: a
+handoff or a step would have to change the instructions mid-call.
+
+**The greeting is spoken in the model's own words.** A greeting with
+`speaks_first: agent` reaches the session as its opening instruction. The model
+paraphrases it rather than reading it out, so expect the sense of the line and
+not its letters.
+
+**Tools and hard reasoning run on the `think` entry.** The live model hands a
+request that needs a tool or careful reasoning to the backend named in `think:`,
+on OpenAI's Responses API, and keeps talking while it works. The backend calls
+this project's tools, which are registered exactly as they are for a cascaded
+pipeline, and the answer comes back as something the live model says. The
+backend has to be an OpenAI think entry with no `endpoint_env`, because the
+handover happens inside the live session itself. An agent with tools and no
+`think:` is refused; an agent with neither is allowed, and the runbook says the
+model declines any request that would need one.
+
+**Turn taking is the model's.** It decides when the caller has finished and how
+to handle being talked over. `conversation.interruption` is refused because
+nothing reads it.
+
+**Inactivity works the same way.** `nudge_after` asks the model, in its own
+words, to check whether the caller is still there, and `end_after` ends the
+call.
+
+## Pipecat
+
+| Provider | Notes |
+|---|---|
+| `openai` | OpenAI Live (`gpt-live-1`): full duplex speech to speech. `OPENAI_API_KEY`. The `think` entry it hands its tools to has to be an OpenAI one too. |
+
+This list is closed. There is no wildcard route for a live model.
+
+## What a live package cannot carry
+
+Each of these is refused at validate with one sentence saying what to do
+instead. Most name the cascaded pipeline, which is the shape for everything a
+live session cannot follow.
+
+| Written | Why it is refused |
+|---|---|
+| a second agent, `tasks`, `task_groups`, `handoffs` | a live model serves one agent; a task or a handoff changes the instructions mid-call, and the session fixes them when it starts |
+| `escalations` | a transfer needs the carrier leg the live shape does not carry yet |
+| `listen`, `speak` or `turn` sections | the live model listens, speaks and decides the turn itself |
+| `conversation.interruption` | the model handles being talked over itself |
+| `variables`, `prefetch` | the instructions are fixed at session start and the live shape carries no call state yet |
+| `tracing` | the live shape has no traced worker yet |
+| an `mcp:` tool | the live shape has no place to start and close a server connection yet |
+| a telephony connection | a live model compiles for the browser route in this version |
+| a `think` entry that is not at OpenAI | the handover happens inside the live session itself |
+| a LiveKit or slng target | the live service is a Pipecat service |
+
+The rows marked "yet" and "in this version" are limits of this release, not of
+the model. They are refused rather than emitted half working, so a package that
+compiles is a package whose every setting reaches the call.
+
+## What the dev page shows
+
+`unmute dev` shows the caller's words and the model's words as the model
+transcribes them, each turn of the model's as one reply, and every tool call
+the backend makes with its duration. The model's text is marked as transcribed
+speech rather than generated text, because that is what it is. No first-token
+or request timing is shown per reply: nothing was requested, the model simply
+spoke.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Reasoning model" icon="brain" href="/models/llm">
+    The cascaded pipeline's think role, and the backend a live model hands its tools to.
+  </Card>
+  <Card title="agent.yaml" icon="file-code" href="/reference/agent-yaml">
+    Every field a model entry takes.
+  </Card>
+</Columns>

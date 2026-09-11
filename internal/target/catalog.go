@@ -150,6 +150,7 @@ func CheckGoogleParams(params map[string]any) error {
 func DefaultCatalog() Catalog {
 	var entries []Entry
 	entries = append(entries, pipecatCatalog...)
+	entries = append(entries, pipecatRealtimeCatalog...)
 	entries = append(entries, livekitCatalog...)
 	return Catalog{entries: entries}
 }

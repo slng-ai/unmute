@@ -1508,6 +1508,8 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMTextFrame,
     MetricsFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     TTSSpeakFrame,
     TTSStoppedFrame,
     TranscriptionFrame,
@@ -1838,7 +1840,12 @@ class DevReporter:
         async def user_before(_processor, frame):
             self._input_boundary(frame)
             scope = self._frame_scope(frame)
-            caller_frame = isinstance(frame, (InterimTranscriptionFrame, TranscriptionFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame))
+            # A proposed turn boundary is a caller frame too: when the transcriber
+            # or a live model decides the turn, the proposal is the frame whose
+            # processing pushes the context, so the input has to be in scope then
+            # or its exchange never ends.
+            caller_frame = isinstance(frame, (InterimTranscriptionFrame, TranscriptionFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame,
+                                              ProposedUserStartedSpeakingFrame, ProposedUserStoppedSpeakingFrame))
             input_id = scope.get("input_id") or (self._input if caller_frame else None)
             if input_id:
                 scope["call_id"] = self.call_id

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -106,6 +107,63 @@ func TestTurnDetectionDocsiteHasNoVendorList(t *testing.T) {
 	row := regexp.MustCompile("(?m)^\\| `([a-z_]+)` \\|")
 	if m := row.FindStringSubmatch(string(raw)); m != nil {
 		t.Errorf("%s carries a provider-style row for %q, but the turn role has no catalogue vendors", path, m[1])
+	}
+}
+
+// TestRealtimeDocsiteMatchesCatalog holds the fifth Models page. A live model
+// has a vendor table on Pipecat alone: the other two targets refuse the binding
+// by name, so the page carries one `## Pipecat` table and no LiveKit one, and
+// that table is the catalogue's realtime row.
+func TestRealtimeDocsiteMatchesCatalog(t *testing.T) {
+	path := filepath.Join("..", "..", "docs-site", "models", "realtime.mdx")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only the target section is a vendor table. The page's other tables list
+	// the entry's fields and what a live package cannot carry, in the same
+	// backticked shape, so the section is what tells them apart.
+	row := regexp.MustCompile("^\\| `([a-z_]+)` \\|")
+	var documented []string
+	var section string
+	var sections []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "## ") {
+			section = strings.TrimSpace(line)
+			sections = append(sections, section)
+			continue
+		}
+		if m := row.FindStringSubmatch(line); m != nil && section == "## Pipecat" {
+			documented = append(documented, m[1])
+		}
+	}
+	if !slices.Contains(sections, "## Pipecat") {
+		t.Fatal("models/realtime.mdx has no `## Pipecat` section, so its vendor table cannot be found")
+	}
+	for _, heading := range sections {
+		if heading == "## LiveKit Agents" || heading == "## slng" {
+			t.Errorf("models/realtime.mdx has a %q section; a live model compiles on Pipecat alone", heading)
+		}
+	}
+	cat := DefaultCatalog()
+	catalogued := cat.Vendors(Pipecat, Realtime)
+	for _, vendor := range documented {
+		if !contains(catalogued, vendor) {
+			t.Errorf("models/realtime.mdx lists pipecat realtime %q, which the catalogue does not have", vendor)
+		}
+	}
+	for _, vendor := range catalogued {
+		if !contains(documented, vendor) {
+			t.Errorf("catalogue entry pipecat/realtime/%s is missing from models/realtime.mdx", vendor)
+		}
+	}
+	for _, fw := range []Provider{LiveKit, Slng} {
+		if vendors := cat.Vendors(fw, Realtime); len(vendors) != 0 {
+			t.Errorf("the catalogue now has %s realtime vendors %v: models/realtime.mdx must grow a section and this test a parser for it", fw, vendors)
+		}
+	}
+	if !strings.Contains(string(raw), "LiveKit and slng refuse") {
+		t.Error("models/realtime.mdx does not say the other two targets refuse a live model")
 	}
 }
 

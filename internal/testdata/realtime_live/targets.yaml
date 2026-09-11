@@ -1,0 +1,5 @@
+# Pipecat only: a live model compiles nowhere else in this version.
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.9.0"

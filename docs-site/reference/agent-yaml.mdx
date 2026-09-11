@@ -92,8 +92,8 @@ split this page and [targets.yaml](/reference/targets-yaml) hold between them.
 </ParamField>
 
 <ParamField path="models" type="map" required>
-  Model palette grouped by kind. Accepts sections `think`, `speak`, `listen`, `turn`.
-  Required; omission is refused.
+  Model palette grouped by kind. Accepts sections `think`, `speak`, `listen`, `turn`,
+  and on Pipecat `realtime`. Required; omission is refused.
 </ParamField>
 
 <ParamField path="listen" type="string">
@@ -253,9 +253,12 @@ rename deliberately, with the steps above, rather than discovering it on a call.
 
 ## `models`
 
-Four sections. The section an entry sits in decides its kind: `think` (LLM),
-`speak` (TTS), `listen` (STT), `turn` (turn detection). Entry names share one
-namespace across sections and are yours to choose.
+Five sections. The section an entry sits in decides its kind: `think` (LLM),
+`speak` (TTS), `listen` (STT), `turn` (turn detection), and `realtime`, a
+[live model](/models/realtime) that does the first three as one and compiles on
+Pipecat only. The first four are maps keyed by entry name; `realtime` is a list
+whose items carry `name:`. Entry names share one namespace across sections and
+are yours to choose.
 
 ```yaml
 models:
@@ -288,6 +291,7 @@ end-of-turn timeout, and `semantic_endpointing`, `endpointing_delay` and
 `interruption.minimum_words` are refused because nothing reads them; see
 [Turn detection](/models/turn-detection).
 | `fallback` | `think`, `listen` |
+| `name`, `provider`, `model`, `voice`, `think`, `description` | `realtime`, and nothing else: every other field is refused on a live entry by name, with its line. `think` names a `models.think` entry with `provider: openai` that runs the model's tools and reasoning. See [Live model](/models/realtime) |
 | `prompt_suffix` | `think`: literal text appended to every prompt this binding sends, up to 512 characters, no `{{variables}}`. A per-target override cannot name a different value. See [Context Router](/optimization/context-router) |
 | `agent_id`, `upstream` | `think`, and only on a binding routed through the SLNG Context Router; refused on any other binding. See [Context Router](/optimization/context-router) |
 
@@ -654,6 +658,12 @@ agents:
 
 <ParamField path="speak" type="string" required>
   Name of an entry in `models.speak`. No profile is inferred.
+</ParamField>
+
+<ParamField path="realtime" type="string">
+  Name of an entry in `models.realtime`, written in place of `think` and `speak`.
+  The package then has this one agent and no tasks. Pipecat only; see
+  [Live model](/models/realtime).
 </ParamField>
 
 <ParamField path="tools" type="list of strings">
