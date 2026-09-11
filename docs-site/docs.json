@@ -128,6 +128,7 @@
           "build/your-first-agent",
           "build/how-a-package-fits-together",
           "build/variables",
+          "build/credentials",
           "build/prefetch",
           {
             "group": "Tools",
