@@ -263,10 +263,12 @@ Reply latency 3.93s · 3 model calls
   ▸ Debug details
 ```
 
-A tool that produced no result says why in its own row: `failed` with the error
-its handler raised, or `timed_out` with the deadline it ran past. A call that
-ends because something broke carries the error on the call itself, so the page
-says what stopped rather than only that something did.
+A tool that produced no result says why in its own row: `failed` with the kind
+of error its handler raised, or `timed_out` when it ran past its deadline. A call
+that ends because something broke names the service that stopped it. The messages
+themselves are in `build/<target>/dev.log`, because an error's text quotes what
+was being worked on and these records carry no prompts, tool arguments or
+results.
 
 Every model call after the first follows a tool call or a control, and the row
 above it says which. A `HANDOFF` row is a call into a task, or a handoff to

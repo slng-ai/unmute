@@ -151,9 +151,11 @@ being compared with a reply. This breakdown carries no reply identity, so it
 sits with the unassigned values rather than being matched to a reply by timing.
 
 **A tool that produced no result says why.** Its row reads `failed` with the
-error the handler raised, or `timed_out` with the deadline it ran past. A call
-that ends the whole thing puts its error on the call itself, so the page says
-what stopped rather than only that something did.
+kind of error the handler raised, or `timed_out` when it ran past its deadline,
+and a call that ends badly names the service that stopped it. The messages
+themselves stay in `build/pipecat/dev.log`: an error's text quotes whatever
+was being worked on, and this feed carries no prompts, tool arguments or
+results.
 
 The event feed reconnects separately from audio. Retained events can replay;
 a gap stays marked until the next call. Switching Conversation and Logs keeps
@@ -1303,9 +1305,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     try:
         await _run_bot(transport, runner_args, dev)
     except Exception as error:
-        # The dev page is where the author is looking when a call dies, so the
-        # exception goes there in its own words rather than only to the log.
-        dev.finish(error=True, reason=f"{type(error).__name__}: {error}")
+        # The dev page is where the author is looking when a call dies, so it
+        # names what stopped it. The type only: an exception's message quotes
+        # whatever it was working on, and that belongs in the log rather than
+        # on a page that carries no prompts, arguments or results.
+        dev.finish(error=True, reason=f"The agent stopped on {type(error).__name__}.")
         raise
     finally:
         dev.finish()
@@ -1570,6 +1574,20 @@ def _emit(record: dict) -> None:
         pass
 
 
+def _error_kind(text):
+    """The exception's type name, and never the message beside it.
+
+    A provider's error text quotes the request that failed, and a handler's
+    quotes whatever it was working on, so neither belongs on a page that
+    deliberately carries no prompts, tool arguments or results. The type name
+    cannot carry any of that: it is an identifier from the code, so it is
+    returned only when it reads as one. The message itself stays in the agent's
+    own log, which `unmute dev` writes beside the build.
+    """
+    head = str(text or "").split(":", 1)[0].strip()
+    return head if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", head) else "an error"
+
+
 def _separator(previous, text, previous_includes_spaces, includes_spaces):
     # Same boundary rule as Pipecat's concatenate_aggregated_text; retain the
     # source chunks themselves, including their leading and trailing spaces.
@@ -1832,11 +1850,12 @@ class DevReporter:
             async def source_error(_processor, frame):
                 if frame.fatal or not processor.is_usable:
                     self._error = True
-                    # What the error said, and who said it. A call that reads
-                    # "error" and nothing else sends the author to the container
-                    # logs to find out which service stopped working.
+                    # Which service stopped working, and nothing it said. A
+                    # call that reads "error" alone sends the author hunting
+                    # through logs for the service; the message itself is in
+                    # those logs, where quoting a request is not a leak.
                     self._update("call", "call", state="error",
-                                 reason=f"{processor.name}: {frame.error}")
+                                 reason=f"{processor.name} reported a fatal error.")
         return True
 
     def _input_boundary(self, frame):
@@ -2033,7 +2052,7 @@ class DevReporter:
         # and the error is what actually went wrong.
         error = getattr(frame, "error", None)
         if error:
-            self._end_tool(tool, "failed", reason=str(error))
+            self._end_tool(tool, "failed", reason=f"The handler raised {_error_kind(error)}.")
         else:
             self._end_tool(tool, "returned")
 
@@ -2087,7 +2106,7 @@ class DevReporter:
             if isinstance(frame, ErrorFrame) and scope.get("tool_operation_id"):
                 for tool in self._tools.values():
                     if tool["id"] == scope["tool_operation_id"]:
-                        self._end_tool(tool, "failed", reason=str(frame.error))
+                        self._end_tool(tool, "failed", reason=f"The handler raised {_error_kind(frame.error)}.")
                         return
             operation = scope.get("operation_id")
             request = self._requests.get(operation)

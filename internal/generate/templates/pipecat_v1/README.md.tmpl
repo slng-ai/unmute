@@ -63,9 +63,11 @@ being compared with a reply. This breakdown carries no reply identity, so it
 sits with the unassigned values rather than being matched to a reply by timing.
 
 **A tool that produced no result says why.** Its row reads `failed` with the
-error the handler raised, or `timed_out` with the deadline it ran past. A call
-that ends the whole thing puts its error on the call itself, so the page says
-what stopped rather than only that something did.
+kind of error the handler raised, or `timed_out` when it ran past its deadline,
+and a call that ends badly names the service that stopped it. The messages
+themselves stay in `build/{{.Target}}/dev.log`: an error's text quotes whatever
+was being worked on, and this feed carries no prompts, tool arguments or
+results.
 
 The event feed reconnects separately from audio. Retained events can replay;
 a gap stays marked until the next call. Switching Conversation and Logs keeps

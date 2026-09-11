@@ -492,6 +492,13 @@ func buildModels(pkg *packagespec.Package) (map[string]ModelDef, error) {
 			return nil, fmt.Errorf("%s: a models.realtime entry has no name", pkg.Location("agent.yaml", "realtime"))
 		}
 		if prev, ok := result[raw.Name]; ok {
+			// Two entries in this same list is a different mistake from a clash
+			// with another section, and reading "appears in both realtime and
+			// realtime" sends the author looking for a section they did not
+			// write.
+			if prev.Kind == KindRealtime {
+				return nil, fmt.Errorf("%s: models.realtime declares %q twice; give the second entry its own name or delete it", pkg.Location("agent.yaml", raw.Name), raw.Name)
+			}
 			return nil, fmt.Errorf("%s: model name %q appears in both %s and realtime; names share one namespace", pkg.Location("agent.yaml", raw.Name), raw.Name, prev.Kind)
 		}
 		def := convertModelDef(packagespec.ModelDef{
@@ -1737,6 +1744,13 @@ func resolveBindings(agent *Agent, used map[string]bool, overrides map[string]pa
 			}
 			if replaced.Pace == "" {
 				replaced.Pace = def.Pace
+			}
+			// And the same again for the early answer. An override that says
+			// nothing about it has not turned it off: dropping it would compile
+			// a bot with no speculative reply and no line saying so, on the one
+			// package shape that overrides its turn binding per target.
+			if replaced.Eager == nil {
+				replaced.Eager = def.Eager
 			}
 			def = replaced
 		}

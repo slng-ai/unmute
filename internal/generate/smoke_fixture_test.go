@@ -434,7 +434,15 @@ func TestSmokeStubbedNamesExistInTheListenerModule(t *testing.T) {
 		t.Fatal("the Flux constructor call does not close where the stand-in expects")
 	}
 	for _, line := range strings.Split(rest[:end], "\n")[1:] {
-		if arg := strings.TrimSpace(line); arg != "" && !strings.Contains(arg, "=") && !strings.HasSuffix(arg, ",") && !strings.HasSuffix(arg, "(") {
+		// Every emitted argument ends in a comma, so testing for one excluded
+		// the whole block and the check could never fire. What separates an
+		// argument from the line closing a nested call is the `=`, and the
+		// closer is recognised by what it is rather than by its comma.
+		arg := strings.TrimSpace(line)
+		if arg == "" || strings.HasPrefix(arg, ")") || strings.HasSuffix(arg, "(") {
+			continue
+		}
+		if !strings.Contains(arg, "=") {
 			t.Errorf("the Flux constructor takes a positional argument %q; the smoke stand-in accepts keywords only", arg)
 		}
 	}

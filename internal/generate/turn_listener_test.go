@@ -40,8 +40,15 @@ func TestListenDeciderEmitsTheTranscribersTurnService(t *testing.T) {
 		}
 	}
 	// A flat flag, not a setting: the service reads it once at construction.
-	if strings.Contains(bot, "Settings(\n            enable_eager_end_of_turn") {
-		t.Error("enable_eager_end_of_turn landed inside Settings; it is a constructor argument")
+	// Read from where the settings block opens to where it closes, because the
+	// mistake this guards against renders the flag *last* among the settings:
+	// matching the first settings line could never have caught it.
+	settings := bot[strings.Index(bot, "settings=DeepgramFluxSTTService.Settings("):]
+	if end := strings.Index(settings, "\n        )"); end > 0 {
+		settings = settings[:end]
+	}
+	if strings.Contains(settings, "enable_eager_end_of_turn") {
+		t.Errorf("enable_eager_end_of_turn landed inside Settings; it is a constructor argument:\n%s", settings)
 	}
 	// The runbook names the decider, the field the ceiling landed in, and that
 	// the early answer is on (FR-015).
@@ -62,6 +69,17 @@ func TestListenDeciderEmitsTheTranscribersTurnService(t *testing.T) {
 	report := artifactFile(t, artifact, "compile-report.json")
 	if !strings.Contains(report, "the transcriber decides, DeepgramFluxSTTService closes at 1.2s via eot_timeout_ms, answers the predicted turn early") {
 		t.Errorf("compile-report.json does not say who decides the turn:\n%s", report)
+	}
+	// And it does not say the opposite two lines above. The advisory note is
+	// true of the on-device pair and false here, where the binding is what
+	// selected the transcriber's own turn service.
+	if strings.Contains(report, "its binding is advisory") {
+		t.Error("compile-report.json calls the turn binding advisory while that binding is what chose the service")
+	}
+	// The date beside the class is that service's own, not the ordinary
+	// transcriber's: they are different rows, checked on different days.
+	if !strings.Contains(report, "DeepgramFluxSTTService (pipecat-ai[deepgram], verified 2026-09-11)") {
+		t.Errorf("compile-report.json does not carry the turn service's own verification date:\n%s", report)
 	}
 	// The extra and the key come from the ordinary listen entry.
 	if pyproject := artifactFile(t, artifact, "pyproject.toml"); !strings.Contains(pyproject, "deepgram,") {

@@ -854,6 +854,24 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	if len(resolved.Models.ListenFallbacks) > 0 {
 		applyCapability(caps, targetcap.FieldListenFallback, provider, row)
 	}
+	// `eager` is a turn field. validateModelKind refuses it on an authored entry
+	// of any other kind, but a per-target `models:` override replaces a binding
+	// wholesale, so the same mistake can arrive here having never been an
+	// authored model at all.
+	for role, binding := range map[string]*Binding{"listen": resolved.Models.Listen} {
+		if binding != nil && binding.Eager {
+			row.Errors = add(row.Errors, fmt.Sprintf(
+				"the %s binding sets eager, which is a turn-model field: it reaches nothing here. Put it on the models.turn binding, beside provider: listen", role))
+		}
+	}
+	for role, set := range map[string]map[string]Binding{"think": resolved.Models.Reason, "speak": resolved.Models.Speak} {
+		for name := range set {
+			if set[name].Eager {
+				row.Errors = add(row.Errors, fmt.Sprintf(
+					"%s binding %q sets eager, which is a turn-model field: it reaches nothing here. Put it on the models.turn binding, beside provider: listen", role, name))
+			}
+		}
+	}
 	if b := resolved.Models.Turn; b != nil {
 		applyCapability(caps, targetcap.FieldTurnPlacement, provider, row)
 		if b.Provider == targetcap.TurnDeciderListen {
@@ -1397,8 +1415,8 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 
 	models, voices := usedProfiles(agent)
 	for _, name := range slices.Sorted(maps.Keys(voices)) {
-		if name == "" {
-			continue // a realtime agent names no speak model; Build refused every other empty reference
+		if name == "" && len(realtimeAgentNames(agent)) > 0 {
+			continue // a realtime agent names no speak model of its own
 		}
 		binding, ok := resolved.Models.Speak[name]
 		if !ok || !bindingHasVoice(&binding) {
@@ -1414,8 +1432,11 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 		checkSpeakRequiredFields(catalog, provider, name, binding, row)
 	}
 	for _, name := range slices.Sorted(maps.Keys(models)) {
-		if name == "" {
-			continue // a realtime agent names no think model of its own
+		if name == "" && len(realtimeAgentNames(agent)) > 0 {
+			// A realtime agent names no think model of its own, so it contributes
+			// an empty name here. Skipping every empty name instead would turn a
+			// future empty reference of any other kind into silence.
+			continue
 		}
 		binding, ok := resolved.Models.Reason[name]
 		if !ok || binding.Model == "" {
@@ -3175,6 +3196,16 @@ func validateListenDecider(agent *Agent, resolved Target, provider targetcap.Pro
 	}
 	if agent.Conversation != nil && agent.Conversation.Interruption != nil && agent.Conversation.Interruption.MinimumWords > 0 {
 		row.Errors = add(row.Errors, "conversation.interruption.minimum_words reaches nothing when the transcriber decides the turn: it gates a local turn start the transcriber replaces. Remove it")
+	}
+	// Both services that can take the turn can also predict it, so this refusal
+	// fires for nobody today. It is here because the row carries the answer and
+	// the emitted constructor passes the flag unconditionally: a vendor added
+	// with Eager false would otherwise compile a service that raises on the
+	// keyword at the first call, which is a worse way to find out.
+	if ok && turn.Eager && !detector.Eager {
+		row.Errors = add(row.Errors, fmt.Sprintf(
+			"eager: true asks %s to answer a predicted end of turn, and %s does not predict one. Remove eager, or bind a listening model that does",
+			vendor, detector.Class))
 	}
 }
 

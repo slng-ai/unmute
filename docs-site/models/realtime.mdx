@@ -4,8 +4,8 @@ description: "One model that listens, thinks and speaks, on Pipecat: the block, 
 ---
 
 <Note>
-  A live model is a Pipecat feature. LiveKit and slng refuse the binding by
-  name and say to compile to Pipecat, or to bind think, listen and speak models.
+  A live model is a Pipecat feature. LiveKit and slng refuse the binding by name,
+  and say to compile to Pipecat or to bind think, listen and speak models.
 </Note>
 
 The `realtime` section binds one model that does the three jobs the other
@@ -106,15 +106,14 @@ live session cannot follow.
 
 | Written | Why it is refused |
 |---|---|
-| a second agent, `tasks`, `task_groups`, `handoffs` | a live model serves one agent; a task or a handoff changes the instructions mid-call, and the session fixes them when it starts |
+| a second agent, `tasks`, `task_groups`, `handoffs` | a live model serves one agent, with no `tasks`, no `task_groups` and no `handoffs`: a task or a handoff changes the instructions mid-call, and the session fixes them when it starts |
 | `escalations` | a transfer needs the carrier leg the live shape does not carry yet |
-| `listen`, `speak` or `turn` sections | the live model listens, speaks and decides the turn itself |
-| `conversation.interruption` | the model handles being talked over itself |
+| `listen`, `speak` or `turn` sections, and `conversation.interruption` | the model listens, speaks and decides the turn itself |
 | `variables`, `prefetch` | the instructions are fixed at session start and the live shape carries no call state yet |
 | `tracing` | the live shape has no traced worker yet |
 | an `mcp:` tool | the live shape has no place to start and close a server connection yet |
 | a telephony connection | a live model compiles for the browser route in this version |
-| a `think` entry that is not at OpenAI | the handover happens inside the live session itself |
+| a `think` entry that is not at OpenAI | the backend must be at OpenAI: the handover happens inside the live session itself |
 | a LiveKit or slng target | the live service is a Pipecat service |
 
 The rows marked "yet" and "in this version" are limits of this release, not of

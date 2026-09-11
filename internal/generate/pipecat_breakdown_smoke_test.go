@@ -140,7 +140,10 @@ async def exercise_breakdown():
                             "the raising handler did not end failed", timeout=5)
                 await until(lambda: outcome("slow") and outcome("slow")["state"] == "timed_out",
                             "the handler that ran past its deadline did not end timed out", timeout=5)
-                assert "customer_id" in outcome("boom")["reason"], outcome("boom")
+                # The type, and never the message beside it: an exception's
+                # text quotes whatever the handler was working on.
+                assert outcome("boom")["reason"] == "The handler raised KeyError.", outcome("boom")
+                assert "customer_id" not in capture.getvalue(), "the handler's message reached the dev feed"
                 assert outcome("slow")["reason"], outcome("slow")
             finally:
                 if not task.done():

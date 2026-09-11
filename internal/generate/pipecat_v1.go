@@ -693,9 +693,6 @@ type pipecatData struct {
 	// opening instruction. Validation has already held the package to what this
 	// shape carries (ir.validateRealtime).
 	Realtime bool
-	// RealtimeBackend means the live model names a think entry, so the bot
-	// imports the Responses service whose Settings the delegation is built from.
-	RealtimeBackend bool
 	// Knowledge is the shared knowledge-module data: the declared bases and the
 	// deduplicated embedding imports across them.
 	Knowledge knowledgeData

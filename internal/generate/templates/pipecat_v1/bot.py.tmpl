@@ -2290,9 +2290,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     try:
         await _run_bot(transport, runner_args, dev)
     except Exception as error:
-        # The dev page is where the author is looking when a call dies, so the
-        # exception goes there in its own words rather than only to the log.
-        dev.finish(error=True, reason=f"{type(error).__name__}: {error}")
+        # The dev page is where the author is looking when a call dies, so it
+        # names what stopped it. The type only: an exception's message quotes
+        # whatever it was working on, and that belongs in the log rather than
+        # on a page that carries no prompts, arguments or results.
+        dev.finish(error=True, reason=f"The agent stopped on {type(error).__name__}.")
         raise
     finally:
         dev.finish()

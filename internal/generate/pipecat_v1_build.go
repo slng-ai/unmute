@@ -74,7 +74,6 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 			// One agent, held to that by validation: the live model listens for
 			// itself, so no transcriber is built and no listen binding is read.
 			data.Realtime = true
-			data.RealtimeBackend = agent.Models[def.Realtime].Think != ""
 		}
 	}
 	var err error
@@ -198,7 +197,12 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	applyConversation(agent.Conversation, target.Telephony != nil, &data)
 	data.Notes = append(data.Notes, serviceNotes(data)...)
 	if target.Models.Turn != nil {
-		data.Notes = append(data.Notes, "turn role lowers to on-device VAD (Silero); its binding is advisory")
+		// Under a listening decider the binding is the opposite of advisory: it
+		// is what selected the transcriber's own turn service. Saying otherwise
+		// put two lines in one report that contradicted each other.
+		if !data.Pace.ByListener {
+			data.Notes = append(data.Notes, "turn role lowers to on-device VAD (Silero); its binding is advisory")
+		}
 		data.Notes = append(data.Notes, data.Pace.note())
 	}
 	setImportNeeds(&data)
@@ -1807,6 +1811,10 @@ func sttService(binding *ir.Binding, pace paceView, env *envSet) (pipecatService
 	call.Class = detector.Class
 	svc.Entry.Call = &call
 	svc.Entry.Import = detector.Import
+	// And its own verification date, which the compile report prints beside the
+	// class: the ordinary transcriber's date says nothing about when this
+	// service was checked.
+	svc.Entry.Verified = detector.Verified
 	svc.Call.Class = detector.Class
 	svc.Call.SettingsClass = detector.Class + ".Settings"
 	// The pace ceiling lands in the service's own end-of-turn timeout, in

@@ -465,11 +465,17 @@ func TestRealtimeSurfacesAgree(t *testing.T) {
 		"realtime:", "- name: live", "provider: openai", "model: gpt-live-1", "voice: marin", "think: fast",
 		"realtime: live",
 	}
+	// Whole clauses, not words. "tasks", "tracing" and "OpenAI" appear on any
+	// models page for unrelated reasons, so matching those would pass on a
+	// surface that had dropped the refusal entirely.
 	refused := []string{
-		"one agent", "tasks", "handoffs", "escalations",
-		"`listen`", "`speak`", "`turn`", "interruption",
-		"variables", "prefetch", "tracing", "mcp", "telephony",
-		"OpenAI", "LiveKit", "slng",
+		"serves one agent", "no `tasks`", "`handoffs`", "`escalations`",
+		"listens, speaks and decides the turn itself",
+		"`conversation.interruption`",
+		"carries no call state yet", "no traced worker yet",
+		"start and close a server connection yet",
+		"browser route in this version", "must be at OpenAI",
+		"refuse the binding by name",
 	}
 	fields := []string{"`name`", "`provider`", "`model`", "`voice`", "`think`", "`description`"}
 	surfaces := map[string]string{
@@ -477,8 +483,11 @@ func TestRealtimeSurfacesAgree(t *testing.T) {
 		"docs-site/models/realtime.mdx": trackedFile(t, "docs-site/models/realtime.mdx"),
 	}
 	for name, content := range surfaces {
+		// Whitespace-normalised, because these are clauses rather than words and
+		// a clause is wrapped wherever its line ran out.
+		flat := strings.Join(strings.Fields(content), " ")
 		for _, want := range append(append(block, refused...), fields...) {
-			if !strings.Contains(content, want) {
+			if !strings.Contains(flat, strings.Join(strings.Fields(want), " ")) {
 				t.Errorf("%s does not carry %q, which the other live-model surfaces teach", name, want)
 			}
 		}

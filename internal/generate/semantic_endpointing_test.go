@@ -168,10 +168,16 @@ func TestTurnFieldsSurviveAPerTargetOverride(t *testing.T) {
 	// endpointing_delay from salon-concierge's own base binding, so dropping
 	// that line from the package silently turned one of these three
 	// assertions into a no-op.
+	eager := true
 	for name, def := range pkg.Agent.Models.Turn {
 		def.Pace = string(ir.PaceSnappy)
 		def.SemanticEndpointing = string(ir.SemanticEndpointingOff)
 		def.EndpointingDelay = "400ms"
+		// The fourth field, and the one that was missing from this loop while
+		// the carry-forward was missing from Build: an override that says
+		// nothing about the early answer compiled a bot without it, with no
+		// line anywhere saying the feature had been turned off.
+		def.Eager = &eager
 		pkg.Agent.Models.Turn[name] = def
 	}
 
@@ -192,9 +198,12 @@ func TestTurnFieldsSurviveAPerTargetOverride(t *testing.T) {
 			t.Errorf("target %q resolved semantic_endpointing %q, want %q: a per-target override dropped it", name, got, ir.SemanticEndpointingOff)
 		}
 		// The one that already had a carry-forward, asserted here too so all
-		// three live in one place.
+		// four live in one place.
 		if resolved.Models.Turn.EndpointingDelay == "" {
 			t.Errorf("target %q lost its endpointing_delay", name)
+		}
+		if !resolved.Models.Turn.Eager {
+			t.Errorf("target %q resolved eager false: a per-target override dropped the early answer", name)
 		}
 	}
 	if overridden == 0 {

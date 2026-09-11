@@ -192,3 +192,35 @@ func TestValidateLocalDeciderIsUntouched(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateRefusesEagerOnAnotherRolesOverride: a per-target `models:` block
+// replaces a binding whole, so a turn field written inside an override of a
+// listening or thinking entry never passes through the authored-model check
+// that refuses it everywhere else. It would resolve onto a binding nothing
+// reads and compile without a word.
+func TestValidateRefusesEagerOnAnotherRolesOverride(t *testing.T) {
+	for _, tc := range []struct {
+		role  string
+		apply func(*Target)
+		want  string
+	}{
+		{"listen", func(tgt *Target) { tgt.Models.Listen.Eager = true },
+			"the listen binding sets eager, which is a turn-model field"},
+		{"think", func(tgt *Target) {
+			for name, binding := range tgt.Models.Reason {
+				binding.Eager = true
+				tgt.Models.Reason[name] = binding
+				break
+			}
+		}, "sets eager, which is a turn-model field"},
+	} {
+		t.Run(tc.role, func(t *testing.T) {
+			agent, tgt := listenDeciderTarget(t, ProviderPipecat, "deepgram", "flux-general-en", nil)
+			tc.apply(&tgt)
+			row := validateOne(t, agent, tgt)
+			if text := strings.Join(row.Errors, "\n"); !strings.Contains(text, tc.want) {
+				t.Errorf("want %q in:\n%s", tc.want, text)
+			}
+		})
+	}
+}

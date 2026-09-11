@@ -126,18 +126,21 @@ user the sense of the line is kept and not its letters.
 Write a live package only when the user asks for speech to speech, and say what
 it cannot carry in this version, because each is refused at validate:
 
-- one agent, and no `tasks`, `task_groups`, `handoffs` or `escalations`: the
-  session fixes its instructions when it starts, so nothing may change them
-  mid-call;
-- no `listen`, `speak` or `turn` sections and no `conversation.interruption`:
-  the live model does those jobs itself;
-- no `variables`, `prefetch`, `tracing` or `mcp` tools, and no telephony
-  connection: the live shape carries none of them yet, so it compiles for the
-  browser route;
+- a live model **serves one agent**, with no `tasks`, no `task_groups`,
+  no `handoffs` and no `escalations`: the session fixes its instructions when it
+  starts, so nothing may change them mid-call;
+- no `listen`, `speak` or `turn` sections, and no `conversation.interruption`:
+  the model listens, speaks and decides the turn itself;
+- no `variables` and no `prefetch`: the live shape carries no call state yet;
+- no `tracing`: the live shape has no traced worker yet;
+- no `mcp` tool: nothing in the live shape can start and close a server
+  connection yet;
+- no telephony connection: a live model compiles for the browser route in this
+  version;
 - no `temperature`, `language`, `speed`, `params`, `pace` or `endpoint_env` on
   the entry, and no per-target override of it;
-- the `think` backend must be at OpenAI, and the target must be Pipecat: LiveKit
-  and slng refuse the binding by name.
+- the `think` backend must be at OpenAI, and the target must be Pipecat, because
+  LiveKit and slng refuse the binding by name.
 
 `conversation.inactivity` still works: the nudge is put to the model in its own
 words and `end_after` ends the call.
