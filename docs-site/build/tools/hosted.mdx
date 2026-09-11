@@ -6,6 +6,17 @@ description: "Reference a tool your SLNG organisation already has by its exact n
 A hosted tool is not defined in your package. It is defined on the SLNG
 platform already, and the block just names it.
 
+On this page:
+
+- [The file name and the hosted name](#the-file-name-and-the-hosted-name-are-two-different-things) - two names, one reference
+- [Descriptions and parameters are inherited](#descriptions-and-parameters-are-inherited) - what the platform supplies
+- [What the block keeps](#what-the-block-keeps) - every key you write
+- [Attaching one](#attaching-one) - the same two lists
+- [Deploying to SLNG needs no mirror](#deploying-to-slng-needs-no-mirror) - what deploy checks
+- [What each target does with it](#what-each-target-does-with-it) - slng, livekit, pipecat
+- [Advanced](#advanced) - the legacy form and the mirrors
+- [Troubleshooting](#troubleshooting) - the refusals, and their fixes
+
 ```yaml tools/check_order.yaml
 slng: check_order
 
@@ -33,13 +44,6 @@ creates no tool and renames nothing in SLNG, it only lets your package call
 the reference whatever reads best in the prompt and the tool list. Say the
 hosted callable name out loud in a prompt that explicitly names the platform
 function; the file name is a package reference, not a remote rename.
-
-Leave the block bare and validation refuses before anything else runs:
-
-```text wrap
-tools/check_order.yaml:1: `slng:` names the tool SLNG already hosts: write `slng: check_order`,
-  one line, the hosted tool's exact name
-```
 
 ## Descriptions and parameters are inherited
 
@@ -76,13 +80,26 @@ silently ignored:
 These describe how your agent uses the tool, not what the tool is, so they
 stay yours to write, exactly as before:
 
-| Field | Effect |
-|---|---|
-| `description` | overrides the platform's own. Omit it to inherit what the platform already says |
-| `inject` | values merged into every call, never shown to the model |
-| `announce` | one sentence the agent speaks as the tool starts |
-| `effect` | whether the call ends the conversation |
-| `interruption` | whether the caller can interrupt during the call |
+<ParamField path="description" type="string">
+  Overrides the platform's own. Omit it to inherit what the platform already
+  says.
+</ParamField>
+
+<ParamField path="inject" type="list of pairs">
+  Values merged into every call, never shown to the model.
+</ParamField>
+
+<ParamField path="announce" type="one sentence">
+  One sentence the agent speaks as the tool starts.
+</ParamField>
+
+<ParamField path="effect" type="returns_data | ends_conversation">
+  Whether the call ends the conversation.
+</ParamField>
+
+<ParamField path="interruption" type="provider_default | continue | cancel">
+  Whether the caller can interrupt during the call.
+</ParamField>
 
 ```yaml tools/search_places_text.yaml
 slng: search_places_text
@@ -108,25 +125,6 @@ text and converts it into the parameter's declared type, so `- limit:
 as a number. That conversion happens when the call starts, so `unmute deploy`
 checks the parameter and reports the value as deferred rather than claiming to
 have validated it.
-
-`unmute deploy` refuses an injected value in three cases, each naming the tool
-file and the published version:
-
-- **The parameter is not declared.** An attachment pins a declared parameter.
-  A schema that allows extra properties lets the *model* send more; it does not
-  give an override anywhere to bind.
-- **The parameter's type is not settled.** A parameter that could be a string
-  or an integer, or that declares no type, or that holds an object or a list,
-  cannot take a pinned value. Leave it to the model.
-- **A constraint sits at the root of the schema.** A published schema may
-  constrain a parameter from its root, under `allOf` and friends. Checking one
-  supplied value against a rule written for the whole call would reject the
-  arguments the model fills in, so the value is not reported as checked.
-
-Two tool files resolving to the same hosted tool are refused as well, naming
-both. SLNG attaches a hosted tool once, so the two cannot carry separate
-descriptions or `inject:` values, and a push would silently keep one file's
-settings and drop the other's.
 
 ## Attaching one
 
@@ -175,19 +173,6 @@ yet" rather than "everything is fine." `unmute deploy` completes all three
 before it changes the agent, and `--dry-run` reports them without changing
 anything. See [Deploy to SLNG](/deploy/slng) for what that run checks and what
 it prints.
-
-## The legacy form still loads
-
-```yaml tools/check_order.yaml
-slng:
-  hash: 336a66b9a564f472...
-```
-
-A tool file written before this shape existed still resolves, by the
-**file's** own name, and a code target still checks its mirror's pin exactly
-as it always did. It is accepted, not taught: a new tool file should write
-the scalar name instead. Nothing about deploying to SLNG reads this form's
-mirror or its pin; SLNG resolves the reference by name either way.
 
 ## What each target does with it
 
@@ -242,56 +227,6 @@ diff knowing what to expect:
   the platform reads the credential from its own vault, and `unmute deploy`
   reports the same requirement from the published contract.
 
-Skip the pull for a code target and the refusal names the fix, and the
-shortcut:
-
-```text wrap
-livekit: tool "check_order": `slng:` names a tool SLNG hosts and this target builds a tool
-  out of its committed mirror, and none is committed: run `unmute pull` to fetch it and
-  commit what it writes, or compile this package to slng, which references the published
-  tool and needs no mirror
-```
-
-**One limit, and it is the honest cost of "runs everywhere."** A hosted tool
-that declares Python dependencies compiles to slng, which installs a per-tool
-environment. It is refused on livekit and pipecat, in the same words an
-authored `local:` tool's `dependencies:` already gets there:
-
-```text wrap
-the LiveKit driver builds one dependency list for the whole generated project from the
-  provider catalogue and reads no per-tool pins: add the package to
-  build/<target>/pyproject.toml after compiling, or compile to slng which installs a
-  per-tool environment
-```
-
-A mirrored pin and an authored one reach nothing on those two targets for the
-same reason: each builds one dependency list for the whole project, and reads
-no per-tool pins. A hosted tool with no dependencies works on all three. On a
-slng-only package this limit is invisible until deploy, because there is no
-mirror to read it from ahead of time; deploy reports it as one of the checks
-it completed.
-
-## The mirrors are not yours to edit
-
-`tools/<name>.slng.json` and, for a code tool, `tools/<name>.slng.py` are the
-platform's copy, not yours, whichever form the reference is written in. The
-`.slng.` infix marks a file as mirrored rather than authored, so one glance
-answers whether you may edit it. The answer is no.
-
-Every compile of a code target checks the mirror against its pin, with no
-network at all, so a hand edit is caught the next time anybody builds the
-package:
-
-```text wrap
-tool "check_order": tools/check_order.slng.py does not match the hash tools/check_order.slng.meta.json
-  pins, so the committed mirror is not the one this package means: run `unmute pull` and
-  read the diff, or `git checkout` the mirror if the edit was a mistake
-```
-
-`unmute pull` itself refuses the same way, before it overwrites anything,
-naming every changed file at once. `--force` discards the edits; the honest
-fix is to change the tool on the platform and pull again.
-
 ## Reference-only
 
 Unmute creates no tool on SLNG. A hosted reference only ever points at a tool
@@ -316,6 +251,126 @@ package reaches it once it exists there.
 | an HTTP endpoint you host | `webhook:` |
 
 The last two are the two that no longer reach slng.
+
+## Advanced
+
+Neither of these comes up on a package that targets slng and writes the scalar
+reference.
+
+### The legacy form still loads
+
+```yaml tools/check_order.yaml
+slng:
+  hash: 336a66b9a564f472...
+```
+
+A tool file written before this shape existed still resolves, by the
+**file's** own name, and a code target still checks its mirror's pin exactly
+as it always did. It is accepted, not taught: a new tool file should write
+the scalar name instead. Nothing about deploying to SLNG reads this form's
+mirror or its pin; SLNG resolves the reference by name either way.
+
+### The mirrors are not yours to edit
+
+`tools/<name>.slng.json` and, for a code tool, `tools/<name>.slng.py` are the
+platform's copy, not yours, whichever form the reference is written in. The
+`.slng.` infix marks a file as mirrored rather than authored, so one glance
+answers whether you may edit it. The answer is no.
+
+Every compile of a code target checks the mirror against its pin, with no
+network at all, so a hand edit is caught the next time anybody builds the
+package:
+
+```text wrap
+tool "check_order": tools/check_order.slng.py does not match the hash tools/check_order.slng.meta.json
+  pins, so the committed mirror is not the one this package means: run `unmute pull` and
+  read the diff, or `git checkout` the mirror if the edit was a mistake
+```
+
+`unmute pull` itself refuses the same way, before it overwrites anything,
+naming every changed file at once. `--force` discards the edits; the honest
+fix is to change the tool on the platform and pull again.
+
+## Troubleshooting
+
+### The build refuses a bare `slng:` block
+
+Leave the block bare and validation refuses before anything else runs:
+
+```text wrap
+tools/check_order.yaml:1: `slng:` names the tool SLNG already hosts: write `slng: check_order`,
+  one line, the hosted tool's exact name
+```
+
+**Fix:** write the hosted tool's exact name on the same line, as your
+organisation holds it.
+
+### `unmute deploy` refuses an injected value
+
+There are three cases, each naming the tool file and the published version:
+
+- **The parameter is not declared.** An attachment pins a declared parameter.
+  A schema that allows extra properties lets the *model* send more; it does not
+  give an override anywhere to bind.
+- **The parameter's type is not settled.** A parameter that could be a string
+  or an integer, or that declares no type, or that holds an object or a list,
+  cannot take a pinned value. Leave it to the model.
+- **A constraint sits at the root of the schema.** A published schema may
+  constrain a parameter from its root, under `allOf` and friends. Checking one
+  supplied value against a rule written for the whole call would reject the
+  arguments the model fills in, so the value is not reported as checked.
+
+**Fix:** drop that key from `inject:` and let the model fill the parameter in,
+or pin a different parameter whose published type is settled.
+
+### Two tool files resolve to one hosted tool
+
+Two tool files resolving to the same hosted tool are refused, naming
+both. SLNG attaches a hosted tool once, so the two cannot carry separate
+descriptions or `inject:` values, and a push would silently keep one file's
+settings and drop the other's.
+
+**Fix:** keep one file per hosted tool, and attach that one file wherever both
+were attached.
+
+### A code target says no mirror is committed
+
+Skip the pull for a code target and the refusal names the fix, and the
+shortcut:
+
+```text wrap
+livekit: tool "check_order": `slng:` names a tool SLNG hosts and this target builds a tool
+  out of its committed mirror, and none is committed: run `unmute pull` to fetch it and
+  commit what it writes, or compile this package to slng, which references the published
+  tool and needs no mirror
+```
+
+**Fix:** run `unmute pull` and commit everything it writes, or compile the
+package to slng instead.
+
+### A hosted tool with Python dependencies is refused on livekit and pipecat
+
+**One limit, and it is the honest cost of "runs everywhere."** A hosted tool
+that declares Python dependencies compiles to slng, which installs a per-tool
+environment. It is refused on livekit and pipecat, in the same words an
+authored `local:` tool's `dependencies:` already gets there:
+
+```text wrap
+the LiveKit driver builds one dependency list for the whole generated project from the
+  provider catalogue and reads no per-tool pins: add the package to
+  build/<target>/pyproject.toml after compiling, or compile to slng which installs a
+  per-tool environment
+```
+
+A mirrored pin and an authored one reach nothing on those two targets for the
+same reason: each builds one dependency list for the whole project, and reads
+no per-tool pins. A hosted tool with no dependencies works on all three. On a
+slng-only package this limit is invisible until deploy, because there is no
+mirror to read it from ahead of time; deploy reports it as one of the checks
+it completed.
+
+**Fix:** add the package to `build/<target>/pyproject.toml` after compiling, or
+compile that tool's package to slng.
 
 ## Where to go next
 

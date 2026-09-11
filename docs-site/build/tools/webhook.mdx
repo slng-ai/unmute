@@ -21,6 +21,15 @@ nowhere in a package for a URL and its credential to write to there.
 Reference a tool your organisation already has on the platform with
 [`slng:`](/build/tools/hosted) instead.
 
+On this page:
+
+- [The block](#the-block) - the four keys
+- [The path renders per call](#the-path-renders-per-call) - variables in the URL
+- [Authentication](#authentication) - bearer or API key
+- [What the model fills in, and what it cannot](#what-the-model-fills-in-and-what-it-cannot) - input against inject
+- [Advanced](#advanced) - naming the base URL, describing the result
+- [Troubleshooting](#troubleshooting) - the refusals, and their fixes
+
 ```yaml tools/confirm_appointment.yaml expandable wrap
 description: Confirm that the existing appointment stays as booked. Call it when the customer says the time works.
 
@@ -60,33 +69,27 @@ refused. Full rules in [the behavior fields](/build/tools/overview#the-three-beh
 
 ## The block
 
-| Field | Required | What it is |
-|---|---|---|
-| `url_env` | at least one of `url_env`, `base_url` | the UPPER_SNAKE name of an environment variable holding the base URL |
-| `base_url` | at least one of `url_env`, `base_url` | the literal `https://` base URL |
-| `path` | no | appended to that base URL; when present it starts with `/` and may carry `{{variable}}` tokens |
-| `auth` | no | how the request authenticates |
+<ParamField path="url_env" type="UPPER_SNAKE name">
+  The name of an environment variable holding the base URL. At least one of
+  `url_env` and `base_url` is required.
+</ParamField>
+
+<ParamField path="base_url" type="literal https:// URL">
+  The literal base URL. At least one of `url_env` and `base_url` is required.
+</ParamField>
+
+<ParamField path="path" type="string">
+  Appended to that base URL. When present it starts with `/` and may carry
+  `{{variable}}` tokens.
+</ParamField>
+
+<ParamField path="auth" type="block">
+  How the request authenticates. See [Authentication](#authentication).
+</ParamField>
 
 `url_env` holds a **name**, so the base URL is a deployment choice rather than a
 package one: staging and production run the same package against different APIs.
 Pipecat and LiveKit read it at run time and never look at `base_url`.
-
-## Naming the base URL
-
-`base_url` exists for a hosted target: that is where SLNG used to store the
-URL in the tool body it pushed, since there was no environment for it to read
-at run time there. An slng target refuses a `webhook:` block outright now,
-for the reason at the top of this page, so there is no longer a target that
-reads `base_url`. Name `url_env` for livekit and pipecat, which read it at
-run time and never look at `base_url`.
-
-Drop `url_env` and both code targets refuse, and the message still names a
-hosted target as the reason the field exists at all:
-
-```text
-livekit: livekit target reads a webhook base URL from the environment: tool
-  "confirm_appointment" needs url_env, keeping base_url for a hosted target
-```
 
 ## The path renders per call
 
@@ -101,12 +104,7 @@ once a task assigns it partway through the call is fine here.
 
 If the variable has no value when the model calls the tool, the call is refused
 and the model is told what to ask the caller for, rather than sending a
-half-formed request. A token that names nothing at all fails at compile time:
-
-```text
-tools/confirm_appointment.yaml:7: tool "confirm_appointment" webhook.path references
-  {{not_a_variable}}, which is not a declared variable
-```
+half-formed request.
 
 ## Authentication
 
@@ -116,25 +114,17 @@ tools/confirm_appointment.yaml:7: tool "confirm_appointment" webhook.path refere
     token_env: SALON_API_TOKEN
 ```
 
-| Field | What it is |
-|---|---|
-| `type` | `bearer` or `api_key` |
-| `token_env` | environment variable holding the token |
-| `header` | header name, `api_key` only, defaults to `X-API-Key` |
+<ParamField path="type" type="bearer | api_key" required>
+  Which scheme the request uses.
+</ParamField>
 
-Again a name, never a value. A token written in place of a name is refused:
+<ParamField path="token_env" type="UPPER_SNAKE name" required>
+  The environment variable holding the token. Always a name, never a value.
+</ParamField>
 
-```text
-livekit: tool "confirm_appointment" auth token_env must be an UPPER_SNAKE environment
-  variable name, never a secret value
-```
-
-So is a field from the other scheme, and the message says why:
-
-```text wrap
-livekit: tool "confirm_appointment" auth header is not a bearer field: bearer always sends
-  Authorization
-```
+<ParamField path="header" type="header name" default="X-API-Key">
+  Legal on `api_key` only.
+</ParamField>
 
 Every name you use here goes in `agent.yaml` under
 [`secrets:`](/reference/secrets). The compiler also infers these fields as
@@ -162,14 +152,7 @@ inject:
 
 Injected values are merged into the call and **never shown to the model**, so it
 can neither see them nor overwrite them. That is the place a customer id, a
-captured slot, or the number the call went out to rides along. A key cannot be in
-both lists, and the refusal explains the reason rather than just the rule:
-
-```text wrap
-tools/confirm_appointment.yaml:5: tool "confirm_appointment" injects "customer_id", which
-  is also an input property; an injected value is hidden from the model, so it cannot
-  double as a parameter the model fills in
-```
+captured slot, or the number the call went out to rides along.
 
 The tool above takes no parameters at all: everything the API needs is injected.
 The model can call it or not call it, and that is the whole of its authority. It
@@ -181,7 +164,18 @@ number stays a number.
 Every injected value must be a scalar. Strings, numbers, booleans, and null are
 legal; maps and lists are refused.
 
-## Describing the result
+## Advanced
+
+### Naming the base URL
+
+`base_url` exists for a hosted target: that is where SLNG used to store the
+URL in the tool body it pushed, since there was no environment for it to read
+at run time there. An slng target refuses a `webhook:` block outright now,
+for the reason at the top of this page, so there is no longer a target that
+reads `base_url`. Name `url_env` for livekit and pipecat, which read it at
+run time and never look at `base_url`.
+
+### Describing the result
 
 ```yaml
 output:
@@ -215,6 +209,71 @@ refused there now, and the check moved with the code: a hosted `code` tool's
 module carries its own `Output` model, and SLNG reads the result shape off
 that. See [Python tools](/build/tools/python#what-the-slng-sandbox-expects)
 and [Hosted tools](/build/tools/hosted).
+
+## Troubleshooting
+
+### Both code targets refuse a tool with no `url_env`
+
+Drop `url_env` and both code targets refuse, and the message still names a
+hosted target as the reason the field exists at all:
+
+```text
+livekit: livekit target reads a webhook base URL from the environment: tool
+  "confirm_appointment" needs url_env, keeping base_url for a hosted target
+```
+
+**Fix:** add `url_env` with the UPPER_SNAKE name of the variable that holds the
+base URL, and keep `base_url` if the package also has a hosted build.
+
+### A `{{token}}` in the path names nothing
+
+A token that names nothing at all fails at compile time:
+
+```text
+tools/confirm_appointment.yaml:7: tool "confirm_appointment" webhook.path references
+  {{not_a_variable}}, which is not a declared variable
+```
+
+**Fix:** declare the variable under `variables:`, or correct the spelling in the
+path.
+
+### `token_env` holds a value instead of a name
+
+Again a name, never a value. A token written in place of a name is refused:
+
+```text
+livekit: tool "confirm_appointment" auth token_env must be an UPPER_SNAKE environment
+  variable name, never a secret value
+```
+
+**Fix:** put the variable's name here and the token itself in your environment or
+secret store.
+
+### An `auth` field belongs to the other scheme
+
+A field from the other scheme is refused too, and the message says why:
+
+```text wrap
+livekit: tool "confirm_appointment" auth header is not a bearer field: bearer always sends
+  Authorization
+```
+
+**Fix:** drop `header` from a `bearer` block, or switch `type` to `api_key` if
+the API really wants a named header.
+
+### A key is in both `input` and `inject`
+
+A key cannot be in both lists, and the refusal explains the reason rather than
+just the rule:
+
+```text wrap
+tools/confirm_appointment.yaml:5: tool "confirm_appointment" injects "customer_id", which
+  is also an input property; an injected value is hidden from the model, so it cannot
+  double as a parameter the model fills in
+```
+
+**Fix:** decide who supplies it. Leave it in `inject:` for a value the model must
+never see, or in `input:` for one the model fills in.
 
 ## Where to go next
 

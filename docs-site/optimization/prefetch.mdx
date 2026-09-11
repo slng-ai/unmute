@@ -4,12 +4,59 @@ description: "How to decide which lookups belong before the greeting, and the tr
 sidebarTitle: "Pre-fetch"
 ---
 
+[`prefetch:`](/build/prefetch) runs a lookup once, before the greeting, and puts
+the answer in a variable. Deciding which lookups belong there is the work, and
+this page is how to decide.
+
 The model is the slowest part of a voice turn, and a turn with a tool call in it
 goes to the model twice instead of once. So the cheapest turn is the one that
 never happens.
 
-[`prefetch:`](/build/prefetch) is how you remove one. This page is about deciding
-which ones to remove.
+On this page:
+
+- [What it looks like](#what-it-looks-like) - three entries, three kinds
+- [Count round trips, not seconds](#count-round-trips-not-seconds) - the habit worth building
+- [The one question](#the-one-question) - what passes the test
+- [Collecting becomes confirming](#collecting-becomes-confirming) - shorter, not skipped
+- [Do not move the wait to before the greeting](#do-not-move-the-wait-to-before-the-greeting) - the trap
+- [Design for empty](#design-for-empty-because-empty-is-the-common-case) - the common case
+- [Advanced](#advanced) - how far a fetched value travels
+- [Troubleshooting](#troubleshooting) - what goes wrong, and the fix
+
+## What it looks like
+
+Three entries, and they are the three kinds of value worth moving: a clock
+reading, a fact the call arrives with, and a read-only lookup you already have
+the inputs for.
+
+```yaml agent.yaml
+prefetch:
+  - name: today
+    clock: now
+    timezone: Europe/Madrid
+    assign:
+      - booking_date: result.date
+
+  - name: caller
+    source: from_number
+    assign:
+      - customer_phone: result.value
+
+  - name: profile
+    tool: look_up_customer
+    writes: false
+    args:
+      - phone: "{{customer_phone}}"
+    assign:
+      - customer_name: result.name
+```
+
+```sh
+unmute validate my-agent
+```
+
+[Writing a pre-fetch](/build/prefetch) is the syntax. The rest of this page is
+which lookups belong in that list.
 
 ## Count round trips, not seconds
 
@@ -33,7 +80,7 @@ Counting them tells you what a pre-fetch is worth before you write it:
 **Could this have been known before anybody spoke?** Not "is it slow", and not
 "is it annoying to collect".
 
-Three kinds of value pass that test.
+Three kinds of value pass that test, and they are the three entries above.
 
 **A clock reading.** The easiest win, and the easiest to miss, because a date tool
 looks like a real tool. It is not. It takes nothing from the conversation, so it
@@ -55,7 +102,7 @@ product they want, why they are calling, whether an option suits them. No amount
 of pre-fetching helps there, and a step that collects a decision is doing its
 job.
 
-## Update the prompt to use what was fetched
+### Update the prompt to use what was fetched
 
 A saved value can remove a lookup from the conversation only if the agent or
 tool uses it. Add a placeholder where the model needs to read it, or use
@@ -99,7 +146,68 @@ task is what clears the runtime mark.
   it.
 </Tip>
 
-## Where a fetched value is allowed to go
+## Do not move the wait to before the greeting
+
+The trap. A pre-fetch runs before the agent says anything, so any time it spends
+is silence with nothing to listen to at all. Silence before hello is worse than
+silence in the middle of a call.
+
+Three rules keep it safe, and the first two are enforced for you:
+
+1. The whole block has a **time limit**. A lookup that runs over is logged and given up on.
+2. It **cannot fail a call**. An error is logged and given up on too.
+3. Keep the list short, and do not chain a lookup off a lookup off a lookup. Entries run one after another, so a chain eats the time limit.
+
+For a noticeable wait, consider one short `announce:` line. Omit it for quick
+tools, and avoid a second model-generated line saying the same thing.
+
+### A pre-fetch is not a cover line
+
+Both make a gap easier to sit through. They are not interchangeable.
+
+| | `prefetch:` | `announce:` |
+|---|---|---|
+| what it does | removes a round trip | gives the caller something to hear during one |
+| when it runs | once, before the greeting | every time that tool fires |
+| use it for | a value that was already knowable | a value you really do have to fetch now |
+
+A task transition may also take time. A task can have an `announce:` line,
+but it is optional; test whether the caller benefits from hearing it.
+
+Reach for a pre-fetch first, because a round trip you remove is gone for good.
+Use an announcement only for waits that need one.
+
+## Design for empty, because empty is the common case
+
+Every input a pre-fetch needs can be missing, and on some routes it always is.
+Your machine has no phone network. Some facts are absent on some routes by
+design, for example `source.carrier` on either Pipecat route, or a phone
+number on the direction a route does not grant. Callers hide their number too,
+so even a route that grants a fact can still supply nothing on a given call.
+Your lookup will not know a first-time customer.
+
+So the empty call is not an edge case to handle later. It is the one to write
+first:
+
+- Write each prompt so it reads as a whole sentence with the value empty. An unset variable renders as `none recorded yet.` Use a label such as `Candidate phone: {{customer_phone}}` and explain what to ask when it is absent.
+- Then check it still reads well once the value is there.
+- Then run the agent both ways: `unmute dev` with `--source` and without it. Both are real paths in production.
+
+## What you see in the log
+
+Every entry writes one line, whether it resolved or was skipped:
+
+```text
+prefetch today: resolved booking_date=2026-09-01
+prefetch caller: skipped, the call carries no from_number
+```
+
+A removed round trip is one fewer `llm_request` span on LiveKit's own trace for
+that turn.
+
+## Advanced
+
+### Where a fetched value is allowed to go
 
 A value does not sit in front of every prompt just because a pre-fetch found
 it. Variables are declared once, with a type and a default. From there, four
@@ -119,7 +227,7 @@ controls decide how far each value travels.
   and saves it. Values that are not assigned never enter call state. See
   [Tasks](/build/orchestration/tasks).
 
-### Why this beats a prompt instruction
+#### Why this beats a prompt instruction
 
 None of this is a rule written in a prompt and hoped for. Reference a value that still requires confirmation in the greeting and
 you get a build error.
@@ -140,72 +248,30 @@ the one place that needs it keeps it off that bill everywhere else. A turn the
 [Context Router](/optimization/context-router) judges repeatable can answer
 from cache instead of paying at all, and that is a package's own opt-in.
 
-## Do not move the wait to before the greeting
+## Troubleshooting
 
-The trap. A pre-fetch runs before the agent says anything, so any time it spends
-is silence with nothing to listen to at all. Silence before hello is worse than
-silence in the middle of a call.
+### A value arrives empty on every call
 
-Three rules keep it safe, and the first two are enforced for you:
+The entry cannot resolve on that route, or the input it needs is missing.
 
-1. The whole block has a **time limit**. A lookup that runs over is logged and given up on.
-2. It **cannot fail a call**. An error is logged and given up on too.
-3. Keep the list short, and do not chain a lookup off a lookup off a lookup. Entries run one after another, so a chain eats the time limit.
+**Fix:** `unmute validate` tells you which entries can never get a value on a
+given target, and names the later entries that then get skipped too. Read its
+warnings instead of finding out on a call.
 
-If a lookup is usually slow, leave it as a tool called during the conversation.
-For a noticeable wait, consider one short `announce:` line. Omit it for quick
-tools, and avoid a second model-generated line saying the same thing.
+### The greeting is late now
 
-## Design for empty, because empty is the common case
+A lookup you moved is spending its time where the caller has nothing at all to
+listen to.
 
-Every input a pre-fetch needs can be missing, and on some routes it always is.
-Your machine has no phone network. Some facts are absent on some routes by
-design, for example `source.carrier` on either Pipecat route, or a phone
-number on the direction a route does not grant. Callers hide their number too,
-so even a route that grants a fact can still supply nothing on a given call.
-Your lookup will not know a first-time customer.
+**Fix:** if a lookup is usually slow, leave it as a tool called during the
+conversation. A cover line can sit over it there.
 
-So the empty call is not an edge case to handle later. It is the one to write
-first:
+### The caller hears two cover lines for one request
 
-- Write each prompt so it reads as a whole sentence with the value empty. An unset variable renders as `none recorded yet.` Use a label such as `Candidate phone: {{customer_phone}}` and explain what to ask when it is absent.
-- Then check it still reads well once the value is there.
-- Then run the agent both ways: `unmute dev` with `--source` and without it. Both are real paths in production.
+Two things are speaking for one thing the caller asked for.
 
-`unmute validate` tells you which entries can never get a value on a given
-target, and names the later entries that then get skipped too. Read its warnings
-instead of finding out on a call.
-
-## A pre-fetch is not a cover line
-
-Both make a gap easier to sit through. They are not interchangeable.
-
-| | `prefetch:` | `announce:` |
-|---|---|---|
-| what it does | removes a round trip | gives the caller something to hear during one |
-| when it runs | once, before the greeting | every time that tool fires |
-| use it for | a value that was already knowable | a value you really do have to fetch now |
-
-A task transition may also take time. A task can have an `announce:` line,
-but it is optional; test whether the caller benefits from hearing it.
-
-Reach for a pre-fetch first, because a round trip you remove is gone for good.
-Use an announcement only for waits that need one. And never let two things speak for one
-request: two tools in the same turn, or a tool at the end of one step and a
-task at the start of the next. The caller hears two cover lines for one thing
-they asked for.
-
-## What you see in the log
-
-Every entry writes one line, whether it resolved or was skipped:
-
-```text
-prefetch today: resolved booking_date=2026-09-01
-prefetch caller: skipped, the call carries no from_number
-```
-
-A removed round trip is one fewer `llm_request` span on LiveKit's own trace for
-that turn.
+**Fix:** never let two things speak for one request: two tools in the same
+turn, or a tool at the end of one step and a task at the start of the next.
 
 ## Next
 

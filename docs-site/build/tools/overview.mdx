@@ -9,6 +9,17 @@ model calls it. Both live in one file, `tools/<name>.yaml`.
 The file stem is the tool name. It must be lower snake case and cannot start with
 an underscore.
 
+On this page:
+
+- [The eight execution blocks](#the-eight-execution-blocks) - the ways a tool runs
+- [How each target treats a tool](#how-each-target-treats-a-tool) - what each one supports
+- [Choosing a kind](#choosing-a-kind) - stop at the first fit
+- [Fields inside each execution block](#fields-inside-each-execution-block) - every key, per block
+- [Which fields the block allows](#which-fields-the-block-allows) - the shared contract fields
+- [The three behavior fields](#the-three-behavior-fields) - announce, effect, interruption
+- [Define once, attach by name](#define-once-attach-by-name) - one definition, two lists
+- [Troubleshooting](#troubleshooting) - the refusals you will meet
+
 ```yaml tools/check_availability.yaml expandable
 description: >-
   List Sage and Stone slots for one service and date. Call only after customer
@@ -62,19 +73,9 @@ tool file has exactly one.
 | `provider_hosted:` | a tool the model provider runs itself | gated, see below |
 | `knowledge:` | a search over a folder of your own documents | [Knowledge bases](/build/tools/knowledge) |
 
-Exactly one, and the compiler holds you to it. Two blocks:
-
-```text
-tools/check_availability.yaml:7: two execution blocks (local and webhook): a tool runs
-  exactly one way
-```
-
-None at all, where the message is also the list:
-
-```text wrap
-tools/check_availability.yaml: no execution block: add one of webhook, local, mcp, builtin,
-  client, provider_hosted, knowledge, slng
-```
+Exactly one, and the compiler holds you to it. A file carrying two blocks, and a
+file carrying none, are both refused with their line: see
+[Troubleshooting](#troubleshooting).
 
 ### The two gated blocks
 
@@ -98,11 +99,6 @@ Both blocks have no fields, but YAML still needs an explicit body: write
 
 ## How each target treats a tool
 
-The same tool file compiles to three different runtimes, and they do not all
-support the same things. This table is the capability table, which is what the
-compiler actually reads, so a `no` here is a refusal you will meet at compile time
-rather than a surprise on a call.
-
 | Tool kind | LiveKit | Pipecat | SLNG |
 |---|---|---|---|
 | `webhook:` | yes | yes | yes |
@@ -113,6 +109,11 @@ rather than a surprise on a call.
 | `knowledge:` | yes | yes | **no** |
 | `client:` | no | no | no |
 | `provider_hosted:` | no | no | no |
+
+The same tool file compiles to three different runtimes, and they do not all
+support the same things. This table is the capability table, which is what the
+compiler actually reads, so a `no` here is a refusal you will meet at compile time
+rather than a surprise on a call.
 
 Three of those rows are worth a sentence.
 
@@ -143,14 +144,14 @@ a decision rather than a bug.
 
 ### Attaching a tool to a task
 
-A tool listed on a task rather than on an agent is a narrower thing, and two kinds
-are not available everywhere:
-
 | Tool kind on a task | LiveKit | Pipecat | SLNG |
 |---|---|---|---|
 | `mcp:` | yes | **no**, list it on the agent | yes |
 | `knowledge:` | yes | **no**, list it on the agent | **no** |
 | everything else | yes | yes | no tasks at all |
+
+A tool listed on a task rather than on an agent is a narrower thing, and two kinds
+are not available everywhere.
 
 Pipecat's reason is the same for both: a task tool there is a flows handler holding
 a `FlowManager`, not a decorated function holding `FunctionCallParams`. The SLNG
@@ -199,22 +200,26 @@ not to.
 
 ## Fields inside each execution block
 
-| Block | Field | Required | Values and defaults |
-|---|---|---|---|
-| `webhook` | `url_env` | at least one of `url_env`, `base_url` | UPPER_SNAKE name holding the base URL; read by the code targets |
-| `webhook` | `base_url` | at least one of `url_env`, `base_url`; required on SLNG | literal `https://` URL; read by SLNG, which stores the URL in the tool body instead of an environment |
-| `webhook` | `path` | no | path beginning with `/`; may contain `{{variable}}` tokens |
-| `webhook` | `auth` | no | bearer or API-key authentication |
-| `local` | `handler` | no | package Python path; omitted means `tools/<tool-name>.py` |
-| `mcp` | `server` | no | the server's name on the platform, when it is not this tool's own name. Read it with `voiceai mcp list` |
-| `mcp` | `url_env` | yes on LiveKit and Pipecat; not read by SLNG | UPPER_SNAKE name holding the server URL |
-| `mcp` | `transport` | no | `sse` or `streamable_http`; omitted lets the SDK infer it from the URL |
-| `mcp` | `auth` | no; never read by SLNG | bearer or API-key authentication |
-| `mcp` | `tools` | no; required on slng | non-empty, unique server tool names; omitted means all tools. Required on slng, which attaches one reference per tool and has no "whole server" attachment |
-| `builtin` | `id` | yes | an id from the closed registry, listed on the [prebuilt tools](/build/tools/prebuilt) page |
-| `builtin` | `instructions` | no | instruction applied by the prebuilt as it runs |
-| `client`, `provider_hosted` | none | | explicit empty block only |
-| `knowledge` | `base` | yes | the name of a knowledge base declared in `knowledge:` in `agent.yaml` |
+### `webhook:`
+
+<ParamField path="url_env" type="UPPER_SNAKE name">
+  The name of an environment variable holding the base URL, read by the code
+  targets. At least one of `url_env` and `base_url` is required.
+</ParamField>
+
+<ParamField path="base_url" type="literal https:// URL">
+  Read by SLNG, which stores the URL in the tool body instead of an environment.
+  At least one of `url_env` and `base_url` is required, and SLNG requires this
+  one.
+</ParamField>
+
+<ParamField path="path" type="string">
+  A path beginning with `/`. It may contain `{{variable}}` tokens.
+</ParamField>
+
+<ParamField path="auth" type="block">
+  Bearer or API-key authentication.
+</ParamField>
 
 A `webhook:` tool needs `url_env`, `base_url`, or both. Pipecat and LiveKit
 read `url_env` from the environment at run time and never look at `base_url`.
@@ -223,19 +228,96 @@ never looks at `url_env`. A package that targets both writes both fields; each
 target reads only the one it needs. Full rules in
 [Webhook tools](/build/tools/webhook#the-block).
 
+### `local:`
+
+<ParamField path="handler" type="package Python path">
+  Omitted means `tools/<tool-name>.py`.
+</ParamField>
+
+### `mcp:`
+
+<ParamField path="server" type="string">
+  The server's name on the platform, when it is not this tool's own name. Read
+  it with `voiceai mcp list`.
+</ParamField>
+
+<ParamField path="url_env" type="UPPER_SNAKE name">
+  The name of an environment variable holding the server URL. Required on
+  LiveKit and Pipecat, and not read by SLNG.
+</ParamField>
+
+<ParamField path="transport" type="sse | streamable_http">
+  Omitted lets the SDK infer it from the URL.
+</ParamField>
+
+<ParamField path="auth" type="block">
+  Bearer or API-key authentication. Never read by SLNG.
+</ParamField>
+
+<ParamField path="tools" type="list of names">
+  Non-empty, unique server tool names; omitted means all tools. Required on
+  slng, which attaches one reference per tool and has no "whole server"
+  attachment.
+</ParamField>
+
+### `builtin:`
+
+<ParamField path="id" type="registry id" required>
+  An id from the closed registry, listed on the
+  [prebuilt tools](/build/tools/prebuilt) page.
+</ParamField>
+
+<ParamField path="instructions" type="string">
+  Instruction applied by the prebuilt as it runs.
+</ParamField>
+
+### `knowledge:`
+
+<ParamField path="base" type="base name" required>
+  The name of a knowledge base declared in `knowledge:` in `agent.yaml`.
+</ParamField>
+
+### `client:` and `provider_hosted:`
+
+Neither takes a field. Write an explicit empty block only.
+
 ## Which fields the block allows
 
 The contract fields are shared, with one exception that matters:
 
-| Field | Required | Where it is legal |
-|---|---|---|
-| `description` | yes, except on `builtin:` and `mcp:` | optional on `builtin:`, illegal on `mcp:`, legal everywhere else |
-| `input` | yes on tool contracts | illegal on `builtin:`, `mcp:` and `knowledge:`, required everywhere else |
-| `output` | no | illegal on `builtin:`, `mcp:` and `knowledge:`; author-side only elsewhere, not sent to the model, not included in the compile report, and not enforced at run time on the code targets |
-| `inject` | no | `webhook:`, `local:`, and hosted `slng:`; authored values are scalars or placeholder strings. See [Variables](/reference/variables#passing-a-value-into-a-tool) |
-| `interruption` | no | everywhere except `mcp:` |
-| `effect` | no | everywhere except `mcp:` and `knowledge:` |
-| `announce` | no | `webhook:`, `local:` and `knowledge:` only; a fixed sentence, no `{{variables}}` |
+<ParamField path="description" type="string" required>
+  Optional on `builtin:`, illegal on `mcp:`, legal everywhere else.
+</ParamField>
+
+<ParamField path="input" type="JSON Schema object" required>
+  Required on tool contracts. Illegal on `builtin:`, `mcp:` and `knowledge:`,
+  required everywhere else.
+</ParamField>
+
+<ParamField path="output" type="JSON Schema object">
+  Illegal on `builtin:`, `mcp:` and `knowledge:`. Elsewhere it is author-side
+  only: not sent to the model, not included in the compile report, and not
+  enforced at run time on the code targets.
+</ParamField>
+
+<ParamField path="inject" type="list of pairs">
+  Legal on `webhook:`, `local:`, and hosted `slng:`. Authored values are scalars
+  or placeholder strings. See
+  [Variables](/reference/variables#passing-a-value-into-a-tool).
+</ParamField>
+
+<ParamField path="interruption" type="provider_default | continue | cancel">
+  Legal everywhere except `mcp:`.
+</ParamField>
+
+<ParamField path="effect" type="returns_data | ends_conversation">
+  Legal everywhere except `mcp:` and `knowledge:`.
+</ParamField>
+
+<ParamField path="announce" type="one sentence">
+  Legal on `webhook:`, `local:` and `knowledge:` only. A fixed sentence, with no
+  `{{variables}}`.
+</ParamField>
 
 An `mcp:` file carries none of them, because the server owns each tool's contract.
 A `builtin:` file takes no `input` or `output`. The registry supplies its contract
@@ -245,15 +327,6 @@ tool asks for one string and returns passages, so there is nothing to describe a
 nothing to merge into. It does take `description` and `announce`, and you should
 write both.
 
-**`output:` is refused on an slng target.** It used to be allowed there, for a
-reason. The compiler turned it into a pydantic `Output` class inside the code
-it uploaded, and SLNG read the tool's result shape off that class. unmute
-uploads no code now, so the field reaches nothing and is refused rather than
-dropped. A tool SLNG hosts carries its own `Output` model, written where the
-tool was written. Full story in [Python
-tools](/build/tools/python#what-the-slng-sandbox-expects) and [Hosted
-tools](/build/tools/hosted).
-
 ## The three behavior fields
 
 ```yaml
@@ -262,11 +335,18 @@ effect: returns_data
 announce: Let me check the calendar.
 ```
 
-| Field | Values | Default | Meaning |
-|---|---|---|---|
-| `interruption` | `provider_default`, `continue`, `cancel` | `provider_default` | what happens to the call if the caller speaks while the tool runs |
-| `effect` | `returns_data`, `ends_conversation` | `returns_data` | whether the conversation continues after the tool |
-| `announce` | any one sentence | absent, nothing is spoken | a fixed line the agent speaks as the tool starts, so a slow call is not silence |
+<ParamField path="interruption" type="provider_default | continue | cancel" default="provider_default">
+  What happens to the call if the caller speaks while the tool runs.
+</ParamField>
+
+<ParamField path="effect" type="returns_data | ends_conversation" default="returns_data">
+  Whether the conversation continues after the tool.
+</ParamField>
+
+<ParamField path="announce" type="one sentence">
+  A fixed line the agent speaks as the tool starts, so a slow call is not
+  silence. Absent by default, and then nothing is spoken.
+</ParamField>
 
 All three are optional, and each is honored differently per target. Pipecat maps
 `interruption` onto its own cancel-on-interruption setting, while LiveKit runs
@@ -288,41 +368,43 @@ sentence in the way.
 hears two announcements in a row, which is worse than the pause you were trying
 to cover.
 
-#### Writing the line
+<AccordionGroup>
+  <Accordion title="Writing the line">
+    The sentence is fixed, so it is spoken word for word every time that tool
+    runs. Everything else follows from that.
 
-The sentence is fixed, so it is spoken word for word every time that tool runs.
-Everything else follows from that.
+    | Write this | Not this | Why |
+    |---|---|---|
+    | `Let me check the calendar.` | `Let me find you some great times!` | you do not know yet what you will find |
+    | `One moment while I look that up.` | `I'm querying the availability API.` | the caller does not have your architecture |
+    | `Give me one second.` | `Please hold while I retrieve your account details from our system.` | it should be shorter than the wait it covers |
 
-| Write this | Not this | Why |
-|---|---|---|
-| `Let me check the calendar.` | `Let me find you some great times!` | you do not know yet what you will find |
-| `One moment while I look that up.` | `I'm querying the availability API.` | the caller does not have your architecture |
-| `Give me one second.` | `Please hold while I retrieve your account details from our system.` | it should be shorter than the wait it covers |
+    Pick something that still sounds fine the third time. If the model calls a
+    tool repeatedly within one conversation, that is an argument for not
+    announcing it at all.
+  </Accordion>
 
-Pick something that still sounds fine the third time. If the model calls a tool
-repeatedly within one conversation, that is an argument for not announcing it at
-all.
+  <Accordion title="The mistake worth avoiding">
+    If your instructions already tell the agent to say it is checking something,
+    delete that line when you add `announce:`. Otherwise the model speaks its own
+    version, the tool speaks the fixed one, and the caller hears both.
+  </Accordion>
 
-#### The mistake worth avoiding
+  <Accordion title="The rules">
+    | Rule | What happens if you break it |
+    |---|---|
+    | legal on `webhook:`, `local:` and `knowledge:` only | refused by tool name; an `mcp:` file is refused at load, with the line number |
+    | a fixed sentence, no `{{variables}}` | refused by tool name |
+    | a blank value reads as absent | nothing is spoken and nothing is emitted |
+    | on Pipecat, list the tool on an agent, not on a task | refused by name, telling you to move it |
 
-If your instructions already tell the agent to say it is checking something,
-delete that line when you add `announce:`. Otherwise the model speaks its own
-version, the tool speaks the fixed one, and the caller hears both.
-
-#### The rules
-
-| Rule | What happens if you break it |
-|---|---|
-| legal on `webhook:`, `local:` and `knowledge:` only | refused by tool name; an `mcp:` file is refused at load, with the line number |
-| a fixed sentence, no `{{variables}}` | refused by tool name |
-| a blank value reads as absent | nothing is spoken and nothing is emitted |
-| on Pipecat, list the tool on an agent, not on a task | refused by name, telling you to move it |
-
-It adds no new interruption rule: if the caller speaks over the line, the tool's
-own `interruption:` value decides what happens. LiveKit emits the line for a tool
-listed on an agent or on a task. A target whose driver has no lowering for the
-field fails validation with that driver's own reason, rather than dropping the
-line quietly.
+    It adds no new interruption rule: if the caller speaks over the line, the
+    tool's own `interruption:` value decides what happens. LiveKit emits the line
+    for a tool listed on an agent or on a task. A target whose driver has no
+    lowering for the field fails validation with that driver's own reason, rather
+    than dropping the line quietly.
+  </Accordion>
+</AccordionGroup>
 
 ## Define once, attach by name
 
@@ -374,9 +456,46 @@ A tool's optional `output:` remains its own JSON Schema. A task does not copy
 that schema. Its `assign:` list derives finish fields from destination
 variables and saves only the values needed later.
 
+## Troubleshooting
+
+### A tool file has two execution blocks, or none
+
+Every tool file runs exactly one way, so both shapes are refused. Two blocks:
+
+```text
+tools/check_availability.yaml:7: two execution blocks (local and webhook): a tool runs
+  exactly one way
+```
+
+None at all, where the message is also the list:
+
+```text wrap
+tools/check_availability.yaml: no execution block: add one of webhook, local, mcp, builtin,
+  client, provider_hosted, knowledge, slng
+```
+
+**Fix:** keep the block the tool really needs and delete the other, or add one of
+the blocks the second message lists.
+
+### A tool you wrote is never offered
+
 A file in `tools/` that the package level list does not name is not loaded at all,
-and nothing complains. If a tool you wrote never seems to be offered, check that
-list first.
+and nothing complains.
+
+**Fix:** check the top-level `tools:` list in `agent.yaml` first, then the agent's
+or task's own list.
+
+### `output:` is refused on an slng target
+
+It used to be allowed there, for a reason. The compiler turned it into a pydantic
+`Output` class inside the code it uploaded, and SLNG read the tool's result shape
+off that class. unmute uploads no code now, so the field reaches nothing and is
+refused rather than dropped.
+
+**Fix:** delete the field from the tool file. A tool SLNG hosts carries its own
+`Output` model, written where the tool was written. Full story in [Python
+tools](/build/tools/python#what-the-slng-sandbox-expects) and [Hosted
+tools](/build/tools/hosted).
 
 ## Where to go next
 

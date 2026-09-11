@@ -12,6 +12,15 @@ anything else, write a [webhook](/build/tools/webhook), a
 [Python handler](/build/tools/python), or point at an
 [MCP server](/build/tools/mcp).
 
+On this page:
+
+- [The block](#the-block) - two keys
+- [The registry, in full](#the-registry-in-full) - two ids, and it is closed
+- [What the registry decides for you](#what-the-registry-decides-for-you) - effect, parameters, description
+- [Turning it on](#turning-it-on) - the same two lists
+- [Advanced](#advanced) - resolving on SLNG
+- [Troubleshooting](#troubleshooting) - two refusals by name
+
 ```yaml tools/end_call.yaml
 description: "End the call when the caller is finished or says goodbye."
 builtin:
@@ -23,10 +32,14 @@ run.
 
 ## The block
 
-| Field | Required | What it is |
-|---|---|---|
-| `id` | yes | id from the closed registry below |
-| `instructions` | no | instruction the runtime gives the model as the prebuilt runs; for `end_call`, use it for a final line or action before ending |
+<ParamField path="id" type="registry id" required>
+  An id from the closed registry below.
+</ParamField>
+
+<ParamField path="instructions" type="string">
+  An instruction the runtime gives the model as the prebuilt runs. For
+  `end_call`, use it for a final line or action before ending.
+</ParamField>
 
 ## The registry, in full
 
@@ -66,14 +79,6 @@ browse. If what you want is neither, it is a
 [webhook](/build/tools/webhook), a [Python handler](/build/tools/python), or an
 [MCP server](/build/tools/mcp).
 
-An id the registry does not hold is refused by name. Every line below is
-prefixed with the target instance that refused it, so a fresh scaffold, which
-has one `livekit` instance, reads like this:
-
-```text
-livekit: tool "end_call" has unknown builtin "transfer_to_human"
-```
-
 ## What the registry decides for you
 
 **The effect.** `end_call` implies `ends_conversation`, and writing anything else
@@ -92,27 +97,31 @@ livekit: tool "end_call" builtin execution takes no input, output, handler, or u
 ```
 
 **The description, unless you write one.** Leave `description` out and the registry
-default is used. From a real compile of the bare file above, on each target:
+default is used.
 
-<CodeGroup>
-```python LiveKit
-tools=[
-    *EndCallTool(
-        extra_description="End the call when the caller is finished or says goodbye."
-    ).tools
-],
-```
+<Accordion title="What the two targets emit for the bare file">
+  From a real compile of the bare file above, on each target:
 
-```python Pipecat
-async def end_call(params: FunctionCallParams):
-    """End the call when the caller is finished or says goodbye."""
-    await params.result_callback({"ended": True})
-    await params.llm.push_frame(EndFrame())
-```
-</CodeGroup>
+  <CodeGroup>
+  ```python LiveKit
+  tools=[
+      *EndCallTool(
+          extra_description="End the call when the caller is finished or says goodbye."
+      ).tools
+  ],
+  ```
 
-Same tool, same description, two lowerings. `unmute init` scaffolds the LiveKit
-one; the shipped examples that declare a Pipecat target get the other.
+  ```python Pipecat
+  async def end_call(params: FunctionCallParams):
+      """End the call when the caller is finished or says goodbye."""
+      await params.result_callback({"ended": True})
+      await params.llm.push_frame(EndFrame())
+  ```
+  </CodeGroup>
+
+  Same tool, same description, two lowerings. `unmute init` scaffolds the LiveKit
+  one; the shipped examples that declare a Pipecat target get the other.
+</Accordion>
 
 Write your own `description` when the agent needs a narrower instruction, for
 example telling it to confirm before hanging up. Yours is added on top of the
@@ -146,7 +155,9 @@ tools:
   - end_call
 ```
 
-## Resolving on SLNG
+## Advanced
+
+### Resolving on SLNG
 
 SLNG already offers `end_call` as one of its own curated capabilities, so
 `unmute deploy`'s preflight check has to match your reference against it
@@ -155,10 +166,28 @@ never by the `builtin.id` you selected inside it.
 
 That is fine as written here, because the file is named `end_call` too. It
 stops being fine the moment you rename the file to describe what it does rather
-than the capability it selects. A file `tools/hang_up.yaml` holding `builtin:
-{id: end_call}` compiles and validates, but the organisation has no tool named
-`hang_up`. The preflight then reports it absent, even though the capability
-exists:
+than the capability it selects.
+
+## Troubleshooting
+
+### An id the registry does not hold
+
+An id the registry does not hold is refused by name. Every line below is
+prefixed with the target instance that refused it, so a fresh scaffold, which
+has one `livekit` instance, reads like this:
+
+```text
+livekit: tool "end_call" has unknown builtin "transfer_to_human"
+```
+
+**Fix:** pick one of the two ids in [the registry](#the-registry-in-full), or
+write the capability yourself as a webhook, a Python handler, or an MCP source.
+
+### The SLNG preflight says the organisation has no tool of that name
+
+A file `tools/hang_up.yaml` holding `builtin: {id: end_call}` compiles and
+validates, but the organisation has no tool named `hang_up`. The preflight then
+reports it absent, even though the capability exists:
 
 ```text wrap
 this organisation has no tool of this name (it has `end_call`). A builtin reference is
@@ -166,7 +195,7 @@ this organisation has no tool of this name (it has `end_call`). A builtin refere
   create the tool in the SLNG dashboard
 ```
 
-Keep a `builtin:` file's name matching its `id`.
+**Fix:** keep a `builtin:` file's name matching its `id`.
 
 ## Where to go next
 
@@ -175,6 +204,6 @@ Keep a `builtin:` file's name matching its `id`.
     Answer from a folder of your own documents.
   </Card>
   <Card title="Tools" icon="wrench" href="/build/tools/overview">
-    Return to all seven execution blocks.
+    Return to all eight execution blocks.
   </Card>
 </Columns>

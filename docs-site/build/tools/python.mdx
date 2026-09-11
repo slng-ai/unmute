@@ -21,6 +21,16 @@ target: SLNG owns a tool's code, version and gate pipeline, so a handler of
 yours has nowhere to run there. Reference a tool your organisation already has
 on the platform with [`slng:`](/build/tools/hosted) instead.
 
+On this page:
+
+- [The block](#the-block) - the one key it takes
+- [The rules the function follows](#the-rules-the-function-follows) - five rules
+- [When the handler is slow](#when-the-handler-is-slow) - cover the wait
+- [Where it ends up](#where-it-ends-up) - inside the generated project
+- [Credentials, when a real handler needs one](#credentials-when-a-real-handler-needs-one) - names, never values
+- [Advanced](#advanced) - what the SLNG sandbox expects
+- [Troubleshooting](#troubleshooting) - the two worth reading
+
 ```yaml tools/cancel_appointment.yaml expandable wrap
 description: Cancel the appointment outright. Call it only when the customer says plainly that they want to cancel, never when they want a different time.
 
@@ -56,31 +66,11 @@ that shows a handler receiving an injected value. For real ones, every tool in
 `examples/salon-concierge` is a local handler, and all eight share the one
 `tools/salon.py`.
 
-## When the handler is slow
-
-A local handler that reads a calendar or a database keeps the caller waiting the
-same way a webhook does. `announce:` gives the agent one fixed sentence to speak
-as the handler starts, and it does not wait for that sentence to finish, so the
-result arrives no later than it would in silence:
-
-```yaml tools/check_availability.yaml
-local:
-  handler: tools/salon.py
-
-announce: Let me check.
-```
-
-That one is real, from `examples/salon-concierge`. Keep the line shorter than the
-gap it covers: a long one runs into the answer and breaks its own promise of a
-wait. The fixtures above carry no `announce:`, because they return instantly and a
-tool that speaks before doing nothing slow is just noise. Full rules in
-[the behavior fields](/build/tools/overview#the-three-behavior-fields).
-
 ## The block
 
-| Field | Required | What it is |
-|---|---|---|
-| `handler` | no | Python file inside the package; omitted means `tools/<tool-name>.py` |
+<ParamField path="handler" type="package Python path">
+  A Python file inside the package. Omitted means `tools/<tool-name>.py`.
+</ParamField>
 
 The function inside that file still has the tool name. For a tool named
 `cancel_appointment`, omitting `handler` selects
@@ -100,60 +90,25 @@ The handler above takes `customer_id` even though `input.properties` is empty,
 because `customer_id` is injected. The model never sees that value and cannot
 invent one.
 
-## What the SLNG sandbox expects
+## When the handler is slow
 
-A `local:` handler no longer reaches SLNG at all, so none of this is a refusal
-you will meet from `unmute`. It is worth knowing anyway, because a tool SLNG
-hosts runs under these rules, and if you write one in the SLNG dashboard and
-then reference it with [`slng:`](/build/tools/hosted), they are the rules it
-runs under.
+A local handler that reads a calendar or a database keeps the caller waiting the
+same way a webhook does. `announce:` gives the agent one fixed sentence to speak
+as the handler starts, and it does not wait for that sentence to finish, so the
+result arrives no later than it would in silence:
 
-**SLNG calls the handler itself, synchronously.** A plain `def` that runs its
-own event loop internally, with `asyncio.run(...)`, is fine: only the entry
-point has to be synchronous.
+```yaml tools/check_availability.yaml
+local:
+  handler: tools/salon.py
 
-**Code on SLNG has no internet access at all.** A handler that imports
-`requests`, `httpx`, `urllib`, `urllib3`, `aiohttp`, `http.client` or `socket`
-and reaches the network fails at connection time inside the sandbox. Work that
-needs the network belongs in an API-request tool, which SLNG runs itself,
-outside the sandbox.
-
-**SLNG derives the schemas by introspection.** A hosted `code` tool's module
-defines an `Input` model, an `Output` model and a `handler()` taking one
-`Input`, and the platform reads the parameter and result schemas off those
-classes. `unmute pull` mirrors that module into your package, so the same
-module is what runs on livekit and pipecat too:
-
-```python
-def check_order(order_number: str) -> dict:
-    status, delivers_on = ORDERS.get(order_number.strip().upper(), ("unknown", ""))
-    return {"status": status, "delivers_on": delivers_on}
-
-
-from pydantic import BaseModel
-
-
-class Input(BaseModel):
-    order_number: str
-
-
-class Output(BaseModel):
-    delivers_on: str | None = None
-    status: str | None = None
-
-
-def handler(input: Input) -> Output:
-    result = check_order(order_number=input.order_number)
-    return Output(**result)
+announce: Let me check.
 ```
 
-`handler()` is what SLNG calls, and it is also what a generated livekit or
-pipecat project calls, through the mirror. A return value that does not fit
-`Output` fails there rather than reaching the model unnoticed.
-
-On the code targets `output:` on a tool file stays author documentation, the
-same as on a webhook tool: nothing sends it to the model or checks the
-handler's return value against it.
+That one is real, from `examples/salon-concierge`. Keep the line shorter than the
+gap it covers: a long one runs into the answer and breaks its own promise of a
+wait. The fixtures above carry no `announce:`, because they return instantly and a
+tool that speaks before doing nothing slow is just noise. Full rules in
+[the behavior fields](/build/tools/overview#the-three-behavior-fields).
 
 ## Where it ends up
 
@@ -205,6 +160,61 @@ token = os.environ["CRM_API_TOKEN"]
 Only the **name** belongs in the file. Put that name in `agent.yaml` under
 `secrets:`; keep the value in your environment or secret store.
 
+## Advanced
+
+### What the SLNG sandbox expects
+
+A `local:` handler no longer reaches SLNG at all, so none of this is a refusal
+you will meet from `unmute`. It is worth knowing anyway, because a tool SLNG
+hosts runs under these rules, and if you write one in the SLNG dashboard and
+then reference it with [`slng:`](/build/tools/hosted), they are the rules it
+runs under.
+
+**SLNG calls the handler itself, synchronously.** A plain `def` that runs its
+own event loop internally, with `asyncio.run(...)`, is fine: only the entry
+point has to be synchronous.
+
+**SLNG derives the schemas by introspection.** A hosted `code` tool's module
+defines an `Input` model, an `Output` model and a `handler()` taking one
+`Input`, and the platform reads the parameter and result schemas off those
+classes. `unmute pull` mirrors that module into your package, so the same
+module is what runs on livekit and pipecat too:
+
+```python
+def check_order(order_number: str) -> dict:
+    status, delivers_on = ORDERS.get(order_number.strip().upper(), ("unknown", ""))
+    return {"status": status, "delivers_on": delivers_on}
+
+
+from pydantic import BaseModel
+
+
+class Input(BaseModel):
+    order_number: str
+
+
+class Output(BaseModel):
+    delivers_on: str | None = None
+    status: str | None = None
+
+
+def handler(input: Input) -> Output:
+    result = check_order(order_number=input.order_number)
+    return Output(**result)
+```
+
+`handler()` is what SLNG calls, and it is also what a generated livekit or
+pipecat project calls, through the mirror. A return value that does not fit
+`Output` fails there rather than reaching the model unnoticed.
+
+On the code targets `output:` on a tool file stays author documentation, the
+same as on a webhook tool: nothing sends it to the model or checks the
+handler's return value against it.
+
+## Troubleshooting
+
+### `unmute validate` warns that a credential is not declared
+
 `unmute validate` reads the handler, finds the names it looks up, and warns when
 `agent.yaml` forgot to declare one:
 
@@ -214,8 +224,19 @@ pipecat: environment variables referenced but not declared in secrets: CRM_API_T
 
 The literal lookup also makes the compiler include the name in generated
 environment instructions and the startup check even if the declaration is
-missing. Declaring it removes the warning and keeps the explicit inventory
-complete.
+missing.
+
+**Fix:** add the name to `secrets:` in `agent.yaml`. Declaring it removes the
+warning and keeps the explicit inventory complete.
+
+### A hosted handler fails the moment it reaches the network
+
+**Code on SLNG has no internet access at all.** A handler that imports
+`requests`, `httpx`, `urllib`, `urllib3`, `aiohttp`, `http.client` or `socket`
+and reaches the network fails at connection time inside the sandbox.
+
+**Fix:** move that work into an API-request tool, which SLNG runs itself,
+outside the sandbox.
 
 ## Where to go next
 
