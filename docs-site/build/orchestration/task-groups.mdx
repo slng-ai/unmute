@@ -70,15 +70,43 @@ Each `steps` entry names a task defined in the package, under some agent's
 what makes each step reachable. `assign:` derives each task's finish arguments
 and saves the values needed later.
 
-| Field | Required | Values |
-|---|---|---|
-| `steps` | yes | one or more steps, in order: a bare task name, or an item with `task:` and `skip_when_confirmed:` |
-| `when` | no, but write one | the situation the model reads to decide whether to run the group. Nothing checks that it is there, and a group without one gives the model nothing to decide on |
-| `announce` | no | one fixed line, spoken exactly as written as the caller enters the group, to cover the wait before the first step speaks. It takes no `{{placeholders}}` |
-| `context_scope` | yes | `shared` or `isolated` |
-| `then` | yes | `return`, `transfer`, or `end` |
-| `then_target` | with `transfer` | an agent name |
-| `merge` | no | `results`; omission means the same |
+### Every key a group takes
+
+<ParamField path="steps" type="list" required>
+  The tasks to run, in order. Each entry is a bare task name, or an item with
+  `task:` and [`skip_when_confirmed:`](#skip-a-step-whose-work-is-already-done).
+</ParamField>
+
+<ParamField path="context_scope" type="shared | isolated" required>
+  Whether each step sees what the steps before it said. See
+  [Context between steps](#context-between-steps).
+</ParamField>
+
+<ParamField path="then" type="return | transfer | end" required>
+  What happens when the last step finishes: control returns to the owning
+  agent, the caller moves to another agent, or the call ends.
+</ParamField>
+
+<ParamField path="then_target" type="agent name">
+  Required with `then: transfer`, and meaningless otherwise. Which agent the
+  caller lands on.
+</ParamField>
+
+<ParamField path="when" type="string">
+  What the model reads to decide whether to run the group. Nothing checks that
+  it is there, but write one: a group without a `when:` gives the model nothing
+  to decide on.
+</ParamField>
+
+<ParamField path="announce" type="string">
+  One fixed line, spoken exactly as written as the caller enters the group, to
+  cover the wait before the first step speaks. It takes no `{{placeholders}}`.
+</ParamField>
+
+<ParamField path="merge" type="results" default="results">
+  How the group's step results come back. `results` is the only value, and
+  leaving it out means the same thing.
+</ParamField>
 
 ## Skip a step whose work is already done
 

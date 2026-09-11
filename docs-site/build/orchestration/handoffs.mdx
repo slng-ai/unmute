@@ -35,8 +35,27 @@ handoffs:
     announce: I’m connecting you with our appointment manager now.
 ```
 
-`when` tells the model when to use the handoff. `announce` is an optional fixed
-sentence spoken before the new agent starts.
+### Every key a handoff takes
+
+<ParamField path="to" type="agent name" required>
+  Which agent takes the caller. Names one entry under `agents:`.
+</ParamField>
+
+<ParamField path="when" type="string">
+  What the model reads to decide whether to use this handoff. Write one: with
+  no `when:`, the model has nothing to decide on.
+</ParamField>
+
+<ParamField path="announce" type="string">
+  One fixed sentence spoken before the new agent starts. Omit it for a silent
+  switch. It takes no `{{placeholders}}`.
+</ParamField>
+
+<ParamField path="context" type="block">
+  How much conversation travels with the caller. Its keys are `history:`,
+  `max_messages:`, `summarizer:` and `include_tool_calls:`. See
+  [Choose conversation history](#choose-conversation-history).
+</ParamField>
 
 ## Share only intentional saved values
 
