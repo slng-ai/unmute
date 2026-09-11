@@ -19,6 +19,45 @@ different agent should own the rest of the call.
 New to tasks? [Your first task](/build/orchestration/first-task) adds one to
 the package `unmute init` writes, one key at a time.
 
+On this page:
+
+- [Quickstart](#quickstart) - one task, start to finish
+- [Every key a task takes](#every-key-a-task-takes) - all eleven
+- [Say what success looks like](#say-what-success-looks-like) - let the tool end the step
+- [Choose conversation history](#choose-conversation-history) - what the task can read
+- [What returns](#what-returns) - and what does not
+- [Advanced](#advanced) - lists, sharing, opening and announcing
+- [Troubleshooting](#troubleshooting) - the two that come up most
+
+## Quickstart
+
+A task is one entry under an agent's `tasks:`. This one identifies the caller
+and saves what it learns:
+
+```yaml agent.yaml
+variables:
+  customer_id:
+    type: Id
+
+agents:
+  appointment_desk:
+    tasks:
+      - name: verify_customer
+        when: Identify the caller before handling an appointment.
+        instructions: tasks/verify-customer.md
+        tools:
+          - lookup_customer
+        assign:
+          - customer_id: result.customer_id
+```
+
+```sh
+unmute validate my-agent
+```
+
+Four keys carry it: **what it is** (`name`, `instructions`), **when to run it**
+(`when`), **what it can use** (`tools`), and **what it saves** (`assign`).
+
 ## Declare a task
 
 ```yaml agent.yaml
@@ -330,7 +369,9 @@ For requests that another agent can handle, a task may declare `handoffs:`.
 Taking one ends the task and any remaining task-group steps. See
 [Handoffs](/build/orchestration/handoffs).
 
-## Append and project values
+## Advanced
+
+### Append and project values
 
 Append one result to a list with `+`:
 
@@ -357,7 +398,7 @@ assign:
 The whole-object assignment establishes the result shape. The compiler then
 checks the nested path and derives its type.
 
-## Share a task across agents
+### Share a task across agents
 
 Define a task once. Another agent can attach it by name:
 
@@ -379,7 +420,7 @@ agents:
 Task names are unique across the package. Share a task only when both agents
 should be able to run it: a task within reach is a task the model may choose.
 
-## Open by listening
+### Open by listening
 
 A task's first turn is a model request. When the task opens with one fixed
 question, `opening: listen` speaks that question and waits, and makes no
@@ -401,7 +442,7 @@ A listening task with no `announce:` is a warning, not a refusal: the caller
 hears nothing until they speak, which is occasionally what you want and usually
 a mistake.
 
-## Announce a task
+### Announce a task
 
 `announce:` is an optional fixed line spoken as the task starts. Omit it for
 a silent transition. If you add one, tell the model not to repeat it with a
@@ -414,7 +455,7 @@ second "let me check" line:
         instructions: tasks/booking.md
 ```
 
-## Task or second agent
+### Task or second agent
 
 | | Task | Second agent |
 |---|---|---|
@@ -444,7 +485,27 @@ unmute validate examples/salon-concierge
 unmute dev examples/salon-concierge --target pipecat
 ```
 
-## If you have an older package
+## Troubleshooting
+
+### The model does the task's work itself and never enters it
+
+The agent holds every tool the task holds, so the model takes the short route
+and the task's `assign:` never runs. `unmute validate` warns and names the tool
+to move.
+
+**Fix:** take the tool off the agent and leave it on the task. A task the model
+can bypass is a task it will bypass.
+
+### A task saves nothing on a call where it clearly ran
+
+Every assigned value is checked before any is saved. If one value is invalid,
+nothing changes and the task stays open so the model can correct it.
+
+**Fix:** check the destination's type against what the tool actually returns.
+An `object` or `array` output landing on a plain destination is refused at
+compile time; a wrong value at run time keeps the task open instead.
+
+### An older package uses a retired key
 
 | Earlier configuration | What to do now | Why |
 |---|---|---|

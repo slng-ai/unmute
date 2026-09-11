@@ -6,8 +6,47 @@ description: "Declare a value once, fill it during the call, and read it only wh
 A variable is a named value the call holds onto. You declare what it holds,
 something fills it during the call, and the prompts that need it name it.
 
-Three steps, in that order. This page walks them, then covers the types you can
-declare.
+On this page:
+
+- [Quickstart](#quickstart) - declare, fill and read one value
+- [Declare it](#1-declare-it) - every key a variable takes
+- [Fill it](#2-fill-it) - a task, a pre-fetch, or the call itself
+- [Read it](#3-read-it-where-it-is-needed) - placeholders, and the greeting
+- [The types you can declare](#the-types-you-can-declare) - ten built in, plus lists and your own
+- [Advanced](#advanced) - shapes, injection, and seeding a value locally
+- [Troubleshooting](#troubleshooting) - the four that come up most
+
+## Quickstart
+
+Declare a value, save it when a task finishes, and read it in a later prompt:
+
+```yaml agent.yaml
+variables:
+  requested_service:
+    type: str
+    description: The service the caller chose for this booking.
+
+agents:
+  concierge:
+    tasks:
+      - name: choose_service
+        when: Find out which service the caller wants.
+        instructions: tasks/choose-service.md
+        assign:
+          - requested_service: result.service
+```
+
+```markdown tasks/booking.md
+Requested service: {{requested_service}}
+If no service is recorded, ask which service the caller wants.
+```
+
+```sh
+unmute validate my-agent
+```
+
+That is the whole loop: **declare, fill, read.** The rest of this page is each
+step in full.
 
 <Note>
   The snippets below extend an existing package. Merge them into the matching
@@ -228,12 +267,16 @@ Appending skips `null` and skips an identical structured item. See
 and [state design](/best-practices/state-design#choose-a-current-value-or-a-list)
 to choose between a current value and a list.
 
-## Group fields into a shape
+## Advanced
+
+Three things you will not need on your first agent.
+
+### Group fields into a shape
 
 <Note>
-  Skip this section until you need it. A shape is worth declaring when several
-  fields always travel together and one tool fills all of them at once. Until
-  then, separate variables are simpler to read and simpler to prompt.
+  Skip this until you need it. A shape is worth declaring when several fields
+  always travel together and one tool fills all of them at once. Until then,
+  separate variables are simpler to read and simpler to prompt.
 </Note>
 
 A shape is your own object type. Name it, declare its fields under `shapes:`,
@@ -268,7 +311,7 @@ for both.
   it renders empty in every prompt that names it for the rest of the call.
 </Warning>
 
-### Reading one field
+#### Reading one field
 
 `{{appointment}}` renders the whole object as compact JSON. `{{appointment.date}}`
 reads one field, and a dotted path can follow nested shapes. To read fields
@@ -282,7 +325,7 @@ For deciding which fields belong together, separating a requested change from a
 saved result, and choosing one record or a list, see
 [Designing declared state](/best-practices/state-design#group-fields-that-describe-one-result).
 
-## Hand a value to a tool
+### Hand a value to a tool
 
 Sometimes the tool needs a value the model does not need to read or type. Use
 `inject:` for that argument:
@@ -313,7 +356,7 @@ Injection is not the same as keeping a value private: tool results and spoken
 messages can still contain it. See
 [Reduce context sharing step by step](/best-practices/context-scope).
 
-## Try it locally
+### Try it locally
 
 ```sh
 unmute dev my-agent --var customer_name=Priya
@@ -333,6 +376,49 @@ unmute dev my-agent --source from_number=+15005550006
 
 Which facts a route supplies, and in which direction, is in the
 [source reference](/reference/variables#sources).
+
+## Troubleshooting
+
+### A prompt renders `none recorded yet.` on every call
+
+The variable is unset. Either nothing has filled it yet, or the prompt that
+reads it runs before the step that fills it.
+
+**Fix:** check which step owns the `assign:`, and write the sentence so it reads
+whole either way. An unset value is normal early in a call, so the prompt should
+say what to do about it:
+
+```markdown
+Requested service: {{requested_service}}
+If no service is recorded, ask which service the caller wants.
+```
+
+### The owning agent forgets a value after its task returns
+
+A task returns a completion status and the owner's own earlier conversation. It
+does not hand back the private conversation inside the task.
+
+**Fix:** put a placeholder in the **owner's** prompt too. Saving is not sharing.
+
+### A tool refuses to run, naming a value
+
+The tool reads that value through `inject:` or a webhook path, and the value is
+empty or still unconfirmed.
+
+**Fix:** the refusal names the task that supplies or confirms it. Run that step
+first, or, when nothing supplies the value, have the model ask the caller.
+
+### `--var` is refused for a variable
+
+`--var` works only for a variable with `source: call_start` or no `source:` at
+all. A system source such as `from_number` comes from the phone route, and your
+machine is not one.
+
+**Fix:** use `--source` instead, which stands in for the network:
+
+```sh
+unmute dev my-agent --source from_number=+15005550006
+```
 
 ## Where to go next
 

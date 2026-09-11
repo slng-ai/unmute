@@ -72,6 +72,40 @@ mint a11y                                               # contrast and media alt
     the script never touches anything above the `{/* changelog:entries */}`
     marker.
 
+## The shape of a guide page
+
+Readers arrive with low attention and a specific question. A page that opens on
+theory makes them read to find out whether they are in the right place. So a
+page under Build, Best practices or Optimization is written in this order, and
+skips the slots it does not need:
+
+| Slot | What goes in it |
+|---|---|
+| **Definition** | one sentence saying what the thing is. Not a preamble, not why it matters yet |
+| **On this page** | a bullet list of this page's own H2s, each with three or four words. The reader's map |
+| **Quickstart** | the smallest thing that works, as code, before any explanation. Ends with the command that proves it |
+| **The parts** | one H2 per step or concept, in the order somebody meets them |
+| **Every key X takes** | `<ParamField>` per key: name, type, required, allowed values. Not prose |
+| **Advanced** | one H2 near the bottom holding what a first agent does not need. `<Accordion>` for reference detail nobody reads top to bottom |
+| **Troubleshooting** | H3 per symptom, written as the reader would describe it, then **Fix:** and code |
+| **Where to go next** | two to six cards |
+
+Three rules about that shape, because they are the ones that decay:
+
+1. **Code before prose.** If the first thing on a page is a paragraph, the page
+   is wrong. `build/prefetch` and `build/variables` open on a runnable snippet
+   and say "that is the whole thing" before expanding it.
+2. **Keys are a list, not paragraphs.** Every block an author writes states its
+   keys with `<ParamField>` before the prose about any one of them. A task has
+   eleven keys; three used to be explained in scattered paragraphs and the
+   other eight you found by reading the page.
+3. **Reference detail goes behind an `<Accordion>` or under Advanced.** The
+   route grid on `build/prefetch` is reference material a reader consults once;
+   it must not sit between a beginner and the next step.
+
+The reference pages under Configuration files and CLI are the exception. There
+the complete list *is* the page, so they lead with it.
+
 ## The structure
 
 Twelve top-level groups, in the order the reader needs them: Get started,
