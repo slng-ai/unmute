@@ -12,6 +12,10 @@ part there is to read.
 No phone route and no carrier account. Browser audio on both code targets, and
 the only credentials it needs are `OPENAI_API_KEY` and `SLNG_API_KEY`.
 
+**Speech gateway.** Both targets send STT and TTS through `eu-north.api.slng.ai`.
+Change `params.world_part` on each speech model to choose another
+[SLNG gateway](../../docs-site/optimization/regional-infrastructure.mdx).
+
 ## What it collects
 
 Every type in the authoring grammar appears once, and each one is there because
