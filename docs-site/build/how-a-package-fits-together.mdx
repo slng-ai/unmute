@@ -27,8 +27,8 @@ kind has its own list:
 
 | List on the agent | What it means | Does the agent get the caller back? |
 |---|---|---|
-| `tools:` | do real work: look something up, call an API | yes, a tool just returns data |
-| `tasks:` | run a smaller job with its own prompt, and use its typed result | yes, the task finishes and reports back |
+| [`tools:`](/build/tools/overview) | do real work: look something up, call an API | yes, a tool just returns data |
+| [`tasks:`](/build/orchestration/tasks) | run a smaller job with its own prompt, and use its typed result | yes, the task finishes and reports back |
 | [`task_groups:`](/build/orchestration/task-groups) | run several tasks in a fixed order, then use the merged result | yes, the group finishes and reports back |
 | [`handoffs:`](/build/orchestration/handoffs) | give the caller to another agent | no, the other agent takes over |
 | [`escalations:`](/transfers/overview) | give the caller to a human | no, the call leaves the system |
@@ -36,7 +36,47 @@ kind has its own list:
 If you remember one thing, remember the third column. Tools, tasks and task
 groups come back. Handoffs and escalations do not.
 
-There is no `kind:` field anywhere. The block a thing is written in is its kind.
+### Every key an agent takes
+
+An agent has three required keys and five optional lists. There are no others.
+
+<ParamField path="instructions" type="file path" required>
+  The Markdown file holding this agent's prompt, relative to the package root.
+</ParamField>
+
+<ParamField path="think" type="model name" required>
+  Which reasoning model this agent uses. Names one entry under
+  [`models.think`](/models/llm).
+</ParamField>
+
+<ParamField path="speak" type="model name" required>
+  Which voice this agent speaks in. Names one entry under
+  [`models.speak`](/models/tts).
+</ParamField>
+
+<ParamField path="tools" type="list of names">
+  Tools this agent may call. Each name is a file under `tools/<name>.yaml`.
+</ParamField>
+
+<ParamField path="tasks" type="list of tasks or names">
+  Tasks this agent may run. Write the task in full to define it here, or write
+  a bare name to run a task another agent already defined.
+</ParamField>
+
+<ParamField path="task_groups" type="list of names">
+  Task groups this agent may run. Each name is an entry under the top-level
+  `task_groups:`.
+</ParamField>
+
+<ParamField path="handoffs" type="list of names">
+  Agents this one can hand the caller to. Each name is an entry under the
+  top-level `handoffs:`.
+</ParamField>
+
+<ParamField path="escalations" type="list of names">
+  People this agent can put the caller through to. Each name is an entry under
+  the top-level `escalations:`.
+</ParamField>
 
 ## Build one in four steps
 
@@ -138,21 +178,40 @@ Done. Notice you never wrote `verify_customer` twice. It is defined once,
 inside `front_desk`, and `complaint_specialist` just names it. Sharing is
 naming the same thing.
 
-## Two small words that move data
+## How a value gets from one step to the next
 
-Two keys touch your [`variables:`](/build/variables). They look similar and do
-different jobs:
+Three keys do this, and they each do one thing. Each has its own page.
 
-| Key | Job | Plain words | Legal on |
-|---|---|---|---|
-| [`context:`](/reference/agent-yaml#context) | luggage | "when the caller moves, these values travel along" | handoffs, tasks |
-| [`assign:`](/build/orchestration/tasks) | a write-back | "when the task finishes, save its result here" | tasks |
+<ParamField path="variables:" type="top-level block">
+  Declares a value the call can hold, and what type it is. A variable is the
+  box. Nothing fills it by itself.
 
-Luggage carries a value. A write-back fills it. In the example above,
-`verify_customer` fills `customer_phone` with `assign:`, and `manage_booking`'s
-own `when:` says it runs only once the caller is identified. That is how
-"verify before booking" works, with no extra agent and nothing the caller can
-hear: the order lives in the prompt, not in a gate.
+  [Variables](/build/variables)
+</ParamField>
+
+<ParamField path="assign:" type="on a task">
+  Fills a variable when the task finishes. `- customer_phone: result.phone`
+  means "put the task's `phone` answer into `customer_phone`".
+
+  [Tasks](/build/orchestration/tasks)
+</ParamField>
+
+<ParamField path="context:" type="on a task or a handoff">
+  Chooses how much of the conversation so far the next step can read. It moves
+  the transcript, not your saved values.
+
+  [Context scope](/best-practices/context-scope)
+</ParamField>
+
+Saved values are never added to a prompt on their own. A prompt reads a value
+only when it names it, as `{{customer_phone}}`.
+
+### Ordering work without a gate
+
+In the example above, `verify_customer` fills `customer_phone` with `assign:`,
+and `manage_booking`'s own `when:` says it runs only once the caller is
+identified. That is how "verify before booking" works: the order lives in the
+prompt, not in a gate, so the caller hears nothing about it.
 
 Put that clause on the work that needs the value, not on the route to it. And
 never hold up the way to a person: somebody asking for a manager should not be

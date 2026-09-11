@@ -6,9 +6,17 @@ description: "Run a lookup before the call starts, when you already have everyth
 Agents look things up before they can help. Today's date. Who is calling. What
 that person ordered last time.
 
-If you already have what a lookup needs, the model should not spend the call doing
-it. `prefetch:` runs it once, before the greeting, and puts the answer in a
-variable.
+If you already have what a lookup needs, the model should not spend the call
+doing it. `prefetch:` runs it once, before the greeting, and puts the answer in
+a variable.
+
+<Note>
+  A fetched value is a guess until the caller agrees to it. The phone network
+  says which phone called, not who is holding it. Mark anything about the
+  caller's identity with `confirm:` and the agent has to hear them say yes
+  before it acts: [Check a value with the
+  caller](#always-check-a-value-with-the-caller).
+</Note>
 
 ## Why bother
 
@@ -149,14 +157,52 @@ A prefetch assignment does not add a value to any prompt by itself.
   carrying no caller ID.
 </Note>
 
+## Every key an entry takes
+
+An entry needs a `name:`, exactly one source, and an `assign:`. The rest depend
+on which source you picked.
+
+<ParamField path="name" type="string" required>
+  What this entry is called. It appears in refusals, in the run log, and in
+  `compile-report.json`, so give it a name you would recognise there.
+</ParamField>
+
+<ParamField path="clock | source | tool" type="string" required>
+  The one source this entry reads. Write exactly one of the three:
+
+  - `clock: now` reads the clock.
+  - `source: <fact>` reads a fact the call carries, such as `from_number`.
+  - `tool: <name>` runs a local or webhook tool.
+</ParamField>
+
+<ParamField path="assign" type="list of pairs" required>
+  Where the answer goes. One `- variable: result.field` per line. An entry may
+  fill as many variables as the result has fields.
+</ParamField>
+
+<ParamField path="timezone" type="IANA zone">
+  Required on a `clock:` entry, refused on any other. `Europe/Madrid`, not an
+  offset. Containers run on UTC, so there is no useful default.
+</ParamField>
+
+<ParamField path="writes" type="true | false">
+  Required on a `tool:` entry, refused on any other. Your answer to "does
+  running this unasked, on every call, change anything?"
+</ParamField>
+
+<ParamField path="args" type="list of pairs">
+  The inputs a `tool:` entry passes. One `- name: value` per line. A value may
+  be fixed, or a `{{variable}}` an earlier entry filled.
+</ParamField>
+
 ## Entries run in order
 
-Top to bottom, in the order you wrote them. Above, `caller` gets the phone number
-and then `profile` uses it. Put them the other way round and the build stops:
+Top to bottom, in the order you wrote them. Above, `caller` gets the phone
+number and then `profile` uses it.
 
-```text wrap
-agent.yaml:196: prefetch "profile" reads {{customer_phone}}, which prefetch "caller" assigns further down the list. Entries resolve in the order you wrote them: move "caller" above "profile"
-```
+Put them the other way round and the build stops, naming both entries and
+telling you which one to move up. An entry can only read what an entry above it
+has already assigned.
 
 ## Rules that will stop the build
 
@@ -200,12 +246,8 @@ anybody speaks, so what it has is one value: a formatted clock reading, the
 number the call carries, one field of a tool result. Text is fine, and so is
 shaped text like `Phone`, `Date` or `EmailStr`, because the shape is checked
 where the value enters the state. A `Literal` works when the tool's own field
-declares the same set. A `list[...]`, a declared shape or `NameEmail` is refused,
-and names the step to assign it from instead:
-
-```text
-agent.yaml:37: prefetch "today" assigns appointments, which is declared list[Appointment], and a pre-fetch resolves one plain value before the greeting. Assign appointments from the step that produces it, and leave the pre-fetch the values a call already carries
-```
+declares the same set. A `list[...]`, a declared shape or `NameEmail` is
+refused, and the message names the step to assign it from instead.
 
 If you need an object or a list from a lookup, run it in a task and save the
 result through task `assign:`. Prefetch currently supports scalar destinations
@@ -276,11 +318,8 @@ generated `build/pipecat/README.md` prints the whole request with your own
 values already in it, which is the copy worth using.
 
 Leave the parameter out and the entry is skipped, exactly as a withheld caller
-ID is skipped, with a line naming the entry:
-
-```text
-prefetch dialing: skipped, the call carries no to_number
-```
+ID is skipped, and the run log names the entry and says the call carried no
+`to_number`.
 
 ### A caller's number is best effort
 
