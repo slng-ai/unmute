@@ -225,11 +225,15 @@ models:
       model: "deepgram/aura:2"
       voice: "aura-2-thalia-en"
       language: en
+      params:
+        world_part: eu-north
   listen:
     transcriber:
       provider: slng
       model: "deepgram/nova:3"
       language: en
+      params:
+        world_part: eu-north
   turn:
     detector:
       provider: local
