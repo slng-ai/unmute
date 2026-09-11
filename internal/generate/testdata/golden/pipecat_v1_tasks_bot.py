@@ -608,7 +608,7 @@ class BillingAgent(TracedLLMWorker):
                 delta=LLMSettings(system_instruction=BILLING_PROMPT),
             ))
             await super().on_activated(args)
-            # Pipecat 1.8 only runs on activation when messages are nonempty.
+            # Pipecat 1.8 and 1.9 only run on activation when messages are nonempty.
             # A handoff already shaped the shared context; request the reply
             # without adding a synthetic message or waiting for the caller.
             if args and args.get("run_llm") and not args.get("messages"):
@@ -684,7 +684,7 @@ class IntakeAgent(TracedLLMWorker):
                 delta=LLMSettings(system_instruction=INTAKE_PROMPT),
             ))
             await super().on_activated(args)
-            # Pipecat 1.8 only runs on activation when messages are nonempty.
+            # Pipecat 1.8 and 1.9 only run on activation when messages are nonempty.
             # A handoff already shaped the shared context; request the reply
             # without adding a synthetic message or waiting for the caller.
             if args and args.get("run_llm") and not args.get("messages"):

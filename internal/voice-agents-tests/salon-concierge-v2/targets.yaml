@@ -12,7 +12,7 @@ targets:
 
   pipecat:
     provider: pipecat
-    version: "1.8.0"
+    version: "1.9.0"
     connection: twilio_voice
     deployment_region: eu-central
     warm_instances: 1
