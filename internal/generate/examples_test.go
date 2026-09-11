@@ -991,6 +991,20 @@ func TestPublicExamplesValidateAndGenerate(t *testing.T) {
 				}
 			}
 			for _, resolved := range declared {
+				if resolved.Provider == ir.ProviderLiveKit || resolved.Provider == ir.ProviderPipecat {
+					bindings := slices.Collect(maps.Values(resolved.Models.Speak))
+					if resolved.Models.Listen != nil {
+						bindings = append(bindings, *resolved.Models.Listen)
+					}
+					for _, fallback := range resolved.Models.ListenFallbacks {
+						bindings = append(bindings, fallback.Binding)
+					}
+					for _, binding := range bindings {
+						if binding.Provider == "slng" && binding.Params["world_part"] != "eu-north" {
+							t.Errorf("target %q speech model %q must use the eu-north gateway", resolved.Name, binding.Model)
+						}
+					}
+				}
 				if _, err := Generate(agent, resolved, target.Default()); err != nil {
 					t.Errorf("generate %q: %v", resolved.Name, err)
 				}

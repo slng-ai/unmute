@@ -73,8 +73,9 @@ round trip. Coval's
 [guide to measuring voice AI latency](https://www.coval.ai/blog/how-to-measure-voice-ai-latency-the-complete-guide/)
 explains why that adds up faster than people expect.
 
-With SLNG this is a configuration rather than a deployment problem: the same
-model can run in the world part or the specific region nearest your callers. See
+Choose a nearby endpoint or location for each STT, TTS and LLM provider when
+its integration supports one. With SLNG, set a world part on each speech model
+to choose its API gateway. See
 [Regional infrastructure](/optimization/regional-infrastructure) for the full
 picture, including where the agent itself runs.
 
@@ -86,11 +87,8 @@ models:
       model: "deepgram/aura:2"
       voice: "aura-2-thalia-en"
       params:
-        # A broad area: na, eu or ap.
-        world_part_override: eu
-        # Or a specific region. When both are set this one wins, and
-        # world_part_override is ignored rather than used as a fallback.
-        region_override: eu-north-1
+        # Connect through eu-north.api.slng.ai.
+        world_part: eu-north
 ```
 
 <Tip>
@@ -152,8 +150,8 @@ models:
         # arrives. Off by default, and it holds a second connection open while
         # an utterance runs.
         warm_standby_enabled: true
-        # Data residency. Pick the region nearest your callers.
-        world_part_override: eu
+        # Pick the speech gateway nearest your callers.
+        world_part: eu-north
 ```
 
 ### Set the pace, then the silence window
@@ -319,9 +317,8 @@ models:
         # arrives. Off by default, and it holds a second connection open while
         # an utterance runs.
         warm_standby_enabled: true
-        # Run the model near your callers. A world part, or a specific region
-        # with region_override, which wins when both are set.
-        world_part_override: eu
+        # Connect through eu-north.api.slng.ai.
+        world_part: eu-north
   listen:
     transcriber:
       provider: slng

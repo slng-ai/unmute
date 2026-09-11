@@ -48,6 +48,10 @@ Elastic SIP Trunk (`sip`), and the Pipecat target carries them over Pipecat
 Cloud's Twilio websocket (`cloud-websocket`). Browser audio on both. There is no
 outbound route.
 
+**Speech gateway.** Both targets send STT and TTS through `eu-north.api.slng.ai`.
+Change `params.world_part` on each speech model to choose another
+[SLNG gateway](../../docs-site/optimization/regional-infrastructure.mdx).
+
 ## How to run it
 
 ```sh

@@ -88,9 +88,9 @@ are on that vendor's own path instead, and none of the above applies. The lists 
 what else each target can construct are on
 [speech to text](/models/stt) and [text to speech](/models/tts).
 
-To keep SLNG speech compute in a world part or exact region, add regional params
-to each binding. [Regional infrastructure](/optimization/regional-infrastructure)
-shows the YAML and keeps speech placement separate from worker and media placement.
+To select an SLNG speech gateway, set `params.world_part` on each
+binding. [Regional infrastructure](/optimization/regional-infrastructure) shows
+the YAML and explains the separate model, worker, and media regions.
 
 ## The third role
 
@@ -120,6 +120,6 @@ inline. The page explains all three.
     Every vendor each target can use for listening.
   </Card>
   <Card title="Regional infrastructure" icon="earth" href="/optimization/regional-infrastructure">
-    Keep SLNG speech compute in the intended region.
+    Choose the speech gateway, model region, and worker region.
   </Card>
 </Columns>

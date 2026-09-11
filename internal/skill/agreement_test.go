@@ -513,14 +513,42 @@ func TestModelFieldAndPassthroughGuidanceStaysExact(t *testing.T) {
 
 func TestRegionalGuidanceStaysExplicit(t *testing.T) {
 	models := bundleFile(t, "references/models.md")
+	for name, content := range map[string]string{
+		"references/models.md":                               models,
+		"docs-site/optimization/regional-infrastructure.mdx": trackedFile(t, "docs-site/optimization/regional-infrastructure.mdx"),
+	} {
+		content = strings.Join(strings.Fields(content), " ")
+		for _, want := range []string{
+			"world_part",
+			"{world_part}.api.slng.ai",
+			`slng_base_url="eu-north.api.slng.ai"`,
+			`base_url="eu-north.api.slng.ai"`,
+			"Omitting `world_part` keeps the existing default URL.",
+			"`params.slng_base_url` cannot be combined with `params.world_part`",
+			"`na`, `eu`, and `ap` are refused",
+		} {
+			if !strings.Contains(content, want) {
+				t.Errorf("%s does not state %q", name, want)
+			}
+		}
+		if strings.Contains(content, "region_override") || strings.Contains(content, "region-override") {
+			t.Errorf("%s still teaches the retired SLNG region override", name)
+		}
+		for _, part := range target.SlngSpeechWorldParts {
+			if !strings.Contains(content, "`"+part+"`") {
+				t.Errorf("%s omits speech gateway %q", name, part)
+			}
+			if strings.HasPrefix(name, "docs-site/") {
+				row := regexp.MustCompile(`\| ` + regexp.QuoteMeta("`"+part+"`") + ` \| [^|]+ \| ` + regexp.QuoteMeta("`"+part+".api.slng.ai`") + ` \|`)
+				if !row.MatchString(content) {
+					t.Errorf("%s omits the table row for speech gateway %q", name, part)
+				}
+			}
+		}
+	}
 	for _, want := range []string{
-		"world_part_override",
-		"region_override",
-		"`region_override` takes precedence over `world_part_override`",
 		"https://docs.slng.ai/agents/livekit-plugin",
-		"1.6.7 or newer",
 		"https://docs.slng.ai/agents/pipecat-plugin",
-		"0.4.0 or newer",
 	} {
 		if !strings.Contains(models, want) {
 			t.Errorf("references/models.md does not state %q", want)

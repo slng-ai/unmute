@@ -436,11 +436,15 @@ billing plan. SLNG refuses it too, because it exposes no pool of yours.
 
 ## Deployment regions and model regions
 
-`deployment_region` chooses where the agent worker runs. It does not choose
-where SLNG runs STT or TTS. Those model regions belong in
-`params.world_part_override` or `params.region_override` on the SLNG listen and
-speak entries. Set both layers when the worker and speech data must stay in the
-same geography; `models.md` has the model YAML.
+`deployment_region` chooses where the agent worker runs. Each STT, TTS and LLM
+provider keeps its own endpoint and location settings. Set those on the model
+using fields the selected target's plugin supports.
+
+SLNG listen and speak entries choose their API gateway with
+`params.world_part`, which emits `{world_part}.api.slng.ai` on LiveKit
+and Pipecat. `models.md` has the accepted world parts and model YAML. A gateway
+choice does not set the worker region or guarantee where a provider processes
+speech.
 
 A LiveKit target accepts one deployment region or a duplicate-free list.
 Pipecat accepts exactly one. Every deployment from one LiveKit target uses the
@@ -449,8 +453,9 @@ TTS with each worker.
 
 For hard regional isolation, use one target instance per geography. Give each
 target one deployment region and complete per-target listen and speak model
-overrides that pin the matching SLNG region. A target model override replaces
-the entry instead of merging it, so repeat every field that entry needs.
+overrides with the provider's supported endpoint settings for that geography.
+A target model override replaces the entry instead of merging it, so repeat
+every field that entry needs.
 
 ## Which targets do what
 

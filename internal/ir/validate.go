@@ -1333,6 +1333,12 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 		if err := catalog.CheckVendor(provider, role, binding.Provider, binding.EndpointEnv != ""); err != nil {
 			row.Errors = add(row.Errors, err.Error())
 		}
+		if (provider == targetcap.LiveKit || provider == targetcap.Pipecat) &&
+			binding.Provider == "slng" && (role == targetcap.Listen || role == targetcap.Speak) {
+			if _, err := targetcap.SlngSpeechBaseURL(binding.Params); err != nil {
+				row.Errors = add(row.Errors, fmt.Sprintf("%s %s model %q: %v", provider, role, binding.Model, err))
+			}
+		}
 	}
 	// A per-model language must have a slot on the resolved target's integration
 	// (N16). The generator errors on a slotless entry; mirror it here so a
@@ -1602,8 +1608,7 @@ func slngRouterTargets() []string {
 }
 
 // slngRouterRegionErrors holds FR-003 and FR-005. The refusal names the four
-// router regions and says they are the router's own set, because `na` copied
-// from the regional infrastructure page is the likely mistake.
+// router regions and distinguishes them from speech gateway codes.
 func slngRouterRegionErrors(profile string, binding Binding) []string {
 	regions := strings.Join(targetcap.SlngRouterRegions, ", ")
 	value, ok := binding.Params["world_part_override"]
@@ -1613,7 +1618,7 @@ func slngRouterRegionErrors(profile string, binding Binding) []string {
 	region, _ := value.(string)
 	if _, ok := targetcap.SlngRouterBaseURL(region); !ok {
 		return []string{fmt.Sprintf(
-			"think.%s params.world_part_override %q is not a router region: one of %s. These four are the router's own set; na, eu and ap are the SLNG *speech* world parts, which share this key and not its accepted values",
+			"think.%s params.world_part_override %q is not a router region: one of %s. These four are the router's own set; SLNG speech gateways use params.world_part with a different set of world parts",
 			profile, region, regions)}
 	}
 	return nil
