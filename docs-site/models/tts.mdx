@@ -53,15 +53,15 @@ run. The full SLNG catalog is at
 | Provider | Notes |
 |---|---|
 | `slng` | SLNG hosted text to speech. `SLNG_API_KEY`. |
-| `cartesia` | |
-| `deepgram` | |
+| `cartesia` | Since Pipecat 1.9.0 the default model is `sonic-3.6`. Write `model: "sonic-3.5"` to stay on the previous one. |
+| `deepgram` | `params: {speed: 1.1}` sets Aura's speech rate, from 0.7 to 1.5. |
 | `elevenlabs` | also accepted as `eleven_labs` |
 | `gradium` | |
 | `inworld` | |
 | `openai` | |
 | `rime` | |
-| `sarvam` | |
-| `soniox` | |
+| `sarvam` | Since Pipecat 1.9.0 the default model is `bulbul:v3`. Sarvam's API no longer serves `bulbul:v2`, so a package naming it cannot speak. |
+| `soniox` | `params: {reduce_silence: true}` shortens the pauses between words, on models that support it. |
 
 An unlisted provider is legal on Pipecat on one condition: it has to be a
 genuinely OpenAI-compatible endpoint, named with `endpoint_env`.

@@ -568,13 +568,14 @@ the catalogue holds.
 | livekit | speak | `slng`, `cartesia`, `deepgram`, `elevenlabs`, `gemini`, `gradium`, `inworld`, `rime`, `sarvam`, `soniox` |
 | livekit | think | `slng`, `anthropic`, `aws`, `azure`, `groq`, `mistralai`, `openai`, `openrouter`, `sarvam` |
 
-Three vendor facts on Pipecat change what an author writes, and each is one
-`params:` line, which reaches the service's settings by name:
+Some vendor facts on Pipecat change what an author writes. Each setting below is
+one `params:` line, which reaches the service's settings by name:
 
 - `deepgram` listen: since Pipecat 1.9.0 the profanity filter is off unless
   asked for, because it rewrites the words it matches and a false positive
   silently changes a transcript. `params: {profanity_filter: true}` turns it on.
-  `params: {version: "2021-03-17.0"}` pins a model version.
+  `params: {version: "2021-03-17.0"}` pins a model version. A Flux model also
+  takes `params: {redact: ...}` to mask numbers.
 - `openai` listen: OpenAI retires its previous transcription model on
   2027-02-26; `gpt-transcribe` is the current one. The transcriber pads each
   speech segment with half a second of silence so the last word is not cut,
@@ -582,6 +583,17 @@ Three vendor facts on Pipecat change what an author writes, and each is one
 - `elevenlabs` listen takes `params: {no_verbatim: true}` to drop filler words;
   `speechmatics` listen takes `params: {include_results: true}` for word-level
   results.
+- `cartesia` listen under a listening decider takes `turn_start_threshold`,
+  `turn_eager_end_threshold` and `turn_end_threshold`, which say how sure Turns
+  has to be. Leave them out and Cartesia's own defaults apply.
+- `assemblyai` listen: `universal-3-5-pro` is the default and
+  `universal-3-6-pro` is the same model upgraded, with the same features.
+- `deepgram` speak takes `params: {speed: 1.1}`, Aura's speech rate, 0.7 to 1.5;
+  `soniox` speak takes `params: {reduce_silence: true}` to shorten the pauses
+  between words.
+- Two speaking defaults moved in 1.9.0: `cartesia` now speaks with `sonic-3.6`
+  and `sarvam` with `bulbul:v3`. Sarvam's API no longer serves `bulbul:v2`, so a
+  package naming it cannot speak at all.
 
 Read that table carefully rather than from memory. The two targets do not hold
 the same set, and the same company can appear under a different name: LiveKit
