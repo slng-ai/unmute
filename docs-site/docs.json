@@ -248,6 +248,7 @@
               "models/stt",
               "models/tts",
               "models/llm",
+              "models/realtime",
               "models/turn-detection"
             ]
           }

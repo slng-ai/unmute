@@ -79,7 +79,7 @@ split this page and [targets.yaml](/reference/targets-yaml) hold between them.
 | `version` | integer | yes |  | `1` | schema version |
 | `name` | string | yes |  | lowercase letters, digits, single hyphens; 3 to 64 characters | what the deployed agent is called |
 | `entry_agent` | string | yes |  | declared agent name | agent that answers |
-| `models` | map | yes |  | sections `think`, `speak`, `listen`, `turn` | model palette grouped by kind |
+| `models` | map | yes |  | sections `think`, `speak`, `listen`, `turn`, and on Pipecat `realtime` | model palette grouped by kind |
 | `listen` | string | with 2 or more listen chain heads | sole chain head | declared `models.listen` name | listen entry to use |
 | `turn` | string | with 2 or more turn entries | sole entry | declared `models.turn` name | turn entry to use |
 | `variables` | map | no |  | lower snake case names | per-call values |
@@ -167,9 +167,12 @@ rename deliberately, with the steps above, rather than discovering it on a call.
 
 ## `models`
 
-Four sections. The section an entry sits in decides its kind: `think` (LLM),
-`speak` (TTS), `listen` (STT), `turn` (turn detection). Entry names share one
-namespace across sections and are yours to choose.
+Five sections. The section an entry sits in decides its kind: `think` (LLM),
+`speak` (TTS), `listen` (STT), `turn` (turn detection), and `realtime`, a
+[live model](/models/realtime) that does the first three as one and compiles on
+Pipecat only. The first four are maps keyed by entry name; `realtime` is a list
+whose items carry `name:`. Entry names share one namespace across sections and
+are yours to choose.
 
 ```yaml
 models:
@@ -202,6 +205,7 @@ end-of-turn timeout, and `semantic_endpointing`, `endpointing_delay` and
 `interruption.minimum_words` are refused because nothing reads them; see
 [Turn detection](/models/turn-detection).
 | `fallback` | `think`, `listen` |
+| `name`, `provider`, `model`, `voice`, `think`, `description` | `realtime`, and nothing else: every other field is refused on a live entry by name, with its line. `think` names a `models.think` entry with `provider: openai` that runs the model's tools and reasoning. See [Live model](/models/realtime) |
 | `prompt_suffix` | `think`: literal text appended to every prompt this binding sends, up to 512 characters, no `{{variables}}`. A per-target override cannot name a different value. See [Context Router](/optimization/context-router) |
 | `agent_id`, `upstream` | `think`, and only on a binding routed through the SLNG Context Router; refused on any other binding. See [Context Router](/optimization/context-router) |
 
@@ -419,6 +423,7 @@ agents:
 | `instructions` | path to a Markdown prompt in the package |
 | `think` | a `models.think` entry name |
 | `speak` | a `models.speak` entry name |
+| `realtime` | a `models.realtime` entry name, in place of `think` and `speak`; the package then has this one agent and no tasks, see [Live model](/models/realtime) |
 | `tools` | tool files this agent may call; definitions never go here |
 | `tasks` | tasks this agent can run: each entry is either a full definition or a bare name for a task another agent already defines, see [`tasks`](#tasks) below |
 | `task_groups` | entries under [`task_groups:`](#task_groups) this agent may run |

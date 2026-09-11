@@ -76,9 +76,14 @@ type pipecatAgent struct {
 	// It exists because a task borrows this worker's service: entering one swaps
 	// the task's scope in, and every way out has to swap this back or the owner
 	// would keep answering under the task's cache scope.
-	SlngHeaders       string
-	LLM               pipecatService
-	TTS               pipecatService
+	SlngHeaders string
+	LLM         pipecatService
+	TTS         pipecatService
+	// Realtime is the live model's row when this agent binds one: LLM then holds
+	// the live service and TTS is empty. Backend is the think model it hands its
+	// tools and reasoning to, "" when it runs alone.
+	Realtime          bool
+	Backend           string
 	Tools             []pipecatTool
 	Transfers         []pipecatTransfer
 	Delegates         []pipecatDelegate
@@ -682,6 +687,15 @@ type pipecatData struct {
 	NeedsContextStrategy bool
 	NeedsLanguage        bool // any emitted service sets a language kwarg (Language enum import, N16)
 	Inline               bool // single agent, no bus: LLM inline in the pipeline (F3)
+	// Realtime means the one agent binds a live model: the inline pipeline with
+	// the live service where the transcriber, the model and the synthesizer sat,
+	// no local turn machinery, and the greeting delivered as the session's
+	// opening instruction. Validation has already held the package to what this
+	// shape carries (ir.validateRealtime).
+	Realtime bool
+	// RealtimeBackend means the live model names a think entry, so the bot
+	// imports the Responses service whose Settings the delegation is built from.
+	RealtimeBackend bool
 	// Knowledge is the shared knowledge-module data: the declared bases and the
 	// deduplicated embedding imports across them.
 	Knowledge knowledgeData
@@ -726,6 +740,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldPace:                 true, // smart-turn analyzer stop_secs (the ceiling), or the transcriber's end-of-turn timeout under provider: listen
 	targetcap.FieldTurnByListener:       true, // the vendor's turn-detecting service class in place of the transcriber, no local analyzer
 	targetcap.FieldTurnEager:            true, // enable_eager_end_of_turn on that service and EagerUserTurnStrategies on the aggregator
+	targetcap.FieldRealtimeModel:        true, // one live service where the transcriber, the model and the synthesizer sat; its backend by Responses delegation
 	targetcap.FieldTask:                 true, // Flow node on the owning worker (C8)
 	targetcap.FieldTaskNestedResult:     true, // forwarded json_schema properties
 	targetcap.FieldTaskGroup:            true, // linear dynamic-flow chain

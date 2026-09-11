@@ -201,6 +201,9 @@ type ModelSections struct {
 	Speak  map[string]ModelDef `json:"speak,omitempty" yaml:"speak,omitempty"`
 	Listen map[string]ModelDef `json:"listen,omitempty" yaml:"listen,omitempty"`
 	Turn   map[string]ModelDef `json:"turn,omitempty" yaml:"turn,omitempty"`
+	// Realtime is the fifth kind: one model that listens, thinks and speaks. A
+	// list of named entries rather than a map, for the reason RealtimeDef gives.
+	Realtime []RealtimeDef `json:"realtime,omitempty" yaml:"realtime,omitempty"`
 }
 
 // ModelDef is the unified model definition (N15): one shape for every models
@@ -396,14 +399,19 @@ type Prefetch struct {
 // `think:` and `speak:` name entries in the same-named `models:` sections, so the
 // four model kinds are spelled one way everywhere they are referred to.
 type AgentDef struct {
-	Instructions string     `json:"instructions" yaml:"instructions"`
-	Think        string     `json:"think" yaml:"think"`
-	Speak        string     `json:"speak" yaml:"speak"`
-	Tools        []string   `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Tasks        []TaskItem `json:"tasks,omitempty" yaml:"tasks,omitempty"`
-	TaskGroups   []string   `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
-	Handoffs     []string   `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
-	Escalations  []string   `json:"escalations,omitempty" yaml:"escalations,omitempty"`
+	Instructions string `json:"instructions" yaml:"instructions"`
+	// Think and Speak name the agent's models the way every package has: one
+	// entry of `models.think` and one of `models.speak`. Realtime names one
+	// entry of `models.realtime` instead, a model that does all three jobs, and
+	// an agent writes one form or the other; Build refuses both and neither.
+	Think       string     `json:"think,omitempty" yaml:"think,omitempty"`
+	Speak       string     `json:"speak,omitempty" yaml:"speak,omitempty"`
+	Realtime    string     `json:"realtime,omitempty" yaml:"realtime,omitempty"`
+	Tools       []string   `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Tasks       []TaskItem `json:"tasks,omitempty" yaml:"tasks,omitempty"`
+	TaskGroups  []string   `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
+	Handoffs    []string   `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
+	Escalations []string   `json:"escalations,omitempty" yaml:"escalations,omitempty"`
 }
 
 // Task is one entry of an agent's `tasks:` list. It carries both what the task is

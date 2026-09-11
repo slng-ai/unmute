@@ -318,6 +318,15 @@ import:   from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 install:  pipecat-ai[speechmatics]
 env:      SPEECHMATICS_API_KEY
 
+=== pipecat realtime openai ===
+binding:  provider=openai model=model-1 voice=voice-1
+class:    OpenAILiveLLMService
+args:     api_key=os.environ["OPENAI_API_KEY"]
+settings: voice="voice-1", model="model-1", sample_rate=24000
+import:   from pipecat.services.openai.live.llm import OpenAILiveLLMService
+install:  pipecat-ai[openai]
+env:      OPENAI_API_KEY
+
 === pipecat reason * ===
 binding:  provider="*" as acme model=model-1 endpoint_env=ACME_BASE_URL
 class:    OpenAILLMService

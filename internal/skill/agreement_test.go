@@ -390,10 +390,10 @@ func TestModelsReferenceMatchesCatalog(t *testing.T) {
 
 	// The reference names the roles the way an author writes them; the
 	// catalogue keeps the internal name "reason" for the thinking kind.
-	roles := map[string]target.Role{"listen": target.Listen, "speak": target.Speak, "think": target.Reason}
+	roles := map[string]target.Role{"listen": target.Listen, "speak": target.Speak, "think": target.Reason, "realtime": target.Realtime}
 	providers := map[string]target.Provider{"pipecat": target.Pipecat, "livekit": target.LiveKit}
 
-	row := regexp.MustCompile(`^\| (pipecat|livekit) \| (listen|speak|think) \| (.*) \|$`)
+	row := regexp.MustCompile(`^\| (pipecat|livekit) \| (listen|speak|think|realtime) \| (.*) \|$`)
 	vendor := regexp.MustCompile("`([a-z0-9_]+)`")
 
 	documented := map[string][]string{}
@@ -408,11 +408,22 @@ func TestModelsReferenceMatchesCatalog(t *testing.T) {
 		}
 		documented[m[1]+" "+m[2]] = vendors
 	}
-	if len(documented) != 6 {
-		t.Fatalf("parsed %d vendor rows from references/models.md, want 6 (two targets, three roles) — table format changed? update this parser", len(documented))
+	// Two targets and three cascaded roles, plus the one realtime row: only
+	// Pipecat has a live service, so a livekit realtime row would be a lie.
+	if len(documented) != 7 {
+		t.Fatalf("parsed %d vendor rows from references/models.md, want 7 (two targets, three roles, and pipecat realtime) — table format changed? update this parser", len(documented))
+	}
+	if _, ok := documented["pipecat realtime"]; !ok {
+		t.Error("references/models.md has no `| pipecat | realtime |` vendor row")
+	}
+	if _, ok := documented["livekit realtime"]; ok {
+		t.Error("references/models.md lists livekit realtime vendors; the livekit driver emits no live model")
 	}
 
 	cat := target.DefaultCatalog()
+	if vendors := cat.Vendors(target.LiveKit, target.Realtime); len(vendors) != 0 {
+		t.Errorf("the catalogue now has livekit realtime vendors %v: references/models.md must grow a row and the parser above a check", vendors)
+	}
 	for key, vendors := range documented {
 		parts := strings.Fields(key)
 		fw, role := providers[parts[0]], roles[parts[1]]
@@ -439,6 +450,57 @@ func TestModelsReferenceMatchesCatalog(t *testing.T) {
 	for _, fw := range []target.Provider{target.Pipecat, target.LiveKit} {
 		if vendors := cat.Vendors(fw, target.Turn); len(vendors) != 0 {
 			t.Errorf("the catalogue now has %s turn vendors %v: references/models.md must list them", fw, vendors)
+		}
+	}
+}
+
+// TestRealtimeSurfacesAgree holds the three surfaces that teach a live model to
+// one block and one list of what it refuses: the public page an author lands
+// on, the skill a coding agent reads first, and the agent.yaml reference. The
+// refusals are the rows of ir.validateRealtime, held in
+// internal/ir/validate_realtime_test.go; a surface that drops one teaches a
+// shape the compiler refuses.
+func TestRealtimeSurfacesAgree(t *testing.T) {
+	block := []string{
+		"realtime:", "- name: live", "provider: openai", "model: gpt-live-1", "voice: marin", "think: fast",
+		"realtime: live",
+	}
+	refused := []string{
+		"one agent", "tasks", "handoffs", "escalations",
+		"`listen`", "`speak`", "`turn`", "interruption",
+		"variables", "prefetch", "tracing", "mcp", "telephony",
+		"OpenAI", "LiveKit", "slng",
+	}
+	fields := []string{"`name`", "`provider`", "`model`", "`voice`", "`think`", "`description`"}
+	surfaces := map[string]string{
+		"references/models.md":          bundleFile(t, "references/models.md"),
+		"docs-site/models/realtime.mdx": trackedFile(t, "docs-site/models/realtime.mdx"),
+	}
+	for name, content := range surfaces {
+		for _, want := range append(append(block, refused...), fields...) {
+			if !strings.Contains(content, want) {
+				t.Errorf("%s does not carry %q, which the other live-model surfaces teach", name, want)
+			}
+		}
+		if !strings.Contains(content, "paraphrase") {
+			t.Errorf("%s does not say the greeting is paraphrased, which a live call makes obvious", name)
+		}
+	}
+	// The reference documents the entry's fields and the agent's `realtime:`
+	// key, and points at the page for the rest.
+	reference := trackedFile(t, "docs-site/reference/agent-yaml.mdx")
+	for _, want := range append(fields, "| `realtime` | a `models.realtime` entry name", "/models/realtime") {
+		if !strings.Contains(reference, want) {
+			t.Errorf("docs-site/reference/agent-yaml.mdx does not carry %q", want)
+		}
+	}
+	// One vendor row, read from the catalogue rather than repeated here.
+	vendors := target.DefaultCatalog().Vendors(target.Pipecat, target.Realtime)
+	for _, vendor := range vendors {
+		for name, content := range surfaces {
+			if !strings.Contains(content, "`"+vendor+"`") {
+				t.Errorf("%s does not name the realtime vendor %q the catalogue has", name, vendor)
+			}
 		}
 	}
 }

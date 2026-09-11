@@ -32,6 +32,10 @@ models:
 That is what every shipped example writes. A package scaffolded by `unmute init`
 targets LiveKit, so it writes the LiveKit binding below in this spot instead.
 
+A package on a [live model](/models/realtime) has no `turn:` section at all:
+the model hears the caller directly and decides the turn itself, so a `turn:`
+entry beside a `realtime:` binding is refused.
+
 ## Pipecat
 
 Both targets do two jobs, not one. On Pipecat both run on device.

@@ -23,6 +23,8 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMTextFrame,
     MetricsFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     TTSSpeakFrame,
     TTSStoppedFrame,
     TranscriptionFrame,
@@ -102,6 +104,12 @@ class DevReporter:
         self._tools = {}
         self._tool_frames = set()
         self._tts_contexts = {}
+{{- if .Realtime}}
+        # The reply the live model is speaking now. It opens with no context
+        # frame in front of it, so the request it records under is kept here
+        # rather than read off the frames, which carry no scope of their own.
+        self._live_turn = None
+{{- end}}
         self._latency_observer = None
         self._attached = set()
         if self.enabled:
@@ -359,7 +367,12 @@ class DevReporter:
         async def user_before(_processor, frame):
             self._input_boundary(frame)
             scope = self._frame_scope(frame)
-            caller_frame = isinstance(frame, (InterimTranscriptionFrame, TranscriptionFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame))
+            # A proposed turn boundary is a caller frame too: when the transcriber
+            # or a live model decides the turn, the proposal is the frame whose
+            # processing pushes the context, so the input has to be in scope then
+            # or its exchange never ends.
+            caller_frame = isinstance(frame, (InterimTranscriptionFrame, TranscriptionFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame,
+                                              ProposedUserStartedSpeakingFrame, ProposedUserStoppedSpeakingFrame))
             input_id = scope.get("input_id") or (self._input if caller_frame else None)
             if input_id:
                 scope["call_id"] = self.call_id
@@ -472,6 +485,12 @@ class DevReporter:
                 for operation in tuple(pending):
                     self._end_request(operation, "cancelled")
             scope = self._frame_scope(frame)
+{{- if .Realtime}}
+            # A context frame starts no request on a live model: the first one
+            # configures the session and a later one never reaches the API, so
+            # a request opened here would stay running for the whole call. The
+            # model's replies open their own requests below, as they start.
+{{- else}}
             if isinstance(frame, LLMContextFrame):
                 scope.pop("tool_operation_id", None)
                 operation = self._id("llm")
@@ -488,6 +507,7 @@ class DevReporter:
                     self._measure(f"{operation}:{metric}", metric, None, f"pipecat-llm-{source}",
                                   scope="operation", operation_id=operation, exchange_id=scope["response_id"], state="pending")
                 frame.metadata[_METADATA] = dict(scope)
+{{- end}}
             self._scope.set(scope or None)
 
         @self._listen(llm, "on_before_push_frame")
@@ -503,9 +523,32 @@ class DevReporter:
                         return
             operation = scope.get("operation_id")
             request = self._requests.get(operation)
+{{- if .Realtime}}
+            if not request and self._live_turn:
+                operation = self._live_turn
+                request = self._requests.get(operation)
+                scope = dict(request["scope"])
+            if isinstance(frame, LLMFullResponseStartFrame) and not request:
+                # The live model opens a reply with no context frame in front of
+                # it, so the reply is given a request of its own here and its
+                # words record under it below, the way a generated answer does.
+                # No timing is pending on it: nothing was requested.
+                operation = self._id("llm")
+                scope = dict(scope, call_id=self.call_id, operation_id=operation)
+                scope["response_id"] = self._response(scope)
+                request = {"scope": dict(scope), "text_id": None, "ended": False}
+                self._requests[operation] = request
+                self._live_turn = operation
+                pending.add(operation)
+                self._put("operation", operation, {
+                    "exchange_id": scope["response_id"], "type": "llm",
+                    "name": llm.name, "state": "running",
+                })
+{{- else}}
             if isinstance(frame, LLMFullResponseStartFrame) and not request:
                 # Some services generate without a concrete context invocation.
                 self._update("call", "call", model_calls="partial")
+{{- end}}
             if not request:
                 return
             if type(frame) is LLMTextFrame:
@@ -519,18 +562,37 @@ class DevReporter:
                 self._put("text", identity, {
                     "exchange_id": scope["response_id"], "message_id": identity,
                     "speaker": "assistant", "text": text + separator + frame.text,
+{{- if .Realtime}}
+                    # The words are the model's own speech transcribed, not
+                    # text it generated for a synthesizer to read.
+                    "state": "provisional", "origin": "transcription", "separator_before": "",
+{{- else}}
                     "state": "provisional", "origin": "generated", "separator_before": "",
+{{- end}}
                 })
                 if frame.text:
                     request["includes_spaces"] = frame.includes_inter_frame_spaces
             elif isinstance(frame, LLMFullResponseEndFrame):
                 self._end_request(operation, "ended")
                 pending.discard(operation)
+{{- if .Realtime}}
+                if self._live_turn == operation:
+                    self._live_turn = None
+{{- end}}
             elif isinstance(frame, ErrorFrame):
                 self._end_request(operation, "failed")
                 pending.discard(operation)
 
         return llm
+{{- if .Realtime}}
+
+    def observe_live(self, live):
+        # One service where the transcriber, the model and the synthesizer sat.
+        # The caller's words come out of it as recognition frames, so the
+        # transcriber's observer reads them off it; its own words come out as a
+        # reply with no context frame in front, which observe_llm handles above.
+        return self.observe_stt(self.observe_llm(live))
+{{- end}}
 
     def _end_request(self, operation, state):
         request = self._requests.get(operation)
@@ -603,7 +665,13 @@ class DevReporter:
                     unfinished.add(response)
                 elif payload["type"] == "tts":
                     final_tts.add(response)
+{{- if .Realtime}}
+        # The live model speaks its own words, so no synthesis stands between a
+        # final transcript and the reply having been spoken.
+        completed = final_text - unfinished
+{{- else}}
         completed = (final_text & final_tts) - unfinished
+{{- end}}
         for (kind, identity), record in list(self._records.items()):
             if kind == "text" and record[kind]["state"] == "provisional":
                 self._update(kind, identity, state="incomplete")

@@ -130,7 +130,43 @@ is a flows handler and queues it through `flow_manager.worker`. Same frame, same
 contract, and nothing waits for playout in either.
 {{- end}}
 
-## Turn taking
+{{if .Realtime}}## The live model
+
+One model listens, thinks and speaks. `{{(index .Agents 0).LLM.Call.Class}}` sits in the pipeline
+where the transcriber, the model and the synthesizer would sit, hears the
+caller's audio directly, decides for itself when to answer and how to handle
+being talked over, and speaks in its own voice. There is no turn-taking
+section in this runbook because no setting of this package's decides the turn.
+
+**The greeting is spoken in the model's own words.** The package's greeting
+reaches the session as its opening instruction, which the model paraphrases
+rather than reads out, so expect the sense of the line and not its letters.
+{{if (index .Agents 0).Backend}}
+**Tools and hard reasoning run on `{{(index .Agents 0).Backend}}`**, the think entry the
+realtime model names, on OpenAI's Responses API inside the same live session:
+the live model hands the request over and keeps talking, the backend calls this
+project's tools, and the answer comes back as something the live model says.
+Every tool in `bot.py` is registered exactly as it is for a cascaded pipeline.
+{{else}}
+**No think entry is named**, so the live model runs alone and declines any
+request that would need a tool. Add `think: <a models.think entry>` to the
+realtime entry to give it one.
+{{end}}
+**Fixed for the session.** The model, the voice and the instructions are set
+when the session starts and cannot change until it ends. That is why this
+package has one agent and no tasks: a handoff or a step would have to change
+the instructions mid-call. It is also why no call state is rendered into the
+prompt in this version.
+
+**What the dev page shows.** The caller's and the model's transcripts, as the
+model reports them, and every tool call the backend makes. Reply latency is
+measured from the voice activity detector, which still runs for that reason.
+{{if .Inactivity}}
+**Inactivity.** After {{.Inactivity.NudgeSecs}}s of silence the model is asked, in its own
+words, to check whether the caller is still there{{if gt .Inactivity.EndSecs 0}}, and the call ends
+after {{.Inactivity.EndSecs}}s{{end}}.
+{{end}}
+{{else}}## Turn taking
 {{if .Pace.ByListener}}
 **The transcriber decides the turn.** The package's `turn:` binding names the
 listener as the decider (`provider: listen`), so `{{.Pace.Listener.Class}}` ends
@@ -198,7 +234,7 @@ A minimum interruption word count is set, and it replaces the default turn-*star
 pair on purpose: gating turn start on words is the point, and leaving VAD start in
 place would open the turn before the words arrive. It no longer costs you the
 end-of-turn analyzer, which it used to.
-{{end}}
+{{end}}{{end}}
 
 {{- if .HasFlows}}
 

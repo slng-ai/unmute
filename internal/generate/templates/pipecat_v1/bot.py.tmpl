@@ -61,10 +61,10 @@ from pydantic import {{.PydanticImports}}{{end}}
 {{if .NeedsMCP}}from mcp.client.session_group import {{join .MCPParamsImports ", "}}
 {{end}}
 {{if .NeedsFunctionSchema}}from pipecat.adapters.schemas.function_schema import FunctionSchema
-{{end}}{{if and (not .SemanticOff) (not .Pace.ByListener)}}from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+{{end}}{{if and (not .SemanticOff) (not .Pace.ByListener) (not .Realtime)}}from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 {{end}}from pipecat.audio.vad.silero import SileroVADAnalyzer
-{{if not .Pace.ByListener}}from pipecat.audio.vad.vad_analyzer import VADParams
+{{if and (not .Pace.ByListener) (not .Realtime)}}from pipecat.audio.vad.vad_analyzer import VADParams
 {{end}}{{if not .Inline}}from pipecat.bus import BusBridgeProcessor
 {{end}}{{if .HasFlows}}from pipecat.flows import {{if .NeedsContextStrategy}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig, NO_RESPONSE
 {{end}}{{if .FrameImports}}from pipecat.frames.frames import {{join .FrameImports ", "}}
@@ -85,7 +85,7 @@ from pipecat.runner.utils import create_transport
 {{if .DailyParams}}{{.DailyParams.Import}}
 {{end}}{{if .CloudWebsocket}}from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 {{end}}{{if .NeedsTurnStrategies}}from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
-{{end}}{{if .Pace.ByListener}}{{if .Pace.Eager}}from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies
+{{end}}{{if .Realtime}}{{else if .Pace.ByListener}}{{if .Pace.Eager}}from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies
 {{end}}{{else}}from pipecat.turns.user_stop import {{if .SemanticOff}}SpeechTimeoutUserTurnStopStrategy{{else}}TurnAnalyzerUserTurnStopStrategy{{end}}
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 {{end}}{{if .UserMuteStrategies}}from pipecat.turns.user_mute import {{join .UserMuteStrategies ", "}}
@@ -886,14 +886,20 @@ class _HandoffWorker({{if and .Tracing .NeedsFunctionCalls}}TracedLLMWorker{{els
         return await super().process_deferred_tool_frames(frames)
 {{end}}
 {{range .Agents}}
-
+{{if .Realtime}}
+def build_{{.Name}}_live():
+    # One service where the transcriber, the model and the synthesizer sat. Its
+    # instructions, model and voice are fixed once the session starts, and its
+    # tools and reasoning run on the backend named in the delegation.
+    return {{template "svc" .LLM.Call}}
+{{else}}
 def build_{{.Name}}_llm(state=None{{if $.Slng.Any}}, *, slng_session_id{{end}}):
     return {{template "svc" .LLM.Call}}
 
 
 def build_{{.Name}}_tts():
     return {{template "svc" .TTS.Call}}
-{{if $.Inline}}{{range .Tools}}
+{{end}}{{if $.Inline}}{{range .Tools}}
 
 @_direct_tool{{.Decorator}}
 async def {{.MethodName}}(params: FunctionCallParams{{range .Args}}, {{.Name}}: {{.PyType}}{{if not .Required}} = {{.PyDefault}}{{end}}{{end}}):
@@ -1723,9 +1729,9 @@ transport_params: dict = {
 
 
 
-def build_stt():
+{{if not .Realtime}}def build_stt():
     return {{template "svc" .STT.Call}}
-
+{{end}}
 
 {{if .Inline}}{{$agent := index .Agents 0}}async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev) -> None:
     require_env()
@@ -1737,13 +1743,19 @@ def build_stt():
     slng_session_id = str(uuid.uuid4())
 {{end}}    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-    # Single agent, no handoffs: the LLM sits inline in the pipeline (no bus).
+{{if .Realtime}}    # One live model listens, thinks and speaks. It sits where the transcriber,
+    # the model and the synthesizer sat, and it decides the turn itself: no
+    # strategies of ours are passed, so the aggregator takes the external ones
+    # the service recommends. The VAD stays for the speaking frames the idle
+    # timer and the latency measurement anchor on.
+{{else}}    # Single agent, no handoffs: the LLM sits inline in the pipeline (no bus).
     # turn: local — on-device VAD (Silero); the turn binding is advisory.
-    context = LLMContext({{if $agent.Tools}}tools=[{{range $i, $t := $agent.Tools}}{{if $i}}, {{end}}{{$t.MethodName}}{{end}}]{{end}})
+{{end}}    context = LLMContext({{if $agent.Tools}}tools=[{{range $i, $t := $agent.Tools}}{{if $i}}, {{end}}{{$t.MethodName}}{{end}}]{{end}})
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-{{if .Pace.ByListener}}            # The transcriber decides the turn (turn: provider: listen). The VAD
+{{if .Realtime}}            vad_analyzer=SileroVADAnalyzer(),
+{{else if .Pace.ByListener}}            # The transcriber decides the turn (turn: provider: listen). The VAD
             # still runs, for the speaking frames the idle timer and the latency
             # observer anchor on, but no silence window of ours ends a turn and
             # no local analyzer is built: {{.Pace.Listener.Class}} owns both
@@ -1808,7 +1820,17 @@ def build_stt():
 {{end}}        ),
     )
     dev.observe_aggregators(user_aggregator, assistant_aggregator)
+{{if .Realtime}}    live = dev.observe_live(build_{{$agent.Name}}_live())
     pipeline = Pipeline(
+        [
+            transport.input(),
+            user_aggregator,
+            live,
+            transport.output(),
+            assistant_aggregator,
+        ]
+    )
+{{else}}    pipeline = Pipeline(
         [
             transport.input(),
             dev.observe_stt(build_stt()),
@@ -1819,7 +1841,7 @@ def build_stt():
             assistant_aggregator,
         ]
     )
-    worker = PipelineWorker(
+{{end}}    worker = PipelineWorker(
         pipeline,
         name=MAIN_NAME,
         observers=dev.observers(),
@@ -1828,13 +1850,19 @@ def build_stt():
 {{if .Inactivity}}
     @user_aggregator.event_handler("on_user_turn_idle")
     async def on_user_turn_idle(aggregator):
-        await aggregator.push_frame(
+{{if .Realtime}}        # A later context frame never reaches a live session, so the nudge goes
+        # in as spoken commentary: the model checks on the caller in its own words.
+        await live.send_client_event(live_events.SessionCommentaryAppendEvent(
+            delegation_id=None,
+            content="The caller has gone quiet. Politely check if they are still there.",
+        ))
+{{else}}        await aggregator.push_frame(
             LLMMessagesAppendFrame(
                 [{"role": "developer", "content": "The caller has gone quiet. Politely check if they are still there."}],
                 run_llm=True,
             )
         )
-{{if gt .Inactivity.EndSecs 0}}
+{{end}}{{if gt .Inactivity.EndSecs 0}}
     # inactivity.end_after: the nudge above is the first half, and this is the
     # second. Without it an idle call is nudged forever and never hung up, which
     # on a phone line is a billed open call. The clock starts at the first idle
@@ -1857,9 +1885,19 @@ def build_stt():
             _idle_end = None
 {{end}}{{end}}
     async def start_session():
-{{if .GreetingText}}        await worker.queue_frame(TTSSpeakFrame({{pyq .GreetingText}}))
-{{end}}{{if gt .MaxDurationSecs 0}}        asyncio.create_task(_end_after(worker, {{.MaxDurationSecs}}))
-{{end}}{{if and (not .GreetingText) (le .MaxDurationSecs 0)}}        pass
+{{if .Realtime}}        # The live session starts on the first context frame, so the run is
+        # queued whatever the greeting says. An opening line rides ahead of it as
+        # a developer message: the service lifts a trailing one out of the
+        # startup history and delivers it as spoken commentary once the session
+        # is up, which the model paraphrases rather than reads out.
+        await worker.queue_frames([
+{{if .GreetingText}}            LLMMessagesAppendFrame([{"role": "developer", "content": "Open the call with this greeting, in these words as far as you can: " + {{pyq .GreetingText}}}]),
+{{else if .GreetingInstruction}}            LLMMessagesAppendFrame([{"role": "developer", "content": {{pyq .GreetingInstruction}}}]),
+{{end}}            LLMRunFrame(),
+        ])
+{{else}}{{if .GreetingText}}        await worker.queue_frame(TTSSpeakFrame({{pyq .GreetingText}}))
+{{end}}{{end}}{{if gt .MaxDurationSecs 0}}        asyncio.create_task(_end_after(worker, {{.MaxDurationSecs}}))
+{{end}}{{if and (not .GreetingText) (not .Realtime) (le .MaxDurationSecs 0)}}        pass
 {{end}}
     @worker.rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):

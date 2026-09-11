@@ -138,7 +138,7 @@ dispatch rule keeps naming the old worker, so inbound calls stop.
 
 ## models
 
-Four sections, and the section an entry sits in decides its kind.
+Five sections, and the section an entry sits in decides its kind.
 
 | Section | Job | Common name |
 |---|---|---|
@@ -146,10 +146,13 @@ Four sections, and the section an entry sits in decides its kind.
 | `speak` | turns text into audio | TTS |
 | `listen` | turns audio into text | STT |
 | `turn` | decides when the caller has finished speaking | turn detection or VAD |
+| `realtime` | listens, thinks and speaks as one model; Pipecat only, a list of entries with `name:` | speech to speech, live model |
 
 Entry names are yours and share one namespace across sections. An agent points
 at an entry by name. Entries you never reference are legal alternates, so
-swapping a voice is a one line change.
+swapping a voice is a one line change. An agent names either `think` and
+`speak`, or `realtime`; `models.md` has the live model's block and what it
+refuses.
 
 Each section allows these fields:
 
@@ -208,6 +211,7 @@ agents:
 | `instructions` | path to a Markdown prompt in the package |
 | `think` | a `models.think` entry name |
 | `speak` | a `models.speak` entry name |
+| `realtime` | a `models.realtime` entry name, in place of `think` and `speak`; Pipecat only, one agent, no tasks |
 | `tools` | tool files this agent may call, by name |
 | `tasks` | tasks this agent can run: each item is a full definition, or a bare name for a task another agent already defines |
 | `task_groups` | entries under `task_groups:` this agent may run |

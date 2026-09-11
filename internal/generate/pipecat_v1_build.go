@@ -69,11 +69,21 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		env.add(name)
 	}
 
-	stt, err := sttService(target.Models.Listen, data.Pace, env)
-	if err != nil {
-		return pipecatData{}, err
+	for _, def := range agent.Agents {
+		if def.Realtime != "" {
+			// One agent, held to that by validation: the live model listens for
+			// itself, so no transcriber is built and no listen binding is read.
+			data.Realtime = true
+			data.RealtimeBackend = agent.Models[def.Realtime].Think != ""
+		}
 	}
-	data.STT = stt
+	var err error
+	if !data.Realtime {
+		data.STT, err = sttService(target.Models.Listen, data.Pace, env)
+		if err != nil {
+			return pipecatData{}, err
+		}
+	}
 
 	// The router's module-level helpers, collected before any LLM resolves so
 	// every construction site can name its profile's configuration function.
@@ -263,6 +273,15 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	data.Inline = inlineEligible(&data)
 	if !data.Inline {
 		data.FrameImports = append(data.FrameImports, "LLMUpdateSettingsFrame", "LLMRunFrame")
+	}
+	if data.Realtime {
+		// The live session starts on the first context frame, so client-ready
+		// queues a run whatever the greeting says; an opening line rides ahead of
+		// it as a developer message the model paraphrases.
+		data.FrameImports = append(data.FrameImports, "LLMRunFrame")
+		if (data.GreetingText != "" || data.GreetingInstruction != "") && !slices.Contains(data.FrameImports, "LLMMessagesAppendFrame") {
+			data.FrameImports = append(data.FrameImports, "LLMMessagesAppendFrame")
+		}
 	}
 	slices.Sort(data.FrameImports)
 	knowledge, err := loweredKnowledge(agent, env)
@@ -526,6 +545,13 @@ func buildPipecatCloudWebsocket(agent *ir.Agent, resolved ir.Target, env *envSet
 // delegates, no tracing (the tracing helper is worker-bound, V22), no telephony
 // or cold transfer. Everything else keeps the workers/bus path (dp§C8).
 func inlineEligible(data *pipecatData) bool {
+	// A live model sits in the one pipeline that carries the caller's audio, so
+	// the realtime shape is the inline shape by construction; validation held
+	// the package to what that shape carries, the greeting included, which is
+	// delivered as the session's opening instruction rather than spoken.
+	if data.Realtime {
+		return true
+	}
 	// State (Variables) and model-written greeting both need machinery the inline
 	// shape lacks (module-level tools can't reach self.state; the greeting has no
 	// activate_worker to carry a developer message). MCP also stays on the bus so
@@ -690,7 +716,8 @@ func setImportNeeds(data *pipecatData) {
 	if data.NeedsAppendFrame {
 		data.FrameImports = append(data.FrameImports, "LLMMessagesAppendFrame")
 	}
-	needsTTSSpeakFrame := data.GreetingText != ""
+	// A live model speaks the greeting itself, so no TTSSpeakFrame carries it.
+	needsTTSSpeakFrame := data.GreetingText != "" && !data.Realtime
 	for _, agent := range data.Agents {
 		for _, transfer := range agent.Transfers {
 			if transfer.Announce != "" {
@@ -815,6 +842,16 @@ func collectImportsExtras(data pipecatData) (imports, extras, deps []string) {
 	for _, a := range data.Agents {
 		note(a.LLM.Entry)
 		note(a.TTS.Entry)
+		if a.Realtime && a.Backend != "" {
+			// The delegation names the Responses service's Settings class; the
+			// live service's own import comes off its catalogue entry above.
+			importSet["from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService"] = true
+		}
+	}
+	if data.Realtime && data.Inactivity != nil {
+		// The idle nudge reaches a live session as spoken commentary, through
+		// the service's public client-event API (research R8 of spec 021).
+		importSet["from pipecat.services.openai.live import events as live_events"] = true
 	}
 	return sortedKeys(importSet), sortedKeys(extraSet), sortedKeys(depSet)
 }
@@ -860,6 +897,9 @@ func sortedKeys[V any](set map[string]V) []string { return slices.Sorted(maps.Ke
 
 func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.AgentDef, env *envSet) (pipecatAgent, error) {
 	promptConst := promptConstName(name)
+	if def.Realtime != "" {
+		return buildPipecatRealtimeAgent(agent, target, name, def, promptConst, env)
+	}
 	// A templated prompt is rendered per session from the call state; an untouched
 	// one stays the bare module constant it always was.
 	profile, router := slngRouterBinding(agent, target, def.Model)
@@ -940,6 +980,49 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 		}
 	}
 	built.FlowFunctionNames = sortedKeys(flowNames)
+	return built, nil
+}
+
+// buildPipecatRealtimeAgent lowers the one agent of a realtime package: the live
+// service takes the rendered prompt as its instructions and the voice, and hands
+// its tools and reasoning to the think entry the realtime model names, through
+// Responses delegation at OpenAI. There is no synthesizer to build. Validation
+// has already refused every shape this cannot carry (ir.validateRealtime), so
+// the prompt is the bare module constant: no call state reaches a live session.
+func buildPipecatRealtimeAgent(agent *ir.Agent, target ir.Target, name string, def ir.AgentDef, promptConst string, env *envSet) (pipecatAgent, error) {
+	binding := target.Models.Realtime[def.Realtime]
+	live, err := resolvePipecatService(targetcap.Realtime, binding, env, slngSite{},
+		pyKV{Key: "system_instruction", Value: promptConst})
+	if err != nil {
+		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
+	}
+	if binding.Think != "" {
+		backend := target.Models.Reason[binding.Think]
+		// The backend is the Responses model the live model delegates to. Its
+		// key is the same OpenAI key the live service reads, so nothing new
+		// joins the startup check; the model id is what the think entry names.
+		live.Call.Args = append(live.Call.Args, pyKV{
+			Key:   "delegation",
+			Value: "OpenAILiveLLMService.ResponsesDelegation(settings=OpenAIResponsesLLMService.Settings(model=" + pyQuote(backend.Model) + "))",
+		})
+	}
+	built := pipecatAgent{
+		Name: name, Class: pyName(name) + "Agent", Prompt: def.Instructions,
+		PromptConst: promptConst, PromptExpr: promptConst, RuntimePromptExpr: promptConst,
+		LLM: live, Realtime: true, Backend: binding.Think,
+	}
+	for _, ref := range def.Tools {
+		tool, ok := agent.Tools[ref]
+		if !ok {
+			// Controls are refused on a realtime package before generation.
+			return pipecatAgent{}, fmt.Errorf("agent %q references unknown tool %q", name, ref)
+		}
+		lowered, err := buildTool(ref, tool, agent.Variables, SupplierIndex(agent.Tasks), env)
+		if err != nil {
+			return pipecatAgent{}, err
+		}
+		built.Tools = append(built.Tools, lowered)
+	}
 	return built, nil
 }
 

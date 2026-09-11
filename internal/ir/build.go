@@ -229,7 +229,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		instructions = FlattenPaths(instructions)
 		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg, raw.Think))
 		out.Agents[name] = AgentDef{
-			Instructions: instructions, Model: raw.Think, Voice: raw.Speak,
+			Instructions: instructions, Model: raw.Think, Voice: raw.Speak, Realtime: raw.Realtime,
 			Tools: attached(raw.Tools, callables(raw, pkg), raw.Handoffs, raw.Escalations),
 		}
 	}
@@ -485,6 +485,21 @@ func buildModels(pkg *packagespec.Package) (map[string]ModelDef, error) {
 			result[name] = convertModelDef(section.entries[name], section.kind, fallback)
 		}
 	}
+	// The realtime section is a list, so its order is the author's and a name
+	// written twice is a mistake rather than a map key silently winning.
+	for _, raw := range pkg.Agent.Models.Realtime {
+		if raw.Name == "" {
+			return nil, fmt.Errorf("%s: a models.realtime entry has no name", pkg.Location("agent.yaml", "realtime"))
+		}
+		if prev, ok := result[raw.Name]; ok {
+			return nil, fmt.Errorf("%s: model name %q appears in both %s and realtime; names share one namespace", pkg.Location("agent.yaml", raw.Name), raw.Name, prev.Kind)
+		}
+		def := convertModelDef(packagespec.ModelDef{
+			Provider: raw.Provider, Model: raw.Model, Voice: raw.Voice, Description: raw.Description,
+		}, KindRealtime, nil)
+		def.Think = raw.Think
+		result[raw.Name] = def
+	}
 	return result, nil
 }
 
@@ -510,6 +525,27 @@ func checkModelReferences(pkg *packagespec.Package, models map[string]ModelDef) 
 			return err
 		}
 		if err := check(agent.Speak, KindSpeak, "speak"); err != nil {
+			return err
+		}
+		if err := check(agent.Realtime, KindRealtime, "realtime"); err != nil {
+			return err
+		}
+		// One form or the other: a live model does the jobs think and speak name,
+		// and an agent naming neither has nothing to run on.
+		switch {
+		case agent.Realtime != "" && (agent.Think != "" || agent.Speak != ""):
+			return fmt.Errorf("%s: agent %q names realtime %q and also think or speak: a realtime model listens, thinks and speaks itself, so remove think and speak",
+				pkg.Location("agent.yaml", agentName), agentName, agent.Realtime)
+		case agent.Realtime == "" && agent.Think == "":
+			return fmt.Errorf("%s: agent %q names no think model: write think: <name of a models.think entry> and speak: <name of a models.speak entry>, or realtime: <name of a models.realtime entry>",
+				pkg.Location("agent.yaml", agentName), agentName)
+		case agent.Realtime == "" && agent.Speak == "":
+			return fmt.Errorf("%s: agent %q names no speak model: write speak: <name of a models.speak entry>",
+				pkg.Location("agent.yaml", agentName), agentName)
+		}
+	}
+	for _, raw := range pkg.Agent.Models.Realtime {
+		if err := check(raw.Think, KindThink, "realtime "+raw.Name+" think"); err != nil {
 			return err
 		}
 	}
@@ -582,6 +618,10 @@ func usedModelNames(pkg *packagespec.Package, models map[string]ModelDef) map[st
 	for _, agent := range pkg.Agent.Agents {
 		add(agent.Think)
 		add(agent.Speak)
+		add(agent.Realtime)
+		if agent.Realtime != "" {
+			add(models[agent.Realtime].Think)
+		}
 	}
 	for _, task := range pkg.Tasks {
 		add(task.Think)
@@ -1247,8 +1287,15 @@ func stringSlice(value any) ([]string, error) {
 // stay inert.
 func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, agent *Agent, used map[string]bool) (Target, error) {
 	for _, key := range sortedKeys(raw.Models) {
-		if _, ok := agent.Models[key]; !ok {
+		def, ok := agent.Models[key]
+		if !ok {
 			return Target{}, fmt.Errorf("%s: target %q overrides %q, which is not a defined model", pkg.Location("targets.yaml", key), name, key)
+		}
+		// A realtime entry compiles on one target, so an override has nothing to
+		// vary; and a ModelDef override would drop the think reference the entry
+		// carries, silently. Refused rather than merged.
+		if def.Kind == KindRealtime {
+			return Target{}, fmt.Errorf("%s: target %q overrides realtime model %q; a realtime entry takes no per-target override, because it compiles on pipecat alone", pkg.Location("targets.yaml", key), name, key)
 		}
 	}
 	// Three fields moved out of a target. Each is refused by name, quoting the
@@ -1714,6 +1761,11 @@ func resolveBindings(agent *Agent, used map[string]bool, overrides map[string]pa
 			bindings.Speak[name] = toBinding(def)
 		case KindThink:
 			bindings.Reason[name] = toBinding(def)
+		case KindRealtime:
+			if bindings.Realtime == nil {
+				bindings.Realtime = make(map[string]Binding)
+			}
+			bindings.Realtime[name] = toBinding(def)
 		}
 	}
 	return bindings
@@ -1729,6 +1781,7 @@ func toBinding(def ModelDef) Binding {
 		SemanticEndpointing: def.SemanticEndpointing, Pace: def.Pace,
 		EndpointingDelay: def.EndpointingDelay,
 		Eager:            def.Eager != nil && *def.Eager,
+		Think:            def.Think,
 		AgentID:          def.AgentID, Upstream: def.Upstream, PromptSuffix: def.PromptSuffix,
 		Params: foldParams(def),
 	}

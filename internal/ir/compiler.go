@@ -220,6 +220,9 @@ const (
 	KindSpeak  ModelKind = "speak"
 	KindListen ModelKind = "listen"
 	KindTurn   ModelKind = "turn"
+	// KindRealtime is one model that listens, thinks and speaks. It is
+	// referenced from an agent's `realtime:` rather than its think and speak.
+	KindRealtime ModelKind = "realtime"
 )
 
 // ModelDef is the resolved unified model definition (N15). provider+model carry
@@ -251,6 +254,10 @@ type ModelDef struct {
 	// Eager answers a transcriber's predicted end of turn before it is confirmed.
 	// Turn models only, and only with provider listen; nil is the same as false.
 	Eager *bool `json:"eager,omitempty" yaml:"eager,omitempty"`
+	// Think is the think entry a realtime model hands its tools and reasoning
+	// to. Realtime models only; empty means the live model runs alone and
+	// declines delegated work.
+	Think string `json:"think,omitempty" yaml:"think,omitempty"`
 	// AgentID and Upstream are the SLNG Context Router's two authored fields,
 	// carried verbatim: the id scopes the router's cache and the block says
 	// which upstream serves the model. Neither folds into Params, because params
@@ -495,10 +502,13 @@ const (
 )
 
 type AgentDef struct {
-	Instructions string   `json:"instructions" yaml:"instructions"`
-	Model        string   `json:"model" yaml:"model"`
-	Voice        string   `json:"voice" yaml:"voice"`
-	Tools        []string `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Instructions string `json:"instructions" yaml:"instructions"`
+	Model        string `json:"model" yaml:"model"`
+	Voice        string `json:"voice" yaml:"voice"`
+	// Realtime names the realtime model this agent runs on, in place of Model
+	// and Voice, which are then empty. Set on at most one agent per package.
+	Realtime string   `json:"realtime,omitempty" yaml:"realtime,omitempty"`
+	Tools    []string `json:"tools,omitempty" yaml:"tools,omitempty"`
 }
 
 type Task struct {
@@ -1048,6 +1058,9 @@ type Bindings struct {
 	Turn            *Binding           `json:"turn,omitempty" yaml:"turn,omitempty"`
 	Speak           map[string]Binding `json:"speak,omitempty" yaml:"speak,omitempty"`
 	Reason          map[string]Binding `json:"reason,omitempty" yaml:"reason,omitempty"`
+	// Realtime holds the used realtime models, by name. Nil on every package
+	// that binds none, so the resolved shape of such a package is unchanged.
+	Realtime map[string]Binding `json:"realtime,omitempty" yaml:"realtime,omitempty"`
 }
 
 // ListenFallback pairs a chain entry's model name with its resolved binding.
@@ -1077,6 +1090,9 @@ type Binding struct {
 	// Eager is set only on a turn binding whose provider is listen: the driver
 	// asks the transcriber to predict the end of turn and answers the prediction.
 	Eager bool `json:"eager,omitempty" yaml:"eager,omitempty"`
+	// Think is set only on a realtime binding: the think entry that runs the live
+	// model's tools and reasoning.
+	Think string `json:"think,omitempty" yaml:"think,omitempty"`
 	// AgentID and Upstream are set only on a SLNG Context Router think binding.
 	AgentID  string    `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
 	Upstream *Upstream `json:"upstream,omitempty" yaml:"upstream,omitempty"`

@@ -55,6 +55,12 @@ def require_env() -> None:
 A missing key stops the container at startup and names what is missing, instead
 of failing on the first spoken word.
 
+A package that binds a [live model](/models/realtime) emits one service where
+the transcriber, the model and the synthesizer would be built: it hears the
+caller's audio directly, speaks in its own voice, and hands its tools to the
+`think` entry it names. That shape is Pipecat's alone, and it is the one place
+the emitted `bot.py` builds no transcriber and no synthesizer.
+
 ## Run it without Unmute
 
 The generated README says it:

@@ -1373,20 +1373,33 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 			row.Errors = add(row.Errors, fmt.Sprintf("%s %s binding provider %q has no language slot; remove the language field", provider, label, binding.Provider))
 		}
 	}
-	validateRoleBinding("listen", caps.Role(targetcap.Listen, provider), resolved.Models.Listen, row)
-	checkVendor(targetcap.Listen, resolved.Models.Listen)
-	checkLanguageSlot(targetcap.Listen, "listen", resolved.Models.Listen)
-	for _, fallback := range resolved.Models.ListenFallbacks {
-		binding := fallback.Binding
-		validatePlacement("listen."+fallback.Name, &binding, row)
-		checkVendor(targetcap.Listen, &binding)
-		checkLanguageSlot(targetcap.Listen, "listen."+fallback.Name, &binding)
+	if realtime := realtimeAgentNames(agent); len(realtime) > 0 {
+		// One model listens, thinks and speaks, so the open listen and turn roles
+		// are not required here; validateRealtime refuses the sections if they
+		// are present at all, on the targets that support the binding.
+		applyCapability(caps, targetcap.FieldRealtimeModel, provider, row)
+		if caps.Capability(targetcap.FieldRealtimeModel, provider).Tag == targetcap.Core {
+			validateRealtime(agent, resolved, realtime, checkVendor, row)
+		}
+	} else {
+		validateRoleBinding("listen", caps.Role(targetcap.Listen, provider), resolved.Models.Listen, row)
+		checkVendor(targetcap.Listen, resolved.Models.Listen)
+		checkLanguageSlot(targetcap.Listen, "listen", resolved.Models.Listen)
+		for _, fallback := range resolved.Models.ListenFallbacks {
+			binding := fallback.Binding
+			validatePlacement("listen."+fallback.Name, &binding, row)
+			checkVendor(targetcap.Listen, &binding)
+			checkLanguageSlot(targetcap.Listen, "listen."+fallback.Name, &binding)
+		}
+		validateRoleBinding("turn", caps.Role(targetcap.Turn, provider), resolved.Models.Turn, row)
+		checkVendor(targetcap.Turn, resolved.Models.Turn)
 	}
-	validateRoleBinding("turn", caps.Role(targetcap.Turn, provider), resolved.Models.Turn, row)
-	checkVendor(targetcap.Turn, resolved.Models.Turn)
 
 	models, voices := usedProfiles(agent)
 	for _, name := range slices.Sorted(maps.Keys(voices)) {
+		if name == "" {
+			continue // a realtime agent names no speak model; Build refused every other empty reference
+		}
 		binding, ok := resolved.Models.Speak[name]
 		if !ok || !bindingHasVoice(&binding) {
 			row.Errors = add(row.Errors, fmt.Sprintf("%s target %q is missing speak binding for voice %q", resolved.Provider, resolved.Name, name))
@@ -1401,6 +1414,9 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 		checkSpeakRequiredFields(catalog, provider, name, binding, row)
 	}
 	for _, name := range slices.Sorted(maps.Keys(models)) {
+		if name == "" {
+			continue // a realtime agent names no think model of its own
+		}
 		binding, ok := resolved.Models.Reason[name]
 		if !ok || binding.Model == "" {
 			row.Errors = add(row.Errors, fmt.Sprintf("%s target %q is missing reason binding for model %q", resolved.Provider, resolved.Name, name))
@@ -2321,6 +2337,10 @@ func providerKeyEnvNames(agent *Agent, resolved Target) []struct{ name, site str
 		add(targetcap.Listen, "listen", fallback.Name, &binding)
 	}
 	add(targetcap.Turn, "turn", agent.Turn, resolved.Models.Turn)
+	for _, name := range sortedKeys(resolved.Models.Realtime) {
+		binding := resolved.Models.Realtime[name]
+		add(targetcap.Realtime, "realtime", name, &binding)
+	}
 	for _, name := range sortedKeys(resolved.Models.Speak) {
 		binding := resolved.Models.Speak[name]
 		add(targetcap.Speak, "speak", name, &binding)
@@ -3155,6 +3175,104 @@ func validateListenDecider(agent *Agent, resolved Target, provider targetcap.Pro
 	}
 	if agent.Conversation != nil && agent.Conversation.Interruption != nil && agent.Conversation.Interruption.MinimumWords > 0 {
 		row.Errors = add(row.Errors, "conversation.interruption.minimum_words reaches nothing when the transcriber decides the turn: it gates a local turn start the transcriber replaces. Remove it")
+	}
+}
+
+// realtimeAgentNames lists the agents bound to a realtime model, sorted.
+func realtimeAgentNames(agent *Agent) []string {
+	var names []string
+	for name, def := range agent.Agents {
+		if def.Realtime != "" {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+// validateRealtime holds a package bound to a live model to what the Pipecat
+// driver can emit for one, and refuses every authored thing the live model does
+// itself or that this version's shape has no place for. Each refusal says what
+// to do instead (Principle II). The shape is the inline pipeline with the live
+// service where the transcriber, the model and the synthesizer sat, which is
+// why the first version takes one agent, the browser route, and no call state:
+// the live session fixes its instructions when it starts, and the inline shape
+// has no worker to carry state, tracing or a carrier leg.
+func validateRealtime(agent *Agent, resolved Target, names []string, checkVendor func(targetcap.Role, *Binding), row *TargetValidation) {
+	refuse := func(format string, args ...any) { row.Errors = add(row.Errors, fmt.Sprintf(format, args...)) }
+	first := names[0]
+	model := agent.Agents[first].Realtime
+	if len(agent.Agents) > 1 {
+		var others []string
+		for _, name := range sortedKeys(agent.Agents) {
+			if name != first {
+				others = append(others, name)
+			}
+		}
+		refuse("a realtime model serves one agent: %q is bound by %q and the package also declares agent %s. Compile the rest as a cascaded pipeline (think, listen and speak models), or give every agent think and speak models",
+			model, first, strings.Join(others, ", "))
+	}
+	if len(agent.Tasks) > 0 || len(agent.TaskGroups) > 0 {
+		refuse("a realtime model serves one agent with no tasks: a task changes the instructions mid-call and a live session fixes them when it starts. Remove the tasks and task groups, or compile a cascaded pipeline")
+	}
+	for _, name := range sortedKeys(agent.Controls) {
+		switch agent.Controls[name].(type) {
+		case *AgentTransfer, *Delegate:
+			refuse("a realtime model serves one agent: control %q hands the call to another agent or a task, which a live session cannot follow. Remove it, or compile a cascaded pipeline", name)
+		case *HumanTransfer:
+			refuse("escalation %q is not emitted for a live model in this version: a transfer needs the carrier leg the realtime shape does not carry yet. Remove it, or compile a cascaded pipeline", name)
+		}
+	}
+	if agent.Listen != "" {
+		refuse("models.listen is not used when agent %q binds realtime model %q: the live model listens itself. Remove the listen section", first, model)
+	}
+	if agent.Turn != "" {
+		refuse("models.turn is not used when agent %q binds realtime model %q: the live model decides the turn itself. Remove the turn section", first, model)
+	}
+	for _, name := range sortedKeys(agent.Models) {
+		if agent.Models[name].Kind == KindSpeak {
+			refuse("models.speak is not used when agent %q binds realtime model %q: the live model speaks itself. Remove the speak section", first, model)
+			break
+		}
+	}
+	if agent.Conversation != nil && agent.Conversation.Interruption != nil {
+		refuse("conversation.interruption reaches nothing on a live model: it handles being talked over itself and decides its own turns. Remove it")
+	}
+	if len(agent.Variables) > 0 || len(agent.Prefetch) > 0 {
+		refuse("variables and prefetch are not emitted for a live model in this version: its instructions are fixed when the session starts and the realtime shape carries no call state yet. Remove them, or compile a cascaded pipeline")
+	}
+	if agent.Tracing != nil {
+		refuse("tracing is not emitted for a live model in this version: the realtime shape has no traced worker yet. Remove tracing, or compile a cascaded pipeline")
+	}
+	for _, name := range sortedKeys(agent.Tools) {
+		if agent.Tools[name].Execution == ToolMCP {
+			refuse("mcp tool %q is not emitted for a live model in this version: the realtime shape has no place to start and close a server connection yet. Remove it, or compile a cascaded pipeline", name)
+		}
+	}
+	if resolved.Connection != "" || resolved.Telephony != nil {
+		refuse("a live model compiles for the browser route in this version: connection %q needs the carrier leg the realtime shape does not carry yet. Remove the connection, or compile a cascaded pipeline", resolved.Connection)
+	}
+
+	binding, ok := resolved.Models.Realtime[model]
+	if !ok {
+		refuse("%s target %q is missing realtime binding for model %q", resolved.Provider, resolved.Name, model)
+		return
+	}
+	checkVendor(targetcap.Realtime, &binding)
+	if binding.Model == "" {
+		refuse("realtime model %q names no model: write model: <the live model's id>", model)
+	}
+	def := agent.Models[model]
+	switch {
+	case def.Think == "" && len(agent.Agents[first].Tools) > 0:
+		refuse("realtime model %q is bound by agent %q, which has tools, and names no think entry: tools and reasoning run on the backend. Add think: <name of a models.think entry with provider openai>", model, first)
+	case def.Think != "":
+		backend, ok := resolved.Models.Reason[def.Think]
+		if !ok {
+			refuse("realtime model %q think %q has no reason binding on target %q", model, def.Think, resolved.Name)
+		} else if vendor := cmp.Or(backend.Provider, "openai"); vendor != "openai" || backend.EndpointEnv != "" {
+			refuse("realtime model %q think %q is provider %q: the live model's backend runs at OpenAI, so name a think entry with provider openai and no endpoint_env", model, def.Think, vendor)
+		}
 	}
 }
 

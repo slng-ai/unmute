@@ -80,9 +80,67 @@ say what you bound.
 | `endpointing_delay` | `turn`: a positive duration. The floor, and only the floor |
 | `eager` | `turn`, Pipecat only, with `provider: listen`: answer the transcriber's predicted end of turn before it is confirmed. Off unless set |
 | `fallback` | `think`, `listen` |
+| `name`, `provider`, `model`, `voice`, `think`, `description` | `realtime`, Pipecat only, and nothing else: every other field is refused on a live entry by name |
 
 A target and vendor may narrow this further. For example, validation rejects
 `language` when that integration has no language slot.
+
+### One live model that listens, thinks and speaks (Pipecat)
+
+`models.realtime` binds one model that does the work of `listen`, `think` and
+`speak` together: it hears the caller's audio directly, decides what to say and
+when, and speaks in its own voice. It is a **list** of entries carrying `name:`,
+and an agent names one with `realtime:` in place of `think:` and `speak:`.
+`openai` is the one vendor, and `gpt-live-1` its live model.
+
+```yaml
+models:
+  realtime:
+    - name: live
+      provider: openai
+      model: gpt-live-1
+      voice: marin
+      think: fast
+  think:
+    fast:
+      provider: openai
+      model: gpt-5.6-terra
+
+agents:
+  desk:
+    instructions: instructions.md
+    realtime: live
+    tools:
+      - lookup_customer
+```
+
+`think:` on the realtime entry names a `models.think` entry with
+`provider: openai` and no `endpoint_env`; the live model hands tools and hard
+reasoning to it on OpenAI's Responses API, inside the same live session, and
+keeps talking while it works. An agent with tools and no `think:` is refused.
+That backend must be at OpenAI for the same reason: the handover happens inside
+the session the live model already holds. The greeting reaches the
+session as its opening instruction and the model paraphrases it, so tell the
+user the sense of the line is kept and not its letters.
+
+Write a live package only when the user asks for speech to speech, and say what
+it cannot carry in this version, because each is refused at validate:
+
+- one agent, and no `tasks`, `task_groups`, `handoffs` or `escalations`: the
+  session fixes its instructions when it starts, so nothing may change them
+  mid-call;
+- no `listen`, `speak` or `turn` sections and no `conversation.interruption`:
+  the live model does those jobs itself;
+- no `variables`, `prefetch`, `tracing` or `mcp` tools, and no telephony
+  connection: the live shape carries none of them yet, so it compiles for the
+  browser route;
+- no `temperature`, `language`, `speed`, `params`, `pace` or `endpoint_env` on
+  the entry, and no per-target override of it;
+- the `think` backend must be at OpenAI, and the target must be Pipecat: LiveKit
+  and slng refuse the binding by name.
+
+`conversation.inactivity` still works: the nudge is put to the model in its own
+words and `end_after` ends the call.
 
 ### Let the transcriber decide the turn (Pipecat)
 
@@ -505,6 +563,7 @@ the catalogue holds.
 | pipecat | listen | `slng`, `assemblyai`, `cartesia`, `deepgram`, `elevenlabs`, `gradium`, `openai`, `soniox`, `speechmatics` |
 | pipecat | speak | `slng`, `cartesia`, `deepgram`, `elevenlabs`, `gradium`, `inworld`, `openai`, `rime`, `sarvam`, `soniox` |
 | pipecat | think | `slng`, `anthropic`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openrouter`, `qwen` |
+| pipecat | realtime | `openai` |
 | livekit | listen | `slng`, `assemblyai`, `cartesia`, `deepgram`, `elevenlabs`, `gradium`, `sarvam`, `soniox`, `speechmatics` |
 | livekit | speak | `slng`, `cartesia`, `deepgram`, `elevenlabs`, `gemini`, `gradium`, `inworld`, `rime`, `sarvam`, `soniox` |
 | livekit | think | `slng`, `anthropic`, `aws`, `azure`, `groq`, `mistralai`, `openai`, `openrouter`, `sarvam` |

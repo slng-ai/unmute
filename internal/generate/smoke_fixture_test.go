@@ -440,6 +440,48 @@ func TestSmokeStubbedNamesExistInTheListenerModule(t *testing.T) {
 	}
 }
 
+// TestSmokeStubbedNamesExistInTheLiveModelModule is the same contract for the
+// realtime_live fixture, which TestSmokeLiveModel drives. That script replaces
+// nothing in the emitted module: it swaps the socket constructor inside the
+// framework's own live module and wraps the aggregator parameters to shorten the
+// idle timer, so the bot has to import the service from that module, call the
+// parameters with keywords only and an idle timeout among them, construct the VAD
+// with no arguments, and send the nudge as the commentary event the script waits
+// for.
+func TestSmokeStubbedNamesExistInTheLiveModelModule(t *testing.T) {
+	emitted := artifactFile(t, generateFor(t, "realtime_live", ir.ProviderPipecat), "bot.py")
+	for _, want := range []string{
+		"from pipecat.services.openai.live.llm import OpenAILiveLLMService",
+		"live = dev.observe_live(build_desk_live())",
+		"vad_analyzer=SileroVADAnalyzer(),",
+		"user_idle_timeout=20,",
+		"await live.send_client_event(",
+		"live_events.SessionCommentaryAppendEvent(",
+		"still there",
+		"tools.lookup_customer.lookup_customer(phone=phone)",
+	} {
+		if !strings.Contains(emitted, want) {
+			t.Errorf("bot.py no longer emits %q, so the live model smoke's stand-in is not exercised", want)
+		}
+	}
+	// Every argument to the aggregator parameters is a keyword, so the script's
+	// `lambda **kwargs` wrapper receives all of them and can override one.
+	idx := strings.Index(emitted, "user_params=LLMUserAggregatorParams(\n")
+	if idx < 0 {
+		t.Fatal("the aggregator parameters are not built where the live model smoke wraps them")
+	}
+	rest := emitted[idx:]
+	end := strings.Index(rest, "\n        ),\n")
+	if end < 0 {
+		t.Fatal("the aggregator parameters do not close where the live model smoke expects")
+	}
+	for _, line := range strings.Split(rest[:end], "\n")[1:] {
+		if arg := strings.TrimSpace(line); arg != "" && !strings.Contains(arg, "=") {
+			t.Errorf("the aggregator parameters take a positional argument %q; the smoke wrapper accepts keywords only", arg)
+		}
+	}
+}
+
 // livekitRunContextStandIn is the RunContext the LiveKit salon smokes hand to an
 // emitted tool body, shared by both scripts so there is one shape to keep right.
 //

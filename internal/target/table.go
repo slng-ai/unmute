@@ -68,6 +68,7 @@ const (
 	FieldPace                Field = "pipeline.turn.pace"
 	FieldTurnByListener      Field = "pipeline.turn.listener"
 	FieldTurnEager           Field = "pipeline.turn.eager"
+	FieldRealtimeModel       Field = "models.realtime"
 	FieldFallback            Field = "models.fallback"
 	FieldListenFallback      Field = "models.listen.fallback"
 	FieldTask                Field = "tasks"
@@ -162,6 +163,10 @@ const (
 	Turn   Role = "turn"
 	Speak  Role = "speak"
 	Reason Role = "reason"
+	// Realtime is one model doing the three jobs above. It has catalogue entries
+	// (a vendor's speech-to-speech class) but no row in Table.Roles: it is never
+	// required, and where an agent binds one the three open roles are not.
+	Realtime Role = "realtime"
 )
 
 type RoleKind string
@@ -340,6 +345,16 @@ func Default() Table {
 			FieldTurnEager: field(
 				deny(LiveKit, "eager is not available on livekit: no transcriber decides the turn there, so there is no prediction to answer early. Remove eager, or compile to pipecat with turn provider listen"),
 				deny(Slng, "slng target owns its own turn taking, so eager reaches nothing: remove it, or compile to pipecat with turn provider listen"),
+			),
+			// `models: realtime:`, one model that listens, thinks and speaks. The
+			// Pipecat driver has a pipeline shape for it (the live service sits
+			// where the transcriber, the model and the synthesizer sat). LiveKit
+			// has realtime services of its own, but this driver emits no shape
+			// for them, and pretending otherwise would be the silent downgrade
+			// Principle II forbids. SLNG binds the three roles by name.
+			FieldRealtimeModel: field(
+				deny(LiveKit, "a realtime model compiles on pipecat only: the livekit driver emits no pipeline for one model that listens, thinks and speaks. Compile to pipecat, or bind think, listen and speak models"),
+				deny(Slng, "slng target binds listen, think and speak by name and has no slot for a realtime model that does all three: compile to pipecat, or bind think, listen and speak models"),
 			),
 			// SLNG has a real fallback slot per component: fallbacks.stt and
 			// fallbacks.llm take model strings, fallbacks.tts takes model and voice
