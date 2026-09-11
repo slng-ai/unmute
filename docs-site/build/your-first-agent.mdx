@@ -259,14 +259,9 @@ changing the agent. [Targets](/targets/overview) has both.
 unmute validate my-agent
 ```
 
-```text
-✓ livekit (livekit)
-```
-
-This scaffolded package validates clean. When `unmute validate` does print a
-warning, it goes to standard error and the command still exits 0: a warning is
-a real difference worth reading, not a failure. Then talk to it in your
-browser:
+The scaffolded package validates clean. A warning, when you do get one, does
+not stop the command: it names a real difference worth reading. Now talk to
+the agent in your browser:
 
 ```sh
 unmute dev my-agent

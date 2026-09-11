@@ -12,13 +12,12 @@ start?", and everything below assumes it.
 
 <Note>
 
-These shapes need a code target, Pipecat or LiveKit. The SLNG target
-compiles one agent with one prompt, so it refuses tasks, task groups and
-handoffs. `unmute validate` says so, and names the way out:
+These shapes need a code target, Pipecat or LiveKit. SLNG compiles one agent
+with one prompt, so it refuses tasks, task groups and handoffs today.
+`unmute validate` says so and names the way out: fold the step into the
+agent's instructions, or compile to LiveKit or Pipecat.
 
-```text
-slng: slng target writes one agent with one prompt, so a task has nowhere to go: fold the step into the agent's instructions, or compile to livekit or pipecat which emit multi-task agents
-```
+Tasks on SLNG are coming.
 
 </Note>
 

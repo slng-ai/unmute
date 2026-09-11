@@ -44,16 +44,74 @@ agents:
           - customer_name: result.customer_name
 ```
 
-`instructions:` points at a Markdown file. `tasks/` is a folder you create next
-to `agent.yaml`, and the path is relative to the package.
+### Every key a task takes
 
-`when:` tells the model when to run the task. A task with no `when:` is a
-definition only: a task group can list it as a step, but an agent cannot run it
-on its own.
+Two are required. The rest are how you shape the step.
 
-`assign:` defines what the task saves and where each value goes. The
-destination variable already owns the type and description, so the task does
-not repeat them in a separate result schema.
+<ParamField path="name" type="string" required>
+  What the task is called. Names are unique across the whole package, because
+  every one becomes a function the model can call.
+</ParamField>
+
+<ParamField path="instructions" type="file path" required>
+  The Markdown file holding this task's prompt. `tasks/` is a folder you create
+  next to `agent.yaml`, and the path is relative to the package.
+</ParamField>
+
+<ParamField path="when" type="string">
+  Tells the model when to run the task. A task with no `when:` is a definition
+  only: a task group can list it as a step, but an agent cannot choose to run
+  it.
+</ParamField>
+
+<ParamField path="tools" type="list of names">
+  The tools this task may call. Usually narrower than the owning agent's list,
+  which is much of the point.
+</ParamField>
+
+<ParamField path="assign" type="list of pairs">
+  What the task saves, and into which [variable](/build/variables). The
+  destination variable already owns the type and the description, so the task
+  does not repeat them in a result schema of its own. Left out, the task saves
+  nothing and can still finish.
+</ParamField>
+
+<ParamField path="finish" type="list of tools">
+  Which tools end the task by their own result, instead of the model deciding.
+  See [Say what success looks like](#say-what-success-looks-like).
+</ParamField>
+
+<ParamField path="handoffs" type="list of names">
+  Agents this task can hand the caller to. Taking one ends the task.
+</ParamField>
+
+<ParamField path="announce" type="string">
+  One fixed sentence spoken as the task starts. Omit it for a silent
+  transition. See [Announce a task](#announce-a-task).
+</ParamField>
+
+<ParamField path="opening" type="generate | listen" default="generate">
+  How the task's first turn happens. `generate` has the model open it.
+  `listen` speaks the `announce:` line and waits, costing no model request.
+  See [Open by listening](#open-by-listening).
+</ParamField>
+
+<ParamField path="context" type="block">
+  How much conversation the task receives. Its own keys are `history:`,
+  `max_messages:`, `summarizer:` and `include_tool_calls:`. See
+  [Choose conversation history](#choose-conversation-history).
+</ParamField>
+
+<ParamField path="think" type="model name">
+  Use a different reasoning model for this step than the owner uses. Names one
+  entry under `models.think`.
+</ParamField>
+
+There is no `tasks:`, no `task_groups:` and no `escalations:` key on a task. A
+task cannot run another task or reach a person directly, and that is structure
+rather than a rule to remember: there is no key to write it in.
+
+## How a task finishes
 
 Every task gets a `finish` call. The model uses it to say the task is done and
 to hand over the values in `assign:`. The `finish:` key is different: it names
@@ -207,9 +265,9 @@ assignments, and confirmation.
 | `reset` | No earlier conversation. Its own instructions and explicit placeholders still apply. |
 | `summary` | A generated summary. Compiles on LiveKit only; Pipecat refuses this value. |
 
-A task needs a code target, Pipecat or LiveKit. On the SLNG target a
-task cannot run at all, so every history value is refused there, `messages`
-included.
+A task needs a code target, Pipecat or LiveKit. On SLNG a task cannot run at
+all today, so every history value is refused there, `messages` included. Tasks
+on SLNG are coming.
 
 ```yaml agent.yaml
       - name: reschedule_booking

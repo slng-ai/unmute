@@ -143,12 +143,7 @@ tools; naming one keeps the rest out of a conversation that has to stay fast.
 
 On LiveKit and Pipecat, the list is **not checked against the server** during
 validation, because its tools are fetched at run time. A name the server does
-not expose is never offered, and the package still validates:
-
-```text
-✓ livekit (livekit)
-✓ pipecat (pipecat)
-```
+not expose is never offered, and the package still validates on both.
 
 Leave `tools` out and the agent gets everything the server exposes.
 An empty list entry or a name repeated twice is still an authoring error and is

@@ -13,13 +13,12 @@ the agent looks it up and says when the parcel is due. It is small on purpose.
 The shape is what matters, and you will swap the parcel for your own thing.
 
 <Note>
-  Tasks need a code target: Pipecat or LiveKit. The package `unmute
-  init` writes targets LiveKit, so it is ready. The SLNG target compiles
-  one agent with one prompt, and refuses a task with this line:
+  **Tasks need a code target: Pipecat or LiveKit.** The package `unmute init`
+  writes targets LiveKit, so you are ready.
 
-  ```text
-  slng: slng target writes one agent with one prompt, so a task has nowhere to go: fold the step into the agent's instructions, or compile to livekit or pipecat which emit multi-task agents
-  ```
+  SLNG compiles one agent with one prompt, so it refuses a task today and tells
+  you to fold the step into the agent's instructions instead. Tasks on SLNG are
+  coming.
 </Note>
 
 ## What a task is
@@ -44,10 +43,6 @@ write is always a task.
 
     ```sh
     unmute validate my-agent
-    ```
-
-    ```text
-    ✓ livekit (livekit)
     ```
 
     One agent, one prompt, one built-in tool so it can hang up. Keep this
@@ -152,10 +147,6 @@ write is always a task.
     unmute validate my-agent
     ```
 
-    ```text
-    ✓ livekit (livekit)
-    ```
-
     This already works, and for many agents it is enough. Stop here if the job
     is one lookup and one answer. The rest of this page is for when you want the
     lookup to be its own small conversation, and you want to keep what it
@@ -186,10 +177,6 @@ write is always a task.
 
     ```sh
     unmute validate my-agent
-    ```
-
-    ```text
-    ✓ livekit (livekit)
     ```
   </Step>
 
@@ -235,11 +222,10 @@ write is always a task.
     unmute validate my-agent
     ```
 
-    ```text
-    ✓ livekit (livekit)
+    It still validates, and it warns:
 
-    Warnings:
-      livekit: agent "assistant" holds every tool of its step "find_parcel" (look_up_parcel), so it can do the step's work without entering it and the step's assign may never run: drop look_up_parcel from agent "assistant" tools and leave them on the step
+    ```text wrap
+    agent "assistant" holds every tool of its step "find_parcel" (look_up_parcel), so it can do the step's work without entering it and the step's assign may never run: drop look_up_parcel from agent "assistant" tools and leave them on the step
     ```
 
     Read that warning, because it is the most common mistake with a first
@@ -279,10 +265,6 @@ write is always a task.
     unmute validate my-agent
     ```
 
-    ```text
-    ✓ livekit (livekit)
-    ```
-
     The warning is gone. The model now has one way to look up a parcel, and it
     goes through the task.
   </Step>
@@ -306,10 +288,6 @@ write is always a task.
 
     ```sh
     unmute validate my-agent
-    ```
-
-    ```text
-    ✓ livekit (livekit)
     ```
 
     Here is what that line did. Every task gets a `finish` call, a function
@@ -353,10 +331,6 @@ write is always a task.
     ```sh
     unmute validate my-agent
     ```
-
-    ```text
-    ✓ livekit (livekit)
-    ```
   </Step>
 
   <Step title="Say what success looks like">
@@ -384,10 +358,6 @@ write is always a task.
 
     ```sh
     unmute validate my-agent
-    ```
-
-    ```text
-    ✓ livekit (livekit)
     ```
 
     Read it as a sentence: "this task is finished when `look_up_parcel` returns
@@ -466,10 +436,6 @@ write is always a task.
 
     ```sh
     unmute validate my-agent
-    ```
-
-    ```text
-    ✓ livekit (livekit)
     ```
   </Step>
 

@@ -209,10 +209,7 @@ Only the **name** belongs in the file. Put that name in `agent.yaml` under
 `agent.yaml` forgot to declare one:
 
 ```text wrap
-✓ pipecat (pipecat)
-
-Warnings:
-  pipecat: environment variables referenced but not declared in secrets: CRM_API_TOKEN (tools/sync_customer.py os.environ)
+pipecat: environment variables referenced but not declared in secrets: CRM_API_TOKEN (tools/sync_customer.py os.environ)
 ```
 
 The literal lookup also makes the compiler include the name in generated

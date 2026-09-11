@@ -195,10 +195,7 @@ the generated environment instructions and call-time checks; declaring it makes
 the package's explicit secret inventory agree with that inferred requirement:
 
 ```text wrap
-✓ livekit (livekit)
-
-Warnings:
-  livekit: environment variables referenced but not declared in secrets: SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address)
+livekit: environment variables referenced but not declared in secrets: SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address)
 ```
 
 **A connection nothing names is a warning, not an error.** The build succeeds and
