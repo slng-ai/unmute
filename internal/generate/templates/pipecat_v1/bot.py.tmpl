@@ -61,11 +61,11 @@ from pydantic import {{.PydanticImports}}{{end}}
 {{if .NeedsMCP}}from mcp.client.session_group import {{join .MCPParamsImports ", "}}
 {{end}}
 {{if .NeedsFunctionSchema}}from pipecat.adapters.schemas.function_schema import FunctionSchema
-{{end}}{{if not .SemanticOff}}from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+{{end}}{{if and (not .SemanticOff) (not .Pace.ByListener)}}from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 {{end}}from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
-{{if not .Inline}}from pipecat.bus import BusBridgeProcessor
+{{if not .Pace.ByListener}}from pipecat.audio.vad.vad_analyzer import VADParams
+{{end}}{{if not .Inline}}from pipecat.bus import BusBridgeProcessor
 {{end}}{{if .HasFlows}}from pipecat.flows import {{if .NeedsContextStrategy}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig, NO_RESPONSE
 {{end}}{{if .FrameImports}}from pipecat.frames.frames import {{join .FrameImports ", "}}
 {{end}}from pipecat.pipeline.pipeline import Pipeline
@@ -85,9 +85,10 @@ from pipecat.runner.utils import create_transport
 {{if .DailyParams}}{{.DailyParams.Import}}
 {{end}}{{if .CloudWebsocket}}from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 {{end}}{{if .NeedsTurnStrategies}}from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
-{{end}}from pipecat.turns.user_stop import {{if .SemanticOff}}SpeechTimeoutUserTurnStopStrategy{{else}}TurnAnalyzerUserTurnStopStrategy{{end}}
+{{end}}{{if .Pace.ByListener}}{{if .Pace.Eager}}from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies
+{{end}}{{else}}from pipecat.turns.user_stop import {{if .SemanticOff}}SpeechTimeoutUserTurnStopStrategy{{else}}TurnAnalyzerUserTurnStopStrategy{{end}}
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
-{{if .UserMuteStrategies}}from pipecat.turns.user_mute import {{join .UserMuteStrategies ", "}}
+{{end}}{{if .UserMuteStrategies}}from pipecat.turns.user_mute import {{join .UserMuteStrategies ", "}}
 {{end}}{{if not .Inline}}from pipecat.workers.llm import {{if not (and .Tracing (or .NeedsFunctionCalls .NeedsMCP))}}LLMWorker, {{end}}LLMWorkerActivationArgs{{if .NeedsFunctionCalls}}, tool{{end}}
 {{else if .NeedsFunctionCalls}}from pipecat.workers.llm import tool
 {{end}}from pipecat.workers.runner import WorkerRunner
@@ -1742,7 +1743,25 @@ def build_stt():
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            # The FLOOR: how long silence has to last before speech counts as
+{{if .Pace.ByListener}}            # The transcriber decides the turn (turn: provider: listen). The VAD
+            # still runs, for the speaking frames the idle timer and the latency
+            # observer anchor on, but no silence window of ours ends a turn and
+            # no local analyzer is built: {{.Pace.Listener.Class}} owns both
+            # halves, and its own end-of-turn timeout carries the pace ceiling
+            # ({{.Pace.Listener.CeilingArg}}={{.Pace.CeilingMillis}}, from pace: {{.Pace.Name}}).
+            vad_analyzer=SileroVADAnalyzer(),
+{{if .Pace.Eager}}            # eager: the service predicts an end of turn before it commits one, and
+            # the reply is generated while it decides. The framework holds that
+            # reply inside the LLM service and drops it if the caller resumes or
+            # the committed words differ, so an unconfirmed turn never reaches the
+            # caller, the context or a tool. Passed explicitly because the
+            # aggregator ignores a service's recommended strategies the moment the
+            # bot passes any of its own.
+            user_turn_strategies=EagerUserTurnStrategies(),
+{{else}}            # No user_turn_strategies of ours: the aggregator takes the external
+            # strategies the service recommends through its metadata frame, and
+            # would ignore that recommendation if one were passed here.
+{{end}}{{else}}            # The FLOOR: how long silence has to last before speech counts as
             # stopped. {{if .Pace.FloorAuthored}}Authored as endpointing_delay.{{else}}Pipecat's own default, and it does not move with the pace.{{end}}
             #
             # Widening this window makes some turns SLOWER, not more patient.
@@ -1779,7 +1798,7 @@ def build_stt():
                 ],
 {{end}}
             ),
-{{if .UserMuteStrategies}}            # The stretches of the call the caller cannot talk over, lowered from
+{{end}}{{if .UserMuteStrategies}}            # The stretches of the call the caller cannot talk over, lowered from
             # conversation.interruption. On a phone route the greeting is
             # protected by default: a phone leg has no echo cancellation, so
             # without this the agent hears its own opening line and cuts itself
@@ -1925,7 +1944,25 @@ def build_stt():
 {{end}}    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            # The FLOOR: how long silence has to last before speech counts as
+{{if .Pace.ByListener}}            # The transcriber decides the turn (turn: provider: listen). The VAD
+            # still runs, for the speaking frames the idle timer and the latency
+            # observer anchor on, but no silence window of ours ends a turn and
+            # no local analyzer is built: {{.Pace.Listener.Class}} owns both
+            # halves, and its own end-of-turn timeout carries the pace ceiling
+            # ({{.Pace.Listener.CeilingArg}}={{.Pace.CeilingMillis}}, from pace: {{.Pace.Name}}).
+            vad_analyzer=SileroVADAnalyzer(),
+{{if .Pace.Eager}}            # eager: the service predicts an end of turn before it commits one, and
+            # the reply is generated while it decides. The framework holds that
+            # reply inside the LLM service and drops it if the caller resumes or
+            # the committed words differ, so an unconfirmed turn never reaches the
+            # caller, the context or a tool. Passed explicitly because the
+            # aggregator ignores a service's recommended strategies the moment the
+            # bot passes any of its own.
+            user_turn_strategies=EagerUserTurnStrategies(),
+{{else}}            # No user_turn_strategies of ours: the aggregator takes the external
+            # strategies the service recommends through its metadata frame, and
+            # would ignore that recommendation if one were passed here.
+{{end}}{{else}}            # The FLOOR: how long silence has to last before speech counts as
             # stopped. {{if .Pace.FloorAuthored}}Authored as endpointing_delay.{{else}}Pipecat's own default, and it does not move with the pace.{{end}}
             #
             # Widening this window makes some turns SLOWER, not more patient.
@@ -1962,7 +1999,7 @@ def build_stt():
                 ],
 {{end}}
             ),
-{{if .UserMuteStrategies}}            # The stretches of the call the caller cannot talk over, lowered from
+{{end}}{{if .UserMuteStrategies}}            # The stretches of the call the caller cannot talk over, lowered from
             # conversation.interruption. On a phone route the greeting is
             # protected by default: a phone leg has no echo cancellation, so
             # without this the agent hears its own opening line and cuts itself

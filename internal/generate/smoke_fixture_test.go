@@ -403,6 +403,43 @@ func TestSmokeStubbedNamesExistInTheEmittedModule(t *testing.T) {
 	}
 }
 
+// TestSmokeStubbedNamesExistInTheListenerModule is the same contract for the
+// turn_listener fixture, which TestSmokeListenerDecidesTheTurn drives. Its
+// script leaves the emitted build_stt() in place and replaces the class it
+// names, so the class has to be named, called with keyword arguments only, and
+// read for its Settings; and the aggregator's VAD has to be constructed with no
+// arguments, because the shared stub for it takes only keywords.
+func TestSmokeStubbedNamesExistInTheListenerModule(t *testing.T) {
+	emitted := artifactFile(t, generateFor(t, "turn_listener", ir.ProviderPipecat), "bot.py")
+	for _, want := range []string{
+		"return DeepgramFluxSTTService(\n",
+		"settings=DeepgramFluxSTTService.Settings(",
+		"enable_eager_end_of_turn=True,",
+		"vad_analyzer=SileroVADAnalyzer(),",
+		"user_turn_strategies=EagerUserTurnStrategies(),",
+	} {
+		if !strings.Contains(emitted, want) {
+			t.Errorf("bot.py no longer emits %q, so the listener smoke's stand-in is not exercised", want)
+		}
+	}
+	// Every argument to the service is a keyword, so the stand-in's
+	// `__call__(self, **kwargs)` receives all of them.
+	idx := strings.Index(emitted, "return DeepgramFluxSTTService(\n")
+	if idx < 0 {
+		return
+	}
+	rest := emitted[idx:]
+	end := strings.Index(rest, "\n    )\n")
+	if end < 0 {
+		t.Fatal("the Flux constructor call does not close where the stand-in expects")
+	}
+	for _, line := range strings.Split(rest[:end], "\n")[1:] {
+		if arg := strings.TrimSpace(line); arg != "" && !strings.Contains(arg, "=") && !strings.HasSuffix(arg, ",") && !strings.HasSuffix(arg, "(") {
+			t.Errorf("the Flux constructor takes a positional argument %q; the smoke stand-in accepts keywords only", arg)
+		}
+	}
+}
+
 // livekitRunContextStandIn is the RunContext the LiveKit salon smokes hand to an
 // emitted tool body, shared by both scripts so there is one shape to keep right.
 //

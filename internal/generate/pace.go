@@ -30,30 +30,51 @@ type paceView struct {
 	FloorAuthored bool
 	// Ceiling is the longest the runtime waits before closing the turn
 	// regardless, in seconds. LiveKit spells it max_delay; Pipecat spells it the
-	// analyzer's own stop_secs.
+	// analyzer's own stop_secs, or the transcriber's end-of-turn timeout when
+	// the transcriber decides the turn.
 	Ceiling string
+	// CeilingMillis is the same ceiling in whole milliseconds, which is how the
+	// turn-detecting transcribers spell their timeout (eot_timeout_ms,
+	// turn_end_timeout_ms).
+	CeilingMillis string
 	// MinDelay and Mode are LiveKit's endpointing dict. Pipecat has no separate
 	// equivalent for either, and its runbook says so rather than pretending.
 	MinDelay string
 	Mode     string
+	// ByListener says the transcriber decides the turn (`turn: provider:
+	// listen`): no local silence window is consulted and no local analyzer is
+	// built, so the floor above is not emitted and the ceiling reaches the
+	// transcriber's own timeout instead. Pipecat only; validation refuses the
+	// decider elsewhere before a driver sees it.
+	ByListener bool
+	// Eager says the transcriber's predicted end of turn is answered before it
+	// is confirmed. Meaningful only with ByListener, which validation holds.
+	Eager bool
+	// Listener is the turn-detecting service row when ByListener is set, so the
+	// runbook can name the class and the field the ceiling landed in.
+	Listener targetcap.ListenTurnDetector
 }
 
 // resolvePaceView resolves a target's turn binding into the literals its
 // template needs. An unset pace reads as balanced rather than empty, because the
 // name reaches the runbook and the compile report and "" would tell an author
 // their agent waits on nothing.
-func resolvePaceView(provider targetcap.Provider, binding *ir.Binding) paceView {
+//
+// listen is the target's listening binding, read only when the turn binding
+// hands it the decision, to name the service that took it.
+func resolvePaceView(provider targetcap.Provider, binding *ir.Binding, listen *ir.Binding) paceView {
 	pace := targetcap.PaceBalanced
 	if binding != nil && binding.Pace != "" {
 		pace = string(binding.Pace)
 	}
 	profile := targetcap.ResolvePace(provider, pace)
 	view := paceView{
-		Name:     pace,
-		Floor:    seconds(profile.VADSilence),
-		Ceiling:  seconds(profile.TurnCeiling),
-		MinDelay: seconds(profile.MinDelay),
-		Mode:     profile.Mode,
+		Name:          pace,
+		Floor:         seconds(profile.VADSilence),
+		Ceiling:       seconds(profile.TurnCeiling),
+		CeilingMillis: strconv.Itoa(int(profile.TurnCeiling*1000 + 0.5)),
+		MinDelay:      seconds(profile.MinDelay),
+		Mode:          profile.Mode,
 	}
 	if binding != nil && binding.EndpointingDelay != "" {
 		// FR-004: an authored duration is never overridden. It wins the floor and
@@ -63,7 +84,23 @@ func resolvePaceView(provider targetcap.Provider, binding *ir.Binding) paceView 
 			view.FloorAuthored = true
 		}
 	}
+	if binding != nil && binding.Provider == targetcap.TurnDeciderListen && listen != nil {
+		if detector, ok := targetcap.LookupListenTurnDetector(provider, listenVendor(*listen)); ok {
+			view.ByListener = true
+			view.Eager = binding.Eager
+			view.Listener = detector
+		}
+	}
 	return view
+}
+
+// listenVendor is the vendor a listening binding resolves to, with the same
+// default spelling resolveService uses for an unnamed provider.
+func listenVendor(listen ir.Binding) string {
+	if listen.Provider == "" {
+		return "openai"
+	}
+	return listen.Provider
 }
 
 // seconds renders a profile value the way Python reads it: 0.3, 1.6, 3. Trailing
@@ -77,6 +114,13 @@ func seconds(value float64) string {
 // the whole point of one authored word is that the author can still see what it
 // became, and "pace: snappy" alone does not tell anyone how long the agent waits.
 func (p paceView) note() string {
+	if p.ByListener {
+		eager := "answers the confirmed turn"
+		if p.Eager {
+			eager = "answers the predicted turn early"
+		}
+		return "turn pace " + p.Name + " (the transcriber decides, " + p.Listener.Class + " closes at " + p.Ceiling + "s via " + p.Listener.CeilingArg + ", " + eager + ")"
+	}
 	floor := "silence " + p.Floor + "s from the pace"
 	if p.FloorAuthored {
 		floor = "silence " + p.Floor + "s authored"

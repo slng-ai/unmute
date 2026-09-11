@@ -1,0 +1,6 @@
+# Pipecat only: LiveKit's turn model runs beside the transcriber and cannot hand
+# it the decision, so this shape is refused there.
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.9.0"

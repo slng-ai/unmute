@@ -66,6 +66,8 @@ const (
 	FieldSemanticEndpointing Field = "pipeline.turn.semantic_endpointing"
 	FieldEndpointingDelay    Field = "pipeline.turn.endpointing_delay"
 	FieldPace                Field = "pipeline.turn.pace"
+	FieldTurnByListener      Field = "pipeline.turn.listener"
+	FieldTurnEager           Field = "pipeline.turn.eager"
 	FieldFallback            Field = "models.fallback"
 	FieldListenFallback      Field = "models.listen.fallback"
 	FieldTask                Field = "tasks"
@@ -319,6 +321,25 @@ func Default() Table {
 			// a duration in disguise and endpointing_delay already is one.
 			FieldPace: field(
 				deny(Slng, "slng target owns its own turn taking, so a pace reaches nothing: remove it, or compile to livekit or pipecat, which set the turn window themselves"),
+			),
+			// `turn: provider: listen`: the listening model's own turn detection
+			// ends the turn, and the local pair is not built. Pipecat has a class
+			// for it per vendor (turn_listener.go). LiveKit runs its turn model
+			// beside whatever transcriber is bound and has no path that hands the
+			// decision to the transcriber, so the only honest answer there is the
+			// local detector it does have.
+			FieldTurnByListener: field(
+				deny(LiveKit, "turn provider \"listen\" is not available on livekit: its turn model runs beside the transcriber. Use turn-detector-mini (local) or turn-detector (LiveKit Cloud)"),
+				deny(Slng, "slng target owns its own turn taking, so turn provider \"listen\" reaches nothing: set the turn provider to local, or compile to pipecat, where the transcriber can decide the turn"),
+			),
+			// `eager: true` answers the transcriber's predicted end of turn before
+			// it is confirmed, so the gap is spent generating rather than waiting.
+			// It is meaningful only where a transcriber decides the turn, which
+			// is the row above; the same two targets refuse it for the same
+			// reasons.
+			FieldTurnEager: field(
+				deny(LiveKit, "eager is not available on livekit: no transcriber decides the turn there, so there is no prediction to answer early. Remove eager, or compile to pipecat with turn provider listen"),
+				deny(Slng, "slng target owns its own turn taking, so eager reaches nothing: remove it, or compile to pipecat with turn provider listen"),
 			),
 			// SLNG has a real fallback slot per component: fallbacks.stt and
 			// fallbacks.llm take model strings, fallbacks.tts takes model and voice

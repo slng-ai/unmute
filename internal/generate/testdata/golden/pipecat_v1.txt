@@ -198,7 +198,8 @@ LiveKit's moves, and why the inconsistency is deliberate.
 
 The end-of-turn analyzer (`LocalSmartTurnAnalyzerV3`) runs on every call. It is
 constructed explicitly only so the ceiling is reachable; left implicit it sits at
-its own 3s.
+its own 3s. A transcriber that detects turns itself only *proposes* an ending
+while this pair is bound; `turn: provider: listen` hands it the decision.
 
 A minimum interruption word count is set, and it replaces the default turn-*start*
 pair on purpose: gating turn start on words is the point, and leaving VAD start in
