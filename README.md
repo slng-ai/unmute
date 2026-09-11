@@ -15,9 +15,11 @@
 </p>
 
 Unmute is a command line compiler for voice agents. You write a small package of
-YAML and Markdown that says who the agent is, which models it uses, and which
-tools it can call. Unmute turns that into a real Python project for the
-orchestrator you picked.
+YAML and Markdown that says who the agent is, which models it uses, which tools
+it can call, what it saves as the call goes on, and how the work is broken into
+steps. Unmute turns that into a real Python project for the orchestrator you
+picked, and refuses to compile the mistakes you would otherwise find on a live
+call.
 
 The project it writes is yours. Pinned dependencies, a Dockerfile, a runbook, and
 no dependency on Unmute at runtime. Unmute compiles ahead of time and gets out of
@@ -89,10 +91,15 @@ models:
       provider: slng
       model: "deepgram/aura:2"
       voice: "aura-2-thalia-en"
+      params:
+        # Speech goes through the SLNG gateway nearest your callers.
+        world_part: eu-north
   listen:
     transcriber:
       provider: slng
       model: "deepgram/nova:3"
+      params:
+        world_part: eu-north
   turn:
     detector:
       provider: local
@@ -181,18 +188,264 @@ imports Unmute.
 Treat `build/` as output. Edit the package and compile again. Anything you change
 inside `build/` is overwritten on the next compile.
 
+## What else the file holds
+
+The agent at the top of this page is the floor. Everything below is written in
+the same `agent.yaml`, next to what you have already read, and every piece of it
+is checked before a call happens rather than during one. The snippets are from
+[`customer-intake`](examples/customer-intake/) and
+[`salon-concierge`](examples/salon-concierge/).
+
+### Values with a type
+
+A variable says what it holds. The model is told the format, and the value is
+checked where it enters, not where it is used.
+
+```yaml
+shapes:
+  - name: CustomerRecord
+    description: The record the intake desk opened for this caller.
+    fields:
+      - record_id: Id
+      - opened_on: Date
+      - enquiry: Literal["new_customer", "existing_customer", "complaint", "other"]
+
+variables:
+  contact:
+    type: NameEmail
+    description: >-
+      Who the caller is and where their confirmation goes, the name and the
+      email address held as two separate parts.
+
+  caller_email:
+    type: EmailStr
+    default: ""
+    description: The caller's email address on its own, with no name around it.
+
+  callback_time:
+    type: Time | None
+    description: >-
+      A good time of day to ring the caller back, on the 24 hour clock. Leave it
+      out when the caller has not named one.
+
+  notes:
+    type: list[str]
+    description: >-
+      Anything the caller added that no other field holds, one short entry per
+      thing they said.
+```
+
+`Phone`, `Date`, `Time`, `Id` and `EmailStr` are text with a checked shape.
+`NameEmail` holds a name and an address as two separate parts, so a prompt can
+use the name without reading the address out loud. You also have `str`, `int`,
+`float`, `bool`, `Literal[...]`, `list[...]`, `| None`, and any shape you
+declare yourself.
+
+An address the model misheard is refused with the format, inside the same turn,
+so the model fixes it rather than saving something wrong. The email check never
+asks DNS: this runs while the caller is on the line, and a slow resolver would
+hold them in silence.
+
+A step takes one part of a result with a dotted path, and `+` appends instead of
+replacing.
+
+```yaml
+assign:
+  - contact: result.contact
+  - caller_email: result.contact.email
+  - notes+: result.note
+```
+
+### A step that ends on its own tool
+
+One task out of an agent's `tasks:` list.
+
+```yaml
+- name: manage_booking
+  instructions: tasks/booking.md
+  tools:
+    - create_booking
+    - modify_booking
+    - cancel_booking
+  finish:
+    - tool: create_booking
+      success:
+        - status: booked
+    - tool: modify_booking
+      success:
+        - status: modified
+    - tool: cancel_booking
+      success:
+        - status: cancelled
+  assign:
+    - appointment: result.appointment
+  context:
+    history: messages
+```
+
+`finish:` names the tool calls that end the step, and the result value that
+counts as success. The booking goes through and the step is over. No extra model
+call to announce it, no second sentence, and none of those tools runs again in
+that step, because a second booking that ran and was then refused is still a
+second booking. The caller hears the owning agent reply once.
+
+The success value has to be one the tool's own output declares in an `enum:`. A
+field that cannot hold it is refused when you compile, with the file and the
+line.
+
+### A group that skips work already done
+
+```yaml
+task_groups:
+  book:
+    when: >-
+      The caller wants to create, move or cancel a booking. Includes a change to
+      an appointment just made.
+    steps:
+      - task: verify_customer
+        skip_when_confirmed: customer_phone
+      - manage_booking
+    context_scope: shared
+    then: return
+```
+
+Verification runs the first time and is skipped once the number is agreed.
+`skip_when_confirmed:` has to name a value that this same step confirms, so the
+two cannot drift apart. Entering the step again withdraws what it confirmed,
+which is what a caller correcting their number needs.
+
+### Facts in the prompt before the caller speaks
+
+```yaml
+prefetch:
+  - name: today
+    clock: now
+    timezone: Europe/Madrid
+    assign:
+      - today_date: result.date
+
+  - name: caller
+    source: from_number
+    assign:
+      - caller_phone: result.value
+```
+
+Each entry runs before the greeting, on its own budget, and cannot raise. When
+one skips, the variable keeps its default and the step that asks runs instead.
+The zone sits on the entry, because a container's clock is UTC and would name
+the wrong day for everybody who is not on it.
+
+### A value the model never retypes
+
+```yaml
+# tools/create_customer_record.yaml
+input:
+  type: object
+  properties:
+    summary:
+      type: string
+      description: One sentence in the caller's own words saying what they rang about.
+  required:
+    - summary
+
+inject:
+  - phone: "{{caller_phone}}"
+  - email: "{{caller_email}}"
+  - name: "{{contact.name}}"
+```
+
+The model fills one argument. The other three come straight out of saved state
+and are hidden from it, so a digit cannot change between the turn it was agreed
+on and the turn it was written down.
+
+A variable can also carry `confirm: verify_contact`. Until that step hears a
+yes, the value renders in no prompt but that step's own, and any tool injecting
+it refuses itself and names the step to run first.
+
+### Speech through the gateway nearest your callers
+
+```yaml
+models:
+  speak:
+    voice:
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+      params:
+        world_part: eu-north
+  listen:
+    transcriber:
+      provider: slng
+      model: "deepgram/nova:3"
+      params:
+        world_part: eu-north
+```
+
+`world_part` picks one of 13 SLNG speech gateways, on each `listen` and `speak`
+model separately. It becomes the host `eu-north.api.slng.ai` in the generated
+project: `slng_base_url=` on LiveKit, `base_url=` on Pipecat.
+
+The 13 are `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`,
+`jp`, `sg`, `id`, `in` and `au`. Leave `world_part` out and the existing default
+URL stands. Reasoning through the SLNG Context Router picks its own region with
+`params.world_part_override`, which has a smaller set of its own, so the two
+settings are never confused for one another. Where the worker itself runs is a
+third choice, `deployment_region` in `targets.yaml`, and none of the three has
+to match the others: `salon-concierge` deploys to `eu-central` and speaks
+through `eu-north`.
+
+### Turn taking you can hear
+
+```yaml
+models:
+  turn:
+    detector:
+      provider: local
+      model: silero
+      pace: patient
+```
+
+`pace:` is `snappy`, `balanced` or `patient`. It sets how long the agent waits
+after the caller stops talking. A desk that asks people to spell an email
+address out loud wants `patient`, because they pause between the characters.
+
+## What validate catches
+
+`unmute validate` reads the package the way the compiler does, and names the
+file, the line and often the column when something is wrong. It is offline and
+needs no account. A few of the things it refuses:
+
+- a `finish:` whose success value the tool's own output cannot hold
+- a `skip_when_confirmed:` naming a value that step does not confirm
+- a pre-fetch entry reading a value only a later entry assigns, naming both and
+  which one to move
+- a `type:` outside the grammar, with the column inside the expression
+- a prompt placeholder naming a value the package does not declare, or a greeting
+  naming one that is not settled before the first word
+- a `world_part` that is not a gateway, listing the ones that are
+- a feature the chosen target cannot run, naming what to write instead
+
+Warnings are the other half. A credential a package uses but never declares in
+`secrets:`, an agent holding every tool of its own step so the step's `assign:`
+never runs, a turn field that reaches nothing: each one names the thing to
+change, goes to standard error, and still exits 0.
+
 ## What goes in a package
+
+Each of these has a page in the guide.
 
 | | Where it is taught |
 |---|---|
 | **Tools** that call a webhook, run local Python, reach an MCP server, use one the runtime already has, or search your own documents | [Tools](https://unmute.ai/build/tools/overview) |
-| **Tasks, task groups and handoffs**, for when one prompt stops being enough | [Orchestration](https://unmute.ai/build/orchestration/overview) |
+| **Tasks, task groups and handoffs**, for when one prompt stops being enough, and the steps that end on their own tool | [Orchestration](https://unmute.ai/build/orchestration/overview) |
+| **Typed values**, declared once and checked where they enter: phone numbers, dates, email addresses, a closed set of words, lists, and shapes of your own | [Variables](https://unmute.ai/build/variables) |
 | **Escalation to a person**, cold or warm depending on the phone route | [Transfers](https://unmute.ai/transfers/overview) |
 | **Phone calls**, inbound and outbound, through Twilio, SIP trunks or a carrier stream | [Phone calls](https://unmute.ai/telephony/overview) |
 | **Pre-fetch**, so a known fact is in the prompt before the caller finishes the first sentence | [Pre-fetch](https://unmute.ai/build/prefetch) |
 | **Tracing** to Langfuse or Coval, with per-turn latency and tool calls | [Tracing](https://unmute.ai/tracing/overview) |
-| **Turn taking, the context router, and regional compute** | [Optimization](https://unmute.ai/optimization/overview) |
-| **Variables and secrets**, so a value never sits in a package file | [Variables](https://unmute.ai/reference/variables) |
+| **Turn taking, the context router, and regional infrastructure** | [Optimization](https://unmute.ai/optimization/overview) |
+| **Secrets**, so a credential never sits in a package file | [Secrets](https://unmute.ai/reference/secrets) |
+| **What to declare, and what to leave out**, once a package has more than a handful of values | [State design](https://unmute.ai/best-practices/state-design) |
 
 Every key of every package file is listed under
 [configuration](https://unmute.ai/reference/agent-yaml).
@@ -234,16 +487,22 @@ time by adding `.md` to its URL. See
 
 ## Examples
 
-[`examples/`](examples/) holds three packages.
+[`examples/`](examples/) holds four packages.
 
-- [`salon-concierge`](examples/salon-concierge/) is the one to read: two agents,
-  two tasks, one of them shared by both agents from a single definition, handoffs,
-  a guarded task, a cold manager transfer, tracing, and inbound phone on both code
-  targets. Every tool is local Python, so nothing remote has to be up before the
-  greeting.
+- [`customer-intake`](examples/customer-intake/) is the small one: one agent,
+  three tasks, one local tool. It takes a caller's number, name, email address,
+  enquiry and callback time, saves each under its own type, and hands them to a
+  tool the model cannot type over. Every type in the grammar appears once. Start
+  here if the question is about types, saved values or injection.
+- [`salon-concierge`](examples/salon-concierge/) is the big one: two agents, four
+  tasks, a task group that skips verification once the number is agreed, three
+  steps that end on their own tool with `finish:`, handoffs in both directions, a
+  cold manager transfer, tracing, and inbound phone on both code targets. Every
+  tool is local Python, so nothing remote has to be up before the greeting.
 - [`salon-concierge-single-prompt`](examples/salon-concierge-single-prompt/) is
   the same salon with the structural features taken back out, so the one above
-  can be read against something.
+  can be read against something. Model, transport and turn taking are held
+  identical, so a difference you hear is a difference the structure made.
 - [`hotel-concierge`](examples/hotel-concierge/) is the hosted target's
   showcase: a concierge line whose tools are all references SLNG already holds,
   with template variables, an injected argument, a tool announcement, named MCP
