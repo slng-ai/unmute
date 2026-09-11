@@ -77,3 +77,15 @@ and transport work. Complete at least one user turn before reviewing traces.
 LiveKit then records `llm_node` and `llm_request` generation observations;
 Pipecat records `llm` and `tts` generation observations under its conversation
 and turn spans.
+
+## Contribute one
+
+A change to Unmute ships with a package that uses it, so a maintainer can
+compile it, dial it, and hear the difference. The new key has to appear in the
+package's authored files and the code path has to run on a real call, or there
+is nothing to review. Extending one of the packages above counts.
+
+[CONTRIBUTING.md](../CONTRIBUTING.md) says what a public example has to pass,
+where a package goes when it is meant to be dialled rather than read, and what
+else a pull request carries: the issue you opened first, the video, the README
+and the docs page.

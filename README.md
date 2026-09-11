@@ -12,6 +12,7 @@
   <a href="https://github.com/slng-ai/unmute/actions/workflows/ci.yml"><img src="https://github.com/slng-ai/unmute/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/slng-ai/unmute" alt="License"></a>
   <a href="https://unmute.ai"><img src="https://img.shields.io/badge/docs-unmute.ai-8A7300" alt="Documentation"></a>
+  <a href="https://discord.gg/kxZactmWj"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
 Unmute is a command line compiler for voice agents. You write a small package of
@@ -266,6 +267,33 @@ make fmt
 is opt-in and never the pull request gate. `make contracts` re-fetches the
 published SLNG conformance fixtures and needs network.
 
+## Contributing
+
+Contributions are welcome, from anyone. Unmute is MIT licensed and every part of
+it is open: the compiler, the three targets, the examples, the skill and the
+docs site.
+
+A pull request needs five things:
+
+1. **An issue, opened before you write the code.** Search the
+   [open issues](https://github.com/slng-ai/unmute/issues) first, then open a
+   bug report, an improvement or a feature request. Link it from the pull
+   request.
+2. **An example package that uses your feature.** Shaped like the ones in
+   [`examples/`](examples/), with your new key in its authored files and the
+   code path running on a real call, so we can compile it, dial it and hear it.
+3. **A video** of that example working.
+4. **A README** for that example, saying which part of it is your feature.
+5. **Updated docs** under [`docs-site/`](docs-site/) that explain how the
+   feature works, not only what the key is called.
+
+[CONTRIBUTING.md](CONTRIBUTING.md) is the whole thing: what the example has to
+exercise, where the package goes, what a public example has to pass, and every
+check CI runs with its local command.
+
+Say hello on [Discord](https://discord.gg/kxZactmWj) before you start something
+large. It is the fastest way to find out whether somebody is already on it.
+
 ## Resources
 
 - [Documentation](https://unmute.ai) covers everything above in order.
@@ -278,5 +306,8 @@ published SLNG conformance fixtures and needs network.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) explains the design and points
   at the load-bearing code.
 - [Issues](https://github.com/slng-ai/unmute/issues) for bugs and requests.
+- [Discord](https://discord.gg/kxZactmWj) for questions, and for showing what
+  you built.
+- [Contributing](CONTRIBUTING.md) for how to send a change.
 
 Unmute is MIT licensed. See [LICENSE](LICENSE).

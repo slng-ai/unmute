@@ -74,13 +74,16 @@ mint a11y                                               # contrast and media alt
 
 ## The structure
 
-Ten top-level groups, in the order the reader needs them: Get started, Build
-the agent, Run and observe, Optimization, Deploy, Phone calls, Targets and
-models, Configuration files, CLI, and Releases. The first six are the story:
-learn it, build it, run it, make it faster, ship it, put it on a phone. The
-last four are reference. Build the agent nests Tools and Orchestration; Phone
-calls nests Transfers; Targets and models nests Targets and Models. Releases
-holds the single `changelog` page.
+Twelve top-level groups, in the order the reader needs them: Get started,
+Build the agent, Best practices, Run and observe, Optimization, Deploy, Phone
+calls, Targets and models, Configuration files, CLI, Community, and Releases.
+The first seven are the story: learn it, build it, build it well, run it, make
+it faster, ship it, put it on a phone. The next three are reference. The last
+two are what a reader does after the product has answered their question:
+Community holds `community/overview` and `community/contributing`, and
+Releases holds the single `changelog` page. Build the agent nests Tools and
+Orchestration; Phone calls nests Transfers; Targets and models nests Targets
+and Models.
 
 Top-level groups are section headers, not clickable roots. Their overview pages
 appear first in the group. Nested groups use clickable roots for Tools,
@@ -105,6 +108,7 @@ Prose rots. These facts cannot:
 | `internal/docsite/prose_test.go` | no page uses an em or en dash outside a code fence, and no page tells the reader how the author checked a fact ("we measured", "Measured on 20..", "Where this page's facts come from", "this repository"); rules 4 and 5 above, held |
 | `internal/docsite/changelog_test.go` | `changelog.mdx` runs newest first, every entry has a label, a version and a link to its own release, the newest entry matches the version snippet, the insert marker survives, and no entry keeps a heading, an em or en dash, or a commit hash (five tests) |
 | `internal/skill/markdown_surface_test.go` | `docs.json` declares the contextual menu in order and states the two facts agents get wrong, and `start/coding-agents.mdx` names all three Markdown endpoints and the suffix rule (three tests) |
+| `internal/docsite/community_test.go` | there is exactly one Discord invite in the tree, every surface a newcomer lands on carries it, the navbar and footer offer it on every page, `CONTRIBUTING.md` exists and the contributing page links to it, and both contributing surfaces still ask for all five things a contribution carries (five tests) |
 
 `reference/connections-yaml` deliberately has no test: its three shapes are backed
 by two shipped examples and one scratch package, and every telephony example is
