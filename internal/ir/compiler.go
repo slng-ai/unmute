@@ -248,6 +248,9 @@ type ModelDef struct {
 	// It sets the floor only. The ceiling comes from Pace, so a package that
 	// tuned this value keeps it and still gets a shorter ceiling.
 	EndpointingDelay Duration `json:"endpointing_delay,omitempty" yaml:"endpointing_delay,omitempty"`
+	// Eager answers a transcriber's predicted end of turn before it is confirmed.
+	// Turn models only, and only with provider listen; nil is the same as false.
+	Eager *bool `json:"eager,omitempty" yaml:"eager,omitempty"`
 	// AgentID and Upstream are the SLNG Context Router's two authored fields,
 	// carried verbatim: the id scopes the router's cache and the block says
 	// which upstream serves the model. Neither folds into Params, because params
@@ -1071,6 +1074,9 @@ type Binding struct {
 	// has to stay quiet before the runtime treats them as finished. It is the
 	// floor on every turn's wait. Turn models only; LiveKit floors it at 250ms.
 	EndpointingDelay Duration `json:"endpointing_delay,omitempty" yaml:"endpointing_delay,omitempty"`
+	// Eager is set only on a turn binding whose provider is listen: the driver
+	// asks the transcriber to predict the end of turn and answers the prediction.
+	Eager bool `json:"eager,omitempty" yaml:"eager,omitempty"`
 	// AgentID and Upstream are set only on a SLNG Context Router think binding.
 	AgentID  string    `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
 	Upstream *Upstream `json:"upstream,omitempty" yaml:"upstream,omitempty"`

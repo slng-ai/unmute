@@ -856,6 +856,23 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	}
 	if b := resolved.Models.Turn; b != nil {
 		applyCapability(caps, targetcap.FieldTurnPlacement, provider, row)
+		if b.Provider == targetcap.TurnDeciderListen {
+			applyCapability(caps, targetcap.FieldTurnByListener, provider, row)
+			// The per-vendor checks make sense only where the row is supported:
+			// on a target that denies the decider the denial is the whole answer.
+			if caps.Capability(targetcap.FieldTurnByListener, provider).Tag == targetcap.Core {
+				validateListenDecider(agent, resolved, provider, b, row)
+			}
+		}
+		if b.Eager {
+			applyCapability(caps, targetcap.FieldTurnEager, provider, row)
+			// A per-target override can replace the base binding wholesale, so the
+			// pairing is checked on the effective binding too, not only on the
+			// authored one in validateModelKind.
+			if b.Provider != targetcap.TurnDeciderListen {
+				row.Errors = add(row.Errors, "turn binding sets eager without provider listen: the local detector cannot predict a turn before it ends. Set provider: listen with a Flux or Turns listening model, or remove eager")
+			}
+		}
 		if b.SemanticEndpointing != "" {
 			applyCapability(caps, targetcap.FieldSemanticEndpointing, provider, row)
 		}
@@ -1811,7 +1828,12 @@ func checkResponsesParams(provider targetcap.Provider, profile string, binding B
 
 func validateRoleBinding(role string, kind targetcap.RoleKind, binding *Binding, row *TargetValidation) {
 	if kind == targetcap.Open {
-		if binding == nil || binding.Model == "" {
+		// A turn binding handing the decision to the transcriber names no model of
+		// its own: the listening model is the model. Everything else it needs
+		// (the vendor's turn-detecting class, the model family) is checked by
+		// validateListenDecider on the targets that support it.
+		listener := role == "turn" && binding != nil && binding.Provider == targetcap.TurnDeciderListen
+		if binding == nil || binding.Model == "" && !listener {
 			row.Errors = add(row.Errors, fmt.Sprintf("%s target %q is missing open %s binding", row.Provider, row.Name, role))
 			return
 		}
@@ -3077,7 +3099,74 @@ func validateModelKind(name string, model ModelDef) []string {
 			}
 		}
 	}
+	errors = append(errors, eagerErrors(name, model)...)
 	return errors
+}
+
+// eagerErrors holds `eager` to the one place it means something: a turn binding
+// whose transcriber decides the turn. The local detector predicts nothing, so
+// `eager: true` beside `provider: local` would be a flag that reaches no code,
+// and Principle II says a field that reaches nothing is refused, not dropped.
+func eagerErrors(name string, model ModelDef) []string {
+	if model.Eager == nil {
+		return nil
+	}
+	if model.Kind != KindTurn {
+		return []string{fmt.Sprintf("model %q eager is a turn-model field: it belongs on a turn binding, not a %s binding", name, model.Kind)}
+	}
+	if *model.Eager && model.Provider != targetcap.TurnDeciderListen {
+		return []string{fmt.Sprintf(
+			"model %q eager needs turn provider listen: the local detector cannot predict a turn before it ends. Set provider: listen with a Flux or Turns listening model, or remove eager",
+			name)}
+	}
+	return nil
+}
+
+// validateListenDecider holds `turn: provider: listen` on a target that lets a
+// transcriber decide the turn. Three things have to be true for the emitted
+// service to connect and for every authored field to reach something: the
+// listening vendor ships a turn-detecting class, the listening model is one that
+// class serves, and no field that only the local pair reads is set.
+func validateListenDecider(agent *Agent, resolved Target, provider targetcap.Provider, turn *Binding, row *TargetValidation) {
+	vendor, model := "", ""
+	if listen := resolved.Models.Listen; listen != nil {
+		vendor, model = cmp.Or(listen.Provider, "openai"), listen.Model
+	}
+	detector, ok := targetcap.LookupListenTurnDetector(provider, vendor)
+	switch {
+	case !ok:
+		row.Errors = add(row.Errors, fmt.Sprintf(
+			"turn provider \"listen\" works with %s; the listening model is provider %q. Set the turn provider to local, or bind one of those listening models",
+			listenDeciderVendors(provider), vendor))
+	case !detector.ServesModel(model):
+		row.Errors = add(row.Errors, fmt.Sprintf(
+			"turn provider \"listen\" needs a listening model that detects turns itself; %s model %q does not. Use a %s model such as %s, or set the turn provider back to local",
+			vendor, model, strings.Join(detector.ModelPrefixes, "/"), detector.ExampleModel))
+	}
+	if turn.EndpointingDelay != "" {
+		row.Errors = add(row.Errors, fmt.Sprintf(
+			"endpointing_delay %s reaches nothing when the transcriber decides the turn: there is no local silence window to set. Remove it, or set the turn provider to local",
+			turn.EndpointingDelay))
+	}
+	if turn.SemanticEndpointing != "" {
+		row.Errors = add(row.Errors, fmt.Sprintf(
+			"semantic_endpointing %s reaches nothing when the transcriber decides the turn: it names a local analyzer that is not built. Remove it",
+			turn.SemanticEndpointing))
+	}
+	if agent.Conversation != nil && agent.Conversation.Interruption != nil && agent.Conversation.Interruption.MinimumWords > 0 {
+		row.Errors = add(row.Errors, "conversation.interruption.minimum_words reaches nothing when the transcriber decides the turn: it gates a local turn start the transcriber replaces. Remove it")
+	}
+}
+
+// listenDeciderVendors reads the turn-detector table into the phrase a refusal
+// names, so a vendor added there reaches the message with no second list.
+func listenDeciderVendors(provider targetcap.Provider) string {
+	var parts []string
+	for _, vendor := range targetcap.ListenTurnDetectorVendors(provider) {
+		detector, _ := targetcap.LookupListenTurnDetector(provider, vendor)
+		parts = append(parts, fmt.Sprintf("%s (%s models such as %s)", vendor, strings.Join(detector.ModelPrefixes, "/"), detector.ExampleModel))
+	}
+	return strings.Join(parts, " and ")
 }
 
 func validPlacement(value Placement) bool {

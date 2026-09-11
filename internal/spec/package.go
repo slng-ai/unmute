@@ -237,6 +237,18 @@ type ModelDef struct {
 	// shortening it shortens every answer and lengthening it gives a caller who
 	// pauses mid-sentence more room. LiveKit will not accept less than 250ms.
 	EndpointingDelay string `json:"endpointing_delay,omitempty" yaml:"endpointing_delay,omitempty"`
+	// Eager answers the transcriber's predicted end of turn before it is
+	// confirmed, so the wait for the confirmation is spent generating the
+	// reply. The early reply is dropped if the caller goes on or the confirmed
+	// words differ, so the caller never hears a reply to something they did not
+	// say. Turn bindings only, and only with `provider: listen`, because the
+	// local detector predicts nothing; a transcriber that decides turns without
+	// predicting them is refused by name.
+	//
+	// Off unless asked for: the framework spends one model request on every
+	// prediction, including the ones the transcriber withdraws, which is a cost
+	// an author should choose.
+	Eager *bool `json:"eager,omitempty" yaml:"eager,omitempty"`
 	// AgentID scopes the SLNG Context Router's cache. One stable value per
 	// package, authored by a human, carrying a version suffix they own and bump
 	// after a prompt change they judge meaningful. Never composed, never

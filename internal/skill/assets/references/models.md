@@ -78,10 +78,43 @@ say what you bound.
 | `semantic_endpointing` | `turn`: `required`, `preferred`, or `off` |
 | `pace` | `turn`: `snappy`, `balanced`, or `patient`. Defaults to `balanced`. No per-target override |
 | `endpointing_delay` | `turn`: a positive duration. The floor, and only the floor |
+| `eager` | `turn`, Pipecat only, with `provider: listen`: answer the transcriber's predicted end of turn before it is confirmed. Off unless set |
 | `fallback` | `think`, `listen` |
 
 A target and vendor may narrow this further. For example, validation rejects
 `language` when that integration has no language slot.
+
+### Let the transcriber decide the turn (Pipecat)
+
+A `turn` entry's `provider` is `local` (the on-device pair) or, on Pipecat,
+`listen`: the listening model's own turn detection ends the turn and no local
+analyzer is built. Only two listeners can take it, and both can predict a turn
+before it is final: Deepgram with a `flux-` model (`flux-general-en`) and
+Cartesia with an `ink-` model (`ink-2`, not `ink-whisper`). Any other listening
+vendor is refused naming these two.
+
+```yaml
+models:
+  listen:
+    transcriber:
+      provider: deepgram
+      model: flux-general-en
+      language: en
+  turn:
+    detector:
+      provider: listen
+      eager: true
+      pace: snappy
+```
+
+`pace` still applies: the ceiling becomes the transcriber's own end-of-turn
+timeout in milliseconds (`eot_timeout_ms` on Flux, `turn_end_timeout_ms` on
+Turns; snappy 1200, balanced 1600, patient 3000). There is no floor, so
+`endpointing_delay`, `semantic_endpointing` and `interruption.minimum_words` are
+refused; `interruption.protect` still works. `eager: true` costs one model
+request per prediction, including the ones the transcriber withdraws, so leave
+it off unless the user wants the faster reply. `eager` beside `provider: local`
+is refused, and `provider: listen` is refused on LiveKit and slng.
 
 ## The default OpenAI think model needs `reasoning_effort`
 
@@ -483,10 +516,10 @@ Three vendor facts on Pipecat change what an author writes, and each is one
   asked for, because it rewrites the words it matches and a false positive
   silently changes a transcript. `params: {profanity_filter: true}` turns it on.
   `params: {version: "2021-03-17.0"}` pins a model version.
-- `openai` listen: `gpt-4o-transcribe` shuts down on 2027-02-26 and
-  `gpt-transcribe` replaces it. The transcriber pads each speech segment with
-  half a second of silence so the last word is not cut, and the padding counts
-  toward usage.
+- `openai` listen: OpenAI retires its previous transcription model on
+  2027-02-26; `gpt-transcribe` is the current one. The transcriber pads each
+  speech segment with half a second of silence so the last word is not cut,
+  and the padding counts toward usage.
 - `elevenlabs` listen takes `params: {no_verbatim: true}` to drop filler words;
   `speechmatics` listen takes `params: {include_results: true}` for word-level
   results.

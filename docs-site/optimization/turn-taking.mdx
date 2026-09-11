@@ -124,6 +124,22 @@ floor and ceiling with a plain timeout, which stopped the end-of-turn
 classifier running and made turn taking worse instead of better. It no longer
 does: the classifier survives, and it still carries the `pace` ceiling.
 
+## Let the transcriber decide
+
+On Pipecat there is a third setting, and it changes what the other two mean.
+A Deepgram Flux or Cartesia Turns listener can end the turn itself: write
+`provider: listen` on the `turn:` binding. The pace ceiling then becomes the
+transcriber's own end-of-turn timeout (`eot_timeout_ms` or
+`turn_end_timeout_ms`, in milliseconds), there is no floor because no local
+silence window ends a turn, and `endpointing_delay` is refused.
+
+Add `eager: true` and the reply is generated while the transcriber is still
+confirming the caller stopped. The framework holds it and drops it if the
+caller goes on or the confirmed words differ. It costs one model request per
+prediction, including the withdrawn ones, so it is off unless you ask.
+[Turn detection](/models/turn-detection) has the shape, the two vendors, and
+every refusal.
+
 ## Reading what you set
 
 Each target's emitted `build/<target>/README.md` names the resolved pace, the

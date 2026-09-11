@@ -53,7 +53,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		// Tracing is on for either provider now, and TracingProvider says which.
 		Tracing:         agent.Tracing != nil,
 		TracingProvider: tracingProviderOf(agent),
-		Pace:            resolvePaceView(targetcap.Pipecat, target.Models.Turn),
+		Pace:            resolvePaceView(targetcap.Pipecat, target.Models.Turn, target.Models.Listen),
 		SemanticOff:     semanticEndpointingOff(target.Models.Turn),
 	}
 	// Read through the same door validate uses, so the command and the emitted
@@ -69,7 +69,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		env.add(name)
 	}
 
-	stt, err := sttService(target.Models.Listen, env)
+	stt, err := sttService(target.Models.Listen, data.Pace, env)
 	if err != nil {
 		return pipecatData{}, err
 	}
@@ -1706,11 +1706,36 @@ func resolvePipecatService(role targetcap.Role, binding ir.Binding, env *envSet,
 	return svc, nil
 }
 
-func sttService(binding *ir.Binding, env *envSet) (pipecatService, error) {
+func sttService(binding *ir.Binding, pace paceView, env *envSet) (pipecatService, error) {
 	if binding == nil {
 		return pipecatService{}, fmt.Errorf("pipecat listen binding is missing a model")
 	}
-	return resolvePipecatService(targetcap.Listen, *binding, env, slngSite{})
+	svc, err := resolvePipecatService(targetcap.Listen, *binding, env, slngSite{})
+	if err != nil || !pace.ByListener {
+		return svc, err
+	}
+	// The transcriber decides the turn, so the vendor's turn-detecting class
+	// stands in for its ordinary transcriber. Same key, same extra, same
+	// language slot: the catalogue entry still supplies those, and only the
+	// class, its import and the two turn fields change. The entry's CallSpec is
+	// shared with the catalogue, so it is copied before the class is renamed.
+	detector := pace.Listener
+	call := *svc.Entry.Call
+	call.Class = detector.Class
+	svc.Entry.Call = &call
+	svc.Entry.Import = detector.Import
+	svc.Call.Class = detector.Class
+	svc.Call.SettingsClass = detector.Class + ".Settings"
+	// The pace ceiling lands in the service's own end-of-turn timeout, in
+	// milliseconds: the longest the service waits after the caller stops before
+	// it closes the turn whatever its confidence says.
+	svc.Call.SettingsArgs = append(svc.Call.SettingsArgs, pyKV{Key: detector.CeilingArg, Value: pace.CeilingMillis})
+	if pace.Eager {
+		// A flat constructor flag, not a setting: the service reads it once and
+		// recommends the eager strategies from it.
+		svc.Call.Args = append(svc.Call.Args, pyKV{Key: "enable_eager_end_of_turn", Value: "True"})
+	}
+	return svc, nil
 }
 
 // pipecatSlngSite is where the router's per-call values live on this target: a

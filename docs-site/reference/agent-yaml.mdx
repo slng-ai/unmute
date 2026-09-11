@@ -192,6 +192,15 @@ Which fields are legal depends on the section:
 | `semantic_endpointing` | `turn`: `required`, `preferred`, or `off` |
 | `pace` | `turn`: `snappy`, `balanced`, or `patient`. How quickly the agent decides the caller has finished. Sets the ceiling on a turn, and the floor when `endpointing_delay` is absent. Defaults to `balanced`. No per-target override |
 | `endpointing_delay` | `turn`: a positive duration, the window of silence before the caller counts as finished. The floor on every turn, and only the floor. LiveKit refuses under `250ms` |
+| `eager` | `turn`, Pipecat only, with `provider: listen`: `true` answers the transcriber's predicted end of turn before it is confirmed, dropping the early reply if the caller goes on. Off unless set; costs one model request per prediction |
+
+A `turn` entry's `provider` is `local` (the on-device pair) or, on Pipecat,
+`listen`, which hands the decision to the listening model's own turn detection.
+`listen` takes no `model` of its own and needs a Deepgram Flux or Cartesia Turns
+listening model. Under `listen` the `pace` ceiling becomes the transcriber's own
+end-of-turn timeout, and `semantic_endpointing`, `endpointing_delay` and
+`interruption.minimum_words` are refused because nothing reads them; see
+[Turn detection](/models/turn-detection).
 | `fallback` | `think`, `listen` |
 | `prompt_suffix` | `think`: literal text appended to every prompt this binding sends, up to 512 characters, no `{{variables}}`. A per-target override cannot name a different value. See [Context Router](/optimization/context-router) |
 | `agent_id`, `upstream` | `think`, and only on a binding routed through the SLNG Context Router; refused on any other binding. See [Context Router](/optimization/context-router) |

@@ -609,6 +609,7 @@ func convertModelDef(raw packagespec.ModelDef, kind ModelKind, fallback []string
 		Placement: derivePlacement(raw), SemanticEndpointing: SemanticEndpointing(raw.SemanticEndpointing),
 		Pace:             Pace(raw.Pace),
 		EndpointingDelay: Duration(raw.EndpointingDelay),
+		Eager:            raw.Eager,
 		AgentID:          raw.AgentID, Upstream: convertUpstream(raw.Upstream),
 		PromptSuffix: raw.PromptSuffix,
 		Params:       raw.Params, Fallback: fallback, Description: raw.Description,
@@ -1727,6 +1728,7 @@ func toBinding(def ModelDef) Binding {
 		EndpointEnv: def.EndpointEnv, Placement: def.Placement,
 		SemanticEndpointing: def.SemanticEndpointing, Pace: def.Pace,
 		EndpointingDelay: def.EndpointingDelay,
+		Eager:            def.Eager != nil && *def.Eager,
 		AgentID:          def.AgentID, Upstream: def.Upstream, PromptSuffix: def.PromptSuffix,
 		Params: foldParams(def),
 	}

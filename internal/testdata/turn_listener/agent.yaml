@@ -1,0 +1,63 @@
+# The smallest package whose transcriber decides the turn: one agent, one tool,
+# a Deepgram Flux listener, and a turn binding that hands it the decision and
+# asks it to answer its prediction early. internal/generate/turn_listener_test.go
+# reads the emitted bot; the fixture exists so that assertion is possible.
+version: 1
+
+name: turn-listener
+entry_agent: desk
+
+secrets:
+  - OPENAI_API_KEY
+  - DEEPGRAM_API_KEY
+  - SLNG_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-terra
+      params:
+        reasoning_effort: "none"
+  speak:
+    voice:
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: deepgram
+      model: flux-general-en
+      language: en
+  turn:
+    detector:
+      # The transcriber decides when the caller has finished. Flux predicts an
+      # end of turn before it commits one, and eager answers the prediction.
+      provider: listen
+      eager: true
+      pace: snappy
+
+agents:
+  desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tools:
+      - lookup_customer
+
+tools:
+  - lookup_customer
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, this is Sage and Stone Salon. How can I help?"
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m

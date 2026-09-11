@@ -1482,7 +1482,7 @@ func TestSmokeV26LiveKitExamplesStaticCheck(t *testing.T) {
 			}
 			// dl§V26: the raw generator output is ruff-check + ty-clean.
 			for _, args := range [][]string{{"run", "ruff", "check", "."}, {"run", "ty", "check", "."}} {
-				cmd := exec.Command("uv", args...)
+				cmd := uvCommand(args...)
 				cmd.Dir = dir
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("uv %v failed:\n%s", args, out)
@@ -1493,12 +1493,12 @@ func TestSmokeV26LiveKitExamplesStaticCheck(t *testing.T) {
 			// format-stable (a second pass leaves no diff). Byte-format-stability
 			// of the raw generator output stays out of scope (C1: the generator
 			// never formats).
-			format := exec.Command("uv", "run", "ruff", "format", ".")
+			format := uvCommand("run", "ruff", "format", ".")
 			format.Dir = dir
 			if out, err := format.CombinedOutput(); err != nil {
 				t.Fatalf("uv run ruff format failed:\n%s", out)
 			}
-			diff := exec.Command("uv", "run", "ruff", "format", "--diff", ".")
+			diff := uvCommand("run", "ruff", "format", "--diff", ".")
 			diff.Dir = dir
 			if out, err := diff.CombinedOutput(); err != nil {
 				t.Fatalf("emitted project is not ruff-format-stable:\n%s", out)
@@ -1613,7 +1613,7 @@ func runLiveKitSmokeScript(t *testing.T, example string, mutate func(*ir.Target)
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command("uv", "run", "python", "smoke_check.py")
+	cmd := uvCommand("run", "python", "smoke_check.py")
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -1815,7 +1815,7 @@ func TestSmokeLiveKitHarnessRecoversAGroupStepHandoff(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command("uv", "run", "--project", filepath.Join("pkg", "build", "livekit"), "python", "smoke_check.py")
+	cmd := uvCommand("run", "--project", filepath.Join("pkg", "build", "livekit"), "python", "smoke_check.py")
 	cmd.Dir = dir
 	raw, err := cmd.CombinedOutput()
 	out := string(raw)

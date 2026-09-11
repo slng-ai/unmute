@@ -70,6 +70,63 @@ above, those services only *propose* an ending; the pair still decides. So
 picking one of them does not change what `endpointing_delay` and `pace` mean,
 and does not give you a second thing racing your settings.
 
+### Let the transcriber decide
+
+Two transcribers can take the whole decision, and one of them can also predict
+it before it is final. Name the listener as the decider in the `turn:` binding:
+
+```yaml agent.yaml
+models:
+  listen:
+    transcriber:
+      provider: deepgram
+      model: flux-general-en
+      language: en
+  turn:
+    detector:
+      provider: listen      # the transcriber decides when the caller is done
+      eager: true           # answer its prediction early; dropped if the caller goes on
+      pace: snappy          # the ceiling: the transcriber's own end-of-turn timeout
+```
+
+The emitted bot then builds the vendor's turn-detecting service in place of its
+ordinary transcriber and builds no local end-of-turn analyzer. The VAD still
+runs, for the speaking frames the idle timer and the latency measurement use,
+but it ends no turn.
+
+| Transcriber | `listen:` binding | Where `pace` lands | Early answer |
+|---|---|---|---|
+| Deepgram Flux (`DeepgramFluxSTTService`) | `provider: deepgram` and a `flux-` model such as `flux-general-en` | `eot_timeout_ms` | yes |
+| Cartesia Turns (`CartesiaTurnsSTTService`) | `provider: cartesia` and an `ink-` model such as `ink-2` | `turn_end_timeout_ms` | yes |
+
+Any other listening vendor is refused with this list, because those two are
+the only services the framework ships that both detect and predict a turn.
+A Deepgram model that is not a Flux model, or `ink-whisper` on Cartesia, is
+refused too: the turn-detecting class serves its own model family.
+
+**What `pace` means here.** The ceiling becomes the transcriber's own end-of-turn
+timeout, in milliseconds: `snappy` is 1200, `balanced` 1600, `patient` 3000.
+There is no floor, because no local silence window ends a turn, so
+`endpointing_delay` is refused. `semantic_endpointing` is refused for the same
+reason: it names a local analyzer that is not built. `interruption.minimum_words`
+gates a local turn start the transcriber replaces, and is refused as well.
+`interruption.protect` and `interruption.enabled: false` still work.
+
+**What `eager` buys and costs.** With `eager: true` the transcriber predicts
+the end of the turn, and the reply is generated while it is still confirming.
+The framework holds that reply inside the LLM service and drops it if the caller
+resumes speaking or the confirmed words differ, so an unconfirmed turn never
+reaches the caller, the conversation context or a tool. Each prediction costs
+one model request, including the ones the transcriber withdraws. That is why it
+is off unless you ask for it. `eager: true` beside `provider: local` is refused:
+the local detector predicts nothing.
+
+This is a Pipecat feature. LiveKit runs its turn model beside the transcriber
+and has no path that hands it the decision, so `provider: listen` is refused
+there and the two LiveKit identities below are the options. The emitted runbook
+says who decides the turn, which field carries the ceiling, and whether an
+early answer is on.
+
 ## LiveKit Agents
 
 LiveKit does both jobs, with two different pieces. It always loads Silero for voice

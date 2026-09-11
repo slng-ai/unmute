@@ -102,6 +102,15 @@ that wait. Compare repeated low and high values, then check both settings.
 [Turn taking](/optimization/turn-taking) explains every legal value, what it
 becomes on each target, and how to choose between them.
 
+#### Or let the transcriber decide, and answer early
+
+On Pipecat, a Deepgram Flux or Cartesia Turns listener can end the turn itself
+(`turn: provider: listen`), and with `eager: true` the reply is generated while
+the transcriber is still confirming the caller stopped. The wait you see under
+`turn_detection` then belongs to the transcriber, the ceiling is its own
+end-of-turn timeout, and the early answer is dropped if the caller goes on.
+[Turn detection](/models/turn-detection) has the shape and what it refuses.
+
 ### The model can think before it speaks
 
 On a reasoning model, `reasoning_effort` controls how much reasoning happens

@@ -51,7 +51,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		EntryAgent:        agent.EntryAgent,
 		EntryClass:        pyName(agent.EntryAgent),
 		TurnVersion:       turnVersion,
-		Pace:              resolvePaceView(targetcap.LiveKit, tgt.Models.Turn),
+		Pace:              resolvePaceView(targetcap.LiveKit, tgt.Models.Turn, tgt.Models.Listen),
 		SemanticOff:       semanticEndpointingOff(tgt.Models.Turn),
 		Pins:              tgt.Pins,
 		Tracing:           agent.Tracing != nil,

@@ -2230,7 +2230,7 @@ func TestSmokeV24PipecatExamplesStaticCheck(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			cmd := exec.Command("uv", "run", "ruff", "check", ".")
+			cmd := uvCommand("run", "ruff", "check", ".")
 			cmd.Dir = dir
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("uv run ruff check . failed:\n%s", out)
@@ -2361,7 +2361,7 @@ func runGeneratedPipecatSmokeScript(t *testing.T, artifact Artifact, script stri
 
 	// uv resolves the emitted pyproject into a project venv (shared uv cache,
 	// so repeat runs are fast) and runs the check inside it.
-	cmd := exec.Command("uv", "run", "python", "smoke_check.py")
+	cmd := uvCommand("run", "python", "smoke_check.py")
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {

@@ -723,7 +723,9 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTurnPlacement:        true, // advisory (VAD/smart-turn supplied)
 	targetcap.FieldSemanticEndpointing:  true, // advisory
 	targetcap.FieldEndpointingDelay:     true, // VAD stop_secs
-	targetcap.FieldPace:                 true, // smart-turn analyzer stop_secs (the ceiling)
+	targetcap.FieldPace:                 true, // smart-turn analyzer stop_secs (the ceiling), or the transcriber's end-of-turn timeout under provider: listen
+	targetcap.FieldTurnByListener:       true, // the vendor's turn-detecting service class in place of the transcriber, no local analyzer
+	targetcap.FieldTurnEager:            true, // enable_eager_end_of_turn on that service and EagerUserTurnStrategies on the aggregator
 	targetcap.FieldTask:                 true, // Flow node on the owning worker (C8)
 	targetcap.FieldTaskNestedResult:     true, // forwarded json_schema properties
 	targetcap.FieldTaskGroup:            true, // linear dynamic-flow chain
