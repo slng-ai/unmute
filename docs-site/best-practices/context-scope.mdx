@@ -104,7 +104,7 @@ selection task uses `messages` by default, so it can use "Friday afternoon"
 from the caller's request. If several times are available, it asks the caller
 to choose before saving an exact `Time`.
 
-In the owning agent's instructions, make the order clear:
+In the owner's instructions, make the order clear:
 
 ```markdown instructions.md
 For a new request to move a booking, run choose_booking to select its new
@@ -141,7 +141,7 @@ After a successful change, finish immediately.
 
 The task receives its own prompt with those three values. It receives no
 previous messages, tool results, summary, or sentence that triggered it.
-There is no automatic request passed by the owning agent.
+There is no automatic request passed by the owner.
 
 For **no prior conversation and no saved values in the prompt**, use `reset`
 and omit variable placeholders. The task can collect what it needs from the
@@ -175,10 +175,10 @@ Add the assignment to `reschedule_booking` and change its final instruction:
 ```markdown tasks/reschedule-booking.md
 After modify_booking reports success, copy the saved appointment from its
 result and finish immediately with appointment. Do not wait for another
-caller request. Let the owning agent confirm the change.
+caller request. Let the owner confirm the change.
 ```
 
-The owning agent and any later agent that needs the booking should read it:
+The owner and any later agent that needs the booking should read it:
 
 ```markdown instructions.md
 Latest saved appointment: {{appointment}}
@@ -256,3 +256,20 @@ shows selected reset boundaries.
 The [context reference](/reference/agent-yaml#context) covers every field and
 target restriction. A summary or a short history is not a substitute for
 `reset` when the receiver should inherit no conversation.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Designing declared state" icon="brackets-curly" href="/best-practices/state-design">
+    Which facts to save, who saves them, and who reads them next.
+  </Card>
+  <Card title="Making a task actually run" icon="route" href="/best-practices/step-scoping">
+    What to give a task so the model enters it, and what to take off its owner.
+  </Card>
+  <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
+    Declaring a task, saving its result, and saying what success looks like.
+  </Card>
+  <Card title="Task groups" icon="list-ordered" href="/build/orchestration/task-groups">
+    Tasks in a fixed order, and skipping a step whose work is already done.
+  </Card>
+</Columns>

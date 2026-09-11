@@ -186,7 +186,7 @@ inside `build/` is overwritten on the next compile.
 | | Where it is taught |
 |---|---|
 | **Tools** that call a webhook, run local Python, reach an MCP server, use one the runtime already has, or search your own documents | [Tools](https://unmute.ai/build/tools/overview) |
-| **Handoffs, tasks and task groups**, for when one prompt stops being enough | [Orchestration](https://unmute.ai/build/orchestration/overview) |
+| **Tasks, task groups and handoffs**, for when one prompt stops being enough | [Orchestration](https://unmute.ai/build/orchestration/overview) |
 | **Escalation to a person**, cold or warm depending on the phone route | [Transfers](https://unmute.ai/transfers/overview) |
 | **Phone calls**, inbound and outbound, through Twilio, SIP trunks or a carrier stream | [Phone calls](https://unmute.ai/telephony/overview) |
 | **Pre-fetch**, so a known fact is in the prompt before the caller finishes the first sentence | [Pre-fetch](https://unmute.ai/build/prefetch) |

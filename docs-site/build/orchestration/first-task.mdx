@@ -1,0 +1,610 @@
+---
+title: "Your first task"
+description: "Add one task to the agent you already have, one key at a time, until it knows for itself when its work is done."
+---
+
+You have one agent working from [Your first agent](/build/your-first-agent).
+This page adds one task to it. Nothing here needs a second agent, a phone
+number or a new account. Every change below ends with `unmute validate`, and
+every change leaves you a package that runs.
+
+The example is a parcel tracking line. A caller reads out a tracking number,
+the agent looks it up and says when the parcel is due. It is small on purpose.
+The shape is what matters, and you will swap the parcel for your own thing.
+
+<Note>
+  Tasks need a code target: Pipecat or LiveKit Agents. The package `unmute
+  init` writes targets LiveKit Agents, so it is ready. The SLNG target compiles
+  one agent with one prompt, and refuses a task with this line:
+
+  ```text
+  slng: slng target writes one agent with one prompt, so a task has nowhere to go: fold the step into the agent's instructions, or compile to livekit or pipecat which emit multi-task agents
+  ```
+</Note>
+
+## What a task is
+
+A task is a smaller conversation inside the call. It has its own prompt and
+its own tools. To the model, a task is one more entry in its function list,
+right next to the agent's tools. When the model calls it, the task's prompt
+takes over. When the task is done, the agent that started it, the owner, gets
+the caller back, along with whatever the task saved.
+
+You reach for a task when part of the call needs a narrower prompt, a smaller
+tool list, or an answer you want to keep. If none of those is true, stay with
+one agent and its tools. Most agents should.
+
+One word to settle before we start. A task is one step of the call. Some of
+the compiler's messages say "step" for that reason. On this page the thing you
+write is always a task.
+
+<Steps>
+  <Step title="Start with no task">
+    This is the package from the last page. Make sure it still validates:
+
+    ```sh
+    unmute validate my-agent
+    ```
+
+    ```text
+    ✓ livekit (livekit)
+    ```
+
+    One agent, one prompt, one built-in tool so it can hang up. Keep this
+    picture in mind: each change below adds one thing to it.
+  </Step>
+
+  <Step title="Give the agent a tool">
+    A tool does real work and comes back with a result. This one is a small
+    Python function that stands in for your delivery system. It lives in the
+    package, in two files.
+
+    The tool file says what the tool takes and what it returns:
+
+    ```yaml tools/look_up_parcel.yaml
+    description: >-
+      Look up a parcel by its tracking number. Call it once the caller has read
+      the number out and you have said it back to them.
+
+    input:
+      type: object
+      properties:
+        tracking_number:
+          type: string
+          description: The tracking number as the caller gave it, letters and digits, no spaces.
+      required:
+        - tracking_number
+
+    output:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - found
+            - not_found
+        tracking_number:
+          type: string
+        delivery_date:
+          type: string
+      required:
+        - status
+        - tracking_number
+        - delivery_date
+
+    local:
+      handler: tools/look_up_parcel.py
+    ```
+
+    The handler is a function with the same name as the tool:
+
+    ```python tools/look_up_parcel.py
+    from datetime import date, timedelta
+
+    # A stand-in for your delivery system. Two parcels, due in a few days.
+    PARCELS = {
+        "AB123456": 3,
+        "CD789012": 1,
+    }
+
+
+    def look_up_parcel(tracking_number):
+        number = tracking_number.replace(" ", "").upper()
+        days = PARCELS.get(number)
+        if days is None:
+            return {"status": "not_found", "tracking_number": number, "delivery_date": ""}
+        due = date.today() + timedelta(days=days)
+        return {"status": "found", "tracking_number": number, "delivery_date": due.isoformat()}
+    ```
+
+    Look at the `status` field in `output:`. It has an `enum:`, a fixed list
+    of the values it can hold. That list is what will let the task know, later,
+    whether the lookup worked. Write one for any tool a task will end on.
+
+    Now name the tool in two places in `agent.yaml`. The agent's own list says
+    the agent may call it. The top-level list says the tool exists.
+
+    ```yaml agent.yaml
+    agents:
+      assistant:
+        instructions: instructions.md
+        think: assistant_model
+        speak: assistant_voice
+        tools:
+          - end_call
+          - look_up_parcel
+
+    tools:
+      - end_call
+      - look_up_parcel
+    ```
+
+    And tell the agent what to do with it, at the end of `instructions.md`:
+
+    ```markdown instructions.md
+    # Parcels
+
+    When the caller asks where their parcel is, ask for the tracking number, say it
+    back to them, and look it up. Tell them the day it is due.
+    ```
+
+    ```sh
+    unmute validate my-agent
+    ```
+
+    ```text
+    ✓ livekit (livekit)
+    ```
+
+    This already works, and for many agents it is enough. Stop here if the job
+    is one lookup and one answer. The rest of this page is for when you want the
+    lookup to be its own small conversation, and you want to keep what it
+    found.
+  </Step>
+
+  <Step title="Say what you want to keep">
+    A task can save what it learns. You say what that is by declaring a
+    variable, once, with a type. Add this block to `agent.yaml`, anywhere at
+    the top level:
+
+    ```yaml agent.yaml
+    variables:
+      tracking_number:
+        type: str
+        description: The tracking number of the parcel we found for this caller.
+      delivery_date:
+        type: Date
+        description: The day that parcel is due, written year-month-day.
+    ```
+
+    `Date` is a built-in type. A value that is not a date in that form is
+    refused where it enters, and the model is told the form, so it can try
+    again. The description is read by the model, so write it for the model.
+
+    Nothing reads these yet. Declaring a value and using it are two separate
+    things, and that is on purpose.
+
+    ```sh
+    unmute validate my-agent
+    ```
+
+    ```text
+    ✓ livekit (livekit)
+    ```
+  </Step>
+
+  <Step title="Add the task">
+    A task is written inside the agent that runs it, under `tasks:`. It has a
+    name, a `when:` that tells the model when to run it, its own prompt file,
+    and its own tools.
+
+    Make a `tasks/` folder next to `agent.yaml` and put the task's prompt in it:
+
+    ```markdown tasks/find-parcel.md
+    # Your job
+
+    Find the caller's parcel.
+
+    Ask for the tracking number. Say it back to them in groups of two or three
+    characters and ask if that is right. Only then look it up.
+
+    If the parcel is not found, say so, and ask the caller to check the number and
+    read it again.
+    ```
+
+    Then add the task to the agent:
+
+    ```yaml agent.yaml
+    agents:
+      assistant:
+        instructions: instructions.md
+        think: assistant_model
+        speak: assistant_voice
+        tools:
+          - end_call
+          - look_up_parcel
+        tasks:
+          - name: find_parcel
+            when: The caller wants to know where their parcel is.
+            instructions: tasks/find-parcel.md
+            tools:
+              - look_up_parcel
+    ```
+
+    ```sh
+    unmute validate my-agent
+    ```
+
+    ```text
+    ✓ livekit (livekit)
+
+    Warnings:
+      livekit: agent "assistant" holds every tool of its step "find_parcel" (look_up_parcel), so it can do the step's work without entering it and the step's assign may never run: drop look_up_parcel from agent "assistant" tools and leave them on the step
+    ```
+
+    Read that warning, because it is the most common mistake with a first
+    task. The model sees one list with the agent's tools and the task in it,
+    and it takes the shortest route. If the agent can call `look_up_parcel`
+    itself, it will, and the task never runs. The fix is to move the tool: take
+    it off the agent and leave it on the task.
+
+    ```yaml agent.yaml
+    agents:
+      assistant:
+        instructions: instructions.md
+        think: assistant_model
+        speak: assistant_voice
+        tools:
+          - end_call
+        tasks:
+          - name: find_parcel
+            when: The caller wants to know where their parcel is.
+            instructions: tasks/find-parcel.md
+            tools:
+              - look_up_parcel
+    ```
+
+    The top-level `tools:` list keeps `look_up_parcel`. That list says the
+    tool exists; the task now says who may call it.
+
+    Change the agent's prompt to match. It no longer looks parcels up itself:
+
+    ```markdown instructions.md
+    # Parcels
+
+    When the caller asks where their parcel is, run find_parcel.
+    ```
+
+    ```sh
+    unmute validate my-agent
+    ```
+
+    ```text
+    ✓ livekit (livekit)
+    ```
+
+    The warning is gone. The model now has one way to look up a parcel, and it
+    goes through the task.
+  </Step>
+
+  <Step title="Save the answer">
+    Right now the task can find the parcel, but when it ends, what it found is
+    gone. `assign:` says which values the task saves, and where. Each line is
+    one variable you declared, and the tool result field it takes:
+
+    ```yaml agent.yaml
+        tasks:
+          - name: find_parcel
+            when: The caller wants to know where their parcel is.
+            instructions: tasks/find-parcel.md
+            tools:
+              - look_up_parcel
+            assign:
+              - tracking_number: result.tracking_number
+              - delivery_date: result.delivery_date
+    ```
+
+    ```sh
+    unmute validate my-agent
+    ```
+
+    ```text
+    ✓ livekit (livekit)
+    ```
+
+    Here is what that line did. Every task gets a `finish` call, a function
+    the model calls to say the task is done. `assign:` gives that call two
+    arguments, `tracking_number` and `delivery_date`, typed from the variables
+    they land in. When the model calls `finish`, each value is checked against
+    its type. If one is wrong, nothing is saved and the task stays open, so a
+    bad date never gets written down.
+
+    You do not write "call finish when you are done" in the task's prompt.
+    The compiler adds that rule to the prompt for you. You will see the exact
+    words when you add `finish:`.
+
+    A wrong name on the left is refused with the line it is on:
+
+    ```text
+    unmute: validate my-agent: build: agent.yaml:36: task "find_parcel": assign writes to "due_date", and it is not declared under the variables: block
+    ```
+  </Step>
+
+  <Step title="Read it back">
+    Saving a value does not show it to anybody. A prompt sees a saved value only
+    when it names it, with the variable in double braces. Add this to the end
+    of `instructions.md`:
+
+    ```markdown instructions.md
+    # Parcels
+
+    When the caller asks where their parcel is, run find_parcel.
+
+    The parcel we found on this call: {{tracking_number}}, due {{delivery_date}}.
+    When those are filled in, tell the caller the day and do not run find_parcel
+    again unless they give a different number.
+    ```
+
+    Before the task has run, an empty value renders as `none recorded yet.`, so
+    write the sentence so it still makes sense with those words in it. After
+    the task has run, the owner reads the real values on its next turn and can
+    answer without looking the parcel up again.
+
+    ```sh
+    unmute validate my-agent
+    ```
+
+    ```text
+    ✓ livekit (livekit)
+    ```
+  </Step>
+
+  <Step title="Say what success looks like">
+    So far the task ends when the model decides to call `finish`. That is one
+    more model request after the lookup, and one more chance for the model to
+    do something else first. The tool already knows whether it worked: its
+    `status` is `found` or `not_found`. `finish:` lets that result end the
+    task:
+
+    ```yaml agent.yaml
+        tasks:
+          - name: find_parcel
+            when: The caller wants to know where their parcel is.
+            instructions: tasks/find-parcel.md
+            tools:
+              - look_up_parcel
+            finish:
+              - tool: look_up_parcel
+                success:
+                  - status: found
+            assign:
+              - tracking_number: result.tracking_number
+              - delivery_date: result.delivery_date
+    ```
+
+    ```sh
+    unmute validate my-agent
+    ```
+
+    ```text
+    ✓ livekit (livekit)
+    ```
+
+    Read it as a sentence: "this task is finished when `look_up_parcel` returns
+    `status: found`". When that happens, the task saves its `assign:` straight
+    from the tool result and ends. The model is not asked, and the result never
+    reaches it. When the status is `not_found`, the result goes back to the
+    model as normal and the task stays open, which is exactly when you want the
+    prompt's "ask the caller to check the number" line to do its job.
+
+    | | Who decides the task is finished |
+    |---|---|
+    | no `finish:` | the model, by calling `finish` |
+    | with `finish:` | the tool's own result, checked against `success:` |
+
+    Two rules keep this honest, and the compiler holds both. A `finish:` entry
+    needs a `success:` check:
+
+    ```text
+    unmute: validate my-agent: build: agent.yaml:36: task "find_parcel": finish names "look_up_parcel" with no success:; a step cannot end on a result nothing checks
+    ```
+
+    And every `success:` value has to be one the tool declares in its `enum:`,
+    so a typo is caught here and not on a call that never ends:
+
+    ```text
+    unmute: validate my-agent: build: agent.yaml:36: task "find_parcel": look_up_parcel never returns status: fund; it declares found, not_found
+    ```
+
+    This is also where you can see what the compiler adds to the task's
+    prompt. Run `unmute compile my-agent` and open `build/livekit/agent.py`.
+    Under your own instructions you will find these lines:
+
+    ```text
+    When this step is complete, call `finish` with: delivery_date, tracking_number.
+
+    When `look_up_parcel` returns a successful result, this step ends by itself and saves it; do not call `finish` after it. `finish` is for a request this step cannot serve, for values you already hold, and for recording a result whose save was refused.
+    ```
+
+    So the `finish` call is still there. The model uses it when the caller asks
+    for something the task cannot do, and for a value the task already holds.
+    Your own prompt should not argue with those lines.
+  </Step>
+
+  <Step title="Open with the question">
+    A task's first turn is normally a model request that writes an opening
+    line. This task always opens the same way: it asks for the tracking
+    number. Say that line yourself and skip the request:
+
+    ```yaml agent.yaml
+        tasks:
+          - name: find_parcel
+            when: The caller wants to know where their parcel is.
+            announce: Sure. What is the tracking number?
+            opening: listen
+            instructions: tasks/find-parcel.md
+    ```
+
+    `announce:` is one fixed line, spoken exactly as written. `opening: listen`
+    says: speak it, then wait for the caller. The line is recorded as the
+    task's own first turn, so the caller's answer lands in a conversation the
+    task can see.
+
+    Update the task's prompt so it does not ask the question twice:
+
+    ```markdown tasks/find-parcel.md
+    # Your job
+
+    Find the caller's parcel.
+
+    You have already asked for the tracking number. Say it back to them in groups
+    of two or three characters and ask if that is right. Only then look it up.
+
+    If the parcel is not found, say so, and ask the caller to check the number and
+    read it again.
+    ```
+
+    ```sh
+    unmute validate my-agent
+    ```
+
+    ```text
+    ✓ livekit (livekit)
+    ```
+  </Step>
+
+  <Step title="Run it">
+    ```sh
+    unmute dev my-agent
+    ```
+
+    Your keys from the quickstart are still in `.env`. When the browser opens,
+    ask where your parcel is and read out one of the two numbers in the
+    handler, "A B one two three four five six".
+
+    Watch the dev page while you talk. The task shows up as its own row when
+    the model enters it, then `look_up_parcel` gets a row of its own, and then
+    the agent answers. If you never see the task's row, the model went round
+    it: check that the agent does not hold the task's tool, and that the
+    `when:` line describes what the caller actually said. [Running it
+    locally](/dev/overview) explains every row on that page.
+  </Step>
+</Steps>
+
+## The whole file
+
+This is `agent.yaml` at the end, with the scaffold's comments taken out. The
+three lists near the top are the whole change: one tool on the agent, one task
+nested under it, and the task's own tool, `finish:` and `assign:`.
+
+<Accordion title="Complete agent.yaml">
+```yaml
+version: 1
+
+name: my-agent
+entry_agent: assistant
+
+agents:
+  assistant:
+    instructions: instructions.md
+    think: assistant_model
+    speak: assistant_voice
+    tools:
+      - end_call
+    tasks:
+      - name: find_parcel
+        when: The caller wants to know where their parcel is.
+        announce: Sure. What is the tracking number?
+        opening: listen
+        instructions: tasks/find-parcel.md
+        tools:
+          - look_up_parcel
+        finish:
+          - tool: look_up_parcel
+            success:
+              - status: found
+        assign:
+          - tracking_number: result.tracking_number
+          - delivery_date: result.delivery_date
+
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+
+models:
+  think:
+    assistant_model:
+      description: default reasoning model
+      provider: openai
+      model: "gpt-5.6-terra"
+      params:
+        reasoning_effort: none
+  speak:
+    assistant_voice:
+      description: default voice
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "deepgram/nova:3"
+  turn:
+    detector:
+      provider: livekit
+      model: turn-detector-mini
+
+variables:
+  tracking_number:
+    type: str
+    description: The tracking number of the parcel we found for this caller.
+  delivery_date:
+    type: Date
+    description: The day that parcel is due, written year-month-day.
+
+tools:
+  - end_call
+  - look_up_parcel
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi there, I'm listening. What can I help you with?"
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 10
+  max_sessions: 20
+  avg_session_duration: 5m
+```
+</Accordion>
+
+## What you have now
+
+| Key | What it says | If you leave it out |
+|---|---|---|
+| `when:` | when the model should run the task | the task is only usable as a step of a task group |
+| `tools:` on the task | what the task may call | the task talks but cannot look anything up |
+| `assign:` | what the task saves, and where | the task can still finish, and keeps nothing |
+| `finish:` | which tool result means the task is done | the model decides, by calling `finish` |
+| `announce:` and `opening: listen` | a fixed first line, and no model request to write it | the model writes the opening line |
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
+    Every task key in full: history, what returns, sharing a task between agents.
+  </Card>
+  <Card title="Task groups" icon="list-ordered" href="/build/orchestration/task-groups">
+    Two or more tasks that have to run in a fixed order.
+  </Card>
+  <Card title="Making a task actually run" icon="footprints" href="/best-practices/step-scoping">
+    Why the model skips a task, and what to give it so it does not.
+  </Card>
+  <Card title="Designing declared state" icon="database" href="/best-practices/state-design">
+    Choosing what to save, and writing prompts that read well when it is empty.
+  </Card>
+</Columns>

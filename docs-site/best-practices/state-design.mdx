@@ -73,7 +73,7 @@ format checks and their limits.
 Use one shaped variable for the latest successful appointment. Replacing it
 makes the new date the current one.
 
-Use a list when later steps need several records. Append with `+`:
+Use a list when later tasks need several records. Append with `+`:
 
 ```yaml
 assign:
@@ -90,9 +90,16 @@ A task that performs an action and then waits for another caller turn can
 accidentally absorb a new request. For example, a booking task might complete
 a move, hear a complaint, and return `unserved` instead of saving the move.
 
-Write the task prompt to save the successful result and finish immediately.
-Let the owner read the saved value and confirm it once. For a task designed
-to save one record, finish after that record; run it again for another request.
+Write the task prompt to save the successful result and make the `finish` call
+immediately. Let the owner read the saved value and confirm it once. For a task
+designed to save one record, finish after that record; run it again for another
+request.
+
+Better still, when the task's last action is a tool, name that tool under
+`finish:`. The task then ends on the tool's success result by itself, saves its
+`assign:` from that result, and the model never has to decide that the work is
+done. See
+[Say what success looks like](/build/orchestration/tasks#say-what-success-looks-like).
 
 A non-empty `unserved_request` saves no assignments and returns only a status.
 It does not undo an action already completed by a tool.
@@ -107,6 +114,17 @@ Verification status: {{customer_status}}
 If the status is existing or created, continue without verifying again.
 Verify again if the caller corrects the account details.
 ```
+
+When verification is the first step of a task group, declare the skip instead
+of asking the prompt for it. Put `skip_when_confirmed:` on that step, naming the
+variable the step confirms. The group then skips the step when that variable is
+confirmed at the moment the group starts, and runs it otherwise. See
+[Skip a step whose work is already done](/build/orchestration/task-groups#skip-a-step-whose-work-is-already-done).
+
+Confirmed here is a real mark on the variable. Only `confirm:` sets it, when the
+task it names saves the value, and any other write clears it. A prompt sentence
+saying the caller was verified is not that mark, and a saved status such as
+`existing` is not that mark either. The group reads the mark and nothing else.
 
 Use [`confirm:`](/build/prefetch#always-check-a-value-with-the-caller) for a
 candidate value that must be checked with the caller. When that candidate
@@ -136,4 +154,4 @@ a trace to confirm that each receiving prompt contains the facts it needs.
 
 For a practical walkthrough, see [Reduce context sharing step by
 step](/best-practices/context-scope). For task structure and tool placement,
-see [Making a step actually run](/best-practices/step-scoping).
+see [Making a task actually run](/best-practices/step-scoping).

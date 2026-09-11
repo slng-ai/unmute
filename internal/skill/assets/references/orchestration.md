@@ -745,15 +745,24 @@ rather than one list with a kind field.
 ## The shapes, as packages
 
 One package in the unmute repository shows these shapes working together:
-`examples/salon-concierge` has two agents that hand the caller over, two tasks
-nested in the concierge (one of them ordered after the other by the agent's
-own prompt) and a bare name that lets the complaint specialist run the same
-verification task without a second copy.
+`examples/salon-concierge`. Two agents hand the caller over, in both
+directions. The concierge defines three tasks, `verify_customer`,
+`take_confirmation_contact` and `manage_booking`. The complaint specialist
+defines one, `handle_complaint`, and deliberately does not list
+`verify_customer`: only the concierge verifies, because a task within reach
+beats a prompt rule telling the model not to run it. Every tool that needs the
+caller's number refuses while it is unconfirmed, and `to_concierge` is the way
+back. Three of the four tasks end on their own tool through `finish:`.
+
+The same package carries the task group, `book`: `verify_customer` with
+`skip_when_confirmed: customer_phone`, then `manage_booking`, with
+`context_scope: shared` and `then: return`. `manage_booking` has no `when:`
+because the group runs it. `verify_customer` keeps a `when:` for one case
+only, a caller correcting their phone number; every other route into
+verification goes through the group. Read it before writing a group of your
+own, and repeat the LiveKit beta note in "Where a target refuses a shape"
+before a user ships one.
 
 The one-agent, one-prompt shape is shown in
 `examples/salon-concierge-single-prompt`. `unmute init <name>` also scaffolds
 that structure.
-
-Task groups have no package either. The YAML above is the reference, and the
-LiveKit beta note in "Where a target refuses a shape" is the thing to repeat
-before a user ships one.

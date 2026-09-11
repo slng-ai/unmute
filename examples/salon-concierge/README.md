@@ -25,7 +25,7 @@ call. Customer care is a second agent because it holds a document set and a
 permission the concierge must not have: the refund policy and the complaint
 record.
 
-**Four tasks, one of them shared, two of them steps of the booking group.**
+**Four tasks, two of them steps of the booking group.**
 Verification confirms who is calling.
 Booking does create, modify and cancel in one task and saves a typed Appointment.
 Taking the confirmation contact is its own step, so a caller who does not want an
@@ -71,10 +71,12 @@ hands over, with no model request in between and without the result reaching
 the model. A result that is not a success, a `not_confirmed` or a
 `slot_unavailable`, goes back to the model and the step stays open.
 
-Together those facts take three model requests out of one booking: the
-verification `finish`, the concierge's routing call, and the booking `finish`.
-The one request left on the turn that books is the concierge saying it is done.
-Recording a complaint loses its `finish` the same way.
+Together, the group and `finish:` take the model out of the seams. The group
+means the concierge makes one call and never chooses between the two steps, and
+`finish:` removes the model request between a tool succeeding and the hand-over
+that follows it, on both steps. The one request left on the turn that books is
+the concierge saying it is done. Recording a complaint loses its `finish` call
+the same way.
 
 Each of those tools returns the record it saved, whole, on success:
 `create_booking` returns the `appointment` and `record_complaint` returns the
@@ -82,10 +84,10 @@ Each of those tools returns the record it saved, whole, on success:
 model, and it is the reason the model can never retype an id it was handed.
 
 **One agent verifies.** `verify_customer` is on the concierge and nowhere else.
-A live call had the complaint specialist run it again on a caller it had
-already verified, with its own prompt and the step's `when:` both saying not
-to: a step in reach beats a prompt rule. Every tool that needs the number
-refuses while it is unconfirmed, so the gate is still there.
+A task within reach beats a prompt rule, so the task is not listed on the
+specialist, however plainly its prompt says not to verify again. Every tool
+that needs the number refuses while it is unconfirmed, so the gate is still
+there, and `to_concierge` is the way back to the agent that verifies.
 
 **One agent asks for agreement.** The specialist says the complaint back and
 asks once; `handle_complaint` records what was agreed and asks nothing. Both
@@ -93,11 +95,10 @@ asking cost the caller a whole turn to learn nothing.
 
 **Two rules live in the booking backend, not the prompt.** `create_booking`
 refuses with `has_booking` while the caller already holds one, unless the model
-passes `additional` because the caller asked for another appointment: a live
-call answered "move it to the day after tomorrow" with a second booking, prompt
-notwithstanding, and a change to a booking is `modify_booking`. And a slot
-earlier than the salon's own clock today is not offered and not accepted, after
-a call was offered 15:00 at four minutes past three.
+passes `additional` because the caller asked for another appointment. A change
+to a booking is `modify_booking`, and a prompt rule alone does not stop a model
+from answering "move it" with a second booking. And a slot earlier than the
+salon's own clock today is not offered and not accepted.
 
 **Facts resolved before the greeting.** The `prefetch:` block reads the date,
 the weekday and the salon's local time off one clock reading, and the caller's

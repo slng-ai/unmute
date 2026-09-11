@@ -22,7 +22,8 @@ left in what it writes.
   </Step>
   <Step title="Build">
     Names get resolved into one internal description of the agent. Model names
-    point at model definitions, controls point at tasks or agents, per target
+    point at model definitions, the names in an agent's lists are resolved to
+    the tasks, task groups, handoffs and tools they point at, per target
     overrides get applied, and a telephony route is picked from what the target
     declares. This description knows nothing about Pipecat or LiveKit.
   </Step>

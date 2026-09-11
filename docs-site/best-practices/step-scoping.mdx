@@ -1,29 +1,29 @@
 ---
-title: "Making a step actually run"
-description: "A step the model can skip is a step that never writes state. What to give a step so it gets entered, and what to take away from the agent above it."
+title: "Making a task actually run"
+description: "A task the model can skip is a task that never writes a saved value. What to give a task so it gets entered, and what to take away from its owner."
 ---
 
-A step is worth having when it does something the agent above it cannot do as
-well: a narrower prompt, a smaller context, a typed result that lands in
-declared state. None of that happens if the model never enters it.
+A task is worth having when it does something its owner cannot do as well: a
+narrower prompt, a smaller context, a typed result that lands in a saved
+value. None of that happens if the model never enters it.
 
-The model does not read your intent. It sees one list containing the agent's own
-tools and the step's entry function, and it picks. These are the rules that
-decide which way it picks.
+The model does not read your intent. To the model, a task is one more entry in
+its function list, next to the owner's own tools, and it picks. These are the
+rules that decide which way it picks.
 
-## Give the step a tool the agent does not have
+## Give the task a tool the owner does not have
 
-If the agent already holds every tool the step holds, the agent can finish the
-job without entering the step. It usually will, and then the step's `assign:`
-never runs and declared state never records what happened.
+If the owner already holds every tool the task holds, the owner can finish the
+job without entering the task. It usually will. The task's `assign:` then never
+runs and nothing is saved.
 
-This is the failure it produces. A complaint specialist declared:
+This is the shape that produces it. A complaint specialist declared:
 
 ```yaml agent.yaml
 complaint_specialist:
   tools:
     - look_up_refund_policy
-    - record_complaint          # also the step's only tool
+    - record_complaint          # also the task's only tool
   tasks:
     - name: handle_complaint
       tools:
@@ -32,14 +32,12 @@ complaint_specialist:
         - complaints+: result.complaint
 ```
 
-On a live call it recorded the complaint correctly and gave the caller a
-sensible next step, but `complaints` stayed empty. The specialist had the tool
-in reach, so it never entered the step, so nothing appended to `complaints`.
+The specialist records the complaint itself, because the tool is in its own
+list, and `complaints` stays empty. The prompt is not the fix. A workflow that
+says "then run the complaint task in the same turn" is a request to the model,
+and a tool within reach beats a request.
 
-The prompt was not the problem. Its workflow said "then run the complaint step
-in the same turn, silently", in those words. A tool within reach beat the prompt.
-
-The fix is to take the tool off the agent and leave it on the step:
+The fix is to take the tool off the owner and leave it on the task:
 
 ```yaml agent.yaml
 complaint_specialist:
@@ -52,23 +50,28 @@ complaint_specialist:
 ```
 
 <Note>
-`unmute validate` warns when an agent holds every tool of one of its steps, and
+`unmute validate` warns when an agent holds every tool of one of its tasks, and
 names the tool to move. It is a warning and not a refusal because whether the
 model takes the short route depends on your prompt and your `when:`, neither of
 which the compiler reads. Read the warning and decide.
 </Note>
 
-A step that declares no tools at all is fine. Its prompt, context choice, and
+A task that declares no tools at all is fine. Its prompt, context choice, and
 saved assignments are reasons to enter it that have nothing to do with tools.
 
 ## Order steps with the prompt
 
-A step that must run only after another one does not need a code gate for
-that. It needs two sentences: one in the agent's own instructions, and one in
-the step's own `when:`.
+Step here means a task an agent runs on its own. Two tasks that must hold
+their order every time belong in a [task group](/build/orchestration/task-groups),
+which runs its steps in the order you list them. This section is for the
+looser case: a task that usually follows another one.
 
-Number the flow in the agent's instructions, in the order the caller
-actually moves through it:
+A task that must run only after another one does not need a code gate for
+that. It needs two sentences: one in the owner's own instructions, and one in
+the task's own `when:`.
+
+Number the flow in the owner's instructions, in the order the caller actually
+moves through it:
 
 ```md instructions.md
 1. Confirm who is calling.
@@ -76,7 +79,7 @@ actually moves through it:
 3. Hand a complaint to customer care.
 ```
 
-Then give the later step a `when:` that names the situation and, in one
+Then give the later task a `when:` that names the situation and, in one
 clause, what has to be true first:
 
 ```yaml agent.yaml
@@ -84,96 +87,125 @@ clause, what has to be true first:
         when: The caller wants to create, modify, or cancel a booking, once the caller is verified.
 ```
 
-The model has something real to check that clause against when the agent's
-prompt explicitly references the value the earlier task saved:
+The model has something real to check that clause against when the owner's
+prompt names the value the earlier task saved:
 
 ```md instructions.md
 The verified customer is {{customer_id}}. Once that value is present, verification has already
-succeeded. Never run that step again unless the caller says the number is wrong.
+succeeded. Never run that task again unless the caller says the number is wrong.
 ```
 
 That is a request to the model, not a gate, so it is not the last line of
 defense. The last line sits on the tool. A tool that silently reads a value,
 through `inject:` or a webhook path, still refuses to run while that value is
-empty or unconfirmed, and the model is told which step supplies it, or, when
+empty or unconfirmed, and the model is told which task supplies it, or, when
 nothing does, to ask the caller. The worst case is one extra model turn, not
 a request sent with a blank or an unconfirmed field.
 
-Check the order with a scripted text conversation before you check it on a
-live call. It drives the agent through a fixed script with the real model
-and the real tools, so you see which step ran, and in what order, without
-picking up a phone. See
+Check the order with a scripted text conversation before you check it on the
+phone. It drives the agent through a fixed script with the real model and the
+real tools, so you see which task ran, and in what order, without picking up a
+phone. See
 [`scripts/text_run_livekit.py`](https://github.com/slng-ai/unmute/blob/main/scripts/text_run_livekit.py).
 
-## Keep a read on the agent, keep the write on the step
+## Keep a read on the owner, keep the write on the task
 
 The rule above has a natural shape once you apply it. Lookups that answer
-questions belong on the agent, because the caller can ask at any time and
-entering a step to answer a price question is slow. Anything that records,
-saves, or changes something belongs on the step, alone, because that is the
-action whose result you want in declared state.
+questions belong on the owner, because the caller can ask at any time and
+entering a task to answer a price question is slow. Anything that records,
+saves, or changes something belongs on the task, alone, because that is the
+action whose result you want saved.
 
-Split that way, the model has a real reason to enter: the step holds the only
+Split that way, the model has a real reason to enter: the task holds the only
 route to the thing the caller is asking for.
 
-## Scope history down and let state carry the facts
+## Let the tool end the task
+
+When a task's work ends on one tool, name that tool under `finish:` with the
+result values that count as success. The task then ends on the tool's own
+success result, saves its `assign:` from that result, and never waits for the
+model to make the `finish` call. A result that is not a success goes back to
+the model and the task stays open.
+
+```yaml agent.yaml
+    - name: handle_complaint
+      tools:
+        - record_complaint
+      finish:
+        - tool: record_complaint
+          success:
+            - status: recorded
+      assign:
+        - complaints+: result.complaint
+```
+
+The tool has to declare the success values in its output `enum:`, and every
+tool under `finish:` has to return what `assign:` saves. See
+[Say what success looks like](/build/orchestration/tasks#say-what-success-looks-like).
+
+## Scope history down and let saved values carry the facts
 
 A task may not need the transcript if its prompt names every fact it needs.
 Start with `messages`. Use `reset` only when the saved inputs cover the job;
 otherwise the caller will have to repeat details that were only spoken.
 
-| Scope | What the step sees | Use it when |
+| Scope | What the task sees | Use it when |
 | --- | --- | --- |
 | `messages` | What was said, without tool traffic | The default for normal continuity |
-| `full` | Speech and paired tool records, without old instructions | The step needs earlier tool results |
-| `reset` | Its own prompt and the saved values that prompt names | The package intentionally declares every fact the step needs |
+| `full` | Speech and paired tool records, without old instructions | The task needs earlier tool results |
+| `reset` | Its own prompt and the saved values that prompt names | The package intentionally declares every fact the task needs |
 
-`reset` is the strongest scope. A reset step never receives the turn that
+`reset` is the strongest scope. A reset task never receives the turn that
 triggered it. Save a fact before the boundary and reference it in the reset
 prompt when the receiver needs it. If the fact was only spoken and never saved,
-the reset step asks for it again.
+the reset task asks for it again.
 
-## Give every step an escape, and read it
+## Give every task an escape, and read it
 
-A task offers its own tools, declared handoffs, and finish call. When the
-caller asks for something none of those cover, a step with no way out refuses,
-the caller presses, and it refuses again.
+A task offers its own tools, its declared handoffs, and the `finish` call. When
+the caller asks for something none of those cover, a task with no way out
+refuses, the caller presses, and it refuses again.
 
-Every generated step carries a reserved `unserved_request` field for this. The
-step does its own work, then names the request it could not serve in its own
-words, and finishes.
+Every generated task carries a reserved `unserved_request` field for this. The
+task does its own work, then names the request it could not serve in its own
+words, and makes the `finish` call. You do not write that rule yourself: the
+compiler appends it to every task prompt.
 
 The owner receives only an `unserved` status, not the private request text. It
 asks what the caller needs and handles the new request with its own tools or
 handoffs:
 
 ```md
-When a step returns unserved, ask the caller what they need and help with the
+When a task returns unserved, ask the caller what they need and help with the
 tools or handoffs available here.
 ```
 
 ## Do not let two prompts disagree
 
-A step's prompt and its owning agent's prompt are written at different times and
-read together. When they conflict, the model picks one and you cannot predict
-which.
+A task's prompt and its owner's prompt are written at different times and read
+together. When they disagree, the model picks one, and you cannot tell which.
 
-The pairing that bites most often is "do not run the same flow again for a
-request that just finished" on one side and "act on the unserved request" on the
-other. A second booking is a new request, not a repeat of the last one, but
-nothing says so unless you write it. Until it did, one call resolved the
-contradiction by apologising to the caller instead of booking.
+The pairing that bites most often is "do not run the same task again for a
+request that just finished" on one side and "act on the unserved request" on
+the other. A second booking is a new request, not a repeat of the last one, but
+nothing says so unless you write it.
 
-When you add a rule to a step, read the owning agent's prompt in the same
-sitting and check it still agrees.
+When you add a rule to a task, read the owner's prompt in the same sitting and
+check it still agrees.
 
 ## Where the mechanics live
 
 <CardGroup cols={2}>
   <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
-    Declaring a step, its saved values, and the reserved finish contract.
+    Declaring a task, its saved values, and what success looks like.
+  </Card>
+  <Card title="Task groups" icon="list-ordered" href="/build/orchestration/task-groups">
+    Tasks in a fixed order, and skipping a step whose work is already done.
+  </Card>
+  <Card title="Designing declared state" icon="brackets-curly" href="/best-practices/state-design">
+    What to save, and who reads it next.
   </Card>
   <Card title="Choosing a context scope" icon="scissors" href="/best-practices/context-scope">
-    What each scope costs, and what has to travel as declared state.
+    What each scope costs, and what has to travel as a saved value.
   </Card>
 </CardGroup>
