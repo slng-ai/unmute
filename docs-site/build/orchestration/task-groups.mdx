@@ -7,6 +7,14 @@ A task group is an ordered sequence of tasks. Use one when the order must be a
 runtime guarantee. A task that runs inside a group is called a step of that
 group.
 
+On this page:
+
+- [Declare a group](#declare-a-group) - steps, in order
+- [Every key a group takes](#every-key-a-group-takes) - all seven
+- [Skip a step whose work is already done](#skip-a-step-whose-work-is-already-done) - `skip_when_confirmed:`
+- [What stops a group](#what-stops-a-group) - unserved, handoff, finish
+- [Context between steps](#context-between-steps) - shared or isolated
+
 ## Declare a group
 
 ```yaml agent.yaml
