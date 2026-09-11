@@ -31,7 +31,9 @@ Dialling out is the carrier's job, so each target needs a connection that can
 reach your carrier account. An agent on both targets rides two different
 mechanisms, so it needs two connection files holding the same three names:
 
-```yaml connections/twilio_voice.yaml
+<CodeGroup>
+```yaml Pipecat
+# connections/twilio_voice.yaml
 transport: cloud-websocket
 carrier: twilio
 environment:
@@ -40,7 +42,8 @@ environment:
   from_number: TWILIO_PHONE_NUMBER
 ```
 
-```yaml connections/twilio_connector.yaml
+```yaml LiveKit
+# connections/twilio_connector.yaml
 transport: connector
 carrier: twilio
 environment:
@@ -48,10 +51,10 @@ environment:
   auth_token: TWILIO_AUTH_TOKEN
   from_number: TWILIO_PHONE_NUMBER
 ```
+</CodeGroup>
 
-`from_number` is the caller identity the person you dial sees. The Pipecat target
-names the first file, the LiveKit target names the second, and neither target says
-anything else about the route. See
+Same three names, different `transport:`. `from_number` is the caller identity
+the person you dial sees. Neither target says anything else about the route. See
 [`connections/<name>.yaml`](/reference/connections-yaml).
 
 ## Place a call

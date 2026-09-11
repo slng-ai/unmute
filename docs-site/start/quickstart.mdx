@@ -3,6 +3,9 @@ title: "Quickstart"
 description: "Scaffold an agent, add two keys, and talk to it in your browser."
 ---
 
+The quickstart scaffolds a package, adds two keys, and puts you in a browser
+conversation with the agent.
+
 You need the `unmute` binary ([installation](/start/installation)), Docker
 running for this LiveKit quickstart, and two API keys: one for the model that thinks (`OPENAI_API_KEY`) and
 one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
@@ -10,11 +13,19 @@ one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
 This page is written against the newest release. Run `unmute --version` to see
 what you have, and upgrade if a flag here is missing from your build.
 
+On this page:
+
+- [Scaffold and talk to it](#scaffold-and-talk-to-it) - three steps, one conversation
+- [Validate, develop, and compile](#validate-develop-and-compile) - which command, when
+- [If something goes wrong](#if-something-goes-wrong) - four symptoms, four fixes
+
 <Note>
   The coding skill is optional and unrelated to `SLNG_API_KEY`, which
   authenticates the default speech models. This page uses the CLI directly;
   [Coding agents](/start/coding-agents) shows the assistant workflow.
 </Note>
+
+## Scaffold and talk to it
 
 <Steps>
   <Step title="Scaffold a package">
@@ -125,24 +136,32 @@ use the current directory.
 ## If something goes wrong
 
 <AccordionGroup>
-  <Accordion title="docker compose is required to run unmute dev">
-    Docker is not running, or Compose is missing. Start Docker and run the
-    command again. This scaffold targets LiveKit, whose local server stack runs
-    in Docker Compose. Pipecat browser targets use `uv` instead.
+  <Accordion title="unmute dev stops and says docker compose is required">
+    Docker is not running, or Compose is missing. This scaffold targets LiveKit,
+    whose local server stack runs in Docker Compose. Pipecat browser targets use
+    `uv` instead.
+
+    **Fix:** start Docker and run the command again.
   </Accordion>
-  <Accordion title="Missing required environment variables">
+  <Accordion title="The container stops, naming environment variables it did not find">
     The container starts, checks the keys the agent needs, and stops with the
-    names it did not find. Fill them in `.env` and run again.
+    names it did not find.
+
+    **Fix:** fill them in `.env` and run again.
   </Accordion>
   <Accordion title="The browser page opens but nothing speaks">
-    Look at `build/livekit/dev.log`. It has the container's whole output. Add
-    `--verbose` to follow the same log in your terminal while it runs.
+    The container is running, so its log has the answer.
+
+    **Fix:** look at `build/livekit/dev.log`. It has the container's whole
+    output. Add `--verbose` to follow the same log in your terminal while it
+    runs.
   </Accordion>
-  <Accordion title="Port already in use">
+  <Accordion title="unmute dev says the port is already in use">
     This only happens for a port you passed yourself. With no `--port` or
-    `--bot-port`, `unmute dev` picks a free one and prints the URL. Either stop
-    the run holding the port, or pass another one: `--port 8790` for the web
-    page and `--bot-port 7890` for the agent.
+    `--bot-port`, `unmute dev` picks a free one and prints the URL.
+
+    **Fix:** either stop the run holding the port, or pass another one:
+    `--port 8790` for the web page and `--bot-port 7890` for the agent.
   </Accordion>
 </AccordionGroup>
 

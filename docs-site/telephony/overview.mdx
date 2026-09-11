@@ -121,7 +121,7 @@ number that rings and never connects.
 | **3. Platform records** | none | `bash telephony-setup.sh`, which claims the number in your LiveKit project and routes it to the agent |
 
 Step 3 is the one people miss, partly because two different things get called a
-trunk. The Elastic SIP trunk is Twilio's, and it carries the call. The inbound
+<Tooltip tip="A phone line set up between two systems. This route needs two: one on the phone company's side that carries the call, one on LiveKit's side that claims the number.">trunk</Tooltip>. The Elastic SIP trunk is Twilio's, and it carries the call. The inbound
 trunk is LiveKit's, and it says the number belongs to your project. LiveKit
 rejects a call whose number no inbound trunk claims, however correct the Twilio
 side is.

@@ -131,7 +131,9 @@ targets:
     connection: twilio_connector
 ```
 
-```yaml connections/twilio_websocket.yaml
+<CodeGroup>
+```yaml Pipecat
+# connections/twilio_websocket.yaml
 transport: cloud-websocket
 carrier: twilio
 environment:
@@ -140,7 +142,8 @@ environment:
   from_number: TWILIO_PHONE_NUMBER
 ```
 
-```yaml connections/twilio_connector.yaml
+```yaml LiveKit
+# connections/twilio_connector.yaml
 transport: connector
 carrier: twilio
 environment:
@@ -148,6 +151,7 @@ environment:
   auth_token: TWILIO_AUTH_TOKEN
   from_number: TWILIO_PHONE_NUMBER
 ```
+</CodeGroup>
 
 Same three names, different mechanism. The file name does not have to repeat the
 transport, but its stem must still be lower snake case.

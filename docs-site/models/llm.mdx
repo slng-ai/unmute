@@ -227,10 +227,11 @@ models:
 or `turn` entry is refused, by name. A name the section does not have, or a
 chain that loops back on itself, is refused too, naming the loop.
 
-LiveKit lowers the chain to one constructor call, wrapped in
-`llm.FallbackAdapter`. Compiling the package above emits:
+What that one block compiles to depends on the target:
 
-```python
+<CodeGroup>
+```python LiveKit
+# one constructor call, wrapped in llm.FallbackAdapter
 llm=llm.FallbackAdapter(
     llm=[
         openai.LLM(
@@ -245,16 +246,23 @@ llm=llm.FallbackAdapter(
 ),
 ```
 
-Pipecat does not emit a generated fallback yet. Validating the same package
-against a Pipecat target refuses it before a file is written:
-
-```text
+```text Pipecat
+# refused before a file is written
 pipecat: the Pipecat driver does not emit generated fallback yet
 ```
 
-On SLNG the chain rides the push body as `fallbacks.llm`, a list of model
-strings in the same [vendor/model shape](/targets/slng#model-names) the primary
-binding uses.
+```json SLNG
+// on the push body, in the same shape the primary binding uses: the driver
+// joins each entry's provider and model. See /targets/slng#model-names.
+"fallbacks": {
+  "llm": ["<provider>/<model>", "<provider>/<model>"]
+}
+```
+</CodeGroup>
+
+Pipecat does not emit a generated fallback yet, so validating the same package
+against a Pipecat target refuses it. The SLNG list uses the same
+[vendor/model shape](/targets/slng#model-names) as the primary binding.
 
 [Speech to text](/models/stt#fallback) documents the same field on the `listen`
 role.

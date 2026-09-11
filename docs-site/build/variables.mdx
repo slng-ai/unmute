@@ -395,7 +395,7 @@ If no service is recorded, ask which service the caller wants.
 
 ### The owning agent forgets a value after its task returns
 
-A task returns a completion status and the owner's own earlier conversation. It
+A task returns a completion status and the <Tooltip tip="The agent that started a task. When the task ends, the caller goes back to it.">owner</Tooltip>'s own earlier conversation. It
 does not hand back the private conversation inside the task.
 
 **Fix:** put a placeholder in the **owner's** prompt too. Saving is not sharing.

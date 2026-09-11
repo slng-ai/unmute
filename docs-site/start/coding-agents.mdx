@@ -290,7 +290,7 @@ conversation with your assistant. What you get back depends on what your
 request carries.
 
 Describe required order, separate roles, and server-directed next steps in
-plain words. You do not need to ask for tasks or task groups by name. The
+plain words. You do not need to ask for tasks or <Tooltip tip="Several tasks that run one after another, in the order you wrote them.">task groups</Tooltip> by name. The
 assistant should infer the smallest Unmute structure before writing files and
 tell you what it chose.
 
@@ -298,7 +298,7 @@ tell you what it chose.
 |---|---|---|
 | a tool | what it does, where the data comes from, and whether there is an HTTP endpoint already | which of the five kinds it chose, and why |
 | an ordered workflow | which stages must happen in order and which parts are server-directed | which tasks and task groups it chose, and what context the steps share |
-| a second agent | what each one owns, and when control moves between them | what context crosses the handoff, and whether the handoff comes back |
+| a second agent | what each one owns, and when control moves between them | what context crosses the <Tooltip tip="One agent gives the caller to another agent. The first agent does not get the caller back.">handoff</Tooltip>, and whether the handoff comes back |
 | a phone number | inbound, outbound, or both, and which carrier you have | which route, and what that route cannot do |
 
 Ask what it decided, every time. The skill tells it to state the target, the

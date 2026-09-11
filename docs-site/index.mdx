@@ -35,7 +35,7 @@ Then you pick a target. A target is where the agent will run, and Unmute
 compiles the package into what that target expects:
 
 - **Pipecat** and **LiveKit** are code targets. You get a Python
-  project with a Dockerfile, a `.env.example`, and a runbook. The project does
+  project with a Dockerfile, a `.env.example`, and a <Tooltip tip="A README written for your build alone. It lists the exact keys, commands and phone steps that build needs.">runbook</Tooltip>. The project does
   not import Unmute, and Unmute is not in the call path.
 - **SLNG** is a hosted target. You get a deployment body, `unmute deploy`
   pushes it, and SLNG runs the agent.

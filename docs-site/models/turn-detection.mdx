@@ -32,17 +32,13 @@ models:
 That is what every shipped example writes. A package scaffolded by `unmute init`
 targets LiveKit, so it writes the LiveKit binding below in this spot instead.
 
-## Pipecat
+## What each target builds
 
-Both targets do two jobs, not one. On Pipecat both run on device.
+Both targets do two jobs, not one: decide you stopped making sound, then decide
+you had finished a thought. Here is what one `turn` binding compiles to on each.
 
-Silero is the transport's voice activity analyzer: it decides you stopped making
-sound. Pipecat's own Smart Turn v3 classifier then decides whether you had
-finished a thought. The classifier is a small ONNX model shipped inside the
-framework, so it needs no extra install and no API call, and it runs in every
-package Unmute compiles whether or not you asked for it:
-
-```python
+<CodeGroup>
+```python Pipecat
 vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
 user_turn_strategies=UserTurnStrategies(
     stop=[
@@ -54,6 +50,30 @@ user_turn_strategies=UserTurnStrategies(
     ],
 ),
 ```
+
+```python LiveKit
+turn_handling=TurnHandlingOptions(
+    turn_detection=inference.TurnDetector(version="v1-mini"),
+    endpointing={"mode": "dynamic", "min_delay": 0.3, "max_delay": 1.6},
+    interruption={"enabled": True},
+    preemptive_generation={"enabled": True},
+),
+vad=ctx.proc.userdata["vad"],
+```
+</CodeGroup>
+
+The two sections below say where each number comes from, and what is yours to
+set.
+
+## Pipecat
+
+On Pipecat both stages run on device.
+
+Silero is the transport's voice activity analyzer: it decides you stopped making
+sound. Pipecat's own Smart Turn v3 classifier then decides whether you had
+finished a thought. The classifier is a small ONNX model shipped inside the
+framework, so it needs no extra install and no API call, and it runs in every
+package Unmute compiles whether or not you asked for it.
 
 So `provider: local` and `model: silero` name the first stage. The second stage
 has no binding to name because it is the framework's own, and it is not optional.
@@ -72,18 +92,8 @@ second thing racing your settings.
 
 ## LiveKit
 
-LiveKit does both jobs, with two different pieces. It always loads Silero for voice
-activity, and it takes a turn model on top:
-
-```python
-turn_handling=TurnHandlingOptions(
-    turn_detection=inference.TurnDetector(version="v1-mini"),
-    endpointing={"mode": "dynamic", "min_delay": 0.3, "max_delay": 1.6},
-    interruption={"enabled": True},
-    preemptive_generation={"enabled": True},
-),
-vad=ctx.proc.userdata["vad"],
-```
+LiveKit does both jobs, with two different pieces. It always loads Silero for
+voice activity, and it takes a turn model on top.
 
 The `endpointing` dict comes from `pace`. Unlike Pipecat, LiveKit can adapt the
 wait to the pauses a caller actually leaves, which is what `mode: dynamic` asks

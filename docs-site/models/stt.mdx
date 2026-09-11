@@ -115,10 +115,11 @@ models:
       model: nova-3
 ```
 
-On LiveKit the chain lowers to one constructor call, `stt.FallbackAdapter`.
-Compiling the package above emits:
+What that one block compiles to depends on the target:
 
-```python
+<CodeGroup>
+```python LiveKit
+# one constructor call, wrapped in stt.FallbackAdapter
 stt=stt.FallbackAdapter(
     stt=[
         slng.STT(api_key=os.environ["SLNG_API_KEY"], model="deepgram/nova:3"),
@@ -127,16 +128,22 @@ stt=stt.FallbackAdapter(
 ),
 ```
 
-Pipecat does not emit a generated fallback yet, and validating the same package
-against a Pipecat target refuses it before a file is written:
-
-```text
+```text Pipecat
+# refused before a file is written
 pipecat: the Pipecat driver does not emit listen fallback yet
 ```
 
-On SLNG the chain rides the push body as `fallbacks.stt`, a list of model
-strings in the same [vendor/model shape](/targets/slng#model-names) the primary
-binding uses.
+```json SLNG
+// on the push body, in the same vendor/model shape the primary binding uses
+"fallbacks": {
+  "stt": ["slng/deepgram/nova:3", "deepgram/nova-3"]
+}
+```
+</CodeGroup>
+
+Pipecat does not emit a generated fallback yet, so validating the same package
+against a Pipecat target refuses it. The SLNG list uses the same
+[vendor/model shape](/targets/slng#model-names) as the primary binding.
 
 ## Where to go next
 

@@ -157,7 +157,7 @@ lk agent create --region eu-central --secrets-file .env
 ```
 
 [LiveKit Cloud](/deploy/livekit-cloud) walks the deploy. It comes before the
-LiveKit records because the dispatch rule names the agent, and a rule that names
+LiveKit records because the <Tooltip tip="A LiveKit setting that sends calls on a trunk to your agent, one room per caller.">dispatch rule</Tooltip> names the agent, and a rule that names
 an agent nobody has registered sends the call nowhere.
 
 ## Create the LiveKit records

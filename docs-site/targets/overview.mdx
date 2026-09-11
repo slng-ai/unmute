@@ -144,11 +144,24 @@ Both run the same agent. The differences that usually decide it:
 | | Pipecat | LiveKit |
 |---|---|---|
 | generated entry point | `bot.py` | `agent.py` |
-| local run | `uv run bot.py -t webrtc`, or `unmute dev` under `uv` | `uv run python -m livekit.agents start agent.py`, or `unmute dev` in Docker with a local LiveKit server |
 | phone routes | your carrier through Daily or over websockets, Pipecat Cloud carrier streams | SIP trunks, or a generated Twilio bridge |
 | transfers | cold, on two of its routes | cold and warm, on the SIP route |
 | turn detection in the examples | local Silero | LiveKit's own turn model |
 | provider lists | see [Models](/models/stt) | see [Models](/models/stt) |
+
+Running the generated project yourself differs too:
+
+<CodeGroup>
+```sh Pipecat
+uv run bot.py -t webrtc
+# or: unmute dev, which runs it under uv
+```
+
+```sh LiveKit
+uv run python -m livekit.agents start agent.py
+# or: unmute dev, which runs it in Docker against a local LiveKit server
+```
+</CodeGroup>
 
 If you need warm transfer today, that is the LiveKit SIP route. If you want a
 phone number with nothing hosted, that is one of the Pipecat routes. For a

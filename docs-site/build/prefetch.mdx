@@ -53,7 +53,7 @@ That is a whole pre-fetch. Everything below is the rest of what an entry can do.
 <Note>
   A fetched value is a guess until the caller agrees to it. The phone network
   says which phone called, not who is holding it. Mark anything about the
-  caller's identity with `confirm:` and the agent has to hear them say yes
+  caller's identity with <Tooltip tip="A value stays locked until the caller says yes to it out loud. Locked values stay out of prompts and out of tools.">`confirm:`</Tooltip> and the agent has to hear them say yes
   before it acts: [Always check a value with the
   caller](#always-check-a-value-with-the-caller).
 </Note>
@@ -192,7 +192,7 @@ on which source you picked.
   The one source this entry reads. Write exactly one of the three:
 
   - `clock: now` reads the clock.
-  - `source: <fact>` reads a fact the call carries, such as `from_number`.
+  - `source: <fact>` reads a <Tooltip tip="Something the phone call already carries when it arrives, like the number that called you. There are eight of them.">fact the call carries</Tooltip>, such as `from_number`.
   - `tool: <name>` runs a local or webhook tool.
 </ParamField>
 
