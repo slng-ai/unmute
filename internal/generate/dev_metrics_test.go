@@ -248,7 +248,7 @@ func TestPipecatNamesWhyAToolProducedNoResult(t *testing.T) {
 		`getattr(frame, "run_llm", False)`,
 		`self._end_tool(tool, "timed_out"`,
 		`getattr(frame, "error", None)`,
-		`self._end_tool(tool, "failed", reason=str(error))`,
+		`reason=f"The handler raised {_error_kind(error)}."`,
 		`self._end_tool(tool, "cancelled")`,
 		`self._end_tool(tool, "returned")`,
 	} {
@@ -260,13 +260,23 @@ func TestPipecatNamesWhyAToolProducedNoResult(t *testing.T) {
 	// reports and the page had no answer for.
 	for _, want := range []string{
 		`self._update("call", "call", state="error",`,
-		`f"{processor.name}: {frame.error}"`,
+		`f"{processor.name} reported a fatal error."`,
 		`"speech_duration"`,
 		"BotStartedSpeakingFrame",
 		"BotStoppedSpeakingFrame",
 	} {
 		if !strings.Contains(producer, want) {
 			t.Errorf("the producer does not carry %q", want)
+		}
+	}
+	// The one thing a reason may never be. A provider's error text quotes the
+	// request that failed and a handler's quotes what it was holding, and this
+	// feed carries no prompts, tool arguments or results. `make smoke` asserts
+	// the same thing on a real fatal error; this says it about the source, so a
+	// reader of the producer can see the rule rather than infer it.
+	for _, forbidden := range []string{"{frame.error}", "str(error)", "{error}"} {
+		if strings.Contains(producer, forbidden) {
+			t.Errorf("the producer writes %q into a record, which puts provider or handler text on the dev page", forbidden)
 		}
 	}
 	// LiveKit reports its own breakdown and its own tool states, and this change

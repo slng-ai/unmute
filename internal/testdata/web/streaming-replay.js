@@ -324,7 +324,7 @@ const {chromium} = require(process.env.UNMUTE_SWEEP_PLAYWRIGHT || 'playwright');
       // A handler that raised and one that ran out of time are different answers
       // to "where is the result", and each says which in its own words.
       for(const [id,state,reason,pattern] of [
-        ['tool-failed','failed','KeyError: customer_id',/lookup[\s\S]*failed[\s\S]*KeyError/i],
+        ['tool-failed','failed','The handler raised KeyError.',/lookup[\s\S]*failed[\s\S]*raised KeyError/i],
         ['tool-slow','timed_out','It ran past its deadline and was cancelled.',/lookup[\s\S]*timed out[\s\S]*past its deadline/i],
       ]){
         await emit('operation',id,operation('tool','lookup'));
@@ -561,10 +561,10 @@ const {chromium} = require(process.env.UNMUTE_SWEEP_PLAYWRIGHT || 'playwright');
       await page.locator('#connect').click();
       await page.locator('body[data-state="connected"]').waitFor();
       await closeNative();
-      await emit('call','call',{target,state:'error',reason:'CartesiaTTSService#0: websocket closed',input_boundaries:'known',model_calls:'known',generated_text:'available'},undefined,`call-${call}`);
+      await emit('call','call',{target,state:'error',reason:'CartesiaTTSService#0 reported a fatal error.',input_boundaries:'known',model_calls:'known',generated_text:'available'},undefined,`call-${call}`);
       if(target==='pipecat') assert.equal(await page.locator('body').getAttribute('data-state'),'error','failed calls must not become successful hangups');
       // Why it failed, on the page. Otherwise the answer is only in a terminal.
-      assert.match(await page.locator('#diagnostic-list').textContent(),/websocket closed/,'a failed call says what ended it');
+      assert.match(await page.locator('#diagnostic-list').textContent(),/CartesiaTTSService#0 reported a fatal error/,'a failed call names the service that stopped');
       await page.locator('#connect').click();
       await page.locator('body[data-state="connected"]').waitFor();
       await control({t:'state',state:'failed',stream_id:streamID});

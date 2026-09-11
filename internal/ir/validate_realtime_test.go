@@ -244,8 +244,14 @@ func TestBuildRefusesAnAgentNamingBothFormsOrNeither(t *testing.T) {
 	}
 	if err := load(t, func(pkg *packagespec.Package) {
 		pkg.Agent.Models.Realtime = append(pkg.Agent.Models.Realtime, pkg.Agent.Models.Realtime[0])
-	}); err == nil || !strings.Contains(err.Error(), `model name "live" appears in both realtime and realtime`) {
+	}); err == nil || !strings.Contains(err.Error(), `models.realtime declares "live" twice`) {
 		t.Errorf("duplicate name: %v", err)
+	}
+	// A clash with another section is the other mistake, and says so.
+	if err := load(t, func(pkg *packagespec.Package) {
+		pkg.Agent.Models.Realtime[0].Name = "fast"
+	}); err == nil || !strings.Contains(err.Error(), `model name "fast" appears in both think and realtime`) {
+		t.Errorf("name taken by a think entry: %v", err)
 	}
 	if err := load(t, func(pkg *packagespec.Package) {
 		tgt := pkg.Targets["pipecat"]

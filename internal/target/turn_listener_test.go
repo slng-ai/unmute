@@ -78,3 +78,24 @@ func TestListenTurnDetectorServesItsFamilyOnly(t *testing.T) {
 		t.Error("livekit lets no transcriber decide the turn; its turn model runs beside the transcriber")
 	}
 }
+
+// TestEveryListenTurnDetectorRowIsRead: the rows carry an `Eager` answer, and a
+// row whose answer is no has to reach a refusal rather than an emitted keyword.
+// Both shipped rows say yes, so nothing exercises that path today; this keeps
+// the field from becoming a note to self that the compiler never reads.
+func TestEveryListenTurnDetectorRowIsRead(t *testing.T) {
+	for _, provider := range []Provider{Pipecat} {
+		for _, vendor := range ListenTurnDetectorVendors(provider) {
+			detector, ok := LookupListenTurnDetector(provider, vendor)
+			if !ok {
+				t.Fatalf("%s names %q and the lookup does not have it", provider, vendor)
+			}
+			if detector.Class == "" || detector.Import == "" || detector.CeilingArg == "" || len(detector.ModelPrefixes) == 0 {
+				t.Errorf("%s/%s is missing part of its row: %+v", provider, vendor, detector)
+			}
+			if !detector.Eager {
+				t.Logf("%s/%s cannot predict a turn; validate refuses eager: true there", provider, vendor)
+			}
+		}
+	}
+}

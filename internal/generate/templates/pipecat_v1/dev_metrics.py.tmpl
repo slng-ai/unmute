@@ -68,6 +68,20 @@ def _emit(record: dict) -> None:
         pass
 
 
+def _error_kind(text):
+    """The exception's type name, and never the message beside it.
+
+    A provider's error text quotes the request that failed, and a handler's
+    quotes whatever it was working on, so neither belongs on a page that
+    deliberately carries no prompts, tool arguments or results. The type name
+    cannot carry any of that: it is an identifier from the code, so it is
+    returned only when it reads as one. The message itself stays in the agent's
+    own log, which `unmute dev` writes beside the build.
+    """
+    head = str(text or "").split(":", 1)[0].strip()
+    return head if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", head) else "an error"
+
+
 def _separator(previous, text, previous_includes_spaces, includes_spaces):
     # Same boundary rule as Pipecat's concatenate_aggregated_text; retain the
     # source chunks themselves, including their leading and trailing spaces.
@@ -336,11 +350,12 @@ class DevReporter:
             async def source_error(_processor, frame):
                 if frame.fatal or not processor.is_usable:
                     self._error = True
-                    # What the error said, and who said it. A call that reads
-                    # "error" and nothing else sends the author to the container
-                    # logs to find out which service stopped working.
+                    # Which service stopped working, and nothing it said. A
+                    # call that reads "error" alone sends the author hunting
+                    # through logs for the service; the message itself is in
+                    # those logs, where quoting a request is not a leak.
                     self._update("call", "call", state="error",
-                                 reason=f"{processor.name}: {frame.error}")
+                                 reason=f"{processor.name} reported a fatal error.")
         return True
 
     def _input_boundary(self, frame):
@@ -537,7 +552,7 @@ class DevReporter:
         # and the error is what actually went wrong.
         error = getattr(frame, "error", None)
         if error:
-            self._end_tool(tool, "failed", reason=str(error))
+            self._end_tool(tool, "failed", reason=f"The handler raised {_error_kind(error)}.")
         else:
             self._end_tool(tool, "returned")
 
@@ -598,7 +613,7 @@ class DevReporter:
             if isinstance(frame, ErrorFrame) and scope.get("tool_operation_id"):
                 for tool in self._tools.values():
                     if tool["id"] == scope["tool_operation_id"]:
-                        self._end_tool(tool, "failed", reason=str(frame.error))
+                        self._end_tool(tool, "failed", reason=f"The handler raised {_error_kind(frame.error)}.")
                         return
             operation = scope.get("operation_id")
             request = self._requests.get(operation)
@@ -654,10 +669,6 @@ class DevReporter:
             elif isinstance(frame, LLMFullResponseEndFrame):
                 self._end_request(operation, "ended")
                 pending.discard(operation)
-{{- if .Realtime}}
-                if self._live_turn == operation:
-                    self._live_turn = None
-{{- end}}
             elif isinstance(frame, ErrorFrame):
                 self._end_request(operation, "failed")
                 pending.discard(operation)
@@ -678,6 +689,15 @@ class DevReporter:
         if not request or request["ended"]:
             return
         request["ended"] = True
+{{- if .Realtime}}
+        # Every way a reply ends comes through here, which is why the live
+        # turn is let go of here rather than beside one of them: cleared only
+        # on the tidy ending, a reply cut short by a barge-in or an error left
+        # the next one attaching to a request already finished, so it opened no
+        # row and recorded none of its words.
+        if self._live_turn == operation:
+            self._live_turn = None
+{{- end}}
         self._update("operation", operation, state=state)
         if request["text_id"]:
             self._update("text", request["text_id"], state="final" if state == "ended" else "incomplete")
