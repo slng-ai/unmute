@@ -305,6 +305,32 @@ const {chromium} = require(process.env.UNMUTE_SWEEP_PLAYWRIGHT || 'playwright');
       assert.match(await unknownSection.textContent(),/unassigned/i);
       assert.equal(await unknownSection.evaluate(node=>document.querySelector('#diagnostic-list').contains(node)),true,'unassigned measurements stay in the footer');
       for(const value of ['source-only-no-clock','model-without-time','provider-without-time']) assert.match(await unknownSection.textContent(),new RegExp(value));
+      // Where a reply's time went. The framework measures audio in to audio out
+      // and names every part of the wait, but carries no request id, so it sits
+      // with the unassigned reply latency instead of being matched to a reply.
+      await emit('breakdown','turn-breakdown',{measured_from:'user_silence',total_secs:1.02,parts:[
+        {key:'endpointing_wait',label:'endpointing wait',owner:'config: VAD stop_secs',owner_kind:'setting',start_time:1,duration_secs:.2},
+        {key:'stt',label:'transcription',owner:'DeepgramSTTService#0',owner_kind:'service',start_time:1.2,duration_secs:.12},
+        {key:'llm',label:'LLM inference',owner:'OpenAILLMService#0',owner_kind:'service',start_time:1.32,duration_secs:.7}]});
+      const breakdown=page.locator(identity('breakdown','turn-breakdown'));
+      await checkpoint(visible(identity('breakdown','turn-breakdown'),/reply time[\s\S]*1\.02s/i));
+      assert.match(await breakdown.textContent(),/from the caller falling silent/i);
+      for(const [duration,label,owner] of [['200ms','endpointing wait','config: VAD stop_secs'],
+        ['120ms','transcription','DeepgramSTTService#0'],['700ms','LLM inference','OpenAILLMService#0']])
+        assert.match(await breakdown.textContent(),new RegExp(duration+'[\\s\\S]*'+label+'[\\s\\S]*'+owner.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')),
+          'every part of the wait is named with its duration and its owner');
+      assert.equal(await breakdown.evaluate(node=>document.querySelector('#diagnostic-list').contains(node)),true,'a breakdown belongs to no reply, so it stays in the footer');
+      assert.equal(await reply.locator('[data-kind="breakdown"]').count(),0,'a breakdown is never attached to a reply by timing');
+      // A handler that raised and one that ran out of time are different answers
+      // to "where is the result", and each says which in its own words.
+      for(const [id,state,reason,pattern] of [
+        ['tool-failed','failed','KeyError: customer_id',/lookup[\s\S]*failed[\s\S]*KeyError/i],
+        ['tool-slow','timed_out','It ran past its deadline and was cancelled.',/lookup[\s\S]*timed out[\s\S]*past its deadline/i],
+      ]){
+        await emit('operation',id,operation('tool','lookup'));
+        await emit('operation',id,operation('tool','lookup',{state,reason}));
+        await checkpoint(visible(identity('operation',id),pattern));
+      }
       // Opaque native IDs may equal the UI's names for synthetic scope groups.
       await emit('exchange','call-details',response());
       await emit('operation','scope-collision-response',operation('llm','identified response',{exchange_id:'call-details'}));
@@ -535,8 +561,10 @@ const {chromium} = require(process.env.UNMUTE_SWEEP_PLAYWRIGHT || 'playwright');
       await page.locator('#connect').click();
       await page.locator('body[data-state="connected"]').waitFor();
       await closeNative();
-      await emit('call','call',{target,state:'error',input_boundaries:'known',model_calls:'known',generated_text:'available'},undefined,`call-${call}`);
+      await emit('call','call',{target,state:'error',reason:'CartesiaTTSService#0: websocket closed',input_boundaries:'known',model_calls:'known',generated_text:'available'},undefined,`call-${call}`);
       if(target==='pipecat') assert.equal(await page.locator('body').getAttribute('data-state'),'error','failed calls must not become successful hangups');
+      // Why it failed, on the page. Otherwise the answer is only in a terminal.
+      assert.match(await page.locator('#diagnostic-list').textContent(),/websocket closed/,'a failed call says what ended it');
       await page.locator('#connect').click();
       await page.locator('body[data-state="connected"]').waitFor();
       await control({t:'state',state:'failed',stream_id:streamID});

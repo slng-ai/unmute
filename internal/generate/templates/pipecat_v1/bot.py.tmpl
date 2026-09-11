@@ -2289,8 +2289,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     dev = install_dev_metrics(runner_args)
     try:
         await _run_bot(transport, runner_args, dev)
-    except Exception:
-        dev.finish(error=True)
+    except Exception as error:
+        # The dev page is where the author is looking when a call dies, so the
+        # exception goes there in its own words rather than only to the log.
+        dev.finish(error=True, reason=f"{type(error).__name__}: {error}")
         raise
     finally:
         dev.finish()

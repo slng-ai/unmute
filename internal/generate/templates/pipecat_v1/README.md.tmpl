@@ -46,6 +46,27 @@ Pipecat reports service first-response and processing durations separately.
 Its native audio-latency summaries have no proven response ID and remain
 unassigned. Call first speech uses the native observer session-start boundary.
 
+**Where a reply's time went.** Beside that unassigned reply latency the page
+shows the reply broken into the parts that make it up, in time order, each with
+what it cost and who owns it. The parts account for the whole wait, so they add
+up to the total, and the owner is one of four kinds:
+
+- a **service** you bound, such as the transcriber or the model;
+- a **setting** you wrote, such as the silence window before a turn ends;
+- the **bot** itself, meaning this project's own code between the frameworks;
+- the **pipeline**, meaning time inside the framework that belongs to nobody
+  above, which is what makes a gap visible instead of silently missing.
+
+The line above the parts says what the interval was measured from: the caller
+falling silent, or the client connecting, which is how a greeting is kept from
+being compared with a reply. This breakdown carries no reply identity, so it
+sits with the unassigned values rather than being matched to a reply by timing.
+
+**A tool that produced no result says why.** Its row reads `failed` with the
+error the handler raised, or `timed_out` with the deadline it ran past. A call
+that ends the whole thing puts its error on the call itself, so the page says
+what stopped rather than only that something did.
+
 The event feed reconnects separately from audio. Retained events can replay;
 a gap stays marked until the next call. Switching Conversation and Logs keeps
 the same microphone connection.
@@ -1446,10 +1467,14 @@ anything. Two lines answer almost every latency question:
 - **First bot speech** counts from inside the process only. If it reads about two
   seconds and your caller waited much longer, the difference was the container
   starting: see the cold-start row above{{if not .WarmInstances}} and declare `warm_instances: 1`{{end}}.
-- **The breakdown** attributes each turn to a service by name. One service far
-  above the others is that provider, not this project and not the platform: take
-  it up with them, or bind a different provider for that role in the source
-  package and recompile.
+- **The breakdown** names every part of the turn, not only the services: a part
+  owned by a service far above the others is that provider, not this project and
+  not the platform, so take it up with them or bind a different provider for that
+  role in the source package and recompile. A part owned by a **setting** is
+  yours to change in the package, a part owned by the **bot** is this project's
+  own code, and a part owned by the **pipeline** is time inside the framework.
+  `unmute dev` shows the same parts per reply while you are still on the browser
+  loop, which is the cheaper place to read them.
 - **End-of-turn detection sits between the two.** The pipeline waits to be sure
   the caller has finished before it answers, which costs a second or two per turn
   on purpose. It is the difference between an agent that interrupts and one that
