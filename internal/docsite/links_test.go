@@ -147,3 +147,56 @@ func readAnchors(t *testing.T, path string) map[string]bool {
 	}
 	return found
 }
+
+// Every link into this repository's own tree on GitHub points at a path that
+// exists.
+//
+// These are the links that rot without anyone touching the page. Renaming an
+// example renames a directory, and the pages that pointed at the old one keep
+// pointing at it: `examples/slng-support` became `examples/hotel-concierge` on
+// 2026-09-08 and the MCP page went on sending readers to a GitHub 404 until a
+// link sweep found it three days later. Nothing on the page looked wrong, and
+// nothing failed.
+//
+// Checked against the working tree rather than over the network, so it is
+// offline, deterministic, and fails in the same commit that moves the file
+// rather than after it reaches main.
+func TestRepoLinksPointAtPathsThatExist(t *testing.T) {
+	// Only `main` links are checked. A link pinned to a tag or a commit refers
+	// to history on purpose, and history does not move.
+	repoPath := regexp.MustCompile(`https://github\.com/slng-ai/unmute/(?:tree|blob)/main/([^)"\s]+)`)
+
+	checked := 0
+	err := filepath.WalkDir(siteRoot, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || (filepath.Ext(path) != ".mdx" && filepath.Ext(path) != ".md") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(siteRoot, path)
+		if err != nil {
+			return err
+		}
+		for _, match := range repoPath.FindAllStringSubmatch(string(raw), -1) {
+			target := strings.TrimSuffix(match[1], "/")
+			checked++
+			if _, err := os.Stat(filepath.Join("..", "..", target)); err != nil {
+				t.Errorf("%s links to %s in this repository, and that path does not exist; "+
+					"it was probably renamed or removed without the page moving with it",
+					filepath.ToSlash(rel), target)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checked == 0 {
+		t.Fatal("found no links into this repository's tree; the pattern stopped matching")
+	}
+}

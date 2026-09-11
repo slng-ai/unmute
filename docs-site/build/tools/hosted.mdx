@@ -91,7 +91,7 @@ inject:
   - query: "{{customer_name}}"
 ```
 
-This snippet is separate from the phone-ready `slng-support` example. Declare
+This snippet is separate from the phone-ready `hotel-concierge` example. Declare
 `customer_name` under `variables:` with `type: str` and `source: call_start`,
 and supply it when starting a web session. For inbound phone calls, give it a
 valid default or leave `query` to the model: carriers supply no session inputs.
@@ -150,9 +150,9 @@ tools:
 ## Deploying to SLNG needs no mirror
 
 ```sh
-unmute validate examples/slng-support --target slng
-unmute compile examples/slng-support --target slng
-unmute deploy examples/slng-support
+unmute validate examples/hotel-concierge --target slng
+unmute compile examples/hotel-concierge --target slng
+unmute deploy examples/hotel-concierge
 ```
 
 All three work with no mirror file, no network, and no credential except the

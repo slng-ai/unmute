@@ -44,13 +44,12 @@ tools:
 
 This is a worked example rather than a quote, with `auth:` added to show the
 field. The real one ships in
-[`examples/slng-support`](https://github.com/slng-ai/unmute/tree/main/examples/slng-support):
+[`examples/hotel-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/hotel-concierge):
 its `tools/web_search.yaml` names the same server and the same two tools, and
-carries no `url_env`, `transport` or `auth:`. The platform reads
-the server by name from its own registration, so
-those fields matter only for a code target. This package deploys to slng only,
-agent name `support`, alongside three other tools, so there was nothing for
-`auth:` to reach.
+carries no `url_env`, `transport` or `auth:`. The platform reads the server by
+name from its own registration, so those fields matter only for a code target.
+That package deploys to slng only, agent name `hotel-concierge`, alongside four
+other tools, so there was nothing for `auth:` to reach.
 
 ## The block
 
