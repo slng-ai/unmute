@@ -114,7 +114,7 @@ With the target above, that pushes an agent called **acme-support-slng**.
 SLNG names are unique across an organisation and a push resolves which agent to
 write by matching the name in the body, so pushing under a name that already
 exists replaces that agent rather than adding one. Unmute used to write the
-target name here, and every package on this target calls its target `slng`: two
+target name here, and every package on this target calls its target `slng`. Two
 packages in one organisation both pushed an agent called `slng`, and the second
 replaced the first one's prompt, models and tool attachments.
 
@@ -205,10 +205,11 @@ Reference what your organisation already has by name with
 target needs nothing else: no mirror, no hash, no `unmute pull`, because the
 published tool is the only copy and this target resolves it by name at deploy
 time. `unmute pull` is only for a package that also compiles to livekit or
-pipecat, which build and run the tool themselves and so need a real copy of
-its definition, mirrored into your package. [Hosted tools](/build/tools/hosted)
-has the field-by-field version, including the one limit: a hosted tool's
-Python dependencies compile to slng and are refused on the two code targets.
+pipecat. Those targets build and run the tool themselves, so they need a real
+copy of its definition, mirrored into your package. [Hosted
+tools](/build/tools/hosted) has the field-by-field version, including the one
+limit: a hosted tool's Python dependencies compile to slng and are refused on
+the two code targets.
 
 ### Names, not identifiers
 
@@ -266,9 +267,9 @@ Compile from the package instead.
 ## Hosted tool dependencies
 
 This section is about a package that also targets livekit or pipecat and has
-pulled a mirror; an slng-only deploy never reads a dependency list at all,
-because SLNG installs whatever the published tool declares on its own side,
-invisible to unmute.
+pulled a mirror. An slng-only deploy never reads a dependency list at all: SLNG
+installs whatever the published tool declares on its own side, invisible to
+unmute.
 
 A hosted tool's Python dependencies are the platform's own, mirrored by
 `unmute pull` into `tools/<name>.slng.json` rather than written by you. Each
@@ -280,10 +281,10 @@ tool using only the standard library and pydantic needs no dependencies
 mirrored at all.
 
 This is slng-only. The code drivers build one dependency list for the whole
-generated project out of the provider catalogue and read nothing per tool, so
-a hosted tool that declares dependencies is refused on `livekit` and
-`pipecat` rather than having the pins silently dropped. See
-[Hosted tools](/build/tools/hosted) for the full story.
+generated project out of the provider catalogue, and read nothing per tool. So
+a hosted tool that declares dependencies is refused on `livekit` and `pipecat`,
+rather than having the pins silently dropped. See [Hosted
+tools](/build/tools/hosted) for the full story.
 
 ## The Vault
 

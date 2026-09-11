@@ -53,11 +53,11 @@ slng: check_order
 description: Look up an order and tell the caller its status and delivery date.
 ```
 
-Nothing here is checked offline: the description you write is checked only in
-the sense that a compile records it as an override; whether the published
-tool still means the same thing is a question only your organisation's copy
-can answer, which is why it is one of the checks `unmute deploy` completes,
-not one `unmute compile` does.
+Nothing here is checked offline. A compile records the description you write as
+an override, and that is all it does with it. Whether the published tool still
+means the same thing is a question only your organisation's copy can answer, so
+it is one of the checks `unmute deploy` completes rather than one `unmute
+compile` does.
 
 ## `input` and `output` still have nowhere to go
 
@@ -170,11 +170,11 @@ your organisation and not in your package:
 - which Vault entries the published version needs.
 
 `build/slng/compile-report.json` names these under `deferred_checks`, against
-the references they apply to, so a clean compile reads as "nothing wrong yet"
-rather than "everything is fine." `unmute deploy` completes all three before
-it changes the agent, and `--dry-run` reports them without changing anything.
-See [Deploy to SLNG](/deploy/slng) for what that run checks and what it
-prints.
+the references they apply to. A clean compile therefore reads as "nothing wrong
+yet" rather than "everything is fine." `unmute deploy` completes all three
+before it changes the agent, and `--dry-run` reports them without changing
+anything. See [Deploy to SLNG](/deploy/slng) for what that run checks and what
+it prints.
 
 ## The legacy form still loads
 
@@ -254,7 +254,7 @@ livekit: tool "check_order": `slng:` names a tool SLNG hosts and this target bui
 
 **One limit, and it is the honest cost of "runs everywhere."** A hosted tool
 that declares Python dependencies compiles to slng, which installs a per-tool
-environment, and is refused on livekit and pipecat, in the same words an
+environment. It is refused on livekit and pipecat, in the same words an
 authored `local:` tool's `dependencies:` already gets there:
 
 ```text wrap

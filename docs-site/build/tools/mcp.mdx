@@ -153,9 +153,9 @@ server's discovery snapshot. A missing tool blocks deployment. A real deploy
 can refresh an unusable snapshot once; a dry run never refreshes it.
 
 **SLNG has no "whole server" attachment, so `tools:` is required there.**
-Where LiveKit and Pipecat pass the server through and let it decide what it
-offers, SLNG writes one reference per tool up front, and compiling offline
-means it cannot ask the server what those are:
+LiveKit and Pipecat pass the server through and let it decide what it offers.
+SLNG writes one reference per tool up front, and an offline compile cannot ask
+the server what those are:
 
 ```text
 slng: slng target tool "web_search" exposes every tool on its MCP server, and SLNG
@@ -163,9 +163,9 @@ slng: slng target tool "web_search" exposes every tool on its MCP server, and SL
 ```
 
 `url_env`, `transport`, and `auth` reach no further than that same offline
-compile on SLNG: the platform already has the server registered, under
-`server`, with whatever credential it needs, so nothing in this block reaches
-it at run time except the tool list. Those three fields matter for the code
+compile on SLNG. The platform already has the server registered, under
+`server`, with whatever credential it needs. Nothing in this block reaches it
+at run time except the tool list. Those three fields matter for the code
 targets only.
 
 ## Where the source can be listed

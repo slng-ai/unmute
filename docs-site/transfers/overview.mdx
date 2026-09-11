@@ -142,7 +142,7 @@ agent.yaml:47: escalation "send_to_billing" is declared but no agent reaches it;
 ```
 
 Before, it compiled at exit 0 and the control was simply absent from the
-generated project, while its destination's environment name still reached
+generated project. Its destination's environment name still reached
 `.env.example` and the generated startup check, so the agent refused to start
 over a secret nothing would ever read.
 

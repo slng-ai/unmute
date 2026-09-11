@@ -163,10 +163,10 @@ A route the agent cannot identify records nothing rather than guessing.
    call is its own conversation, holding exactly one `conversation` root span.
 
 If nothing appears, read the agent's log rather than guessing. It says on
-startup whether `COVAL_API_KEY` is present and where traces are going, and it
-writes one line per call naming the conversation the call was filed as, or the
-reason it was not: no transcript, a failed registration, or a registration that
-ran past its budget.
+startup whether `COVAL_API_KEY` is present and where traces are going. It then
+writes one line per call, naming the conversation the call was filed as. If it
+was not filed, the line gives the reason: no transcript, a failed registration,
+or a registration that ran past its budget.
 
 <Note>
 A Coval simulation that dials a deployed agent on a plain phone number cannot
@@ -201,11 +201,11 @@ so what you see is Pipecat's own spans, not a second copy of them. One extra
 
 **LiveKit** builds the tree above from its session events instead, and its own
 OpenTelemetry spans are left switched off. LiveKit's spans are shaped for
-LiveKit: `user_turn` and `agent_turn` are siblings, so the caller's speech can
-never sit inside the reply it caused, one exchange opens a fresh `agent_turn` for
-every tool round, and about a hundred internal spans per call arrive with names
-Coval has no meaning for. A span's parent is fixed when it starts, so renaming
-cannot fix the shape. Every number on the spans is still LiveKit's own
+LiveKit. `user_turn` and `agent_turn` are siblings, so the caller's speech can
+never sit inside the reply it caused. One exchange opens a fresh `agent_turn`
+for every tool round. And about a hundred internal spans per call arrive with
+names Coval has no meaning for. A span's parent is fixed when it starts, so
+renaming cannot fix the shape. Every number on the spans is still LiveKit's own
 measurement, read off `metrics_collected`, `conversation_item_added` and
 `function_tools_executed`. Where the simulation ID came from is recorded on the
 `conversation` span instead of on a `transport` span of its own.
@@ -219,10 +219,10 @@ before LiveKit commits the utterance it answered. The round still lands in the
 turn whose utterance it answered rather than in the one that happened to be
 open when the metric arrived.
 
-Each `llm` span carries the prompt that round actually ran on:
-`gen_ai.system_instructions` is the system prompt of the agent holding the floor,
-`input` is its message history as JSON, `tools` and `tool_count` are what it was
-offered, and `agent.label` says which agent that was.
+Each `llm` span carries the prompt that round actually ran on.
+`gen_ai.system_instructions` is the system prompt of the agent holding the
+floor, and `input` is its message history as JSON. `tools` and `tool_count` are
+what it was offered, and `agent.label` says which agent that was.
 
 One exchange can take several rounds, through tools or a handoff. Only the
 round that produced the spoken reply carries it as `output`; a superseded or

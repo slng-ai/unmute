@@ -37,6 +37,21 @@ One word to settle before we start. A task is one step of the call. Some of
 the compiler's messages say "step" for that reason. On this page the thing you
 write is always a task.
 
+## The nine steps
+
+Each one ends with a package that validates, so you can stop anywhere and come
+back.
+
+1. **Start with no task** - confirm the package you already have still works
+2. **Give the agent a tool** - a lookup, so there is something to move
+3. **Say what you want to keep** - declare the variables
+4. **Add the task** - move the tool onto it
+5. **Save the answer** - `assign:`
+6. **Read it back** - a placeholder in the owner's prompt
+7. **Say what success looks like** - `finish:`, so the tool ends the step
+8. **Open with the question** - `announce:` and `opening: listen`
+9. **Run it** - talk to it in the browser
+
 <Steps>
   <Step title="Start with no task">
     This is the package from the last page. Make sure it still validates:
@@ -451,11 +466,9 @@ write is always a task.
     Watch the dev page while you talk. The task shows up as its own row when
     the model enters it, then `look_up_parcel` gets a row of its own, and then
     the agent answers. If you never see the task's row, the model went round
-    it: check that the agent does not hold the task's tool, and that the
-    `when:` line describes what the caller actually said. [Running it
-    locally](/dev/overview) explains every row on that page.
-  </Step>
-</Steps>
+    it. Check two things: that the agent does not hold the task's tool, and
+    that the `when:` line describes what the caller actually said. [Running it
+    locally](/dev/overview) explains every row on that page. </Step> </Steps>
 
 ## The whole file
 

@@ -154,11 +154,11 @@ before pushing. It matches by the tool **file's** name, `tools/end_call.yaml`,
 never by the `builtin.id` you selected inside it.
 
 That is fine as written here, because the file is named `end_call` too. It
-stops being fine the moment you rename the file to something that describes
-what it does rather than the capability it selects: a file
-`tools/hang_up.yaml` with `builtin: {id: end_call}` inside compiles and
-validates, but the organisation has no tool named `hang_up`, so the preflight
-reports it absent even though the capability exists:
+stops being fine the moment you rename the file to describe what it does rather
+than the capability it selects. A file `tools/hang_up.yaml` holding `builtin:
+{id: end_call}` compiles and validates, but the organisation has no tool named
+`hang_up`. The preflight then reports it absent, even though the capability
+exists:
 
 ```text wrap
 this organisation has no tool of this name (it has `end_call`). A builtin reference is

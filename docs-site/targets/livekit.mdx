@@ -28,11 +28,11 @@ my-agent/build/livekit/
 └── compile-report.json   # what the compiler decided
 ```
 
-A target with an inbound SIP route writes three more files:
-`sip-inbound-trunk.json` and `sip-dispatch-rule.json`, the records that create
-the inbound trunk and the dispatch rule sending calls on your number to this
-agent, and the `telephony-setup.sh` that creates both.
-[Inbound calls](/telephony/inbound-calls) covers them.
+A target with an inbound SIP route writes three more files.
+`sip-inbound-trunk.json` and `sip-dispatch-rule.json` are the records that
+create the inbound trunk and the dispatch rule, which sends calls on your
+number to this agent. `telephony-setup.sh` creates both. [Inbound
+calls](/telephony/inbound-calls) covers them.
 
 ## agent.py
 

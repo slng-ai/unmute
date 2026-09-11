@@ -360,11 +360,12 @@ nothing in a running agent, or in a deployed one, until you compile and deploy
 again.
 
 A base that no tool searches is a warning at compile, not an error, because it is
-read and indexed at every start and never queried. A base where no document yields
-any text stops the deployment, the same as a missing credential. A lookup that
-fails mid-call does **not** end the call: the agent is told the lookup is
-unavailable and says so, and the reason goes to the process log rather than into
-the model's context, because a model handed a provider error can read it aloud.
+read and indexed at every start and never queried. A base where no document
+yields any text stops the deployment, the same as a missing credential.
+
+A lookup that fails mid-call does **not** end the call. The agent is told the
+lookup is unavailable, and says so. The reason goes to the process log, not into
+the model's context: a model handed a provider error can read it aloud.
 
 Indexing happens before the agent takes calls, so a caller never waits for it. It
 runs once per worker process, so every worker indexes the whole corpus at start:

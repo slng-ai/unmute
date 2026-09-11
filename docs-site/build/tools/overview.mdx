@@ -34,8 +34,8 @@ local:
   handler: tools/check_availability.py
 ```
 
-The top of the file is the contract. `description` and `input` are everything the
-model knows about this tool, so write the description as an instruction rather
+The top of the file is the contract. `description` and `input` are everything
+the model knows about this tool. Write the description as an instruction rather
 than a label, and let the schema do real work: the `enum` above means the model
 cannot ask for a service the salon does not offer.
 
@@ -245,14 +245,14 @@ tool asks for one string and returns passages, so there is nothing to describe a
 nothing to merge into. It does take `description` and `announce`, and you should
 write both.
 
-**`output:` is refused on an slng target.** It used to be allowed there, and
-allowed for a reason: the compiler turned it into a pydantic `Output` class
-inside the code it uploaded, and SLNG read the tool's result shape off that
-class. unmute uploads no code now, so the field reaches nothing and is refused
-rather than dropped. A tool SLNG hosts carries its own `Output` model, written
-where the tool was written. Full story in
-[Python tools](/build/tools/python#what-the-slng-sandbox-expects) and
-[Hosted tools](/build/tools/hosted).
+**`output:` is refused on an slng target.** It used to be allowed there, for a
+reason. The compiler turned it into a pydantic `Output` class inside the code
+it uploaded, and SLNG read the tool's result shape off that class. unmute
+uploads no code now, so the field reaches nothing and is refused rather than
+dropped. A tool SLNG hosts carries its own `Output` model, written where the
+tool was written. Full story in [Python
+tools](/build/tools/python#what-the-slng-sandbox-expects) and [Hosted
+tools](/build/tools/hosted).
 
 ## The three behavior fields
 

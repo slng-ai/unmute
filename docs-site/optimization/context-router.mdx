@@ -82,12 +82,12 @@ them.
 | `x-slng-model` | a model id, present only on the model path | which model answered |
 | `x-slng-request-id` | always present, errors included | quote this to support |
 
-Read `x-slng-response-source` rather than inferring a hit from how fast the
-reply came back: fast is not proof of a hit, and a repeat served by the model
-is expected, not a fault, since the router judges which turns are worth
-serving from cache. A miss just costs a little, an extra hop in front of your
-own model. Streamed responses report no usage on either path, so token
-savings cannot be read off the stream either.
+Read `x-slng-response-source` rather than guessing a hit from how fast the
+reply came back. Fast is not proof of a hit. A repeat served by the model is
+expected, not a fault: the router decides which turns are worth serving from
+cache. A miss just costs a little, an extra hop in front of your own model.
+Streamed responses report no usage on either path, so token savings cannot be
+read off the stream either.
 
 If a repeat never caches, check: the same `agent_id` on both calls, a couple
 of seconds since the turn it repeats, the second turn or later, and the exact
@@ -103,11 +103,10 @@ next**. When that same pair comes round again, it can answer from the cache.
 of every call takes the full path to your model. A conversation with no repeat
 in it never shows a hit.
 
-**Not every repeat caches, and that is by design.** The router judges which
-turns are worth treating as repeatable, so two pairs identical in everything a
-client controls can still behave differently, one served from cache and one
-sent to the model every time. A repeat served by the model is expected, not a
-fault.
+**Not every repeat caches, and that is by design.** The router decides which
+turns are worth treating as repeatable. Two pairs identical in everything a
+client controls can still behave differently: one served from cache, one sent
+to the model every time. A repeat served by the model is expected, not a fault.
 
 ## One stable `agent_id`, one scope per prompt
 
@@ -131,28 +130,27 @@ optimized-salon-concierge-v13:task.verify_customer
 optimized-salon-concierge-v13:task.manage_booking
 ```
 
-That is not decoration. The cache key is the last exchange, and it does not
-include the system prompt, so two agents sharing one scope can be served each
-other's answers: an early build without per-prompt scopes hit exactly this, a
-receiving agent's opening line after a handoff served the previous agent's
-cached answer, no model call, because the two agents shared one scope. One
-scope per prompt is what the router's own contract asks for, and that is what
-unmute sends now.
+That is not decoration. The cache key is the last exchange. It does not include
+the system prompt, so two agents sharing one scope can be served each other's
+answers. An early build without per-prompt scopes hit exactly this: after a
+handoff, the receiving agent's opening line was served the previous agent's
+cached answer, with no model call at all. One scope per prompt is what the
+router's own contract asks for, and that is what unmute sends now.
 
 The names come from your package and nothing else, so the same package always
-compiles to the same scopes on either target, and a wording change never
-moves one. Two agents with identical instructions still get two scopes and
-stop sharing warmth, because they are two prompt sites. Hit rates build over
-calls either way, so a fresh id is a cold cache: bump it deliberately rather
-than as housekeeping. Pre-warmed answers, where they exist, are arranged
-against a scope rather than the bare `agent_id`, so an id bump or a package
-that just started sending one scope per prompt needs that arrangement redone;
-the generated runbook prints the exact list of scopes your package sends.
+compiles to the same scopes on either target, and a wording change never moves
+one. Two agents with identical instructions still get two scopes and stop
+sharing warmth, because they are two prompt sites. Hit rates build over calls
+either way, so a fresh id is a cold cache: bump it deliberately rather than as
+housekeeping. Pre-warmed answers, where they exist, are arranged against a
+scope rather than the bare `agent_id`. Bump the id, or start sending one scope
+per prompt, and that arrangement has to be redone. The generated runbook prints
+the exact list of scopes your package sends.
 
-Compiling refuses a scope that will not fit: the value leaves as an HTTP
-header, the bound is 128 characters counted on the finished scope rather than
-the `agent_id` alone, and the message names which agent or task produced the
-long value so you know which name to shorten. It refuses rather than
+Compiling refuses a scope that will not fit. The value leaves as an HTTP
+header, and the bound is 128 characters, counted on the finished scope rather
+than on the `agent_id` alone. The message names which agent or task produced
+the long value, so you know which name to shorten. It refuses rather than
 truncating, because two truncated scopes could land on the same string.
 
 ## Regions
@@ -241,12 +239,12 @@ reads two names and forwards the rest:
 | `slng_pure_proxy` | consumed, and rides the body as the router's shadow-trial switch |
 | anything else | forwarded, in the request body, on both targets |
 
-The router passes a key it does not recognise to your upstream, so this is how
-you reach a provider-specific option Unmute has never heard of, and why the
-compiler cannot check one: a wrong value surfaces as the upstream's own
-error, relayed with its status code and message intact. A nested value is
-fine too, since the body is JSON, so `provider: {only: ["groq"]}` forwards
-straight through to OpenRouter.
+The router passes a key it does not recognise straight to your upstream. That
+is how you reach a provider-specific option Unmute has never heard of, and why
+the compiler cannot check one. A wrong value comes back as the upstream's own
+error, with its status code and message intact. A nested value is fine too,
+since the body is JSON, so `provider: {only: ["groq"]}` forwards straight
+through to OpenRouter.
 
 ## `prompt_suffix`, for what no parameter reaches
 
@@ -342,25 +340,24 @@ shortened with a warning. Prefetch has its own smaller input limit; see
 
 A placeholder is for a value your agent **says**: the caller's name, an
 appointment detail read back aloud. Supplied that way, the stored copy holds
-the placeholder instead of the value, so the turn caches like any other and
-the next caller hears their own name in it. A value that changes **what the
-answer is**, like the reply language, does not belong in one however much it
-varies per call, since two callers would then share one cached answer written
-in only one language: write it into the prompt text instead, and give
-variants that must never share answers their own `agent_id`, the only thing
-that partitions the cache. The compiler does not judge a value by its name,
-so this is not checked for you.
+the placeholder instead of the value, so the turn caches like any other and the
+next caller hears their own name in it. A value that changes **what the answer
+is**, like the reply language, does not belong in one, however much it varies
+per call. Two callers would share one cached answer written in a single
+language. Write it into the prompt text instead. Variants that must never share
+answers need their own `agent_id`, which is the only thing that partitions the
+cache. The compiler does not judge a value by its name, so this is not checked
+for you.
 
 The value also has to match the answer **character for character** to be
 recognised and stored. A phone number the model regroups, or a date it
-rewrites, leaves the real thing in the stored copy instead, the personal-data
-scan refuses to share it, and the turn silently stops caching, no error, just
-a hit rate of zero. Write the expected shape into the variable's own
-`description`, and make whatever produces the value follow it. This only
-decides caching for a value the agent says out loud; a value passed only to
-tools can take whatever shape the rest of your package uses, the way
-`examples/salon-concierge` returns E.164 everywhere and never reads a number
-back to the caller.
+rewrites, leaves the real thing in the stored copy. The personal-data scan then
+refuses to share it, and the turn stops caching. There is no error, just a hit
+rate of zero. Write the expected shape into the variable's own `description`,
+and make whatever produces the value follow it. This decides caching only for a
+value the agent says out loud. A value passed only to tools can take whatever
+shape the rest of your package uses. `examples/salon-concierge` returns E.164
+everywhere and never reads a number back to the caller.
 
 ### What the router will not cache, whatever you do
 
@@ -385,9 +382,9 @@ back into hits.
 
 No shipped example binds to the router today.
 [`examples/salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)
-reaches OpenAI directly, which makes it a useful starting point rather than a
-finished demonstration: it is a package with several prompt sites, so pointing
-its think binding at the router gives you one scope per site to look at.
+reaches OpenAI directly, which makes it a starting point rather than a finished
+demonstration. It has several prompt sites, so pointing its think binding at
+the router gives you one scope per site to look at.
 
 To see the router's own contribution on your own agent, compile it once with
 the think profile bound directly to the upstream vendor and once bound to the

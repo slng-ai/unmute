@@ -87,13 +87,13 @@ because a clean local result is narrower than a clean deploy: it says which
 checks this command has not made.
 
 Each `attached` line names a reference this run resolved and checked against
-your organisation, never one it created: every tool it names already existed,
-published, before this run started, and `v<n>` is the version this run
-checked and attached, which is always the latest published one. An MCP
-selection carries no version, because a server tool has none; what was checked
-for it is the schema hash SLNG's own snapshot recorded. The
-`requirements satisfied` count is the same account read, folded in with every
-Vault entry, MCP server and builtin the package needs.
+your organisation, never one it created. Every tool it names already existed,
+published, before this run started. `v<n>` is the version this run checked and
+attached, which is always the latest published one. An MCP selection carries no
+version, because a server tool has none; what was checked for it is the schema
+hash SLNG's own snapshot recorded. The `requirements satisfied` count is the
+same account read, folded in with every Vault entry, MCP server and builtin the
+package needs.
 
 Only a `slng` target is deployed. A livekit or pipecat target compiles to a
 project that somebody else's platform runs, so it is `unmute compile` plus that
@@ -141,8 +141,8 @@ does not grow with how many secrets you declare.
 
 Unmute creates no tools or MCP servers. SLNG owns tool creation entirely, and
 an authored `local:` or `webhook:` block is refused before this step is
-reached, so there is no first-deploy grace period where an absent tool is
-expected: every name this preflight checks already exists, published, or the
+reached. So there is no first-deploy grace period where an absent tool is
+expected. Every name this preflight checks already exists, published, or the
 run stops.
 
 A control is never checked either. It reaches SLNG as a curated capability you
@@ -224,9 +224,9 @@ to close:
 ```
 
 Say no and the run stops with the entry still missing. Say yes and one of two
-things happens: a value already in your package's `.env` is piped to
-`voiceai secret create` on standard input, or, if there is none, the terminal is
-handed to `voiceai secret create`, which prompts with the input masked.
+things happens. A value already in your package's `.env` is piped to `voiceai
+secret create` on standard input. If there is none, the terminal is handed to
+`voiceai secret create`, which prompts with the input masked.
 
 Either way the value never reaches a command line, a file unmute writes, or your
 screen. There is no `--value` flag anywhere in this path, deliberately: an
@@ -325,12 +325,12 @@ A preview names a version without the word `attached`, because nothing was:
 and `v<n>, new` is one it does not have at all. A first deployment shows no
 previous version rather than inventing one.
 
-The indented lines are what a replacement would alter on that attachment, and
-they exist for the settings only the dashboard could have added: a description
-typed there, an invocation switched to `system`, a `call_start` trigger, a
-system argument, an argument override the package no longer supplies or
-supplies a different value for. Each is named against the attachment it belongs
-to rather than left for the push to discard silently.
+The indented lines are what a replacement would alter on that attachment. They
+exist for the settings only the dashboard could have added: a description typed
+there, an invocation switched to `system`, a `call_start` trigger, a system
+argument, or an argument override the package no longer supplies. Each is named
+against the attachment it belongs to rather than left for the push to discard
+silently.
 
 A setting the package **can** declare is compared, not listed. The sentence
 spoken before a tool runs is `announce:` in the tool file, so a package whose
@@ -368,11 +368,10 @@ The problems you will meet most:
 | `--require-resolved`, naming `brew install` | the installed `voiceai` does not support a checked, resolved push. Upgrade it; see [Deploy to SLNG](/deploy/slng). |
 | `agent ambiguous` | two agents share the package's name. Pass `--agent-id`. |
 
-These problems stop the agent push. `no mirror of it is committed` and
-`does not match the hash` are
-not on this list: `unmute deploy` compiles only the slng target, which reads
-no mirror, so those two refusals belong to a `livekit` or `pipecat` compile of
-the same package. See [Hosted tools](/build/tools/hosted).
+These problems stop the agent push. `no mirror of it is committed` and `does
+not match the hash` are not on this list. `unmute deploy` compiles only the
+slng target, which reads no mirror. Those two refusals belong to a `livekit` or
+`pipecat` compile of the same package. See [Hosted tools](/build/tools/hosted).
 
 ## Trying a hosted tool
 

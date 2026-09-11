@@ -3,11 +3,10 @@ title: "Your first agent"
 description: "The smallest real agent: a prompt, four models, and one file that says who is answering."
 ---
 
-Everything else in this section adds to this page. Start here.
-
 An Unmute package is a directory. The agent lives in `agent.yaml`, the prompt
 lives in a Markdown file next to it, and the target choice lives in
-`targets.yaml`.
+`targets.yaml`. This page walks that file, key by key. Everything else in this
+section adds to it.
 
 Make one now, then read along in the file it writes. Already ran this in the
 quickstart? You are sitting inside that `my-agent/` directory: `cd ..` first,
@@ -31,6 +30,12 @@ created my-agent/tools/end_call.yaml
   built-in tool so it can hang up, no phone number and no third-party account.
   Everything below is a tour of what is in it, so nothing here is a detour.
 </Tip>
+
+## On this page
+
+- [The agent file](#the-agent-file) - every top-level key `unmute init` writes
+- [The target file](#the-target-file) - where this package compiles to
+- [Try it](#try-it) - validate, then talk to it in a browser
 
 ## The agent file
 

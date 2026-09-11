@@ -164,9 +164,9 @@ that feels flat and long is sitting at the ceiling, and only this moves it.
 
 `endpointing_delay` is the floor: how long you have to stay quiet before the
 agent believes you finished. Lowering it also makes short replies finalise
-sooner, because the transcriber is only asked to finalise once the silence window
-elapses, so it pays twice on a "yes, that's right". **But lowering the floor
-alone does not shorten a long turn.**
+sooner. The transcriber is only asked to finalise once the silence window
+elapses, so the change pays twice on a "yes, that's right". **But lowering the
+floor alone does not shorten a long turn.**
 
 ```yaml agent.yaml
 models:
@@ -289,11 +289,12 @@ local:
 announce: Let me check.
 ```
 
-Keep the line **shorter than the gap it covers**. A long line runs into the answer
-and breaks its own promise of a wait: "Okay, one sec." works where "One sec, let
-me pull up your details and see what we have" does not. Put it only on tools that
-fetch or push data, and never on two things that speak for one request: two tools
-in the same turn, or a tool at the end of one step and a task at the start of the next.
+Keep the line **shorter than the gap it covers**. A long line runs into the
+answer and breaks its own promise of a wait: "Okay, one sec." works where "One
+sec, let me pull up your details and see what we have" does not. Put it only on
+tools that fetch or push data. Never put it on two things that speak for one
+request: two tools in the same turn, or a tool at the end of one step and a
+task at the start of the next.
 
 ## All of it in one package
 

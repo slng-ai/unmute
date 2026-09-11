@@ -19,16 +19,13 @@ pushes. The agent is written only after its required checks pass. A real deploy
 may first refresh MCP discovery or fill a Vault entry with your consent; its
 report records those changes even if a later check fails. A dry run does neither.
 
-<Warning>
-  A real deploy needs a `voiceai` release that supports a checked, resolved
-  push; this flow was verified with `voiceai 0.1.18`. `unmute deploy` checks for that support before writing anything: an
-  older `voiceai` is refused with upgrade guidance, naming the missing
-  capability and the install command, rather than falling back to an
-  unchecked push that resolves and attaches whatever is newest without having
-  checked it. `unmute validate` and `unmute compile` are unaffected: both work
-  offline against any installed `voiceai`, because neither one reads your
-  account at all.
-</Warning>
+<Warning> A real deploy needs a `voiceai` release that supports a checked,
+resolved push; this flow was verified with `voiceai 0.1.18`. `unmute deploy`
+checks for that support before writing anything. An older `voiceai` is refused,
+with upgrade guidance naming the missing capability and the install command. It
+never falls back to an unchecked push that attaches whatever is newest. `unmute
+validate` and `unmute compile` are unaffected: both work offline against any
+installed `voiceai`, because neither one reads your account at all. </Warning>
 
 ## What works today
 
@@ -50,15 +47,13 @@ which becomes one of the agent's runtime variables and comes back on the call
 record.
 
 [`hotel-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/hotel-concierge)
-is the working example and the shape to copy: two hosted tools by name, two
-named MCP tools, a builtin, template variables with defaults in the greeting
-and the prompt, an injected argument, a tool announcement and a model fallback,
-with no required session inputs. If your agent needs a
-tool SLNG does not host yet,
-create it in the SLNG dashboard and reference it with `slng:`
-(see [Hosted tools](/build/tools/hosted)), or compile the package to
-`pipecat` or `livekit` instead, where the handler runs in the project you
-host.
+is the working example and the shape to copy. It has two hosted tools by name,
+two named MCP tools, a builtin, template variables with defaults in the
+greeting and the prompt, an injected argument, a tool announcement and a model
+fallback. It needs no session inputs. Does your agent need a tool SLNG does not
+host yet? Create it in the SLNG dashboard and reference it with `slng:` (see
+[Hosted tools](/build/tools/hosted)). Or compile the package to `pipecat` or
+`livekit` instead, where the handler runs in the project you host.
 
 ## Before you start
 
@@ -160,14 +155,13 @@ prove those resources exist in your account.
     the difference is the point: a preview says what it would attach and a
     deploy says what it did.
 
-    On a package that already has a live agent, the same run also names what
-    a replacement would remove: a reference the package no longer names, or a
-    setting the agent has now that the package does not declare, such as a
-    description typed in the dashboard or a `call_start` trigger somebody
+    On a package that already has a live agent, the same run also names what a
+    replacement would remove. That is a reference the package no longer names,
+    or a setting the agent has now that the package does not declare: a
+    description typed in the dashboard, say, or a `call_start` trigger somebody
     added there. Full shape of the preview, including what it says about a
-    changed published description or schema, is at
-    [`unmute deploy`](/reference/cli/deploy).
-  </Step>
+    changed published description or schema, is at [`unmute
+    deploy`](/reference/cli/deploy). </Step>
 
   <Step title="Deploy">
     ```sh
@@ -347,11 +341,11 @@ entry with your consent. Inspect `deploy-report.json` for completed changes.
 | `--require-resolved` in the message, naming `brew install` | the installed `voiceai` does not support a checked, resolved push. See the warning near the top of this page. |
 | `agent ambiguous` | two agents share the package's name. Pass `--agent-id`. |
 
-These problems block the agent push. A dry run makes no remote changes.
-A `slng:` tool's mirror is never checked here, because `unmute
-deploy` compiles only the slng target and that target reads no mirror; a
-`no mirror of it is committed` or `does not match the hash` refusal is
-[a `livekit` or `pipecat` compile's](/build/tools/hosted), not this command's.
+These problems block the agent push. A dry run makes no remote changes. A
+`slng:` tool's mirror is never checked here. `unmute deploy` compiles only the
+slng target, and that target reads no mirror. A `no mirror of it is committed`
+or `does not match the hash` refusal comes from [a `livekit` or `pipecat`
+compile](/build/tools/hosted), not from this command.
 
 ## Receive phone calls
 

@@ -73,15 +73,15 @@ nested reasoning setting when it is present. Use that field instead of a raw
 `reasoning` map.
 
 `api` and `use_websocket` are the two params only LiveKit can act on: one picks
-the class, the other is a kwarg that class has and the chat completions one does
-not. Write them here rather than in a target override. A per-target `models:`
-entry replaces the base entry instead of merging into it, so an override would
-have to repeat `provider`, `model` and `reasoning_effort` to keep them, and two
-copies of one binding is a binding that gets edited on one side. Pipecat drops
-both and builds `OpenAILLMService` either way, and `unmute validate` prints a
-warning per param naming the target, so you are told what did not apply.
-`salon-concierge-single-prompt` shows this binding; `salon-concierge` uses Chat
-Completions with `reasoning_effort: "none"`.
+the class, the other is a kwarg that class has and the chat completions one
+does not. Write them here rather than in a target override. A per-target
+`models:` entry replaces the base entry instead of merging into it. An override
+would have to repeat `provider`, `model` and `reasoning_effort` to keep them,
+and two copies of one binding is a binding somebody edits on one side only.
+Pipecat drops both and builds `OpenAILLMService` either way, and `unmute
+validate` prints a warning per param naming the target, so you are told what
+did not apply. `salon-concierge-single-prompt` shows this binding;
+`salon-concierge` uses Chat Completions with `reasoning_effort: "none"`.
 
 `use_websocket: true` keeps a WebSocket connection for Responses requests.
 HTTP clients can also reuse connections, so compare latency on the package's
@@ -173,7 +173,7 @@ Two things this shape buys, both worth knowing before you copy it:
 
 **Measure the host you pin, and measure two things separately.** On
 `qwen/qwen3-32b` the four providers spanned a wide range at both the median and
-the tail, and latency did not predict correctness: the second-fastest spoke a
+the tail. Latency did not predict correctness: the second-fastest spoke a
 fragment of its own tool-call template into every reply. A provider's published
 figures are aggregated over everybody's traffic, mostly short prompts with no
 tools, so they will not match a voice agent's request. Send your own prompt and

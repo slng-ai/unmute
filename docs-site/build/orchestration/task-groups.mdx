@@ -146,11 +146,9 @@ A group stops when a step ends unserved, whichever `context_scope` it has: the
 later steps do not run, and the owner is handed the unserved status. Running
 the next step would answer a question nobody asked.
 
-A step's handoff also ends the group, and the caller is moved. When the model
-calls a handoff in the same response as a tool that ends the step, or while
-that tool is still running, the step's own work is committed first and the
-caller is moved after: the booking is not lost on the way out. If that work
-does not complete, the caller is not moved and the model is told so.
+A handoff can arrive while a tool that ends the step is still running, or in
+the same response as one. Either way the step's own work is committed first,
+and the caller moves after. The booking is not lost on the way out.
 
 A request the caller makes at a [`reset`](/best-practices/context-scope) or an
 isolated boundary reaches nobody: the step that hears it has no way to pass

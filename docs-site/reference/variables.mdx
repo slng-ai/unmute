@@ -224,11 +224,11 @@ including its fields.
 | `connection` | the phone adapter | LiveKit `sip` or `connector` |
 
 The last eight are system sources. You declare them, and the selected route
-must be able to supply the fact: a route that grants nothing for it refuses
-the declaration at validation. A `prefetch:` entry reads the same route table
-as a variable's own `source:`, so the same fact hydrates either way, on
-whichever route grants it. [The full grid](/build/prefetch#where-it-works) has
-exactly what each route grants, fact by fact and direction by direction.
+must be able to supply the fact: a route that grants nothing for it refuses the
+declaration at validation. A `prefetch:` entry reads the same route table as a
+variable's own `source:`. The same fact hydrates either way, on whichever route
+grants it. [The full grid](/build/prefetch#where-it-works) has exactly what
+each route grants, fact by fact and direction by direction.
 
 For an inbound LiveKit or Pipecat telephony channel, every `call_start` variable
 needs a default. There is no dispatch payload to supply an unsolicited incoming

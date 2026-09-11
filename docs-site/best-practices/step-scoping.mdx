@@ -11,6 +11,16 @@ The model does not read your intent. To the model, a task is one more entry in
 its function list, next to the owner's own tools, and it picks. These are the
 rules that decide which way it picks.
 
+On this page:
+
+- [Give the task a tool the owner does not have](#give-the-task-a-tool-the-owner-does-not-have) - the one that decides entry
+- [Order steps with the prompt](#order-steps-with-the-prompt) - two sentences, no gate
+- [Keep a read on the owner](#keep-a-read-on-the-owner-keep-the-write-on-the-task) - and the write on the task
+- [Let the tool end the task](#let-the-tool-end-the-task) - `finish:` and its success values
+- [Scope history down](#scope-history-down-and-let-saved-values-carry-the-facts) - what each scope shows
+- [Give every task an escape](#give-every-task-an-escape-and-read-it) - `unserved_request`, and reading it
+- [Do not let two prompts disagree](#do-not-let-two-prompts-disagree) - owner and task together
+
 ## Give the task a tool the owner does not have
 
 If the owner already holds every tool the task holds, the owner can finish the
@@ -95,12 +105,10 @@ The verified customer is {{customer_id}}. Once that value is present, verificati
 succeeded. Never run that task again unless the caller says the number is wrong.
 ```
 
-That is a request to the model, not a gate, so it is not the last line of
-defense. The last line sits on the tool. A tool that silently reads a value,
-through `inject:` or a webhook path, still refuses to run while that value is
-empty or unconfirmed, and the model is told which task supplies it, or, when
-nothing does, to ask the caller. The worst case is one extra model turn, not
-a request sent with a blank or an unconfirmed field.
+A tool that silently reads a value, through `inject:` or a webhook path, still
+refuses to run while that value is empty or unconfirmed. The model is told
+which task supplies it. When nothing supplies it, the model is told to ask the
+caller.
 
 Check the order with a scripted text conversation before you check it on the
 phone. It drives the agent through a fixed script with the real model and the

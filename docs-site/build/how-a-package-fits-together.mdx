@@ -3,22 +3,62 @@ title: "How a package fits together"
 description: "One rule explains the whole file: every list on an agent has a matching top-level block."
 ---
 
-You have one agent working. This page is the rule that gets you to several.
+A package is one `agent.yaml` plus the prompts, tool files and knowledge
+folders it points at. It answers three questions: who answers the call, what
+each agent may do, and what each of those things actually is.
 
-A package answers three questions. Who answers the call. What each agent is
-allowed to do. What each of those things actually is. `agent.yaml` holds all
-three, alongside the prompts, tool files and knowledge folders it points at.
-
-You only need one rule to read or write it:
+One rule explains the whole file:
 
 > **Every list on an agent has a matching top-level block with the same name.
 > The list holds names. The block holds the definitions.**
 
-Tasks are the one exception: a task is defined right inside the agent that
-uses it first, under that agent's own [`tasks:`](/build/orchestration/tasks)
-list. A second agent that runs the same task just names it.
+On this page:
 
-That is the whole system. The rest of this page is that rule, applied.
+- [Quickstart](#quickstart) - the smallest package with two agents
+- [The five things an agent can do](#the-five-things-an-agent-can-do) - and which give the caller back
+- [Every key an agent takes](#every-key-an-agent-takes) - three required, five lists
+- [Build one in four steps](#build-one-in-four-steps) - the worked version
+- [How a value gets from one step to the next](#how-a-value-gets-from-one-step-to-the-next) - `variables:`, `assign:`, `context:`
+- [What the compiler holds for you](#what-the-compiler-holds-for-you) - the errors you cannot write past
+
+## Quickstart
+
+Two agents. `front_desk` answers, and can hand the caller to
+`complaint_specialist`:
+
+```yaml agent.yaml
+entry_agent: front_desk
+
+agents:
+  front_desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    handoffs:
+      - to_complaints
+
+  complaint_specialist:
+    instructions: agents/complaints.md
+    think: reasoning
+    speak: voice
+
+handoffs:
+  to_complaints:
+    to: complaint_specialist
+    when: The caller has a complaint.
+```
+
+```sh
+unmute validate my-agent
+```
+
+`front_desk` lists the **name** `to_complaints`. The top-level `handoffs:`
+block holds the **definition**. That is the rule, and every other list works
+the same way.
+
+Tasks are the one exception: a task is defined right inside the agent that uses
+it first, under that agent's own [`tasks:`](/build/orchestration/tasks) list. A
+second agent that runs the same task just names it.
 
 ## The five things an agent can do
 
@@ -253,11 +293,11 @@ agent.yaml:47: escalation "to_manager" is declared but no agent reaches it; add 
 
 ## Order, and what it does not mean
 
-Nothing an agent lists runs in list order. The model picks what to use from
-the `when:` text. Two things in a package do run in a fixed order: the
-`steps:` of a task group, and the entries of [`prefetch:`](/build/prefetch),
-which resolve top to bottom and refuse the build when an entry reads a value
-only a later entry assigns.
+Nothing an agent lists runs in list order. The model picks what to use from the
+`when:` text. Two things in a package do run in a fixed order: the `steps:` of
+a task group, and the entries of [`prefetch:`](/build/prefetch). Pre-fetch
+entries resolve top to bottom, and an entry that reads a value only a later
+entry assigns stops the build.
 
 Order is not free everywhere, though: the order of names in a list is the
 order the tools are declared to the model in the generated code, so
