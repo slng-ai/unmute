@@ -10,11 +10,23 @@ New here? Read [How a package fits together](/build/how-a-package-fits-together)
 first. It is one page, it answers "I want two agents, each with tasks, where do I
 start?", and everything below assumes it.
 
+<Note>
+
+These shapes need a code target, Pipecat or LiveKit Agents. The SLNG target
+compiles one agent with one prompt, so it refuses tasks, task groups and
+handoffs. `unmute validate` says so, and names the way out:
+
+```text
+slng: slng target writes one agent with one prompt, so a task has nowhere to go: fold the step into the agent's instructions, or compile to livekit or pipecat which emit multi-task agents
+```
+
+</Note>
+
 | Shape | What it is | Where it is taught |
 |---|---|---|
-| **Handoff** | one agent gives the caller to another, and does not get them back | [Handoffs](/build/orchestration/handoffs) |
-| **Task** | a short step the agent runs, which returns a typed result | [Tasks](/build/orchestration/tasks) |
+| **Task** | one step the agent runs, which saves typed values and returns | [Tasks](/build/orchestration/tasks) |
 | **Task group** | several tasks in a fixed order, sharing what they learn | [Task groups](/build/orchestration/task-groups) |
+| **Handoff** | one agent gives the caller to another, and does not get them back | [Handoffs](/build/orchestration/handoffs) |
 
 The difference that matters most is whether control comes back. A task returns. A
 handoff does not.
@@ -22,40 +34,119 @@ handoff does not.
 None of these is how you reach a person: that is an
 [escalation](/transfers/overview), and what it can do depends on the phone route.
 
-## Five lists, four catalogs
+Whichever shape you reach for, you write it the same way: as a name in one of
+the agent's five lists. [The five things an agent can
+do](/build/how-a-package-fits-together#the-five-things-an-agent-can-do) shows
+the lists and which ones come back.
 
-Whichever shape you reach for, you write it the same way. An agent declares
-what it can do in five lists, one per kind. Four of those have a top-level
-catalog of the same name; the fifth, tasks, is nested right inside the agent
-that defines it:
+## What each shape does to the call
 
-| Agent list | Catalog | What it does |
-|---|---|---|
-| `tools:` | `tools:` | does work and returns a value |
-| `tasks:` | nested in the agent | runs a focused step, then control returns |
-| `task_groups:` | `task_groups:` | runs several tasks in a fixed order, then control returns |
-| `handoffs:` | `handoffs:` | the conversation becomes another agent, and never returns |
-| `escalations:` | `escalations:` | the caller goes through to a person |
+Each picture answers two questions: who is talking to the caller, and does
+control come back to the agent that started.
 
-Which block a thing is written in is its kind, so nothing carries a `kind:`
-field. [How a package fits together](/build/how-a-package-fits-together) walks
-through a complete file.
+### A tool
+
+The agent stays in charge. It calls the tool, reads the result, and keeps
+talking.
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Owner
+    participant Tool
+    Caller->>Owner: asks a question
+    Owner->>Tool: calls the tool
+    Tool-->>Owner: result
+    Owner->>Caller: answers, and keeps the call
+```
+
+### A task
+
+The owner enters the task. The task talks to the caller with its own prompt and
+tools. When the model calls `finish`, the values in `assign:` are saved and the
+owner continues, reading them through its own placeholders.
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Owner
+    participant Task
+    Caller->>Owner: asks for something the task covers
+    Owner->>Task: enters the task
+    Task->>Caller: talks with its own prompt and tools
+    Caller->>Task: answers
+    Note over Task: the model calls finish
+    Task-->>Owner: status, values saved
+    Owner->>Caller: continues, reading the saved values
+```
+
+### A task with `finish:`
+
+The same, except the tool decides. When the tool's result matches `success:`,
+the task saves and ends by itself. The model makes no `finish` call, and the
+owner speaks next.
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Owner
+    participant Task
+    participant Tool
+    Owner->>Task: enters the task
+    Task->>Caller: asks what it needs
+    Caller->>Task: answers
+    Task->>Tool: runs the tool
+    Tool-->>Task: result matches success
+    Note over Task: the task saves and ends, no finish call
+    Task-->>Owner: status
+    Owner->>Caller: acknowledges, and keeps the call
+```
+
+### A handoff
+
+The first agent hands the caller to a second agent. The second agent owns the
+rest of the call. Nothing comes back.
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Owner
+    participant AgentB as Agent B
+    Caller->>Owner: asks for something Agent B owns
+    Owner->>AgentB: hands the caller over
+    AgentB->>Caller: takes the rest of the call
+    Note over Owner: nothing comes back
+```
+
+## Read one example against the other
+
+Two shipped packages are the same salon, built two ways.
+[`examples/salon-concierge-single-prompt`](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge-single-prompt)
+is one agent with one prompt: no tasks, no handoffs, no variables.
+[`examples/salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)
+is the structured one, with tasks, a task group, handoffs and saved values.
+Read one against the other to see what the structure bought.
 
 ## Read them in order, then choose
 
-Each page below is one shape, with the example package that uses it. The last page
-is the one to come back to when you are deciding: it pairs the symptom you have
-with the shape that fixes it, and states what each shape costs.
+Start with the first page: it adds one task to the package you already have,
+one key at a time. The next three pages are one shape each, with the example
+package that uses it. The last page is the one to come back to when you are
+deciding: it pairs the symptom you have with the shape that fixes it, and says
+what each shape costs.
 
 <Columns cols={2}>
-  <Card title="Handoffs" icon="users" href="/build/orchestration/handoffs">
-    Two agents, two sets of rules.
+  <Card title="Your first task" icon="footprints" href="/build/orchestration/first-task">
+    From no task to a task that says what success looks like, on your own package.
   </Card>
   <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
     Run a step, keep the answer.
   </Card>
   <Card title="Task groups" icon="list-ordered" href="/build/orchestration/task-groups">
     A fixed order, and shared context.
+  </Card>
+  <Card title="Handoffs" icon="users" href="/build/orchestration/handoffs">
+    Two agents, two sets of rules.
   </Card>
   <Card title="Choosing a structure" icon="git-branch" href="/build/orchestration/choosing-a-structure">
     Which split to reach for, and what it costs.

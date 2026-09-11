@@ -36,12 +36,11 @@ works." reads naturally.
 
 This is the rule with the worst failure, and it looks harmless.
 
-A prompt explained how to format a phone number and gave an example number to
-show the grouping. On a live call the agent opened with "I've got your number as
-plus three four, one one one, one one one, one one one, is that right?" before
-any tool had run. It had no number, and the example in its own formatting rule
-was the only one in front of it. The caller said yes to a number that was not
-theirs.
+A prompt that explains how to format a phone number and shows an example number
+to make the grouping clear has put a number in front of the model. A model
+cannot tell an example value from a real one. Before any tool has run, that
+example is the only number the model holds, and it may read it out to the
+caller as theirs. A caller who hears a confident readback says yes to it.
 
 <Warning>
 A model cannot tell an illustration from a value it is holding. Describe the
@@ -77,11 +76,10 @@ Shaped types carry their own format phrase automatically, so the model is told
 that a `Time` is "a time of day on the 24-hour clock, like 09:30 or 17:45"
 whether or not you write a description of your own.
 
-Without it, a model sends the spelling its own prompt requires out loud. One
-step was told to say times as "11:30 AM" to the caller, and it sent
-`"scheduled_time": "11:30 AM"` to a field wanting `11:30`. The step's finish was
-refused, the model corrected itself on the next request, and the caller heard a
-pause for no reason.
+Without it, a model sends the spelling its own prompt requires out loud. A
+task told to say times as "11:30 AM" to the caller will send `"11:30 AM"` to a
+field that wants `11:30`. The `finish` call is refused, the model corrects
+itself on the next request, and the caller hears a pause for no reason.
 
 <Note>
 Say the format once, in the type. A prompt that repeats it can drift from the
@@ -103,7 +101,7 @@ immediately after the tool succeeds and for the owner to confirm once:
 
 ```markdown tasks/booking.md
 After the booking tool reports success, finish with the saved appointment.
-Let the owning agent confirm it to the caller.
+Let the owner confirm it to the caller.
 ```
 
 ```markdown instructions.md

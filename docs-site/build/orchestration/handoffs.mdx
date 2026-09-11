@@ -7,8 +7,8 @@ A handoff moves the caller from one agent to another. The receiving agent owns
 the rest of the call. Nothing returns automatically.
 
 Use a handoff when two roles need different instructions, tools, or
-permissions. Use a [task](/build/orchestration/tasks) when a focused step should
-return control.
+permissions. Use a [task](/build/orchestration/tasks) when the work should
+return control to the same agent.
 
 ## Declare and attach a handoff
 
@@ -105,11 +105,15 @@ from bouncing the call before the caller hears anything.
 
 ## Try it
 
+The salon is the shipped example with a handoff in each direction between the
+concierge and the complaint specialist. These commands need a clone of the
+unmute repo:
+
 ```sh
 unmute validate examples/salon-concierge
 unmute dev examples/salon-concierge --target pipecat
 ```
 
-<Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
-  Run a step, save typed values, and return control.
+<Card title="Choosing a structure" icon="git-branch" href="/build/orchestration/choosing-a-structure">
+  Tools, tasks, task groups, or a second agent: which split to reach for, and what it costs.
 </Card>

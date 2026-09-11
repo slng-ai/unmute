@@ -86,11 +86,9 @@ agents:
       - end_call
     tasks:
       # Deliberately not verify_customer. The concierge is the only agent that
-      # verifies: a live call had this specialist run verification again on a
-      # caller it had already verified, costing two model requests and fourteen
-      # seconds, with its own prompt saying not to. A step in reach beats a
-      # prompt rule, so the step is not listed here. Every tool that needs the
-      # number refuses while it is unconfirmed, and to_concierge is the way back.
+      # verifies. A task in reach beats a prompt rule, so the task is not listed
+      # here. Every tool that needs the number refuses while it is unconfirmed,
+      # and to_concierge is the way back.
       - name: handle_complaint
         when: The verified caller wants a complaint recorded.
         instructions: tasks/complaint.md

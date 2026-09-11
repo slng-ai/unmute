@@ -15,8 +15,8 @@ You only need one rule to read or write it:
 > The list holds names. The block holds the definitions.**
 
 Tasks are the one exception: a task is defined right inside the agent that
-uses it first, under that agent's own `tasks:` list. A second agent that runs
-the same task just names it.
+uses it first, under that agent's own [`tasks:`](/build/orchestration/tasks)
+list. A second agent that runs the same task just names it.
 
 That is the whole system. The rest of this page is that rule, applied.
 
@@ -28,10 +28,10 @@ kind has its own list:
 | List on the agent | What it means | Does the agent get the caller back? |
 |---|---|---|
 | `tools:` | do real work: look something up, call an API | yes, a tool just returns data |
-| `tasks:` | run a focused step with its own prompt, and use its typed result | yes, the task finishes and reports back |
-| `task_groups:` | run several tasks in a fixed order, then use the merged result | yes, the group finishes and reports back |
-| `handoffs:` | give the caller to another agent | no, the other agent takes over |
-| `escalations:` | give the caller to a human | no, the call leaves the system |
+| `tasks:` | run a smaller job with its own prompt, and use its typed result | yes, the task finishes and reports back |
+| [`task_groups:`](/build/orchestration/task-groups) | run several tasks in a fixed order, then use the merged result | yes, the group finishes and reports back |
+| [`handoffs:`](/build/orchestration/handoffs) | give the caller to another agent | no, the other agent takes over |
+| [`escalations:`](/transfers/overview) | give the caller to a human | no, the call leaves the system |
 
 If you remember one thing, remember the third column. Tools, tasks and task
 groups come back. Handoffs and escalations do not.
@@ -140,12 +140,13 @@ naming the same thing.
 
 ## Two small words that move data
 
-Two keys touch your `variables:`. They look similar and do different jobs:
+Two keys touch your [`variables:`](/build/variables). They look similar and do
+different jobs:
 
 | Key | Job | Plain words | Legal on |
 |---|---|---|---|
-| `context:` | luggage | "when the caller moves, these values travel along" | handoffs, tasks |
-| `assign:` | a write-back | "when the task finishes, save its result here" | tasks |
+| [`context:`](/reference/agent-yaml#context) | luggage | "when the caller moves, these values travel along" | handoffs, tasks |
+| [`assign:`](/build/orchestration/tasks) | a write-back | "when the task finishes, save its result here" | tasks |
 
 Luggage carries a value. A write-back fills it. In the example above,
 `verify_customer` fills `customer_phone` with `assign:`, and `manage_booking`'s
@@ -195,9 +196,9 @@ agent.yaml:47: escalation "to_manager" is declared but no agent reaches it; add 
 
 Nothing an agent lists runs in list order. The model picks what to use from
 the `when:` text. Two things in a package do run in a fixed order: the
-`steps:` of a task group, and the entries of `prefetch:`, which resolve top to
-bottom and refuse the build when an entry reads a value only a later entry
-assigns.
+`steps:` of a task group, and the entries of [`prefetch:`](/build/prefetch),
+which resolve top to bottom and refuse the build when an entry reads a value
+only a later entry assigns.
 
 Order is not free everywhere, though: the order of names in a list is the
 order the tools are declared to the model in the generated code, so
@@ -226,6 +227,9 @@ where it lands once a package uses it: right after `variables:`.
 ## Where to go next
 
 <Columns cols={2}>
+  <Card title="Your first task" icon="footprints" href="/build/orchestration/first-task">
+    Add one task to the agent you just made, one key at a time.
+  </Card>
   <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
     Nested tasks and typed results.
   </Card>

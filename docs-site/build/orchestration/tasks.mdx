@@ -1,15 +1,23 @@
 ---
 title: "Tasks"
-description: "Run a focused step with its own prompt and tools, save typed values, and return control."
+description: "Run one step of a call with its own prompt and tools, save typed values, and return control."
 ---
 
-A task is a focused step. It has its own instructions and tools. When it
-finishes, control returns to the agent that called it.
+A task is one step of a call. It has its own instructions and tools. When it
+finishes, control returns to the agent that called it. That agent is the owner.
+Inside a task group, each task is one step of the group.
+
+To the model, a task is one more entry in its function list, next to the
+agent's tools. Calling it switches to the task's prompt and tools. When the
+task finishes, the owner's prompt and tools come back.
 
 Use a task when one bounded piece of work needs a smaller prompt or a smaller
 tool list. Use a [task group](/build/orchestration/task-groups) when several
-steps must run in order. Use a [handoff](/build/orchestration/handoffs) when a
+tasks must run in order. Use a [handoff](/build/orchestration/handoffs) when a
 different agent should own the rest of the call.
+
+New to tasks? [Your first task](/build/orchestration/first-task) adds one to
+the package `unmute init` writes, one key at a time.
 
 ## Declare a task
 
@@ -24,9 +32,7 @@ variables:
 
 agents:
   appointment_desk:
-    instructions: instructions.md
-    think: reasoning
-    speak: voice
+    # the agent's other keys stay as they are
     tasks:
       - name: verify_customer
         when: Identify the caller before handling an appointment.
@@ -38,15 +44,133 @@ agents:
           - customer_name: result.customer_name
 ```
 
-`assign:` defines what the task returns and where each value is saved. The
+`instructions:` points at a Markdown file. `tasks/` is a folder you create next
+to `agent.yaml`, and the path is relative to the package.
+
+`when:` tells the model when to run the task. A task with no `when:` is a
+definition only: a task group can list it as a step, but an agent cannot run it
+on its own.
+
+`assign:` defines what the task saves and where each value goes. The
 destination variable already owns the type and description, so the task does
 not repeat them in a separate result schema.
 
-The generated finish call for this example has `customer_id` and
-`customer_name` arguments. It validates every value before saving any of them.
-If one value is invalid, the task stays open and no value changes.
+Every task gets a `finish` call. The model uses it to say the task is done and
+to hand over the values in `assign:`. The `finish:` key is different: it names
+tools whose own result ends the task, so the model does not have to make that
+call. The next section covers the key.
 
-A task that saves nothing simply omits `assign:`. It can still finish.
+The `finish` call for this example takes `customer_id` and `customer_name`. It
+checks every value before saving any of them. If one value is invalid, the task
+stays open and no value changes.
+
+A task that saves nothing omits `assign:`. The model can still call `finish`.
+
+## Say what success looks like
+
+How does the task know it worked? Without `finish:`, the model decides. It runs
+a tool, reads the result, and calls `finish`. With `finish:`, the tool's own
+result decides. You name the tools that end the task, and what a success from
+each one looks like.
+
+| | Who decides the task is finished |
+|---|---|
+| no `finish:` | the model, by calling `finish` |
+| with `finish:` | the tool's own result, checked against `success:` |
+
+This also removes a model request. A task that runs a tool and then asks the
+model to call `finish` spends a whole request on a decision the tool already
+made. The saving grows with the number of tasks a call runs through.
+
+```yaml agent.yaml
+      - name: manage_booking
+        instructions: tasks/booking.md
+        tools:
+          - check_availability
+          - create_booking
+          - cancel_booking
+        finish:
+          - tool: create_booking
+            success:
+              - status: booked
+          - tool: cancel_booking
+            success:
+              - status: cancelled
+        assign:
+          - appointment: result.appointment
+```
+
+When one of those tools returns a result in which every `success:` field holds
+one of its allowed values, the task saves its `assign:` from that result and
+ends. The result never reaches the model. Anything else is an ordinary result:
+it goes back to the model and the task stays open. That is what keeps a failed
+booking a conversation rather than a saved one.
+
+A `success:` item is `field: value`, or a list of values that are alternatives.
+Items on different fields are all required. Every value has to be one the tool
+declares in its own output `enum:`, so a typo is a refusal at compile time
+rather than a task that never ends by itself.
+
+`result.<field>` in `assign:` names an output property of every listed tool, so
+one tool returning `appointment` and another returning nothing is refused.
+
+Four things follow from a task that ends on its tool:
+
+- **The listed tools close.** Once one of them succeeds, none of the task's
+  `finish:` tools runs again in that run of the task. A new booking is a new
+  request from the caller, and a new run of the task.
+- **The `finish` call is still there.** The model uses it for a request the
+  task cannot serve, for values the task already holds, and for recording a
+  result whose save was refused. That repair keeps the values the tool
+  returned, so a reference the tool handed back is never retyped by the model.
+- **The appended text changes.** The text Unmute adds to your instructions
+  still tells the model to call `finish` when the step is complete. It then
+  says that the named tools end the step by themselves, and that `finish` is
+  not to be called after one of them succeeds. Your own instructions should not
+  contradict it.
+- **The owner speaks.** The task says nothing after its tool. The next step of
+  a group opens, or the owner speaks once when control returns, so the
+  acknowledgement belongs in the owner's prompt.
+
+## What the model gets for a task
+
+The prompt a task runs on has four parts. You write the first one.
+
+1. **Your instructions file**, as written.
+2. **The appended finish rule.** Unmute adds it after your text. It names the
+   `finish` call, lists the values from `assign:`, and gives the model a way
+   out for a request the task cannot serve. You do not write "call finish when
+   you are done" yourself.
+3. **The values your placeholders name.** Each `{{variable}}` in your
+   instructions is replaced with the saved value. No other saved value is
+   added.
+4. **The history you chose** with `context.history`. When omitted, it is
+   `messages`.
+
+For the task declared above, the appended rule reads:
+
+```text
+When this step is complete, call `finish` with: customer_id, customer_name.
+
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.
+```
+
+With `finish:`, a sentence is added between those two paragraphs. It says the
+named tools end the step by themselves and that `finish` is not to be called
+after one of them succeeds. On the Pipecat target the call has a longer name
+that includes the task's name. The rule is the same.
+
+## A task's contract
+
+Four keys make a task that knows what it saves, when it is done, and when it
+can be skipped. They live in three places.
+
+| Key | What it declares | Where it is written | If you leave it out | Taught on |
+|---|---|---|---|---|
+| `assign:` | which values the task saves, and into which variables | on the task | the task saves nothing, and can still finish | this page, and [Variables](/reference/variables#assigning-a-task-result-to-a-variable) |
+| `finish:` | which tools end the task by their own result, checked against `success:` | on the task | the model decides the task is done, by calling `finish` | [Say what success looks like](#say-what-success-looks-like) |
+| `confirm:` | which task has to hear the caller agree before a value is used | on the variable, naming the task | the value is settled the moment it arrives, and any prompt may read it | [Variables](/reference/variables#confirm-marks-a-value-the-caller-has-to-agree-to) |
+| `skip_when_confirmed:` | which variable, once confirmed, lets a group skip this step | on the step entry in a task group's `steps:` | the step runs every time the group runs | [Task groups](/build/orchestration/task-groups#skip-a-step-whose-work-is-already-done) |
 
 ## Read a saved value
 
@@ -81,7 +205,11 @@ assignments, and confirmation.
 | `full` | Earlier speech and paired tool records. Earlier instructions are removed. |
 | `last_n` | The newest `max_messages` entries, without a broken tool pair. |
 | `reset` | No earlier conversation. Its own instructions and explicit placeholders still apply. |
-| `summary` | A generated summary on LiveKit. Pipecat refuses this value. |
+| `summary` | A generated summary. Compiles on LiveKit only; Pipecat refuses this value. |
+
+A task needs a code target, Pipecat or LiveKit Agents. On the SLNG target a
+task cannot run at all, so every history value is refused there, `messages`
+included.
 
 ```yaml agent.yaml
       - name: reschedule_booking
@@ -127,17 +255,18 @@ Task arguments, tool results, private task turns, and the text of an unserved
 request do not cross back. The owner reads saved values through its own prompt
 placeholders.
 
-Every generated finish call includes optional `unserved_request`. A task uses
-it when it cannot complete the request with its tools or handoffs. A non-empty
-value skips all assignments. The owner sees the `unserved` status and asks the
-caller what they need; it does not receive the private request text.
+Every generated `finish` call includes an optional `unserved_request`. A task
+uses it when it cannot complete the request with its tools or handoffs. A
+non-empty value skips all assignments. The owner sees the `unserved` status and
+asks the caller what they need; it does not receive the private request text.
 
-After a tool reports success, finish immediately with the result to save.
+After a tool reports success, call `finish` right away with the result to save.
 Let the owner confirm it once, using its own placeholders. If the task waits
 for another turn, it may receive a new request before saving the first result.
 An `unserved` status does not undo an action already completed by a tool.
 
-Better still, let the tool end the step. See [End on a tool](#end-on-a-tool).
+Better still, let the tool end the task. See
+[Say what success looks like](#say-what-success-looks-like).
 
 For requests that another agent can handle, a task may declare `handoffs:`.
 Taking one ends the task and any remaining task-group steps. See
@@ -189,64 +318,12 @@ agents:
       - verify_customer
 ```
 
-Task names are unique across the package.
-
-## End on a tool
-
-A step that runs a tool and then asks the model to call `finish` spends a whole
-model request on a decision the tool already made. `finish:` names the tools
-that end the step:
-
-```yaml agent.yaml
-      - name: manage_booking
-        instructions: tasks/booking.md
-        tools:
-          - check_availability
-          - create_booking
-          - cancel_booking
-        finish:
-          - tool: create_booking
-            success:
-              - status: booked
-          - tool: cancel_booking
-            success:
-              - status: cancelled
-        assign:
-          - appointment: result.appointment
-```
-
-When one of those tools returns a result in which every `success:` field holds
-one of its allowed values, the step saves its `assign:` from that result and
-ends. The result never reaches the model. Anything else is an ordinary result:
-it goes back to the model and the step stays open, which is what keeps a failed
-booking a conversation rather than a saved one.
-
-A `success:` item is `field: value`, or a list of values that are alternatives.
-Items on different fields are all required. Every value has to be one the tool
-declares in its own output `enum:`, so a typo is a refusal at compile time
-rather than a step that never ends by itself.
-
-`result.<field>` in `assign:` names an output property of every listed tool, so
-one tool returning `appointment` and another returning nothing is refused.
-
-Three things follow from a step that ends on its tool:
-
-- **The mutations close.** Once one of them succeeds, none of the step's
-  `finish:` tools runs again in that invocation. A new booking is a new request
-  from the caller, and a new invocation of the step.
-- **`finish` is still there.** The model calls it for a request the step cannot
-  serve, for values the step already holds, and for recording a result whose
-  save was refused. That repair keeps the values the tool returned, so a
-  reference the tool handed back is never retyped by the model.
-- **The step's prompt stops telling the model to finish.** The generated tail
-  says so; your own instructions should not contradict it.
-- **The owner speaks.** The step says nothing after its tool. The next step
-  opens, or the owner speaks once when the flow returns, so the acknowledgement
-  belongs in the owner's prompt.
+Task names are unique across the package. Share a task only when both agents
+should be able to run it: a task within reach is a task the model may choose.
 
 ## Open by listening
 
-A step's first turn is a model request. When the step opens with one fixed
+A task's first turn is a model request. When the task opens with one fixed
 question, `opening: listen` speaks that question and waits, and makes no
 request:
 
@@ -258,12 +335,11 @@ request:
         instructions: tasks/stylist-note.md
 ```
 
-The line is the `announce:` line, spoken once and recorded as the step's own
-first turn, so a caller answering it is answering something the step can see.
-The default is `generate`, which is what every step did before this key: the
-model opens the step from its instructions.
+The line is the `announce:` line, spoken once and recorded as the task's own
+first turn, so a caller answering it is answering something the task can see.
+The default is `generate`: the model opens the task from its instructions.
 
-A listening step with no `announce:` is a warning, not a refusal: the caller
+A listening task with no `announce:` is a warning, not a refusal: the caller
 hears nothing until they speak, which is occasionally what you want and usually
 a mistake.
 
@@ -286,13 +362,35 @@ second "let me check" line:
 |---|---|---|
 | control returns | yes | no |
 | saved values | through `assign:` | already live in call state; read only by explicit placeholders |
-| prompt | one focused step | a whole role |
+| prompt | one step | a whole role |
 
-## Update an older task definition
+## Try it
+
+`my-agent` is the package `unmute init` wrote in
+[Your first agent](/build/your-first-agent). With a task in it:
+
+```sh
+unmute validate my-agent
+unmute dev my-agent
+```
+
+In the dev page the task shows as its own row, labelled `HANDOFF`, so you can
+see it was entered. [The dev loop](/dev/overview) explains the rest of that
+page.
+
+The salon is the shipped example with tasks, a task group and handoffs. These
+commands need a clone of the unmute repo:
+
+```sh
+unmute validate examples/salon-concierge
+unmute dev examples/salon-concierge --target pipecat
+```
+
+## If you have an older package
 
 | Earlier configuration | What to do now | Why |
 |---|---|---|
-| A task `result:` schema | Put the types on variables and use task `assign:` | One declaration defines the saved value and finish argument |
+| A task `result:` schema | Put the types on variables and use task `assign:` | One declaration defines the saved value and the `finish` argument |
 | Task or handoff `expect:` | Save needed facts first and reference them in the receiving prompt | Sharing is explicit, including with `reset` |
 | Task `requires:` | Put the order in the owner's prompt and the task's `when:` | The model can follow the flow; injected tools still guard missing or unconfirmed values |
 | An automatically appended state block | Add placeholders to each prompt that needs saved facts | Saving a value no longer shares it with every prompt |
@@ -302,13 +400,16 @@ Ordinary tool `input:` and `output:` schemas are unchanged. Run
 `unmute validate` after updating an older package; retired keys produce a
 located error with migration advice.
 
-## Try it
+## Where to go next
 
-```sh
-unmute validate examples/salon-concierge
-unmute dev examples/salon-concierge --target pipecat
-```
-
-<Card title="Task groups" icon="list-ordered" href="/build/orchestration/task-groups">
-  Run several tasks in a fixed order.
-</Card>
+<Columns cols={2}>
+  <Card title="Task groups" icon="list-ordered" href="/build/orchestration/task-groups">
+    Run several tasks in a fixed order. This is the next page.
+  </Card>
+  <Card title="Making a task actually run" icon="footprints" href="/best-practices/step-scoping">
+    What to give a task so the model enters it, and what to take away from the owner.
+  </Card>
+  <Card title="Designing declared state" icon="database" href="/best-practices/state-design">
+    Choosing what to save with `assign:`, and how to type it.
+  </Card>
+</Columns>
