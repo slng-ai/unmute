@@ -4,10 +4,10 @@ description: "What a target is, what targets.yaml holds, and how one package com
 ---
 
 A target is where your agent runs. Unmute compiles one package into a native
-project for the target you pick: Pipecat, LiveKit Agents, or SLNG. Two are code
+project for the target you pick: Pipecat, LiveKit, or SLNG. Two are code
 targets, and one is hosted.
 
-**Pipecat** and **LiveKit Agents** are code targets: `unmute compile` writes a
+**Pipecat** and **LiveKit** are code targets: `unmute compile` writes a
 Python project you own, host and run.
 
 **SLNG** is a hosted target: `unmute deploy` compiles a deployment body and
@@ -80,7 +80,7 @@ edits, not one**. The target and the turn model travel together.
 This is the `turn:` block in `agent.yaml`, written for each one:
 
 <CodeGroup>
-```yaml LiveKit Agents
+```yaml LiveKit
 models:
   turn:
     detector:
@@ -141,7 +141,7 @@ unmute compile examples/salon-concierge --target pipecat
 
 Both run the same agent. The differences that usually decide it:
 
-| | Pipecat | LiveKit Agents |
+| | Pipecat | LiveKit |
 |---|---|---|
 | generated entry point | `bot.py` | `agent.py` |
 | local run | `uv run bot.py -t webrtc`, or `unmute dev` under `uv` | `uv run python -m livekit.agents start agent.py`, or `unmute dev` in Docker with a local LiveKit server |

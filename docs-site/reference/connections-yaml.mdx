@@ -93,8 +93,8 @@ connections/twilio_voice.yaml: connection "twilio_voice" requires environment ke
 |---|---|---|---|
 | Pipecat | `cloud-websocket` | `twilio` | `account_sid`, `auth_token`, `from_number`, and only when the package places or redirects a call |
 | Pipecat | `daily-sip` | `twilio` | `account_sid`, `auth_token`, `sip_address`, `from_number` |
-| LiveKit Agents | `sip` | `twilio`, `telnyx`, `plivo` | `sip_address`, `sip_username`, `sip_password`, `from_number` |
-| LiveKit Agents | `connector` | `twilio` | `account_sid`, `auth_token`, `from_number` |
+| LiveKit | `sip` | `twilio`, `telnyx`, `plivo` | `sip_address`, `sip_username`, `sip_password`, `from_number` |
+| LiveKit | `connector` | `twilio` | `account_sid`, `auth_token`, `from_number` |
 
 The SIP route uses standard SIP names rather than one vendor's, because the same
 generated code dials through any SIP carrier with them.

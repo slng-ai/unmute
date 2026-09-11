@@ -101,7 +101,12 @@ func TestAgentInstructionsNameTheTwoFactsAgentsGetWrong(t *testing.T) {
 	// many there are and name each, not merely mention a target. slng joined on
 	// 2026-08-25 and is the reason the count moved: it is a target and a model
 	// vendor at once, which is the confusion this block exists to prevent.
-	for _, want := range []string{"pipecat", "livekit agents", "slng", "three targets"} {
+	//
+	// The LiveKit target is called "LiveKit" on every reader-facing surface, so
+	// that is the token checked here. It was "LiveKit Agents" until 2026-09-11;
+	// the framework package is still livekit-agents, and the changelog still
+	// says so about the version it pinned, but no page teaches the longer name.
+	for _, want := range []string{"pipecat", "livekit", "slng", "three targets"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("docs-site/docs.json markdown.instructions never says %q; an agent that does not know the target set invents a provider name", want)
 		}

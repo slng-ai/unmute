@@ -5,7 +5,7 @@ description: "The four stages between your package and what each target runs."
 
 Unmute is a compiler for a declarative package. It reads the package, resolves
 it against one target, and writes what that target runs: a Python project for
-Pipecat or LiveKit Agents, a deployment body for SLNG. Nothing of Unmute is
+Pipecat or LiveKit, a deployment body for SLNG. Nothing of Unmute is
 left in what it writes.
 
 ## The four stages
@@ -62,7 +62,7 @@ build/pipecat/
 └── compile-report.json
 ```
 
-```text LiveKit Agents
+```text LiveKit
 build/livekit/
 ├── agent.py            # the agent
 ├── tools/              # your local handlers, copied

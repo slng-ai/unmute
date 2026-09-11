@@ -216,7 +216,7 @@ not to.
 | `client`, `provider_hosted` | none | | explicit empty block only |
 | `knowledge` | `base` | yes | the name of a knowledge base declared in `knowledge:` in `agent.yaml` |
 
-A `webhook:` tool needs `url_env`, `base_url`, or both. Pipecat and LiveKit Agents
+A `webhook:` tool needs `url_env`, `base_url`, or both. Pipecat and LiveKit
 read `url_env` from the environment at run time and never look at `base_url`.
 SLNG stores the URL in the tool body it pushes, so it reads `base_url` and
 never looks at `url_env`. A package that targets both writes both fields; each

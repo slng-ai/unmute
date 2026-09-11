@@ -93,7 +93,7 @@ The function inside that file still has the tool name. For a tool named
 | the function name matches the tool name | that is how the generated code finds it |
 | its parameters match the `input` properties plus the `inject` keys | the call is built from both |
 | it returns the value your description and prompt expect | the result goes back to the model |
-| it may be `async def` on Pipecat and LiveKit Agents | the code targets await an awaitable result |
+| it may be `async def` on Pipecat and LiveKit | the code targets await an awaitable result |
 | it imports nothing from Unmute | the generated project does not depend on Unmute at run time |
 
 The handler above takes `customer_id` even though `input.properties` is empty,
@@ -172,7 +172,7 @@ The generated project imports it as a plain module and calls it like a plain
 function. The two targets differ only in how the result leaves the method:
 
 <CodeGroup>
-```python LiveKit Agents
+```python LiveKit
 result = tools.cancel_appointment.cancel_appointment(
     customer_id=ctx.userdata.customer_id
 )
