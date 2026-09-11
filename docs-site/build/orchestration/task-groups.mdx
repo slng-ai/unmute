@@ -4,7 +4,8 @@ description: "Run several tasks in a fixed order."
 ---
 
 A task group is an ordered sequence of tasks. Use one when the order must be a
-runtime guarantee.
+runtime guarantee. A task that runs inside a group is called a step of that
+group.
 
 ## Declare a group
 
@@ -59,13 +60,21 @@ task_groups:
     merge: results
 ```
 
-Each `steps` entry names a task already attached to the agent. `assign:` derives
-each task's finish arguments and saves the values needed later.
+These three tasks have no `when:`. The group decides when they run, so they
+need no trigger of their own. A task an agent runs on its own does need one,
+and a task with no `when:` that no group lists is refused, because nothing
+would ever run it.
+
+Each `steps` entry names a task defined in the package, under some agent's
+`tasks:`. It does not have to be the agent that runs the group: the group is
+what makes each step reachable. `assign:` derives each task's finish arguments
+and saves the values needed later.
 
 | Field | Required | Values |
 |---|---|---|
-| `steps` | yes | one or more steps, in order: a task name, or an item |
-| `when` | when an agent can run it | the situation the model reads |
+| `steps` | yes | one or more steps, in order: a bare task name, or an item with `task:` and `skip_when_confirmed:` |
+| `when` | no, but write one | the situation the model reads to decide whether to run the group. Nothing checks that it is there, and a group without one gives the model nothing to decide on |
+| `announce` | no | one fixed line, spoken exactly as written as the caller enters the group, to cover the wait before the first step speaks. It takes no `{{placeholders}}` |
 | `context_scope` | yes | `shared` or `isolated` |
 | `then` | yes | `return`, `transfer`, or `end` |
 | `then_target` | with `transfer` | an agent name |
@@ -85,12 +94,17 @@ A step is a bare task name, or an item that says how the group treats it:
 
 The group skips that step when the named variable is confirmed at the moment
 the group starts, and runs it otherwise. A bare step always runs. This is what
-makes a second booking on one call cost nothing: the caller is identified once.
+makes a second booking on one call cost nothing extra: the caller is identified
+once, and the group knows it.
 
 `skip_when_confirmed:` names a variable the skipped step itself confirms, with
-`confirm:` on the variable. Anything else is refused: a variable nobody
-confirms would leave the step running forever or never, and a variable another
-step confirms would let this group skip somebody else's work.
+[`confirm:`](/reference/variables#confirm-marks-a-value-the-caller-has-to-agree-to)
+on the variable. Confirmed here is a real mark on the variable, set when the
+step named under `confirm:` saves a value. It is not the same as a prompt
+sentence saying the caller was verified: the compiler reads the mark, never the
+prose. Anything else is refused: a variable nobody confirms would leave the
+step running forever or never, and a variable another step confirms would let
+this group skip somebody else's work.
 
 There is a side effect, and it is the point. A step some group names this way
 withdraws the confirmation of the values it confirms every time it is entered,
@@ -110,11 +124,12 @@ that tool is still running, the step's own work is committed first and the
 caller is moved after: the booking is not lost on the way out. If that work
 does not complete, the caller is not moved and the model is told so.
 
-A request the caller makes at a `reset` or an isolated boundary reaches nobody:
-the step that hears it has no way to pass words on other than
-`unserved_request`, and an isolated step's context does not carry back. Keep the
-request in the caller's own words in `unserved_request` and let the owner act on
-it.
+A request the caller makes at a [`reset`](/best-practices/context-scope) or an
+isolated boundary reaches nobody: the step that hears it has no way to pass
+words on other than
+[`unserved_request`](/build/orchestration/tasks#what-returns), and an isolated
+step's context does not carry back. Keep the request in the caller's own words
+in `unserved_request` and let the owner act on it.
 
 ## Context between steps
 
@@ -144,6 +159,16 @@ task and skips the remaining group steps.
 Task groups use a LiveKit API that upstream marks experimental. The package
 still validates and compiles normally.
 
-<Card title="Choosing a structure" icon="git-branch" href="/build/orchestration/choosing-a-structure">
-  Compare tasks, task groups, and handoffs.
-</Card>
+## Where to go next
+
+<Columns cols={3}>
+  <Card title="Handoffs" icon="users" href="/build/orchestration/handoffs">
+    The shape that does not return: a lasting change of role.
+  </Card>
+  <Card title="Choosing a structure" icon="git-branch" href="/build/orchestration/choosing-a-structure">
+    Compare tasks, task groups, and handoffs.
+  </Card>
+  <Card title="Making a task actually run" icon="list-checks" href="/best-practices/step-scoping">
+    Why a task you declared never runs, and how to fix it.
+  </Card>
+</Columns>

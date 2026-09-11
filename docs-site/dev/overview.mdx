@@ -149,11 +149,13 @@ the conversation, holds those values and call-level first-speech measurements.
 It starts collapsed and appears only when there is data to inspect; it does not
 insert diagnostic sections between turns.
 
-Controls do not get a row. A task, a task group, or a transfer reaches the
-framework as a function call, so it would otherwise be timed like a tool, and a
-task or task group does not return until the flow it started has finished. A
-three-turn task would appear as one very slow tool, which is the opposite of
-what the numbers are for.
+The `HANDOFF` row carries no duration on purpose. A task, a task group, or a
+handoff to another agent reaches the framework as a function call, so it could
+be timed like a tool. But a task or a task group does not return until
+everything it started has finished, and a handoff never returns at all. Timed
+that way, a three-turn task would appear as one very slow tool, which is the
+opposite of what the numbers are for. The row marks the moment control moved,
+and the model call that follows it is timed on its own.
 
 [Reading the latency numbers](/optimization/latency) covers what each number means, where
 the time goes in a voice turn, and how to tell which part is slow.

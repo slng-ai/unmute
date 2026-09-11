@@ -11,10 +11,10 @@ Choose from the brief before you write files.
 Every shape trades something for control. This table is the whole trade, side
 by side.
 
-| | Holds the session | Context the next step sees | Cost in round trips | A caller's correction | Best for |
+| | Holds the session | Context the receiver sees | Cost in round trips | A caller's correction | Best for |
 |---|---|---|---|---|---|
 | One agent with tools | the agent, for the whole call | the whole conversation | none beyond the tool call itself | ask again, same turn | one job, one set of rules |
-| Task | the task, until it returns | what `context:` gives it | 2 to enter, the same as one tool call | run it again | a step with a definite, typed answer |
+| Task | the task, until it returns | what `context:` gives it | 2 to enter, the same as one tool call | run it again | one job with a definite, typed answer |
 | Task group | the group, across its steps, until it returns | shared across steps, or isolated per step, by `context_scope` | 2 to enter the group, once, however many steps run inside | revisit a step inside the group | an order that has to hold, with shared context |
 | Handoff | the receiving agent, for good | only what `context:` carries over | 1 to leave, plus the receiving agent's forced opening turn, every time control changes hands | another handoff back | two roles with genuinely different rules or permissions |
 
@@ -45,7 +45,8 @@ tasks in a task group. The server owns its dynamic order.
 - Do not create current-step, happy-path, completion, or routing variables.
   Tasks, groups, handoffs, and an external server already hold that state.
 - Do not create advance, proceed, dispatcher, or transition tools. A tool does
-  real external or local work; a native control moves the conversation.
+  real external or local work; a task, a task group or a handoff moves the
+  conversation.
 - Keep a variable only when its value really crosses a boundary or feeds a later
   tool call.
 
@@ -55,22 +56,22 @@ tasks in a task group. The server owns its dynamic order.
 |---|---|
 | the prompt keeps growing and starts contradicting itself | split it: [tasks](/build/orchestration/tasks) if the parts serve one caller goal, a [handoff](/build/orchestration/handoffs) if they are separate roles |
 | the model does things out of order | a [task group](/build/orchestration/task-groups): the order is declared, not requested |
-| the model calls a tool it should not have yet | move the tool. Lists are per agent and per task, so a tool the current step does not hold cannot be called at all |
-| a step runs before you have the value it needs | give the step's own `when:` the clause that names what has to be true first, "once the caller is identified" |
-| you need a value out of a step and want to keep it | a task that saves a declared variable with `assign:` |
+| the model calls a tool it should not have yet | move the tool. Lists are per agent and per task, so a tool the current task does not hold cannot be called at all |
+| a task runs before you have the value it needs | give the task's own `when:` the clause that names what has to be true first, "once the caller is identified" |
+| you need to keep a value a task produces | `assign:` on the task, into a declared variable |
 | two phases need different tools or different permissions | a [handoff](/build/orchestration/handoffs) |
 | the caller needs a person | none of these: that is a [human transfer](/transfers/overview), and what it can do depends on the phone route |
 
 A prompt that says "always identify the caller first" is a request. A task group
 is a guarantee. A `when:` clause naming the dependency is not a guarantee the
-same way, but it is cheap: no extra step, no extra prompt site, and nothing
+same way, but it is cheap: no extra task, no extra prompt site, and nothing
 the caller has to be spoken through. See [Order steps with the
 prompt](/best-practices/step-scoping#order-steps-with-the-prompt) for the full
-pattern, including the tool-level check that catches a step run out of
+pattern, including the tool-level check that catches a task run out of
 order anyway.
 
 Reach for the task group when the *order* is what must hold. Reach for a
-`when:` clause when one *value* should usually be there before one step runs,
+`when:` clause when one *value* should usually be there before one task runs,
 and a stray extra turn asking for it is an acceptable cost.
 
 ## Task or handoff
@@ -95,24 +96,24 @@ handoffs:
     when: The caller wants to reschedule or cancel an existing appointment.
 ```
 
-### Order the step, not the route to it
+### Order the task, not the route to it
 
-Say the dependency on the step itself, in its own `when:`:
+Say the dependency on the task itself, in its own `when:`:
 
 ```yaml
-      - name: manage_booking
-        when: The caller wants to make, change, or cancel a booking, once the caller is identified.
+      - name: send_receipt
+        when: The caller asks for a receipt from a past visit, once the caller is identified.
 ```
 
-The model reads that clause every time it considers the step. Reference the
-saved value in the owning prompt when the model needs to check it. See [Order steps with the
-prompt](/best-practices/step-scoping#order-steps-with-the-prompt) for what
-still catches a step run out of order anyway, and what the caller hears when
-it does.
+The model reads that clause every time it considers the task. Reference the
+saved value in the owner's prompt when the model needs to check it. See [Order
+steps with the prompt](/best-practices/step-scoping#order-steps-with-the-prompt)
+for what still catches a task run out of order anyway, and what the caller
+hears when it does.
 
-Do not add an agent whose only job is to hold callers up in front of a step.
+Do not add an agent whose only job is to hold callers up in front of a task.
 That agent has to be spoken through, which costs the caller a turn and buys
-nothing a clause on the step does not already give. And never hold up the
+nothing a clause on the task does not already give. And never hold up the
 route to a person: someone who asks for a manager should not be interviewed
 first.
 
@@ -133,31 +134,70 @@ on a different shape, and together they are
 agent with tools handles it. `concierge` calls `look_up_salon_info` directly,
 with no task in between.
 
-**Confirm who is calling before anything personal.** A bounded step with a
-definite, typed answer: a task. The `verify_customer` task assigns its result
-to `customer_phone`, and `manage_booking`'s own `when:` says it runs only
-once the caller is identified.
+**Confirm who is calling before anything personal.** One job with a definite,
+typed answer: a task. `verify_customer` holds the one tool that looks the
+caller up, ends on that tool through `finish:`, and saves `customer_phone` and
+`customer_status` with `assign:`. The `customer_phone` variable carries
+`confirm: verify_customer`, so until this task has heard the caller agree, the
+number reaches no other prompt and every tool that needs it refuses. The task
+keeps a `when:` of its own for one case only: the caller correcting their phone
+number. Every other route into verification goes through the group below.
 
-**Would identifying the caller, checking availability, then confirming ever
-have to run in that exact order, every time?** That is the task-group
-question, and here the answer is no: identification only has to happen before
-booking starts, not before browsing services, so a clause on one task's
-`when:` is enough. A task group would buy nothing extra, and the package
-declares none.
+**Does identifying the caller have to come before booking, every time?** That
+is the task-group question, and here the answer is yes. A booking made against
+a number nobody agreed to is a booking for a stranger, so the order is not a
+request to the model. It is something the package has to hold. The group
+`book` runs `verify_customer` and then `manage_booking`, with
+`context_scope: shared` so the booking step hears what verification heard, and
+`then: return` so the concierge gets the call back:
+
+```yaml
+task_groups:
+  book:
+    when: >-
+      The caller wants to create, move or cancel a booking. Includes a change to
+      an appointment just made.
+    steps:
+      - task: verify_customer
+        skip_when_confirmed: customer_phone
+      - manage_booking
+    context_scope: shared
+    then: return
+```
+
+Three things follow from the group.
+
+- The second booking on a call skips verification. `skip_when_confirmed:
+  customer_phone` skips the first step when the number is already confirmed,
+  which is every booking after the first.
+- The concierge makes one call into the group instead of choosing between two
+  tasks. Which step runs, and in what order, is the group's decision.
+- `manage_booking` has no `when:` of its own, because the group decides when
+  it runs. A task an agent runs on its own needs a `when:`. A step inside a
+  group does not.
 
 **Hand a complaint to someone who needs a different tool list and a refund
 policy the booking agent should never see.** A different role with different
-permissions, not another step in the same role: a handoff. `to_complaints`
-moves the caller to `complaint_specialist`, who alone holds `record_complaint`
-and the refund knowledge base, with `to_concierge` carrying the reverse
-direction.
+permissions, not another task in the same role: a handoff. `to_complaints`
+moves the caller to `complaint_specialist`, whose `handle_complaint` task alone
+holds `record_complaint`, and who alone reads the refund knowledge base through
+`look_up_refund_policy`. `to_concierge` carries the reverse direction. The
+specialist does not list `verify_customer`: only the concierge verifies, and
+every tool that needs the number refuses while it is unconfirmed.
 
 What is left over goes to a person. A caller who asks for a manager reaches
-`to_manager`, an escalation, not any of the four shapes above.
+`to_manager`, a cold transfer, not any of the four shapes above. Both agents
+hold it, so asking for a person is never gated on identifying yourself first.
 
 ## Where to go next
 
 <Columns cols={2}>
+  <Card title="Making a task actually run" icon="list-checks" href="/best-practices/step-scoping">
+    Why a task you declared never runs, and how to fix it.
+  </Card>
+  <Card title="Designing declared state" icon="braces" href="/best-practices/state-design">
+    Choosing what a task saves, and the type each value gets.
+  </Card>
   <Card title="Run it locally" icon="play" href="/dev/overview">
     The dev loop: ports, logs, and picking a target.
   </Card>
