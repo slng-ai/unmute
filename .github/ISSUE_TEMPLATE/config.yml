@@ -3,3 +3,9 @@ contact_links:
   - name: Documentation
     url: https://unmute.ai
     about: How to author a package, the YAML reference, and every telephony route.
+  - name: Discord
+    url: https://discord.gg/kxZactmWj
+    about: Ask a question, show what you built, and talk to the people who maintain Unmute.
+  - name: Contributing
+    url: https://github.com/slng-ai/unmute/blob/main/CONTRIBUTING.md
+    about: What a change needs before it can be merged, and how to send one.

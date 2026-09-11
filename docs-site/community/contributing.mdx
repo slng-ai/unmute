@@ -1,0 +1,105 @@
+---
+title: "Contributing"
+description: "What a pull request to Unmute needs: the issue, an example that uses your feature, a video, a README and updated docs."
+---
+
+Contributions are welcome. Unmute is MIT licensed and open all the way
+through: the compiler, the three targets, the examples, the coding agent skill
+and this site. You do not need permission to open a pull request.
+
+The full guide is
+[CONTRIBUTING.md](https://github.com/slng-ai/unmute/blob/main/CONTRIBUTING.md)
+on GitHub. This page is the short version.
+
+## What a pull request needs
+
+<Steps>
+  <Step title="An issue, opened before you write the code">
+    Search the [open issues](https://github.com/slng-ai/unmute/issues) first.
+    If it is already filed, add what you know to that thread instead of opening
+    a second. If it is not, open a
+    [bug report](https://github.com/slng-ai/unmute/issues/new?template=1-bug.yml),
+    an [improvement](https://github.com/slng-ai/unmute/issues/new?template=2-improvement.yml)
+    or a [feature request](https://github.com/slng-ai/unmute/issues/new?template=3-feature-request.yml),
+    and link it from the pull request. A field has to mean something on
+    Pipecat, on LiveKit Agents and on SLNG, or be refused by name where it
+    cannot. Settling that on the issue takes a day. Finding it out on a
+    finished branch costs you the branch.
+  </Step>
+  <Step title="An example package that uses your feature">
+    Ship a package in the same branch, shaped like the ones in
+    [`examples/`](https://github.com/slng-ai/unmute/tree/main/examples), that
+    **uses the thing you added**. Your new key appears in its authored files,
+    the code path runs on a real call, and the package declares every target
+    the feature claims. A package that compiles but never touches your new
+    field cannot be reviewed. Extending an existing example counts.
+  </Step>
+  <Step title="A video of that example working">
+    Record your screen with sound while you talk to the agent. Drive it to the
+    point where the feature fires. Say which target and which route, and what
+    to listen for. Audio is the part that matters: the pause, the interruption,
+    the value the agent did not have to ask for. A minute or two is enough.
+  </Step>
+  <Step title="A README for that example">
+    What the agent does, which targets and transports it declares, what it
+    needs before it runs, how to run it, and which part of it is your feature.
+    Every example already carries one. Copy the closest.
+  </Step>
+  <Step title="Updated docs that explain the logic">
+    A feature nobody can find is a feature nobody uses. Write the page in
+    `docs-site/` in the same pull request, and update the coding agent skill so
+    an assistant knows the feature exists.
+  </Step>
+</Steps>
+
+## Explain the logic, not just the key
+
+A page that lists a field name and its type has not explained anything. Write
+what somebody needs in order to predict the behaviour:
+
+| Say | Why it matters |
+|---|---|
+| What it does, in one sentence | A reader has to be able to repeat it back |
+| When to reach for it, and when not to | Name the problem it solves |
+| What it compiles to on each target | Say plainly where the targets differ, and when one refuses it |
+| What happens if you leave it out | The default, and the reason for that default |
+| What happens when it goes wrong | The timeout, the skip, the refusal, and what the caller hears meanwhile |
+| A snippet a reader can paste | Take it from the example you added, so the page and the package cannot drift |
+
+A change to emitted behaviour touches four surfaces in the same commit: the
+generated runbook template, the example's own README, the page here that
+teaches it, and the coding agent skill. A fact that is only true in generated
+output is a fact no reader ever sees.
+
+## Where the package goes
+
+| Put it here | When |
+|---|---|
+| [`examples/`](https://github.com/slng-ai/unmute/tree/main/examples) | The package teaches something a user should read. It joins the public set, so it carries every example gate. |
+| `internal/voice-agents-tests/` | The package exists to be deployed and called against real providers, not read as a tutorial. |
+| `internal/testdata/` | The package is the smallest thing that makes one unit test possible. |
+
+Adding a directory under `examples/` fails the suite until its name is written
+into the hardcoded list in `internal/generate/examples_test.go`. That is the
+moment somebody decides the public set grew.
+
+## Run the checks before you push
+
+```sh
+make fmt     # gofmt and go vet
+make test    # go test -race ./... , no Python, no network, no accounts
+make lint    # golangci-lint
+ruff check . # checked-in Python, including an example's tool handlers
+```
+
+`make test` is the gate. `make smoke` proves the emitted Python actually runs,
+needs Python installed, and is opt-in. Run it yourself if you changed what
+gets emitted.
+
+## What happens next
+
+A maintainer reads the issue, runs your example, watches the video, then reads
+the diff. Expect questions about the call rather than about the code.
+
+Say hello on [Discord](https://discord.gg/kxZactmWj) before you start something
+large. It is the fastest way to find out whether somebody is already on it.
