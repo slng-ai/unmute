@@ -210,6 +210,39 @@ turns *slower*. Above the transcript's arrival time the frame goes out unfinaliz
 and Pipecat waits out a flat 1.0s safety net. Observed transcripts arrive from
 0.27s, which is why that floor stays at 0.2s for every pace.
 
+### On Pipecat, read the reply's parts before changing a setting
+
+Since Pipecat 1.9.0 the dev page splits each measured reply into the parts that
+make it up, and they add up to the total, so the wait, the transcription, the
+model, the synthesis and the framework time between them are all there with an
+owner each. Read that first: a part owned by a **setting** is one you wrote, a
+part owned by a **service** is the provider, and a part owned by the **bot** or
+the **pipeline** is not a knob at all. Tuning the window when the model was the
+large part is the wasted effort this whole document is about.
+
+---
+
+## What a Pipecat 1.9.0 verification call has to show
+
+Three things cannot be proved without a browser and a provider key, so a call
+that means to verify this release checks all three and records what it saw:
+
+1. **The bump.** `unmute dev examples/salon-concierge --target pipecat`, ten
+   turns with three interruptions and two bookings, then
+   `python scripts/read_langfuse_trace.py --check-v4`. The turn spans, the tool
+   calls and one trace per call all have to be there. Record the date and the
+   counts in the `supportWindows` comment in `internal/target/driver.go`.
+2. **The transcriber deciding the turn.** Point the salon's listen binding at
+   `provider: deepgram, model: flux-general-en` with `turn: provider: listen`
+   and `eager: true`, then talk. On the dev page the endpointing-wait part
+   shrinks and the transcription part carries the Flux service's name; in the
+   conversation, a sentence the caller carries on past is answered once, not
+   twice.
+3. **The live model.** `unmute dev internal/testdata/realtime_live --target
+   pipecat`. The greeting arrives in the model's own words rather than read out,
+   a booking request makes the backend call a tool, falling silent past the
+   nudge time brings a check-in, and the call ends on its own after that.
+
 ---
 
 ## Reading the call somebody just made

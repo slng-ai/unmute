@@ -171,7 +171,10 @@ SDK model call shows its own first-response and full-duration values at a glance
 TTS first audio and tool duration also stay visible; Debug details holds
 secondary timings and source metadata. A call into a task, such as `verify_customer`,
 gets a `HANDOFF` row and no duration, which is what accounts for the extra model
-call in that reply. Reply latency excludes browser delivery; source-limited measurements
+call in that reply. On Pipecat each measured reply is also split into the parts
+that make it up, with what each cost and who owns it, and a tool that produced no
+result says whether it failed or ran past its deadline. Reply latency excludes
+browser delivery; source-limited measurements
 remain unassigned, and a lost event range labels the call count as observed.
 Missing values have no placeholder; measured zero stays visible.
 Generated text can be ahead of audio. Disconnect keeps unfinished text visible;
