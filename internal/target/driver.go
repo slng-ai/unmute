@@ -39,10 +39,16 @@ var exactVersionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 // The ceiling is a claim about verification, not about upstream. A newer
 // release upstream is unsupported until a human proves it and a new unmute
 // ships, which is what ties the supported version to the unmute version.
+//
+// Verified is the date of the newest verification, and the comment beside each
+// row says what that verification was: a browser call on a shipped example is
+// the whole answer, and anything less (the offline suite, the smoke suite on
+// the real wheel, a source diff) is named as what it is, with the call still
+// owed. A date with no comment would let a suite run read as a call.
 type SupportWindow struct {
 	Floor    string // oldest supported, inclusive
 	Ceiling  string // newest verified, inclusive
-	Verified string // ISO date the ceiling was verified by live call
+	Verified string // ISO date of the verification the row's comment describes
 }
 
 // supportWindows is the one recorded home for these facts (Principle III).
@@ -55,11 +61,16 @@ type SupportWindow struct {
 // claiming a compatibility range the release matrix does not exercise.
 var supportWindows = map[Provider]SupportWindow{
 	LiveKit: {Floor: "1.6.10", Ceiling: "1.6.10", Verified: "2026-08-16"},
-	// 1.8.0 verified by browser call on salon-concierge: 13 turns, 20
-	// interruptions, 3 handoffs, 12 function calls in progress and 12 results,
-	// no errors. The settled count is the number that mattered, because the
-	// async-call fixes in 1.8.0 are what stop a handoff hanging unsettled.
-	Pipecat: {Floor: "1.8.0", Ceiling: "1.8.0", Verified: "2026-08-27"},
+	// 1.9.0 verified on 2026-09-11 by three things short of a call: the offline
+	// suite; the opt-in smoke suite running every emitted Pipecat module against
+	// the real 1.9.0 wheel, pipecat-slng 0.5.2 beside it; and a diff of every
+	// module the emitted bot imports between 1.8.0 and 1.9.0, which changed no
+	// class or function the bot calls (research R1 of spec 021). The machine
+	// that did this could reach no provider, so the browser call on
+	// salon-concierge that closed 1.8.0 (13 turns, 20 interruptions, 3 handoffs,
+	// 12 function calls settled, no errors) is still owed for 1.9.0. Make it,
+	// and replace this comment with its counts.
+	Pipecat: {Floor: "1.9.0", Ceiling: "1.9.0", Verified: "2026-09-11"},
 }
 
 // frameworkPackages is the distribution each driver installs, so an error

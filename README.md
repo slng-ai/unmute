@@ -128,7 +128,7 @@ Three things to notice:
 targets:
   pipecat:
     provider: pipecat
-    version: "1.8.0"
+    version: "1.9.0"
 
   livekit:
     provider: livekit

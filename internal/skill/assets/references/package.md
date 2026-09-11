@@ -165,10 +165,10 @@ Each section allows these fields:
 | `fallback` | `think`, `listen` |
 
 The `turn:` section is the only thing that ends a turn. Some transcribers
-(AssemblyAI, Cartesia, Soniox, Speechmatics) detect turns themselves, but on
-Pipecat 1.8.0 they only propose an ending and the `turn:` entry still decides.
-So never drop `turn:` or set `semantic_endpointing: off` on the theory that the
-transcriber covers it.
+(AssemblyAI, Cartesia, Soniox, Speechmatics) detect turns themselves, but while
+`turn:` names the local pair they only propose an ending and the `turn:` entry
+still decides. So never drop `turn:` or set `semantic_endpointing: off` on the
+theory that the transcriber covers it.
 
 Unmute keeps no list of valid model ids. `model:` and `voice:` are forwarded to
 the provider exactly as written, so a typo is a provider error at run time, not
@@ -377,7 +377,7 @@ data until its access and retention rules are approved.
 targets:
   pipecat:
     provider: pipecat
-    version: "1.8.0"
+    version: "1.9.0"
 
   livekit:
     provider: livekit

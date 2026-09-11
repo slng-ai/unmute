@@ -983,7 +983,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                     extra={"extra_headers": {{.SlngHeaders}}}{{end}}),
             ))
             await super().on_activated(args)
-            # Pipecat 1.8 only runs on activation when messages are nonempty.
+            # Pipecat 1.8 and 1.9 only run on activation when messages are nonempty.
             # A handoff already shaped the shared context; request the reply
             # without adding a synthetic message or waiting for the caller.
             if args and args.get("run_llm") and not args.get("messages"):
@@ -1688,7 +1688,7 @@ async def _flow_tool_{{.Name}}(args, flow_manager{{if .NeedsState}}, state=None{
     # DataFrame, so it is queued and speech starts while the handler body runs.
     # A flows handler holds a FlowManager rather than FunctionCallParams, and
     # FlowManager.worker is the documented seam for queueing a frame from inside
-    # a handler (pipecat.flows.manager, pipecat-ai 1.8.0). Queued after the
+    # a handler (pipecat.flows.manager, pipecat-ai 1.9.0). Queued after the
     # refusal check, so a refused call stays silent.
     await flow_manager.worker.queue_frame(TTSSpeakFrame({{pyq .Announce}}))
 {{end}}{{if .KnowledgeBase}}    return await knowledge.look_up({{pyq .KnowledgeBase}}, dict(args)["query"])

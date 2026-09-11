@@ -476,6 +476,21 @@ the catalogue holds.
 | livekit | speak | `slng`, `cartesia`, `deepgram`, `elevenlabs`, `gemini`, `gradium`, `inworld`, `rime`, `sarvam`, `soniox` |
 | livekit | think | `slng`, `anthropic`, `aws`, `azure`, `groq`, `mistralai`, `openai`, `openrouter`, `sarvam` |
 
+Three vendor facts on Pipecat change what an author writes, and each is one
+`params:` line, which reaches the service's settings by name:
+
+- `deepgram` listen: since Pipecat 1.9.0 the profanity filter is off unless
+  asked for, because it rewrites the words it matches and a false positive
+  silently changes a transcript. `params: {profanity_filter: true}` turns it on.
+  `params: {version: "2021-03-17.0"}` pins a model version.
+- `openai` listen: `gpt-4o-transcribe` shuts down on 2027-02-26 and
+  `gpt-transcribe` replaces it. The transcriber pads each speech segment with
+  half a second of silence so the last word is not cut, and the padding counts
+  toward usage.
+- `elevenlabs` listen takes `params: {no_verbatim: true}` to drop filler words;
+  `speechmatics` listen takes `params: {include_results: true}` for word-level
+  results.
+
 Read that table carefully rather than from memory. The two targets do not hold
 the same set, and the same company can appear under a different name: LiveKit
 takes `mistralai` where Pipecat takes `mistral`.

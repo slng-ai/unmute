@@ -1181,7 +1181,7 @@ if __name__ == "__main__":
     print("LiveKit streaming smoke passed: finality 5s, pre-audio text, native greeting, task retries, pass-through, env off")
 `
 
-const devStreamingPipecatScript = `"""Drive the generated bot through real Pipecat 1.8 workers, without providers.
+const devStreamingPipecatScript = `"""Drive the generated bot through real Pipecat 1.9 workers, without providers.
 
 Run this same script in inline and multi-agent artifacts. The Go harness removes
 tracing, prefetch and inactivity, and gives each artifact a fixed direct greeting.

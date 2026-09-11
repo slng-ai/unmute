@@ -1999,8 +1999,8 @@ func TestCheckPipecatVersion(t *testing.T) {
 		{"1.5.3", false},
 		{"1.6.0", false},
 		{"1.6.9", false},
-		{"1.8.0", true},
-		{"1.7.0", false}, // the previous pin; one version is supported, not a range
+		{"1.9.0", true},
+		{"1.8.0", false}, // the previous pin; one version is supported, not a range
 		{"1.0.3", false}, // never existed on PyPI; workers API not present
 		{"1.4.9", false},
 		{"1", false}, // too vague / pre-1.5
@@ -2740,7 +2740,7 @@ func TestPipecatDoesNotClaimMultiRegion(t *testing.T) {
 // scope half of tool announcements. An agent tool reaches the pipeline through
 // FunctionCallParams; a task tool is a flows handler and reaches it through
 // FlowManager.worker, which is the documented seam for queueing a frame from
-// inside a handler (verified against pipecat-ai 1.8.0, the pinned version, where
+// inside a handler (verified against pipecat-ai 1.9.0, the pinned version, where
 // flows ships as pipecat.flows rather than the standalone pipecat_flows).
 //
 // This case exists because the capability table used to deny Pipecat here with
@@ -2947,7 +2947,7 @@ func pipecatHistoryBot(t *testing.T) string {
 //
 // Pipecat keeps one LLMContext for the whole call and hands every worker the
 // same object, so shaping means replacing that object's message list rather
-// than handing over a copy. LLMContext at pipecat-ai 1.8.0 has no copy(), no
+// than handing over a copy. LLMContext at pipecat-ai 1.9.0 has no copy(), no
 // truncate() and no exclusion filter, so this is plain list work and the
 // framework provides no safety.
 func TestPipecatLowersEveryTaskHistoryValue(t *testing.T) {

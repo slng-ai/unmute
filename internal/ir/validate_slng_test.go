@@ -245,7 +245,7 @@ func TestCodeTargetsKeepAuthoredToolBodies(t *testing.T) {
 		resolved := targetFor(agent, ProviderSlng)
 		resolved.Provider, resolved.Name, resolved.Version = provider, string(provider), "1.6.10"
 		if provider == ProviderPipecat {
-			resolved.Version = "1.8.0"
+			resolved.Version = "1.9.0"
 		}
 		report, _ := Validate(agent, []Target{resolved}, targetcap.Default())
 		for _, err := range reportFor(report, provider).Errors {
@@ -470,7 +470,7 @@ func TestWebhookNeedsURLEnvOnACodeTarget(t *testing.T) {
 	agent.Agents["support"] = entry
 
 	resolved := targetFor(agent, ProviderSlng)
-	resolved.Provider, resolved.Name, resolved.Version = ProviderPipecat, "pipecat", "1.8.0"
+	resolved.Provider, resolved.Name, resolved.Version = ProviderPipecat, "pipecat", "1.9.0"
 	report, err := Validate(agent, []Target{resolved}, targetcap.Default())
 	if err == nil {
 		t.Fatal("a webhook with no url_env passed on pipecat, which reads the base from the environment")

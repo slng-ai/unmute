@@ -969,7 +969,7 @@ class BillingAgent(LLMWorker):
                 delta=LLMSettings(system_instruction=BILLING_PROMPT),
             ))
             await super().on_activated(args)
-            # Pipecat 1.8 only runs on activation when messages are nonempty.
+            # Pipecat 1.8 and 1.9 only run on activation when messages are nonempty.
             # A handoff already shaped the shared context; request the reply
             # without adding a synthetic message or waiting for the caller.
             if args and args.get("run_llm") and not args.get("messages"):
@@ -1045,7 +1045,7 @@ class IntakeAgent(LLMWorker):
                 delta=LLMSettings(system_instruction=INTAKE_PROMPT),
             ))
             await super().on_activated(args)
-            # Pipecat 1.8 only runs on activation when messages are nonempty.
+            # Pipecat 1.8 and 1.9 only run on activation when messages are nonempty.
             # A handoff already shaped the shared context; request the reply
             # without adding a synthetic message or waiting for the caller.
             if args and args.get("run_llm") and not args.get("messages"):
@@ -1302,11 +1302,11 @@ if __name__ == "__main__":
 {
   "target": "pipecat",
   "provider": "pipecat",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "supported": {
-    "floor": "1.8.0",
-    "ceiling": "1.8.0",
-    "verified": "2026-08-27"
+    "floor": "1.9.0",
+    "ceiling": "1.9.0",
+    "verified": "2026-09-11"
   },
   "entry_agent": "intake",
   "agents": [
@@ -2125,7 +2125,7 @@ version = "0.1.0"
 description = "Generated Pipecat voice agent (compiled by unmute)."
 requires-python = ">=3.11"
 dependencies = [
-    "pipecat-ai[deepgram,openai,runner,silero,webrtc]==1.8.0",
+    "pipecat-ai[deepgram,openai,runner,silero,webrtc]==1.9.0",
     "pipecat-slng>=0.5.2",
     "python-dotenv>=1.0",
 

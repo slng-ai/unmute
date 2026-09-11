@@ -1066,7 +1066,7 @@ func TestValueChecksFailAtValidate(t *testing.T) {
 			mutate: func(pkg *packagespec.Package) {
 				setTargetField(pkg, "pipecat", func(t *packagespec.Target) { t.Version = "9.9.9" })
 			},
-			want: `pipecat version "9.9.9" is newer than this unmute supports (exactly 1.8.0); a newer unmute may support it`,
+			want: `pipecat version "9.9.9" is newer than this unmute supports (exactly 1.9.0); a newer unmute may support it`,
 		},
 		{
 			name:     "version is below the exact supported version, pipecat",
@@ -1074,7 +1074,7 @@ func TestValueChecksFailAtValidate(t *testing.T) {
 			mutate: func(pkg *packagespec.Package) {
 				setTargetField(pkg, "pipecat", func(t *packagespec.Target) { t.Version = "1.6.9" })
 			},
-			want: `pipecat version "1.6.9" is outside the supported range (exactly 1.8.0)`,
+			want: `pipecat version "1.6.9" is outside the supported range (exactly 1.9.0)`,
 		},
 		{
 			name:     "version names only two parts, livekit",

@@ -65,10 +65,10 @@ ceiling, from `pace`. See [Latency](/optimization/latency) for both.
 ### Transcribers that detect turns themselves
 
 Some transcribers decide the caller has finished on their own. AssemblyAI,
-Cartesia, Soniox and Speechmatics all do. On Pipecat 1.8.0 those services only
-*propose* an ending; the pair above still decides. So picking one of them does
-not change what `endpointing_delay` and `pace` mean, and does not give you a
-second thing racing your settings.
+Cartesia, Soniox and Speechmatics all do. While `turn:` names the local pair
+above, those services only *propose* an ending; the pair still decides. So
+picking one of them does not change what `endpointing_delay` and `pace` mean,
+and does not give you a second thing racing your settings.
 
 ## LiveKit Agents
 

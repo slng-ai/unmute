@@ -1,7 +1,7 @@
 package target
 
 // Pipecat entries. Contract: the pipecat_v1 driver templates, pipecat-ai
-// ==1.8.0. Official services ship as pipecat-ai extras and take model/
+// ==1.9.0. Official services ship as pipecat-ai extras and take model/
 // voice/params nested in Class.Settings(...) (flat forms deprecated since
 // v0.0.105; verified against the per-service docs 2026-07-15). The SLNG
 // plugin is a standalone package with flat kwargs (verified against the
@@ -334,8 +334,8 @@ var pipecatCatalog = []Entry{
 			Endpoint: FieldSpec{Arg: "base_url"},
 			Params:   ParamsSettings,
 			// Settings.extra is merged verbatim into the request params
-			// (services/openai/base_llm.py:383, pipecat 1.8.0 source read
-			// 2026-08-27), so extra_headers and extra_body reach the SDK call
+			// (services/openai/base_llm.py:383, pipecat 1.9.0 source read
+			// 2026-09-11), so extra_headers and extra_body reach the SDK call
 			// without a new Python class.
 			SettingsOverflow: "extra",
 		},

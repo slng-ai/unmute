@@ -282,7 +282,7 @@ func TestPipecatMCPTracingDocsStayAligned(t *testing.T) {
 			t.Errorf("%s does not state the Pipecat MCP collision contract", name)
 		}
 		// The third rule these three surfaces used to share was a cleanup limit
-		// on cancelling MCPClient.start(). Pipecat 1.8.0 cancels the stranded
+		// on cancelling MCPClient.start(). Pipecat since 1.8.0 cancels the stranded
 		// session task itself (services/mcp_service.py, start()), so the limit
 		// is gone and so is the sentence.
 	}
