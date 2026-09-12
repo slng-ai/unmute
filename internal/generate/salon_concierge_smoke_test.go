@@ -304,9 +304,14 @@ from datetime import date, timedelta
 from importlib.metadata import version
 from types import SimpleNamespace
 
-assert version("livekit-agents") == "1.6.10"
+_report = json.load(open("compile-report.json"))
+# The pin the compiler wrote, read rather than repeated. A literal here fails
+# this whole suite on a framework bump, which is a version check dressed as a
+# behaviour test: the bump is already held by internal/target, and the thing
+# worth asserting here is that the venv installed what the project asked for.
+assert version("livekit-agents") == _report["version"], (version("livekit-agents"), _report["version"])
 
-for name in json.load(open("compile-report.json"))["required_env"]:
+for name in _report["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
 import agent  # noqa: E402
@@ -542,9 +547,14 @@ from datetime import date, timedelta
 from importlib.metadata import version
 from types import SimpleNamespace
 
-assert version("pipecat-ai") == "1.9.0"
+_report = json.load(open("compile-report.json"))
+# The pin the compiler wrote, read rather than repeated. A literal here fails
+# this whole suite on a framework bump, which is a version check dressed as a
+# behaviour test: the bump is already held by internal/target, and the thing
+# worth asserting here is that the venv installed what the project asked for.
+assert version("pipecat-ai") == _report["version"], (version("pipecat-ai"), _report["version"])
 
-for name in json.load(open("compile-report.json"))["required_env"]:
+for name in _report["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
 import bot  # noqa: E402
