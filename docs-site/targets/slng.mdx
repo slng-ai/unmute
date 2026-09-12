@@ -27,6 +27,21 @@ unmute deploy examples/hotel-concierge
   behind it.
 </Card>
 
+On this page:
+
+- [The trade](#the-trade) - what you give up, and what you get back
+- [What compiling writes](#what-compiling-writes) - the three files
+- [targets.yaml](#targetsyaml) - every key this target takes, and every one it refuses
+- [The pushed agent's name](#the-pushed-agents-name) - where the deployed name comes from
+- [Model names](#model-names) - how a vendor and a model are joined
+- [Push it](#push-it) - the command, the key, and where your tools come from
+- [Hosted tool dependencies](#hosted-tool-dependencies) - only for a package that also targets code
+- [The Vault](#the-vault) - where secrets live, and what a compile can see
+- [What a slng package may not ask for](#what-a-slng-package-may-not-ask-for) - the refusals in full
+- [If the agent answers with silence](#if-the-agent-answers-with-silence) - reading `call_end_reason`
+- [There is no unmute dev](#there-is-no-unmute-dev) - how to talk to a pushed agent
+- [Where to go next](#where-to-go-next) - the deploy walkthrough
+
 ## The trade
 
 A slng package is shorter than the same agent written for pipecat or livekit, and
@@ -89,13 +104,42 @@ targets:
     deployment_region: eu-central
 ```
 
-That is the whole target. `version`, `pins`, `sdk_language` and `connection` are
-all refused by name: each describes a generated project, and there is none.
+That is the whole target.
 
-`deployment_region` takes exactly one of `any`, `us-east`, `eu-central` or
-`ap-south`. `any` lets SLNG route each call itself. This is the only target
-whose region values are checked, because it is the only one whose platform
-publishes a closed set.
+### Every key the slng target takes
+
+Two are required, and the third is the one every target takes.
+
+<ParamField path="provider" type="slng" required>
+  What selects this target. It is the difference between compiling a deployment
+  body and compiling a Python project you host.
+</ParamField>
+
+<ParamField path="deployment_region" type="any | us-east | eu-central | ap-south" required>
+  Where SLNG serves the agent from. `any` lets SLNG route each call itself. This
+  is the only target whose region values are checked, because it is the only one
+  whose platform publishes a closed set. Exactly one, and leaving it out is
+  refused.
+</ParamField>
+
+<ParamField path="models" type="model entry name to a model definition">
+  Per target overrides of named entries from `agent.yaml`, the same shape every
+  target takes. SLNG owns its own model list, so an override is forwarded as
+  written and no name is checked here.
+</ParamField>
+
+### Every key the slng target refuses
+
+Each one is refused by name at validate, with what to do instead. Four of them
+describe a generated project, and there is none.
+
+| Key | Why it is refused |
+|---|---|
+| `version` | SLNG owns the runtime version its agents run on |
+| `pins` | no generated project exists whose packages could be pinned |
+| `sdk_language` | no SDK is generated for this target |
+| `connection` | a package declares no carrier state on SLNG: buy the number and configure the trunk in the dashboard, and `unmute deploy` offers to attach a free trunk after a successful push |
+| `warm_instances` | SLNG runs the agent and exposes no instance pool of yours to keep warm |
 
 ## The pushed agent's name
 

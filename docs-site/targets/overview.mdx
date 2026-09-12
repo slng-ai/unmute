@@ -16,6 +16,15 @@ pushes it, and SLNG runs the agent. There is nothing to host and no
 
 Those three are the only values `provider` accepts.
 
+On this page:
+
+- [targets.yaml](#targetsyaml) - the file, and every key a target takes
+- [Overrides, not forks](#overrides-not-forks) - changing one model entry for one target
+- [Switching a package to another target](#switching-a-package-to-another-target) - the two edits that travel together
+- [One package, two projects](#one-package-two-projects) - what `unmute compile` writes
+- [Choosing between them](#choosing-between-them) - what usually decides it
+- [Where to go next](#where-to-go-next) - each target's own page
+
 ## targets.yaml
 
 ```yaml targets.yaml
@@ -39,15 +48,58 @@ pass to `--target`, and it becomes the directory name under `build/`. The name
 is yours: a package with two Twilio setups might call them `pipecat_twilio` and
 `pipecat_telnyx`.
 
-| Field | What it does |
-|---|---|
-| `provider` | `pipecat` or `livekit` |
-| `version` | the exact framework version required for code targets |
-| `sdk_language` | the SDK language, `python` |
-| `pins` | known LiveKit package pins; other providers do not consume them |
-| `models` | per target overrides of named model entries |
-| `connection` | the one connection file that declares this target's phone route |
-| `deployment_region` | where the platform deploys the agent, forwarded as written |
+### Every key a target takes
+
+One is required everywhere. The rest depend on the provider you chose.
+
+<ParamField path="provider" type="livekit | pipecat | slng" required>
+  Which runtime this instance compiles for. Those three names are the whole
+  list. `vapi` and `deepgram` were target names once, and both are now refused
+  by name.
+</ParamField>
+
+<ParamField path="version" type="exact framework version">
+  The framework release an emitted project pins, written with all three
+  numbers. Required on `livekit` and `pipecat`. Refused on `slng`, which owns
+  the version its agents run on.
+</ParamField>
+
+<ParamField path="sdk_language" type="python">
+  The language an emitted project is written in. `python` is the only value
+  either driver has templates for, and LiveKit needs it stated to compile an
+  MCP tool. Refused on `slng`.
+</ParamField>
+
+<ParamField path="pins" type="package name to version">
+  Package versions for the emitted LiveKit project, limited to names the
+  LiveKit driver knows. Pipecat reads none of them, so leave it out there.
+  Refused on `slng`.
+</ParamField>
+
+<ParamField path="connection" type="connection file stem">
+  The one [connection file](/reference/connections-yaml) carrying this target's
+  phone calls. Required once the package declares a phone channel on `livekit`
+  or `pipecat`, and refused when nothing in the package uses a phone route.
+  Refused on `slng`, which has no carrier state in a package.
+</ParamField>
+
+<ParamField path="deployment_region" type="one platform region name, or a list">
+  Where the platform deploys the agent, forwarded as written. More than one
+  region is LiveKit only. On `slng` it is exactly one of `any`, `us-east`,
+  `eu-central` or `ap-south`, the only target whose region names are checked.
+</ParamField>
+
+<ParamField path="warm_instances" type="integer, zero or more" default="0">
+  Instances the platform holds ready, so the first call after a quiet period is
+  not waiting for a container to start. Pipecat only: LiveKit and `slng` refuse
+  a stated pool. Left out means none, and the platform scales to zero when idle.
+</ParamField>
+
+<ParamField path="models" type="model entry name to a model definition">
+  Per target overrides of named entries from `agent.yaml`. An override replaces
+  the entry rather than merging into it. See
+  [Overrides, not forks](#overrides-not-forks).
+</ParamField>
 
 A target says nothing else about telephony. It names one connection, and
 [the connection file](/reference/connections-yaml) declares the transport, the

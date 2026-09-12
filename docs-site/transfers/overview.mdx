@@ -11,6 +11,15 @@ that, an entry under `escalations:`, and two forms.
 | **cold** | the agent says it is putting them through, the call moves to the person, and the agent drops out |
 | **warm** | the caller waits while the agent rings the person, tells them what the call is about, and only then connects the two |
 
+On this page:
+
+- [How you write it](#how-you-write-it) - the block, and every key it takes
+- [Destinations are symbolic](#destinations-are-symbolic) - the model never sees a number
+- [The route decides what is possible](#the-route-decides-what-is-possible) - which shape compiles where
+- [The escalation has to be attached](#the-escalation-has-to-be-attached) - the half that is enforced
+- [When the person does not pick up](#when-the-person-does-not-pick-up) - `ring_timeout` and `on_unavailable`
+- [Where to go next](#where-to-go-next) - the two routes that carry a transfer
+
 ## How you write it
 
 The shape you write is the shape you get. There is no `mode:` field, so a warm
@@ -39,6 +48,51 @@ The escalation's name goes in the agent's own `escalations:` list. That half is
 enforced, not merely conventional. See [the control has to be
 attached](#the-escalation-has-to-be-attached) below.
 
+### Every key an escalation takes
+
+The name on the left is how an agent attaches it. Under the name are two parts:
+when to run it, and which shape it is.
+
+<ParamField path="when" type="string">
+  What the model reads to decide to put the caller through. Nothing checks that
+  it is there, but write one: without it the model has nothing to decide on.
+</ParamField>
+
+<ParamField path="cold" type="block">
+  The cold shape: hand the caller over and drop out. Exactly one of `cold:` or
+  `warm:` is written, never both and never neither.
+</ParamField>
+
+<ParamField path="warm" type="block">
+  The warm shape: hold the caller, ring the person, brief them, then bridge the
+  two. Only the LiveKit `sip` route compiles it.
+</ParamField>
+
+### Every key a shape block takes
+
+`destination:` is required in both. `briefing:` is the one key `cold:` does not
+have.
+
+<ParamField path="destination" type="destinations entry name" required>
+  Which desk to reach, named symbolically. The name is resolved in
+  [`destinations:`](#destinations-are-symbolic) at the top level of `agent.yaml`.
+</ParamField>
+
+<ParamField path="briefing" type="string">
+  What to tell the person while the caller waits. `warm:` only, so it cannot be
+  written on a cold transfer. The drivers pass the call transcript alongside it.
+</ParamField>
+
+<ParamField path="ring_timeout" type="positive Go duration, e.g. 25s">
+  How long to ring before the person counts as unavailable. Left out, Pipecat
+  waits 25 seconds and LiveKit sets nothing, so its platform default applies.
+</ParamField>
+
+<ParamField path="on_unavailable" type="return_to_caller | hangup" default="return_to_caller">
+  What happens when nobody picks up. Pipecat `cloud-websocket` requires
+  `hangup` written out, because it cannot reconnect the original media stream.
+</ParamField>
+
 ## Destinations are symbolic
 
 The model never sees a phone number. `destination` names a symbol, and the symbol
@@ -50,8 +104,17 @@ destinations:
   supervisor_line: SUPERVISOR_PHONE_NUMBER
 ```
 
-A destination is only the UPPER_SNAKE name of an environment variable holding an
-E.164 number or a `sip:` URI, read at call time. A number written here is refused:
+### Every key a destination takes
+
+One line per symbol, and both halves are names.
+
+<ParamField path="<symbol>" type="UPPER_SNAKE environment variable name" required>
+  The left half is the symbol an escalation's `destination:` names. The right
+  half is the environment variable holding an E.164 number or a `sip:` URI, read
+  at call time. A symbol no escalation reaches is refused.
+</ParamField>
+
+A number written on the right is refused too:
 
 ```text
 agent.yaml:60: destination "billing_line" is a literal. agent.yaml is
