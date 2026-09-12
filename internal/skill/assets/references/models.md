@@ -149,10 +149,20 @@ words and `end_after` ends the call.
 
 A `turn` entry's `provider` is `local` (the on-device pair) or, on Pipecat,
 `listen`: the listening model's own turn detection ends the turn and no local
-analyzer is built. Only two listeners can take it, and both can predict a turn
-before it is final: Deepgram with a `flux-` model (`flux-general-en`) and
-Cartesia with an `ink-` model (`ink-2`, not `ink-whisper`). Any other listening
-vendor is refused naming these two.
+analyzer is built. Four listeners can take it, and two of them can also predict
+a turn before it is final:
+
+| Listener | `listen:` binding | `pace` | `eager` |
+|---|---|---|---|
+| Deepgram Flux | `provider: deepgram`, a `flux-` model such as `flux-general-en` | yes | yes |
+| Cartesia Turns | `provider: cartesia`, an `ink-` model such as `ink-2`, not `ink-whisper` | yes | yes |
+| Gradium | `provider: gradium`, any model it serves | refused | refused |
+| Speechmatics | `provider: speechmatics`, any model it serves | refused | refused |
+
+Any other listening vendor is refused naming these four. The first two are
+reached through a separate class that serves its own model family, which is why
+a Deepgram model that is not Flux is refused; the other two keep their ordinary
+service, so any model they serve can decide.
 
 ```yaml
 models:
@@ -168,14 +178,25 @@ models:
       pace: snappy
 ```
 
-`pace` still applies: the ceiling becomes the transcriber's own end-of-turn
-timeout in milliseconds (`eot_timeout_ms` on Flux, `turn_end_timeout_ms` on
-Turns; snappy 1200, balanced 1600, patient 3000). There is no floor, so
-`endpointing_delay`, `semantic_endpointing` and `interruption.minimum_words` are
-refused; `interruption.protect` still works. `eager: true` costs one model
-request per prediction, including the ones the transcriber withdraws, so leave
-it off unless the user wants the faster reply. `eager` beside `provider: local`
-is refused, and `provider: listen` is refused on LiveKit and slng.
+`pace` applies on the first two: the ceiling becomes the transcriber's own
+end-of-turn timeout in milliseconds (`eot_timeout_ms` on Flux,
+`turn_end_timeout_ms` on Turns; snappy 1200, balanced 1600, patient 3000).
+Gradium and Speechmatics expose no such timeout, so `pace` is refused there
+rather than landing on a nearby setting that means something else.
+
+There is no floor either way, so `endpointing_delay`, `semantic_endpointing` and
+`interruption.minimum_words` are refused; `interruption.protect` still works.
+`eager: true` costs one model request per prediction, including the ones the
+transcriber withdraws, so leave it off unless the user wants the faster reply.
+`eager` is refused beside `provider: local` and on the two listeners that report
+only a turn that has already ended, and `provider: listen` is refused on LiveKit
+and slng.
+
+Speechmatics is the one vendor whose turn behaviour is written for the author.
+Its service closes turns itself by default as of Pipecat 1.10.0, so the compiler
+holds it to the caller-driven mode when the package names the local pair, and to
+its own mode when the package hands it the turn. Nothing is authored for this;
+the compile report says which was chosen.
 
 ## The default OpenAI think model needs `reasoning_effort`
 
@@ -584,13 +605,26 @@ one `params:` line, which reaches the service's settings by name:
   speech segment with half a second of silence so the last word is not cut,
   and the padding counts toward usage.
 - `elevenlabs` listen takes `params: {no_verbatim: true}` to drop filler words;
-  `speechmatics` listen takes `params: {include_results: true}` for word-level
-  results.
+  `speechmatics` listen takes `params: {enable_partials: true}` for partial
+  fragments as the caller speaks, and `params: {enable_diarization: true}` to
+  label speakers. Eleven Speechmatics settings are gone in Pipecat 1.10.0 and a
+  package still writing one is refused with the line and what to write instead,
+  so do not carry one over from an older package.
 - `cartesia` listen under a listening decider takes `turn_start_threshold`,
   `turn_eager_end_threshold` and `turn_end_threshold`, which say how sure Turns
   has to be. Leave them out and Cartesia's own defaults apply.
+- `gradium` listen under a listening decider takes `eot_horizon_s` and
+  `eot_threshold`, which say how sure its end-pointing has to be. Leave them out
+  and Gradium's own defaults apply.
 - `assemblyai` listen: `universal-3-5-pro` is the default and
   `universal-3-6-pro` is the same model upgraded, with the same features.
+- `deepseek` think: since Pipecat 1.10.0 the reasoning pass is off unless asked
+  for, because V4 models otherwise reason before every answer and delay the
+  first spoken word. `params: {thinking: {type: enabled}}` turns it on.
+- `anthropic` think: since Pipecat 1.10.0 `temperature`, `top_p` and `top_k`
+  travel in the request body rather than as call parameters, because the
+  Anthropic SDK's 1.x line dropped them. They reach the API unchanged and keep
+  their names and meaning, so a package that sets them needs no edit.
 - `deepgram` speak takes `params: {speed: 1.1}`, Aura's speech rate, 0.7 to 1.5;
   `soniox` speak takes `params: {reduce_silence: true}` to shorten the pauses
   between words.

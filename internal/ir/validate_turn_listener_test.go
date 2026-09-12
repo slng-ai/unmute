@@ -31,6 +31,14 @@ func listenDeciderTarget(t *testing.T, provider Provider, listenVendor, listenMo
 	if mutate != nil {
 		mutate(&turn)
 	}
+	// A pace that differs from the package's own is a DIFFERENT refusal (pace
+	// takes no per-target override), and it would fire before the ones these
+	// cases are about. So the base is kept in step with whatever the case sets,
+	// which is also the only shape an author can actually write.
+	if def, ok := agent.Models[agent.Turn]; ok && def.Pace != turn.Pace {
+		def.Pace = turn.Pace
+		agent.Models[agent.Turn] = def
+	}
 	tgt.Models.Turn = &turn
 	listen := *tgt.Models.Listen
 	listen.Provider, listen.Model, listen.Params = listenVendor, listenModel, nil
@@ -222,5 +230,135 @@ func TestValidateRefusesEagerOnAnotherRolesOverride(t *testing.T) {
 				t.Errorf("want %q in:\n%s", tc.want, text)
 			}
 		})
+	}
+}
+
+// TestValidateListenDeciderAcceptsTheTwoVendors10AddedIsWhatUS3 buys: the same
+// `turn: provider: listen` an author already writes now takes two more
+// transcribers. Neither names a model family, because neither has a second class
+// with its own model list to get wrong.
+func TestValidateListenDeciderAcceptsTheTwoNewVendors(t *testing.T) {
+	for _, tc := range []struct{ vendor, model string }{
+		{"gradium", "default"},
+		{"speechmatics", "linden-1"},
+	} {
+		agent, tgt := listenDeciderTarget(t, ProviderPipecat, tc.vendor, tc.model, func(turn *Binding) {
+			// Neither takes an early answer or a ceiling, so the accepted shape
+			// writes neither. The two cases below prove each is refused.
+			turn.Eager = false
+			turn.Pace = ""
+		})
+		row := validateOne(t, agent, tgt)
+		if len(row.Errors) != 0 {
+			t.Errorf("%s %s: unexpected errors: %s", tc.vendor, tc.model, strings.Join(row.Errors, "\n"))
+		}
+	}
+}
+
+// TestValidateRefusesEagerOnAVendorThatPredictsNothing: the refusal was written
+// in spec 021 against no real vendor, because both rows in the table then said
+// they could predict. 1.10.0 supplies two that cannot: both report a turn that
+// has already ended.
+//
+// Without this, the emitted constructor passes enable_eager_end_of_turn to a
+// service that has no such keyword, and the author finds out from a traceback on
+// the first call.
+func TestValidateRefusesEagerOnAVendorThatPredictsNothing(t *testing.T) {
+	for _, tc := range []struct{ vendor, model string }{
+		{"gradium", "default"},
+		{"speechmatics", "linden-1"},
+	} {
+		agent, tgt := listenDeciderTarget(t, ProviderPipecat, tc.vendor, tc.model, func(turn *Binding) {
+			turn.Eager = true
+			turn.Pace = ""
+		})
+		row := validateOne(t, agent, tgt)
+		found := ""
+		for _, err := range row.Errors {
+			if strings.Contains(err, "eager") {
+				found = err
+			}
+		}
+		if found == "" {
+			t.Fatalf("%s: eager: true was accepted on a vendor that predicts nothing; errors: %s", tc.vendor, strings.Join(row.Errors, "\n"))
+		}
+		if !strings.Contains(found, tc.vendor) {
+			t.Errorf("%s: the refusal does not name the vendor: %s", tc.vendor, found)
+		}
+		// It names what to do instead, and the alternatives are read from the
+		// table rather than written out beside it, so a vendor that gains
+		// prediction later reaches this sentence with nobody remembering.
+		for _, want := range []string{"Remove eager", "deepgram", "cartesia"} {
+			if !strings.Contains(found, want) {
+				t.Errorf("%s: the refusal does not name %q: %s", tc.vendor, want, found)
+			}
+		}
+		// And it does not offer a vendor that cannot predict either.
+		if strings.Contains(found, "gradium") && strings.Contains(found, "such as default") {
+			t.Errorf("%s: the refusal offers a vendor that predicts nothing as the fix: %s", tc.vendor, found)
+		}
+	}
+}
+
+// TestValidateRefusesPaceWithoutACeiling: under a listening decider the pace
+// ceiling IS that service's own end-of-turn timeout. Flux and Turns each expose
+// one field for it; gradium and speechmatics expose none.
+//
+// Refused rather than mapped onto the nearest-looking setting. Gradium's
+// eot_horizon_s is which prediction horizon to READ, in seconds, not how long to
+// wait, so writing the ceiling there would make one authored word mean two
+// different things per vendor and the agent would wait a length nobody asked
+// for.
+func TestValidateRefusesPaceWithoutACeiling(t *testing.T) {
+	for _, tc := range []struct{ vendor, model string }{
+		{"gradium", "default"},
+		{"speechmatics", "linden-1"},
+	} {
+		agent, tgt := listenDeciderTarget(t, ProviderPipecat, tc.vendor, tc.model, func(turn *Binding) {
+			turn.Eager = false
+			turn.Pace = PaceSnappy
+		})
+		row := validateOne(t, agent, tgt)
+		found := ""
+		for _, err := range row.Errors {
+			if strings.Contains(err, "pace") {
+				found = err
+			}
+		}
+		if found == "" {
+			t.Fatalf("%s: pace was accepted on a vendor with no end-of-turn timeout; errors: %s", tc.vendor, strings.Join(row.Errors, "\n"))
+		}
+		for _, want := range []string{"pace: snappy", tc.vendor, "no end-of-turn timeout", "Remove pace"} {
+			if !strings.Contains(found, want) {
+				t.Errorf("%s: the refusal does not name %q: %s", tc.vendor, want, found)
+			}
+		}
+		// The alternatives come from the table, the same way the eager ones do.
+		for _, want := range []string{"deepgram", "cartesia"} {
+			if !strings.Contains(found, want) {
+				t.Errorf("%s: the refusal does not offer %q, which does take a ceiling: %s", tc.vendor, want, found)
+			}
+		}
+	}
+}
+
+// TestValidatePaceIsStillTakenWhereItLands: the inverse, and the reason the
+// refusal is keyed on the row rather than on a list of vendor names. A vendor
+// whose service takes a ceiling still takes a pace, and adding two vendors that
+// do not must not have made `pace` mean nothing everywhere.
+func TestValidatePaceIsStillTakenWhereItLands(t *testing.T) {
+	for _, tc := range []struct{ vendor, model string }{
+		{"deepgram", "flux-general-en"},
+		{"cartesia", "ink-2"},
+	} {
+		agent, tgt := listenDeciderTarget(t, ProviderPipecat, tc.vendor, tc.model, func(turn *Binding) {
+			turn.Pace = PaceSnappy
+		})
+		row := validateOne(t, agent, tgt)
+		for _, err := range row.Errors {
+			if strings.Contains(err, "pace") {
+				t.Errorf("%s: pace was refused on a vendor whose service takes one: %s", tc.vendor, err)
+			}
+		}
 	}
 }

@@ -1798,35 +1798,84 @@ func sttService(binding *ir.Binding, pace paceView, env *envSet) (pipecatService
 		return pipecatService{}, fmt.Errorf("pipecat listen binding is missing a model")
 	}
 	svc, err := resolvePipecatService(targetcap.Listen, *binding, env, slngSite{})
-	if err != nil || !pace.ByListener {
+	if err != nil {
 		return svc, err
 	}
-	// The transcriber decides the turn, so the vendor's turn-detecting class
-	// stands in for its ordinary transcriber. Same key, same extra, same
-	// language slot: the catalogue entry still supplies those, and only the
-	// class, its import and the two turn fields change. The entry's CallSpec is
-	// shared with the catalogue, so it is copied before the class is renamed.
+	if !pace.ByListener {
+		// The local detector decides. One vendor still needs a word, because its
+		// own turn detection is on by default and would close turns beside ours.
+		// Everything else is emitted exactly as it was.
+		if pace.LocalPinArg != "" {
+			svc.settingsKV(pyKV{Key: pace.LocalPinArg, Value: pace.LocalPinValue})
+		}
+		return svc, nil
+	}
+	// The transcriber decides the turn. How the vendor's own detection is
+	// switched on is the row's business, because there are three ways and the
+	// class swap is only the first: see target.TurnSwitch.
 	detector := pace.Listener
-	call := *svc.Entry.Call
-	call.Class = detector.Class
-	svc.Entry.Call = &call
-	svc.Entry.Import = detector.Import
-	// And its own verification date, which the compile report prints beside the
-	// class: the ordinary transcriber's date says nothing about when this
-	// service was checked.
-	svc.Entry.Verified = detector.Verified
-	svc.Call.Class = detector.Class
-	svc.Call.SettingsClass = detector.Class + ".Settings"
-	// The pace ceiling lands in the service's own end-of-turn timeout, in
-	// milliseconds: the longest the service waits after the caller stops before
-	// it closes the turn whatever its confidence says.
-	svc.Call.SettingsArgs = append(svc.Call.SettingsArgs, pyKV{Key: detector.CeilingArg, Value: pace.CeilingMillis})
+	switch detector.Switch {
+	case targetcap.SwitchClass:
+		// A different class stands in for the ordinary transcriber. Same key,
+		// same extra, same language slot: the catalogue entry still supplies
+		// those, and only the class, its import and the turn fields change. The
+		// entry's CallSpec is shared with the catalogue, so it is copied before
+		// the class is renamed.
+		call := *svc.Entry.Call
+		call.Class = detector.Class
+		svc.Entry.Call = &call
+		svc.Entry.Import = detector.Import
+		// And its own verification date, which the compile report prints beside
+		// the class: the ordinary transcriber's date says nothing about when
+		// this service was checked.
+		svc.Entry.Verified = detector.Verified
+		svc.Call.Class = detector.Class
+		svc.Call.SettingsClass = detector.Class + ".Settings"
+	case targetcap.SwitchArg:
+		// The vendor keeps its class and takes one flat constructor argument.
+		svc.Call.Args = append(svc.Call.Args, pyKV{Key: detector.EnableArg, Value: detector.EnableValue})
+	case targetcap.SwitchSetting:
+		// The vendor keeps its class and takes one settings field. Written even
+		// where it matches the framework's current default, because a default
+		// that moved once can move again, and this one already did.
+		svc.settingsKV(pyKV{Key: detector.EnableArg, Value: detector.EnableValue})
+	default:
+		return svc, fmt.Errorf("listening vendor %q has turn switch %q, which this driver cannot emit", detector.Vendor, detector.Switch)
+	}
+	if detector.HasCeiling() {
+		// The pace ceiling lands in the service's own end-of-turn timeout, in
+		// milliseconds: the longest the service waits after the caller stops
+		// before it closes the turn whatever its confidence says. A vendor that
+		// exposes no such field takes no ceiling, and `pace` is refused there
+		// rather than landing on the nearest-looking setting.
+		svc.settingsKV(pyKV{Key: detector.CeilingArg, Value: pace.CeilingMillis})
+	}
 	if pace.Eager {
 		// A flat constructor flag, not a setting: the service reads it once and
-		// recommends the eager strategies from it.
+		// recommends the eager strategies from it. Validation refuses `eager` on
+		// a vendor whose row says it predicts nothing, so this keyword only
+		// reaches a constructor that has it.
 		svc.Call.Args = append(svc.Call.Args, pyKV{Key: "enable_eager_end_of_turn", Value: "True"})
 	}
 	return svc, nil
+}
+
+// settingsKV adds one Settings field to a service call, making sure the call is
+// actually rendering a settings object first.
+//
+// A vendor whose catalogue entry forwards params as kwargs has no settings
+// object, and appending to SettingsArgs there would write a field nothing
+// renders. Every vendor that can decide a turn uses ParamsSettings today, so
+// this is a guard rather than a branch anybody exercises; it exists because the
+// failure it prevents is silent, and the turn simply never changes hands.
+func (s *pipecatService) settingsKV(kv pyKV) {
+	if s.Call.SettingsArg == "" {
+		s.Call.SettingsArg = "settings"
+	}
+	if s.Call.SettingsClass == "" {
+		s.Call.SettingsClass = s.Call.Class + ".Settings"
+	}
+	s.Call.SettingsArgs = append(s.Call.SettingsArgs, kv)
 }
 
 // pipecatSlngSite is where the router's per-call values live on this target: a

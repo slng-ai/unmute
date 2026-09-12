@@ -1758,10 +1758,14 @@ transport_params: dict = {
 {{else if .Pace.ByListener}}            # The transcriber decides the turn (turn: provider: listen). The VAD
             # still runs, for the speaking frames the idle timer and the latency
             # observer anchor on, but no silence window of ours ends a turn and
-            # no local analyzer is built: {{.Pace.Listener.Class}} owns both
+{{if .Pace.Listener.CeilingArg}}            # no local analyzer is built: {{.Pace.Listener.Class}} owns both
             # halves, and its own end-of-turn timeout carries the pace ceiling
             # ({{.Pace.Listener.CeilingArg}}={{.Pace.CeilingMillis}}, from pace: {{.Pace.Name}}).
-            vad_analyzer=SileroVADAnalyzer(),
+{{else}}            # no local analyzer is built: the {{.Pace.Listener.Vendor}} service owns both
+            # halves. It exposes no end-of-turn timeout, so there is no ceiling of
+            # ours on it and `pace` is refused on this binding; the service's own
+            # timing decides how long a pause may run.
+{{end}}            vad_analyzer=SileroVADAnalyzer(),
 {{if .Pace.Eager}}            # eager: the service predicts an end of turn before it commits one, and
             # the reply is generated while it decides. The framework holds that
             # reply inside the LLM service and drops it if the caller resumes or
@@ -1985,10 +1989,14 @@ transport_params: dict = {
 {{if .Pace.ByListener}}            # The transcriber decides the turn (turn: provider: listen). The VAD
             # still runs, for the speaking frames the idle timer and the latency
             # observer anchor on, but no silence window of ours ends a turn and
-            # no local analyzer is built: {{.Pace.Listener.Class}} owns both
+{{if .Pace.Listener.CeilingArg}}            # no local analyzer is built: {{.Pace.Listener.Class}} owns both
             # halves, and its own end-of-turn timeout carries the pace ceiling
             # ({{.Pace.Listener.CeilingArg}}={{.Pace.CeilingMillis}}, from pace: {{.Pace.Name}}).
-            vad_analyzer=SileroVADAnalyzer(),
+{{else}}            # no local analyzer is built: the {{.Pace.Listener.Vendor}} service owns both
+            # halves. It exposes no end-of-turn timeout, so there is no ceiling of
+            # ours on it and `pace` is refused on this binding; the service's own
+            # timing decides how long a pause may run.
+{{end}}            vad_analyzer=SileroVADAnalyzer(),
 {{if .Pace.Eager}}            # eager: the service predicts an end of turn before it commits one, and
             # the reply is generated while it decides. The framework holds that
             # reply inside the LLM service and drops it if the caller resumes or

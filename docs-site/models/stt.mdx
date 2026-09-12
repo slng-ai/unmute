@@ -65,10 +65,10 @@ regardless. Measure your own route rather than assuming a default holds; see
 | `cartesia` | An `ink-` model such as `ink-2` can decide the turn itself and predict it early; see [Turn detection](/models/turn-detection). `ink-whisper` is the ordinary transcriber. Under a listening decider, `params: {turn_start_threshold: …, turn_eager_end_threshold: …, turn_end_threshold: …}` tune how sure it has to be; unset, Cartesia's own defaults apply. |
 | `deepgram` | A Flux model (`flux-general-en`, `flux-general-multi`) can decide the turn itself and predict it early; see [Turn detection](/models/turn-detection). Since Pipecat 1.9.0 the profanity filter is off unless you ask for it: the filter rewrites the words it matches, so a false positive silently changes a transcript. `params: {profanity_filter: true}` turns it on, and a Flux model also takes `params: {redact: …}` to mask numbers. `params: {version: "2021-03-17.0"}` pins a model version instead of whatever `latest` resolves to. |
 | `elevenlabs` | also accepted as `eleven_labs`. `params: {no_verbatim: true}` asks Scribe to drop filler words and false starts. |
-| `gradium` | |
+| `gradium` | The service can decide the turn itself; see [Turn detection](/models/turn-detection). Under a listening decider, `params: {eot_horizon_s: …, eot_threshold: …}` tune how sure it has to be before it ends a turn; unset, Gradium's own defaults apply. |
 | `openai` | OpenAI retires its previous transcription model on 2027-02-26; `gpt-transcribe` is the current one, and the framework's default since 1.9.0. This transcriber works on speech segments, and since 1.9.0 each segment is padded with half a second of silence so the last word is not cut; the padding counts toward usage. |
 | `soniox` | |
-| `speechmatics` | `params: {include_results: true}` asks for word-level results in each transcript message. |
+| `speechmatics` | The service can decide the turn itself; see [Turn detection](/models/turn-detection). `linden-1` is the default model. `params: {enable_partials: true}` includes partial fragments as the caller speaks, and `params: {enable_diarization: true}` labels speakers. Eleven settings this service had before Pipecat 1.10.0 are gone; a package still writing one is refused with the line and what to write instead. |
 
 An unlisted provider is legal on Pipecat on one condition: it has to be a
 genuinely OpenAI-compatible endpoint, named with `endpoint_env`. Without that it is

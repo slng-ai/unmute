@@ -1,0 +1,65 @@
+# The same Speechmatics binding as internal/testdata/speechmatics_local, with the
+# turn handed to the transcriber instead. This is the third shape a listening
+# turn decider takes: the vendor keeps its ordinary class and is switched on by
+# one Settings field, turn_detection_mode.
+#
+# The pair exists so one assertion can show that nobody writes the mode and the
+# turn binding alone decides it: external here, the service's own there.
+#
+# No `eager:` and no `pace:`, for the same two reasons Gradium writes neither.
+version: 1
+
+name: speechmatics-listen
+entry_agent: desk
+
+secrets:
+  - OPENAI_API_KEY
+  - SPEECHMATICS_API_KEY
+  - SLNG_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-terra
+      params:
+        reasoning_effort: "none"
+  speak:
+    voice:
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: speechmatics
+      model: linden-1
+      language: en
+  turn:
+    detector:
+      # The transcriber decides when the caller has finished.
+      provider: listen
+
+agents:
+  desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tools:
+      - lookup_customer
+
+tools:
+  - lookup_customer
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, this is Sage and Stone Salon. How can I help?"
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m

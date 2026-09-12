@@ -3197,15 +3197,36 @@ func validateListenDecider(agent *Agent, resolved Target, provider targetcap.Pro
 	if agent.Conversation != nil && agent.Conversation.Interruption != nil && agent.Conversation.Interruption.MinimumWords > 0 {
 		row.Errors = add(row.Errors, "conversation.interruption.minimum_words reaches nothing when the transcriber decides the turn: it gates a local turn start the transcriber replaces. Remove it")
 	}
-	// Both services that can take the turn can also predict it, so this refusal
-	// fires for nobody today. It is here because the row carries the answer and
-	// the emitted constructor passes the flag unconditionally: a vendor added
-	// with Eager false would otherwise compile a service that raises on the
-	// keyword at the first call, which is a worse way to find out.
+	// Written when both rows in the table said yes, so it fired for nobody. As
+	// of pipecat 1.10.0 two vendors say no: Speechmatics and Gradium both report
+	// a turn that has ENDED, never one they expect to end. Without this the
+	// emitted constructor would pass a keyword those services do not have, and
+	// the author would find out from a traceback on the first call.
 	if ok && turn.Eager && !detector.Eager {
 		row.Errors = add(row.Errors, fmt.Sprintf(
-			"eager: true asks %s to answer a predicted end of turn, and %s does not predict one. Remove eager, or bind a listening model that does",
-			vendor, detector.Class))
+			"eager: true asks %s to answer a predicted end of turn, and it reports only a turn that has already ended. Remove eager, or bind a listening model that predicts one: %s",
+			vendor, eagerDeciderVendors(provider)))
+	}
+	// A pace ceiling under a listening decider IS that service's own end-of-turn
+	// timeout: the longest it waits after the caller stops before closing the
+	// turn whatever its confidence says. Flux and Turns each expose one field
+	// for it. Gradium and Speechmatics expose none.
+	//
+	// Refused rather than mapped onto the nearest-looking setting. Gradium's
+	// eot_horizon_s is which prediction horizon to READ, in seconds, not how
+	// long to wait; writing the ceiling there would make one authored word mean
+	// two different things per vendor, and the agent would wait for a length
+	// nobody asked for. This is the same rule that already refuses
+	// endpointing_delay here: a field reaching nothing is refused, not dropped.
+	if ok && !detector.HasCeiling() && turn.Pace != "" {
+		alternatives := ceilingDeciderVendors(provider)
+		advice := "Remove pace and let " + vendor + " use its own end-of-turn timing"
+		if alternatives != "" {
+			advice += ", or bind a listening model whose service takes one: " + alternatives
+		}
+		row.Errors = add(row.Errors, fmt.Sprintf(
+			"pace: %s reaches nothing when %s decides the turn: the service exposes no end-of-turn timeout for the ceiling to land in. %s",
+			turn.Pace, vendor, advice))
 	}
 }
 
@@ -3309,10 +3330,41 @@ func validateRealtime(agent *Agent, resolved Target, names []string, checkVendor
 
 // listenDeciderVendors reads the turn-detector table into the phrase a refusal
 // names, so a vendor added there reaches the message with no second list.
+//
+// A vendor reached through a second class names its model family, because that
+// is the part an author gets wrong. A vendor switched on by a keyword serves
+// every model it serves, so it names one example and no family, rather than
+// printing an empty pair of brackets.
 func listenDeciderVendors(provider targetcap.Provider) string {
+	return deciderVendorPhrase(provider, func(targetcap.ListenTurnDetector) bool { return true })
+}
+
+// eagerDeciderVendors names the vendors that predict a turn before it ends,
+// which is what `eager:` answers.
+func eagerDeciderVendors(provider targetcap.Provider) string {
+	return deciderVendorPhrase(provider, func(d targetcap.ListenTurnDetector) bool { return d.Eager })
+}
+
+// ceilingDeciderVendors names the vendors whose service takes a pace ceiling.
+func ceilingDeciderVendors(provider targetcap.Provider) string {
+	return deciderVendorPhrase(provider, targetcap.ListenTurnDetector.HasCeiling)
+}
+
+// deciderVendorPhrase is the one place these lists are built. Three refusals
+// name a subset of the same table, and three hand-written lists would drift:
+// the phrase that used to say "the LiveKit routes" went on saying it for two
+// releases after it stopped being true.
+func deciderVendorPhrase(provider targetcap.Provider, keep func(targetcap.ListenTurnDetector) bool) string {
 	var parts []string
 	for _, vendor := range targetcap.ListenTurnDetectorVendors(provider) {
 		detector, _ := targetcap.LookupListenTurnDetector(provider, vendor)
+		if !keep(detector) {
+			continue
+		}
+		if len(detector.ModelPrefixes) == 0 {
+			parts = append(parts, fmt.Sprintf("%s (such as %s)", vendor, detector.ExampleModel))
+			continue
+		}
 		parts = append(parts, fmt.Sprintf("%s (%s models such as %s)", vendor, strings.Join(detector.ModelPrefixes, "/"), detector.ExampleModel))
 	}
 	return strings.Join(parts, " and ")

@@ -23,6 +23,22 @@ import (
 // page: the turn role has no catalogue vendors, and this table is not one.
 var deciderRow = regexp.MustCompile("(?m)^\\|\\s*[A-Z][^|]*\\(`([A-Za-z]+STTService)`\\)\\s*\\|([^|]*)\\|([^|]*)\\|([^|]*)\\|")
 
+// deciderClass is the class a reader will see in the emitted bot for a vendor
+// that decides the turn. Two vendors are reached through a class of their own;
+// the other two keep their ordinary transcriber and are switched on by an
+// argument, so their class comes from the catalogue.
+func deciderClass(t *testing.T, detector target.ListenTurnDetector) string {
+	t.Helper()
+	if detector.SwapsClass() {
+		return detector.Class
+	}
+	entry, ok := target.DefaultCatalog().Lookup(target.Pipecat, target.Listen, detector.Vendor)
+	if !ok {
+		t.Fatalf("%s decides turns and has no pipecat listen entry to take its class from", detector.Vendor)
+	}
+	return entry.Call.Class
+}
+
 func TestTurnDeciderTableMatchesTheTurnListenerTable(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join(siteRoot, "models", "turn-detection.mdx"))
 	if err != nil {
@@ -37,10 +53,13 @@ func TestTurnDeciderTableMatchesTheTurnListenerTable(t *testing.T) {
 	if len(rows) != len(detectors) {
 		t.Errorf("the page has %d decider rows and the table has %d", len(rows), len(detectors))
 	}
+	classes := map[string]bool{}
 	for vendor, detector := range detectors {
-		cells, ok := rows[detector.Class]
+		class := deciderClass(t, detector)
+		classes[class] = true
+		cells, ok := rows[class]
 		if !ok {
-			t.Errorf("models/turn-detection.mdx has no row for %s (%s)", vendor, detector.Class)
+			t.Errorf("models/turn-detection.mdx has no row for %s (%s)", vendor, class)
 			continue
 		}
 		binding, ceiling, eager := cells[0], cells[1], cells[2]
@@ -49,19 +68,35 @@ func TestTurnDeciderTableMatchesTheTurnListenerTable(t *testing.T) {
 				t.Errorf("%s row binding cell %q does not name %s", vendor, strings.TrimSpace(binding), want)
 			}
 		}
-		if !strings.Contains(ceiling, "`"+detector.CeilingArg+"`") {
-			t.Errorf("%s row ceiling cell %q does not name %s", vendor, strings.TrimSpace(ceiling), detector.CeilingArg)
+		// A vendor whose service exposes no end-of-turn timeout has nowhere for
+		// the ceiling to land, and `pace` is refused on it. The cell has to say
+		// so rather than quoting a field that does not exist: a reader who is
+		// told where pace lands, and then has pace refused, debugs the refusal.
+		if detector.HasCeiling() {
+			if !strings.Contains(ceiling, "`"+detector.CeilingArg+"`") {
+				t.Errorf("%s row ceiling cell %q does not name %s", vendor, strings.TrimSpace(ceiling), detector.CeilingArg)
+			}
+		} else {
+			// It must not borrow another vendor's field, which is what a row
+			// written by copying the one above it does.
+			for _, other := range detectors {
+				if other.HasCeiling() && strings.Contains(ceiling, other.CeilingArg) {
+					t.Errorf("%s row ceiling cell %q names %s, which is %s's field; this service exposes no end-of-turn timeout",
+						vendor, strings.TrimSpace(ceiling), other.CeilingArg, other.Vendor)
+				}
+			}
+			for _, want := range []string{"no ceiling", "refused"} {
+				if !strings.Contains(ceiling, want) {
+					t.Errorf("%s row ceiling cell %q does not say %q; pace is refused on this vendor", vendor, strings.TrimSpace(ceiling), want)
+				}
+			}
 		}
 		if want := "yes"; detector.Eager != (strings.TrimSpace(eager) == want) {
 			t.Errorf("%s row says early answer %q; the table says %v", vendor, strings.TrimSpace(eager), detector.Eager)
 		}
 	}
 	for class := range rows {
-		found := false
-		for _, detector := range detectors {
-			found = found || detector.Class == class
-		}
-		if !found {
+		if !classes[class] {
 			t.Errorf("models/turn-detection.mdx names %s, which no turn-detecting listener row has", class)
 		}
 	}

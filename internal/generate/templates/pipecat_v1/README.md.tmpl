@@ -530,6 +530,24 @@ Helper side, optional:
 One group, because one thing reads them: the deployed agent. There is no second
 side on this route, so every name above belongs in the platform secret set.
 {{end}}{{end}}{{end}}
+### If every provider call fails to connect
+
+The OpenAI SDK this project resolves verifies TLS against the operating system's
+own certificate store rather than a bundle shipped inside the package. On an image
+with no system certificates every provider call fails at the handshake, and the
+error names TLS rather than the provider.
+
+The base image this project builds on is the framework vendor's own and normally
+carries them. If you swap the base for a minimal image, install `ca-certificates`
+in it, or point at a bundle you supply:
+
+```sh
+SSL_CERT_FILE=/path/to/ca-bundle.crt
+```
+
+`REQUESTS_CA_BUNDLE` is read by some libraries and not by this one, so set
+`SSL_CERT_FILE` even if you already set the other.
+
 {{if .Slng.Any}}
 ## SLNG Context Router
 

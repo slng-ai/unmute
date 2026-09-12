@@ -69,14 +69,21 @@ ceiling, from `pace`. See [Latency](/optimization/latency) for both.
 ### Transcribers that detect turns themselves
 
 Some transcribers decide the caller has finished on their own. AssemblyAI,
-Cartesia, Soniox and Speechmatics all do. While `turn:` names the local pair
-above, those services only *propose* an ending; the pair still decides. So
-picking one of them does not change what `endpointing_delay` and `pace` mean,
-and does not give you a second thing racing your settings.
+Cartesia and Soniox all do. While `turn:` names the local pair above, those
+services only *propose* an ending; the pair still decides. So picking one of
+them does not change what `endpointing_delay` and `pace` mean, and does not give
+you a second thing racing your settings.
+
+Speechmatics is the exception, and it is worth a sentence because the answer
+changed. Its service now closes turns itself unless it is told not to. A package
+that names the local pair is told not to, so the local pair still decides and
+nothing about your settings changes. A package that hands the turn to the
+transcriber gets the service's own decision. Either way you write only the
+`turn:` binding; nothing else has to be set.
 
 ### Let the transcriber decide
 
-Two transcribers can take the whole decision, and one of them can also predict
+Four transcribers can take the whole decision, and two of them can also predict
 it before it is final. Name the listener as the decider in the `turn:` binding:
 
 ```yaml agent.yaml
@@ -102,15 +109,22 @@ but it ends no turn.
 |---|---|---|---|
 | Deepgram Flux (`DeepgramFluxSTTService`) | `provider: deepgram` and a `flux-` model such as `flux-general-en` | `eot_timeout_ms` | yes |
 | Cartesia Turns (`CartesiaTurnsSTTService`) | `provider: cartesia` and an `ink-` model such as `ink-2` | `turn_end_timeout_ms` | yes |
+| Gradium (`GradiumSTTService`) | `provider: gradium` and any model it serves, such as `default` | no ceiling, so `pace` is refused | no |
+| Speechmatics (`SpeechmaticsSTTService`) | `provider: speechmatics` and any model it serves, such as `linden-1` | no ceiling, so `pace` is refused | no |
 
-Any other listening vendor is refused with this list, because those two are
-the only services the framework ships that both detect and predict a turn.
-A Deepgram model that is not a Flux model, or `ink-whisper` on Cartesia, is
-refused too: the turn-detecting class serves its own model family.
+Any other listening vendor is refused with this list. A Deepgram model that is
+not a Flux model, or `ink-whisper` on Cartesia, is refused too: those two are
+reached through a separate class that serves its own model family. Gradium and
+Speechmatics keep their ordinary service and are switched on by an argument, so
+any model they serve can decide.
 
-**What `pace` means here.** The ceiling becomes the transcriber's own end-of-turn
-timeout, in milliseconds: `snappy` is 1200, `balanced` 1600, `patient` 3000.
-There is no floor, because no local silence window ends a turn, so
+**What `pace` means here.** On the first two, the ceiling becomes the
+transcriber's own end-of-turn timeout, in milliseconds: `snappy` is 1200,
+`balanced` 1600, `patient` 3000. The other two expose no such timeout, so `pace`
+is refused there rather than landing on a nearby setting that means something
+else; those services decide their own timing.
+
+There is no floor either way, because no local silence window ends a turn, so
 `endpointing_delay` is refused. `semantic_endpointing` is refused for the same
 reason: it names a local analyzer that is not built. `interruption.minimum_words`
 gates a local turn start the transcriber replaces, and is refused as well.
@@ -123,7 +137,9 @@ resumes speaking or the confirmed words differ, so an unconfirmed turn never
 reaches the caller, the conversation context or a tool. Each prediction costs
 one model request, including the ones the transcriber withdraws. That is why it
 is off unless you ask for it. `eager: true` beside `provider: local` is refused:
-the local detector predicts nothing.
+the local detector predicts nothing. It is refused on Gradium and Speechmatics
+too, for the same reason: both report a turn that has already ended, never one
+they expect to end.
 
 This is a Pipecat feature. LiveKit runs its turn model beside the transcriber
 and has no path that hands it the decision, so `provider: listen` is refused

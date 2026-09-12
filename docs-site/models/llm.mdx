@@ -92,8 +92,8 @@ own prompts and tools before choosing a transport.
 | Provider | Notes |
 |---|---|
 | `slng` | the [Context Router](/optimization/context-router): a cache in front of your own model, for the turns it judges repeatable |
-| `anthropic` | |
-| `deepseek` | |
+| `anthropic` | Since Pipecat 1.10.0 `temperature`, `top_p` and `top_k` travel in the request body rather than as call parameters, because the Anthropic SDK's 1.x line dropped them. They reach the API unchanged and keep their names and meaning, so a package that sets them needs no edit. |
+| `deepseek` | Since Pipecat 1.10.0 the reasoning pass is off unless you ask for it: V4 models otherwise reason before every answer, which delays the first spoken word. `params: {thinking: {type: enabled}}` turns it on. |
 | `google` | |
 | `groq` | |
 | `mistral` | |

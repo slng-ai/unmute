@@ -1388,6 +1388,9 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 		Models:            resolveBindings(agent, used, raw.Models),
 		Destinations:      destinations,
 	}
+	if err := checkRetiredParams(pkg, name, built); err != nil {
+		return Target{}, err
+	}
 	// The plan is what tells the emitter to emit the Bin, the transport entry,
 	// and the runbook. Without it a package would compile with telephony declared
 	// and no telephony emitted, which is the silent downgrade Principle II
@@ -1401,6 +1404,87 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 		}
 	}
 	return built, nil
+}
+
+// checkRetiredParams refuses a `params:` key the vendor's service no longer has
+// on this target's framework.
+//
+// Why this is worth a refusal at all: `params:` is forwarded by name with no
+// whitelist, which is what lets an author reach a vendor's whole settings object
+// without this compiler tracking each one. The cost is that a key the vendor
+// removed builds a constructor call that raises TypeError when the worker
+// starts, in a deployed container, on the first call. The traceback names a
+// dataclass nobody here wrote.
+//
+// Why it lives in Build rather than Validate: the refusal is only useful with a
+// line number, and Build is where the package's own source is still reachable.
+// Validate sees the resolved IR, which has no file or line.
+//
+// The lookup is keyed by framework, vendor and role together. All three matter:
+// `model` is a removed Speechmatics listening setting and an ordinary field on
+// every think binding here, and the LiveKit plugin for the same vendor lost none
+// of these.
+func checkRetiredParams(pkg *packagespec.Package, targetName string, built Target) error {
+	framework := targetcap.Provider(built.Provider)
+	check := func(role targetcap.Role, binding *Binding) error {
+		if binding == nil || len(binding.Params) == 0 {
+			return nil
+		}
+		vendor := binding.Provider
+		if vendor == "" {
+			vendor = "openai"
+		}
+		// Sorted, so a package writing two removed keys is refused on the same
+		// one every run rather than on whichever the map yielded first.
+		for _, key := range sortedKeys(binding.Params) {
+			retired, ok := targetcap.LookupRetiredParam(framework, vendor, role, key)
+			if !ok {
+				continue
+			}
+			return fmt.Errorf("%s: target %q binds %s %s with params.%s, which %s. %s",
+				retiredParamLocation(pkg, key), targetName, vendor, role, key,
+				retired.Fate(), upperFirst(retired.Advice()))
+		}
+		return nil
+	}
+	if err := check(targetcap.Listen, built.Models.Listen); err != nil {
+		return err
+	}
+	for _, name := range sortedKeys(built.Models.Reason) {
+		binding := built.Models.Reason[name]
+		if err := check(targetcap.Reason, &binding); err != nil {
+			return err
+		}
+	}
+	for _, name := range sortedKeys(built.Models.Speak) {
+		binding := built.Models.Speak[name]
+		if err := check(targetcap.Speak, &binding); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// retiredParamLocation finds the line the key was written on. A per-target
+// override lives in targets.yaml and a base binding in agent.yaml, so both are
+// tried; a key found in neither falls back to the file an author would look in
+// first rather than rendering an empty location.
+func retiredParamLocation(pkg *packagespec.Package, key string) string {
+	for _, file := range []string{"agent.yaml", "targets.yaml"} {
+		if found := pkg.Location(file, key+":"); found != file {
+			return found
+		}
+	}
+	return "agent.yaml"
+}
+
+// upperFirst capitalises the first letter, so a stored fragment reads as the
+// sentence it is appended as.
+func upperFirst(text string) string {
+	if text == "" {
+		return text
+	}
+	return strings.ToUpper(text[:1]) + text[1:]
 }
 
 // packagePlacesCalls reports whether the package dials anybody: an outbound phone

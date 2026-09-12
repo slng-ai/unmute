@@ -222,10 +222,12 @@ large part is the wasted effort this whole document is about.
 
 ---
 
-## What a Pipecat 1.9.0 verification call has to show
+## What a Pipecat 1.10.0 verification call has to show
 
-Three things cannot be proved without a browser and a provider key, so a call
-that means to verify this release checks all three and records what it saw:
+Four things cannot be proved without a browser and a provider key, so a call
+that means to verify this release checks all four and records what it saw.
+The first three were owed for 1.9.0 and are still owed; the fourth is this
+release's own:
 
 1. **The bump.** `unmute dev examples/salon-concierge --target pipecat`, ten
    turns with three interruptions and two bookings, then
@@ -242,6 +244,16 @@ that means to verify this release checks all three and records what it saw:
    pipecat`. The greeting arrives in the model's own words rather than read out,
    a booking request makes the backend call a tool, falling silent past the
    nudge time brings a check-in, and the call ends on its own after that.
+4. **Speechmatics keeping the turn taking it had.** Point the salon's listen
+   binding at `provider: speechmatics, model: linden-1` and leave the turn
+   binding on the local pair, then talk. The turn has to end the way it did
+   before the bump: no turn cut short mid-sentence, and the endpointing-wait
+   part on the dev page still the one the pace names. This is the one upstream
+   change in 1.10.0 that could alter a running agent without anybody asking,
+   and the offline suite can prove what is emitted but not how it sounds.
+
+   Then switch the same package to `turn: provider: listen` and talk again. The
+   endpointing-wait part goes away and the service decides.
 
 ---
 
