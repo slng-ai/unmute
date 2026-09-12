@@ -72,7 +72,7 @@ func TestDailyCarrierRouteNeedsNoNewAuthoringField(t *testing.T) {
 		"connections/twilio_sip_daily.yaml": "transport: daily-sip\ncarrier: twilio\nenvironment:\n" +
 			"  account_sid: TWILIO_ACCOUNT_SID\n  auth_token: TWILIO_AUTH_TOKEN\n" +
 			"  sip_address: SIP_TRUNK_HOSTNAME\n  from_number: SIP_FROM_NUMBER\n",
-		"targets.yaml": "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.9.0\"\n" +
+		"targets.yaml": "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.10.0\"\n" +
 			"    connection: twilio_sip_daily\n",
 	})
 	built := carrier.Targets["pipecat"]
@@ -141,7 +141,7 @@ func TestCloudWebsocketRouteNeedsNoNewAuthoringField(t *testing.T) {
 		"instructions.md": "Help the caller.\n",
 		"agent.yaml": "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: instructions.md\n" +
 			channels,
-		"targets.yaml": "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.9.0\"\n" +
+		"targets.yaml": "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.10.0\"\n" +
 			"    transport: cloud-websocket\n    carrier: twilio\n",
 	})
 	got := inbound.Targets["pipecat"]
@@ -159,7 +159,7 @@ func TestCloudWebsocketRouteNeedsNoNewAuthoringField(t *testing.T) {
 		"connections/twilio_voice.yaml": "kind: telephony\nenvironment:\n" +
 			"  account_sid: TWILIO_ACCOUNT_SID\n  auth_token: TWILIO_AUTH_TOKEN\n" +
 			"  from_number: TWILIO_PHONE_NUMBER\n",
-		"targets.yaml": "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.9.0\"\n" +
+		"targets.yaml": "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.10.0\"\n" +
 			"    transport: cloud-websocket\n    carrier: twilio\n    connection: twilio_voice\n",
 	})
 	if built := full.Targets["pipecat"]; built.Connection != "twilio_voice" {

@@ -1999,8 +1999,9 @@ func TestCheckPipecatVersion(t *testing.T) {
 		{"1.5.3", false},
 		{"1.6.0", false},
 		{"1.6.9", false},
-		{"1.9.0", true},
-		{"1.8.0", false}, // the previous pin; one version is supported, not a range
+		{"1.10.0", true},
+		{"1.9.0", false}, // the previous pin; one version is supported, not a range
+		{"1.8.0", false}, // and the one before that
 		{"1.0.3", false}, // never existed on PyPI; workers API not present
 		{"1.4.9", false},
 		{"1", false}, // too vague / pre-1.5

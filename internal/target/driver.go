@@ -61,16 +61,31 @@ type SupportWindow struct {
 // claiming a compatibility range the release matrix does not exercise.
 var supportWindows = map[Provider]SupportWindow{
 	LiveKit: {Floor: "1.6.10", Ceiling: "1.6.10", Verified: "2026-08-16"},
-	// 1.9.0 verified on 2026-09-11 by three things short of a call: the offline
+	// 1.10.0 verified on 2026-09-12 by three things short of a call: the offline
 	// suite; the opt-in smoke suite running every emitted Pipecat module against
-	// the real 1.9.0 wheel, pipecat-slng 0.5.2 beside it; and a diff of every
-	// module the emitted bot imports between 1.8.0 and 1.9.0, which changed no
-	// class or function the bot calls (research R1 of spec 021). The machine
-	// that did this could reach no provider, so the browser call on
-	// salon-concierge that closed 1.8.0 (13 turns, 20 interruptions, 3 handoffs,
-	// 12 function calls settled, no errors) is still owed for 1.9.0. Make it,
-	// and replace this comment with its counts.
-	Pipecat: {Floor: "1.9.0", Ceiling: "1.9.0", Verified: "2026-09-11"},
+	// the real 1.10.0 wheel, pipecat-slng 0.5.2 beside it; and a diff of every
+	// module the emitted bot imports between 1.9.0 and 1.10.0, all 24 of them
+	// byte-identical (research R1 of spec 022). Only two services a package can
+	// bind changed at all, and both are handled: speechmatics, whose turn mode
+	// default flipped and is now pinned from the turn binding, and gradium,
+	// which gained turn detection and joined the decider table.
+	//
+	// Two checks are OWED rather than made, and neither is a formality:
+	//
+	//  1. A browser call. The machine that did this reaches no provider, so the
+	//     call on salon-concierge that closed 1.8.0 (13 turns, 20 interruptions,
+	//     3 handoffs, 12 function calls settled, no errors) is still owed, for
+	//     1.9.0 and now for this. Make it, and replace this paragraph with its
+	//     counts.
+	//  2. The base image's certificate set. 1.10.0 widens the OpenAI SDK pin to
+	//     the 3.x line, which builds on httpx2 and verifies TLS against the
+	//     operating system trust store rather than a bundled set. An image with
+	//     no system certificates fails every provider call. The emitted project
+	//     builds on the framework vendor's own image, which could not be
+	//     inspected here: no container runtime, and the registry's blob CDN is
+	//     refused by the egress proxy. The runbook names the variable that
+	//     points at a bundle. The first real deployment settles it.
+	Pipecat: {Floor: "1.10.0", Ceiling: "1.10.0", Verified: "2026-09-12"},
 }
 
 // frameworkPackages is the distribution each driver installs, so an error
