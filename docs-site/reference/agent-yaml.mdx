@@ -321,10 +321,10 @@ A list of UPPER_SNAKE environment variable names. Never values, and never usable
 in a `{{template}}`. That list is a worked example: two model keys, the four
 names a SIP connection maps, and the two desks the agent can transfer to.
 
-Declare every environment name the generated project reads: names written in
-tool and connection fields, destination values, literal `os.environ` reads in
-local handlers, provider API keys inferred from the model catalogue, and the
-names your tracing provider needs when tracing is enabled. Names the driver or platform
+Declare every environment name the generated project reads. That means names
+written in tool and connection fields, destination values, literal `os.environ`
+reads in local handlers, provider API keys inferred from the model catalogue,
+and the names your tracing provider needs. Names the driver or platform
 supplies, such as `REDIS_URL` or `DAILY_API_KEY`, stay out. See
 [secrets](/reference/secrets).
 
@@ -379,12 +379,12 @@ The five retrieval fields are per base, because a price list and a prose policy
 want different treatment. `mode: keyword` is the one with a structural
 consequence: it uses BM25, needs no embedding service, no credential and no
 network call, and the emitted image installs no embeddings package. `min_score`
-needs care, and needs `mode: meaning` to do anything useful: these are similarity
-scores, not probabilities, and in practice they land well below 1, so a value near
-1 returns nothing, and on `hybrid` the unscored keyword results pass through any
-cutoff. See [Knowledge bases](/build/tools/knowledge) for how to set it.
-`top_k` times `chunk_size` is roughly what reaches
-the model on every lookup, and the compiler warns above about 1500 tokens.
+needs care, and needs `mode: meaning` to do anything useful. These are
+similarity scores, not probabilities, and in practice they land well below 1,
+so a value near 1 returns nothing. On `hybrid` the unscored keyword results
+pass through any cutoff. See [Knowledge bases](/build/tools/knowledge) for how
+to set it. `top_k` times `chunk_size` is roughly what reaches the model on
+every lookup, and the compiler warns above about 1500 tokens.
 
 A tool reaches a base by name, with a
 [`knowledge:` block](/build/tools/knowledge), and an agent reaches it by being
@@ -669,11 +669,11 @@ all illegal on one, because the server describes its own tools.
 
 Builtin ids: `end_call`, `send_sms`. `end_call` compiles on every target.
 `send_sms` is a capability SLNG curates, so it compiles on the `slng` target
-only, and it takes one setting from the package: `inject:` with a single
-`from_number`, the sender as a literal number in international format starting
-with a plus sign. The model supplies the recipient and the body itself, and
-SLNG reads the Twilio credentials from your vault under `TWILIO_ACCOUNT_SID`
-and `TWILIO_AUTH_TOKEN`, which `unmute deploy` checks.
+only. It takes one setting from the package: `inject:` with a single
+`from_number`. That is the sender, as a literal number in international format
+starting with a plus sign. The model supplies the recipient and the body
+itself, and SLNG reads the Twilio credentials from your vault under
+`TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`, which `unmute deploy` checks.
 
 `webhook.auth`:
 
@@ -816,10 +816,10 @@ task group, or non-entry agent is a build error, and so is a tool no agent's
 `tools:` list names. Attach it to the reachable graph or remove it.
 
 A task is reachable a different way, because it is defined inside the agent
-that lists it rather than in a top-level catalog. A task with no `when:` and
-no task group naming it in `steps:` is a build error too: give it a `when:`
-so an agent can decide to run it, or list it as a step of a task group that
-is reached.
+that lists it rather than in a top-level catalog. A task with no `when:` and no
+task group naming it in `steps:` is a build error too. Give it a `when:` so an
+agent can decide to run it, or list it as a step of a task group that is
+reached.
 
 ## Where to go next
 

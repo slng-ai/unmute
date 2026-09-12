@@ -106,6 +106,18 @@ for what a cold start costs on that route.
 knowing for a quick test. It is not the durable answer, and neither is editing the
 manifest: `unmute compile` rewrites that file.
 
+### Every key a warm pool takes
+
+One key, on the target in `targets.yaml`.
+
+<ParamField path="warm_instances" type="integer, 0 or more" default="0">
+  How many instances Pipecat Cloud holds ready, written into the manifest as
+  `[scaling] min_agents`. Left out or `0`, no `[scaling]` table is written and
+  the platform scales to zero, so the first call after a quiet period waits for
+  a container to start. A negative number is refused, and so is a pool of one
+  or more on livekit or slng.
+</ParamField>
+
 ## Every later deploy
 
 `pipecat cloud deploy` reads `build/pipecat/` and nothing else, so a redeploy is

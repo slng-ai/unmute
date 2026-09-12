@@ -12,6 +12,16 @@ separate tool files would just be repetition. For one tool of your own, write
 a [webhook](/build/tools/webhook) or a [Python handler](/build/tools/python)
 instead.
 
+On this page:
+
+- [The block](#the-block) - five keys, and auth
+- [The file is the block, and nothing else](#the-file-is-the-block-and-nothing-else) - what an mcp file refuses
+- [Choosing which tools to offer](#choosing-which-tools-to-offer) - a filter, not a contract
+- [Where the source can be listed](#where-the-source-can-be-listed) - agent or task
+- [What each target needs](#what-each-target-needs) - the SDK, and the dependency
+- [Advanced](#advanced) - what the compile writes
+- [Troubleshooting](#troubleshooting) - the refusals, and a server that is down
+
 The file that does it holds one block and nothing else:
 
 ```yaml tools/web_search.yaml
@@ -44,23 +54,37 @@ tools:
 
 This is a worked example rather than a quote, with `auth:` added to show the
 field. The real one ships in
-[`examples/slng-support`](https://github.com/slng-ai/unmute/tree/main/examples/slng-support):
+[`examples/hotel-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/hotel-concierge):
 its `tools/web_search.yaml` names the same server and the same two tools, and
-carries no `url_env`, `transport` or `auth:`. The platform reads
-the server by name from its own registration, so
-those fields matter only for a code target. This package deploys to slng only,
-agent name `support`, alongside three other tools, so there was nothing for
-`auth:` to reach.
+carries no `url_env`, `transport` or `auth:`. The platform reads the server by
+name from its own registration, so those fields matter only for a code target.
+That package deploys to slng only, agent name `hotel-concierge`, alongside four
+other tools, so there was nothing for `auth:` to reach.
 
 ## The block
 
-| Field | Required | What it is |
-|---|---|---|
-| `server` | no | the server's name on the platform, when that is not this tool's own file name |
-| `url_env` | yes on LiveKit and Pipecat; not read by SLNG | the UPPER_SNAKE name of the environment variable holding the server address |
-| `transport` | no | `sse` or `streamable_http` |
-| `auth` | no; never read by SLNG | `bearer` with `token_env`, or `api_key` with `token_env` and an optional `header` |
-| `tools` | no; required on slng | non-empty, unique server tool names to offer; absent means all of them |
+<ParamField path="server" type="string">
+  The server's name on the platform, when that is not this tool's own file name.
+</ParamField>
+
+<ParamField path="url_env" type="UPPER_SNAKE name">
+  The name of the environment variable holding the server address. Required on
+  LiveKit and Pipecat, and not read by SLNG.
+</ParamField>
+
+<ParamField path="transport" type="sse | streamable_http">
+  How the client talks to the server.
+</ParamField>
+
+<ParamField path="auth" type="block">
+  `bearer` with `token_env`, or `api_key` with `token_env` and an optional
+  `header`. Never read by SLNG.
+</ParamField>
+
+<ParamField path="tools" type="list of names">
+  Non-empty, unique server tool names to offer. Absent means all of them, and
+  slng requires the list.
+</ParamField>
 
 **A package that only targets slng needs none of `url_env`, `transport` or
 `auth`.** SLNG already has the server registered, with its own connection
@@ -74,29 +98,24 @@ somebody typed in a dashboard: real ones carry dashes and spaces. Without
 `server`, a server called `firecrawl-mcp-2` could not be named at all. Read the
 names your organisation has with `voiceai mcp list`.
 
-`url_env` is a name, never an address. Writing the URL there is refused:
-
-```text
-livekit: tool "web_search" url_env must be an UPPER_SNAKE environment variable name
-```
-
 `transport` is optional because both platforms already have a rule for guessing
 it: a URL whose path ends in `/mcp` is streamable HTTP, anything else is SSE.
-Write it when you want the choice visible instead of inferred. Any other value is
-refused with both legal ones:
-
-```text
-livekit: tool "web_search" transport must be sse or streamable_http, not "websocket"
-```
+Write it when you want the choice visible instead of inferred.
 
 `auth` is the same shape webhook tools use, so there is nothing new to learn and
-no new code in the generated project.
+no new code in the generated project. Its own three keys:
 
-| Auth field | Required | Values and defaults |
-|---|---|---|
-| `type` | yes | `bearer` or `api_key` |
-| `token_env` | yes | UPPER_SNAKE environment variable name holding the token |
-| `header` | no | legal on `api_key` only; omitted means `X-API-Key` |
+<ParamField path="auth.type" type="bearer | api_key" required>
+  Which scheme the request uses.
+</ParamField>
+
+<ParamField path="auth.token_env" type="UPPER_SNAKE name" required>
+  The environment variable name holding the token.
+</ParamField>
+
+<ParamField path="auth.header" type="header name" default="X-API-Key">
+  Legal on `api_key` only.
+</ParamField>
 
 ## The file is the block, and nothing else
 
@@ -143,12 +162,7 @@ tools; naming one keeps the rest out of a conversation that has to stay fast.
 
 On LiveKit and Pipecat, the list is **not checked against the server** during
 validation, because its tools are fetched at run time. A name the server does
-not expose is never offered, and the package still validates:
-
-```text
-✓ livekit (livekit)
-✓ pipecat (pipecat)
-```
+not expose is never offered, and the package still validates on both.
 
 Leave `tools` out and the agent gets everything the server exposes.
 An empty list entry or a name repeated twice is still an authoring error and is
@@ -158,20 +172,10 @@ On SLNG, `unmute deploy` checks every selected name against the registered
 server's discovery snapshot. A missing tool blocks deployment. A real deploy
 can refresh an unusable snapshot once; a dry run never refreshes it.
 
-**SLNG has no "whole server" attachment, so `tools:` is required there.**
-Where LiveKit and Pipecat pass the server through and let it decide what it
-offers, SLNG writes one reference per tool up front, and compiling offline
-means it cannot ask the server what those are:
-
-```text
-slng: slng target tool "web_search" exposes every tool on its MCP server, and SLNG
-  attaches one reference per tool: list the tools you want under mcp.tools
-```
-
 `url_env`, `transport`, and `auth` reach no further than that same offline
-compile on SLNG: the platform already has the server registered, under
-`server`, with whatever credential it needs, so nothing in this block reaches
-it at run time except the tool list. Those three fields matter for the code
+compile on SLNG. The platform already has the server registered, under
+`server`, with whatever credential it needs. Nothing in this block reaches it
+at run time except the tool list. Those three fields matter for the code
 targets only.
 
 ## Where the source can be listed
@@ -180,13 +184,6 @@ targets only.
 |---|---|---|
 | on an agent | yes | yes |
 | on a task | yes | no |
-
-The Pipecat refusal names the fix:
-
-```text
-pipecat: the Pipecat driver cannot scope an MCP tool source to a task: list it on the
-  agent instead
-```
 
 The reason is the framework's: a Pipecat Flows node builds its advertised tool set
 out of its own function schemas, and Pipecat's MCP client offers no per-tool
@@ -227,7 +224,9 @@ example above, with its other roles filled in, writes
 `livekit-agents[cartesia,deepgram,mcp,openai]==1.6.10` and
 `pipecat-ai[cartesia,deepgram,mcp,openai,runner,silero,webrtc]==1.8.0`.
 
-## What the compile does with it
+## Advanced
+
+### What the compile does with it
 
 Every name the block holds becomes part of the generated project. Compiling a
 package that names the worked example's tool and also targets livekit adds,
@@ -278,7 +277,9 @@ Leave a field out of the block and the generated call leaves out its argument,
 rather than passing a guess: no `transport` means no `transport_type`, no `tools`
 means no `allowed_tools`, no `auth` means no `headers`.
 
-## When the server is down
+## Troubleshooting
+
+### The server is down
 
 Both targets treat a listed MCP source as required:
 
@@ -289,6 +290,58 @@ Both targets treat a listed MCP source as required:
 - **Pipecat** raises on startup and the bot exits loudly.
 
 Neither one pretends the tools are there.
+
+**Fix:** bring the server back, or take the source off the agents that list it
+so the rest of the agent can still start.
+
+### `url_env` holds a URL instead of a name
+
+`url_env` is a name, never an address. Writing the URL there is refused:
+
+```text
+livekit: tool "web_search" url_env must be an UPPER_SNAKE environment variable name
+```
+
+**Fix:** put the UPPER_SNAKE variable name here and the address in your
+environment.
+
+### `transport` has a value the client does not know
+
+Any other value is refused with both legal ones:
+
+```text
+livekit: tool "web_search" transport must be sse or streamable_http, not "websocket"
+```
+
+**Fix:** write `sse` or `streamable_http`, or leave the key out and let the SDK
+infer it from the URL.
+
+### Pipecat refuses an MCP source scoped to a task
+
+The Pipecat refusal names the fix:
+
+```text
+pipecat: the Pipecat driver cannot scope an MCP tool source to a task: list it on the
+  agent instead
+```
+
+**Fix:** move the source to the agent's `tools:` list, as in
+[Where the source can be listed](#where-the-source-can-be-listed).
+
+### The slng target asks for an explicit tool list
+
+**SLNG has no "whole server" attachment, so `tools:` is required there.**
+LiveKit and Pipecat pass the server through and let it decide what it offers.
+SLNG writes one reference per tool up front, and an offline compile cannot ask
+the server what those are:
+
+```text
+slng: slng target tool "web_search" exposes every tool on its MCP server, and SLNG
+  attaches one reference per tool: list the tools you want under mcp.tools
+```
+
+**Fix:** name the tools you want under `mcp.tools`. Read what the server offers
+with `voiceai mcp list`.
 
 ## Where to go next
 

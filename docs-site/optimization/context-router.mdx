@@ -15,6 +15,19 @@ already optimised behind their bindings, as
 [Execution Layer](/optimization/execution-layer) explains. Thinking is not,
 until you make this change.
 
+On this page:
+
+- [Start here](#start-here) - three edits to one binding
+- [Every key a router binding takes](#every-key-a-router-binding-takes) - the full shape
+- [Reading the router's log line](#reading-the-routers-log-line) - how to see a hit
+- [How it decides](#how-it-decides) - what it treats as a repeat
+- [One stable `agent_id`, one scope per prompt](#one-stable-agent_id-one-scope-per-prompt) - naming your cache
+- [Regions](#regions) - the four router endpoints
+- [Your model, and who serves it](#your-model-and-who-serves-it) - the `upstream` block
+- [Params ride the request body](#params-ride-the-request-body) - what is forwarded
+- [Advanced](#advanced) - prompt text, effort, and personal prompts
+- [Troubleshooting](#troubleshooting) - when a repeat never caches
+
 ## Start here
 
 Three edits, all to one binding:
@@ -56,6 +69,37 @@ models:
 That is the whole edit. Everything else in your package stays as it is: prompts,
 tools, agents, tasks, task groups, greetings, channels, capacity.
 
+## Every key a router binding takes
+
+<ParamField path="provider" type="slng" required>
+  What points the `think` binding at the router instead of straight at a vendor.
+</ParamField>
+
+<ParamField path="model" type="model id" required>
+  The model you already use. The router calls it through `upstream`.
+</ParamField>
+
+<ParamField path="agent_id" type="string" required>
+  Names your project's cache. One value for the package, and compiling fails if
+  two think profiles disagree about it. The compiler gives each agent and task
+  its own scope under it.
+</ParamField>
+
+<ParamField path="upstream" type="block" required>
+  Where the router actually calls your model. There is no default, because your
+  provider's credentials travel with the request.
+</ParamField>
+
+<ParamField path="prompt_suffix" type="string">
+  Literal text appended to every system prompt this binding sends. See
+  [`prompt_suffix`](#prompt_suffix-for-what-no-parameter-reaches).
+</ParamField>
+
+<ParamField path="params" type="block">
+  Two names are consumed here and everything else rides the request body. See
+  [Params ride the request body](#params-ride-the-request-body).
+</ParamField>
+
 ## Reading the router's log line
 
 Every think request writes one line, at info level, in every run, deployed or
@@ -82,17 +126,12 @@ them.
 | `x-slng-model` | a model id, present only on the model path | which model answered |
 | `x-slng-request-id` | always present, errors included | quote this to support |
 
-Read `x-slng-response-source` rather than inferring a hit from how fast the
-reply came back: fast is not proof of a hit, and a repeat served by the model
-is expected, not a fault, since the router judges which turns are worth
-serving from cache. A miss just costs a little, an extra hop in front of your
-own model. Streamed responses report no usage on either path, so token
-savings cannot be read off the stream either.
-
-If a repeat never caches, check: the same `agent_id` on both calls, a couple
-of seconds since the turn it repeats, the second turn or later, and the exact
-pair of previous reply and current message. If all four hold, stop looking:
-some turns just never cache.
+Read `x-slng-response-source` rather than guessing a hit from how fast the
+reply came back. Fast is not proof of a hit. A repeat served by the model is
+expected, not a fault: the router decides which turns are worth serving from
+cache. A miss just costs a little, an extra hop in front of your own model.
+Streamed responses report no usage on either path, so token savings cannot be
+read off the stream either.
 
 ## How it decides
 
@@ -103,11 +142,10 @@ next**. When that same pair comes round again, it can answer from the cache.
 of every call takes the full path to your model. A conversation with no repeat
 in it never shows a hit.
 
-**Not every repeat caches, and that is by design.** The router judges which
-turns are worth treating as repeatable, so two pairs identical in everything a
-client controls can still behave differently, one served from cache and one
-sent to the model every time. A repeat served by the model is expected, not a
-fault.
+**Not every repeat caches, and that is by design.** The router decides which
+turns are worth treating as repeatable. Two pairs identical in everything a
+client controls can still behave differently: one served from cache, one sent
+to the model every time. A repeat served by the model is expected, not a fault.
 
 ## One stable `agent_id`, one scope per prompt
 
@@ -131,29 +169,22 @@ optimized-salon-concierge-v13:task.verify_customer
 optimized-salon-concierge-v13:task.manage_booking
 ```
 
-That is not decoration. The cache key is the last exchange, and it does not
-include the system prompt, so two agents sharing one scope can be served each
-other's answers: an early build without per-prompt scopes hit exactly this, a
-receiving agent's opening line after a handoff served the previous agent's
-cached answer, no model call, because the two agents shared one scope. One
-scope per prompt is what the router's own contract asks for, and that is what
-unmute sends now.
+That is not decoration. The cache key is the last exchange. It does not include
+the system prompt, so two agents sharing one scope can be served each other's
+answers. An early build without per-prompt scopes hit exactly this: after a
+handoff, the receiving agent's opening line was served the previous agent's
+cached answer, with no model call at all. One scope per prompt is what the
+router's own contract asks for, and that is what unmute sends now.
 
 The names come from your package and nothing else, so the same package always
-compiles to the same scopes on either target, and a wording change never
-moves one. Two agents with identical instructions still get two scopes and
-stop sharing warmth, because they are two prompt sites. Hit rates build over
-calls either way, so a fresh id is a cold cache: bump it deliberately rather
-than as housekeeping. Pre-warmed answers, where they exist, are arranged
-against a scope rather than the bare `agent_id`, so an id bump or a package
-that just started sending one scope per prompt needs that arrangement redone;
-the generated runbook prints the exact list of scopes your package sends.
-
-Compiling refuses a scope that will not fit: the value leaves as an HTTP
-header, the bound is 128 characters counted on the finished scope rather than
-the `agent_id` alone, and the message names which agent or task produced the
-long value so you know which name to shorten. It refuses rather than
-truncating, because two truncated scopes could land on the same string.
+compiles to the same scopes on either target, and a wording change never moves
+one. Two agents with identical instructions still get two scopes and stop
+sharing warmth, because they are two prompt sites. Hit rates build over calls
+either way, so a fresh id is a cold cache: bump it deliberately rather than as
+housekeeping. Pre-warmed answers, where they exist, are arranged against a
+scope rather than the bare `agent_id`. Bump the id, or start sending one scope
+per prompt, and that arrangement has to be redone. The generated runbook prints
+the exact list of scopes your package sends.
 
 ## Regions
 
@@ -171,7 +202,6 @@ truncating, because two truncated scopes could land on the same string.
   different set under `params.world_part`: for example, `in`
   selects the Indian speech gateway, while this router requires `india`.
   See [speech gateway values](/optimization/regional-infrastructure#choose-a-speech-gateway).
-  The compiler refuses a value the router does not serve and names the four.
 </Warning>
 
 The key is consumed rather than forwarded: it becomes the base URL.
@@ -235,20 +265,42 @@ works out which at startup.
 Everything under `params:` on a router think binding is passthrough. The compiler
 reads two names and forwards the rest:
 
-| Key | What happens |
-|---|---|
-| `world_part_override` | consumed, and becomes the router's regional base URL |
-| `slng_pure_proxy` | consumed, and rides the body as the router's shadow-trial switch |
-| anything else | forwarded, in the request body, on both targets |
+<ParamField path="params.world_part_override" type="eu | us | india | indonesia">
+  Consumed, and becomes the router's regional base URL.
+</ParamField>
 
-The router passes a key it does not recognise to your upstream, so this is how
-you reach a provider-specific option Unmute has never heard of, and why the
-compiler cannot check one: a wrong value surfaces as the upstream's own
-error, relayed with its status code and message intact. A nested value is
-fine too, since the body is JSON, so `provider: {only: ["groq"]}` forwards
-straight through to OpenRouter.
+<ParamField path="params.slng_pure_proxy" type="switch">
+  Consumed, and rides the body as the router's shadow-trial switch.
+</ParamField>
 
-## `prompt_suffix`, for what no parameter reaches
+<ParamField path="any other key under params" type="forwarded">
+  Forwarded, in the request body, on both targets.
+</ParamField>
+
+The router passes a key it does not recognise straight to your upstream. That
+is how you reach a provider-specific option Unmute has never heard of, and why
+the compiler cannot check one. A wrong value comes back as the upstream's own
+error, with its status code and message intact. A nested value is fine too,
+since the body is JSON, so `provider: {only: ["groq"]}` forwards straight
+through to OpenRouter.
+
+## Trying it on a package you already have
+
+No shipped example binds to the router today.
+[`examples/salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)
+reaches OpenAI directly, which makes it a starting point rather than a finished
+demonstration. It has several prompt sites, so pointing its think binding at
+the router gives you one scope per site to look at.
+
+To see the router's own contribution on your own agent, compile it once with
+the think profile bound directly to the upstream vendor and once bound to the
+router, then run the same conversation through both.
+
+## Advanced
+
+Three things a first router binding does not need.
+
+### `prompt_suffix`, for what no parameter reaches
 
 Some models take instructions that only work as prompt text. `prompt_suffix` is
 literal text the compiler appends to **every system prompt that binding sends**:
@@ -279,9 +331,9 @@ works across hosts, from the system prompt, mid-prompt, and on a tool turn.
 
 It goes on the model, not on an agent, since it is a fact about the model; an
 agent that needs different wording has its own prompt file. It is literal,
-never a placeholder: the router substitutes placeholders from a snapshot of
-the names your *prompts* reference, so one arriving from a suffix would be
-sent with no value and come back 422 mid-call, which the compiler refuses. It
+never a placeholder. The router substitutes placeholders from a snapshot of
+the names your *prompts* reference, so one arriving from a suffix would be sent
+with no value and come back 422 mid-call, which the compiler refuses. It
 moves no cache, since scopes come from names and never from prompt content,
 so bumping `agent_id` is still the only way to retire one deliberately. And
 the compiler attaches no meaning to it: `/no_think` is just a string here,
@@ -290,7 +342,7 @@ and the next model's directive works the same way.
 You can read what it did in the emitted `*_PROMPT` constants, and `unmute
 compile` names it on its own line.
 
-## `reasoning_effort`, and when it is the problem
+### `reasoning_effort`, and when it is the problem
 
 If your upstream serves an OpenAI reasoning model and your agent has tools, set
 it. The GPT-5 family rejects function tools on chat completions without it, and
@@ -308,22 +360,21 @@ warns when your package has tools and the param is missing, but only for the
 about.
 
 **On an `openai-compat` upstream, ignore all of that**, and do not set it
-defensively. The advice is for OpenAI's own model families; elsewhere the
-param ranges from useless to fatal depending on the host, one host answering
-a request carrying it with a 400 and another accepting it with a 200 and
-ignoring it. Same model, same param, two different failures, and neither is
-a reason to set it.
+defensively. The advice is for OpenAI's own model families. Elsewhere the param
+ranges from useless to fatal depending on the host: one host answers a request
+carrying it with a 400, and another accepts it with a 200 and ignores it. Same
+model, same param, two different failures, and neither is a reason to set it.
 
-## Personal prompts stay cacheable
+### Personal prompts stay cacheable
 
 A prompt that names the caller is different on every call, which would mean
 nothing ever repeats. So a router-bound prompt keeps its placeholders, for
 example `{{customer_name}}` in an instructions file with a matching
-`customer_name` variable, and the router receives the prompt with the
-placeholder intact plus a map of this call's values, substituting them
-itself. Every call sends the same prompt, so turns can still repeat. This
-applies to the system prompt only; greetings, tool arguments, injected
-values, and webhook paths keep rendering locally.
+`customer_name` variable. The router receives the prompt with the placeholder
+intact, plus a map of this call's values, and substitutes them itself. Every
+call sends the same prompt, so turns can still repeat. This applies to the
+system prompt only; greetings, tool arguments, injected values, and webhook
+paths keep rendering locally.
 
 Only variables referenced by the current prompt are sent. Declaring a shape
 or saving a task result does not add all call state to a router request.
@@ -338,31 +389,30 @@ Shapes and lists use compact JSON. A rendered value over 4000 characters is
 shortened with a warning. Prefetch has its own smaller input limit; see
 [Variables](/reference/variables#what-happens-when-it-cannot-resolve).
 
-### Which values belong in a placeholder
+#### Which values belong in a placeholder
 
 A placeholder is for a value your agent **says**: the caller's name, an
 appointment detail read back aloud. Supplied that way, the stored copy holds
-the placeholder instead of the value, so the turn caches like any other and
-the next caller hears their own name in it. A value that changes **what the
-answer is**, like the reply language, does not belong in one however much it
-varies per call, since two callers would then share one cached answer written
-in only one language: write it into the prompt text instead, and give
-variants that must never share answers their own `agent_id`, the only thing
-that partitions the cache. The compiler does not judge a value by its name,
-so this is not checked for you.
+the placeholder instead of the value, so the turn caches like any other and the
+next caller hears their own name in it. A value that changes **what the answer
+is**, like the reply language, does not belong in one, however much it varies
+per call. Two callers would share one cached answer written in a single
+language. Write it into the prompt text instead. Variants that must never share
+answers need their own `agent_id`, which is the only thing that partitions the
+cache. The compiler does not judge a value by its name, so this is not checked
+for you.
 
 The value also has to match the answer **character for character** to be
 recognised and stored. A phone number the model regroups, or a date it
-rewrites, leaves the real thing in the stored copy instead, the personal-data
-scan refuses to share it, and the turn silently stops caching, no error, just
-a hit rate of zero. Write the expected shape into the variable's own
-`description`, and make whatever produces the value follow it. This only
-decides caching for a value the agent says out loud; a value passed only to
-tools can take whatever shape the rest of your package uses, the way
-`examples/salon-concierge` returns E.164 everywhere and never reads a number
-back to the caller.
+rewrites, leaves the real thing in the stored copy. The personal-data scan then
+refuses to share it, and the turn stops caching. There is no error, just a hit
+rate of zero. Write the expected shape into the variable's own `description`,
+and make whatever produces the value follow it. This decides caching only for a
+value the agent says out loud. A value passed only to tools can take whatever
+shape the rest of your package uses. `examples/salon-concierge` returns E.164
+everywhere and never reads a number back to the caller.
 
-### What the router will not cache, whatever you do
+#### What the router will not cache, whatever you do
 
 Three rules decide this, and none of them is about your placeholders:
 
@@ -381,17 +431,34 @@ agent that quotes times and prices from its own working sees fewer hits than
 one that asks questions, and a placeholder is what turns per-call numbers
 back into hits.
 
-## Trying it on a package you already have
+## Troubleshooting
 
-No shipped example binds to the router today.
-[`examples/salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)
-reaches OpenAI directly, which makes it a useful starting point rather than a
-finished demonstration: it is a package with several prompt sites, so pointing
-its think binding at the router gives you one scope per site to look at.
+### A repeat never comes back from the cache
 
-To see the router's own contribution on your own agent, compile it once with
-the think profile bound directly to the upstream vendor and once bound to the
-router, then run the same conversation through both.
+`x-slng-response-source` reads `llm` on a turn you expected to hit.
+
+**Fix:** check four things. The same `agent_id` on both calls, a couple of
+seconds since the turn it repeats, the second turn or later, and the exact pair
+of previous reply and current message. If all four hold, stop looking: some
+turns just never cache.
+
+### Compiling refuses a scope
+
+The value leaves as an HTTP header, and the bound is 128 characters, counted on
+the finished scope rather than on the `agent_id` alone. It refuses rather than
+truncating, because two truncated scopes could land on the same string.
+
+**Fix:** shorten the name the message gives you. It names which agent or task
+produced the long value.
+
+### The compiler refuses a `world_part_override`
+
+It refuses a value the router does not serve and names the four. A speech
+gateway value is the usual cause, because the two sets look alike and are not.
+
+**Fix:** write `eu`, `us`, `india` or `indonesia`. A speech model's
+`params.world_part` keeps its own
+[13 values](/optimization/regional-infrastructure#choose-a-speech-gateway).
 
 ## Next
 

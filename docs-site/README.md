@@ -28,7 +28,7 @@ mint a11y                                               # contrast and media alt
    `internal/target/catalog_*.go` is the provider truth.
 2. **Every YAML snippet was run through `unmute validate`** in a scratch
    package, and every example the site names validates and compiles.
-3. **There are three targets**: Pipecat and LiveKit Agents, which generate a
+3. **There are three targets**: Pipecat and LiveKit, which generate a
    Python project you run, and SLNG, which is hosted and generates a deployment
    body instead. Those are the only values `provider` accepts. Vapi and Deepgram
    were retired as targets on 2026-08-24; do not reintroduce them. Deepgram and
@@ -71,6 +71,50 @@ mint a11y                                               # contrast and media alt
     render will not know you did. The page's lead paragraph is the exception:
     the script never touches anything above the `{/* changelog:entries */}`
     marker.
+
+12. **A page has to parse as MDX, and nothing renders the page for you.** Two
+    shapes cost three pages once: an attribute value written bare, `cols=2`
+    instead of `cols={2}`, and a closing tag pulled onto the end of a sentence
+    by a paragraph rewrap. A closing tag for an element with a blank line
+    inside it starts its own line; an element written all on one flow, which is
+    how several `<Note>` blocks here read, may close on the same line. `mint`
+    refuses a page that breaks either rule and then drops it from the
+    navigation, so the page is gone rather than wrong.
+    `TestPagesHoldValidMDX` holds both, and `make docs` is the real check.
+
+## The shape of a guide page
+
+Readers arrive with low attention and a specific question. A page that opens on
+theory makes them read to find out whether they are in the right place. So a
+page under Build, Best practices or Optimization is written in this order, and
+skips the slots it does not need:
+
+| Slot | What goes in it |
+|---|---|
+| **Definition** | one sentence saying what the thing is. Not a preamble, not why it matters yet |
+| **On this page** | a bullet list of this page's own H2s, each with three or four words. The reader's map |
+| **Quickstart** | the smallest thing that works, as code, before any explanation. Ends with the command that proves it |
+| **The parts** | one H2 per step or concept, in the order somebody meets them |
+| **Every key X takes** | `<ParamField>` per key: name, type, required, allowed values. Not prose |
+| **Advanced** | one H2 near the bottom holding what a first agent does not need. `<Accordion>` for reference detail nobody reads top to bottom |
+| **Troubleshooting** | H3 per symptom, written as the reader would describe it, then **Fix:** and code |
+| **Where to go next** | two to six cards |
+
+Three rules about that shape, because they are the ones that decay:
+
+1. **Code before prose.** If the first thing on a page is a paragraph, the page
+   is wrong. `build/prefetch` and `build/variables` open on a runnable snippet
+   and say "that is the whole thing" before expanding it.
+2. **Keys are a list, not paragraphs.** Every block an author writes states its
+   keys with `<ParamField>` before the prose about any one of them. A task has
+   eleven keys; three used to be explained in scattered paragraphs and the
+   other eight you found by reading the page.
+3. **Reference detail goes behind an `<Accordion>` or under Advanced.** The
+   route grid on `build/prefetch` is reference material a reader consults once;
+   it must not sit between a beginner and the next step.
+
+The reference pages under Configuration files and CLI are the exception. There
+the complete list *is* the page, so they lead with it.
 
 ## The structure
 

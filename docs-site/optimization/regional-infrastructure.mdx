@@ -3,9 +3,53 @@ title: "Regional infrastructure"
 description: "Keep STT, LLM, and TTS services close to your users, with separate settings for model gateways, workers, and media."
 ---
 
+Regional infrastructure is where each part of a call runs: the edge that
+receives the caller's audio, the worker, and every model service the worker
+waits on. Each one is its own setting.
+
 Where your models run matters as much as where you deploy your agent. A nearby
 worker still waits on distant speech and reasoning services. Review the whole
 path from the caller to STT, the LLM, and TTS, for every provider you use.
+
+On this page:
+
+- [Quickstart](#quickstart) - the one setting for speech
+- [Why model proximity matters](#why-model-proximity-matters) - where the time goes
+- [Choose a location for every model](#choose-a-location-for-every-model) - one review per role
+- [Separate the regional settings](#separate-the-regional-settings) - four locations, four controls
+- [Choose a speech gateway](#choose-a-speech-gateway) - the 13 SLNG world parts
+- [Place the worker near your users and models](#place-the-worker-near-your-users-and-models) - `deployment_region`
+- [Troubleshooting](#troubleshooting) - what the compiler refuses
+
+## Quickstart
+
+On LiveKit and Pipecat, set `params.world_part` on each SLNG `listen` or
+`speak` model to choose its gateway:
+
+```yaml agent.yaml
+models:
+  listen:
+    transcriber:
+      provider: slng
+      model: "deepgram/nova:3"
+      params:
+        world_part: eu-north
+  speak:
+    voice:
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+      params:
+        world_part: eu-north
+```
+
+```sh
+unmute validate my-agent
+```
+
+That is the speech half. The worker has its own region, set in `targets.yaml`,
+and the two do not have to match. The rest of this page is which location each
+part of the call has, and how to choose it.
 
 ## Why model proximity matters
 
@@ -73,33 +117,26 @@ Carrier routing remains a separate choice.
 
 ## Choose a speech gateway
 
-**SLNG provides 13 regional speech gateways through one model setting.** On
-LiveKit and Pipecat, set `params.world_part` on each SLNG `listen` or
-`speak` model to choose its gateway. This gives both speech roles the same
-configuration shape across the two frameworks.
+**SLNG provides 13 regional speech gateways through one model setting.** It is
+set per model, and it gives both speech roles the same configuration shape
+across the two frameworks.
 
-```yaml agent.yaml
-models:
-  listen:
-    transcriber:
-      provider: slng
-      model: "deepgram/nova:3"
-      params:
-        world_part: eu-north
-  speak:
-    voice:
-      provider: slng
-      model: "deepgram/aura:2"
-      voice: "aura-2-thalia-en"
-      params:
-        world_part: eu-north
-```
+<ParamField path="params.world_part" type="world part code">
+  The SLNG speech gateway an SLNG `listen` or `speak` model connects through.
+  One of the 13 values below. Set it on each model separately. Omitting it keeps
+  the existing default URL.
+</ParamField>
 
 Unmute turns the value into the host `{world_part}.api.slng.ai` in generated
-services. Here, it emits `slng_base_url="eu-north.api.slng.ai"` on LiveKit and
+services. For the `eu-north` in the quickstart above, it emits
+`slng_base_url="eu-north.api.slng.ai"` on LiveKit and
 `base_url="eu-north.api.slng.ai"` on Pipecat for both speech models. The plugin
 receives the host without a scheme or path; Unmute consumes
 `world_part` rather than passing it to the plugin.
+
+This setting changes generated SLNG speech services on LiveKit and Pipecat.
+Choose the worker's `deployment_region` separately. The SLNG hosted target
+keeps its own deployment settings.
 
 ### Available SLNG world parts
 
@@ -122,16 +159,7 @@ and Pipecat. Set the world part on each model separately.
 | `in` | India | `in.api.slng.ai` |
 | `au` | Australia | `au.api.slng.ai` |
 
-Omitting `world_part` keeps the existing default URL. An empty,
-non-string, or unknown value is refused. The old speech values `na`, `eu`, and
-`ap` are refused too: choose one of the new values explicitly. There is no
-automatic mapping from the old broad areas. `params.base_url` and
-`params.slng_base_url` cannot be combined with `params.world_part`;
-remove the explicit URL or the world part.
-
-This setting changes generated SLNG speech services on LiveKit and Pipecat.
-Choose the worker's `deployment_region` separately. The SLNG hosted target
-keeps its own deployment settings.
+Omitting `world_part` keeps the existing default URL.
 
 ### SLNG reasoning uses the Context Router
 
@@ -146,6 +174,12 @@ keeps its own provider settings.
 
 Set the worker location in `targets.yaml`, using each platform's own region
 names:
+
+<ParamField path="deployment_region" type="platform region name">
+  Where the generated LiveKit or Pipecat worker runs. Written per target in
+  `targets.yaml`, in that platform's own region names. Pipecat accepts one.
+  LiveKit accepts one region as a scalar or several as a list.
+</ParamField>
 
 ```yaml targets.yaml
 targets:
@@ -195,6 +229,41 @@ agent names and explicit dispatch. See LiveKit's
 Adding worker regions leaves the model settings as authored. Review the model
 endpoints each deployment will call so that a nearby worker also has a short
 path to its STT, LLM, and TTS services.
+
+## Troubleshooting
+
+### The compiler refuses a `world_part` value
+
+An empty, non-string, or unknown value is refused. The old speech values `na`,
+`eu`, and `ap` are refused too. There is no automatic mapping from the old
+broad areas.
+
+**Fix:** choose one of the 13 values in
+[the table above](#available-slng-world-parts) explicitly.
+
+### The compiler refuses `world_part` next to a URL
+
+`params.base_url` and `params.slng_base_url` cannot be combined with
+`params.world_part`.
+
+**Fix:** remove the explicit URL or the world part.
+
+### The router refuses the value that works for speech
+
+The two sets are different. Speech gateways use `params.world_part` and 13
+values; the Context Router uses `params.world_part_override` and four. Speech
+uses `in`, for example, while the router uses `india`.
+
+**Fix:** write each setting its own value. See
+[SLNG reasoning uses the Context Router](#slng-reasoning-uses-the-context-router).
+
+### A nearby worker is still slow
+
+Setting one row of the table above does not set the others, and moving only the
+worker leaves any long trips to remote models in place.
+
+**Fix:** review the model endpoints each deployment calls, then measure the full
+call path rather than the worker's own region.
 
 ## Where to go next
 

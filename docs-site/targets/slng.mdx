@@ -27,6 +27,21 @@ unmute deploy examples/hotel-concierge
   behind it.
 </Card>
 
+On this page:
+
+- [The trade](#the-trade) - what you give up, and what you get back
+- [What compiling writes](#what-compiling-writes) - the three files
+- [targets.yaml](#targetsyaml) - every key this target takes, and every one it refuses
+- [The pushed agent's name](#the-pushed-agents-name) - where the deployed name comes from
+- [Model names](#model-names) - how a vendor and a model are joined
+- [Push it](#push-it) - the command, the key, and where your tools come from
+- [Hosted tool dependencies](#hosted-tool-dependencies) - only for a package that also targets code
+- [The Vault](#the-vault) - where secrets live, and what a compile can see
+- [What a slng package may not ask for](#what-a-slng-package-may-not-ask-for) - the refusals in full
+- [If the agent answers with silence](#if-the-agent-answers-with-silence) - reading `call_end_reason`
+- [There is no unmute dev](#there-is-no-unmute-dev) - how to talk to a pushed agent
+- [Where to go next](#where-to-go-next) - the deploy walkthrough
+
 ## The trade
 
 A slng package is shorter than the same agent written for pipecat or livekit, and
@@ -89,13 +104,42 @@ targets:
     deployment_region: eu-central
 ```
 
-That is the whole target. `version`, `pins`, `sdk_language` and `connection` are
-all refused by name: each describes a generated project, and there is none.
+That is the whole target.
 
-`deployment_region` takes exactly one of `any`, `us-east`, `eu-central` or
-`ap-south`. `any` lets SLNG route each call itself. This is the only target
-whose region values are checked, because it is the only one whose platform
-publishes a closed set.
+### Every key the slng target takes
+
+Two are required, and the third is the one every target takes.
+
+<ParamField path="provider" type="slng" required>
+  What selects this target. It is the difference between compiling a deployment
+  body and compiling a Python project you host.
+</ParamField>
+
+<ParamField path="deployment_region" type="any | us-east | eu-central | ap-south" required>
+  Where SLNG serves the agent from. `any` lets SLNG route each call itself. This
+  is the only target whose region values are checked, because it is the only one
+  whose platform publishes a closed set. Exactly one, and leaving it out is
+  refused.
+</ParamField>
+
+<ParamField path="models" type="model entry name to a model definition">
+  Per target overrides of named entries from `agent.yaml`, the same shape every
+  target takes. SLNG owns its own model list, so an override is forwarded as
+  written and no name is checked here.
+</ParamField>
+
+### Every key the slng target refuses
+
+Each one is refused by name at validate, with what to do instead. Four of them
+describe a generated project, and there is none.
+
+| Key | Why it is refused |
+|---|---|
+| `version` | SLNG owns the runtime version its agents run on |
+| `pins` | no generated project exists whose packages could be pinned |
+| `sdk_language` | no SDK is generated for this target |
+| `connection` | a package declares no carrier state on SLNG: buy the number and configure the trunk in the dashboard, and `unmute deploy` offers to attach a free trunk after a successful push |
+| `warm_instances` | SLNG runs the agent and exposes no instance pool of yours to keep warm |
 
 ## The pushed agent's name
 
@@ -114,7 +158,7 @@ With the target above, that pushes an agent called **acme-support-slng**.
 SLNG names are unique across an organisation and a push resolves which agent to
 write by matching the name in the body, so pushing under a name that already
 exists replaces that agent rather than adding one. Unmute used to write the
-target name here, and every package on this target calls its target `slng`: two
+target name here, and every package on this target calls its target `slng`. Two
 packages in one organisation both pushed an agent called `slng`, and the second
 replaced the first one's prompt, models and tool attachments.
 
@@ -205,10 +249,11 @@ Reference what your organisation already has by name with
 target needs nothing else: no mirror, no hash, no `unmute pull`, because the
 published tool is the only copy and this target resolves it by name at deploy
 time. `unmute pull` is only for a package that also compiles to livekit or
-pipecat, which build and run the tool themselves and so need a real copy of
-its definition, mirrored into your package. [Hosted tools](/build/tools/hosted)
-has the field-by-field version, including the one limit: a hosted tool's
-Python dependencies compile to slng and are refused on the two code targets.
+pipecat. Those targets build and run the tool themselves, so they need a real
+copy of its definition, mirrored into your package. [Hosted
+tools](/build/tools/hosted) has the field-by-field version, including the one
+limit: a hosted tool's Python dependencies compile to slng and are refused on
+the two code targets.
 
 ### Names, not identifiers
 
@@ -266,9 +311,9 @@ Compile from the package instead.
 ## Hosted tool dependencies
 
 This section is about a package that also targets livekit or pipecat and has
-pulled a mirror; an slng-only deploy never reads a dependency list at all,
-because SLNG installs whatever the published tool declares on its own side,
-invisible to unmute.
+pulled a mirror. An slng-only deploy never reads a dependency list at all: SLNG
+installs whatever the published tool declares on its own side, invisible to
+unmute.
 
 A hosted tool's Python dependencies are the platform's own, mirrored by
 `unmute pull` into `tools/<name>.slng.json` rather than written by you. Each
@@ -280,10 +325,10 @@ tool using only the standard library and pydantic needs no dependencies
 mirrored at all.
 
 This is slng-only. The code drivers build one dependency list for the whole
-generated project out of the provider catalogue and read nothing per tool, so
-a hosted tool that declares dependencies is refused on `livekit` and
-`pipecat` rather than having the pins silently dropped. See
-[Hosted tools](/build/tools/hosted) for the full story.
+generated project out of the provider catalogue, and read nothing per tool. So
+a hosted tool that declares dependencies is refused on `livekit` and `pipecat`,
+rather than having the pins silently dropped. See [Hosted
+tools](/build/tools/hosted) for the full story.
 
 ## The Vault
 

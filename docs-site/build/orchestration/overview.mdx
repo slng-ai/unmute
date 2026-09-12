@@ -3,24 +3,21 @@ title: "Orchestration"
 description: "Three ways to split one agent into parts, and where each is taught."
 ---
 
-One agent with a good prompt and a few tools handles more than you would expect.
-When it stops being enough, there are three shapes to reach for.
+Orchestration is how you split one agent into parts. There are three shapes,
+and the difference that matters is whether control comes back.
+
+On this page:
+
+- [The three shapes](#the-three-shapes) - task, task group, handoff
+- [What each shape does to the call](#what-each-shape-does-to-the-call) - one diagram each
+- [Read one example against the other](#read-one-example-against-the-other) - the same salon, built two ways
+- [Read them in order, then choose](#read-them-in-order-then-choose) - where to go
 
 New here? Read [How a package fits together](/build/how-a-package-fits-together)
 first. It is one page, it answers "I want two agents, each with tasks, where do I
 start?", and everything below assumes it.
 
-<Note>
-
-These shapes need a code target, Pipecat or LiveKit Agents. The SLNG target
-compiles one agent with one prompt, so it refuses tasks, task groups and
-handoffs. `unmute validate` says so, and names the way out:
-
-```text
-slng: slng target writes one agent with one prompt, so a task has nowhere to go: fold the step into the agent's instructions, or compile to livekit or pipecat which emit multi-task agents
-```
-
-</Note>
+## The three shapes
 
 | Shape | What it is | Where it is taught |
 |---|---|---|
@@ -30,6 +27,15 @@ slng: slng target writes one agent with one prompt, so a task has nowhere to go:
 
 The difference that matters most is whether control comes back. A task returns. A
 handoff does not.
+
+<Note>
+  These shapes need a code target, Pipecat or LiveKit. SLNG compiles one agent
+  with one prompt, so it refuses tasks, task groups and handoffs today.
+  `unmute validate` says so and names the way out: fold the step into the
+  agent's instructions, or compile to LiveKit or Pipecat.
+
+  Tasks on SLNG are coming.
+</Note>
 
 None of these is how you reach a person: that is an
 [escalation](/transfers/overview), and what it can do depends on the phone route.

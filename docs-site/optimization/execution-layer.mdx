@@ -4,13 +4,50 @@ description: "A scaffolded package binds SLNG speech models by design, and those
 sidebarTitle: "Execution Layer"
 ---
 
-`unmute init` binds SLNG for listening and speaking, and every shipped example does
-the same. That is a decision, not a placeholder: SLNG speech models run behind
-SLNG's own **Execution Layer**, which is the part of the stack aimed at the two
-things a voice call is judged on, how fast it answers and what it costs per turn.
+The SLNG Execution Layer is the layer SLNG's own speech models run on. It aims
+at the two things a voice call is judged on: how fast it answers, and what it
+costs per turn.
+
+`unmute init` binds SLNG for listening and speaking, and every shipped example
+does the same. That is a decision, not a placeholder. Bind SLNG for a speech
+role and you are on that layer.
 
 Unmute does not measure any of this. Everything on this page is SLNG's published
 description of its own system, linked so you can read the source.
+
+On this page:
+
+- [What this means for your package](#what-this-means-for-your-package) - the binding you already wrote
+- [What the Execution Layer is](#what-the-execution-layer-is) - routing instead of calling everything
+- [The STT Performance Layer](#the-stt-performance-layer) - the stage on the way in
+- [TTS Path Optimization](#tts-path-optimization) - the stage on the way out
+- [The third role](#the-third-role) - thinking, which you opt into
+
+## What this means for your package
+
+Nothing you have to write. The layer sits behind the SLNG models you already bound:
+
+```yaml agent.yaml
+models:
+  listen:
+    transcriber:
+      provider: slng
+      model: "deepgram/nova:3"
+  speak:
+    voice:
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+```
+
+One `SLNG_API_KEY` covers both. If you bind a different vendor for either role, you
+are on that vendor's own path instead, and none of the above applies. The lists of
+what else each target can construct are on
+[speech to text](/models/stt) and [text to speech](/models/tts).
+
+To select an SLNG speech gateway, set `params.world_part` on each
+binding. [Regional infrastructure](/optimization/regional-infrastructure) shows
+the YAML and explains the separate model, worker, and media regions.
 
 ## What the Execution Layer is
 
@@ -66,32 +103,6 @@ fewer turns hit the upstream model." Read as published on 2026-08-14 at
 Which is worth knowing when you write a greeting: a line every caller hears is the
 kind of output this stage is built for.
 
-## What this means for your package
-
-Nothing you have to write. The layer sits behind the SLNG models you already bound:
-
-```yaml agent.yaml
-models:
-  listen:
-    transcriber:
-      provider: slng
-      model: "deepgram/nova:3"
-  speak:
-    voice:
-      provider: slng
-      model: "deepgram/aura:2"
-      voice: "aura-2-thalia-en"
-```
-
-One `SLNG_API_KEY` covers both. If you bind a different vendor for either role, you
-are on that vendor's own path instead, and none of the above applies. The lists of
-what else each target can construct are on
-[speech to text](/models/stt) and [text to speech](/models/tts).
-
-To select an SLNG speech gateway, set `params.world_part` on each
-binding. [Regional infrastructure](/optimization/regional-infrastructure) shows
-the YAML and explains the separate model, worker, and media regions.
-
 ## The third role
 
 Everything above is about listening and speaking. Thinking has its own SLNG path,
@@ -102,10 +113,10 @@ without calling your model, so a repeat it judges cacheable comes back in roughl
 a tenth of the time. It decides which turns those are, so some repeats still take
 the model path. You keep your own model and your own provider.
 
-It is a different trade from the two above: speech optimisation costs you nothing
-and changes nothing you write, while the router asks you for a `think` binding
-change, a stable cache id, and the decision to send your upstream credentials
-inline. The page explains all three.
+It is a different trade from the two above. Speech optimisation costs you
+nothing and changes nothing you write. The router asks you for a `think`
+binding change, a stable cache id, and the decision to send your upstream
+credentials inline. The page explains all three.
 
 ## Where to go next
 

@@ -7,6 +7,52 @@ Declare a variable when another part of the call needs a reliable fact.
 Then reference it only in the prompts or tools that need it. Keeping a value
 in call state does not put it in every model request.
 
+On this page:
+
+- [One saved fact, end to end](#one-saved-fact-end-to-end) - declare, save, read
+- [Start with the next reader](#start-with-the-next-reader) - who needs this value
+- [Separate a request from an outcome](#separate-a-request-from-an-outcome) - asked for, not booked
+- [Group fields that describe one result](#group-fields-that-describe-one-result) - when to use a shape
+- [Match the type to the actual value](#match-the-type-to-the-actual-value) - what your tools return
+- [Choose a current value or a list](#choose-a-current-value-or-a-list) - latest record, or every one
+- [Finish as soon as the work succeeds](#finish-as-soon-as-the-work-succeeds) - save, then finish at once
+- [Reuse verification deliberately](#reuse-verification-deliberately) - and what confirmed means
+- [Write for a missing value](#write-for-a-missing-value) - write for the empty case
+- [Check the whole path](#check-the-whole-path) - both prompts, then a trace
+
+## One saved fact, end to end
+
+Every saved fact has the same three parts. Declare it, save it in the step
+that learns it, and read it in the prompt that needs it:
+
+```yaml agent.yaml
+variables:
+  customer_status:
+    type: Literal["existing", "created", "invalid"]
+    description: What the verification task found out about this caller.
+
+agents:
+  concierge:
+    tasks:
+      - name: verify_customer
+        when: Confirm who is calling before using their account.
+        instructions: tasks/verify-customer.md
+        assign:
+          - customer_status: result.customer_status
+```
+
+```markdown instructions.md
+Verification status: {{customer_status}}
+If the status is existing or created, continue without verifying again.
+```
+
+```sh
+unmute validate my-agent
+```
+
+The rest of this page is how to choose those three parts: what to declare,
+who saves it, and who reads it next.
+
 ## Start with the next reader
 
 For each value, identify who saves it and who needs it later:
@@ -52,7 +98,7 @@ For a booking flow:
 
 This keeps the booking ID and its current time together. Do not add unrelated
 caller details to the shape just because the booking task can see them.
-The [Variables guide](/build/variables#group-related-fields-into-a-shape)
+The [Variables guide](/build/variables#group-fields-into-a-shape)
 shows the YAML declaration and field descriptions.
 
 ## Match the type to the actual value
@@ -152,6 +198,19 @@ Read the task prompt and the owner's prompt together. Check who asks the
 question, who saves the answer, and who speaks after completion. Then inspect
 a trace to confirm that each receiving prompt contains the facts it needs.
 
-For a practical walkthrough, see [Reduce context sharing step by
-step](/best-practices/context-scope). For task structure and tool placement,
-see [Making a task actually run](/best-practices/step-scoping).
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Reduce context sharing step by step" icon="scissors" href="/best-practices/context-scope">
+    A practical walkthrough, one boundary at a time.
+  </Card>
+  <Card title="Making a task actually run" icon="route" href="/best-practices/step-scoping">
+    Task structure and tool placement, so the step gets entered.
+  </Card>
+  <Card title="Variables" icon="braces" href="/build/variables">
+    The YAML for declaring a value, a shape, and a list.
+  </Card>
+  <Card title="Checking what the agent did" icon="chart-line" href="/best-practices/verifying-behaviour">
+    Reading a trace to see which saved value each prompt received.
+  </Card>
+</CardGroup>

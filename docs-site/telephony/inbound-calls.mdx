@@ -6,17 +6,65 @@ description: "Take a real call from your own phone number, once your agent is de
 An inbound agent answers a call somebody else placed. The channel has to declare
 it, and your carrier has to be able to reach whatever is running the agent.
 
+On this page:
+
+- [Declare the channel](#declare-the-channel) - `channels:`, key by key, for an agent that answers
+- [Pick the target your carrier can reach](#pick-the-target-your-carrier-can-reach) - two routes, two amounts of console work
+- [What you need](#what-you-need) - the accounts, the CLIs, and the names in `.env`
+- [Deploy, then point the number at it](#deploy-then-point-the-number-at-it) - compile, deploy, then your route's carrier step
+- [Call the number](#call-the-number) - the real call, and why one number serves one route
+- [If the call does not arrive](#if-the-call-does-not-arrive) - the failures that belong to no route in particular
+
+## Declare the channel
+
 ```yaml agent.yaml
 channels:
   phone:
     kind: telephony
     inbound: true
+    outbound: false
 ```
 
+### Every key a phone channel takes
+
+Both directions are written out, even when only one of them is `true`.
+
+<ParamField path="kind" type="realtime_audio | telephony" required>
+  `telephony` is a phone call. `realtime_audio` is the browser channel, and it
+  takes none of the keys below.
+</ParamField>
+
+<ParamField path="inbound" type="true | false" required>
+  Whether this agent answers calls. `true` is what makes the rest of this page
+  apply.
+</ParamField>
+
+<ParamField path="outbound" type="true | false" required>
+  Whether this agent places calls. `false` on a line people only ring in on,
+  unless the agent does a warm transfer, because that dials the destination
+  itself.
+</ParamField>
+
+<ParamField path="required_controls" type="list of control names">
+  What the route has to support: `cold_transfer`, `warm_transfer`,
+  `dtmf_send`, `dtmf_receive`, `hold`, `hangup`, `voicemail_detection`,
+  `ivr_navigation`. A route that cannot do one is refused when you validate,
+  which is before you spend a console evening on it.
+</ParamField>
+
+<ParamField path="on_voicemail" type="hangup | leave_message">
+  What to do when the agent reaches a voicemail box. It needs `outbound: true`,
+  so an inbound-only agent leaves it out.
+</ParamField>
+
+A telephony channel also makes `capacity.peak_starts_per_second` required and
+positive. [Phone calls](/telephony/overview#every-key-capacity-takes) has the
+`capacity:` keys.
+
 This page follows `examples/salon-concierge`, the shipped package with an
-inbound phone route. It declares `inbound: true` and no outbound, and it carries
-a target for each platform, so the same package proves the wiring on whichever
-route you pick.
+inbound phone route. It declares `inbound: true` with `outbound: false`, and it
+carries a target for each platform, so the same package proves the wiring on
+whichever route you pick.
 
 Check the prompt, the tools, and the models in your browser before you touch a
 carrier at all:
@@ -40,7 +88,7 @@ recommends for Twilio:
 | `pipecat` | `cloud-websocket` | your number points at a static TwiML Bin whose stream goes to Pipecat Cloud |
 
 Both deploy to a managed platform, so either one can take a real call once it
-is live. `pipecat` needs one console object, a TwiML Bin. `livekit` needs a
+is live. `pipecat` needs one console object, a <Tooltip tip="A small piece of markup you paste into Twilio that tells it where to send the call.">TwiML Bin</Tooltip>. `livekit` needs a
 full Elastic SIP Trunk and more console steps, and in return gets cold
 transfer, warm transfer, and voicemail detection. [The routes
 table](/telephony/overview#the-routes) lists what each transport can do.
@@ -61,11 +109,11 @@ OPENAI_API_KEY=sk-...
 SLNG_API_KEY=...
 TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TWILIO_AUTH_TOKEN=your_auth_token
-TWILIO_PHONE_NUMBER=+15551234567
+TWILIO_PHONE_NUMBER=your_number_in_e164
 SIP_TRUNK_HOSTNAME=your-trunk.pstn.twilio.com
 SIP_AUTH_USERNAME=your_trunk_username
 SIP_AUTH_PASSWORD=your_trunk_password
-SIP_FROM_NUMBER=+15551234567
+SIP_FROM_NUMBER=your_number_in_e164
 ```
 
 The last four are the trunk settings the `livekit` target's connection names.

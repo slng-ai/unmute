@@ -38,7 +38,7 @@ func TestProvidersDocsiteMatchesCatalog(t *testing.T) {
 	// The pages name the roles the way an author writes them (N15 calls the
 	// reasoning kind "think"); the catalogue keeps the internal name "reason".
 	pages := map[string]Role{"stt": Listen, "tts": Speak, "llm": Reason}
-	sections := map[string]Provider{"## Pipecat": Pipecat, "## LiveKit Agents": LiveKit}
+	sections := map[string]Provider{"## Pipecat": Pipecat, "## LiveKit": LiveKit}
 	row := regexp.MustCompile("^\\| `([a-z_]+)` \\|")
 
 	for page, role := range pages {

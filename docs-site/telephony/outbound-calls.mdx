@@ -13,17 +13,56 @@ commands below are a worked example named `my-agent`, an agent that calls a
 customer about an appointment. Everything in them is authorable as shown; there
 is just no package in the repository to run them against.
 
+On this page:
+
+- [Declare the direction](#declare-the-direction) - `channels:`, key by key, for an agent that dials
+- [One route per target](#one-route-per-target) - a connection file per target, key by key
+- [Place a call](#place-a-call) - where the request comes from on each route
+- [Give the call its values](#give-the-call-its-values) - `call_start` variables, and `--var` locally
+- [Values the route supplies](#values-the-route-supplies) - what the runtime fills in, and which routes fill it
+
 ## Declare the direction
 
 ```yaml agent.yaml
 channels:
   phone:
     kind: telephony
+    inbound: false
     outbound: true
 ```
 
 Without `outbound: true`, this target has no outbound capability at all: no
 route reads a destination number for it.
+
+### Every key a channel takes
+
+A telephony channel writes both directions, whichever one it uses.
+
+<ParamField path="kind" type="realtime_audio | telephony" required>
+  `telephony` is a phone call. `realtime_audio` is the browser channel, and it
+  takes none of the keys below.
+</ParamField>
+
+<ParamField path="inbound" type="true | false" required>
+  Whether this agent answers calls. `false` on an agent that only dials.
+</ParamField>
+
+<ParamField path="outbound" type="true | false" required>
+  Whether this agent places calls. It is also what a warm transfer needs, since
+  a warm transfer dials its destination.
+</ParamField>
+
+<ParamField path="required_controls" type="list of control names">
+  What the route has to support: `cold_transfer`, `warm_transfer`,
+  `dtmf_send`, `dtmf_receive`, `hold`, `hangup`, `voicemail_detection`,
+  `ivr_navigation`. A route that cannot do one is refused when you validate.
+</ParamField>
+
+<ParamField path="on_voicemail" type="hangup | leave_message">
+  What the agent does when it reaches a voicemail box. It needs
+  `outbound: true` and a route that detects voicemail, which today is LiveKit
+  `sip`.
+</ParamField>
 
 ## One route per target
 
@@ -31,7 +70,9 @@ Dialling out is the carrier's job, so each target needs a connection that can
 reach your carrier account. An agent on both targets rides two different
 mechanisms, so it needs two connection files holding the same three names:
 
-```yaml connections/twilio_voice.yaml
+<CodeGroup>
+```yaml Pipecat
+# connections/twilio_voice.yaml
 transport: cloud-websocket
 carrier: twilio
 environment:
@@ -40,7 +81,8 @@ environment:
   from_number: TWILIO_PHONE_NUMBER
 ```
 
-```yaml connections/twilio_connector.yaml
+```yaml LiveKit
+# connections/twilio_connector.yaml
 transport: connector
 carrier: twilio
 environment:
@@ -48,11 +90,33 @@ environment:
   auth_token: TWILIO_AUTH_TOKEN
   from_number: TWILIO_PHONE_NUMBER
 ```
+</CodeGroup>
 
-`from_number` is the caller identity the person you dial sees. The Pipecat target
-names the first file, the LiveKit target names the second, and neither target says
-anything else about the route. See
-[`connections/<name>.yaml`](/reference/connections-yaml).
+Same three names, different `transport:`. `from_number` is the caller identity
+the person you dial sees. Neither target says anything else about the route.
+
+### Every key a connection takes
+
+<ParamField path="transport" type="sip | connector | cloud-websocket | daily-sip" required>
+  The mechanism that carries the call. Every one of the four can dial out. The
+  target's provider decides which of them it accepts.
+</ParamField>
+
+<ParamField path="carrier" type="twilio | telnyx | plivo" required>
+  The carrier account that places the call. Telnyx and Plivo dial out through
+  the LiveKit `sip` route only.
+</ParamField>
+
+<ParamField path="environment" type="route key to environment variable name">
+  Which variable holds each of the route's account values. Dialling out always
+  needs `from_number`, plus either `account_sid` and `auth_token` or the SIP
+  trio, depending on the route. [Which environment keys a route
+  accepts](/reference/connections-yaml#which-environment-keys-a-route-accepts)
+  has the set per route. The names on the right are yours, and every one is
+  UPPER_SNAKE.
+</ParamField>
+
+See [`connections/<name>.yaml`](/reference/connections-yaml) for the whole file.
 
 ## Place a call
 
@@ -114,6 +178,39 @@ payload**. Same names, same types, same variables.
 Values are checked against the declared type, and an undeclared name is refused
 rather than quietly ignored.
 
+### Every key a variable takes
+
+<ParamField path="type" type="type expression" required>
+  What the value is, written as one line: a built-in such as `string`, a
+  `Literal[...]` set, a `list[...]`, or a shape you declared. [The type
+  grammar](/reference/variables#the-type-grammar) has all of them.
+</ParamField>
+
+<ParamField path="source" type="call_start | conversation | a system call fact">
+  Where the value comes from. `call_start` is the dispatch payload, which
+  `--var` stands in for. `conversation` is a value the model records mid-call.
+  The eight system facts are listed below. Left out, a task's `assign:` fills
+  it.
+</ParamField>
+
+<ParamField path="default" type="a value of the declared type">
+  What the value is before anything supplies one. Required on a `call_start`
+  variable when the channel is also inbound, because an inbound call carries no
+  dispatch payload.
+</ParamField>
+
+<ParamField path="confirm" type="step name">
+  The step that has to hear the caller agree before anything acts on this
+  value. Until then it renders in that step's prompt and nowhere else. See
+  [`confirm:`](/reference/variables#confirm-marks-a-value-the-caller-has-to-agree-to).
+</ParamField>
+
+<ParamField path="description" type="string">
+  What the value is, for a reader and for the model. Required on a
+  `source: conversation` variable, because the model reads it to know what to
+  record.
+</ParamField>
+
 ## Values the route supplies
 
 Some variables are filled in by the runtime, not by you:
@@ -138,11 +235,11 @@ leaving an empty string at call time. [The full grid](/build/prefetch#where-it-w
 in the pre-fetch reference has every fact, route and direction.
 
 Declaring the fact as a `prefetch:` entry instead keeps one package compiling
-on every route: where the route supplies nothing the entry is skipped and the
-variable keeps its default, rather than the package being refused.
-[Reading the dialled number](/build/prefetch#the-number-an-outbound-call-carries)
-shows that shape, and what a `cloud-websocket` call has to carry for it to
-arrive.
+on every route. Where the route supplies nothing, the entry is skipped and the
+variable keeps its default, rather than the package being refused. [Where it
+works](/build/prefetch#where-it-works) covers that shape, under "The number an
+outbound call carries", and what a `cloud-websocket` call has to carry for it
+to arrive.
 
 ## Where to go next
 
