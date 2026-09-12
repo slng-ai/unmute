@@ -72,6 +72,16 @@ mint a11y                                               # contrast and media alt
     the script never touches anything above the `{/* changelog:entries */}`
     marker.
 
+12. **A page has to parse as MDX, and nothing renders the page for you.** Two
+    shapes cost three pages once: an attribute value written bare, `cols=2`
+    instead of `cols={2}`, and a closing tag pulled onto the end of a sentence
+    by a paragraph rewrap. A closing tag for an element with a blank line
+    inside it starts its own line; an element written all on one flow, which is
+    how several `<Note>` blocks here read, may close on the same line. `mint`
+    refuses a page that breaks either rule and then drops it from the
+    navigation, so the page is gone rather than wrong.
+    `TestPagesHoldValidMDX` holds both, and `make docs` is the real check.
+
 ## The shape of a guide page
 
 Readers arrive with low attention and a specific question. A page that opens on
