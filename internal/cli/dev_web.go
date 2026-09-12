@@ -404,13 +404,22 @@ func runDevCompose(ctx context.Context, cmd *cobra.Command, run devWebRun) error
 		case <-ctx.Done():
 			spin.Stop()
 			return nil
-		case <-logsDone:
+		case err := <-logsDone:
 			spin.Stop()
-			// The stack died during startup. That is a failure the page should
-			// show, but the log stream has ended, so there is nothing more to
-			// wait for: report it and exit rather than holding an idle page.
-			run.stream.SetState(devStateFailed)
-			return fmt.Errorf("dev %s: compose stack stopped before the worker registered (logs: %s)", run.root, run.logPath)
+			select {
+			case <-ready:
+				// The marker arrived and the stream ended before this select ran,
+				// so both cases were ready and Go picked one at random. The
+				// worker did register, so the ended stream is web.wait's to
+				// report; hand it the result it was going to read.
+				logsDone <- err
+			default:
+				// The stack died during startup. That is a failure the page should
+				// show, but the log stream has ended, so there is nothing more to
+				// wait for: report it and exit rather than holding an idle page.
+				run.stream.SetState(devStateFailed)
+				return fmt.Errorf("dev %s: compose stack stopped before the worker registered (logs: %s)", run.root, run.logPath)
+			}
 		case <-time.After(3 * time.Minute):
 			spin.Stop()
 			return web.holdForFailure(ctx, cmd, run,
