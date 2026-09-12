@@ -1741,7 +1741,7 @@ func TestSmokePipecatRegionalInfrastructureInstantiates(t *testing.T) {
 // the supported SDK's real NO_RESPONSE transition semantics.
 func TestSmokePipecatV1TaskTransferStopsFlow(t *testing.T) {
 	runPipecatSmokeScript(t, "safe_core", func(target *ir.Target) {
-		target.Version = "1.9.0"
+		target.Version = "1.10.0"
 	}, func(agent *ir.Agent) {
 		addPipecatTaskTransferFixture(agent)
 	}, pipecatTaskTransferSmokeScript)

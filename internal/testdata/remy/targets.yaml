@@ -17,4 +17,4 @@ targets:
   # used examples/task-groups and examples/subagents run here now.
   pipecat:
     provider: pipecat
-    version: "1.9.0"
+    version: "1.10.0"

@@ -20,7 +20,7 @@ func realtimePackage(t *testing.T, realtimeEntry string) (*Package, error) {
 			"agents:\n  desk:\n    instructions: instructions.md\n    realtime: live\n" +
 			"channels:\n  web:\n    kind: realtime_audio\n" +
 			"capacity:\n  peak_sessions: 2\n  max_sessions: 4\n  avg_session_duration: 3m\n",
-		"targets.yaml": "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.9.0\"\n",
+		"targets.yaml": "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.10.0\"\n",
 	}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
