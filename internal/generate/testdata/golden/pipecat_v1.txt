@@ -319,6 +319,24 @@ Set these before running (values are never written into the project):
 - `OPENAI_API_KEY`
 - `SLNG_API_KEY`
 
+### If every provider call fails to connect
+
+The OpenAI SDK this project resolves verifies TLS against the operating system's
+own certificate store rather than a bundle shipped inside the package. On an image
+with no system certificates every provider call fails at the handshake, and the
+error names TLS rather than the provider.
+
+The base image this project builds on is the framework vendor's own and normally
+carries them. If you swap the base for a minimal image, install `ca-certificates`
+in it, or point at a bundle you supply:
+
+```sh
+SSL_CERT_FILE=/path/to/ca-bundle.crt
+```
+
+`REQUESTS_CA_BUNDLE` is read by some libraries and not by this one, so set
+`SSL_CERT_FILE` even if you already set the other.
+
 ## Deploy to Pipecat Cloud
 
 Authenticate once first with `pipecat cloud auth login`. After that, one command
@@ -1330,11 +1348,11 @@ if __name__ == "__main__":
 {
   "target": "pipecat",
   "provider": "pipecat",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "supported": {
-    "floor": "1.9.0",
-    "ceiling": "1.9.0",
-    "verified": "2026-09-11"
+    "floor": "1.10.0",
+    "ceiling": "1.10.0",
+    "verified": "2026-09-12"
   },
   "entry_agent": "intake",
   "agents": [
@@ -2284,7 +2302,7 @@ version = "0.1.0"
 description = "Generated Pipecat voice agent (compiled by unmute)."
 requires-python = ">=3.11"
 dependencies = [
-    "pipecat-ai[deepgram,openai,runner,silero,webrtc]==1.9.0",
+    "pipecat-ai[deepgram,openai,runner,silero,webrtc]==1.10.0",
     "pipecat-slng>=0.5.2",
     "python-dotenv>=1.0",
 

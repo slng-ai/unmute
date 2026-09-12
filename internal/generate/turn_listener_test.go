@@ -78,7 +78,7 @@ func TestListenDeciderEmitsTheTranscribersTurnService(t *testing.T) {
 	}
 	// The date beside the class is that service's own, not the ordinary
 	// transcriber's: they are different rows, checked on different days.
-	if !strings.Contains(report, "DeepgramFluxSTTService (pipecat-ai[deepgram], verified 2026-09-11)") {
+	if !strings.Contains(report, "DeepgramFluxSTTService (pipecat-ai[deepgram], verified 2026-09-12)") {
 		t.Errorf("compile-report.json does not carry the turn service's own verification date:\n%s", report)
 	}
 	// The extra and the key come from the ordinary listen entry.
@@ -132,6 +132,126 @@ func TestLocalDeciderEmitsWhatItAlwaysDid(t *testing.T) {
 	for _, want := range []string{"VADParams(stop_secs=", "LocalSmartTurnAnalyzerV3(", "user_turn_strategies=UserTurnStrategies("} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("a local-decider package lost %q", want)
+		}
+	}
+}
+
+// TestGradiumDecidesTheTurnThroughItsOwnClass is the second switch: the vendor
+// keeps its ordinary class and takes one flat constructor argument. Nothing is
+// swapped, so the mistake this guards against is a compiler that emits the
+// argument on a class it also renamed, or renames nothing and emits no argument
+// at all, which reads as a working package whose turns never change hands.
+func TestGradiumDecidesTheTurnThroughItsOwnClass(t *testing.T) {
+	artifact := generateFor(t, "turn_listener_gradium", ir.ProviderPipecat)
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		"from pipecat.services.gradium.stt import GradiumSTTService",
+		"return GradiumSTTService(",
+		"enable_turn_detection=True,",
+		"vad_analyzer=SileroVADAnalyzer(),",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py is missing %q", want)
+		}
+	}
+	for _, absent := range []string{
+		// No second class, and none of the local pair.
+		"GradiumTurnsSTTService", "LocalSmartTurnAnalyzerV3", "SmartTurnParams", "VADParams",
+		"user_turn_strategies=", "EagerUserTurnStrategies", "enable_eager_end_of_turn",
+		// And no ceiling: the service exposes no end-of-turn timeout, so a
+		// keyword here would raise at construction on the first call.
+		"eot_timeout_ms", "turn_end_timeout_ms", "eot_horizon_s",
+	} {
+		if strings.Contains(bot, absent) {
+			t.Errorf("bot.py carries %q, which gradium's turn detection neither needs nor has", absent)
+		}
+	}
+	// The flat argument is a constructor argument, not a setting, the same way
+	// the eager flag is. Read the settings block rather than the first line,
+	// because a misplacement renders it among the settings and a prefix match
+	// would pass.
+	settings := bot[strings.Index(bot, "settings=GradiumSTTService.Settings("):]
+	if end := strings.Index(settings, "\n        )"); end > 0 {
+		settings = settings[:end]
+	}
+	if strings.Contains(settings, "enable_turn_detection") {
+		t.Errorf("enable_turn_detection landed inside Settings; it is a constructor argument:\n%s", settings)
+	}
+	// The emitted comment cannot name a ceiling field this vendor does not have.
+	// Before the template branched, it rendered "()=1600" and named no class.
+	if strings.Contains(bot, "=1600, from pace:") {
+		t.Error("bot.py claims a pace ceiling landed somewhere on a vendor with no end-of-turn timeout")
+	}
+	if !strings.Contains(bot, "It exposes no end-of-turn timeout") {
+		t.Error("bot.py does not say why no ceiling was written")
+	}
+	// The report says who decides without crediting a ceiling nobody took.
+	report := artifactFile(t, artifact, "compile-report.json")
+	if !strings.Contains(report, "turn gradium decides (its own end-of-turn timing, no ceiling of ours") {
+		t.Errorf("compile-report.json does not say gradium decides on its own timing:\n%s", report)
+	}
+	if strings.Contains(report, "closes at") {
+		t.Error("compile-report.json names a closing time on a vendor that takes no ceiling")
+	}
+}
+
+// TestSpeechmaticsTurnModeFollowsTheBinding is the third switch and the one that
+// matters most on this bump.
+//
+// turn_detection_mode is not new; its DEFAULT flipped in pipecat 1.10.0, from
+// EXTERNAL (the caller drives turns, meaning Pipecat's own detector) to VAD (the
+// service closes turns itself). So the mode is written in both directions:
+// without the local half, a package that binds this vendor and says nothing
+// about turns changes who ends the caller's turn on a version bump.
+func TestSpeechmaticsTurnModeFollowsTheBinding(t *testing.T) {
+	local := artifactFile(t, generateFor(t, "speechmatics_local", ir.ProviderPipecat), "bot.py")
+	listen := artifactFile(t, generateFor(t, "speechmatics_listen", ir.ProviderPipecat), "bot.py")
+
+	// Same class both ways: this vendor is switched by a setting, not a swap.
+	for name, bot := range map[string]string{"local": local, "listen": listen} {
+		if !strings.Contains(bot, "return SpeechmaticsSTTService(") {
+			t.Errorf("%s: bot.py does not build the ordinary speechmatics class", name)
+		}
+	}
+	if !strings.Contains(local, "turn_detection_mode=SpeechmaticsSTTService.TurnDetectionMode.EXTERNAL,") {
+		t.Error("the local decider does not hold speechmatics to the external mode, so the service would close turns beside pipecat's own detector")
+	}
+	if !strings.Contains(listen, "turn_detection_mode=SpeechmaticsSTTService.TurnDetectionMode.VAD,") {
+		t.Error("the listening decider does not put speechmatics in its own turn mode")
+	}
+	// The local package still builds the local pair; the listening one does not.
+	for _, want := range []string{"LocalSmartTurnAnalyzerV3(", "VADParams(stop_secs=", "user_turn_strategies=UserTurnStrategies("} {
+		if !strings.Contains(local, want) {
+			t.Errorf("the local decider lost %q, so pinning the mode changed more than the mode", want)
+		}
+	}
+	for _, absent := range []string{"LocalSmartTurnAnalyzerV3(", "user_turn_strategies="} {
+		if strings.Contains(listen, absent) {
+			t.Errorf("the listening decider still carries %q", absent)
+		}
+	}
+	// The enum is reached through the service class, so no second import is
+	// needed. An import nothing adds is a NameError at worker startup.
+	if strings.Contains(local, "from pipecat.services.speechmatics.stt import TurnDetectionMode") {
+		t.Error("the mode is reached through the service class; a second import would be one the emitted module has to add and nothing does")
+	}
+	// The report tells the author which component decides, on the path where
+	// they wrote nothing about it (SC-005).
+	report := artifactFile(t, generateFor(t, "speechmatics_local", ir.ProviderPipecat), "compile-report.json")
+	if !strings.Contains(report, "held to turn_detection_mode=SpeechmaticsSTTService.TurnDetectionMode.EXTERNAL so it does not close turns itself") {
+		t.Errorf("compile-report.json does not name the setting written on the author's behalf:\n%s", report)
+	}
+}
+
+// TestAVendorWithNoSwitchEmitsNothingOfOurs: every listening vendor that is NOT
+// in the turn-decider table keeps the bytes it had. The table grew by two on
+// this bump, and a lookup keyed too loosely would start writing a turn keyword
+// into services that have none.
+func TestAVendorWithNoSwitchEmitsNothingOfOurs(t *testing.T) {
+	bot := artifactFile(t, generateFor(t, "simple-prompt", ir.ProviderPipecat), "bot.py")
+	for _, absent := range []string{"enable_turn_detection", "turn_detection_mode"} {
+		if strings.Contains(bot, absent) {
+			t.Errorf("a package binding a vendor with no turn-decider row gained %q", absent)
 		}
 	}
 }
