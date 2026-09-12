@@ -9,6 +9,13 @@ over a Twilio SIP trunk. Warm transfer compiles on no other route today, and no
 shipped example declares it, so the warm snippets below are worked examples
 rather than quotes from a package you can run.
 
+On this page:
+
+- [Two transfers, side by side](#two-transfers-side-by-side) - the block, and every key it takes
+- [The trunk has to allow it](#the-trunk-has-to-allow-it) - three Twilio settings a new trunk does not have
+- [The connection](#the-connection) - the four SIP names this route reads
+- [Run it](#run-it) - compiling, deploying, and the lines the log prints
+
 ```yaml targets.yaml
 targets:
   livekit:
@@ -31,6 +38,8 @@ destinations:
 
 The route is `connections/twilio_sip.yaml`, below. The two desks are in
 `agent.yaml`, because the same desk answers whichever target places the call.
+Each one names an environment variable rather than a number, a rule
+[Human transfers](/transfers/overview) states in full.
 
 ## Two transfers, side by side
 
@@ -69,6 +78,35 @@ The person who answers hears the handover in the first sentence: who is on
 hold, what they want, what was tried, then one question they can answer. If the
 conversation has too little detail, the agent says that plainly instead of
 inventing a briefing.
+
+### Every key a transfer block takes
+
+`destination:` is the only key either block requires. The entry's own `when:`,
+and the choice between `cold:` and `warm:`, work the same on every route and
+are stated on [Human transfers](/transfers/overview).
+
+<ParamField path="destination" type="a destinations entry name" required>
+  Which desk to reach. The name is resolved in the `destinations:` block above,
+  so the model never sees a number.
+</ParamField>
+
+<ParamField path="briefing" type="string">
+  What to tell the person while the caller waits. It belongs to a `warm:` block
+  and is refused in a `cold:` one. Left out, the person still gets the
+  transcript, which rides along on its own.
+</ParamField>
+
+<ParamField path="ring_timeout" type="a positive Go duration, e.g. 25s">
+  How long the destination rings before it counts as unavailable. It reaches
+  both shapes on this route. Left out, LiveKit is sent no value and its own
+  platform default stands.
+</ParamField>
+
+<ParamField path="on_unavailable" type="return_to_caller | hangup" default="return_to_caller">
+  What happens when the destination does not take the call. On this route no
+  answer, a decline, voicemail and a failed dial all arrive as one failure, so
+  one setting covers them.
+</ParamField>
 
 `ring_timeout` covers ringing only. Once the person answers, LiveKit has no
 post-answer timeout and the caller stays on hold until the consultation ends.
@@ -125,6 +163,12 @@ environment:
 The first two lines are the route: this is the file that says the call arrives
 over SIP and Twilio carries it. The four names below are yours, and the compiler
 carries whatever you write through verbatim.
+
+Those settings belong to the route rather than to this page. Which keys each
+route accepts is in
+[Connection configuration](/reference/connections-yaml#which-environment-keys-a-route-accepts).
+Where each Twilio value is found is in
+[LiveKit over Twilio](/telephony/livekit-twilio).
 
 ## Run it
 

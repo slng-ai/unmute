@@ -8,13 +8,38 @@ them. Coval tracing attaches the spans from a call to the simulation that made
 it, so a low score comes with the transcript, the tool calls, and the timings
 that produced it.
 
-```yaml
+On this page:
+
+- [Every key the tracing block takes](#every-key-the-tracing-block-takes) - the one key, and what it accepts
+- [What you need](#what-you-need) - the one credential, and what happens without it
+- [How a trace finds its simulation](#how-a-trace-finds-its-simulation) - the routes the simulation ID arrives on
+- [Calls that no simulation owns](#calls-that-no-simulation-owns) - where a real call lands instead
+- [Telling local runs from deployed ones](#telling-local-runs-from-deployed-ones) - the name each side gets
+- [Checking a deployed agent](#checking-a-deployed-agent) - the three steps, and the log to read
+- [What the spans look like](#what-the-spans-look-like) - the tree, and how each target builds it
+- [Metrics that read these traces](#metrics-that-read-these-traces) - what you can measure with no extra setup
+- [When a trace lands on the wrong simulation](#when-a-trace-lands-on-the-wrong-simulation) - the attribute that says why
+
+## Every key the tracing block takes
+
+```yaml agent.yaml
 tracing:
   provider: coval
 ```
 
 That is the whole change to your package. Compile, and both the Pipecat and
 LiveKit projects send spans to Coval.
+
+<ParamField path="provider" type="langfuse | coval" required>
+  Which service the spans go to. `coval` is this page. Any other name is
+  refused, with both accepted names in the message, and leaving the whole
+  `tracing:` block out means the agent exports nothing.
+</ParamField>
+
+There is no second key. The Coval credential is an environment name read at run
+time rather than something you write in `agent.yaml`, and
+[What you need](#what-you-need) is all of it. [Tracing](/tracing/overview)
+compares the two providers side by side.
 
 ## What you need
 

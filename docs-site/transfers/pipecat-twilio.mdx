@@ -38,7 +38,14 @@ production or ever.
 The three names in the connection are here because this package hands calls to a
 person and places test calls, and both of those speak to Twilio's API in your
 name. A package that only answers calls on this route needs no `environment:`
-block at all.
+block at all. Which keys each route accepts is in
+[Connection configuration](/reference/connections-yaml#which-environment-keys-a-route-accepts),
+and where each Twilio value is found is in
+[Pipecat over Twilio](/telephony/pipecat-twilio).
+
+`billing_line` is a symbol, never a number: the right half names an environment
+variable read at call time, a rule [Human transfers](/transfers/overview) states
+in full.
 
 ## The transfer
 
@@ -55,11 +62,37 @@ The mechanism is different from every other route. One request replaces the
 live call's instructions at Twilio, keyed on the call id: speak a line, dial
 the destination, done. The agent's part of the call ends there.
 
-Pipecat `cloud-websocket` requires explicit `on_unavailable: hangup`; it cannot
-reconnect the original media stream. Omitting the field resolves to
-`return_to_caller`, so validation refuses it on this route. A successful Twilio
-REST update means the transfer has started, not that the destination answered;
-the tool result is `transfer_started`.
+A successful Twilio REST update means the transfer has started, not that the
+destination answered. The tool result is `transfer_started`.
+
+### Every key this transfer takes
+
+`cold:` is the only shape this route compiles, and `on_unavailable:` is the one
+key you cannot leave out. Pipecat `cloud-websocket` requires explicit
+`on_unavailable: hangup`; it cannot reconnect the original media stream. The
+entry's own `when:`, and the choice of shape block, work the same on every
+route and are stated on [Human transfers](/transfers/overview).
+
+<ParamField path="destination" type="a destinations entry name" required>
+  Which desk to reach. The name is resolved in the `destinations:` block above,
+  so the model never sees a number.
+</ParamField>
+
+<ParamField path="ring_timeout" type="a positive Go duration, e.g. 25s">
+  How long the destination rings before it counts as unavailable. It becomes
+  the dial timeout in the markup Twilio runs. Left out, that timeout is 25
+  seconds.
+</ParamField>
+
+<ParamField path="on_unavailable" type="hangup" required>
+  What happens when the destination does not take the call. `hangup` is the
+  only value this route accepts, and it has to be written out: an omitted key
+  resolves to `return_to_caller`, which is refused here because this route
+  cannot reconnect the original media stream.
+</ParamField>
+
+There is no `briefing:` key to write. It belongs to a `warm:` block, and warm
+transfer compiles on no Pipecat route.
 
 ## The transfer ends the call
 
