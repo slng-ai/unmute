@@ -1,9 +1,30 @@
 ---
 title: "Reasoning model"
-description: "Which LLM vendors each target can construct, and what happens when yours is not listed."
+description: "The think binding: every key it takes, the vendors each target can construct, and what happens when yours is not listed."
 ---
 
-The `think` role is the model that decides what to say and when to call a tool.
+`models.think` picks the model that decides what to say and when to call a tool.
+
+<Note>
+  **SLNG serves this role as a proxy with a cache in front.** The
+  [Context Router](/optimization/context-router) answers the turns it judges
+  repeatable and calls your model for the rest. The model stays yours to
+  choose, and so does the provider that serves it, so one `SLNG_API_KEY` can
+  sit in front of any host you already use.
+</Note>
+
+On this page:
+
+- [Quickstart](#quickstart) - the smallest binding that works
+- [Every key a think binding takes](#every-key-a-think-binding-takes) - the full shape
+- [Why `reasoning_effort` is there](#why-reasoning_effort-is-there) - the line that stops a 400
+- [LiveKit Responses API](#livekit-responses-api) - one target's own client
+- [Pipecat](#pipecat) and [LiveKit](#livekit) - the vendors each target can construct
+- [When your provider is not listed](#when-your-provider-is-not-listed) - two different answers
+- [Fallback](#fallback) - what to try when the first call fails
+- [Troubleshooting](#troubleshooting) - the refusals that come up most
+
+## Quickstart
 
 ```yaml agent.yaml
 models:
@@ -15,16 +36,92 @@ models:
         reasoning_effort: "none"
 ```
 
-SLNG serves this role through the [Context Router](/optimization/context-router), which
-caches the turns it judges repeatable and calls your model for the rest. The model behind it is still
-yours to choose, and so is the provider that serves it.
+```sh
+unmute validate my-agent
+```
 
 <Info>
-  Model ids are forwarded to the vendor exactly as you write them. Unmute keeps no
-  allowlist, so a typo surfaces as a provider error at run time. The LiveKit
-  Responses mode below is the narrow exception: `api` selects the generated client and `reasoning_effort` becomes the
-  API's nested reasoning setting.
+  Model ids are forwarded to the vendor exactly as you write them. Unmute keeps
+  no allowlist, so a typo surfaces as a provider error at run time. The LiveKit
+  Responses mode below is the narrow exception: `api` selects the generated
+  client and `reasoning_effort` becomes the API's nested reasoning setting.
 </Info>
+
+## Every key a think binding takes
+
+`provider:` and `model:` carry a plain binding. The rest shape the request, or
+put the Context Router in front.
+
+<ParamField path="provider" type="a vendor from your target's list">
+  Who serves the model. The two lists below are per target. An unlisted name is
+  handled differently by each target, and [When your provider is not
+  listed](#when-your-provider-is-not-listed) explains both.
+</ParamField>
+
+<ParamField path="model" type="string">
+  The model id, forwarded to the vendor exactly as you write it.
+</ParamField>
+
+<ParamField path="params" type="free-form map">
+  Forwarded to the vendor as written. `reasoning_effort` lives here, and so do
+  the two LiveKit Responses directives. A name the target's settings object has
+  no field for rides that target's overflow field and still reaches the
+  provider.
+</ParamField>
+
+<ParamField path="temperature" type="number">
+  Forwarded as written, with no range check here. It is folded into `params:`
+  at compile time, and an explicit `params.temperature` wins over it.
+</ParamField>
+
+<ParamField path="top_p" type="number">
+  Forwarded as written, folded into `params:` the same way.
+</ParamField>
+
+<ParamField path="top_k" type="integer">
+  Forwarded as written, folded into `params:` the same way.
+</ParamField>
+
+<ParamField path="endpoint_env" type="an environment variable name">
+  Points at a variable holding an OpenAI-compatible endpoint URL, for a binding
+  that talks to your gateway directly. On Pipecat this is what lets an unlisted
+  provider through.
+</ParamField>
+
+<ParamField path="placement" type="api | local">
+  Whether the model is called over the network or runs in the agent's own
+  process. Left out, it is `api` whenever the entry names a provider or a
+  model. `local` is refused on the slng target.
+</ParamField>
+
+<ParamField path="fallback" type="list of other think entry names">
+  Other entries in this same `think:` section, tried in order when the first
+  model's call fails. See [Fallback](#fallback).
+</ParamField>
+
+<ParamField path="prompt_suffix" type="string, up to 512 characters">
+  Literal text appended to every system prompt this binding sends: each agent's,
+  each task's, and the summarizer's. No `{{variables}}`. It exists for models
+  that take instructions no parameter can carry. A per-target override cannot
+  name a different value.
+</ParamField>
+
+<ParamField path="agent_id" type="string">
+  Scopes the Context Router's cache. One stable value per package, written by
+  you, with a version suffix you bump after a prompt change you judge
+  meaningful. Router bindings only, and refused on any other.
+</ParamField>
+
+<ParamField path="upstream" type="block: provider, url, key_env">
+  Where the router actually calls the model and whose credentials pay for it.
+  Required on a router think binding, because the configuration travels inline
+  on every request. Router bindings only.
+</ParamField>
+
+<ParamField path="description" type="string">
+  An author note. It reaches no generated artifact, so it is for the next
+  person reading `agent.yaml`.
+</ParamField>
 
 ## Why `reasoning_effort` is there
 
@@ -266,6 +363,36 @@ against a Pipecat target refuses it. The SLNG list uses the same
 
 [Speech to text](/models/stt#fallback) documents the same field on the `listen`
 role.
+
+## Troubleshooting
+
+### Every turn comes back as HTTP 400
+
+A reasoning model was sent function tools without `reasoning_effort`. **Fix:**
+set it in `params:`, as the Quickstart does. On LiveKit it also stops the
+plugin injecting a value of its own.
+
+### `agent_id` or `upstream` is refused
+
+Both belong to a think binding routed through the Context Router, and the
+message names the provider the binding actually has. **Fix:** set
+`provider: slng` on that binding, or remove the key.
+
+### `prompt_suffix` is refused on a listen or speak binding
+
+It appends to a system prompt, and only a think model sends one. **Fix:** move
+it to the think binding those prompts run on.
+
+### The package compiles for LiveKit and is refused for Pipecat
+
+Pipecat does not emit generated fallback yet. **Fix:** remove `fallback:` from
+the `think` section, or keep that package on LiveKit or slng.
+
+### A provider is refused and the message lists other names
+
+The vendor is not on your target's list for this role. **Fix:** see [When your
+provider is not listed](#when-your-provider-is-not-listed); the two targets
+answer it differently.
 
 ## Where to go next
 

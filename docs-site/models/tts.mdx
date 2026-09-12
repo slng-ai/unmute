@@ -1,14 +1,27 @@
 ---
 title: "Text to speech"
-description: "Which text to speech vendors each target can construct, and the SLNG voice the scaffold binds."
+description: "The speak binding: every key it takes, the vendors each target can construct, and how one SLNG key reaches many voices."
 ---
 
+`models.speak` picks the service that turns the agent's words into audio.
+
 <Note>
-  For the connection settings that cut time to first audio, and what each one measured, see [Optimizing your agent](/optimization/overview).
+  **SLNG is a host and a proxy, and one key covers both.** It runs its own
+  copies of voice models, and it also forwards to the vendors' own endpoints.
+  So a single `SLNG_API_KEY` reaches many vendors' voices, and you choose which
+  of thirteen regions the audio is generated in. [One key, many
+  voices](#one-key-many-voices) is the whole picture.
 </Note>
 
-The `speak` role turns the agent's words into audio. You bind it once in
-`agent.yaml`, and this role usually takes a voice as well as a model:
+On this page:
+
+- [Quickstart](#quickstart) - the smallest binding that works
+- [Every key a speak binding takes](#every-key-a-speak-binding-takes) - the full shape
+- [One key, many voices](#one-key-many-voices) - hosted, proxied, and where it runs
+- [Pipecat](#pipecat) and [LiveKit](#livekit) - the vendors each target can construct
+- [Troubleshooting](#troubleshooting) - the refusals that come up most
+
+## Quickstart
 
 ```yaml agent.yaml
 models:
@@ -19,34 +32,126 @@ models:
       voice: "aura-2-thalia-en"
 ```
 
-A scaffolded package binds SLNG here by design, so one `SLNG_API_KEY` covers
-listening and speaking. See the [SLNG Execution Layer](/optimization/execution-layer).
-For model location settings across providers, including SLNG speech gateways,
-see [regional infrastructure](/optimization/regional-infrastructure).
+```sh
+unmute validate my-agent
+```
 
-<Info>
-  Model ids and voice ids are forwarded to the vendor exactly as you write them.
-  Unmute keeps no allowlist, so a typo surfaces as a provider error at run time.
-</Info>
+This role usually takes a voice as well as a model. The entry's name, `voice`
+here, is how the rest of the package refers to it; the `voice:` key inside it
+is the vendor's voice id.
 
-## The SLNG models the scaffold and examples use
+## Every key a speak binding takes
 
+Which of `model:` and `voice:` are required depends on the vendor, and the
+refusal names whichever one is missing.
+
+<ParamField path="provider" type="a vendor from your target's list">
+  Who serves the model. The two lists below are per target, and an unlisted
+  name is refused. Left out, the code targets fall back to `openai`, so name
+  one rather than relying on that.
+</ParamField>
+
+<ParamField path="model" type="string">
+  The model id, forwarded to the vendor exactly as you write it. Required by
+  most vendors, including `slng` on both code targets. Unmute keeps no
+  allowlist, so a typo surfaces as a provider error on the first call.
+</ParamField>
+
+<ParamField path="voice" type="string">
+  The vendor's voice id, also forwarded verbatim. Required by most vendors.
+  A few carry the voice inside the model id instead, and for those this key is
+  refused rather than ignored.
+</ParamField>
+
+<ParamField path="speed" type="number">
+  How fast the voice speaks, forwarded to the vendor as written. Unmute does
+  not check it against the vendor's accepted range, so a value outside it
+  surfaces as a provider error.
+</ParamField>
+
+<ParamField path="language" type="a BCP-47 tag, e.g. en or pt-BR">
+  The language to speak. Only some vendors take one. Where the vendor carries
+  language in the model id instead, this key is refused, and the message names
+  the provider.
+</ParamField>
+
+<ParamField path="placement" type="api | local">
+  Whether the model is called over the network or runs in the agent's own
+  process. Left out, it is `api` whenever the entry names a provider, a model
+  or a voice. `local` is refused on the slng target, which has no machine of
+  yours to run on.
+</ParamField>
+
+<ParamField path="endpoint_env" type="an environment variable name">
+  Points at a variable holding an OpenAI-compatible endpoint URL. This is what
+  lets a vendor that is not on Pipecat's list through. Pipecat only: LiveKit's
+  OpenAI plugin carries no language slot for speech, so there is no custom
+  endpoint for this role there, and the slng target has none either.
+</ParamField>
+
+<ParamField path="params" type="free-form map">
+  Forwarded to the vendor's own client, unchecked, except for
+  `params.world_part`, which selects an SLNG speech gateway and is refused when
+  it is not one of them.
+</ParamField>
+
+A `speak` entry cannot carry `fallback:`. That key is legal only on `think`
+and `listen`; see [Reasoning model](/models/llm#fallback).
+
+## One key, many voices
+
+SLNG serves a voice model two ways, and the shape of the id says which:
+
+| `model:` | What it means |
+|---|---|
+| `slng/deepgram/aura:2-en` | a copy SLNG hosts itself |
+| `deepgram/aura:2` | the vendor's own endpoint, reached through SLNG as a proxy |
+
+Both are one binding and one `SLNG_API_KEY`. The point is that you do not
+collect a key per vendor to reach a vendor's voice. The difference is who runs
+the model and how it is billed, which
+[docs.slng.ai](https://docs.slng.ai/execution-layer/byok) covers.
+
+For **listening** the two differ in speed by enough to matter, and
+[Speech to text](/models/stt#which-shape-to-pick-for-listening) explains the
+gap. For speaking nobody has measured them against each other. The scaffold
+takes the proxied route here to match the transcriber, not because it is known
+to be faster.
+
+### Where it runs
+
+`params.world_part` picks the SLNG speech gateway that serves the call:
+
+```yaml agent.yaml
+models:
+  speak:
+    voice:
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+      params:
+        world_part: eu-north
+```
+
+Thirteen are accepted: `us-east`, `us-west`, `br`, `eu-west`, `eu-north`,
+`gb`, `za`, `il`, `jp`, `sg`, `id`, `au` and `in`. Left out, the SDK default
+stands. A hosted `slng/` id is a separate question: those run only where SLNG
+has put them, so a region you need may rule one out.
+[Regional infrastructure](/optimization/regional-infrastructure) explains the
+separate model, worker and media regions.
+
+<Accordion title="The ids the scaffold and examples use">
 | Where | `model:` | `voice:` |
 |---|---|---|
 | `unmute init`, and every example, `hotel-concierge` on the `slng` target included | `deepgram/aura:2` | `aura-2-thalia-en` |
 | the SLNG-hosted English copy, which runs in `us-central` only, so an `slng` package deploying to `eu-central` cannot name it | `slng/deepgram/aura:2-en` | `aura-2-thalia-en` |
 
-The `slng/` prefix picks a model SLNG hosts itself, and an id without it reaches
-the same vendor model through SLNG as a proxy. For **listening** the two differ
-in speed by enough to matter, and [Speech to text](/models/stt) explains the
-gap. For speaking nobody has measured them against each other; the scaffold
-takes the proxied route here to match the transcriber, not because it is known
-to be faster.
-
-Those are the only exact ids the docs name, because they are the ones the examples
-run. The full SLNG catalog is at
+Those are the only exact ids the docs name, because they are the ones the
+examples run. The full SLNG catalog is at
 [docs.slng.ai/models](https://docs.slng.ai/models); any id from there goes in
-`model:` as written, for example `slng/cartesia/sonic-3` with a voice id of its own.
+`model:` as written, for example `slng/cartesia/sonic-3` with a voice id of
+its own.
+</Accordion>
 
 ## Pipecat
 
@@ -82,15 +187,42 @@ genuinely OpenAI-compatible endpoint, named with `endpoint_env`.
 | `soniox` | |
 
 This list is closed, and closed harder than Pipecat's: LiveKit's OpenAI plugin
-carries no language slot for speech, so there is no custom-endpoint fallback for
-this role at all.
+carries no language slot for speech, so there is no custom-endpoint fallback
+for this role at all.
 
 ## The difference between the two
 
 Pipecat has `openai`, LiveKit has `gemini`. Everything else matches.
 
-A `speak` entry cannot carry `fallback:`. That field is legal only on `think`
-and `listen` models; see [Reasoning model](/models/llm#fallback).
+## Troubleshooting
+
+### The binding is missing a model, or missing a voice
+
+The vendor needs both and the package gave one. **Fix:** add whichever the
+message names. Which of the two a vendor needs is the vendor's own decision,
+not a rule this page can shorten.
+
+### `voice` is refused on a provider that clearly has voices
+
+The vendor carries the voice inside the model id rather than in a separate
+field, so the binding has no slot for it. **Fix:** drop `voice:` and name the
+voice variant in `model:`.
+
+### `fallback` is refused
+
+A speak binding cannot have one, on any target. **Fix:** remove it. Fallback
+is legal on `think` and `listen` only.
+
+### `temperature`, `top_p` or `top_k` is refused
+
+Those are think fields, which shape what the model writes rather than how it
+is spoken. **Fix:** move them to the `think` binding, or delete them.
+
+### `endpoint_env` is refused on LiveKit
+
+LiveKit has no custom speech endpoint at all. **Fix:** bind a vendor from the
+LiveKit list above, or compile to Pipecat, which emits the `endpoint_env`
+lookup.
 
 ## Where to go next
 
