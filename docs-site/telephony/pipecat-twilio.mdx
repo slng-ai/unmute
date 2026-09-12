@@ -23,6 +23,17 @@ tunnel, and no public URL.
   the first call rather than after it.
 </Note>
 
+On this page:
+
+- [Nothing of yours is hosted](#nothing-of-yours-is-hosted-and-that-decides-the-security-model) - why this route authenticates the way it does
+- [The values that have to agree](#the-values-that-have-to-agree) - region, service host, markup, and the number
+- [The markup](#the-markup) - what to paste into the TwiML Bin
+- [What the package declares](#what-the-package-declares-for-this-route) - the connection file and the target, key by key
+- [Deploy with a warm instance](#deploy-with-a-warm-instance) - the setting that makes the call answerable
+- [Three different ways nothing happens](#three-different-ways-nothing-happens) - how to tell them apart in the logs
+- [Reading the agent's log](#reading-the-agents-log) - the two commands, and the flag that hides the error
+- [Speakerphone makes the agent interrupt itself](#speakerphone-makes-the-agent-interrupt-itself) - and what protects the greeting
+
 ## Nothing of yours is hosted, and that decides the security model
 
 The generated `pcc-deploy.toml` sets `websocket_auth = "none"`. That is not a
@@ -139,6 +150,67 @@ your number, **Voice Configuration**, "A call comes in", choose **TwiML Bin**.
 The `<Say>` line is a cold start cushion, not a requirement. Starting this agent
 from cold takes a few seconds, and a caller who hears nothing hangs up. Drop the
 line once you keep a warm instance.
+
+## What the package declares for this route
+
+Two files carry this route: the connection that names it, and the target that
+names the connection. The connection is the short one.
+
+```yaml connections/twilio_voice.yaml
+transport: cloud-websocket
+carrier: twilio
+```
+
+### Every key a connection takes
+
+<ParamField path="transport" type="sip | connector | cloud-websocket | daily-sip" required>
+  The mechanism that carries the call. `cloud-websocket` is this route, and it
+  is the one where Pipecat Cloud terminates the carrier's stream itself.
+</ParamField>
+
+<ParamField path="carrier" type="twilio" required>
+  The carrier account behind the route. This route has no other carrier.
+</ParamField>
+
+<ParamField path="environment" type="route key to environment variable name">
+  Left out entirely on a package that only answers calls, which is what makes
+  the file above two lines long. A package that places a call, or hands one to
+  a person, needs `account_sid`, `auth_token` and `from_number` here, and the
+  refusal says which behaviour asked for them.
+</ParamField>
+
+### Every key a target takes
+
+The target is the block under [Deploy with a warm
+instance](#deploy-with-a-warm-instance). These are its keys.
+
+<ParamField path="provider" type="livekit | pipecat | slng" required>
+  `pipecat` on this route.
+</ParamField>
+
+<ParamField path="version" type="exact x.y.z" required>
+  The framework version pinned into the emitted project, written with all three
+  numbers. [`targets.yaml`](/reference/targets-yaml) names the one this release
+  supports.
+</ParamField>
+
+<ParamField path="connection" type="connection file stem">
+  Which connection carries this target's calls, named without the folder and
+  without the `.yaml`. Required for a phone agent.
+</ParamField>
+
+<ParamField path="deployment_region" type="platform region name">
+  Where the platform deploys the agent. Pipecat takes exactly one, and it is
+  also [the region in your stream address](#the-stream-address-carries-the-region).
+</ParamField>
+
+<ParamField path="warm_instances" type="integer">
+  How many instances the platform holds ready. On this route it is what makes
+  the call answerable: see [below](#deploy-with-a-warm-instance).
+</ParamField>
+
+`pins`, `sdk_language` and per-target `models:` are the remaining target keys,
+and [`targets.yaml`](/reference/targets-yaml) covers all three.
 
 ## Deploy with a warm instance
 

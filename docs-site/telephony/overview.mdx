@@ -8,6 +8,15 @@ A phone call reaches your agent over a route: a target, a transport, and a
 carrier. Unmute picks the route from what your target declares and generates the
 code for it.
 
+On this page:
+
+- [Declare a phone channel](#declare-a-phone-channel) - `channels:` and `capacity:`, key by key
+- [Declare the route](#declare-the-route) - the connection file, and the target that names it
+- [The routes](#the-routes) - the four that exist, and where each one deploys
+- [What a working phone route takes](#what-a-working-phone-route-takes) - the two carrier-side steps compiling does not do
+- [What the transport decides](#what-the-transport-decides) - why a transfer lives on one route and not another
+- [Point the carrier at the deployment](#point-the-carrier-at-the-deployment) - the last step, and why there is no local phone loop
+
 ## Declare a phone channel
 
 ```yaml agent.yaml
@@ -22,6 +31,39 @@ channels:
 
 `inbound` and `outbound` say which directions this agent supports. They are
 separate, because most routes support them differently.
+
+### Every key a channel takes
+
+One key is required on any channel. A telephony channel adds two more, and
+takes two optional ones.
+
+<ParamField path="kind" type="realtime_audio | telephony" required>
+  What carries the conversation. `realtime_audio` is the browser, and it takes
+  none of the four keys below. `telephony` is a phone call.
+</ParamField>
+
+<ParamField path="inbound" type="true | false">
+  Whether this agent answers calls. Required on a `telephony` channel, refused
+  on `realtime_audio`, and at least one of the two directions must be `true`.
+</ParamField>
+
+<ParamField path="outbound" type="true | false">
+  Whether this agent places calls. Same rules as `inbound`. Write it on a line
+  people only ring in on too, because a warm transfer dials out.
+</ParamField>
+
+<ParamField path="required_controls" type="list of control names">
+  What the route has to support, checked when you validate: `cold_transfer`,
+  `warm_transfer`, `dtmf_send`, `dtmf_receive`, `hold`, `hangup`,
+  `voicemail_detection`, `ivr_navigation`. A route that cannot do one is
+  refused rather than deployed. Refused on `realtime_audio`.
+</ParamField>
+
+<ParamField path="on_voicemail" type="hangup | leave_message">
+  What the agent does when it reaches a voicemail box. Needs `outbound: true`
+  and a route that can detect voicemail. Left out, the agent does not detect
+  one at all.
+</ParamField>
 
 Two rules arrive with that block, and validation enforces both:
 
@@ -43,6 +85,29 @@ capacity:
   peak_starts_per_second: 1
   avg_session_duration: 5m
 ```
+
+### Every key capacity takes
+
+`capacity:` is your traffic estimate. It is required for every code target and
+for every package with a telephony channel, and the compiler sizes workers and
+quotas from it.
+
+<ParamField path="peak_sessions" type="positive integer" required>
+  Concurrent sessions you expect at peak.
+</ParamField>
+
+<ParamField path="max_sessions" type="positive integer" required>
+  The ceiling you want to support. It cannot be lower than `peak_sessions`.
+</ParamField>
+
+<ParamField path="peak_starts_per_second" type="positive number">
+  How fast calls arrive at peak. Required the moment any channel is
+  `telephony`, optional otherwise. One is a fine answer for a first line.
+</ParamField>
+
+<ParamField path="avg_session_duration" type="duration, e.g. 5m" required>
+  How long an average call lasts, as a positive Go duration.
+</ParamField>
 
 ## Declare the route
 
@@ -78,6 +143,64 @@ A connection has a full route like the one above or a receive-only
 One target selects exactly one route and one connection. To use two carriers, or
 two mechanisms, declare two targets with a connection file each. Each compiles to
 its own `build/<target>/` directory.
+
+### Every key a connection takes
+
+Three keys, and the third holds names rather than values.
+
+<ParamField path="transport" type="sip | connector | cloud-websocket | daily-sip" required>
+  The mechanism that carries the call. Your target's provider decides which of
+  the four it accepts, and a pairing it does not have is refused with the ones
+  it does.
+</ParamField>
+
+<ParamField path="carrier" type="twilio | telnyx | plivo" required>
+  The carrier account behind the route. Telnyx and Plivo reach an agent through
+  the LiveKit `sip` route only.
+</ParamField>
+
+<ParamField path="environment" type="route key to environment variable name">
+  Which variable holds each of the route's account values. The keys on the left
+  are fixed by the route: `account_sid`, `auth_token`, `from_number`,
+  `sip_address`, `sip_username`, `sip_password`. [Which environment keys a
+  route accepts](/reference/connections-yaml#which-environment-keys-a-route-accepts)
+  has the set per route, and a key from another route is refused. The names on
+  the right are yours, and every one is UPPER_SNAKE.
+</ParamField>
+
+A connection writes no `kind:`. Every transport in the catalog is telephony, so
+`transport:` has already said it.
+
+### Every key a target takes
+
+A target says where the agent runs. These are the keys a phone agent uses, and
+[`targets.yaml`](/reference/targets-yaml) has the rest.
+
+<ParamField path="provider" type="livekit | pipecat | slng" required>
+  Which orchestrator this target compiles to. Only `livekit` and `pipecat`
+  carry a phone call.
+</ParamField>
+
+<ParamField path="version" type="exact x.y.z">
+  The framework version pinned into the emitted project. Required for a code
+  target, written with all three numbers, and installed exactly as written.
+</ParamField>
+
+<ParamField path="connection" type="connection file stem">
+  Which connection carries this target's calls, named without the folder and
+  without the `.yaml`. Required for a LiveKit or Pipecat phone agent, and
+  refused on a package with no phone use.
+</ParamField>
+
+<ParamField path="deployment_region" type="platform region name, or a list of them">
+  Where the platform deploys the agent. Pipecat takes exactly one. LiveKit
+  takes several, and emits one create command per region.
+</ParamField>
+
+<ParamField path="warm_instances" type="integer">
+  How many instances the platform holds ready, so a call is not waiting on a
+  cold container. Pipecat only, and LiveKit refuses it.
+</ParamField>
 
 ## The routes
 

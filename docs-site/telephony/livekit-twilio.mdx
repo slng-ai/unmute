@@ -26,6 +26,18 @@ it works](/build/prefetch#where-it-works) for the full grid.
   values filled in. This page is the same route with the reasons attached.
 </Note>
 
+On this page:
+
+- [Two things are called a trunk](#two-things-are-called-a-trunk) - which trunk does what, on which side
+- [Set up the trunk in Twilio Console](#set-up-the-trunk-in-twilio-console) - the five console steps, and every key the connection takes
+- [Deploy the agent first](#deploy-the-agent-first) - why the agent comes before the records
+- [Create the LiveKit records](#create-the-livekit-records) - the generated script, and what it makes
+- [Call the number](#call-the-number) - the real call
+- [What a rename breaks](#what-a-rename-breaks) - the one change that silently unwires the route
+- [One number, one route](#one-number-one-route) - swapping a number, or buying a second
+- [If the call does not arrive](#if-the-call-does-not-arrive) - four failures and how to tell them apart
+- [The other LiveKit route: the connector](#the-other-livekit-route-the-connector) - Twilio without a trunk
+
 ## Two things are called a trunk
 
 The setup below creates one trunk in Twilio and one in LiveKit, and they do
@@ -147,6 +159,41 @@ environment:
 The names are plain SIP names rather than Twilio ones because the generated code
 can dial through any SIP carrier with them. Put the four values in `.env`, and
 list the four names under `secrets:` in `agent.yaml`.
+
+### Every key this connection takes
+
+Two scalars and four names. Nothing else belongs in the file.
+
+<ParamField path="transport" type="sip" required>
+  The mechanism. `sip` is this route. The other three, `connector`,
+  `cloud-websocket` and `daily-sip`, are other routes with other keys.
+</ParamField>
+
+<ParamField path="carrier" type="twilio | telnyx | plivo" required>
+  The carrier account behind the trunk. This page is `twilio`, and the other
+  two take the same four names because they are standard SIP names.
+</ParamField>
+
+<ParamField path="environment.sip_address" type="environment variable name" required>
+  Holds the trunk's termination domain, the one ending in `pstn.twilio.com`.
+</ParamField>
+
+<ParamField path="environment.sip_username" type="environment variable name" required>
+  Holds the username from the trunk's credential list.
+</ParamField>
+
+<ParamField path="environment.sip_password" type="environment variable name" required>
+  Holds that credential's password.
+</ParamField>
+
+<ParamField path="environment.from_number" type="environment variable name" required>
+  Holds the attached number in E.164 form. The generated setup script reads
+  this one line to find your number.
+</ParamField>
+
+Every value is a **name**, never a value, and each name is UPPER_SNAKE. An
+`account_sid` or an `auth_token` here is refused: those belong to the routes
+that call Twilio's REST API, and this one authenticates to the trunk.
 
 ## Deploy the agent first
 
@@ -277,6 +324,29 @@ environment:
   auth_token: TWILIO_AUTH_TOKEN
   from_number: TWILIO_PHONE_NUMBER
 ```
+
+### Every key the connector connection takes
+
+<ParamField path="transport" type="connector" required>
+  The mechanism. It is what puts the bridge in the emitted project.
+</ParamField>
+
+<ParamField path="carrier" type="twilio" required>
+  The only carrier this route has.
+</ParamField>
+
+<ParamField path="environment.account_sid" type="environment variable name" required>
+  Holds the account SID, the one starting `AC`.
+</ParamField>
+
+<ParamField path="environment.auth_token" type="environment variable name" required>
+  Holds the account's auth token.
+</ParamField>
+
+<ParamField path="environment.from_number" type="environment variable name" required>
+  Holds your number in E.164 form, which is the caller identity a dialled
+  person sees.
+</ParamField>
 
 What changes:
 
