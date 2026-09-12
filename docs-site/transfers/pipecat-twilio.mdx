@@ -31,6 +31,10 @@ destinations:
   billing_line: BILLING_PHONE_NUMBER
 ```
 
+`billing_line` is a symbol, never a number: the right half names an environment
+variable read at call time, a rule [Human transfers](/transfers/overview) states
+in full.
+
 Your number points at a small piece of static markup in the Twilio console, which
 streams the call to Pipecat Cloud. No server of yours is in the path, in
 production or ever.
@@ -42,10 +46,6 @@ block at all. Which keys each route accepts is in
 [Connection configuration](/reference/connections-yaml#which-environment-keys-a-route-accepts),
 and where each Twilio value is found is in
 [Pipecat over Twilio](/telephony/pipecat-twilio).
-
-`billing_line` is a symbol, never a number: the right half names an environment
-variable read at call time, a rule [Human transfers](/transfers/overview) states
-in full.
 
 ## The transfer
 
