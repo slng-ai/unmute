@@ -52,23 +52,29 @@ Nemotron on your own Jetson with a Pipecat agent on any cloud is a legal
 combination, and so is NVIDIA-hosted Nemotron with the agent anywhere else. A
 matrix rather than one choice.
 
-## What binds today, and what does not
+## Using NVIDIA speech endpoints
 
-**`think` — Nemotron — binds on both targets with no new integration.** NIM LLM
-endpoints are OpenAI-compatible, which is the route the compilers keep open for a
-provider that is not in the built-in list.
+This example uses SLNG for `listen` and `speak` — that's what `unmute init` writes
+by default. To use NVIDIA speech endpoints instead, edit `agent.yaml`:
 
-**`listen` and `speak` point at SLNG speech here** — that is what `unmute init`
-writes, not a constraint. On the pipecat target any OpenAI-compatible speech
-endpoint binds through `endpoint_env`, the same route Nemotron travels.
+**For ASR (Parakeet):** NVIDIA's ASR NIM serves `/v1/audio/transcriptions`, the
+same OpenAI-compatible route that STT providers use. Add `endpoint_env` to point
+at your NIM:
 
-The ASR NIM serves `/v1/audio/transcriptions`, so Parakeet should bind on that
-route. The TTS NIM serves `/v1/audio/synthesize` rather than `/v1/audio/speech`,
-so Chatterbox does not. On the livekit target neither binds: its listen and
-speak provider lists have no custom-endpoint route.
+```yaml
+listen:
+  transcriber:
+    provider: nvidia
+    model: "parakeet-ctc-1.1b"
+    endpoint_env: NVIDIA_NIM_BASE_URL
+```
 
-That one missing endpoint is most of the distance between this package and a
-stack that is NVIDIA end to end.
+**For TTS (Chatterbox):** NVIDIA's TTS NIM serves `/v1/audio/synthesize` instead
+of OpenAI's `/v1/audio/speech`. Support for this endpoint is in progress.
+
+**For LLM (Nemotron):** Already configured with `endpoint_env: NVIDIA_NIM_BASE_URL`
+in the example. NIM LLM endpoints are OpenAI-compatible, so they work on both
+Pipecat and LiveKit targets.
 
 ## What targets.yaml is doing
 
