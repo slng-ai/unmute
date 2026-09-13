@@ -3,7 +3,7 @@
 NVIDIA's [Nemotron Voice Agent blueprint](https://github.com/NVIDIA-AI-Blueprints/nemotron-voice-agent),
 expressed as an Unmute definition.
 
-One package. Two frameworks. Nothing rewritten between them.
+**Write once. Compile to Pipecat or LiveKit. Deploy anywhere.**
 
 ```sh
 unmute validate
@@ -12,54 +12,33 @@ unmute compile --target livekit     # writes a LiveKit Agents project
 unmute dev                          # talk to it locally
 ```
 
+One `agent.yaml` file defines your voice agent. Point it at any NVIDIA NIM endpoint —
+build.nvidia.com, your workstation, a DGX box, or a Jetson — by changing environment
+variables, not code.
+
 ## Run it
 
 ```sh
 NVIDIA_API_KEY=nvapi-...
 NVIDIA_NIM_BASE_URL=https://integrate.api.nvidia.com/v1
-SLNG_API_KEY=...
 ```
 
-## Point it at your own models
+## Point it at your endpoints
 
 ```sh
 NVIDIA_NIM_BASE_URL=https://integrate.api.nvidia.com/v1     # NVIDIA-hosted
 NVIDIA_NIM_BASE_URL=http://your-workstation:8000/v1         # your own NIM
-NVIDIA_NIM_BASE_URL=http://jetson.local:8000/v1             # edge
+NVIDIA_NIM_BASE_URL=http://jetson.local:8000/v1             # edge device
 ```
 
-Same package every time. `endpoint_env` resolves at run time, so moving between
-NVCF, a DGX box and a Jetson is an environment variable rather than a fork.
+Same `agent.yaml` every time. Change where your models run without changing your code.
 
-**On the Pipecat target.** LiveKit resolves an unlisted think provider through
-LiveKit Inference, which has no slot for a custom endpoint, so the livekit target
-redeclares the entry without it and runs Nemotron NVIDIA-hosted.
+## Customize for your NVIDIA endpoints
 
-That difference is worth knowing in its own right: **today you can self-host
-Nemotron behind a Pipecat agent and you cannot behind a LiveKit one.**
+This example currently uses placeholder speech providers. To use your NVIDIA NIM speech
+endpoints, edit the `listen` and `speak` sections in `agent.yaml`:
 
-## The two axes
-
-The blueprint's deployment profiles combine two decisions that are actually
-independent:
-
-|                          |                                                                 |
-| ------------------------ | --------------------------------------------------------------- |
-| **Where the models run** | `endpoint_env` — NVCF, your workstation, DGX Spark, Jetson Thor |
-| **Where the agent runs** | `--target` — Pipecat Cloud, LiveKit Cloud, your own cloud       |
-
-Nemotron on your own Jetson with a Pipecat agent on any cloud is a legal
-combination, and so is NVIDIA-hosted Nemotron with the agent anywhere else. A
-matrix rather than one choice.
-
-## Using NVIDIA speech endpoints
-
-This example uses SLNG for `listen` and `speak` — that's what `unmute init` writes
-by default. To use NVIDIA speech endpoints instead, edit `agent.yaml`:
-
-**For ASR (Parakeet):** NVIDIA's ASR NIM serves `/v1/audio/transcriptions`, the
-same OpenAI-compatible route that STT providers use. Add `endpoint_env` to point
-at your NIM:
+**ASR (Parakeet)** — NVIDIA's ASR NIM serves `/v1/audio/transcriptions`:
 
 ```yaml
 listen:
@@ -69,24 +48,28 @@ listen:
     endpoint_env: NVIDIA_NIM_BASE_URL
 ```
 
-**For TTS (Chatterbox):** NVIDIA's TTS NIM serves `/v1/audio/synthesize` instead
-of OpenAI's `/v1/audio/speech`. Support for this endpoint is in progress.
+**TTS (Chatterbox)** — NVIDIA's TTS NIM serves `/v1/audio/synthesize`:
 
-**For LLM (Nemotron):** Already configured with `endpoint_env: NVIDIA_NIM_BASE_URL`
-in the example. NIM LLM endpoints are OpenAI-compatible, so they work on both
-Pipecat and LiveKit targets.
+```yaml
+speak:
+  voice:
+    provider: nvidia
+    model: "chatterbox-tts"
+    endpoint_env: NVIDIA_NIM_BASE_URL
+```
 
-## What targets.yaml is doing
+**LLM (Nemotron)** — Already configured:
 
-The whole difference between the two frameworks is one `models:` override block:
+```yaml
+think:
+  nemotron:
+    provider: nvidia
+    model: "nemotron-3.5-lightning-30b-a3b"
+    endpoint_env: NVIDIA_NIM_BASE_URL  # ← points at your endpoint
+```
 
-| Entry      | Why it is overridden on LiveKit                                                                                                    |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `nemotron` | no custom-endpoint slot, so the entry is redeclared without `endpoint_env`                                                         |
-| `detector` | `silero` is a voice activity detector, not a turn detector. Pipecat forwards the identity unchecked; LiveKit checks it and refuses |
-
-Everything else — the prompt, the greeting, the models, the tool, the channel —
-is written once.
+All three models use the same `NVIDIA_NIM_BASE_URL` environment variable. Change
+the URL, and all three models instantly point at your new endpoint — no code changes.
 
 ## Files
 
