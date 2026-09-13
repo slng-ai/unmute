@@ -9,7 +9,6 @@ One package. Two frameworks. Nothing rewritten between them.
 unmute validate
 unmute compile --target pipecat     # writes a Pipecat project
 unmute compile --target livekit     # writes a LiveKit Agents project
-unmute deploy  --target slng        # hosted
 ```
 
 ## Point it at your own models
@@ -31,11 +30,11 @@ independent:
 | | |
 | --- | --- |
 | **Where the models run** | `endpoint_env` — NVCF, your workstation, DGX Spark, Jetson Thor |
-| **Where the agent runs** | `--target` — Pipecat Cloud, LiveKit Cloud, SLNG, your own cloud |
+| **Where the agent runs** | `--target` — Pipecat Cloud, LiveKit Cloud, your own cloud |
 
-So Nemotron on your own Jetson with the agent on LiveKit Cloud is a legal
+So Nemotron on your own Jetson with the agent on Pipecat Cloud is a legal
 combination, and so is Nemotron on build.nvidia.com with the agent running
-in-region on SLNG. It is a matrix rather than one choice.
+on LiveKit Cloud. It is a matrix rather than one choice.
 
 ## What binds today, and what does not
 
