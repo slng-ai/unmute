@@ -540,16 +540,16 @@ func pyTuple(values []string) string {
 }
 
 // slngConsumedParams drops the params the compiler consumes rather than
-// forwards. world_part_override becomes the base URL and slng_pure_proxy rides
-// the request body, so neither must also reach the client as a kwarg the SDK
-// never heard of (D2).
+// forwards. world_part becomes the base URL and slng_pure_proxy rides the
+// request body, so neither must also reach the client as a kwarg the SDK never
+// heard of (D2).
 func slngConsumedParams(params map[string]any) map[string]any {
 	if len(params) == 0 {
 		return params
 	}
 	out := make(map[string]any, len(params))
 	for key, value := range params {
-		if key == "world_part_override" || key == slngPureProxyParam {
+		if key == "world_part" || key == slngPureProxyParam {
 			continue
 		}
 		out[key] = value
@@ -586,8 +586,9 @@ func slngPureProxy(binding ir.Binding) bool {
 	return on
 }
 
-// slngRegion reads the authored region off a binding, before it is consumed.
-func slngRegion(binding ir.Binding) string {
-	region, _ := binding.Params["world_part_override"].(string)
-	return region
+// slngWorldPart reads the authored world part off a binding, before it is
+// consumed.
+func slngWorldPart(binding ir.Binding) string {
+	part, _ := binding.Params["world_part"].(string)
+	return part
 }

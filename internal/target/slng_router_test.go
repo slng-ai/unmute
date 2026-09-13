@@ -5,27 +5,31 @@ import (
 	"testing"
 )
 
-func TestSlngRouterBaseURL(t *testing.T) {
-	for _, tc := range []struct {
-		region string
-		want   string
-	}{
-		{"eu", "https://eu.context-router.slng.ai/v1"},
-		{"us", "https://us.context-router.slng.ai/v1"},
-		{"india", "https://india.context-router.slng.ai/v1"},
-		{"indonesia", "https://indonesia.context-router.slng.ai/v1"},
-	} {
-		got, ok := SlngRouterBaseURL(tc.region)
-		if !ok || got != tc.want {
-			t.Errorf("SlngRouterBaseURL(%q) = %q, %v; want %q, true", tc.region, got, ok, tc.want)
+// The router serves every world part and nothing else. Asserted against
+// SlngWorldParts itself rather than a copy of the list, because a copy is how
+// the two sets drifted apart the first time: the router took four names of its
+// own, `eu`, `us`, `india` and `indonesia`, while speech took the thirteen world
+// parts, and `in` and `india` were the same place spelled two ways.
+func TestSlngRouterServesEveryWorldPartAndNothingElse(t *testing.T) {
+	for _, part := range SlngWorldParts {
+		want := "https://" + part + ".context-router.slng.ai/v1"
+		got, ok := SlngRouterBaseURL(part)
+		if !ok || got != want {
+			t.Errorf("SlngRouterBaseURL(%q) = %q, %v; want %q, true", part, got, ok, want)
 		}
 	}
-	// The speech world parts share the params key and not the accepted set, so
-	// each has to be refused here rather than silently produce a host that does
-	// not exist (D2).
-	for _, region := range []string{"", "na", "ap", "EU", "eu ", "europe"} {
-		if got, ok := SlngRouterBaseURL(region); ok {
-			t.Errorf("SlngRouterBaseURL(%q) = %q, true; want refused", region, got)
+	// The four retired router names are refused rather than mapped to a guessed
+	// world part, because the spellings overlap and the meanings do not: `us`
+	// was a router region and is not a world part, so accepting it would send
+	// the request somewhere the author did not write.
+	for _, retired := range []string{"eu", "us", "india", "indonesia"} {
+		if got, ok := SlngRouterBaseURL(retired); ok {
+			t.Errorf("SlngRouterBaseURL(%q) = %q, true; want the retired name refused", retired, got)
+		}
+	}
+	for _, wrong := range []string{"", "na", "ap", "EU-WEST", "eu-west ", "europe"} {
+		if got, ok := SlngRouterBaseURL(wrong); ok {
+			t.Errorf("SlngRouterBaseURL(%q) = %q, true; want refused", wrong, got)
 		}
 	}
 }

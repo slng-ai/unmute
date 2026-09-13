@@ -1565,7 +1565,7 @@ func TestBuildPromptSuffixMovesNoCacheScope(t *testing.T) {
 				Provider: "openai-compat", URL: "https://openrouter.ai/api/v1",
 				KeyEnv: "OPENROUTER_API_KEY",
 			},
-			Params: map[string]any{"world_part_override": "eu"},
+			Params: map[string]any{"world_part": "eu-west"},
 		}
 		billing := pkg.Agent.Agents["billing"]
 		billing.Think = "fast_reasoning"

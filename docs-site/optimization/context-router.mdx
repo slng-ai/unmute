@@ -22,7 +22,7 @@ On this page:
 - [Reading the router's log line](#reading-the-routers-log-line) - how to see a hit
 - [How it decides](#how-it-decides) - what it treats as a repeat
 - [One stable `agent_id`, one scope per prompt](#one-stable-agent_id-one-scope-per-prompt) - naming your cache
-- [Regions](#regions) - the four router endpoints
+- [World parts](#world-parts) - the 13 places the router serves you from
 - [Your model, and who serves it](#your-model-and-who-serves-it) - the `upstream` block
 - [Params ride the request body](#params-ride-the-request-body) - what is forwarded
 - [Advanced](#advanced) - prompt text, effort, and personal prompts
@@ -62,7 +62,7 @@ models:
       upstream:
         provider: openai
       params:
-        world_part_override: eu
+        world_part: eu-west
         reasoning_effort: "none"
 ```
 
@@ -95,8 +95,15 @@ tools, agents, tasks, task groups, greetings, channels, capacity.
   [`prompt_suffix`](#prompt_suffix-for-what-no-parameter-reaches).
 </ParamField>
 
+<ParamField path="params.world_part" type="world part" required>
+  Which of the 13 [world parts](#world-parts) serves this binding. The same key
+  and the same values a `listen` or `speak` model takes. The compiler turns it
+  into the base URL, so it never reaches your upstream.
+</ParamField>
+
 <ParamField path="params" type="block">
-  Two names are consumed here and everything else rides the request body. See
+  `world_part` and `slng_pure_proxy` are consumed here and everything else rides
+  the request body. See
   [Params ride the request body](#params-ride-the-request-body).
 </ParamField>
 
@@ -186,25 +193,44 @@ scope rather than the bare `agent_id`. Bump the id, or start sending one scope
 per prompt, and that arrangement has to be redone. The generated runbook prints
 the exact list of scopes your package sends.
 
-## Regions
+## World parts
 
-`params.world_part_override` picks which router serves you.
+`params.world_part` picks which router serves you. It is the same key, and the
+same 13 world parts, that a speech model takes. Learn a world part once and you
+write the same word for listening, thinking and speaking.
 
-| Value | Endpoint |
-|---|---|
-| `eu` | `https://eu.context-router.slng.ai/v1` |
-| `us` | `https://us.context-router.slng.ai/v1` |
-| `india` | `https://india.context-router.slng.ai/v1` |
-| `indonesia` | `https://indonesia.context-router.slng.ai/v1` |
+| Value | Where | Endpoint |
+|---|---|---|
+| `us-east` | Eastern United States | `https://us-east.context-router.slng.ai/v1` |
+| `us-west` | Western United States | `https://us-west.context-router.slng.ai/v1` |
+| `br` | Brazil | `https://br.context-router.slng.ai/v1` |
+| `eu-west` | Western Europe | `https://eu-west.context-router.slng.ai/v1` |
+| `eu-north` | Northern Europe | `https://eu-north.context-router.slng.ai/v1` |
+| `gb` | United Kingdom | `https://gb.context-router.slng.ai/v1` |
+| `za` | South Africa | `https://za.context-router.slng.ai/v1` |
+| `il` | Israel | `https://il.context-router.slng.ai/v1` |
+| `jp` | Japan | `https://jp.context-router.slng.ai/v1` |
+| `sg` | Singapore | `https://sg.context-router.slng.ai/v1` |
+| `id` | Indonesia | `https://id.context-router.slng.ai/v1` |
+| `in` | India | `https://in.context-router.slng.ai/v1` |
+| `au` | Australia | `https://au.context-router.slng.ai/v1` |
 
-<Warning>
-  These four are the router's own regions. SLNG **speech gateways** use a
-  different set under `params.world_part`: for example, `in`
-  selects the Indian speech gateway, while this router requires `india`.
-  See [speech gateway values](/optimization/regional-infrastructure#choose-a-speech-gateway).
-</Warning>
+<Note>
+  One word, three roles. `eu-west` on a `think` binding and `eu-west` on a
+  `listen` binding are the same place, so a package can keep a whole call in one
+  world part. See [the speech gateways](/optimization/regional-infrastructure#choose-a-speech-gateway)
+  for the same table on the speech side.
+</Note>
 
 The key is consumed rather than forwarded: it becomes the base URL.
+
+<Warning>
+  The router used to take four names of its own: `eu`, `us`, `india` and
+  `indonesia`. Those are refused now, with a line saying where they moved.
+  Rewrite them as world parts. `india` becomes `in`, `indonesia` becomes `id`,
+  and `eu` and `us` each become the specific world part you want, because the
+  world parts are finer: `eu-west` or `eu-north`, `us-east` or `us-west`.
+</Warning>
 
 ## Your model, and who serves it
 
@@ -265,8 +291,9 @@ works out which at startup.
 Everything under `params:` on a router think binding is passthrough. The compiler
 reads two names and forwards the rest:
 
-<ParamField path="params.world_part_override" type="eu | us | india | indonesia">
-  Consumed, and becomes the router's regional base URL.
+<ParamField path="params.world_part" type="world part">
+  Consumed, and becomes the router's base URL for that world part. One of the 13
+  values in the table above, the same set a speech binding takes.
 </ParamField>
 
 <ParamField path="params.slng_pure_proxy" type="switch">
@@ -320,7 +347,7 @@ models:
         url: https://openrouter.ai/api/v1
         key_env: OPENROUTER_API_KEY
       params:
-        world_part_override: eu
+        world_part: eu-west
 ```
 
 The worked reason it exists: Qwen3 is a hybrid thinking model, and thinking
@@ -453,12 +480,20 @@ produced the long value.
 
 ### The compiler refuses a `world_part_override`
 
-It refuses a value the router does not serve and names the four. A speech
-gateway value is the usual cause, because the two sets look alike and are not.
+That key is gone. The router took four names of its own, and now it takes the
+same world parts as speech.
 
-**Fix:** write `eu`, `us`, `india` or `indonesia`. A speech model's
-`params.world_part` keeps its own
-[13 values](/optimization/regional-infrastructure#choose-a-speech-gateway).
+**Fix:** rename the key to `params.world_part` and write a world part. `india`
+becomes `in` and `indonesia` becomes `id`; `eu` and `us` each become a specific
+world part, such as `eu-west` or `us-east`.
+
+### The compiler refuses a `world_part`
+
+The value is not one of the [13 world parts](#world-parts). The refusal lists
+them all.
+
+**Fix:** write one of the 13. A speech binding on the same package takes the
+same words, so copying the value from there works.
 
 ## Next
 

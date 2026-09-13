@@ -339,7 +339,7 @@ var pipecatCatalog = []Entry{
 			// without a new Python class.
 			SettingsOverflow: "extra",
 		},
-		Notes: []string{"SLNG Context Router over Chat Completions; params.world_part_override becomes base_url and the identity headers plus the inline slng_config ride Settings.extra"},
+		Notes: []string{"SLNG Context Router over Chat Completions; params.world_part becomes base_url and the identity headers plus the inline slng_config ride Settings.extra"},
 	},
 	{
 		Framework: Pipecat, Role: Reason, Vendor: "anthropic",

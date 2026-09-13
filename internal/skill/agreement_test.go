@@ -534,7 +534,7 @@ func TestRegionalGuidanceStaysExplicit(t *testing.T) {
 		if strings.Contains(content, "region_override") || strings.Contains(content, "region-override") {
 			t.Errorf("%s still teaches the retired SLNG region override", name)
 		}
-		for _, part := range target.SlngSpeechWorldParts {
+		for _, part := range target.SlngWorldParts {
 			if !strings.Contains(content, "`"+part+"`") {
 				t.Errorf("%s omits speech gateway %q", name, part)
 			}
@@ -571,6 +571,47 @@ func TestRegionalGuidanceStaysExplicit(t *testing.T) {
 	// packages, so the skill must not send anyone to a path that is not there.
 	if examples := bundleFile(t, "references/examples.md"); strings.Contains(examples, "`examples/regional-infrastructure`") {
 		t.Error("references/examples.md still routes regional work to a deleted example")
+	}
+}
+
+// The Context Router serves the same world parts as speech, under the same key,
+// and every reader-facing surface has to say the same thing. Held against
+// target.SlngWorldParts rather than a list written here, because the two sets
+// drifted apart once already: the router took four names of its own, `eu`, `us`,
+// `india` and `indonesia`, and an author had to learn that `in` and `india` were
+// the same place spelled two ways. A world part added in Go and not on the page
+// is a value nobody finds.
+func TestRouterWorldPartsReachEveryReaderFacingSurface(t *testing.T) {
+	for name, content := range map[string]string{
+		"references/models.md":                      bundleFile(t, "references/models.md"),
+		"docs-site/optimization/context-router.mdx": trackedFile(t, "docs-site/optimization/context-router.mdx"),
+	} {
+		if !strings.Contains(content, "params.world_part") {
+			t.Errorf("%s does not name params.world_part, which is the key a router binding takes", name)
+		}
+		// The retired key may still be named, because an author on it needs to
+		// be told where it went. What it may not do is read as a key to write.
+		for _, taught := range []string{"world_part_override: ", "path=\"params.world_part_override\""} {
+			if strings.Contains(content, taught) {
+				t.Errorf("%s still teaches params.world_part_override as a key an author writes", name)
+			}
+		}
+	}
+
+	page := trackedFile(t, "docs-site/optimization/context-router.mdx")
+	for _, part := range target.SlngWorldParts {
+		row := regexp.MustCompile(`\| ` + regexp.QuoteMeta("`"+part+"`") + ` \| [^|]+ \| ` + regexp.QuoteMeta("`https://"+part+".context-router.slng.ai/v1`") + ` \|`)
+		if !row.MatchString(page) {
+			t.Errorf("docs-site/optimization/context-router.mdx omits the endpoint row for world part %q", part)
+		}
+	}
+	// The four retired router names are gone from the endpoint table. Named
+	// outside a table row they are migration advice, which the page keeps.
+	for _, retired := range []string{"eu", "us", "india", "indonesia"} {
+		row := regexp.MustCompile(`\| ` + regexp.QuoteMeta("`"+retired+"`") + ` \|`)
+		if row.MatchString(page) {
+			t.Errorf("docs-site/optimization/context-router.mdx still lists retired router region %q as a value", retired)
+		}
 	}
 }
 

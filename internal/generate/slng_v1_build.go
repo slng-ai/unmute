@@ -331,9 +331,10 @@ func buildSlng(agent *ir.Agent, tgt ir.Target) (slngArtifacts, error) {
 // refused an empty list, more than one, and a value outside the four, so this
 // reads the first entry rather than re-deciding.
 //
-// Named for the target because slngRegion next door belongs to the model vendor:
-// it reads a world_part_override off a Context Router binding, which is a
-// different region set answering a different question.
+// Named for the target because slngWorldPart next door answers a different
+// question: it reads the params.world_part off a Context Router binding, which
+// says where a request is thought, not where the worker runs. The two sets are
+// separate and stay separate.
 func slngTargetRegion(tgt ir.Target) string {
 	if len(tgt.DeploymentRegions) == 0 {
 		return ""

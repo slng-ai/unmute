@@ -189,7 +189,7 @@ def _slng_router_client() -> AsyncOpenAI:
     """
     return AsyncOpenAI(
         api_key=os.environ["SLNG_API_KEY"],
-        base_url="https://eu.context-router.slng.ai/v1",
+        base_url="https://eu-west.context-router.slng.ai/v1",
         max_retries=0,
         http_client=httpx.AsyncClient(
             timeout=httpx.Timeout(connect=15.0, read=5.0, write=5.0, pool=5.0),

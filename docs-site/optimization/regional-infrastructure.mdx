@@ -161,14 +161,14 @@ and Pipecat. Set the world part on each model separately.
 
 Omitting `world_part` keeps the existing default URL.
 
-### SLNG reasoning uses the Context Router
+### SLNG reasoning uses the same world parts
 
 For a `think` model with `provider: slng`, the
-[Context Router](/optimization/context-router) has its own gateway locations:
-`eu`, `us`, `india`, and `indonesia`. Set `params.world_part_override` for the
-router and `params.world_part` for speech. Their values also differ: speech
-uses `in`, for example, while the router uses `india`. The LLM behind the router
-keeps its own provider settings.
+[Context Router](/optimization/context-router) serves the same 13 world parts as
+the table above, under the same key: `params.world_part`. So `eu-north` on a
+speech binding and `eu-north` on a think binding are the same place, and a
+package can keep listening, thinking and speaking in one world part. The LLM
+behind the router keeps its own provider settings.
 
 ## Place the worker near your users and models
 
@@ -248,14 +248,14 @@ broad areas.
 
 **Fix:** remove the explicit URL or the world part.
 
-### The router refuses the value that works for speech
+### The router refuses a `world_part_override`
 
-The two sets are different. Speech gateways use `params.world_part` and 13
-values; the Context Router uses `params.world_part_override` and four. Speech
-uses `in`, for example, while the router uses `india`.
+The router used to take four names of its own, `eu`, `us`, `india` and
+`indonesia`, under a key of its own. It takes the 13 world parts now, under
+`params.world_part`, like speech.
 
-**Fix:** write each setting its own value. See
-[SLNG reasoning uses the Context Router](#slng-reasoning-uses-the-context-router).
+**Fix:** rename the key and write a world part. See
+[SLNG reasoning uses the same world parts](#slng-reasoning-uses-the-same-world-parts).
 
 ### A nearby worker is still slow
 
