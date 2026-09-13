@@ -9,6 +9,15 @@ One package. Two frameworks. Nothing rewritten between them.
 unmute validate
 unmute compile --target pipecat     # writes a Pipecat project
 unmute compile --target livekit     # writes a LiveKit Agents project
+unmute dev                          # talk to it locally
+```
+
+## Run it
+
+```bash
+NVIDIA_API_KEY=nvapi-...
+NVIDIA_NIM_BASE_URL=https://integrate.api.nvidia.com/v1
+SLNG_API_KEY=...
 ```
 
 ## Point it at your own models
