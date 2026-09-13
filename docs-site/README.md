@@ -116,6 +116,11 @@ Three rules about that shape, because they are the ones that decay:
 The reference pages under Configuration files and CLI are the exception. There
 the complete list *is* the page, so they lead with it.
 
+The example READMEs under `examples/` run these slots too, adapted: they are
+GitHub Markdown rather than MDX, so they state no keys with `ParamField` and use
+`<details>` where a page uses an `<Accordion>`. `TestExampleReadmesFollowThePageShape`
+holds them.
+
 ## The structure
 
 Twelve top-level groups, in the order the reader needs them: Get started,
