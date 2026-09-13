@@ -3,7 +3,7 @@
 NVIDIA's [Nemotron Voice Agent blueprint](https://github.com/NVIDIA-AI-Blueprints/nemotron-voice-agent),
 expressed as an Unmute definition.
 
-One package. Three targets. Nothing rewritten between them.
+One package. Two frameworks. Nothing rewritten between them.
 
 ```bash
 unmute validate
