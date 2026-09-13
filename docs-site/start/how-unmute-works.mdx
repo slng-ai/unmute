@@ -3,48 +3,61 @@ title: "How Unmute works"
 description: "The four stages between your package and what each target runs."
 ---
 
-Unmute is a compiler for a declarative package. It reads the package, resolves
-it against one target, and writes what that target runs: a Python project for
-Pipecat or LiveKit Agents, a deployment body for SLNG. Nothing of Unmute is
-left in what it writes.
+Unmute is a compiler. You write one package. It reads that package, resolves it
+against one target, and writes what the target runs: a Python project for
+Pipecat or LiveKit, a deployment body for SLNG.
+
+Nothing of Unmute is left in what it writes.
+
+```mermaid
+flowchart LR
+    P["your package<br/>agent.yaml, prompts, tools"] --> L[Load]
+    L --> B[Build]
+    B --> V[Validate]
+    V --> G[Generate]
+    G --> O["build/&lt;target&gt;/<br/>a Python project, or a deployment body"]
+```
 
 ## The four stages
 
 <Steps>
   <Step title="Load">
-    Unmute reads [`agent.yaml`](/reference/agent-yaml),
+    Unmute reads your files: [`agent.yaml`](/reference/agent-yaml),
     [`targets.yaml`](/reference/targets-yaml), your tool files, your
     [connections](/reference/connections-yaml), your prompts, and your local
-    Python handlers. YAML decoding is strict: an unknown field is an error, not
-    a shrug. Errors carry the file and the line. The configuration pages also
-    list every [variable](/reference/variables) and [secret](/reference/secrets)
-    field.
+    Python handlers.
+
+    Decoding is strict. An unknown field is an error, not a shrug, and every
+    error carries the file and the line.
   </Step>
   <Step title="Build">
-    Names get resolved into one internal description of the agent. Model names
-    point at model definitions, the names in an agent's lists are resolved to
-    the tasks, task groups, handoffs and tools they point at, per target
-    overrides get applied, and a telephony route is picked from what the target
-    declares. This description knows nothing about Pipecat or LiveKit.
+    Names become one description of the agent. Model names point at model
+    definitions. The names in an agent's lists are resolved to the tasks, task
+    groups, handoffs and tools they mean. Per-target overrides are applied, and
+    a telephony route is picked from what the target declares.
+
+    This description knows nothing about Pipecat or LiveKit.
   </Step>
   <Step title="Validate">
-    The description is checked against the capability table of each target you
-    selected. Something a target cannot do is an error before anything is
-    written. Something it does differently, while keeping your contract, is a
-    warning.
+    The description is checked against what your chosen target can do.
+
+    Something the target **cannot** do stops the build, before anything is
+    written. Something it does **differently** while keeping your contract is a
+    warning: the build finishes and the warning tells you the difference.
   </Step>
   <Step title="Generate">
-    One driver turns the description into files for one target. `validate` and
-    `compile` run the same first three stages, so a package that validates
-    cannot surprise you at compile time.
+    One driver turns the description into files for one target.
+
+    `validate` and `compile` run the same first three stages, so a package that
+    validates cannot surprise you at compile time.
   </Step>
 </Steps>
 
 ## What you get
 
 `unmute compile` writes one directory per target under `build/`. Name the
-package, as in `unmute compile my-agent`, or leave the argument out and it
-compiles the directory you are standing in:
+package, as in `unmute compile my-agent`, or leave the argument out to compile
+the directory you are standing in.
 
 <CodeGroup>
 ```text Pipecat
@@ -62,7 +75,7 @@ build/pipecat/
 └── compile-report.json
 ```
 
-```text LiveKit Agents
+```text LiveKit
 build/livekit/
 ├── agent.py            # the agent
 ├── tools/              # your local handlers, copied
@@ -85,22 +98,19 @@ build/slng/
 </CodeGroup>
 
 A code target is a normal Python project. You can read it, run it, and deploy
-it. It does not import Unmute. On SLNG there is nothing to run yourself:
-`unmute deploy` pushes `agent.json` and SLNG runs the agent.
+it. It does not import Unmute.
+
+On SLNG there is nothing to run yourself: `unmute deploy` pushes `agent.json`
+and SLNG runs the agent.
 
 <Warning>
   Treat `build/` as output. Edit the package and compile again. Anything you
   change inside `build/` is overwritten on the next compile.
 </Warning>
 
-## Warnings never fail quietly
-
-Warnings go to standard error and the command still exits 0. Errors exit 1.
-A warning is a real difference worth reading, for example:
-
-```text
-warning: livekit: LiveKit runs tool executions to completion; a per-tool interruption preference is not enforced
-```
+Two files in every build answer "what did it decide?": `README.md` is the
+runbook for that build, and <Tooltip tip="A JSON file beside your build listing every choice the compiler made: each model, each route, each number it worked out.">`compile-report.json`</Tooltip> records every binding,
+resolved route and derived number the compiler used.
 
 ## Where to go next
 

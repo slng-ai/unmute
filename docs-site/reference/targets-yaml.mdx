@@ -109,8 +109,9 @@ for a deployed example.
 
 `pins` is a LiveKit-only escape hatch for packages already known to the LiveKit
 driver. Unknown package names and versions below the catalogue floor are errors.
-On a `pipecat` or `slng` target the map validates with no error, and nothing
-reads it, so leave it out there.
+On a `pipecat` target the map validates with no error and nothing reads it, so
+leave it out. An `slng` target refuses it by name: there is no generated
+project whose packages could be pinned.
 
 ## models overrides
 

@@ -1,12 +1,12 @@
 ---
 title: "Unmute"
-description: "A declarative standard for voice agents. Describe the agent once, compile it to Pipecat, LiveKit Agents, or SLNG."
+description: "A declarative standard for voice agents. Describe the agent once, compile it to Pipecat, LiveKit, or SLNG."
 sidebarTitle: "Overview"
 ---
 
 Unmute is a declarative standard for voice agents. You describe the agent
 once, in YAML and Markdown. The compiler turns that package into a native
-project for the target you pick: Pipecat, LiveKit Agents, or SLNG.
+project for the target you pick: Pipecat, LiveKit, or SLNG.
 
 ## The problem
 
@@ -34,8 +34,8 @@ That description is the package. Nothing in it belongs to one framework.
 Then you pick a target. A target is where the agent will run, and Unmute
 compiles the package into what that target expects:
 
-- **Pipecat** and **LiveKit Agents** are code targets. You get a Python
-  project with a Dockerfile, a `.env.example`, and a runbook. The project does
+- **Pipecat** and **LiveKit** are code targets. You get a Python
+  project with a Dockerfile, a `.env.example`, and a <Tooltip tip="A README written for your build alone. It lists the exact keys, commands and phone steps that build needs.">runbook</Tooltip>. The project does
   not import Unmute, and Unmute is not in the call path.
 - **SLNG** is a hosted target. You get a deployment body, `unmute deploy`
   pushes it, and SLNG runs the agent.
@@ -46,7 +46,7 @@ compiles the package into what that target expects:
     agent does.
   </Card>
   <Card title="Three targets" icon="boxes" href="/targets/overview">
-    The same package compiles to Pipecat, to LiveKit Agents, and to SLNG. Same
+    The same package compiles to Pipecat, to LiveKit, and to SLNG. Same
     prompt, same tools, same behavior.
   </Card>
 </Columns>
@@ -70,7 +70,7 @@ complete files, then explains each block where you first need it.
 
 - Teams who ship voice agents and want the agent's behavior in files a
   reviewer can read, not in framework code.
-- Teams who want to compare Pipecat, LiveKit Agents, and SLNG without writing
+- Teams who want to compare Pipecat, LiveKit, and SLNG without writing
   the agent three times.
 - Anyone who wants what the agent does reviewable in a pull request.
 

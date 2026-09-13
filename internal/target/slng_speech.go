@@ -6,9 +6,15 @@ import (
 	"strings"
 )
 
-// SlngSpeechWorldParts selects speech gateways, independently of worker
-// deployment regions and the Context Router's own region set.
-var SlngSpeechWorldParts = []string{
+// SlngWorldParts are SLNG's world parts: the speech gateways and, since the
+// Context Router was widened to the same set, the router endpoints too. One
+// list because one vocabulary: an author who learns a world part for listening
+// writes the same word for thinking.
+//
+// Worker deployment regions are still a separate question, and a separate set.
+// If SLNG ever serves a world part for one role and not the other, this splits
+// back into two lists rather than growing a per-role filter here.
+var SlngWorldParts = []string{
 	"us-east", "us-west", "br", "eu-west", "eu-north", "gb", "za",
 	"il", "jp", "sg", "id", "in", "au",
 }
@@ -26,8 +32,8 @@ func SlngSpeechBaseURL(params map[string]any) (string, error) {
 		return "", nil
 	}
 	part, ok := value.(string)
-	if !ok || !slices.Contains(SlngSpeechWorldParts, part) {
-		return "", fmt.Errorf("params.world_part %v is not an SLNG speech gateway: choose one of %s; replace legacy na, eu or ap with a specific gateway", value, strings.Join(SlngSpeechWorldParts, ", "))
+	if !ok || !slices.Contains(SlngWorldParts, part) {
+		return "", fmt.Errorf("params.world_part %v is not an SLNG speech gateway: choose one of %s; replace legacy na, eu or ap with a specific gateway", value, strings.Join(SlngWorldParts, ", "))
 	}
 	for _, key := range []string{"base_url", "slng_base_url"} {
 		if _, set := params[key]; set {

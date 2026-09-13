@@ -3,18 +3,29 @@ title: "Coding agents"
 description: "Optional setup for supported coding assistants, followed by one checked voice-agent build."
 ---
 
-If you use a supported coding assistant, Unmute ships an optional skill that
-teaches it how to write an Unmute package: the schema, the model catalog, the
-tool kinds, how to shape a prompt for speech, and what each target refuses.
-Install it once, then describe the agent you want in a sentence and check what
-comes back. Setup is quick, and talking to the agent it builds takes a bit
-longer.
+Unmute ships an optional skill that teaches a supported coding assistant how to
+write an Unmute package.
+
+The skill carries the schema, the model catalog, the tool kinds, how to shape a
+prompt for speech, and what each target refuses. Install it once, then describe
+the agent you want in a sentence and check what comes back. Setup is quick, and
+talking to the agent it builds takes a bit longer.
 
 An assistant is not required. If you would rather write the YAML yourself, the
 [quickstart](/start/quickstart) is the same journey by hand, and it is the
 better page if you want to understand every field as you go. If your assistant
 is not one of the four below, you can still use Unmute: you just do not get the
 skill, and the rest of this site is written for you.
+
+On this page:
+
+- [Set it up](#set-it-up) - one command, every assistant
+- [Check it took](#check-it-took) - prove the skill loaded
+- [Read this site as Markdown](#read-this-site-as-markdown) - the endpoints an assistant fetches
+- [Build the salon agent](#build-the-salon-agent) - one build, start to finish
+- [Change an existing package](#change-an-existing-package) - a different order
+- [Ask for more](#ask-for-more) - what your request has to carry
+- [Habits](#habits) - six things that help
 
 ## Set it up
 
@@ -91,12 +102,13 @@ Ask:
 In Unmute, what are the six ways a tool can run?
 ```
 
-A correct answer names all six: an HTTP `webhook:`, a `local:` Python handler
-in the package, a remote `mcp:` server, `builtin:`, which selects a tool the
-runtime already has by id, `knowledge:`, a search over a folder of your own
-documents, and `slng:`, a reference to a tool the SLNG platform already hosts.
-A very good answer also mentions the two blocks that exist in the schema but no
-target emits.
+A correct answer names all six. Three of them say where an action runs: an HTTP
+`webhook:`, a `local:` Python handler in the package, and a remote `mcp:`
+server. The other three point at something that already exists. `builtin:`
+selects a tool the runtime already has by id. `knowledge:` is a search over a
+folder of your own documents. `slng:` is a reference to a tool the SLNG platform
+already hosts. A very good answer also mentions the two blocks that exist in the
+schema but no target emits.
 
 This question is the check because it cannot be guessed. It is a closed list
 out of this project's own schema, so a model that has not read the skill either
@@ -215,14 +227,10 @@ one agent, browser audio, local tools, no phone number.
     unmute validate salon
     ```
 
-    ```text
-    ✓ livekit (livekit)
-    ```
-
     The package is a directory beside you, so it is named on the command line.
     Inside `salon` you could run `unmute validate` with no argument and get the
-    same result. The target name in the output is whichever one the assistant
-    put in `targets.yaml`; `livekit` here is what `unmute init` picks too.
+    same result. It reports one row per target in `targets.yaml`, whichever
+    ones the assistant put there.
 
     Ask the assistant to run this itself and fix what it finds. Reading a
     refusal is the fastest path it has, and the messages name the file and the
@@ -282,7 +290,7 @@ conversation with your assistant. What you get back depends on what your
 request carries.
 
 Describe required order, separate roles, and server-directed next steps in
-plain words. You do not need to ask for tasks or task groups by name. The
+plain words. You do not need to ask for tasks or <Tooltip tip="Several tasks that run one after another, in the order you wrote them.">task groups</Tooltip> by name. The
 assistant should infer the smallest Unmute structure before writing files and
 tell you what it chose.
 
@@ -290,7 +298,7 @@ tell you what it chose.
 |---|---|---|
 | a tool | what it does, where the data comes from, and whether there is an HTTP endpoint already | which of the five kinds it chose, and why |
 | an ordered workflow | which stages must happen in order and which parts are server-directed | which tasks and task groups it chose, and what context the steps share |
-| a second agent | what each one owns, and when control moves between them | what context crosses the handoff, and whether the handoff comes back |
+| a second agent | what each one owns, and when control moves between them | what context crosses the <Tooltip tip="One agent gives the caller to another agent. The first agent does not get the caller back.">handoff</Tooltip>, and whether the handoff comes back |
 | a phone number | inbound, outbound, or both, and which carrier you have | which route, and what that route cannot do |
 
 Ask what it decided, every time. The skill tells it to state the target, the

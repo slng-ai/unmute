@@ -4,10 +4,10 @@ description: "What a target is, what targets.yaml holds, and how one package com
 ---
 
 A target is where your agent runs. Unmute compiles one package into a native
-project for the target you pick: Pipecat, LiveKit Agents, or SLNG. Two are code
+project for the target you pick: Pipecat, LiveKit, or SLNG. Two are code
 targets, and one is hosted.
 
-**Pipecat** and **LiveKit Agents** are code targets: `unmute compile` writes a
+**Pipecat** and **LiveKit** are code targets: `unmute compile` writes a
 Python project you own, host and run.
 
 **SLNG** is a hosted target: `unmute deploy` compiles a deployment body and
@@ -15,6 +15,15 @@ pushes it, and SLNG runs the agent. There is nothing to host and no
 `unmute dev`.
 
 Those three are the only values `provider` accepts.
+
+On this page:
+
+- [targets.yaml](#targetsyaml) - the file, and every key a target takes
+- [Overrides, not forks](#overrides-not-forks) - changing one model entry for one target
+- [Switching a package to another target](#switching-a-package-to-another-target) - the two edits that travel together
+- [One package, two projects](#one-package-two-projects) - what `unmute compile` writes
+- [Choosing between them](#choosing-between-them) - what usually decides it
+- [Where to go next](#where-to-go-next) - each target's own page
 
 ## targets.yaml
 
@@ -39,15 +48,58 @@ pass to `--target`, and it becomes the directory name under `build/`. The name
 is yours: a package with two Twilio setups might call them `pipecat_twilio` and
 `pipecat_telnyx`.
 
-| Field | What it does |
-|---|---|
-| `provider` | `pipecat` or `livekit` |
-| `version` | the exact framework version required for code targets |
-| `sdk_language` | the SDK language, `python` |
-| `pins` | known LiveKit package pins; other providers do not consume them |
-| `models` | per target overrides of named model entries |
-| `connection` | the one connection file that declares this target's phone route |
-| `deployment_region` | where the platform deploys the agent, forwarded as written |
+### Every key a target takes
+
+One is required everywhere. The rest depend on the provider you chose.
+
+<ParamField path="provider" type="livekit | pipecat | slng" required>
+  Which runtime this instance compiles for. Those three names are the whole
+  list. `vapi` and `deepgram` were target names once, and both are now refused
+  by name.
+</ParamField>
+
+<ParamField path="version" type="exact framework version">
+  The framework release an emitted project pins, written with all three
+  numbers. Required on `livekit` and `pipecat`. Refused on `slng`, which owns
+  the version its agents run on.
+</ParamField>
+
+<ParamField path="sdk_language" type="python">
+  The language an emitted project is written in. `python` is the only value
+  either driver has templates for, and LiveKit needs it stated to compile an
+  MCP tool. Refused on `slng`.
+</ParamField>
+
+<ParamField path="pins" type="package name to version">
+  Package versions for the emitted LiveKit project, limited to names the
+  LiveKit driver knows. Pipecat reads none of them, so leave it out there.
+  Refused on `slng`.
+</ParamField>
+
+<ParamField path="connection" type="connection file stem">
+  The one [connection file](/reference/connections-yaml) carrying this target's
+  phone calls. Required once the package declares a phone channel on `livekit`
+  or `pipecat`, and refused when nothing in the package uses a phone route.
+  Refused on `slng`, which has no carrier state in a package.
+</ParamField>
+
+<ParamField path="deployment_region" type="one platform region name, or a list">
+  Where the platform deploys the agent, forwarded as written. More than one
+  region is LiveKit only. On `slng` it is exactly one of `any`, `us-east`,
+  `eu-central` or `ap-south`, the only target whose region names are checked.
+</ParamField>
+
+<ParamField path="warm_instances" type="integer, zero or more" default="0">
+  Instances the platform holds ready, so the first call after a quiet period is
+  not waiting for a container to start. Pipecat only: LiveKit and `slng` refuse
+  a stated pool. Left out means none, and the platform scales to zero when idle.
+</ParamField>
+
+<ParamField path="models" type="model entry name to a model definition">
+  Per target overrides of named entries from `agent.yaml`. An override replaces
+  the entry rather than merging into it. See
+  [Overrides, not forks](#overrides-not-forks).
+</ParamField>
 
 A target says nothing else about telephony. It names one connection, and
 [the connection file](/reference/connections-yaml) declares the transport, the
@@ -80,7 +132,7 @@ edits, not one**. The target and the turn model travel together.
 This is the `turn:` block in `agent.yaml`, written for each one:
 
 <CodeGroup>
-```yaml LiveKit Agents
+```yaml LiveKit
 models:
   turn:
     detector:
@@ -141,14 +193,27 @@ unmute compile examples/salon-concierge --target pipecat
 
 Both run the same agent. The differences that usually decide it:
 
-| | Pipecat | LiveKit Agents |
+| | Pipecat | LiveKit |
 |---|---|---|
 | generated entry point | `bot.py` | `agent.py` |
-| local run | `uv run bot.py -t webrtc`, or `unmute dev` under `uv` | `uv run python -m livekit.agents start agent.py`, or `unmute dev` in Docker with a local LiveKit server |
 | phone routes | your carrier through Daily or over websockets, Pipecat Cloud carrier streams | SIP trunks, or a generated Twilio bridge |
 | transfers | cold, on two of its routes | cold and warm, on the SIP route |
 | turn detection in the examples | local Silero | LiveKit's own turn model |
 | provider lists | see [Models](/models/stt) | see [Models](/models/stt) |
+
+Running the generated project yourself differs too:
+
+<CodeGroup>
+```sh Pipecat
+uv run bot.py -t webrtc
+# or: unmute dev, which runs it under uv
+```
+
+```sh LiveKit
+uv run python -m livekit.agents start agent.py
+# or: unmute dev, which runs it in Docker against a local LiveKit server
+```
+</CodeGroup>
 
 If you need warm transfer today, that is the LiveKit SIP route. If you want a
 phone number with nothing hosted, that is one of the Pipecat routes. For a

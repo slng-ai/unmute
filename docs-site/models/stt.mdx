@@ -1,14 +1,28 @@
 ---
 title: "Speech to text"
-description: "Which speech to text vendors each target can construct, and the SLNG models the scaffold binds."
+description: "The listen binding: every key it takes, the vendors each target can construct, and how one SLNG key reaches many models."
 ---
 
+`models.listen` picks the service that turns the caller's voice into text.
+
 <Note>
-  Choosing a transcriber for **speed** rather than accuracy score is its own decision, and it is measured in [Optimizing your agent](/optimization/overview): how fast a model lands its *final* transcript decides how long the caller waits.
+  **SLNG is a host and a proxy, and one key covers both.** It runs its own
+  copies of speech models, and it also forwards to the vendors' own endpoints.
+  So a single `SLNG_API_KEY` reaches many vendors' models, and you choose which
+  of thirteen regions the audio is processed in. [One key, many
+  models](#one-key-many-models) is the whole picture.
 </Note>
 
-The `listen` role turns the caller's voice into text. You bind it once in
-`agent.yaml`:
+On this page:
+
+- [Quickstart](#quickstart) - the smallest binding that works
+- [Every key a listen binding takes](#every-key-a-listen-binding-takes) - the full shape
+- [One key, many models](#one-key-many-models) - hosted, proxied, and where it runs
+- [Pipecat](#pipecat) and [LiveKit](#livekit) - the vendors each target can construct
+- [Fallback](#fallback) - what to try when the first call fails
+- [Troubleshooting](#troubleshooting) - the refusals that come up most
+
+## Quickstart
 
 ```yaml agent.yaml
 models:
@@ -18,43 +32,115 @@ models:
       model: "deepgram/nova:3"
 ```
 
-A scaffolded package binds SLNG here by design, so one `SLNG_API_KEY` covers
-listening and speaking. See the [SLNG Execution Layer](/optimization/execution-layer).
-For model location settings across providers, including SLNG speech gateways,
-see [regional infrastructure](/optimization/regional-infrastructure).
+```sh
+unmute validate my-agent
+```
 
-<Info>
-  Model ids are forwarded to the vendor exactly as you write them. Unmute keeps no
-  allowlist, so a typo surfaces as a provider error at run time.
-</Info>
+That is a whole transcriber. `provider:` says who runs it, `model:` says which
+one, and the name you give the entry, `transcriber` here, is how the rest of
+the package refers to it.
 
-## The SLNG models the scaffold and examples use
+## Every key a listen binding takes
 
+Only `model:` is required. The rest narrow where the model runs and what
+happens when it fails.
+
+<ParamField path="provider" type="a vendor from your target's list">
+  Who serves the model. The two lists below are per target, and an unlisted
+  name is refused. Left out, the code targets fall back to `openai`, so name
+  one rather than relying on that.
+</ParamField>
+
+<ParamField path="model" type="string" required>
+  The model id, forwarded to the vendor exactly as you write it. Unmute keeps
+  no allowlist, so a typo surfaces as a provider error on the first call.
+</ParamField>
+
+<ParamField path="language" type="a BCP-47 tag, e.g. en or pt-BR">
+  The language to transcribe. Only some vendors take one. Where the vendor
+  carries language in the model id instead, this key is refused, and the
+  message names the provider.
+</ParamField>
+
+<ParamField path="placement" type="api | local">
+  Whether the model is called over the network or runs in the agent's own
+  process. Left out, it is `api` whenever the entry names a provider or a
+  model. `local` is refused on the slng target, which has no machine of yours
+  to run on.
+</ParamField>
+
+<ParamField path="endpoint_env" type="an environment variable name">
+  Points at a variable holding an OpenAI-compatible endpoint URL. This is what
+  lets a vendor that is not on Pipecat's list through. Pipecat only: LiveKit
+  has no custom speech endpoint at all, and neither does the slng target.
+</ParamField>
+
+<ParamField path="params" type="free-form map">
+  Forwarded to the vendor's own client, unchecked, except for
+  `params.world_part`, which selects an SLNG speech gateway and is refused when
+  it is not one of them.
+</ParamField>
+
+<ParamField path="fallback" type="list of other listen entry names">
+  Other entries in this same `listen:` section, tried in order when the first
+  transcriber's call fails. See [Fallback](#fallback). Every entry in a chain
+  must share the same `placement`.
+</ParamField>
+
+## One key, many models
+
+SLNG serves a speech model two ways, and the shape of the id says which:
+
+| `model:` | What it means |
+|---|---|
+| `slng/deepgram/nova:3-en` | a copy SLNG hosts itself |
+| `deepgram/nova:3` | the vendor's own endpoint, reached through SLNG as a proxy |
+
+Both are one binding and one `SLNG_API_KEY`. The point is that you do not
+collect a key per vendor to reach a vendor's model. The difference is who runs
+the model and how it is billed, which
+[docs.slng.ai](https://docs.slng.ai/execution-layer/byok) covers.
+
+### Where it runs
+
+`params.world_part` picks the SLNG speech gateway that serves the call:
+
+```yaml agent.yaml
+models:
+  listen:
+    transcriber:
+      provider: slng
+      model: "deepgram/nova:3"
+      params:
+        world_part: eu-north
+```
+
+Thirteen are accepted: `us-east`, `us-west`, `br`, `eu-west`, `eu-north`,
+`gb`, `za`, `il`, `jp`, `sg`, `id`, `au` and `in`. Left out, the SDK default
+stands. A hosted `slng/` id is a separate question: those run only where SLNG
+has put them, so a region you need may rule one out.
+[Regional infrastructure](/optimization/regional-infrastructure) explains the
+separate model, worker and media regions.
+
+### Which shape to pick for listening
+
+The scaffold and every example take the proxied route. Routing through a
+hosted id adds a hop the proxied route skips, on the one leg the caller waits
+through on every turn, from the end of their speech to the final transcript.
+Measure your own route rather than assuming this holds for you; see
+[Optimizing your agent](/optimization/overview).
+
+<Accordion title="The ids the scaffold and examples use">
 | Where | `model:` |
 |---|---|
 | `unmute init`, and every example, `hotel-concierge` on the `slng` target included | `deepgram/nova:3` |
 | the SLNG-hosted English copy, which runs in `us-central`, `au` and `in` only, so an `slng` package deploying to `eu-central` cannot name it | `slng/deepgram/nova:3-en` |
 
-Those are the only exact ids the docs name, because they are the ones the examples
-run. The full SLNG catalog, with languages, regions, and hosting, is at
-[docs.slng.ai/models](https://docs.slng.ai/models); any id from there goes in
-`model:` as written.
-
-### Why two shapes, and which one to pick
-
-The `slng/` prefix selects a model SLNG hosts itself. An id without it, like
-`deepgram/nova:3`, is the same vendor model reached through SLNG as a proxy. Both
-are one binding and one `SLNG_API_KEY`; the difference is who runs the model and
-how it is billed, which
-[docs.slng.ai](https://docs.slng.ai/execution-layer/byok) covers.
-
-For **listening**, the two are not equally fast: routing through the hosted id
-adds a hop the proxied route skips, on the one leg the caller waits through on
-every turn, from end of speech to the final transcript. That gap is why the
-scaffold and the examples take the proxied route. A hosted id is also not
-offered in every world part, so a region you need may decide this for you
-regardless. Measure your own route rather than assuming a default holds; see
-[Optimizing your agent](/optimization/overview).
+Those are the only exact ids the docs name, because they are the ones the
+examples run. The full SLNG catalog, with languages, regions and hosting, is
+at [docs.slng.ai/models](https://docs.slng.ai/models); any id from there goes
+in `model:` as written.
+</Accordion>
 
 ## Pipecat
 
@@ -71,10 +157,10 @@ regardless. Measure your own route rather than assuming a default holds; see
 | `speechmatics` | |
 
 An unlisted provider is legal on Pipecat on one condition: it has to be a
-genuinely OpenAI-compatible endpoint, named with `endpoint_env`. Without that it is
-refused, and the message lists what the role does take.
+genuinely OpenAI-compatible endpoint, named with `endpoint_env`. Without that
+it is refused, and the message lists what the role does take.
 
-## LiveKit Agents
+## LiveKit
 
 | Provider | Notes |
 |---|---|
@@ -88,8 +174,8 @@ refused, and the message lists what the role does take.
 | `soniox` | |
 | `speechmatics` | |
 
-This list is closed. LiveKit speech to text has no fallback path, so a provider
-that is not here cannot be bound at all.
+This list is closed. LiveKit speech to text has no custom endpoint slot, so a
+provider that is not here cannot be bound at all.
 
 ## The difference between the two
 
@@ -97,10 +183,8 @@ Pipecat has `openai`, LiveKit has `sarvam`. Everything else matches.
 
 ## Fallback
 
-`fallback:` on a `listen` entry names other listen entries, tried in order when
-the primary transcriber's call fails. It is the same field
-[the reasoning model documents](/models/llm#fallback), written on the `listen`
-section instead of `think`:
+`fallback:` names other `listen` entries, tried in order when the primary
+transcriber's call fails:
 
 ```yaml agent.yaml
 models:
@@ -115,10 +199,11 @@ models:
       model: nova-3
 ```
 
-On LiveKit the chain lowers to one constructor call, `stt.FallbackAdapter`.
-Compiling the package above emits:
+What that one block compiles to depends on the target:
 
-```python
+<CodeGroup>
+```python LiveKit
+# one constructor call, wrapped in stt.FallbackAdapter
 stt=stt.FallbackAdapter(
     stt=[
         slng.STT(api_key=os.environ["SLNG_API_KEY"], model="deepgram/nova:3"),
@@ -127,16 +212,51 @@ stt=stt.FallbackAdapter(
 ),
 ```
 
-Pipecat does not emit a generated fallback yet, and validating the same package
-against a Pipecat target refuses it before a file is written:
-
-```text
+```text Pipecat
+# refused before a file is written
 pipecat: the Pipecat driver does not emit listen fallback yet
 ```
 
-On SLNG the chain rides the push body as `fallbacks.stt`, a list of model
-strings in the same [vendor/model shape](/targets/slng#model-names) the primary
-binding uses.
+```json SLNG
+// on the push body, in the same vendor/model shape the primary binding uses
+"fallbacks": {
+  "stt": ["slng/deepgram/nova:3", "deepgram/nova-3"]
+}
+```
+</CodeGroup>
+
+Pipecat does not emit a generated fallback yet, so validating the same package
+against a Pipecat target refuses it. The SLNG list uses the same
+[vendor/model shape](/targets/slng#model-names) as the primary binding.
+
+## Troubleshooting
+
+### The provider is refused, and the message lists other names
+
+The vendor is not on your target's list for this role. **Fix:** pick one from
+the list above, or on Pipecat point `endpoint_env` at a variable holding an
+OpenAI-compatible endpoint. On LiveKit there is no such escape for listening.
+
+### `language` is refused on a provider that clearly supports languages
+
+The vendor carries the language inside the model id rather than in a separate
+field, so the binding has no slot for it. **Fix:** drop `language:` and name
+the language variant in `model:`.
+
+### `voice`, `speed`, `temperature`, `top_p` or `top_k` is refused
+
+Those are speak and think fields. A transcriber takes none of them. **Fix:**
+move the key to the binding it belongs to, or delete it.
+
+### `pace`, `endpointing_delay` or `semantic_endpointing` is refused
+
+All three belong on a `turn` binding, which decides when the caller has
+finished. **Fix:** move them; see [Turn detection](/models/turn-detection).
+
+### The package compiles for LiveKit and is refused for Pipecat
+
+Pipecat does not emit listen fallback yet. **Fix:** remove `fallback:` from
+the `listen` section, or keep that package on LiveKit or slng.
 
 ## Where to go next
 

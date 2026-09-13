@@ -309,7 +309,7 @@ func TestValidateWarnsOnRouterToolsWithoutReasoningEffort(t *testing.T) {
       upstream:
         provider: openai
       params:
-        world_part_override: eu
+        world_part: eu-west
     careful_reasoning:
 `
 	text := mustReplace(t, string(raw), `  think:

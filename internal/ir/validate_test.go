@@ -2214,7 +2214,7 @@ func routerAgent(t *testing.T, mutate func(*packagespec.ModelDef)) *Agent {
 	def := packagespec.ModelDef{
 		Provider: "slng", Model: "gpt-5.6-luna", AgentID: "safe-core-v1",
 		Upstream: &packagespec.Upstream{Provider: "openai"},
-		Params:   map[string]any{"world_part_override": "eu", "reasoning_effort": "none"},
+		Params:   map[string]any{"world_part": "eu-west", "reasoning_effort": "none"},
 	}
 	if mutate != nil {
 		mutate(&def)
@@ -2247,15 +2247,23 @@ func TestValidateSlngRouterAcceptsTheSmallestLegalBinding(t *testing.T) {
 // FR-003 and FR-005. The four regions are the router's own set, and `na` copied
 // off the regional infrastructure page is the likely mistake, so the refusal has
 // to say which vocabulary is which.
-func TestValidateSlngRouterRegion(t *testing.T) {
+func TestValidateSlngRouterWorldPart(t *testing.T) {
+	parts := strings.Join(targetcap.SlngWorldParts, ", ")
 	for _, tc := range []struct {
 		name   string
 		params map[string]any
 		wants  []string
 	}{
-		{"missing", map[string]any{}, []string{"world_part_override", "eu, us, india, indonesia"}},
-		{"speech world part", map[string]any{"world_part_override": "na"}, []string{"na", "eu, us, india, indonesia", "speech"}},
-		{"unknown", map[string]any{"world_part_override": "atlantis"}, []string{"atlantis", "eu, us, india, indonesia"}},
+		{"missing", map[string]any{}, []string{"world_part", parts}},
+		{"retired key", map[string]any{"world_part_override": "eu"}, []string{"world_part_override is no longer supported", "params.world_part", parts}},
+		// The retired key is refused even when it names something the new key
+		// would accept, because the author still has to move it: a package left
+		// on the old key would go on compiling while the word next to it means
+		// something else.
+		{"retired key, new value", map[string]any{"world_part_override": "eu-west"}, []string{"world_part_override is no longer supported"}},
+		{"legacy speech code", map[string]any{"world_part": "na"}, []string{"na", parts}},
+		{"retired router region", map[string]any{"world_part": "india"}, []string{"india", parts}},
+		{"unknown", map[string]any{"world_part": "atlantis"}, []string{"atlantis", parts}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			agent := routerAgent(t, func(def *packagespec.ModelDef) { def.Params = tc.params })
@@ -2362,7 +2370,7 @@ func TestValidateSlngRouterOneAgentIDPerPackage(t *testing.T) {
 		return packagespec.ModelDef{
 			Provider: "slng", Model: "gpt-5.6-luna", AgentID: id,
 			Upstream: &packagespec.Upstream{Provider: "openai"},
-			Params:   map[string]any{"world_part_override": "eu", "reasoning_effort": "none"},
+			Params:   map[string]any{"world_part": "eu-west", "reasoning_effort": "none"},
 		}
 	}
 	pkg.Agent.Models.Think["fast_reasoning"] = router("safe-core-v1")
@@ -2531,7 +2539,7 @@ func TestValidateSlngRouterCredentialMustBeDeclared(t *testing.T) {
 func TestValidateSlngRouterRejectsEndpointEnv(t *testing.T) {
 	agent := routerAgent(t, func(def *packagespec.ModelDef) { def.EndpointEnv = "ROUTER_BASE_URL" })
 	got := routerErrors(t, agent, ProviderPipecat)
-	if !strings.Contains(got, "endpoint_env") || !strings.Contains(got, "world_part_override") {
+	if !strings.Contains(got, "endpoint_env") || !strings.Contains(got, "world_part") {
 		t.Errorf("refusal does not name both owners:\n%s", got)
 	}
 }
@@ -2582,7 +2590,7 @@ func TestValidateSlngRouterNeedsARowOnTheTarget(t *testing.T) {
 // cannot know the upstream model family for certain.
 func TestValidateSlngRouterWarnsOnToolsWithoutReasoningEffort(t *testing.T) {
 	agent := routerAgent(t, func(def *packagespec.ModelDef) {
-		def.Params = map[string]any{"world_part_override": "eu"}
+		def.Params = map[string]any{"world_part": "eu-west"}
 	})
 	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
 	if err != nil {
@@ -2604,7 +2612,7 @@ func TestValidateSlngRouterWarnsOnToolsWithoutReasoningEffort(t *testing.T) {
 	// here would tell every OpenRouter author, on every compile, to set the one
 	// param that breaks their agent.
 	compat := routerAgent(t, func(def *packagespec.ModelDef) {
-		def.Params = map[string]any{"world_part_override": "eu"}
+		def.Params = map[string]any{"world_part": "eu-west"}
 		def.Upstream = &packagespec.Upstream{
 			Provider: "openai-compat",
 			URL:      "https://openrouter.ai/api/v1",
@@ -2636,7 +2644,7 @@ func TestValidateSlngRouterSecondProfileIsLiveKitOnlyRefusal(t *testing.T) {
 	router := packagespec.ModelDef{
 		Provider: "slng", Model: "gpt-5.6-luna", AgentID: "safe-core-v1",
 		Upstream: &packagespec.Upstream{Provider: "openai"},
-		Params:   map[string]any{"world_part_override": "eu", "reasoning_effort": "none"},
+		Params:   map[string]any{"world_part": "eu-west", "reasoning_effort": "none"},
 	}
 	// Both profiles are router bindings carrying the same id, so FR-010 is happy.
 	// careful_reasoning is the billing agent's, not the entry agent's.

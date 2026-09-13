@@ -4,9 +4,18 @@ description: "pace and endpointing_delay: the two settings that decide how long 
 sidebarTitle: "Turn taking"
 ---
 
-Two settings decide how long a caller waits before the agent starts answering.
-They are not the same setting, and confusing them is the most common way to spend
-a day tuning the wrong number.
+Turn taking is the wait between a caller finishing a sentence and the agent
+starting to answer. Two settings decide it. They are not the same setting, and
+confusing them is the most common way to spend a day tuning the wrong number.
+
+On this page:
+
+- [`pace`](#pace) - the ceiling on a turn
+- [`endpointing_delay`](#endpointing_delay) - the floor on a turn
+- [Reading what you set](#reading-what-you-set) - the resolved numbers
+- [How to tune it](#how-to-tune-it) - five steps, in order
+- [Where the rest of turn taking lives](#where-the-rest-of-turn-taking-lives) - interruption, and the turn model
+- [Troubleshooting](#troubleshooting) - reading `user_turn`
 
 ```yaml agent.yaml
 models:
@@ -48,8 +57,14 @@ agent believes you finished. Nothing downstream can start earlier.
 
 ## `pace`
 
-Legal on a `turn` binding. Three values. Defaults to `balanced` when you leave it
-out, so a package that says nothing still gets the faster behaviour.
+<ParamField path="pace" type="snappy | balanced | patient" default="balanced">
+  Legal on a `turn` binding. The ceiling: the longest the agent will keep
+  waiting before it answers regardless. It sets the floor too when
+  `endpointing_delay` is absent. No per-target override.
+</ParamField>
+
+Three values. Defaulting to `balanced` when you leave it out means a package
+that says nothing still gets the faster behaviour.
 
 | Value | The agent | Choose it when |
 |---|---|---|
@@ -79,8 +94,11 @@ which is what `endpointing_delay` is for. Writing a `pace` inside a
 
 ## `endpointing_delay`
 
-Legal on a `turn` binding, as a positive duration. Optional: leave it out and the
-pace sets the floor too.
+<ParamField path="endpointing_delay" type="positive duration">
+  Legal on a `turn` binding. The floor: the window of silence before the caller
+  counts as finished. Optional, and leaving it out lets the pace set the floor
+  too. LiveKit refuses anything under `250ms`. Takes a per-target override.
+</ParamField>
 
 Set it when you have measured a value for your transcriber. Lowering it makes
 short replies finalise sooner as well, because the transcriber is only asked to
@@ -182,14 +200,9 @@ second is the one people skip:
 everything else in the turn. That separation is the point: it tells you whether
 turn taking is your problem before you change anything.
 
-Compare each turn's `user_turn` against the floor and ceiling from step 1:
-
-| What you see | What it means | What to do |
-|---|---|---|
-| `user_turn` at your floor, repeatedly | The floor is the only thing being waited on. Turn taking is working. | Nothing. Look at the model instead. |
-| `user_turn` at your ceiling | The turn ran out of patience rather than deciding. These are the turns a shorter ceiling saves. | Go down one pace, then repeat step 3. |
-| `user_turn` above your ceiling | Something else is holding the turn open. Check the transcription number on the same turn: the ceiling cannot fire before the transcript arrives. | Look at the transcriber, not the pace. |
-| `user_turn` fine, replies still slow | Turn taking is not your problem. | See below. |
+Compare each turn's `user_turn` against the floor and ceiling from step 1.
+[Troubleshooting](#troubleshooting) has what each comparison means and what to
+do about it.
 
 ### 5. When turn taking is not the answer
 
@@ -231,7 +244,48 @@ Individual framework parameters, LiveKit's `alpha` and `unlikely_threshold`,
 Pipecat's `pre_speech_ms` and VAD confidence, are **not** reachable from a
 package today. `pace` and `endpointing_delay` are the whole surface.
 
-A `params:` block on a turn binding is not the escape hatch either. It is accepted
+## Troubleshooting
+
+### `user_turn` sits at your floor, turn after turn
+
+The floor is the only thing being waited on. Turn taking is working.
+
+**Fix:** nothing. Look at the model instead.
+
+### `user_turn` sits at your ceiling
+
+The turn ran out of patience rather than deciding. These are the turns a shorter
+ceiling saves.
+
+**Fix:** go down one pace, then repeat
+[step 3](#3-listen-before-you-measure).
+
+### `user_turn` is above your ceiling
+
+Something else is holding the turn open. Check the transcription number on the
+same turn: the ceiling cannot fire before the transcript arrives.
+
+**Fix:** look at the transcriber, not the pace.
+
+### `user_turn` looks right and replies are still slow
+
+Turn taking is not your problem.
+
+**Fix:** see
+[When turn taking is not the answer](#5-when-turn-taking-is-not-the-answer).
+
+### Widening the Pipecat window made turns slower
+
+The Pipecat floor is a cliff. Above the transcript's arrival time the turn pays
+a flat extra wait on top of the window you set.
+
+**Fix:** come back down, and check the wait afterwards rather than assuming it
+moved by what you added. See
+[The Pipecat floor is a cliff, not a dial](#the-pipecat-floor-is-a-cliff-not-a-dial).
+
+### `unmute compile` warns that a turn `params:` block reaches nothing
+
+A `params:` block on a turn binding is not the escape hatch. It is accepted
 for shape but reaches neither framework, so `unmute compile` warns rather than
 letting you believe it worked:
 
@@ -241,6 +295,8 @@ target reads: turn params are not forwarded to either framework.
 ```
 
 The same goes for `agent_id` and `fallback` on a turn binding.
+
+**Fix:** remove the block. `pace` and `endpointing_delay` are the whole surface.
 
 ## Next
 

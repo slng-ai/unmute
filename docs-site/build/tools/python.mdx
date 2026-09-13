@@ -21,6 +21,16 @@ target: SLNG owns a tool's code, version and gate pipeline, so a handler of
 yours has nowhere to run there. Reference a tool your organisation already has
 on the platform with [`slng:`](/build/tools/hosted) instead.
 
+On this page:
+
+- [The block](#the-block) - the one key it takes
+- [The rules the function follows](#the-rules-the-function-follows) - five rules
+- [When the handler is slow](#when-the-handler-is-slow) - cover the wait
+- [Where it ends up](#where-it-ends-up) - inside the generated project
+- [Credentials, when a real handler needs one](#credentials-when-a-real-handler-needs-one) - names, never values
+- [Advanced](#advanced) - what the SLNG sandbox expects
+- [Troubleshooting](#troubleshooting) - the two worth reading
+
 ```yaml tools/cancel_appointment.yaml expandable wrap
 description: Cancel the appointment outright. Call it only when the customer says plainly that they want to cancel, never when they want a different time.
 
@@ -56,6 +66,30 @@ that shows a handler receiving an injected value. For real ones, every tool in
 `examples/salon-concierge` is a local handler, and all eight share the one
 `tools/salon.py`.
 
+## The block
+
+<ParamField path="handler" type="package Python path">
+  A Python file inside the package. Omitted means `tools/<tool-name>.py`.
+</ParamField>
+
+The function inside that file still has the tool name. For a tool named
+`cancel_appointment`, omitting `handler` selects
+`tools/cancel_appointment.py`.
+
+## The rules the function follows
+
+| Rule | Why |
+|---|---|
+| the function name matches the tool name | that is how the generated code finds it |
+| its parameters match the `input` properties plus the `inject` keys | the call is built from both |
+| it returns the value your description and prompt expect | the result goes back to the model |
+| it may be `async def` on Pipecat and LiveKit | the code targets await an awaitable result |
+| it imports nothing from Unmute | the generated project does not depend on Unmute at run time |
+
+The handler above takes `customer_id` even though `input.properties` is empty,
+because `customer_id` is injected. The model never sees that value and cannot
+invent one.
+
 ## When the handler is slow
 
 A local handler that reads a calendar or a database keeps the caller waiting the
@@ -76,31 +110,59 @@ wait. The fixtures above carry no `announce:`, because they return instantly and
 tool that speaks before doing nothing slow is just noise. Full rules in
 [the behavior fields](/build/tools/overview#the-three-behavior-fields).
 
-## The block
+## Where it ends up
 
-| Field | Required | What it is |
-|---|---|---|
-| `handler` | no | Python file inside the package; omitted means `tools/<tool-name>.py` |
+`unmute compile` copies the file into the generated project, next to the code that
+calls it:
 
-The function inside that file still has the tool name. For a tool named
-`cancel_appointment`, omitting `handler` selects
-`tools/cancel_appointment.py`.
+```text
+build/pipecat/
+├── bot.py
+└── tools/
+    ├── __init__.py
+    └── cancel_appointment.py
+```
 
-## The rules the function follows
+The generated project imports it as a plain module and calls it like a plain
+function. The two targets differ only in how the result leaves the method:
 
-| Rule | Why |
-|---|---|
-| the function name matches the tool name | that is how the generated code finds it |
-| its parameters match the `input` properties plus the `inject` keys | the call is built from both |
-| it returns the value your description and prompt expect | the result goes back to the model |
-| it may be `async def` on Pipecat and LiveKit Agents | the code targets await an awaitable result |
-| it imports nothing from Unmute | the generated project does not depend on Unmute at run time |
+<CodeGroup>
+```python LiveKit
+result = tools.cancel_appointment.cancel_appointment(
+    customer_id=ctx.userdata.customer_id
+)
+if inspect.isawaitable(result):
+    result = await result
+return result
+```
 
-The handler above takes `customer_id` even though `input.properties` is empty,
-because `customer_id` is injected. The model never sees that value and cannot
-invent one.
+```python Pipecat
+result = tools.cancel_appointment.cancel_appointment(
+    customer_id=state.customer_id
+)
+if inspect.isawaitable(result):
+    result = await result
+await params.result_callback(result)
+```
+</CodeGroup>
 
-## What the SLNG sandbox expects
+A LiveKit `@function_tool` method returns its value directly. A Pipecat
+function hands it to `params.result_callback` instead, which is how Pipecat's
+own function-calling convention reports a result. Either way the same handler
+file runs unchanged: only the three lines that call it differ.
+
+## Credentials, when a real handler needs one
+
+```python
+token = os.environ["CRM_API_TOKEN"]
+```
+
+Only the **name** belongs in the file. Put that name in `agent.yaml` under
+`secrets:`; keep the value in your environment or secret store.
+
+## Advanced
+
+### What the SLNG sandbox expects
 
 A `local:` handler no longer reaches SLNG at all, so none of this is a refusal
 you will meet from `unmute`. It is worth knowing anyway, because a tool SLNG
@@ -111,12 +173,6 @@ runs under.
 **SLNG calls the handler itself, synchronously.** A plain `def` that runs its
 own event loop internally, with `asyncio.run(...)`, is fine: only the entry
 point has to be synchronous.
-
-**Code on SLNG has no internet access at all.** A handler that imports
-`requests`, `httpx`, `urllib`, `urllib3`, `aiohttp`, `http.client` or `socket`
-and reaches the network fails at connection time inside the sandbox. Work that
-needs the network belongs in an API-request tool, which SLNG runs itself,
-outside the sandbox.
 
 **SLNG derives the schemas by introspection.** A hosted `code` tool's module
 defines an `Input` model, an `Output` model and a `handler()` taking one
@@ -155,70 +211,32 @@ On the code targets `output:` on a tool file stays author documentation, the
 same as on a webhook tool: nothing sends it to the model or checks the
 handler's return value against it.
 
-## Where it ends up
+## Troubleshooting
 
-`unmute compile` copies the file into the generated project, next to the code that
-calls it:
-
-```text
-build/pipecat/
-├── bot.py
-└── tools/
-    ├── __init__.py
-    └── cancel_appointment.py
-```
-
-The generated project imports it as a plain module and calls it like a plain
-function. The two targets differ only in how the result leaves the method:
-
-<CodeGroup>
-```python LiveKit Agents
-result = tools.cancel_appointment.cancel_appointment(
-    customer_id=ctx.userdata.customer_id
-)
-if inspect.isawaitable(result):
-    result = await result
-return result
-```
-
-```python Pipecat
-result = tools.cancel_appointment.cancel_appointment(
-    customer_id=state.customer_id
-)
-if inspect.isawaitable(result):
-    result = await result
-await params.result_callback(result)
-```
-</CodeGroup>
-
-A LiveKit `@function_tool` method returns its value directly. A Pipecat
-function hands it to `params.result_callback` instead, which is how Pipecat's
-own function-calling convention reports a result. Either way the same handler
-file runs unchanged: only the three lines that call it differ.
-
-## Credentials, when a real handler needs one
-
-```python
-token = os.environ["CRM_API_TOKEN"]
-```
-
-Only the **name** belongs in the file. Put that name in `agent.yaml` under
-`secrets:`; keep the value in your environment or secret store.
+### `unmute validate` warns that a credential is not declared
 
 `unmute validate` reads the handler, finds the names it looks up, and warns when
 `agent.yaml` forgot to declare one:
 
 ```text wrap
-✓ pipecat (pipecat)
-
-Warnings:
-  pipecat: environment variables referenced but not declared in secrets: CRM_API_TOKEN (tools/sync_customer.py os.environ)
+pipecat: environment variables referenced but not declared in secrets: CRM_API_TOKEN (tools/sync_customer.py os.environ)
 ```
 
 The literal lookup also makes the compiler include the name in generated
 environment instructions and the startup check even if the declaration is
-missing. Declaring it removes the warning and keeps the explicit inventory
-complete.
+missing.
+
+**Fix:** add the name to `secrets:` in `agent.yaml`. Declaring it removes the
+warning and keeps the explicit inventory complete.
+
+### A hosted handler fails the moment it reaches the network
+
+**Code on SLNG has no internet access at all.** A handler that imports
+`requests`, `httpx`, `urllib`, `urllib3`, `aiohttp`, `http.client` or `socket`
+and reaches the network fails at connection time inside the sandbox.
+
+**Fix:** move that work into an API-request tool, which SLNG runs itself,
+outside the sandbox.
 
 ## Where to go next
 

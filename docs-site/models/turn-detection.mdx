@@ -1,7 +1,10 @@
 ---
 title: "Turn detection"
-description: "How each target decides the caller has finished speaking, and why it is not a vendor list."
+description: "The turn binding: every key it takes, and how each target decides the caller has finished speaking."
 ---
+
+`models.turn` decides when the caller has finished speaking, so the agent knows
+when to reply.
 
 <Note>
   The silence window is the floor charged on every turn. [Optimizing your agent](/optimization/overview) has the measured values, and why the minimum is the wrong choice.
@@ -14,6 +17,14 @@ them differently. Worth keeping apart:
   cheap, local, and runs on the audio.
 - **End of turn detection** decides whether the caller has finished their thought.
   That can be the same signal as silence, or a model of its own.
+
+On this page:
+
+- [It is not a catalog role](#it-is-not-a-catalog-role) - why there is no vendor list
+- [Every key a turn binding takes](#every-key-a-turn-binding-takes) - the full shape
+- [What each target builds](#what-each-target-builds) - one binding, two pipelines
+- [Semantic endpointing](#semantic-endpointing) - and what `off` removes
+- [Troubleshooting](#troubleshooting) - the refusals that come up most
 
 ## It is not a catalog role
 
@@ -32,17 +43,68 @@ models:
 That is what every shipped example writes. A package scaffolded by `unmute init`
 targets LiveKit, so it writes the LiveKit binding below in this spot instead.
 
-## Pipecat
+## Every key a turn binding takes
 
-Both targets do two jobs, not one. On Pipecat both run on device.
+Nothing here is required. Left out entirely, each target builds its own
+default pipeline, which [What each target builds](#what-each-target-builds)
+shows.
 
-Silero is the transport's voice activity analyzer: it decides you stopped making
-sound. Pipecat's own Smart Turn v3 classifier then decides whether you had
-finished a thought. The classifier is a small ONNX model shipped inside the
-framework, so it needs no extra install and no API call, and it runs in every
-package Unmute compiles whether or not you asked for it:
+<ParamField path="provider" type="string">
+  Forwarded to the runtime as written. There is no vendor list to pick from,
+  which is what the section above is about.
+</ParamField>
 
-```python
+<ParamField path="model" type="string">
+  Forwarded as written on Pipecat. LiveKit accepts only the two identities its
+  own runtime knows, and refuses anything else by name.
+</ParamField>
+
+<ParamField path="pace" type="snappy | balanced | patient">
+  How quickly the agent decides the caller has finished. It sets the ceiling on
+  a turn, and the floor too when `endpointing_delay` is absent. Left out, it is
+  `balanced`, which is deliberately not the same as leaving the runtime alone.
+  It takes no per-target override.
+</ParamField>
+
+<ParamField path="endpointing_delay" type="a positive duration, e.g. 400ms">
+  The window of silence that has to pass before the caller counts as finished.
+  It is the floor on every turn, and only the floor. LiveKit refuses anything
+  under `250ms`.
+</ParamField>
+
+<ParamField path="semantic_endpointing" type="required | preferred | off">
+  Whether a model, rather than silence alone, decides the turn has ended. `off`
+  removes the turn model; the other two are forwarded. See [Semantic
+  endpointing](#semantic-endpointing).
+</ParamField>
+
+<ParamField path="placement" type="api | local">
+  Where the check runs. On LiveKit it is only a preference: that runtime picks
+  the side itself and an authored value does not change it.
+</ParamField>
+
+<ParamField path="params" type="free-form map">
+  Forwarded to the runtime as written.
+</ParamField>
+
+<ParamField path="description" type="string">
+  An author note. It reaches no generated artifact.
+</ParamField>
+
+A `turn` entry cannot carry `fallback:`, `voice:`, `speed:`, `language:` or any
+of the think sampling fields. Each is refused by name. Fallback is legal on
+`think` and `listen` only; see [Reasoning model](/models/llm#fallback).
+
+[Turn taking](/optimization/turn-taking) has every legal value of `pace` and
+`endpointing_delay`, and what each becomes on each target.
+
+## What each target builds
+
+Both targets do two jobs, not one: decide you stopped making sound, then decide
+you had finished a thought. Here is what one `turn` binding compiles to on each.
+
+<CodeGroup>
+```python Pipecat
 vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
 user_turn_strategies=UserTurnStrategies(
     stop=[
@@ -54,6 +116,30 @@ user_turn_strategies=UserTurnStrategies(
     ],
 ),
 ```
+
+```python LiveKit
+turn_handling=TurnHandlingOptions(
+    turn_detection=inference.TurnDetector(version="v1-mini"),
+    endpointing={"mode": "dynamic", "min_delay": 0.3, "max_delay": 1.6},
+    interruption={"enabled": True},
+    preemptive_generation={"enabled": True},
+),
+vad=ctx.proc.userdata["vad"],
+```
+</CodeGroup>
+
+The two sections below say where each number comes from, and what is yours to
+set.
+
+## Pipecat
+
+On Pipecat both stages run on device.
+
+Silero is the transport's voice activity analyzer: it decides you stopped making
+sound. Pipecat's own Smart Turn v3 classifier then decides whether you had
+finished a thought. The classifier is a small ONNX model shipped inside the
+framework, so it needs no extra install and no API call, and it runs in every
+package Unmute compiles whether or not you asked for it.
 
 So `provider: local` and `model: silero` name the first stage. The second stage
 has no binding to name because it is the framework's own, and it is not optional.
@@ -70,20 +156,10 @@ Cartesia, Soniox and Speechmatics all do. On Pipecat 1.8.0 those services only
 not change what `endpointing_delay` and `pace` mean, and does not give you a
 second thing racing your settings.
 
-## LiveKit Agents
+## LiveKit
 
-LiveKit does both jobs, with two different pieces. It always loads Silero for voice
-activity, and it takes a turn model on top:
-
-```python
-turn_handling=TurnHandlingOptions(
-    turn_detection=inference.TurnDetector(version="v1-mini"),
-    endpointing={"mode": "dynamic", "min_delay": 0.3, "max_delay": 1.6},
-    interruption={"enabled": True},
-    preemptive_generation={"enabled": True},
-),
-vad=ctx.proc.userdata["vad"],
-```
+LiveKit does both jobs, with two different pieces. It always loads Silero for
+voice activity, and it takes a turn model on top.
 
 The `endpointing` dict comes from `pace`. Unlike Pipecat, LiveKit can adapt the
 wait to the pauses a caller actually leaves, which is what `mode: dynamic` asks
@@ -152,8 +228,31 @@ the detector. On Pipecat it replaces the Smart Turn analyzer's stop strategy
 with `SpeechTimeoutUserTurnStopStrategy()`, and loses the ceiling along with
 it, because on this target the ceiling *is* the analyzer's own `stop_secs`.
 
-A `turn` entry cannot carry `fallback:` either. That field is legal only on
-`think` and `listen` models; see [Reasoning model](/models/llm#fallback).
+## Troubleshooting
+
+### LiveKit refuses the `model:` every example writes
+
+`silero` is the right answer on Pipecat, where it is a voice activity detector
+rather than a turn detector. LiveKit knows two identities of its own and
+refuses the rest. **Fix:** override the entry per target, which is what every
+example that runs on both targets does.
+
+### `endpointing_delay` is refused on LiveKit
+
+LiveKit will not accept a window under `250ms`. **Fix:** raise the value, or
+reach for `pace: snappy`, which sets the ceiling rather than the floor.
+
+### `pace` is refused
+
+It belongs on a turn binding and nowhere else, and it takes no per-target
+override. **Fix:** move it here. For a per-target duration, use
+`endpointing_delay`.
+
+### Turning `semantic_endpointing` off made replies slower on Pipecat
+
+On that target the ceiling *is* the analyzer's own `stop_secs`, so removing the
+analyzer loses the ceiling with it. **Fix:** keep `preferred`, or set
+`endpointing_delay` to hold the floor yourself.
 
 ## Where to go next
 

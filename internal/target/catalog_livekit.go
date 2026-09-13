@@ -324,7 +324,7 @@ var livekitCatalog = []Entry{
 			Endpoint: FieldSpec{Arg: "base_url"},
 			Params:   ParamsKwargs,
 		},
-		Notes: []string{"SLNG Context Router over Chat Completions; params.world_part_override becomes base_url and the identity headers plus the inline slng_config ride extra_headers/extra_body"},
+		Notes: []string{"SLNG Context Router over Chat Completions; params.world_part becomes base_url and the identity headers plus the inline slng_config ride extra_headers/extra_body"},
 	},
 	{
 		Framework: LiveKit, Role: Reason, Vendor: "anthropic",

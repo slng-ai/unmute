@@ -9,6 +9,17 @@ values behind them: where each one lives in your Twilio account, and which key i
 belongs to. It also covers the console setup those values assume, because a
 correct connection file over a half-configured trunk still gets you nothing.
 
+On this page:
+
+- [Give each route its own number](#give-each-route-its-own-number) - why one number cannot serve two routes
+- [Which values you need depends on the route](#which-values-you-need-depends-on-the-route) - the two credential groups, and every connection key
+- [First, a voice-capable number](#first-a-voice-capable-number) - the one requirement on the number itself
+- [The account trio](#the-account-trio-pipecat-cloud-websocket-and-the-livekit-connector) - for `cloud-websocket` and the LiveKit connector
+- [The four SIP values](#the-four-sip-values-the-livekit-sip-route) - for the LiveKit `sip` route
+- [Caller ID for a transfer target](#caller-id-for-a-transfer-target) - the trunk setting that decides whether a transfer connects
+- [If your trunk is in a Twilio Region](#if-your-trunk-is-in-a-twilio-region) - what a region changes, and what it does not
+- [Then declare the names](#then-declare-the-names) - `secrets:`, and where the values live
+
 <Note>
   Unmute never buys a number, creates a trunk, or changes anything on your carrier
   account, at compile time or afterward. Every value below is one you set yourself,
@@ -34,12 +45,39 @@ setup below covers that. Two numbers is less work after the first day.
 | Target | `transport` | `environment` keys | Where they come from |
 |---|---|---|---|
 | Pipecat | `cloud-websocket` | `account_sid`, `auth_token`, `from_number` | the account dashboard, plus a number you own |
-| LiveKit Agents | `connector` | `account_sid`, `auth_token`, `from_number` | the same three |
-| LiveKit Agents | `sip` | `sip_address`, `sip_username`, `sip_password`, `from_number` | an Elastic SIP trunk you create |
+| LiveKit | `connector` | `account_sid`, `auth_token`, `from_number` | the same three |
+| LiveKit | `sip` | `sip_address`, `sip_username`, `sip_password`, `from_number` | an Elastic SIP trunk you create |
 
 The two groups are different credentials, not two names for one thing. The account
 trio identifies your account to Twilio's REST API. The four SIP values are one
 trunk's own dial-out settings, and they live in a different part of the console.
+
+### Every key a connection takes
+
+Three keys. The first two pick the route, and the third names the variables that
+hold its values.
+
+<ParamField path="transport" type="sip | connector | cloud-websocket | daily-sip" required>
+  The mechanism that carries the call. It decides which `environment` keys the
+  file accepts, so changing it changes the group of values you need.
+</ParamField>
+
+<ParamField path="carrier" type="twilio | telnyx | plivo" required>
+  The carrier account behind the route. `twilio` on every route on this page.
+</ParamField>
+
+<ParamField path="environment" type="route key to environment variable name">
+  Which variable holds each value. The keys on the left are fixed by the route:
+  `account_sid`, `auth_token` and `from_number` for the account trio,
+  `sip_address`, `sip_username`, `sip_password` and `from_number` for the SIP
+  route. A key from another route is refused, and the refusal lists the set
+  this route accepts.
+</ParamField>
+
+The names on the right are yours, and each one is UPPER_SNAKE: an uppercase
+letter, then only uppercase letters, digits and underscores. The compiler never
+reads a value, so a package with connections validates and compiles with no
+credentials present anywhere.
 
 ## First, a voice-capable number
 
@@ -59,7 +97,7 @@ credentials.
 |---|---|---|
 | `account_sid` | starts with `AC` | the Twilio Console account dashboard |
 | `auth_token` | the account's auth token | the same dashboard, revealed on request |
-| `from_number` | the number in E.164 form, `+15551234567` | Phone Numbers, Manage |
+| `from_number` | the number in E.164 form: a plus, the country code, then the rest, no spaces | Phone Numbers, Manage |
 
 ```yaml connections/twilio_voice.yaml
 transport: cloud-websocket
@@ -78,14 +116,14 @@ in the repository uses, so one `.env` drives all of them.
 This part differs by route, and it is the part to get right:
 
 - **`cloud-websocket`**: the number points at a static piece of TwiML in the
-  console, which streams the call to Pipecat Cloud. There is no URL of yours
-  to configure, because nothing of yours is hosted. Your build's generated README
-  dictates the exact markup, including the regional stream address, because that
-  address comes from the region in your `targets.yaml`. [Pipecat over
-  Twilio](/telephony/pipecat-twilio) walks the whole route, including the
-  organisation slug that is the most common thing to get wrong.
-- **`connector`**: the number's voice webhook points at `POST /telephony/inbound`
-  on the public URL of the service you deploy.
+console, which streams the call to Pipecat Cloud. There is no URL of yours to
+configure, because nothing of yours is hosted. Your build's generated README
+dictates the exact markup, including the regional stream address. That address
+comes from the region in your `targets.yaml`. [Pipecat over
+Twilio](/telephony/pipecat-twilio) walks the whole route, including the
+organisation slug that is the most common thing to get wrong. -
+**`connector`**: the number's voice webhook points at `POST /telephony/inbound`
+on the public URL of the service you deploy.
 
 <Warning>
   Take the number off any SIP trunk before using it on one of these routes. A number

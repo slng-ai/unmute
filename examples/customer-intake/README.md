@@ -9,12 +9,50 @@ this too, but spread across two agents, five tasks, tracing, knowledge documents
 and two phone routes. This one does nothing else, so the typed part is the only
 part there is to read.
 
-No phone route and no carrier account. Browser audio on both code targets, and
-the only credentials it needs are `OPENAI_API_KEY` and `SLNG_API_KEY`.
+No phone route and no carrier account. Browser audio on both code targets. It
+needs `OPENAI_API_KEY` and `SLNG_API_KEY` for the models, and the three
+`LANGFUSE_*` names together, because the package traces every call.
 
-**Speech gateway.** Both targets send STT and TTS through `eu-north.api.slng.ai`.
-Change `params.world_part` on each speech model to choose another
-[SLNG gateway](../../docs-site/optimization/regional-infrastructure.mdx).
+On this page:
+
+- [Quickstart](#quickstart) - validate, run, check
+- [What it collects](#what-it-collects) - every declared type once
+- [The three things it shows](#the-three-things-it-shows) - the ideas behind it
+- [Files](#files) - what each file holds
+- [What it does not do](#what-it-does-not-do) - and where to look
+- [Advanced](#advanced) - scripted run, other gateways
+- [Troubleshooting](#troubleshooting) - when something goes wrong
+- [Where to go next](#where-to-go-next) - packages and pages
+
+## Quickstart
+
+```sh
+unmute validate examples/customer-intake
+unmute compile examples/customer-intake
+cp examples/customer-intake/build/pipecat/.env.example .env   # then fill it in
+unmute dev examples/customer-intake --target pipecat
+```
+
+The generated `.env.example` names every value the run needs. All five are
+required and the agent refuses to start while one is empty.
+
+`unmute dev` is browser audio, so there is no carrier and no caller ID. Seed one
+the way a route would:
+
+```sh
+unmute dev examples/customer-intake --target pipecat --source from_number=+34600111222
+```
+
+Leave `--source` off and the pre-fetch entry finds nothing, skips, and
+`verify_contact` asks for a number instead. That is the same path a withheld
+caller ID takes on a real phone route.
+
+The package's one tool is a local Python file, `tools/intake.py`.
+Run the handler's own check on its own, without compiling anything:
+
+```sh
+python3 examples/customer-intake/tools/intake.py
+```
 
 ## What it collects
 
@@ -60,23 +98,35 @@ cannot call create_customer_record yet: caller_phone not set. run verify_contact
 Somebody may be ringing from a friend's phone. Without the mark, a record would
 be opened against somebody else's number and nothing would say so.
 
-## How to run it
+## Files
 
-```sh
-unmute validate examples/customer-intake
-unmute dev examples/customer-intake --target pipecat
-```
+| File | What is in it |
+|---|---|
+| `agent.yaml` | one agent, three tasks, the shape, the variables and the pre-fetch |
+| `targets.yaml` | both code targets, no `connection:`, which is what makes it browser only |
+| `instructions.md` | the agent's own prompt; deliberately holds no phone number |
+| `tasks/verify-contact.md` | the confirming step, and the only prompt that holds the number |
+| `tasks/take-details.md` | name, address and enquiry in one pass |
+| `tasks/open-record.md` | calls the tool and relays the record back |
+| `tools/create_customer_record.yaml` | one model argument, four injected values |
+| `tools/intake.py` | the local handler, an in-process store, and a `_demo()` self-check |
 
-`unmute dev` is browser audio, so there is no carrier and no caller ID. Seed one
-the way a route would:
+## What it does not do
 
-```sh
-unmute dev examples/customer-intake --target pipecat --source from_number=+34600111222
-```
+No phone number, no transfer, no handoff, no second agent and no knowledge
+base. For any of those, read [`salon-concierge`](../salon-concierge/).
+For a package with none of the structure at all, to read the optimized one
+against, read
+[`salon-concierge-single-prompt`](../salon-concierge-single-prompt/).
 
-Leave `--source` off and the pre-fetch entry finds nothing, skips, and
-`verify_contact` asks for a number instead. That is the same path a withheld
-caller ID takes on a real phone route.
+The declared types are refused on the `slng` target, which runs no code from
+your package and so has nowhere to check one. That is why this package names
+only the two code targets.
+
+## Advanced
+
+<details>
+<summary>Drive it through a scripted conversation, with no audio</summary>
 
 To watch the values land without talking to anything, drive the compiled LiveKit
 agent through a scripted conversation. It uses the real model and the real local
@@ -97,33 +147,95 @@ repository's into `examples/customer-intake/.env` first. It is ignored by git.
 `unmute dev` does not need this: it reads the repository root's `.env` on its
 own.
 
-## Files
+</details>
 
-| File | What is in it |
-|---|---|
-| `agent.yaml` | one agent, three tasks, the shape, the variables and the pre-fetch |
-| `targets.yaml` | both code targets, no `connection:`, which is what makes it browser only |
-| `instructions.md` | the agent's own prompt; deliberately holds no phone number |
-| `tasks/verify-contact.md` | the confirming step, and the only prompt that holds the number |
-| `tasks/take-details.md` | name, address and enquiry in one pass |
-| `tasks/open-record.md` | calls the tool and relays the record back |
-| `tools/create_customer_record.yaml` | one model argument, four injected values |
-| `tools/intake.py` | the local handler, an in-process store, and a `_demo()` self-check |
+<details>
+<summary>Send the speech models through another gateway</summary>
 
-Run the handler's own check on its own, without compiling anything:
+**Speech gateway.** Both targets send STT and TTS through `eu-north.api.slng.ai`.
+Change `params.world_part` on each speech model to choose another
+[SLNG gateway](../../docs-site/optimization/regional-infrastructure.mdx).
+
+</details>
+
+## Troubleshooting
+
+### It stops at startup and says an environment variable is missing
+
+Every name under `secrets:` has to hold a value before the first turn, and this
+package declares five: the two model keys and the three `LANGFUSE_*` names that
+tracing needs. The check runs before the agent answers rather than at the first
+tool call, so a missing one is a session that never starts.
+
+**Fix:** fill in every line of the generated `.env.example`.
 
 ```sh
-python3 examples/customer-intake/tools/intake.py
+unmute compile examples/customer-intake
+cp examples/customer-intake/build/pipecat/.env.example .env
 ```
 
-## What it does not do
+### The agent asks for my number instead of reading one back
 
-No phone number, no transfer, no handoff, no second agent, no tracing and no
-knowledge base. For any of those, read [`salon-concierge`](../salon-concierge/).
-For a package with none of the structure at all, to read the optimized one
-against, read
-[`salon-concierge-single-prompt`](../salon-concierge-single-prompt/).
+Nothing supplied a caller ID, so the `caller` pre-fetch entry skipped and
+`verify_contact` fell back to asking. On browser audio that is the normal case.
 
-The declared types are refused on the `slng` target, which runs no code from
-your package and so has nowhere to check one. That is why this package names
-only the two code targets.
+**Fix:** seed the number the way a phone route would.
+
+```sh
+unmute dev examples/customer-intake --target pipecat --source from_number=YOUR_NUMBER
+```
+
+### `create_customer_record` refuses itself and names `caller_phone`
+
+The number is still a proposal. It carries `confirm: verify_contact`, so every
+tool that injects it refuses until that step has heard the caller agree.
+
+**Fix:** run `verify_contact` first and let the caller agree the number is
+theirs. In a scripted run that is a turn that says yes.
+
+```
+--line "Yeah that's right."
+```
+
+### A value the model sent was refused and the turn went round again
+
+That is the declared type doing its job. `enquiry` takes one of the four words
+in the table above, `callback_time` takes a time on the 24 hour clock or
+nothing at all, and the address, the number, the date and the reference number
+each have a format.
+
+**Fix:** read the refusal. It names the field and what was allowed, and the
+model corrects itself on the next turn. To change what is accepted, change the
+`type:` on that variable in `agent.yaml`. Rewording the description does not
+work: no wording reliably stops a model sending nothing when there is nothing.
+
+### The scripted run cannot find a key
+
+`scripts/text_run_livekit.py` reads the package's own `.env` and no other one.
+
+**Fix:** copy the repository's file into the package first.
+
+```sh
+cp .env examples/customer-intake/.env
+```
+
+### I added a `slng` target and the declared types are refused
+
+That target is hosted. The check for a declared type is Python this compiler
+emits, and a hosted target emits no project to run it in.
+
+**Fix:** keep this package on the two targets `targets.yaml` names, `livekit`
+and `pipecat`.
+
+```sh
+unmute compile examples/customer-intake --target livekit
+```
+
+## Where to go next
+
+- [`salon-concierge`](../salon-concierge/) - the same types, in a full package
+- [`salon-concierge-single-prompt`](../salon-concierge-single-prompt/) - none of the structure, to read against
+- [All four examples](../README.md) - what each one is for
+- [Variables](../../docs-site/build/variables.mdx) - every key a variable takes
+- [Pre-fetch](../../docs-site/build/prefetch.mdx) - what runs before the greeting
+- [Python tools](../../docs-site/build/tools/python.mdx) - the `local:` block this package uses

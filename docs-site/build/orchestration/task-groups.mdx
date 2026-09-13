@@ -7,6 +7,14 @@ A task group is an ordered sequence of tasks. Use one when the order must be a
 runtime guarantee. A task that runs inside a group is called a step of that
 group.
 
+On this page:
+
+- [Declare a group](#declare-a-group) - steps, in order
+- [Every key a group takes](#every-key-a-group-takes) - all seven
+- [Skip a step whose work is already done](#skip-a-step-whose-work-is-already-done) - `skip_when_confirmed:`
+- [What stops a group](#what-stops-a-group) - unserved, handoff, finish
+- [Context between steps](#context-between-steps) - shared or isolated
+
 ## Declare a group
 
 ```yaml agent.yaml
@@ -70,15 +78,43 @@ Each `steps` entry names a task defined in the package, under some agent's
 what makes each step reachable. `assign:` derives each task's finish arguments
 and saves the values needed later.
 
-| Field | Required | Values |
-|---|---|---|
-| `steps` | yes | one or more steps, in order: a bare task name, or an item with `task:` and `skip_when_confirmed:` |
-| `when` | no, but write one | the situation the model reads to decide whether to run the group. Nothing checks that it is there, and a group without one gives the model nothing to decide on |
-| `announce` | no | one fixed line, spoken exactly as written as the caller enters the group, to cover the wait before the first step speaks. It takes no `{{placeholders}}` |
-| `context_scope` | yes | `shared` or `isolated` |
-| `then` | yes | `return`, `transfer`, or `end` |
-| `then_target` | with `transfer` | an agent name |
-| `merge` | no | `results`; omission means the same |
+### Every key a group takes
+
+<ParamField path="steps" type="list" required>
+  The tasks to run, in order. Each entry is a bare task name, or an item with
+  `task:` and [`skip_when_confirmed:`](#skip-a-step-whose-work-is-already-done).
+</ParamField>
+
+<ParamField path="context_scope" type="shared | isolated" required>
+  Whether each step sees what the steps before it said. See
+  [Context between steps](#context-between-steps).
+</ParamField>
+
+<ParamField path="then" type="return | transfer | end" required>
+  What happens when the last step finishes: control returns to the owning
+  agent, the caller moves to another agent, or the call ends.
+</ParamField>
+
+<ParamField path="then_target" type="agent name">
+  Required with `then: transfer`, and meaningless otherwise. Which agent the
+  caller lands on.
+</ParamField>
+
+<ParamField path="when" type="string">
+  What the model reads to decide whether to run the group. Nothing checks that
+  it is there, but write one: a group without a `when:` gives the model nothing
+  to decide on.
+</ParamField>
+
+<ParamField path="announce" type="string">
+  One fixed line, spoken exactly as written as the caller enters the group, to
+  cover the wait before the first step speaks. It takes no `{{placeholders}}`.
+</ParamField>
+
+<ParamField path="merge" type="results" default="results">
+  How the group's step results come back. `results` is the only value, and
+  leaving it out means the same thing.
+</ParamField>
 
 ## Skip a step whose work is already done
 
@@ -118,11 +154,9 @@ A group stops when a step ends unserved, whichever `context_scope` it has: the
 later steps do not run, and the owner is handed the unserved status. Running
 the next step would answer a question nobody asked.
 
-A step's handoff also ends the group, and the caller is moved. When the model
-calls a handoff in the same response as a tool that ends the step, or while
-that tool is still running, the step's own work is committed first and the
-caller is moved after: the booking is not lost on the way out. If that work
-does not complete, the caller is not moved and the model is told so.
+A handoff can arrive while a tool that ends the step is still running, or in
+the same response as one. Either way the step's own work is committed first,
+and the caller moves after. The booking is not lost on the way out.
 
 A request the caller makes at a [`reset`](/best-practices/context-scope) or an
 isolated boundary reaches nobody: the step that hears it has no way to pass
