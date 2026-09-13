@@ -1,0 +1,58 @@
+version: 1
+
+name: nemotron-voice-agent
+entry_agent: assistant
+
+agents:
+  assistant:
+    instructions: instructions.md
+    think: nemotron
+    speak: assistant_voice
+    tools:
+      - end_call
+
+secrets:
+  - NVIDIA_API_KEY
+  - NVIDIA_NIM_BASE_URL
+  - SLNG_API_KEY
+
+models:
+  think:
+    nemotron:
+      description: Nemotron 3.5 Lightning 30B A3B via a NIM endpoint
+      provider: nvidia
+      model: "nemotron-3.5-lightning-30b-a3b"
+      endpoint_env: NVIDIA_NIM_BASE_URL
+  speak:
+    assistant_voice:
+      description: default voice
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "deepgram/nova:3"
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+tools:
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, you're through to the Nemotron voice agent. What can I help you with?"
+  interruption:
+    enabled: true
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 5
+  avg_session_duration: 3m
