@@ -4,6 +4,14 @@ package target
 // where the transcriber, the model and the synthesizer stood. Same contract as
 // catalog_pipecat.go (the pipecat_v1 driver templates, pipecat-ai ==1.9.0).
 //
+// What "Verified" on the row below covers: the offline suite reading the emitted
+// module, and the opt-in smoke driving the real service with only its socket
+// replaced. It does NOT cover a browser call. Real audio, real latency and real
+// turn taking on this target are OWED, and this is the shape where the model
+// takes the turn decision over entirely, so no offline check stands in for it.
+// Whoever has a key should run `unmute dev --target pipecat` on
+// examples/takeaway-orders and replace this paragraph with what happened.
+//
 // The driver adds the one argument this table cannot express: the backend the
 // live model hands its tools and reasoning to, built from the think entry the
 // live entry names. That is a Python expression over a second class, so it

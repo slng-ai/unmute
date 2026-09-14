@@ -5,6 +5,15 @@ package target
 // synthesizer stood. Same contract as catalog_pipecat.go (the pipecat_v1 driver
 // templates, pipecat-ai ==1.10.0).
 //
+// What "Verified" on the row below covers: the offline suite reading the emitted
+// module, and the opt-in smoke driving the real service with only its socket
+// replaced. It does NOT cover a browser call. Real audio, real latency and real
+// turn taking on this target are OWED, and the turn is exactly the thing this
+// architecture lets an author move, so no offline check stands in for it.
+// Whoever has a key should run `unmute dev --target pipecat` on
+// examples/pharmacy-refills, at each of the three turn_detection values, and
+// replace this paragraph with what happened.
+//
 // Two facts this table cannot express, so the driver supplies both as Python
 // expressions rather than FieldSpecs, the way the live entry's `delegation` is:
 //

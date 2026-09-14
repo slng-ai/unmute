@@ -359,3 +359,47 @@ func prewarmBody(module string) (string, bool) {
 	}
 	return strings.Join(kept, "\n"), true
 }
+
+// TestTheHalfCascadeCompilesAsAPackageSomebodyCouldRun.
+//
+// FR-006 was held only by a test that took the voice off a binding and added a
+// speak binding in memory. That proves the driver branches; it does not prove a
+// person can write the shape down, and every other architecture in this tree
+// has a package that validates and compiles as authored.
+//
+// The pairing is also the one most worth having a real package for. LiveKit
+// does not refuse a half-made half cascade: with audio output on, no audio
+// modality and no TTS it logs an error and carries on (agent_activity.py:1139).
+// So the failure mode is a call that connects and never speaks, which is
+// exactly what a compiled fixture catches and an in-memory mutation does not.
+func TestTheHalfCascadeCompilesAsAPackageSomebodyCouldRun(t *testing.T) {
+	module := artifactFile(t, generateFor(t, "realtime_half_cascade", ir.ProviderLiveKit), "agent.py")
+	code := codeOnly(module)
+
+	for _, want := range []string{
+		// The model is asked for text. Without this the synthesizer below is
+		// the second voice on a call that already had one.
+		`modalities=["text"]`,
+		"tts=cartesia.TTS(",
+		"from livekit.plugins import cartesia",
+	} {
+		if !strings.Contains(code, want) {
+			t.Errorf("the emitted half cascade is missing %q", want)
+		}
+	}
+	// The model must not also be asked to speak. Both at once is refused at
+	// validate, so finding a voice here would mean the refusal was bypassed.
+	if strings.Contains(code, `voice="marin"`) {
+		t.Error("the model is given a voice while a synthesizer speaks for it")
+	}
+
+	// The control. The full realtime fixture speaks for itself, so it builds no
+	// synthesizer and asks for no text-only modality.
+	full := codeOnly(artifactFile(t, generateFor(t, "realtime_model", ir.ProviderLiveKit), "agent.py"))
+	if strings.Contains(full, "tts=") {
+		t.Error("a full realtime package built a synthesizer, which would give the call two voices")
+	}
+	if strings.Contains(full, `modalities=["text"]`) {
+		t.Error("a full realtime package asked for text only, so nothing would speak")
+	}
+}
