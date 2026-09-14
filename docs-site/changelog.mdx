@@ -16,6 +16,163 @@ kinds were validated live here.
 
 {/* changelog:entries */}
 
+<Update label="September 2026" description="v0.4.2" tags={["CLI"]}>
+
+Regional speech, live transcripts, and typed contacts.
+
+Highlights:
+
+* Choose where SLNG speech requests go. Set params.world_part on each
+  SLNG listen or speak model to select one of 13 regional gateways,
+  including eu-north, eu-west, us-east and us-west. Unmute generates
+  the matching endpoint on both LiveKit and Pipecat. Gateway location
+  and worker deployment region are configured separately.
+
+* See every turn in unmute dev. Streaming transcripts show the caller's
+  words and the agent's reply as they arrive. Model requests, tool calls
+  and handoffs get their own rows, with per-request latency and audio
+  timings to help explain where the wait comes from.
+
+* Collect typed contact details on LiveKit and Pipecat. EmailStr checks
+  and normalizes email addresses before saving them. NameEmail keeps a
+  name and address together, with dotted references for either field.
+  Invalid values leave saved state untouched and tell the model what
+  to correct.
+
+* Deploy SLNG tools by name. Reference published hosted tools and named
+  MCP tools without pulling a mirror first. Deployment checks published
+  contracts, injected arguments and required credentials before pushing.
+  A dry run previews the versions and attachment changes.
+
+* Record conversation values and send SMS on SLNG. The new
+  source: conversation lets the model save values during a call.
+  The send_sms builtin sends a message to the caller's number on
+  phone calls, with the sender fixed by the package.
+
+* Two new examples to build from. customer-intake shows typed details,
+  caller confirmation and saved values passed into a local tool.
+  hotel-concierge replaces slng-support with hosted lookups, MCP web
+  search, conversation memory and SMS summaries.
+
+* Run local dev sessions side by side. Busy default ports are selected
+  automatically, LiveKit stacks are isolated, and shutdown cleans up
+  the session. Transcript handling, worker startup and Pipecat hangups
+  also get fixes.
+
+* Updated dependencies and clearer guides. pipecat-slng moves to 0.5.2,
+  generated Python supports ty 0.0.40, and the docs expand SLNG deployment,
+  typed state, regional model settings and latency measurement.
+
+Upgrade notes:
+
+* For SLNG listen and speak models, replace params.world_part_override
+  and params.region_override with params.world_part and a specific
+  gateway, such as eu-north. Legacy values na, eu and ap are refused.
+  Omit world_part to keep the default endpoint. SLNG think models
+  keep the Context Router's existing world_part_override setting.
+
+* SLNG deployment requires voiceai support for checked, resolved pushes
+  (verified with 0.1.18). Validation and compilation remain offline.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.4.2)
+
+</Update>
+
+<Update label="September 2026" description="v0.4.1" tags={["CLI"]}>
+
+Simpler SLNG deploys, live transcripts, and a hotel concierge.
+
+Highlights:
+- Reference SLNG hosted tools and MCP tools by name. Deployment checks published bindings and credentials, previews attachment changes, and pushes only after checks pass.
+- Follow conversations as they happen in unmute dev, with streaming transcripts, tool activity, and per-request latency.
+- Meet hotel-concierge: a new SLNG example combining hosted tools, web search, conversation memory, and SMS summaries.
+- Improve local worker startup, transcript handling, and graceful Pipecat hangups, with regression coverage for LiveKit task handoffs.
+- Update pipecat-slng to 0.5.2 and keep generated Python compatible with ty 0.0.40.
+- Expand the SLNG deployment walkthrough and clarify tool setup, testing, and latency measurement.
+
+Upgrade note:
+SLNG deployment now requires voiceai support for checked, resolved pushes
+(verified with 0.1.18). Validation and compilation remain offline.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.4.1)
+
+</Update>
+
+<Update label="September 2026" description="v0.4.0" tags={["CLI"]}>
+
+Typed state, simpler tasks, and portable hosted tools.
+
+Highlights:
+
+* Typed session state on LiveKit and Pipecat. Declare reusable shapes,
+  lists, optional values and fixed choices. Task finish arguments come
+  from the variables they assign, so each type is declared once.
+  Results are validated together before any value is saved.
+
+* Explicit context sharing. Prompts read saved values with &#123;&#123;variable}}
+  or &#123;&#123;variable.field}}. Tasks restore the owner's earlier context and
+  return a completion status; saved results reach only prompts that
+  name them. List assignments can append records across several tasks.
+
+* Simpler task definitions. Tasks live inside the agent that owns them,
+  with their trigger, announcement and assignments in one place.
+  Other agents can reuse a task by name.
+
+* Hosted SLNG tools. The new `slng:` block references an existing tool,
+  and `unmute pull` saves its definition and hash into the package.
+  Validation and compilation check the committed mirror offline.
+  Supported mirrors also run in generated LiveKit and Pipecat projects.
+
+* Langfuse v4 tracing on both code targets. Each call stays in one trace,
+  with the full conversation on its root and both sides of each exchange
+  on a turn span. Tool spans carry their names, arguments and results;
+  session IDs and trace names reach every observation.
+
+* More reliable conversations. Pipecat settles task tool calls before
+  returning to the owner, starts replies after empty-history handoffs,
+  and removes tool calls together with their replies when trimming history.
+  Salon examples preserve verified identity and booking details across
+  changes. A new text harness exercises generated LiveKit agents with
+  real models and local tools.
+
+* Clearer CLI output and docs. Commands print what they did and what
+  needs fixing; compile details live in compile-report.json.
+  New guides cover state design, context sharing and verification.
+  Shared OpenAI bindings can select LiveKit's Responses API; Pipecat
+  warns and drops the options it cannot use.
+
+Breaking changes and migration:
+
+* Replace agent `model:` and `voice:` selectors with `think:` and `speak:`.
+  Task model overrides also use `think:`.
+
+* Move top-level task definitions into an agent's `tasks:` list.
+  Replace `delegates:` with `tasks:` or `task_groups:` attachments,
+  moving triggers and announcements onto the task or group.
+
+* Replace task `result:` schemas with typed variables and task `assign:`.
+  Write `assign:` and tool `inject:` as lists of single-key entries.
+
+* Remove `requires:` and handoff `context.variables:`.
+  Put step ordering in prompts and reference saved values explicitly.
+  Tools still refuse missing or unconfirmed injected values.
+
+* Omitted task and handoff history now means `messages`.
+  Use `full` when the receiver needs earlier tool calls and results.
+
+* Move package-level `timezone:` onto each clock pre-fetch entry.
+  Replace tool `read_only:` with an explicit `writes: false` or
+  `writes: true` on each tool pre-fetch entry.
+
+* SLNG deployment no longer creates tools from `local:` or `webhook:`.
+  Create the tool on SLNG, reference it with `slng:`, run `unmute pull`,
+  and commit the generated mirror. Local and webhook tools remain
+  supported on LiveKit and Pipecat.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.4.0)
+
+</Update>
+
 <Update label="September 2026" description="v0.3.2" tags={["CLI"]}>
 
 Pre-fetch known facts, and a deploy that checks the account first.

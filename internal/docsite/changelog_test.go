@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/goccy/go-yaml"
 )
 
 // docs-site/changelog.mdx is written by scripts/render_changelog.py from the
@@ -147,9 +149,7 @@ func TestChangelogEntriesAreWellFormed(t *testing.T) {
 	}
 }
 
-// TestChangelogIsNewestFirst holds the order. The renderer inserts at the top,
-// so descending order is what a correct run produces and any other order means
-// somebody backfilled out of sequence or edited the page by hand.
+// TestChangelogIsNewestFirst holds the order, including backfilled releases.
 func TestChangelogIsNewestFirst(t *testing.T) {
 	entries := changelogEntries(t, changelog(t))
 
@@ -230,5 +230,39 @@ func TestChangelogKeepsTheInsertMarker(t *testing.T) {
 	}
 	if got := strings.Count(page, "<Update"); got != len(entries) {
 		t.Errorf("found %d <Update> tags but parsed %d entries; an entry is formatted in a way this gate cannot read, so it is not being checked", got, len(entries))
+	}
+}
+
+// GITHUB_TOKEN release events cannot start another workflow. The completion
+// trigger is needed even when a package publisher fails after the release exists.
+func TestChangelogRunsAfterTheReleaseWorkflow(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(siteRoot, "../.github/workflows/changelog.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		On map[string]struct {
+			Workflows []string `yaml:"workflows"`
+			Types     []string `yaml:"types"`
+		} `yaml:"on"`
+		Jobs map[string]struct {
+			If string `yaml:"if"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(raw, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	run := workflow.On["workflow_run"]
+	if !slices.Contains(run.Workflows, "Release") || !slices.Contains(run.Types, "completed") {
+		t.Fatal("the changelog must run after Release completes; GITHUB_TOKEN suppresses release events")
+	}
+	if _, ok := workflow.On["workflow_dispatch"]; !ok {
+		t.Error("the changelog needs a manual retry for missed releases")
+	}
+	if !slices.Contains(workflow.On["release"].Types, "edited") {
+		t.Error("edited release notes must refresh the changelog")
+	}
+	if workflow.Jobs["changelog"].If != "" {
+		t.Error("sync published releases even if a later package publisher failed")
 	}
 }

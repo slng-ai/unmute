@@ -5,15 +5,14 @@ The GitHub Release is the single source of truth. GoReleaser already writes it
 from the tag message and the git subjects, so this script derives a page entry
 from it rather than asking anybody to keep a second changelog by hand.
 
-Run by .github/workflows/changelog.yml on `release: published`, and by hand to
-backfill or to read a diff:
+Run by .github/workflows/changelog.yml after releases complete or notes change,
+and by hand to backfill or to read a diff:
 
     python3 scripts/render_changelog.py v0.2.5
     python3 scripts/render_changelog.py v0.2.5 --dry-run
 
-Re-running for a tag already on the page is a success that writes nothing.
-Failed releases get re-run in this repository, so that case is the one that
-matters most.
+Re-running updates edited notes in place. Unchanged releases write nothing,
+and backfills keep entries in version order.
 
 Standard library only, on purpose. Nothing here needs more.
 """
@@ -305,6 +304,7 @@ def render_body(body: str) -> str:
     body = tidy("\n".join(rendered))
 
     if lead:
+        lead = escape_mdx(normalise_dashes(lead))
         body = f"{lead}\n\n{body}".strip() if body else lead
     return body
 
@@ -324,15 +324,25 @@ def render_entry(tag: str, published: str, body: str) -> str:
     )
 
 
-def insert_entry(page: str, entry: str) -> str:
-    """Put the entry directly below the marker, so the newest is first."""
-    if INSERT_MARKER not in page:
-        raise RenderError(
-            f"{CHANGELOG} has no {INSERT_MARKER!r} line, which is where entries go"
-        )
-    # No trailing newline of its own: whatever followed the marker already starts
-    # with one, so adding another leaves a growing gap between entries.
-    return page.replace(INSERT_MARKER, f"{INSERT_MARKER}\n\n{entry.rstrip()}", 1)
+def insert_entry(page: str, entry: str, tag: str) -> str:
+    """Replace edited notes, or insert a missing release in version order."""
+    if page.count(INSERT_MARKER) != 1:
+        raise RenderError(f"{CHANGELOG} needs exactly one {INSERT_MARKER!r} line")
+    version = SEMVER.fullmatch(tag)
+    if not version:
+        raise RenderError(f"{tag!r} is not a version of the shape v1.2.3")
+    new = tuple(map(int, version.groups()))
+    blocks = re.compile(
+        r'^<Update [^\n]*description="(v\d+\.\d+\.\d+)"[^\n]*>\n'
+        r'.*?^</Update>\n?', re.MULTILINE | re.DOTALL
+    )
+    for match in blocks.finditer(page):
+        if match.group(1) == tag:
+            return page[:match.start()] + entry + page[match.end():]
+        current = tuple(map(int, match.group(1)[1:].split(".")))
+        if new > current:
+            return page[:match.start()] + entry + "\n" + page[match.start():]
+    return page.rstrip() + "\n\n" + entry
 
 
 def bump_marker(snippet: str, tag: str) -> tuple[str, bool]:
@@ -356,7 +366,7 @@ def bump_marker(snippet: str, tag: str) -> tuple[str, bool]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     parser.add_argument("tag", help="the release tag, for example v0.2.5")
     parser.add_argument(
         "--from-json",
@@ -384,13 +394,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        if f'description="{args.tag}"' in page:
-            print(f"{args.tag} is already on {CHANGELOG}; nothing to do")
-            return 0
-
         release = load_release(args.tag, args.from_json)
         entry = render_entry(args.tag, release["publishedAt"], release["body"])
-        page = insert_entry(page, entry)
+        original_page, original_snippet = page, snippet
+        page = insert_entry(page, entry, args.tag)
         snippet, moved = bump_marker(snippet, args.tag)
     except RenderError as err:
         print(f"render_changelog: {err}", file=sys.stderr)
@@ -404,9 +411,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    if page == original_page and snippet == original_snippet:
+        print(f"{args.tag} is up to date; nothing to do")
+        return 0
+
     changelog.write_text(page, encoding="utf-8")
     snippet_path.write_text(snippet, encoding="utf-8")
-    print(f"added {args.tag} to {CHANGELOG}")
+    print(f"synced {args.tag} to {CHANGELOG}")
     print(
         f"version marker {'now ' + args.tag if moved else 'left alone, it already names a newer release'}"
     )
