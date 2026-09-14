@@ -7,10 +7,12 @@ import (
 
 // Package is the decoded, unresolved v1 package assembled from its files.
 type Package struct {
-	Agent       AgentFile             `json:"agent" yaml:"agent"`
-	Tools       map[string]Tool       `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Connections map[string]Connection `json:"connections,omitempty" yaml:"connections,omitempty"`
-	Targets     map[string]Target     `json:"targets" yaml:"targets"`
+	Manifest      *Manifest             `json:"-" yaml:"-"`
+	ManifestBytes []byte                `json:"-" yaml:"-"`
+	Agent         AgentFile             `json:"agent" yaml:"agent"`
+	Tools         map[string]Tool       `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Connections   map[string]Connection `json:"connections,omitempty" yaml:"connections,omitempty"`
+	Targets       map[string]Target     `json:"targets" yaml:"targets"`
 
 	Root     string            `json:"-" yaml:"-"`
 	Markdown map[string]string `json:"-" yaml:"-"`
@@ -79,7 +81,8 @@ func (p *Package) Location(file, token string) string {
 }
 
 type AgentFile struct {
-	Version int `json:"version" yaml:"version"`
+	Manifest string `json:"manifest,omitempty" yaml:"manifest,omitempty"`
+	Version  int    `json:"version" yaml:"version"`
 	// Name is what this agent is called wherever it is deployed under a name
 	// rather than an id. It lives here, in the package, because that is the only
 	// thing about it that is stable: a target instance is named for where the

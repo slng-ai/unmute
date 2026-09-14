@@ -405,8 +405,7 @@ with `AGENT_MODEL_UNAVAILABLE`, naming the field. Unmute cannot check this: the
 list is per-organisation, and model strings are forwarded exactly as written.
 Three things cause it. The model is not enabled for agents, it is your own model
 and SLNG's router is off, or it is not served in the region and language this
-agent asked for. `deployment_region: any` avoids the third by letting SLNG route
-each call, which is worth trying before you pin one.
+agent asked for. Choose a region that serves the model.
 
 ## Where to go next
 

@@ -5,4 +5,4 @@
 targets:
   slng:
     provider: slng
-    deployment_region: eu-central
+    deployment_region: eu-north

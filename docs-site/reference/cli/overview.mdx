@@ -18,6 +18,7 @@ Available Commands:
   dev         Compile, run the agent locally, and talk to it in the browser.
   help        Help about any command
   init        Scaffold a new v1 agent package.
+  manifest    Save organization contracts on this computer.
   pull        Fetch each SLNG-hosted tool's definition into the package.
   resources   List the tools, MCP servers and phone numbers your SLNG organisation offers.
   skill       Install the coding-agent skill into a project.
@@ -45,6 +46,16 @@ The first four take you from nothing to a voice you can talk to on your own
 machine. `deploy` is the one that puts an agent somewhere else, and it is SLNG
 only: a livekit or pipecat target compiles to a project that platform deploys
 with its own tool.
+
+## Saved company rules
+
+| Command | What it does |
+|---|---|
+| [`manifest create`](/reference/cli/manifest) | edit and save a reusable manifest |
+| [`manifest use`](/reference/cli/manifest) | choose the default for future agents |
+
+`init` uses the saved default automatically. Add `--from-manifest` to pick a
+different saved contract for one new agent. See [Manifest](/reference/manifest).
 
 ## Two commands off that path
 

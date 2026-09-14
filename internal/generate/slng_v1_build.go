@@ -328,13 +328,13 @@ func buildSlng(agent *ir.Agent, tgt ir.Target) (slngArtifacts, error) {
 }
 
 // slngTargetRegion returns the one region SLNG is given. Validation has already
-// refused an empty list, more than one, and a value outside the four, so this
+// refused an empty list, more than one, and a value outside the shared region list, so this
 // reads the first entry rather than re-deciding.
 //
 // Named for the target because slngWorldPart next door answers a different
 // question: it reads the params.world_part off a Context Router binding, which
-// says where a request is thought, not where the worker runs. The two sets are
-// separate and stay separate.
+// selects the model service location rather than the worker location.
+// Both choices use the shared SLNG region list.
 func slngTargetRegion(tgt ir.Target) string {
 	if len(tgt.DeploymentRegions) == 0 {
 		return ""

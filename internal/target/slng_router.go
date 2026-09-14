@@ -74,10 +74,10 @@ const (
 // The router used to take four names of its own, eu, us, india and indonesia,
 // while speech took the thirteen world parts. One author had to learn that
 // `in` and `india` were the same place spelled two ways. The router now serves
-// every world part, so both roles read SlngWorldParts and the host is the world
+// every world part, so both roles read SlngRegions and the host is the world
 // part: the URL form did not change, only how many names reach it.
 func SlngRouterBaseURL(worldPart string) (string, bool) {
-	if !slices.Contains(SlngWorldParts, worldPart) {
+	if !slices.Contains(SlngRegions, worldPart) {
 		return "", false
 	}
 	return "https://" + worldPart + ".context-router.slng.ai/v1", true

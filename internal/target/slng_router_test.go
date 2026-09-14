@@ -6,12 +6,12 @@ import (
 )
 
 // The router serves every world part and nothing else. Asserted against
-// SlngWorldParts itself rather than a copy of the list, because a copy is how
+// SlngRegions itself rather than a copy of the list, because a copy is how
 // the two sets drifted apart the first time: the router took four names of its
 // own, `eu`, `us`, `india` and `indonesia`, while speech took the thirteen world
 // parts, and `in` and `india` were the same place spelled two ways.
 func TestSlngRouterServesEveryWorldPartAndNothingElse(t *testing.T) {
-	for _, part := range SlngWorldParts {
+	for _, part := range SlngRegions {
 		want := "https://" + part + ".context-router.slng.ai/v1"
 		got, ok := SlngRouterBaseURL(part)
 		if !ok || got != want {
@@ -350,5 +350,32 @@ func TestValidateSlngScope(t *testing.T) {
 	exact := strings.Repeat("y", SlngAgentIDMaxLen-len(SlngScopeSeparator)-len("concierge"))
 	if err := ValidateSlngScope(exact, site); err != nil {
 		t.Errorf("ValidateSlngScope refused a scope of exactly %d characters: %v", SlngAgentIDMaxLen, err)
+	}
+}
+
+func TestSlngAllRolesShareDeploymentRegions(t *testing.T) {
+	for _, region := range SlngRegions {
+		want := "https://" + region + ".context-router.slng.ai/v1"
+		got, ok := SlngRouterBaseURL(region)
+		if !ok || got != want {
+			t.Errorf("region %s: got %s, %v; want %s", region, got, ok, want)
+		}
+		if err := CheckSlngRegion(region); err != nil {
+			t.Error(err)
+		}
+		if _, err := SlngSpeechBaseURL(map[string]any{"world_part": region}); err != nil {
+			t.Error(err)
+		}
+	}
+	for _, region := range []string{"", "any", "eu", "us", "india", "indonesia", "eu-central", "ap-south", "na", "ap", "EU", "eu ", "europe"} {
+		if _, ok := SlngRouterBaseURL(region); ok {
+			t.Errorf("router accepted retired/invalid region %q", region)
+		}
+		if err := CheckSlngRegion(region); err == nil {
+			t.Errorf("deployment accepted retired/invalid region %q", region)
+		}
+		if _, err := SlngSpeechBaseURL(map[string]any{"world_part": region}); err == nil {
+			t.Errorf("speech accepted retired/invalid region %q", region)
+		}
 	}
 }

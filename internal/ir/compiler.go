@@ -10,7 +10,8 @@ import (
 // Agent is the resolved v1 package. References remain names so the graph is
 // acyclic and schema derivation does not recurse through agent handoffs.
 type Agent struct {
-	Version int `json:"version" yaml:"version"`
+	Manifest *packagespec.Manifest `json:"manifest,omitempty" yaml:"manifest,omitempty"`
+	Version  int                   `json:"version" yaml:"version"`
 	// Name is the package's own name, carried through from agent.yaml and
 	// trimmed. Empty when the author wrote none, which only the slng target
 	// refuses: it is the one target that deploys under a name instead of into a
@@ -1011,19 +1012,20 @@ type TelephonyFeatureEvidence struct {
 }
 
 type Target struct {
-	Name              string            `json:"name" yaml:"name"`
-	Provider          Provider          `json:"provider" yaml:"provider"`
-	Version           string            `json:"version,omitempty" yaml:"version,omitempty"`
-	Pins              map[string]string `json:"pins,omitempty" yaml:"pins,omitempty"`
-	SDKLanguage       string            `json:"sdk_language,omitempty" yaml:"sdk_language,omitempty"`
-	Transport         string            `json:"transport,omitempty" yaml:"transport,omitempty"`
-	Carrier           string            `json:"carrier,omitempty" yaml:"carrier,omitempty"`
-	Connection        string            `json:"connection,omitempty" yaml:"connection,omitempty"`
-	DeploymentRegions []string          `json:"deployment_regions,omitempty" yaml:"deployment_regions,omitempty"`
-	WarmInstances     int               `json:"warm_instances,omitempty" yaml:"warm_instances,omitempty"`
-	Models            Bindings          `json:"models" yaml:"models"`
-	Destinations      map[string]string `json:"destinations,omitempty" yaml:"destinations,omitempty"`
-	Telephony         *TelephonyPlan    `json:"telephony,omitempty" yaml:"telephony,omitempty"`
+	ManifestModels    map[string]ModelDef `json:"manifest_models,omitempty" yaml:"manifest_models,omitempty"`
+	Name              string              `json:"name" yaml:"name"`
+	Provider          Provider            `json:"provider" yaml:"provider"`
+	Version           string              `json:"version,omitempty" yaml:"version,omitempty"`
+	Pins              map[string]string   `json:"pins,omitempty" yaml:"pins,omitempty"`
+	SDKLanguage       string              `json:"sdk_language,omitempty" yaml:"sdk_language,omitempty"`
+	Transport         string              `json:"transport,omitempty" yaml:"transport,omitempty"`
+	Carrier           string              `json:"carrier,omitempty" yaml:"carrier,omitempty"`
+	Connection        string              `json:"connection,omitempty" yaml:"connection,omitempty"`
+	DeploymentRegions []string            `json:"deployment_regions,omitempty" yaml:"deployment_regions,omitempty"`
+	WarmInstances     int                 `json:"warm_instances,omitempty" yaml:"warm_instances,omitempty"`
+	Models            Bindings            `json:"models" yaml:"models"`
+	Destinations      map[string]string   `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+	Telephony         *TelephonyPlan      `json:"telephony,omitempty" yaml:"telephony,omitempty"`
 }
 
 type Provider string

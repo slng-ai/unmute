@@ -122,7 +122,7 @@ func TestSlngRefusesRegionsOutsideTheFour(t *testing.T) {
 		regions []string
 		want    string
 	}{
-		{"unknown", []string{"eu-west"}, `does not deploy to region "eu-west"`},
+		{"unknown", []string{"any"}, `does not deploy to region "any"`},
 		{"absent", nil, "requires a deployment_region"},
 		{"two", []string{"us-east", "eu-central"}, "takes exactly one deployment region"},
 		{"two and one wrong", []string{"us-east", "atlantis"}, `does not deploy to region "atlantis"`},
@@ -139,7 +139,7 @@ func TestSlngRefusesRegionsOutsideTheFour(t *testing.T) {
 			wantSlngError(t, row, test.want)
 			// Every region message lists the accepted values, because the useful
 			// half of "that one is wrong" is which ones are right.
-			if test.name != "two" && !strings.Contains(strings.Join(row.Errors, "\n"), "ap-south") {
+			if test.name != "two" && !strings.Contains(strings.Join(row.Errors, "\n"), "eu-north") {
 				t.Errorf("the message does not list the accepted regions: %#v", row.Errors)
 			}
 		})

@@ -534,7 +534,7 @@ func TestRegionalGuidanceStaysExplicit(t *testing.T) {
 		if strings.Contains(content, "region_override") || strings.Contains(content, "region-override") {
 			t.Errorf("%s still teaches the retired SLNG region override", name)
 		}
-		for _, part := range target.SlngWorldParts {
+		for _, part := range target.SlngRegions {
 			if !strings.Contains(content, "`"+part+"`") {
 				t.Errorf("%s omits speech gateway %q", name, part)
 			}
@@ -576,7 +576,7 @@ func TestRegionalGuidanceStaysExplicit(t *testing.T) {
 
 // The Context Router serves the same world parts as speech, under the same key,
 // and every reader-facing surface has to say the same thing. Held against
-// target.SlngWorldParts rather than a list written here, because the two sets
+// target.SlngRegions rather than a list written here, because the two sets
 // drifted apart once already: the router took four names of its own, `eu`, `us`,
 // `india` and `indonesia`, and an author had to learn that `in` and `india` were
 // the same place spelled two ways. A world part added in Go and not on the page
@@ -599,7 +599,7 @@ func TestRouterWorldPartsReachEveryReaderFacingSurface(t *testing.T) {
 	}
 
 	page := trackedFile(t, "docs-site/optimization/context-router.mdx")
-	for _, part := range target.SlngWorldParts {
+	for _, part := range target.SlngRegions {
 		row := regexp.MustCompile(`\| ` + regexp.QuoteMeta("`"+part+"`") + ` \| [^|]+ \| ` + regexp.QuoteMeta("`https://"+part+".context-router.slng.ai/v1`") + ` \|`)
 		if !row.MatchString(page) {
 			t.Errorf("docs-site/optimization/context-router.mdx omits the endpoint row for world part %q", part)

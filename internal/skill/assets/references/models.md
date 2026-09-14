@@ -168,7 +168,7 @@ Four things are required and none has a default:
   itself passed. The refusal names the agent or task that produced the long value.
 - `upstream`, saying who actually serves the model.
 - `params.world_part`, the world part the request is thought in. The same key
-  and the same set a speech binding takes, so `eu-west` here and `eu-west` for
+  and the same set speech and SLNG deployment take, so `eu-west` here and `eu-west` for
   listening are the same place. The compiler consumes this into the base URL and
   names the substitution in the compile report. The four old router-only names,
   `eu`, `us`, `india` and `indonesia`, are refused with a line saying where they

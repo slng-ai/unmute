@@ -101,6 +101,10 @@ Everything you say is read out loud.
 
 // Data is the v1 agent configuration rendered by the scaffold templates.
 type Data struct {
+	// Manifest carries the exact package contract through creation and maintenance.
+	Manifest []byte
+	Tracing  *spec.Tracing
+
 	// Name is the package folder, used as a label. It is not the agent's name:
 	// a folder is named by whoever cloned the repository.
 	Name string
@@ -813,6 +817,11 @@ func (d Data) DeclaredSecrets() []string {
 			set[tool.Auth.TokenEnv] = true
 		}
 	}
+	if d.Tracing != nil {
+		for _, name := range ir.TracingSecrets[d.Tracing.Provider] {
+			set[name] = true
+		}
+	}
 	names := make([]string, 0, len(set))
 	for name := range set {
 		names = append(names, name)
@@ -882,6 +891,13 @@ func Write(dir string, d Data) ([]string, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("scaffold: %w", err)
+	}
+	if len(d.Manifest) > 0 {
+		path := filepath.Join(dir, "manifest")
+		if err := os.WriteFile(path, d.Manifest, 0o644); err != nil {
+			return nil, fmt.Errorf("scaffold manifest: %w", err)
+		}
+		created = append(created, path)
 	}
 	raw, err := templates.ReadFile("templates/tool.yaml.tmpl")
 	if err != nil {

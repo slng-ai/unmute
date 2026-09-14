@@ -80,7 +80,7 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		artifact.Notes.Notes = append(artifact.Notes.Notes, emitted.Notes.Notes...)
 		artifact.Notes.Notes = append(artifact.Notes.Notes, knowledgeNotes(agent)...)
 		artifact.Notes.Warnings = append(artifact.Notes.Warnings, emitted.Notes.Warnings...)
-		return artifact, nil
+		return withManifestReport(artifact, agent)
 	case ir.ProviderPipecat:
 		emitted, err := GeneratePipecat(agent, resolved, report.ForwardedBindings, report.Sizing)
 		if err != nil {
@@ -94,7 +94,7 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		artifact.Notes.Notes = append(artifact.Notes.Notes, emitted.Notes.Notes...)
 		artifact.Notes.Notes = append(artifact.Notes.Notes, knowledgeNotes(agent)...)
 		artifact.Notes.Warnings = append(artifact.Notes.Warnings, emitted.Notes.Warnings...)
-		return artifact, nil
+		return withManifestReport(artifact, agent)
 	case ir.ProviderSlng:
 		// No withTelephonyReport: unmute writes slng no carrier state, so there is
 		// no route plan to report and Telephony is nil above.
@@ -109,7 +109,7 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		// by that platform's own tool, which owns whatever it needs to find
 		// already in place; unmute has nothing to check on its behalf.
 		artifact.Requires = emitted.Requires
-		return artifact, nil
+		return withManifestReport(artifact, agent)
 	default:
 		return Artifact{}, fmt.Errorf("unsupported provider %q", resolved.Provider)
 	}

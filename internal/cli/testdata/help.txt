@@ -12,6 +12,7 @@ Available Commands:
   dev         Compile, run the agent locally, and talk to it in the browser.
   help        Help about any command
   init        Scaffold a new v1 agent package.
+  manifest    Save organization contracts on this computer.
   pull        Fetch each SLNG-hosted tool's definition into the package.
   resources   List the tools, MCP servers and phone numbers your SLNG organisation offers.
   skill       Install the coding-agent skill into a project.
@@ -30,7 +31,41 @@ Usage:
   unmute init [name] [flags]
 
 Flags:
-  -h, --help   help for init
+      --from-manifest   Choose a saved organization manifest.
+  -h, --help            help for init
+
+$ unmute manifest --help
+Save organization contracts on this computer.
+
+Usage:
+  unmute manifest [command]
+
+Available Commands:
+  create      Create a saved manifest in your editor.
+  use         Choose the default manifest for new agents.
+
+Flags:
+  -h, --help   help for manifest
+
+Use "unmute manifest [command] --help" for more information about a command.
+
+$ unmute manifest create --help
+Create a saved manifest in your editor.
+
+Usage:
+  unmute manifest create [name] [flags]
+
+Flags:
+  -h, --help   help for create
+
+$ unmute manifest use --help
+Choose the default manifest for new agents.
+
+Usage:
+  unmute manifest use <name> [flags]
+
+Flags:
+  -h, --help   help for use
 
 $ unmute validate --help
 Validate a v1 agent package against its targets.

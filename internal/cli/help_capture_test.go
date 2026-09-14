@@ -21,7 +21,7 @@ var helpCapture = filepath.Join("testdata", "help.txt")
 
 // helpCommands are the command paths the docs document, in the order the
 // capture file lists them.
-var helpCommands = [][]string{{}, {"init"}, {"validate"}, {"compile"}, {"deploy"}, {"dev"}, {"pull"}, {"resources"}, {"skill"}, {"skill", "install"}, {"completion"}}
+var helpCommands = [][]string{{}, {"init"}, {"manifest"}, {"manifest", "create"}, {"manifest", "use"}, {"validate"}, {"compile"}, {"deploy"}, {"dev"}, {"pull"}, {"resources"}, {"skill"}, {"skill", "install"}, {"completion"}}
 
 func renderHelp(t *testing.T) string {
 	t.Helper()
@@ -75,17 +75,20 @@ func TestHelpCaptureMatchesBinary(t *testing.T) {
 // appear on the page that documents that command.
 func TestDocsSiteCLIPagesQuoteHelp(t *testing.T) {
 	pages := map[string]string{
-		"":              "overview",
-		"init":          "init",
-		"validate":      "validate",
-		"compile":       "compile",
-		"deploy":        "deploy",
-		"dev":           "dev",
-		"pull":          "pull",
-		"resources":     "resources",
-		"skill":         "skill",
-		"skill install": "skill",
-		"completion":    "overview",
+		"":                "overview",
+		"init":            "init",
+		"manifest":        "manifest",
+		"manifest create": "manifest",
+		"manifest use":    "manifest",
+		"validate":        "validate",
+		"compile":         "compile",
+		"deploy":          "deploy",
+		"dev":             "dev",
+		"pull":            "pull",
+		"resources":       "resources",
+		"skill":           "skill",
+		"skill install":   "skill",
+		"completion":      "overview",
 	}
 	for _, path := range helpCommands {
 		name := strings.Join(path, " ")

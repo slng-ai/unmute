@@ -2248,13 +2248,15 @@ func TestValidateSlngRouterAcceptsTheSmallestLegalBinding(t *testing.T) {
 // off the regional infrastructure page is the likely mistake, so the refusal has
 // to say which vocabulary is which.
 func TestValidateSlngRouterWorldPart(t *testing.T) {
-	parts := strings.Join(targetcap.SlngWorldParts, ", ")
+	parts := strings.Join(targetcap.SlngRegions, ", ")
 	for _, tc := range []struct {
 		name   string
 		params map[string]any
 		wants  []string
 	}{
 		{"missing", map[string]any{}, []string{"world_part", parts}},
+		{"both keys", map[string]any{"world_part_override": nil, "world_part": "eu-north"}, []string{"world_part_override is no longer supported"}},
+		{"retired region", map[string]any{"region_override": "eu"}, []string{"region_override is no longer supported", "params.world_part"}},
 		{"retired key", map[string]any{"world_part_override": "eu"}, []string{"world_part_override is no longer supported", "params.world_part", parts}},
 		// The retired key is refused even when it names something the new key
 		// would accept, because the author still has to move it: a package left

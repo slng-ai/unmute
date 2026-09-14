@@ -394,6 +394,9 @@ worker itself runs is a separate choice, `deployment_region` in `targets.yaml`,
 and it does not have to match: `salon-concierge` deploys to `eu-central` and
 speaks through `eu-north`.
 
+SLNG deployment uses these same 13 region names. The location of each service
+is still chosen separately.
+
 ### Turn taking you can hear
 
 ```yaml

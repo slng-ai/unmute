@@ -119,14 +119,14 @@ the model has no text tool, and the prompt says so to the guest.
 
 ## Structure
 
-- **Target.** `targets.yaml` names one target, `slng`, in `eu-central`. A
+- **Target.** `targets.yaml` names one target, `slng`, in `eu-north`. A
   push deploys an agent named `hotel-concierge-slng`: the package's name
   joined to the target's name.
 - **Agent.** `agent.yaml` defines one agent, `concierge`, whose prompt is in
   `instructions.md`. It reasons with a Gemini model and falls back to a
   second Gemini model, and speaks and transcribes with the Deepgram models
   SLNG serves in Europe. The SLNG-hosted `slng/deepgram/...-en` copies run in
-  other regions, and a push into `eu-central` refuses them by name.
+  other regions, and a push into `eu-north` refuses them by name.
 - **Variables.** Four template variables, each with a default: `hotel_name`,
   `neighbourhood`, `city`, `hotel_website`. The greeting names
   `{{hotel_name}}` and the prompt names all four. A fifth, `caller_phone`, has

@@ -144,9 +144,9 @@ def slng_config(binding):
 
 
 def base_url(binding):
-    region = (binding.get("params") or {}).get("world_part_override")
+    region = (binding.get("params") or {}).get("world_part")
     if not region:
-        sys.exit("the binding has no params.world_part_override, so it has no base URL")
+        sys.exit("the binding has no params.world_part, so it has no base URL")
     return f"https://{region}.context-router.slng.ai/v1"
 
 

@@ -32,7 +32,7 @@ models:
   # Both speech models are written whole, vendor and model joined, and both are
   # ones SLNG serves in the eu region. The `slng/deepgram/...-en` ids the
   # scaffold uses elsewhere are SLNG-hosted copies that run in us-central,
-  # Australia and India only, and a push into eu-central refuses them with
+  # Australia and India only, and a push into eu-north refuses them with
   # AGENT_MODEL_UNAVAILABLE.
   speak:
     front_desk:

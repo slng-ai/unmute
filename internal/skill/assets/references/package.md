@@ -7,6 +7,7 @@ What an author writes, file by file. This is the surface you work in.
 | File | Required | What it holds |
 |---|---|---|
 | `agent.yaml` | yes | the agent: models, prompts, tools, conversation, channels |
+| `manifest` | when linked | the company rules copied into this package; see [manifests](manifests.md) |
 | an instructions file | yes | the prompt, in Markdown, named by each agent |
 | `targets.yaml` | yes | where it runs, and the framework version pinned |
 | `tools/<name>.yaml` | no | one file per tool |
@@ -88,6 +89,7 @@ That is the shape `unmute init <name>` scaffolds, and it runs in a browser.
 | Key | Required | What it is |
 |---|---|---|
 | `version` | yes | the schema version, `1` |
+| `manifest` | when a root manifest exists | the literal `manifest`, linking the company contract |
 | `name` | yes | what the deployed agent is called |
 | `entry_agent` | yes | which agent answers |
 | `models` | yes | the model palette, grouped by kind |
@@ -401,7 +403,7 @@ provider with different settings, for example `pipecat_twilio` and
 | `pins` | LiveKit-only known package pins, name to semantic version; refused on `slng` |
 | `sdk_language` | `python` when written; refused on `slng` |
 | `connection` | required for LiveKit or Pipecat telephony; illegal with no phone use; refused on `slng` |
-| `deployment_region` | one non-empty region, or a duplicate-free list; multiple regions are LiveKit-only; on `slng` exactly one of `any`, `us-east`, `eu-central`, `ap-south` |
+| `deployment_region` | one non-empty region, or a duplicate-free list; multiple regions are LiveKit-only; on `slng` exactly one of `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au` |
 | `warm_instances` | instances the platform holds ready; zero or more; **Pipecat only**, refused on `livekit` and `slng` |
 | `models` | per target overrides of named `models` entries |
 
@@ -609,12 +611,10 @@ across an organisation and a push replaces the agent it matches.
 targets:
   slng:
     provider: slng
-    deployment_region: eu-central
+    deployment_region: eu-north
 ```
 
-That is the whole target. `deployment_region` takes exactly one of `any`,
-`us-east`, `eu-central` or `ap-south`, where `any` lets SLNG route each call
-itself. `version`, `pins`, `sdk_language` and `connection` are all refused by
+That is the whole target. `deployment_region` takes exactly one of `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`. `version`, `pins`, `sdk_language` and `connection` are all refused by
 name: each describes a generated project and there is none.
 
 Write models as two fields here, the same as everywhere else. SLNG names a

@@ -14,11 +14,63 @@ import (
 )
 
 func newInitCmd() *cobra.Command {
-	return &cobra.Command{
+	var fromManifest bool
+	command := &cobra.Command{
 		Use:   "init [name]",
 		Short: "Scaffold a new v1 agent package.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := manifestStore()
+			if err != nil {
+				return err
+			}
+			saved, err := store.Default()
+			if err != nil {
+				return err
+			}
+			if fromManifest {
+				entries, err := store.List()
+				if err != nil {
+					return err
+				}
+				if len(entries) == 0 {
+					return fmt.Errorf("no saved manifests; run `unmute manifest create` first")
+				}
+				if cmd.InOrStdin() == os.Stdin && (!isTTY(os.Stdin) || !isTTY(cmd.OutOrStdout())) {
+					return fmt.Errorf("manifest initialization needs an interactive terminal")
+				}
+				choices := make([]tui.ManifestChoice, 0, len(entries))
+				for _, entry := range entries {
+					choices = append(choices, tui.ManifestChoice{Name: entry.Name, Data: entry.Data})
+				}
+				defaultName := ""
+				if saved != nil {
+					defaultName = saved.Name
+				}
+				path := ""
+				if len(args) > 0 {
+					path = args[0]
+				}
+				result, err := tui.RunCreateWithManifests(cmd.InOrStdin(), cmd.OutOrStdout(), cmd.InOrStdin() != os.Stdin, path, choices, defaultName, true)
+				if err != nil {
+					return fmt.Errorf("console: %w", err)
+				}
+				return writeConsoleResult(cmd, result)
+			}
+			if saved != nil {
+				if cmd.InOrStdin() == os.Stdin && (!isTTY(os.Stdin) || !isTTY(cmd.OutOrStdout())) {
+					return fmt.Errorf("manifest initialization needs an interactive terminal")
+				}
+				path := ""
+				if len(args) > 0 {
+					path = args[0]
+				}
+				result, err := tui.RunCreateFromManifest(cmd.InOrStdin(), cmd.OutOrStdout(), cmd.InOrStdin() != os.Stdin, path, saved.Data)
+				if err != nil {
+					return fmt.Errorf("console: %w", err)
+				}
+				return writeConsoleResult(cmd, result)
+			}
 			if len(args) == 0 {
 				if cmd.InOrStdin() == os.Stdin && (!isTTY(os.Stdin) || !isTTY(cmd.OutOrStdout())) {
 					return fmt.Errorf("agent name required")
@@ -29,11 +81,24 @@ func newInitCmd() *cobra.Command {
 			return writeScaffold(cmd, dir, scaffold.Data{Name: filepath.Base(dir), Tools: scaffold.DefaultTools()})
 		},
 	}
+	command.Flags().BoolVar(&fromManifest, "from-manifest", false, "Choose a saved organization manifest.")
+	return command
 }
 
 func runConsole(cmd *cobra.Command, createOnly bool) error {
 	in := cmd.InOrStdin()
 	run := func(in io.Reader, out io.Writer, accessible bool) (tui.Result, error) {
+		store, err := manifestStore()
+		if err != nil {
+			return tui.RunConsoleWithManifest(in, out, accessible, consoleAction, nil, err)
+		}
+		saved, err := store.Default()
+		if err != nil {
+			return tui.RunConsoleWithManifest(in, out, accessible, consoleAction, nil, err)
+		}
+		if saved != nil {
+			return tui.RunConsoleWithManifest(in, out, accessible, consoleAction, saved.Data, nil)
+		}
 		return tui.RunConsole(in, out, accessible, consoleAction)
 	}
 	if createOnly {
@@ -43,6 +108,10 @@ func runConsole(cmd *cobra.Command, createOnly bool) error {
 	if err != nil {
 		return fmt.Errorf("console: %w", err)
 	}
+	return writeConsoleResult(cmd, result)
+}
+
+func writeConsoleResult(cmd *cobra.Command, result tui.Result) error {
 	if !result.Confirmed {
 		return nil
 	}
@@ -84,8 +153,12 @@ func writeScaffold(cmd *cobra.Command, dir string, data scaffold.Data) error {
 			"a name is %s. Run `unmute init <name>` with one, or scaffold here and add a `name:` to agent.yaml yourself",
 			dir, data.Name, ir.PackageNameShape)
 	}
-	if _, err := scaffold.Preflight(data); err != nil {
+	if review, err := scaffold.Preflight(data); err != nil {
 		return fmt.Errorf("init %s: preflight: %w", dir, err)
+	} else if len(data.Manifest) > 0 {
+		for _, warning := range review.Warnings {
+			fmt.Fprintln(cmd.ErrOrStderr(), "warning:", warning)
+		}
 	}
 	created, err := scaffold.Write(dir, data)
 	if err != nil {

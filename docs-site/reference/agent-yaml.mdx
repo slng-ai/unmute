@@ -7,6 +7,10 @@ description: "Every block of the agent file, and the tool files beside it."
 can do, and who it can reach. Nothing in it belongs to one target; the runtime
 half lives in [targets.yaml](/reference/targets-yaml).
 
+An optional `manifest: manifest` links the company contract copied into the
+package root. If that file exists, the link is required. See
+[Manifest](/reference/manifest) for the rules and saved defaults.
+
 YAML decoding is strict. An unknown field is an error with the file and the
 line, not a shrug.
 

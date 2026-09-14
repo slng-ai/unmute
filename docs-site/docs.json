@@ -260,6 +260,7 @@
         "icon": "file-code",
         "pages": [
           "reference/agent-yaml",
+          "reference/manifest",
           "reference/targets-yaml",
           "reference/connections-yaml",
           "reference/variables",
@@ -273,6 +274,7 @@
         "pages": [
           "reference/cli/overview",
           "reference/cli/init",
+          "reference/cli/manifest",
           "reference/cli/validate",
           "reference/cli/pull",
           "reference/cli/compile",

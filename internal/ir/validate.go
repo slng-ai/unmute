@@ -81,6 +81,9 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 		return ValidateReport{}, fmt.Errorf("validate: no targets selected")
 	}
 	global, globalWarnings := validateStructure(agent)
+	contractErrors, contractWarnings := ValidateManifest(agent)
+	global = append(global, contractErrors...)
+	globalWarnings = append(globalWarnings, contractWarnings...)
 	global = append(global, validateConfiguredTargets(agent, caps)...)
 	global = append(global, slngOneAgentIDPerPackage(agent)...)
 	global = append(global, slngScopeErrors(agent)...)
@@ -1616,7 +1619,10 @@ func slngRouterTargets() []string {
 // package left on the old key would either compile to a host that does not
 // exist or, worse, to a different place than the author wrote.
 func slngRouterWorldPartErrors(profile string, binding Binding) []string {
-	parts := strings.Join(targetcap.SlngWorldParts, ", ")
+	parts := strings.Join(targetcap.SlngRegions, ", ")
+	if _, set := binding.Params["region_override"]; set {
+		return []string{fmt.Sprintf("think.%s params.region_override is no longer supported: replace it with params.world_part (one of %s)", profile, parts)}
+	}
 	if _, set := binding.Params["world_part_override"]; set {
 		return []string{fmt.Sprintf(
 			"think.%s params.world_part_override is no longer supported for the SLNG Context Router: replace it with params.world_part, the same key and the same set a speech binding takes. One of %s",
