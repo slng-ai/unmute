@@ -170,6 +170,23 @@ async def exercise_live():
                 await until(lambda: socket.events("response.create"), "the finished response was not continued", timeout=5)
                 await until(lambda: [op["state"] for op in operations(capture, "tool")] == ["returned"], "the tool row did not end as returned")
                 assert [op["name"] for op in operations(capture, "tool")] == ["lookup_customer"], operations(capture, "tool")
+                # And the row says which reply called it. A live reply opens with
+                # no context frame in front of it, so the open reply has to be
+                # looked up before the tool frame is recorded; looked up after,
+                # every tool row came out with no cause at all and the dev page
+                # filed it under unassigned activity, beside the reply that had
+                # called it. Both rows read fine on their own, which is why this
+                # is asserted against the reply rather than against a field.
+                tool = operations(capture, "tool")[0]
+                replies = [op for op in operations(capture, "llm") if op.get("exchange_id")]
+                assert replies, operations(capture, "llm")
+                assert tool.get("exchange_id") == replies[-1]["exchange_id"], (tool, replies[-1])
+                # And no parent operation, deliberately. A live model delegates a
+                # tool as a response of its own, which arrives after the spoken
+                # reply has closed, so the tool belongs to the caller's turn and
+                # not to that reply's model call. Naming one would draw a nesting
+                # the run never had.
+                assert "parent_operation_id" not in tool, tool
 
                 # 6. The idle nudge goes in as commentary once the bot has stopped
                 # speaking and the caller has stayed quiet for the timeout.

@@ -126,6 +126,15 @@ class DevReporter:
         # frame in front of it, so the request it records under is kept here
         # rather than read off the frames, which carry no scope of their own.
         self._live_turn = None
+        # The exchange the last reply belonged to, kept after that reply ends.
+        # A live model delegates a tool as a response of its OWN, which arrives
+        # after the spoken reply has closed, so by then there is no open reply
+        # to hang the tool off and _live_turn is rightly None. The tool still
+        # belongs to the turn the caller is having, and this is what says which.
+        # Only the exchange: the delegated response is a different model call,
+        # so naming the spoken reply as the tool's parent operation would be a
+        # nesting the run never had.
+        self._live_exchange = None
 {{- end}}
         self._latency_observer = None
         self._attached = set()
@@ -617,6 +626,8 @@ class DevReporter:
             # activity, sitting beside the very reply that had called it.
             if not scope.get("operation_id") and self._live_turn in self._requests:
                 scope = dict(self._requests[self._live_turn]["scope"])
+            elif not scope.get("response_id") and self._live_exchange:
+                scope = dict(scope, response_id=self._live_exchange)
 {{- end}}
             self._service_metrics(llm, "llm", frame, scope)
             self._tool_event(llm, frame, scope)
@@ -639,6 +650,7 @@ class DevReporter:
                 request = {"scope": dict(scope), "text_id": None, "ended": False}
                 self._requests[operation] = request
                 self._live_turn = operation
+                self._live_exchange = scope["response_id"]
                 pending.add(operation)
                 self._put("operation", operation, {
                     "exchange_id": scope["response_id"], "type": "llm",
