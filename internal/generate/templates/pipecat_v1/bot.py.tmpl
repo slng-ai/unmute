@@ -106,7 +106,7 @@ from dev_metrics import install_dev_metrics
 {{end}}
 {{range .Imports}}{{.}}
 {{end}}
-load_dotenv()
+{{.GoogleVertex}}load_dotenv()
 
 _LOGGING_CONFIGURED = False
 

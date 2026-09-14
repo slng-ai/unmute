@@ -21,6 +21,7 @@ seeds one, with a reserved test number unless --from-number says otherwise.
 from __future__ import annotations
 
 import argparse
+import ast
 import asyncio
 import json
 import os
@@ -44,7 +45,7 @@ def parse() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         default=None,
-        help="think model override; default is the package's openai binding",
+        help="OpenAI model override; default is the compiled session's native binding",
     )
     return parser.parse_args()
 
@@ -157,7 +158,6 @@ async def run(args: argparse.Namespace) -> None:
 
     import agent as generated  # noqa: PLC0415 - after sys.path and cwd are set
     from livekit.agents import AgentSession  # noqa: PLC0415
-    from livekit.plugins import openai  # noqa: PLC0415
 
     entry = getattr(generated, "ENTRY_AGENT_CLASS", None)
     if entry is None:
@@ -179,10 +179,14 @@ async def run(args: argparse.Namespace) -> None:
                 return False
 
         entry = next(cls for _, cls in inspect.getmembers(generated, inspect.isclass) if takes_initial(cls))
-    model = args.model or _openai_model(package / "agent.yaml")
-    llm = openai.LLM(
-        api_key=os.environ["OPENAI_API_KEY"], model=model, reasoning_effort="none"
-    )
+    if args.model:
+        from livekit.plugins import openai  # noqa: PLC0415
+
+        llm = openai.LLM(
+            api_key=os.environ["OPENAI_API_KEY"], model=args.model, reasoning_effort="none"
+        )
+    else:
+        llm = compiled_llm(build / "agent.py", vars(generated))
     async with AgentSession(userdata=generated.Userdata(), llm=llm) as session:
         # A package that declares no `prefetch:` emits no _prefetch at all.
         prefetch = getattr(generated, "_prefetch", None)
@@ -193,6 +197,7 @@ async def run(args: argparse.Namespace) -> None:
         # model turn rather than the greeting session.say would speak; there is
         # no TTS here to speak it.
         await session.start(entry(initial=False), capture_run=True)
+        await settle(session)
         transfer = getattr(generated, "_TaskTransfer", None)
         said: list = []
         session.on("conversation_item_added", lambda ev: said.append(ev.item))
@@ -225,6 +230,7 @@ async def run(args: argparse.Namespace) -> None:
                     else getattr(item, "item", item)
                 )
                 print("  ", describe(ev))
+            await settle(session)
             current = session.current_agent
             print("   active agent:", type(current).__name__)
             print("   active prompt:", prompt_of(current))
@@ -233,22 +239,17 @@ async def run(args: argparse.Namespace) -> None:
         print(state_of(session.userdata))
 
 
-def _openai_model(agent_yaml: Path) -> str:
-    import re  # noqa: PLC0415
-
-    # Comment lines between the two keys are skipped. A `#` explaining why a
-    # package is on the model it is on belongs next to the model, and without
-    # this the pair stopped matching and the run refused a package that is a
-    # direct openai one.
-    found = re.search(
-        r"provider: openai\n(?:[ \t]*#.*\n)*\s+model: (\S+)", agent_yaml.read_text()
-    )
-    if not found:
-        sys.exit("the package's think binding is not a direct openai one; pass --model")
-    # `unmute init` writes the id quoted and the salon packages write it bare.
-    # Both are the same YAML; the quotes are not part of the model id, and sent
-    # as one the provider answers "invalid model ID" rather than naming them.
-    return found.group(1).strip("\"'")
+def compiled_llm(module: Path, namespace: dict):
+    """Use the emitted model constructor rather than silently choosing OpenAI."""
+    for node in ast.walk(ast.parse(module.read_text())):
+        if not isinstance(node, ast.Call):
+            continue
+        function = node.func.value if isinstance(node.func, ast.Subscript) else node.func
+        if isinstance(function, ast.Name) and function.id == "AgentSession":
+            for keyword in node.keywords:
+                if keyword.arg == "llm":
+                    return eval(compile(ast.Expression(keyword.value), str(module), "eval"), namespace)
+    raise ValueError("compiled AgentSession has no llm; pass --model for an OpenAI override")
 
 
 if __name__ == "__main__":

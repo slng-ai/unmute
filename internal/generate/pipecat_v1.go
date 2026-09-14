@@ -570,6 +570,7 @@ type pipecatData struct {
 	// Slng is the SLNG Context Router's module-level helpers. Empty on a package
 	// with no router think binding, and then none of it is emitted (FR-019).
 	Slng            slngHelpers
+	GoogleVertex    string
 	HandoffControls []string // control names dev_metrics.py must not report as tools
 	DevOptionalEnv  []string // passed through when the host sets it, never required
 	Notes           []string

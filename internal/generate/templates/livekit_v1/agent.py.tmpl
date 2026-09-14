@@ -302,7 +302,7 @@ from dev_metrics import dev_llm_node, dev_say, install_dev_metrics
 logger = logging.getLogger({{pyq .Project}})
 logger.setLevel(logging.INFO)
 
-load_dotenv()
+{{.GoogleVertex}}load_dotenv()
 
 
 # --- prompts ---------------------------------------------------------------

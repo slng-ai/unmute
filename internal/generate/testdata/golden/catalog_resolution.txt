@@ -101,6 +101,14 @@ import:   from livekit.plugins import openai
 install:  livekit-agents[openai]
 env:      AZURE_OPENAI_API_KEY
 
+=== livekit reason google ===
+binding:  provider=google model=model-1
+class:    google.LLM
+args:     api_key=os.environ["GOOGLE_API_KEY"], model="model-1", sample_rate=24000
+import:   from livekit.plugins import google
+install:  livekit-agents[google]
+env:      GOOGLE_API_KEY
+
 === livekit reason groq ===
 binding:  provider=groq model=model-1
 class:    groq.LLM

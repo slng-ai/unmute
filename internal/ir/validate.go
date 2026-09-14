@@ -1343,6 +1343,12 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 		if err := catalog.CheckVendor(provider, role, binding.Provider, binding.EndpointEnv != ""); err != nil {
 			row.Errors = add(row.Errors, err.Error())
 		}
+		if (provider == targetcap.LiveKit || provider == targetcap.Pipecat) && role == targetcap.Reason &&
+			(binding.Provider == "google" || binding.Provider == "gemini") {
+			if err := targetcap.CheckGoogleParams(binding.Params); err != nil {
+				row.Errors = add(row.Errors, fmt.Sprintf("%s think model %q: %v", provider, binding.Model, err))
+			}
+		}
 		if (provider == targetcap.LiveKit || provider == targetcap.Pipecat) &&
 			binding.Provider == "slng" && (role == targetcap.Listen || role == targetcap.Speak) {
 			if _, err := targetcap.SlngSpeechBaseURL(binding.Params); err != nil {

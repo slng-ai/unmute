@@ -365,7 +365,7 @@ var pipecatCatalog = []Entry{
 		},
 	},
 	{
-		Framework: Pipecat, Role: Reason, Vendor: "google",
+		Framework: Pipecat, Role: Reason, Vendor: "google", Aliases: []string{"gemini"},
 		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/llm/google",
 		Install: InstallSpec{Extra: "google"},
 		Import:  "from pipecat.services.google.llm import GoogleLLMService",

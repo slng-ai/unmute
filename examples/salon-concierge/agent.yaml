@@ -295,6 +295,7 @@ prefetch:
       - customer_on_file: result.status
 
 secrets:
+  - GOOGLE_API_KEY
   - OPENAI_API_KEY
   - SLNG_API_KEY
   - LANGFUSE_SECRET_KEY
@@ -323,10 +324,13 @@ knowledge:
 models:
   think:
     reasoning:
-      provider: openai
-      model: gpt-5.6-luna
+      provider: google
+      model: gemini-3.5-flash-lite
       params:
-        reasoning_effort: "none"
+        vertexai: true
+        location: eu
+        thinking_config:
+          thinking_level: minimal
   speak:
     voice:
       provider: slng

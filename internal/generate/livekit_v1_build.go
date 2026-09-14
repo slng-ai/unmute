@@ -42,6 +42,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		return livekitData{}, err
 	}
 	data := livekitData{
+		GoogleVertex:      googleVertexHelpers(tgt),
 		Project:           agent.Name,
 		Target:            tgt.Name,
 		Version:           tgt.Version,

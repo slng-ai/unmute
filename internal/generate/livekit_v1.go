@@ -482,9 +482,10 @@ type livekitData struct {
 	PluginModules   []string // merged `from livekit.plugins import ...` names
 	// Slng is the SLNG Context Router's module-level helpers. Empty on a package
 	// with no router think binding, and then none of it is emitted (FR-019).
-	Slng        slngHelpers
-	Deps        []string
-	RequiredEnv []string
+	Slng         slngHelpers
+	GoogleVertex string
+	Deps         []string
+	RequiredEnv  []string
 	// Knowledge is the shared knowledge-module data: the declared bases and the
 	// deduplicated embedding imports across them.
 	Knowledge knowledgeData

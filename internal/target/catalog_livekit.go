@@ -276,9 +276,20 @@ var livekitCatalog = []Entry{
 	// --- reason ---------------------------------------------------------
 	// Native per-vendor LLM plugins where they exist (PR #10 restore + openai,
 	// B6): an explicit vendor with a native entry binds it and its own key env
-	// (V19). Vendors without one (gemini, deepseek, kimi, ...) fall to the
+	// (V19). Vendors without one (deepseek, kimi, ...) fall to the
 	// Inference wildcard below; provider: livekit is the deliberate Inference
 	// spelling (model verbatim, "openai/gpt-4o-mini" form).
+	{
+		Framework: LiveKit, Role: Reason, Vendor: "google", Aliases: []string{"gemini"},
+		Verified: "2026-09-14", Docs: "https://docs.livekit.io/agents/models/llm/gemini/",
+		Install: InstallSpec{Extra: "google"},
+		Import:  "from livekit.plugins import google",
+		Call: &CallSpec{
+			Class: "google.LLM", APIKeyArg: "api_key", APIKeyEnv: "GOOGLE_API_KEY",
+			Model:  FieldSpec{Arg: "model", Required: true},
+			Params: ParamsKwargs,
+		},
+	},
 	{
 		Framework: LiveKit, Role: Reason, Vendor: "openai",
 		Verified: "2026-07-18", Docs: "https://docs.livekit.io/agents/models/llm/openai/",

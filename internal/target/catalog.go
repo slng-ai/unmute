@@ -130,6 +130,21 @@ func (e Entry) Wildcard() bool { return e.Vendor == "*" }
 
 type Catalog struct{ entries []Entry }
 
+// CheckGoogleParams keeps the API-key Vertex bridge's EU endpoint unambiguous.
+func CheckGoogleParams(params map[string]any) error {
+	if vertex, exists := params["vertexai"]; exists {
+		if vertex != true || params["location"] != "eu" {
+			return fmt.Errorf("google API-key Vertex binding needs vertexai: true and location: eu")
+		}
+		if params["http_options"] != nil || params["project"] != nil || params["credentials"] != nil {
+			return fmt.Errorf("google EU API-key binding owns its endpoint and authentication; remove http_options, project and credentials")
+		}
+	} else if params["location"] != nil {
+		return fmt.Errorf("google location needs vertexai: true; the Gemini Developer API has no regional endpoint")
+	}
+	return nil
+}
+
 // DefaultCatalog assembles the built-in entries. A user overlay
 // (providers.yaml) merges add-only on top of this; not implemented yet.
 func DefaultCatalog() Catalog {

@@ -37,10 +37,11 @@ func regionList(region string) []string {
 // selects the Pipecat service class and api-key env (C11).
 func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	data := pipecatData{
-		Project:   agent.Name,
-		Target:    target.Name,
-		AgentName: agent.DeployName(target),
-		Version:   target.Version,
+		GoogleVertex: googleVertexHelpers(target),
+		Project:      agent.Name,
+		Target:       target.Name,
+		AgentName:    agent.DeployName(target),
+		Version:      target.Version,
 		// At most one region reaches this driver: a list of several is a gated
 		// validation error (FieldDeploymentMultiRegion), which runs before any
 		// artifact exists.
