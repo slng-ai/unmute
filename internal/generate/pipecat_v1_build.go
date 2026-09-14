@@ -54,7 +54,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		// Tracing is on for either provider now, and TracingProvider says which.
 		Tracing:         agent.Tracing != nil,
 		TracingProvider: tracingProviderOf(agent),
-		Pace:            resolvePaceView(targetcap.Pipecat, target.Models.Turn),
+		Pace:            resolvePaceView(targetcap.Pipecat, target.Models.Turn, target.Models.Listen),
 		SemanticOff:     semanticEndpointingOff(target.Models.Turn),
 	}
 	// Read through the same door validate uses, so the command and the emitted
@@ -70,11 +70,43 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		env.add(name)
 	}
 
-	stt, err := sttService(target.Models.Listen, env)
-	if err != nil {
-		return pipecatData{}, err
+	for _, def := range agent.Agents {
+		if def.Live != "" {
+			// One agent, held to that by validation: the live model listens for
+			// itself, so no transcriber is built and no listen binding is read.
+			data.Live = true
+		}
+		if def.Realtime != "" {
+			// Same shape, one socket: the realtime model listens for itself too.
+			// The two differences an author can ask for are read here, because
+			// both change what this bot builds around the service rather than
+			// anything inside its construction.
+			data.Realtime = true
+			// speak: alongside realtime: is the half cascade. Validation refuses
+			// it beside the entry's own voice:, so exactly one of the two is set
+			// and the model is asked for text only when it is this one.
+			data.HalfCascade = def.Voice != ""
+			// `local` is the one value that hands the turn back to this project's
+			// own detector: pipecat holds False and None apart on purpose, so
+			// `local` puts the service in manual mode and everything else, an
+			// omitted value included, leaves the vendor deciding.
+			data.RealtimeTurnDetection = target.Models.Realtime[def.Realtime].TurnDetection
+			data.ExternalTurns = data.RealtimeTurnDetection != targetcap.TurnDetectionLocal
+		}
 	}
-	data.STT = stt
+	data.SpeechToSpeech = data.Live || data.Realtime
+	// A live model always speaks with its own voice; a realtime model does
+	// unless a synthesizer was bound in front of it.
+	data.SpokenByModel = data.Live || (data.Realtime && !data.HalfCascade)
+	// A live session decides every turn itself and takes no setting for it.
+	data.ExternalTurns = data.Live || (data.Realtime && data.ExternalTurns)
+	var err error
+	if !data.SpeechToSpeech {
+		data.STT, err = sttService(target.Models.Listen, data.Pace, env)
+		if err != nil {
+			return pipecatData{}, err
+		}
+	}
 
 	// The router's module-level helpers, collected before any LLM resolves so
 	// every construction site can name its profile's configuration function.
@@ -187,9 +219,30 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	}
 
 	applyConversation(agent.Conversation, target.Telephony != nil, &data)
+	if data.Realtime {
+		// One expression, built once, so the context seed and the runbook cannot
+		// describe two different opening lines. The words asking the model to keep
+		// to a fixed line are the same ones the live shape uses.
+		switch {
+		case data.GreetingText != "":
+			data.RealtimeOpening = pyQuote("Open the call with this greeting, in these words as far as you can: " + data.GreetingText)
+		case data.GreetingInstruction != "":
+			data.RealtimeOpening = pyQuote(data.GreetingInstruction)
+		}
+	}
+	// A live package always queues its run frame, so its start_session is never
+	// empty. Every other shape's is empty when nothing opens the call and no
+	// timer closes it.
+	data.EmptyStartSession = !data.Live && data.GreetingText == "" &&
+		data.RealtimeOpening == "" && data.MaxDurationSecs <= 0
 	data.Notes = append(data.Notes, serviceNotes(data)...)
 	if target.Models.Turn != nil {
-		data.Notes = append(data.Notes, "turn role lowers to on-device VAD (Silero); its binding is advisory")
+		// Under a listening decider the binding is the opposite of advisory: it
+		// is what selected the transcriber's own turn service. Saying otherwise
+		// put two lines in one report that contradicted each other.
+		if !data.Pace.ByListener {
+			data.Notes = append(data.Notes, "turn role lowers to on-device VAD (Silero); its binding is advisory")
+		}
 		data.Notes = append(data.Notes, data.Pace.note())
 	}
 	setImportNeeds(&data)
@@ -264,6 +317,25 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	data.Inline = inlineEligible(&data)
 	if !data.Inline {
 		data.FrameImports = append(data.FrameImports, "LLMUpdateSettingsFrame", "LLMRunFrame")
+	}
+	if data.Live {
+		// The live session starts on the first context frame, so client-ready
+		// queues a run whatever the greeting says; an opening line rides ahead of
+		// it as a developer message the model paraphrases.
+		data.FrameImports = append(data.FrameImports, "LLMRunFrame")
+		if (data.GreetingText != "" || data.GreetingInstruction != "") && !slices.Contains(data.FrameImports, "LLMMessagesAppendFrame") {
+			data.FrameImports = append(data.FrameImports, "LLMMessagesAppendFrame")
+		}
+	}
+	if data.Realtime && (data.GreetingText != "" || data.GreetingInstruction != "") {
+		// The realtime session sends its conversation setup and creates its
+		// first response off the first context frame (llm.py:1180-1214), so the
+		// opening line is seeded into that context and one run frame starts the
+		// call. No LLMMessagesAppendFrame here, and none anywhere else in this
+		// branch: the service's handler for it is an unimplemented stub that
+		// logs an error and returns (llm.py:693-694), so a greeting queued that
+		// way would be silently dropped.
+		data.FrameImports = append(data.FrameImports, "LLMRunFrame")
 	}
 	slices.Sort(data.FrameImports)
 	knowledge, err := loweredKnowledge(agent, env)
@@ -527,6 +599,13 @@ func buildPipecatCloudWebsocket(agent *ir.Agent, resolved ir.Target, env *envSet
 // delegates, no tracing (the tracing helper is worker-bound, V22), no telephony
 // or cold transfer. Everything else keeps the workers/bus path (dp§C8).
 func inlineEligible(data *pipecatData) bool {
+	// A live model sits in the one pipeline that carries the caller's audio, so
+	// the live shape is the inline shape by construction; validation held
+	// the package to what that shape carries, the greeting included, which is
+	// delivered as the session's opening instruction rather than spoken.
+	if data.Live || data.Realtime {
+		return true
+	}
 	// State (Variables) and model-written greeting both need machinery the inline
 	// shape lacks (module-level tools can't reach self.state; the greeting has no
 	// activate_worker to carry a developer message). MCP also stays on the bus so
@@ -555,7 +634,10 @@ func setImportNeeds(data *pipecatData) {
 	// asyncio is unconditional: every bot gates entry-agent activation on an
 	// asyncio.Event (B8/V14), so it is not an import-need flag anymore.
 	data.NeedsTurnStrategies = data.Interrupt != nil && data.Interrupt.MinWords > 0
-	data.NeedsAppendFrame = data.Inactivity != nil
+	// The idle nudge is an appended developer message on every shape but one: a
+	// realtime session takes it as two client events instead, because the frame's
+	// handler in pipecat-ai 1.10.0 logs an error and returns (llm.py:693-694).
+	data.NeedsAppendFrame = data.Inactivity != nil && !data.Realtime
 	data.NeedsEndFrame = data.NeedsEndAfter
 	paramsClasses := map[string]bool{}
 	for _, a := range data.Agents {
@@ -691,7 +773,11 @@ func setImportNeeds(data *pipecatData) {
 	if data.NeedsAppendFrame {
 		data.FrameImports = append(data.FrameImports, "LLMMessagesAppendFrame")
 	}
-	needsTTSSpeakFrame := data.GreetingText != ""
+	// A model that speaks with its own voice speaks the greeting itself, so no
+	// TTSSpeakFrame carries it. The half cascade has a synthesizer again, but its
+	// greeting still rides into the session as an instruction the model
+	// paraphrases, so the frame is not needed there either.
+	needsTTSSpeakFrame := data.GreetingText != "" && !data.SpeechToSpeech
 	for _, agent := range data.Agents {
 		for _, transfer := range agent.Transfers {
 			if transfer.Announce != "" {
@@ -816,6 +902,22 @@ func collectImportsExtras(data pipecatData) (imports, extras, deps []string) {
 	for _, a := range data.Agents {
 		note(a.LLM.Entry)
 		note(a.TTS.Entry)
+		if a.Live && a.Backend != "" {
+			// The delegation names the Responses service's Settings class; the
+			// live service's own import comes off its catalogue entry above.
+			importSet["from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService"] = true
+		}
+	}
+	if data.Realtime {
+		// The nested session properties, and on a `local` package the literal
+		// False that turns the vendor's own detection off. The service's package
+		// __init__ is empty in pipecat-ai 1.10.0, so the module is named in full.
+		importSet["from pipecat.services.openai.realtime import events as realtime_events"] = true
+	}
+	if data.Live && data.Inactivity != nil {
+		// The idle nudge reaches a live session as spoken commentary, through
+		// the service's public client-event API (research R8 of spec 021).
+		importSet["from pipecat.services.openai.live import events as live_events"] = true
 	}
 	return sortedKeys(importSet), sortedKeys(extraSet), sortedKeys(depSet)
 }
@@ -861,6 +963,12 @@ func sortedKeys[V any](set map[string]V) []string { return slices.Sorted(maps.Ke
 
 func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.AgentDef, env *envSet) (pipecatAgent, error) {
 	promptConst := promptConstName(name)
+	if def.Live != "" {
+		return buildPipecatLiveAgent(agent, target, name, def, promptConst, env)
+	}
+	if def.Realtime != "" {
+		return buildPipecatRealtimeAgent(agent, target, name, def, promptConst, env)
+	}
 	// A templated prompt is rendered per session from the call state; an untouched
 	// one stays the bare module constant it always was.
 	profile, router := slngRouterBinding(agent, target, def.Model)
@@ -942,6 +1050,191 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	}
 	built.FlowFunctionNames = sortedKeys(flowNames)
 	return built, nil
+}
+
+// buildPipecatLiveAgent lowers the one agent of a live package: the live
+// service takes the rendered prompt as its instructions and the voice, and hands
+// its tools and reasoning to the think entry the live model names, through
+// Responses delegation at OpenAI. There is no synthesizer to build. Validation
+// has already refused every shape this cannot carry (ir.validateLive), so
+// the prompt is the bare module constant: no call state reaches a live session.
+func buildPipecatLiveAgent(agent *ir.Agent, target ir.Target, name string, def ir.AgentDef, promptConst string, env *envSet) (pipecatAgent, error) {
+	binding := target.Models.Live[def.Live]
+	live, err := resolvePipecatService(targetcap.Live, binding, env, slngSite{},
+		pyKV{Key: "system_instruction", Value: promptConst})
+	if err != nil {
+		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
+	}
+	if binding.Backend != "" {
+		backend := target.Models.Reason[binding.Backend]
+		// The backend is the Responses model the live model delegates to. Its
+		// key is the same OpenAI key the live service reads, so nothing new
+		// joins the startup check; the model id is what the think entry names.
+		live.Call.Args = append(live.Call.Args, pyKV{
+			Key:   "delegation",
+			Value: "OpenAILiveLLMService.ResponsesDelegation(settings=OpenAIResponsesLLMService.Settings(model=" + pyQuote(backend.Model) + "))",
+		})
+	}
+	built := pipecatAgent{
+		Name: name, Class: pyName(name) + "Agent", Prompt: def.Instructions,
+		PromptConst: promptConst, PromptExpr: promptConst, RuntimePromptExpr: promptConst,
+		LLM: live, Live: true, Backend: binding.Backend,
+	}
+	for _, ref := range def.Tools {
+		tool, ok := agent.Tools[ref]
+		if !ok {
+			// Controls are refused on a live package before generation.
+			return pipecatAgent{}, fmt.Errorf("agent %q references unknown tool %q", name, ref)
+		}
+		lowered, err := buildTool(ref, tool, agent.Variables, SupplierIndex(agent.Tasks), env)
+		if err != nil {
+			return pipecatAgent{}, err
+		}
+		built.Tools = append(built.Tools, lowered)
+	}
+	return built, nil
+}
+
+// buildPipecatRealtimeAgent lowers the one agent of a realtime package: one
+// service over one websocket session, taking the rendered prompt as its
+// instructions and running the package's tools over the same socket. Validation
+// has already refused every shape this cannot carry (ir.validateRealtime), so
+// the prompt is the bare module constant: no call state reaches the session.
+//
+// Two things this function does that no other agent builder does, and both are
+// the same fact from different sides: the voice and who decides the turn live
+// three levels down in the service's session properties, not in its Settings.
+// The catalogue entry therefore declares no voice slot, and the nested
+// expression is written here.
+func buildPipecatRealtimeAgent(agent *ir.Agent, target ir.Target, name string, def ir.AgentDef, promptConst string, env *envSet) (pipecatAgent, error) {
+	binding := target.Models.Realtime[def.Realtime]
+	voice := cmp.Or(binding.Voice, binding.VoiceID)
+	// Taken off the binding before the catalogue sees it. OpenAIRealtimeLLMService
+	// .Settings has no `voice` field (pipecat-ai 1.10.0
+	// services/openai/realtime/llm.py:99-112 over services/settings.py's
+	// LLMSettings), so a flat `voice=` kwarg is a TypeError at worker start
+	// rather than a setting that lands somewhere harmless. It goes into the
+	// session properties below instead.
+	binding.Voice, binding.VoiceID = "", ""
+	svc, err := resolvePipecatService(targetcap.Realtime, binding, env, slngSite{},
+		pyKV{Key: "system_instruction", Value: promptConst})
+	if err != nil {
+		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
+	}
+	// system_instruction is a Settings field rather than a session property on
+	// purpose: the service syncs it down into session_properties.instructions
+	// itself (llm.py:113-126), and writing both is how the two would drift.
+	properties, err := pipecatRealtimeSessionProperties(binding.TurnDetection, voice, def.Voice != "")
+	if err != nil {
+		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
+	}
+	svc.settingsKV(pyKV{Key: "session_properties", Value: properties})
+	if binding.TurnDetection == targetcap.TurnDetectionLocal && minimumWords(agent) > 0 {
+		// Manual turn mode replays a little recent audio after an interruption
+		// clears the input buffer, so the caller's first syllables are not lost.
+		// Left unset the service auto-sizes that window from the upstream VAD's
+		// start_secs, but only because it assumes the default VAD turn-start
+		// strategy (llm.py:278-289). A minimum word count replaces that strategy,
+		// so the window is written out here at the service's own fallback,
+		// DEFAULT_USER_AUDIO_PREROLL_SECS (llm.py:78).
+		svc.Call.Args = append(svc.Call.Args, pyKV{Key: "user_audio_preroll_secs", Value: "0.5"})
+	}
+	built := pipecatAgent{
+		Name: name, Class: pyName(name) + "Agent", Prompt: def.Instructions,
+		PromptConst: promptConst, PromptExpr: promptConst, RuntimePromptExpr: promptConst,
+		LLM: svc, Realtime: true,
+	}
+	if def.Voice != "" {
+		// The half cascade: the model is asked for text only above, and the
+		// bound synthesizer speaks what it writes. Ordinary text frames reach an
+		// ordinary TTS service, so nothing else in the pipeline changes.
+		tts, err := ttsService(target.Models.Speak[def.Voice], env)
+		if err != nil {
+			return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
+		}
+		built.TTS = tts
+	}
+	for _, ref := range def.Tools {
+		tool, ok := agent.Tools[ref]
+		if !ok {
+			// Controls are refused on a realtime package before generation.
+			return pipecatAgent{}, fmt.Errorf("agent %q references unknown tool %q", name, ref)
+		}
+		lowered, err := buildTool(ref, tool, agent.Variables, SupplierIndex(agent.Tasks), env)
+		if err != nil {
+			return pipecatAgent{}, err
+		}
+		built.Tools = append(built.Tools, lowered)
+	}
+	return built, nil
+}
+
+// minimumWords is the authored interruption.minimum_words, or 0. Read straight
+// off the IR rather than off the template model, because the conversation block
+// is lowered after the agents are built and this decides a constructor argument.
+func minimumWords(agent *ir.Agent) int {
+	if agent.Conversation == nil || agent.Conversation.Interruption == nil {
+		return 0
+	}
+	return agent.Conversation.Interruption.MinimumWords
+}
+
+// pipecatRealtimeSessionProperties writes the one nested expression the realtime
+// service takes its session from. Everything an author can decide about the
+// session that is not the model id or the prompt lives in here.
+//
+// Every class named is from pipecat.services.openai.realtime.events in
+// pipecat-ai 1.10.0, imported as realtime_events (its package __init__ is empty,
+// so the module is named in full).
+//
+// A field the package says nothing about is left out rather than written at the
+// vendor's own default, so an omitted turn_detection leaves OpenAI deciding and
+// this compiler pins nothing it was not asked to pin.
+func pipecatRealtimeSessionProperties(turnDetection, voice string, halfCascade bool) (string, error) {
+	// The indentation is the "svc" template's: a settings argument starts at
+	// column 12, so the lines under it step in from there. Written out because
+	// this is the one construction in this driver deep enough that a single line
+	// stops being readable, and a template cannot indent an expression it is
+	// handed.
+	const (
+		one   = "\n                "
+		two   = "\n                    "
+		three = "\n                        "
+	)
+	var session []string
+	if halfCascade {
+		// The half cascade, and the whole of it. With text as the only output
+		// modality the service pushes plain LLMTextFrames (llm.py:1044-1050),
+		// which an ordinary downstream TTSService consumes exactly as it
+		// consumes a cascaded model's (services/tts_service.py:766-799). There is
+		// no other wiring.
+		session = append(session, `output_modalities=["text"]`)
+	}
+	// Transcription of the caller is OFF unless it is asked for: SessionProperties
+	// leaves audio None (events.py:191-237), and with no transcription
+	// configured the server sends no
+	// conversation.item.input_audio_transcription.* events at all
+	// (llm.py:967-971 is the only reader). The caller's words would then reach
+	// neither the conversation context nor the dev page, so every package asks
+	// for it. InputAudioTranscription()'s own default model is the one the
+	// service checks its prompt rule against (services/openai/_constants.py:10),
+	// so no model is named here.
+	input := []string{"transcription=realtime_events.InputAudioTranscription()"}
+	if turnDetection != "" {
+		profile, err := targetcap.ResolveTurnDetection(targetcap.Pipecat, turnDetection)
+		if err != nil {
+			return "", err
+		}
+		if !profile.Omit {
+			input = append(input, "turn_detection="+profile.Expr)
+		}
+	}
+	audio := []string{"input=realtime_events.AudioInput(" + three + strings.Join(input, ","+three) + "," + two + ")"}
+	if voice != "" {
+		audio = append(audio, `output=realtime_events.AudioOutput(voice=`+pyQuote(voice)+`)`)
+	}
+	session = append(session, "audio=realtime_events.AudioConfiguration("+two+strings.Join(audio, ","+two)+","+one+")")
+	return "realtime_events.SessionProperties(" + one + strings.Join(session, ","+one) + ",\n            )", nil
 }
 
 // pipecatCtxExpr lowers a context block's history shaping to the Python list a
@@ -1707,11 +2000,89 @@ func resolvePipecatService(role targetcap.Role, binding ir.Binding, env *envSet,
 	return svc, nil
 }
 
-func sttService(binding *ir.Binding, env *envSet) (pipecatService, error) {
+func sttService(binding *ir.Binding, pace paceView, env *envSet) (pipecatService, error) {
 	if binding == nil {
 		return pipecatService{}, fmt.Errorf("pipecat listen binding is missing a model")
 	}
-	return resolvePipecatService(targetcap.Listen, *binding, env, slngSite{})
+	svc, err := resolvePipecatService(targetcap.Listen, *binding, env, slngSite{})
+	if err != nil {
+		return svc, err
+	}
+	if !pace.ByListener {
+		// The local detector decides. One vendor still needs a word, because its
+		// own turn detection is on by default and would close turns beside ours.
+		// Everything else is emitted exactly as it was.
+		if pace.LocalPinArg != "" {
+			svc.settingsKV(pyKV{Key: pace.LocalPinArg, Value: pace.LocalPinValue})
+		}
+		return svc, nil
+	}
+	// The transcriber decides the turn. How the vendor's own detection is
+	// switched on is the row's business, because there are three ways and the
+	// class swap is only the first: see target.TurnSwitch.
+	detector := pace.Listener
+	switch detector.Switch {
+	case targetcap.SwitchClass:
+		// A different class stands in for the ordinary transcriber. Same key,
+		// same extra, same language slot: the catalogue entry still supplies
+		// those, and only the class, its import and the turn fields change. The
+		// entry's CallSpec is shared with the catalogue, so it is copied before
+		// the class is renamed.
+		call := *svc.Entry.Call
+		call.Class = detector.Class
+		svc.Entry.Call = &call
+		svc.Entry.Import = detector.Import
+		// And its own verification date, which the compile report prints beside
+		// the class: the ordinary transcriber's date says nothing about when
+		// this service was checked.
+		svc.Entry.Verified = detector.Verified
+		svc.Call.Class = detector.Class
+		svc.Call.SettingsClass = detector.Class + ".Settings"
+	case targetcap.SwitchArg:
+		// The vendor keeps its class and takes one flat constructor argument.
+		svc.Call.Args = append(svc.Call.Args, pyKV{Key: detector.EnableArg, Value: detector.EnableValue})
+	case targetcap.SwitchSetting:
+		// The vendor keeps its class and takes one settings field. Written even
+		// where it matches the framework's current default, because a default
+		// that moved once can move again, and this one already did.
+		svc.settingsKV(pyKV{Key: detector.EnableArg, Value: detector.EnableValue})
+	default:
+		return svc, fmt.Errorf("listening vendor %q has turn switch %q, which this driver cannot emit", detector.Vendor, detector.Switch)
+	}
+	if detector.HasCeiling() {
+		// The pace ceiling lands in the service's own end-of-turn timeout, in
+		// milliseconds: the longest the service waits after the caller stops
+		// before it closes the turn whatever its confidence says. A vendor that
+		// exposes no such field takes no ceiling, and `pace` is refused there
+		// rather than landing on the nearest-looking setting.
+		svc.settingsKV(pyKV{Key: detector.CeilingArg, Value: pace.CeilingMillis})
+	}
+	if pace.Eager {
+		// A flat constructor flag, not a setting: the service reads it once and
+		// recommends the eager strategies from it. Validation refuses `eager` on
+		// a vendor whose row says it predicts nothing, so this keyword only
+		// reaches a constructor that has it.
+		svc.Call.Args = append(svc.Call.Args, pyKV{Key: "enable_eager_end_of_turn", Value: "True"})
+	}
+	return svc, nil
+}
+
+// settingsKV adds one Settings field to a service call, making sure the call is
+// actually rendering a settings object first.
+//
+// A vendor whose catalogue entry forwards params as kwargs has no settings
+// object, and appending to SettingsArgs there would write a field nothing
+// renders. Every vendor that can decide a turn uses ParamsSettings today, so
+// this is a guard rather than a branch anybody exercises; it exists because the
+// failure it prevents is silent, and the turn simply never changes hands.
+func (s *pipecatService) settingsKV(kv pyKV) {
+	if s.Call.SettingsArg == "" {
+		s.Call.SettingsArg = "settings"
+	}
+	if s.Call.SettingsClass == "" {
+		s.Call.SettingsClass = s.Call.Class + ".Settings"
+	}
+	s.Call.SettingsArgs = append(s.Call.SettingsArgs, kv)
 }
 
 // pipecatSlngSite is where the router's per-call values live on this target: a

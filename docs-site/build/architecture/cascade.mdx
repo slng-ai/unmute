@@ -1,0 +1,117 @@
+---
+title: "Cascade"
+description: "Four services in a row: a transcriber, a model, a synthesizer and a turn detector, each one yours to pick."
+---
+
+`architecture: cascade` builds four services and runs them in order. The caller
+speaks, a transcriber writes down the words, a model reads them and writes a
+reply, a synthesizer speaks it. A fourth service watches for the caller to stop
+talking and decides when the turn is over.
+
+It is the default. Leave `architecture:` out and this is what you get, which is
+what every package written before that key existed gets.
+
+```yaml agent.yaml
+models:
+  listen:
+    ears:
+      provider: deepgram
+      model: nova-3
+  think:
+    brain:
+      provider: openai
+      model: gpt-5.6-terra
+  speak:
+    mouth:
+      provider: cartesia
+      model: sonic-3
+      voice: "a-voice-id"
+
+agents:
+  desk:
+    instructions: instructions.md
+    listen: ears
+    think: brain
+    speak: mouth
+```
+
+On this page:
+
+- [Why pick it](#why-pick-it) - what the other two cannot do
+- [The four roles](#the-four-roles) - and where each is taught
+- [What it costs](#what-it-costs) - the pause between turns
+- [Troubleshooting](#troubleshooting)
+
+## Why pick it
+
+**It is the only shape that carries tasks, handoffs and saved call state.** A
+task changes the agent's prompt in the middle of a call. A cascade rebuilds the
+model's request every turn, so a new prompt is just the next request. A
+speech-to-speech session fixes what it knows when it starts.
+
+**You can mix vendors.** The transcriber, the model and the voice are three
+separate choices, and nothing makes you take all three from one company. A
+speech-to-speech model is one vendor for the whole job.
+
+**Every part is replaceable.** If one vendor's transcriber is wrong for your
+callers, swap that one entry. Nothing else in the package changes.
+
+## Every key this page shows
+
+A cascade writes no key of its own. `architecture: cascade` is the default, so
+the block above is four ordinary model entries and one agent binding them. Each
+role's own keys are on its own page, listed below.
+
+<ParamField path="listen" type="a models.listen entry name" required>
+  The transcriber this agent uses. Full key list on
+  [Transcription](/models/stt).
+</ParamField>
+
+<ParamField path="think" type="a models.think entry name" required>
+  The reasoning model. Full key list on [Reasoning](/models/llm).
+</ParamField>
+
+<ParamField path="speak" type="a models.speak entry name" required>
+  The synthesizer. Full key list on [Voices](/models/tts).
+</ParamField>
+
+<ParamField path="turn" type="a models.turn entry name">
+  Who decides the caller has finished. Optional: left out, each target builds
+  its own default. Full key list on [Turn detection](/models/turn-detection).
+</ParamField>
+
+## The four roles
+
+| Role | What it does | Where it is taught |
+|---|---|---|
+| `listen` | turns the caller's audio into text | [Transcription](/models/stt) |
+| `think` | reads the text and writes the reply | [Reasoning](/models/llm) |
+| `speak` | turns the reply into audio | [Voices](/models/tts) |
+| `turn` | decides the caller has finished | [Turn detection](/models/turn-detection) |
+
+`listen`, `think` and `speak` are required. `turn` is optional, and left out
+each target builds its own default.
+
+## What it costs
+
+Four services means four hops, and every hop is time the caller spends waiting.
+The caller stops talking, the turn detector notices, the transcriber finishes,
+the model thinks, the synthesizer starts speaking. Each step waits for the one
+before it.
+
+A speech-to-speech model collapses that into one. If the pause between turns is
+the thing you are trying to fix, read [Latency](/optimization/latency) first: a
+lot of that wait is settings rather than architecture, and moving architecture
+costs you tasks.
+
+## Troubleshooting
+
+**The agent answers too slowly.** Start with
+[Turn taking](/optimization/turn-taking). The silence window before the turn
+ends is usually the largest single piece, and it is one line.
+
+**The agent interrupts the caller.** The same page, in the other direction. A
+shorter window answers faster and cuts people off more.
+
+**A vendor name is refused.** Each role has its own list, and an unlisted name
+is refused with the list. The role pages above carry them.

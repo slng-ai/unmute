@@ -53,7 +53,7 @@ def _emit(record: dict) -> None:
 
 
 def _native_speech(session):
-    # ponytail: private reads pinned to LiveKit 1.6.10; replace with public
+    # ponytail: private reads pinned to LiveKit 1.8.1; replace with public
     # identity/input events when available. Missing fields lose association,
     # never speech. current_speech names playback, not this coroutine's work.
     speech_var = getattr(agent_activity, "_SpeechHandleContextVar", None)

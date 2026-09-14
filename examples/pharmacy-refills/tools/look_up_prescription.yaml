@@ -1,0 +1,52 @@
+description: >-
+  Look up one repeat prescription by its reference and say what state it is in:
+  the medicine, how many repeats are left, when it was last issued, and whether
+  an order is already on its way. Call it before you order anything and before
+  you tell a caller where their order has got to. Read the reference back to the
+  caller first and wait for a yes, because a wrong one looks up somebody else's
+  medicine.
+
+input:
+  type: object
+  properties:
+    reference:
+      type: string
+      description: >-
+        The prescription reference the caller read out: two letters, four
+        digits, and one letter. Write it as the caller said it. Spaces, dashes
+        and lower case are all read the same way.
+  required:
+    - reference
+
+output:
+  type: object
+  properties:
+    found:
+      type: boolean
+    reference:
+      type: string
+    medicine:
+      type: string
+    repeats_left:
+      type: integer
+    last_issued:
+      type: string
+    already_ordered:
+      type: boolean
+  required:
+    - found
+    - reference
+    - medicine
+    - repeats_left
+    - last_issued
+    - already_ordered
+
+local:
+  handler: tools/pharmacy.py
+
+# A read, and a fast one, so let it finish. `cancel` is the other answer and is
+# worth knowing about: Pipecat would drop the lookup when the caller cuts in,
+# while LiveKit runs every tool to completion and says so at validate. This
+# package wants the same behaviour on both, so it writes the one they share.
+interruption: continue
+effect: returns_data

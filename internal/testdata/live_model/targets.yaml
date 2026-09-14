@@ -1,0 +1,10 @@
+# Both code targets. The same package compiles to either one, which is the
+# promise architecture: live is here to keep, and the reason this fixture
+# declares two targets rather than one per fixture.
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.10.0"
+  livekit:
+    provider: livekit
+    version: "1.8.1"

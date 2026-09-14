@@ -548,3 +548,43 @@ func TestCompileNamesASkippableStepInTheReport(t *testing.T) {
 		}
 	}
 }
+
+// FR-010 of specs/023. A live package's report names the live model, its voice
+// and the backend its delegated work runs on, on both code targets.
+//
+// It used to name none of them. `forwardedBindings` walked listen, turn, speak
+// and reason, so the only row a live package produced was its backend think
+// entry: a report showing one reason binding, no listen and no speak, which is
+// indistinguishable from a cascade that lost two of its three models. This
+// project moved every figure `compile` stopped printing into that file, so for
+// the one architecture where the model *is* the pipeline it said nothing.
+//
+// Asserted on both targets in one test, because the collector is shared and a
+// per-target copy of this would be the thing that drifts.
+func TestCompileNamesTheLiveModelAndItsBackendInTheReport(t *testing.T) {
+	for _, target := range []string{"livekit", "pipecat"} {
+		t.Run(target, func(t *testing.T) {
+			dir := copyPackage(t, "live_model")
+			if _, _, err := runCompileCommand(t, "--target", target, dir); err != nil {
+				t.Fatal(err)
+			}
+			report, err := os.ReadFile(filepath.Join(dir, "build", target, "compile-report.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{
+				`"role": "live"`,
+				`"model": "gpt-live-1"`,
+				`"voice": "marin"`,
+				`"backend": "fast"`,
+				// The backend's own row is still there: the reader needs the id
+				// the delegated work actually runs on, not just its entry name.
+				`"model": "gpt-5.6-terra"`,
+			} {
+				if !strings.Contains(string(report), want) {
+					t.Errorf("compile-report.json missing %q:\n%s", want, report)
+				}
+			}
+		})
+	}
+}

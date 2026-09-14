@@ -46,7 +46,7 @@ func TestToolDependenciesAreSlngOnly(t *testing.T) {
 
 	agent := withDeps(t)
 	target := targetFor(agent, ProviderSlng)
-	target.Provider, target.Name, target.Version = ProviderLiveKit, "livekit", "1.6.10"
+	target.Provider, target.Name, target.Version = ProviderLiveKit, "livekit", "1.8.1"
 	report, err := Validate(agent, []Target{target}, targetcap.Default())
 	if err == nil {
 		t.Fatal("a per-tool dependency passed on livekit, whose driver reads none")

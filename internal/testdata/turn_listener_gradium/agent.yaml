@@ -1,0 +1,66 @@
+# The second shape a listening turn decider takes: the vendor keeps its ordinary
+# class and is switched on by one flat constructor argument. Gradium gained
+# enable_turn_detection in pipecat 1.10.0.
+#
+# It writes no `eager:` and no `pace:` because the service offers neither: it
+# reports a turn that has already ended, and exposes no end-of-turn timeout for
+# a ceiling to land in. Both are refused by name, which
+# internal/ir/validate_turn_listener_test.go holds.
+version: 1
+
+name: turn-listener-gradium
+entry_agent: desk
+
+secrets:
+  - OPENAI_API_KEY
+  - GRADIUM_API_KEY
+  - SLNG_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-terra
+      params:
+        reasoning_effort: "none"
+  speak:
+    voice:
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: gradium
+      model: default
+      language: en
+  turn:
+    detector:
+      # The transcriber decides when the caller has finished. Gradium's server
+      # sends an end-pointing signal and the service recommends the external
+      # turn strategies, so no local analyzer is built.
+      provider: listen
+
+agents:
+  desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tools:
+      - lookup_customer
+
+tools:
+  - lookup_customer
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, this is Sage and Stone Salon. How can I help?"
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m

@@ -142,6 +142,36 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		Carrier:    pkg.Connections[tgt.Connection].Carrier,
 	}
 	data.Pins = jsonText(tgt.Pins)
+	// The architecture and its section, read so the rewrite keeps them. The
+	// console offers no editor for either: changing a package's pipeline shape
+	// means changing its models, its prompts and usually its tasks, which is
+	// editing the file, not answering a prompt. Carrying them is not optional
+	// though, because a key absent here is a key the rewrite deletes, and this
+	// one deletes quietly: the file still compiles, as a cascade.
+	data.Architecture = string(pkg.Agent.Architecture)
+	for _, entry := range pkg.Agent.Models.Realtime {
+		data.Realtime = append(data.Realtime, scaffold.SpeechModel{
+			Name: entry.Name, Provider: entry.Provider, Model: entry.Model,
+			Voice: entry.Voice, Turn: entry.TurnDetection, Description: entry.Description,
+		})
+	}
+	for _, entry := range pkg.Agent.Models.Live {
+		data.Live = append(data.Live, scaffold.SpeechModel{
+			Name: entry.Name, Provider: entry.Provider, Model: entry.Model,
+			Voice: entry.Voice, Backend: entry.Backend, Description: entry.Description,
+		})
+		// The backend whole, not just its name. Writing the name and inventing
+		// the entry gave back a package that still validated and compiled, with
+		// the author's model id replaced by nothing.
+		if entry.Backend == "" {
+			continue
+		}
+		if def, ok := effectiveModelDef(pkg, tgt, entry.Backend); ok {
+			data.Backends = append(data.Backends, scaffold.SpeechBackend{
+				Name: entry.Backend, Description: def.Description, Binding: scaffoldBinding(def),
+			})
+		}
+	}
 	// Read so it survives the rewrite. The console offers no editor for it: the
 	// folder is a path on disk the console cannot check and the author already
 	// knows. Carrying it is not optional though, because maintain rewrites

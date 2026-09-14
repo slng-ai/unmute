@@ -1,0 +1,84 @@
+# A busy takeaway taking orders over the phone, on the live architecture.
+#
+# The caller wants a fast back and forth: they talk over the agent, change their
+# mind halfway through a sentence, and read a list of dishes out at speed. One
+# live model hears the audio, decides when the caller has finished and speaks
+# back in its own voice, so none of that waits on a transcriber, a turn detector
+# and a synthesizer taking their turns.
+version: 1
+
+name: takeaway-orders
+architecture: live
+entry_agent: counter
+
+secrets:
+  # One key covers all three uses here: the live model, the backend model, and
+  # the embeddings the knowledge index is built with.
+  - OPENAI_API_KEY
+
+models:
+  live:
+    - name: counter_voice
+      provider: openai
+      model: gpt-live-1
+      voice: marin
+      # Why there is a backend at all. The live model is good at keeping a
+      # conversation moving and poor at careful work. Reading the menu index,
+      # adding a bill up and getting a dish name right are the parts a caller
+      # will notice being wrong, so they run on the model named here while the
+      # live model goes on talking to the caller.
+      backend: kitchen
+  think:
+    kitchen:
+      description: prices the order and searches the menu documents
+      provider: openai
+      model: gpt-5.6-terra
+      # No `params:` here. A think entry used as a live backend reaches the
+      # emitted service as its model name and nothing else, so a param written
+      # here would be recorded in compile-report.json and never sent.
+
+agents:
+  counter:
+    instructions: instructions.md
+    # `live:` replaces `think:` and `speak:` together: this one entry listens,
+    # thinks and speaks.
+    live: counter_voice
+    tools:
+      - look_up_dish
+      - place_order
+      - look_up_kitchen_info
+
+# Opening hours, allergens and how delivery works are written down, change
+# often, and are the questions a takeaway gets all day. So they are documents
+# the agent searches rather than sentences in a prompt that go stale.
+knowledge:
+  kitchen:
+    documents: knowledge/kitchen
+
+tools:
+  - look_up_dish
+  - place_order
+  - look_up_kitchen_info
+
+conversation:
+  greeting:
+    speaks_first: agent
+    # The live model paraphrases this rather than reading it out, so write the
+    # sense of the line and do not count on the words.
+    text: "Golden Wok, takeaway orders. What can I get you?"
+  inactivity:
+    # A caller reading an order off a phone screen goes quiet for a while, so
+    # the nudge waits longer than a conversation normally would.
+    nudge_after: 20s
+    end_after: 60s
+  max_duration: 10m
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 3
+  max_sessions: 8
+  peak_starts_per_second: 1
+  avg_session_duration: 3m

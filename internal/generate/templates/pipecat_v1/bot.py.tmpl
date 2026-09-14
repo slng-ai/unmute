@@ -61,11 +61,11 @@ from pydantic import {{.PydanticImports}}{{end}}
 {{if .NeedsMCP}}from mcp.client.session_group import {{join .MCPParamsImports ", "}}
 {{end}}
 {{if .NeedsFunctionSchema}}from pipecat.adapters.schemas.function_schema import FunctionSchema
-{{end}}{{if not .SemanticOff}}from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+{{end}}{{if and (not .SemanticOff) (not .Pace.ByListener) (not .ExternalTurns)}}from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 {{end}}from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
-{{if not .Inline}}from pipecat.bus import BusBridgeProcessor
+{{if and (not .Pace.ByListener) (not .ExternalTurns)}}from pipecat.audio.vad.vad_analyzer import VADParams
+{{end}}{{if not .Inline}}from pipecat.bus import BusBridgeProcessor
 {{end}}{{if .HasFlows}}from pipecat.flows import {{if .NeedsContextStrategy}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig, NO_RESPONSE
 {{end}}{{if .FrameImports}}from pipecat.frames.frames import {{join .FrameImports ", "}}
 {{end}}from pipecat.pipeline.pipeline import Pipeline
@@ -85,9 +85,10 @@ from pipecat.runner.utils import create_transport
 {{if .DailyParams}}{{.DailyParams.Import}}
 {{end}}{{if .CloudWebsocket}}from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 {{end}}{{if .NeedsTurnStrategies}}from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
-{{end}}from pipecat.turns.user_stop import {{if .SemanticOff}}SpeechTimeoutUserTurnStopStrategy{{else}}TurnAnalyzerUserTurnStopStrategy{{end}}
+{{end}}{{if .ExternalTurns}}{{else if .Pace.ByListener}}{{if .Pace.Eager}}from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies
+{{end}}{{else}}from pipecat.turns.user_stop import {{if .SemanticOff}}SpeechTimeoutUserTurnStopStrategy{{else}}TurnAnalyzerUserTurnStopStrategy{{end}}
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
-{{if .UserMuteStrategies}}from pipecat.turns.user_mute import {{join .UserMuteStrategies ", "}}
+{{end}}{{if .UserMuteStrategies}}from pipecat.turns.user_mute import {{join .UserMuteStrategies ", "}}
 {{end}}{{if not .Inline}}from pipecat.workers.llm import {{if not (and .Tracing (or .NeedsFunctionCalls .NeedsMCP))}}LLMWorker, {{end}}LLMWorkerActivationArgs{{if .NeedsFunctionCalls}}, tool{{end}}
 {{else if .NeedsFunctionCalls}}from pipecat.workers.llm import tool
 {{end}}from pipecat.workers.runner import WorkerRunner
@@ -885,14 +886,32 @@ class _HandoffWorker({{if and .Tracing .NeedsFunctionCalls}}TracedLLMWorker{{els
         return await super().process_deferred_tool_frames(frames)
 {{end}}
 {{range .Agents}}
+{{if .Live}}
+def build_{{.Name}}_live():
+    # One service where the transcriber, the model and the synthesizer sat. Its
+    # instructions, model and voice are fixed once the session starts, and its
+    # tools and reasoning run on the backend named in the delegation.
+    return {{template "svc" .LLM.Call}}
+{{else if .Realtime}}
+def build_{{.Name}}_realtime():
+    # One service over one websocket session, where the transcriber, the model
+    # and{{if $.HalfCascade}}, until a synthesizer was bound in front of it,{{end}} the synthesizer sat. The model id rides the socket URL as a
+    # query parameter rather than a session field, which is why it is a setting
+    # here and not a session property.
+    return {{template "svc" .LLM.Call}}
+{{if $.HalfCascade}}
 
+def build_{{.Name}}_tts():
+    # The half cascade: the model above writes text and this speaks it.
+    return {{template "svc" .TTS.Call}}
+{{end}}{{else}}
 def build_{{.Name}}_llm(state=None{{if $.Slng.Any}}, *, slng_session_id{{end}}):
     return {{template "svc" .LLM.Call}}
 
 
 def build_{{.Name}}_tts():
     return {{template "svc" .TTS.Call}}
-{{if $.Inline}}{{range .Tools}}
+{{end}}{{if $.Inline}}{{range .Tools}}
 
 @_direct_tool{{.Decorator}}
 async def {{.MethodName}}(params: FunctionCallParams{{range .Args}}, {{.Name}}: {{.PyType}}{{if not .Required}} = {{.PyDefault}}{{end}}{{end}}):
@@ -983,7 +1002,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                     extra={"extra_headers": {{.SlngHeaders}}}{{end}}),
             ))
             await super().on_activated(args)
-            # Pipecat 1.8 only runs on activation when messages are nonempty.
+            # Pipecat 1.8 and 1.9 only run on activation when messages are nonempty.
             # A handoff already shaped the shared context; request the reply
             # without adding a synthetic message or waiting for the caller.
             if args and args.get("run_llm") and not args.get("messages"):
@@ -1688,7 +1707,7 @@ async def _flow_tool_{{.Name}}(args, flow_manager{{if .NeedsState}}, state=None{
     # DataFrame, so it is queued and speech starts while the handler body runs.
     # A flows handler holds a FlowManager rather than FunctionCallParams, and
     # FlowManager.worker is the documented seam for queueing a frame from inside
-    # a handler (pipecat.flows.manager, pipecat-ai 1.8.0). Queued after the
+    # a handler (pipecat.flows.manager, pipecat-ai 1.9.0). Queued after the
     # refusal check, so a refused call stays silent.
     await flow_manager.worker.queue_frame(TTSSpeakFrame({{pyq .Announce}}))
 {{end}}{{if .KnowledgeBase}}    return await knowledge.look_up({{pyq .KnowledgeBase}}, dict(args)["query"])
@@ -1722,9 +1741,9 @@ transport_params: dict = {
 
 
 
-def build_stt():
+{{if not .SpeechToSpeech}}def build_stt():
     return {{template "svc" .STT.Call}}
-
+{{end}}
 
 {{if .Inline}}{{$agent := index .Agents 0}}async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev) -> None:
     require_env()
@@ -1736,13 +1755,60 @@ def build_stt():
     slng_session_id = str(uuid.uuid4())
 {{end}}    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
-    # Single agent, no handoffs: the LLM sits inline in the pipeline (no bus).
+{{if .Live}}    # One live model listens, thinks and speaks. It sits where the transcriber,
+    # the model and the synthesizer sat, and it decides the turn itself: no
+    # strategies of ours are passed, so the aggregator takes the external ones
+    # the service recommends. The VAD stays for the speaking frames the idle
+    # timer and the latency measurement anchor on.
+{{else if .Realtime}}{{if .HalfCascade}}    # One realtime model hears the caller and writes the reply, standing where the
+    # transcriber and the model sat. The synthesizer below speaks what it writes.
+{{else}}    # One realtime model listens, thinks and speaks, standing where the
+    # transcriber, the model and the synthesizer sat.
+{{end}}{{if .ExternalTurns}}    # The vendor decides the turn, so no strategies of ours are passed and the
+    # aggregator takes the external ones the service recommends. The VAD stays
+    # for the speaking frames the idle timer and the latency measurement anchor
+    # on.
+{{else}}    # turn_detection: local — the vendor's own detection is switched off with a
+    # literal False, which the service holds apart from None, and this project's
+    # own detector below decides the caller has finished.
+{{end}}{{else}}    # Single agent, no handoffs: the LLM sits inline in the pipeline (no bus).
     # turn: local — on-device VAD (Silero); the turn binding is advisory.
-    context = LLMContext({{if $agent.Tools}}tools=[{{range $i, $t := $agent.Tools}}{{if $i}}, {{end}}{{$t.MethodName}}{{end}}]{{end}})
+{{end}}    context = LLMContext({{if .RealtimeOpening}}
+        # The opening line, seeded into the context the first run frame carries.
+        # The service sends every message it finds there as a conversation item
+        # and then creates its first response, so this is what the model opens
+        # with. Not queued as an append frame: that frame's handler in
+        # pipecat-ai 1.10.0 logs an error and returns without doing anything.
+        messages=[{"role": "developer", "content": {{.RealtimeOpening}}}],
+{{if $agent.Tools}}        tools=[{{range $i, $t := $agent.Tools}}{{if $i}}, {{end}}{{$t.MethodName}}{{end}}],
+{{end}}    {{end}}{{if and (not .RealtimeOpening) $agent.Tools}}tools=[{{range $i, $t := $agent.Tools}}{{if $i}}, {{end}}{{$t.MethodName}}{{end}}]{{end}})
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            # The FLOOR: how long silence has to last before speech counts as
+{{if .ExternalTurns}}            vad_analyzer=SileroVADAnalyzer(),
+{{else if .Pace.ByListener}}            # The transcriber decides the turn (turn: provider: listen). The VAD
+            # still runs, for the speaking frames the idle timer and the latency
+            # observer anchor on, but no silence window of ours ends a turn and
+{{if .Pace.Listener.CeilingArg}}            # no local analyzer is built: {{.Pace.Listener.Class}} owns both
+            # halves, and its own end-of-turn timeout carries the pace ceiling
+            # ({{.Pace.Listener.CeilingArg}}={{.Pace.CeilingMillis}}, from pace: {{.Pace.Name}}).
+{{else}}            # no local analyzer is built: the {{.Pace.Listener.Vendor}} service owns both
+            # halves. It exposes no end-of-turn timeout, so there is no ceiling of
+            # ours on it and `pace` is refused on this binding; the service's own
+            # timing decides how long a pause may run.
+{{end}}            vad_analyzer=SileroVADAnalyzer(),
+{{if .Pace.Eager}}            # eager: the service predicts an end of turn before it commits one, and
+            # the reply is generated while it decides. The framework holds that
+            # reply inside the LLM service and drops it if the caller resumes or
+            # the committed words differ, so an unconfirmed turn never reaches the
+            # caller, the context or a tool. Passed explicitly because the
+            # aggregator ignores a service's recommended strategies the moment the
+            # bot passes any of its own.
+            user_turn_strategies=EagerUserTurnStrategies(),
+{{else}}            # No user_turn_strategies of ours: the aggregator takes the external
+            # strategies the service recommends through its metadata frame, and
+            # would ignore that recommendation if one were passed here.
+{{end}}{{else}}            # The FLOOR: how long silence has to last before speech counts as
             # stopped. {{if .Pace.FloorAuthored}}Authored as endpointing_delay.{{else}}Pipecat's own default, and it does not move with the pace.{{end}}
             #
             # Widening this window makes some turns SLOWER, not more patient.
@@ -1779,7 +1845,7 @@ def build_stt():
                 ],
 {{end}}
             ),
-{{if .UserMuteStrategies}}            # The stretches of the call the caller cannot talk over, lowered from
+{{end}}{{if .UserMuteStrategies}}            # The stretches of the call the caller cannot talk over, lowered from
             # conversation.interruption. On a phone route the greeting is
             # protected by default: a phone leg has no echo cancellation, so
             # without this the agent hears its own opening line and cuts itself
@@ -1789,7 +1855,28 @@ def build_stt():
 {{end}}        ),
     )
     dev.observe_aggregators(user_aggregator, assistant_aggregator)
+{{if .Live}}    live = dev.observe_live(build_{{$agent.Name}}_live())
     pipeline = Pipeline(
+        [
+            transport.input(),
+            user_aggregator,
+            live,
+            transport.output(),
+            assistant_aggregator,
+        ]
+    )
+{{else if .Realtime}}    realtime = dev.observe_live(build_{{$agent.Name}}_realtime())
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            user_aggregator,
+            realtime,
+{{if .HalfCascade}}            dev.observe_tts(build_{{$agent.Name}}_tts()),
+{{end}}            transport.output(),
+            assistant_aggregator,
+        ]
+    )
+{{else}}    pipeline = Pipeline(
         [
             transport.input(),
             dev.observe_stt(build_stt()),
@@ -1800,7 +1887,7 @@ def build_stt():
             assistant_aggregator,
         ]
     )
-    worker = PipelineWorker(
+{{end}}    worker = PipelineWorker(
         pipeline,
         name=MAIN_NAME,
         observers=dev.observers(),
@@ -1809,13 +1896,33 @@ def build_stt():
 {{if .Inactivity}}
     @user_aggregator.event_handler("on_user_turn_idle")
     async def on_user_turn_idle(aggregator):
-        await aggregator.push_frame(
+{{if .Live}}        # A later context frame never reaches a live session, so the nudge goes
+        # in as spoken commentary: the model checks on the caller in its own words.
+        await live.send_client_event(live_events.SessionCommentaryAppendEvent(
+            delegation_id=None,
+            content="The caller has gone quiet. Politely check if they are still there.",
+        ))
+{{else if .Realtime}}        # The nudge goes straight onto the server's conversation and then asks for
+        # a reply, which is the pair of client events this API takes. An append
+        # frame would reach a handler that logs an error and returns.
+        await realtime.send_client_event(realtime_events.ConversationItemCreateEvent(
+            item=realtime_events.ConversationItem(
+                type="message",
+                role="user",
+                content=[realtime_events.ItemContent(
+                    type="input_text",
+                    text="The caller has gone quiet. Politely check if they are still there.",
+                )],
+            ),
+        ))
+        await realtime.send_client_event(realtime_events.ResponseCreateEvent())
+{{else}}        await aggregator.push_frame(
             LLMMessagesAppendFrame(
                 [{"role": "developer", "content": "The caller has gone quiet. Politely check if they are still there."}],
                 run_llm=True,
             )
         )
-{{if gt .Inactivity.EndSecs 0}}
+{{end}}{{if gt .Inactivity.EndSecs 0}}
     # inactivity.end_after: the nudge above is the first half, and this is the
     # second. Without it an idle call is nudged forever and never hung up, which
     # on a phone line is a billed open call. The clock starts at the first idle
@@ -1838,9 +1945,23 @@ def build_stt():
             _idle_end = None
 {{end}}{{end}}
     async def start_session():
-{{if .GreetingText}}        await worker.queue_frame(TTSSpeakFrame({{pyq .GreetingText}}))
-{{end}}{{if gt .MaxDurationSecs 0}}        asyncio.create_task(_end_after(worker, {{.MaxDurationSecs}}))
-{{end}}{{if and (not .GreetingText) (le .MaxDurationSecs 0)}}        pass
+{{if .Live}}        # The live session starts on the first context frame, so the run is
+        # queued whatever the greeting says. An opening line rides ahead of it as
+        # a developer message: the service lifts a trailing one out of the
+        # startup history and delivers it as spoken commentary once the session
+        # is up, which the model paraphrases rather than reads out.
+        await worker.queue_frames([
+{{if .GreetingText}}            LLMMessagesAppendFrame([{"role": "developer", "content": "Open the call with this greeting, in these words as far as you can: " + {{pyq .GreetingText}}}]),
+{{else if .GreetingInstruction}}            LLMMessagesAppendFrame([{"role": "developer", "content": {{pyq .GreetingInstruction}}}]),
+{{end}}            LLMRunFrame(),
+        ])
+{{else if .RealtimeOpening}}        # The realtime session sets its conversation up and creates its first
+        # response off the first context frame, so one run frame opens the call
+        # and the opening line is already in the context above.
+        await worker.queue_frame(LLMRunFrame())
+{{else}}{{if .GreetingText}}        await worker.queue_frame(TTSSpeakFrame({{pyq .GreetingText}}))
+{{end}}{{end}}{{if gt .MaxDurationSecs 0}}        asyncio.create_task(_end_after(worker, {{.MaxDurationSecs}}))
+{{end}}{{if .EmptyStartSession}}        pass
 {{end}}
     @worker.rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
@@ -1925,7 +2046,29 @@ def build_stt():
 {{end}}    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            # The FLOOR: how long silence has to last before speech counts as
+{{if .Pace.ByListener}}            # The transcriber decides the turn (turn: provider: listen). The VAD
+            # still runs, for the speaking frames the idle timer and the latency
+            # observer anchor on, but no silence window of ours ends a turn and
+{{if .Pace.Listener.CeilingArg}}            # no local analyzer is built: {{.Pace.Listener.Class}} owns both
+            # halves, and its own end-of-turn timeout carries the pace ceiling
+            # ({{.Pace.Listener.CeilingArg}}={{.Pace.CeilingMillis}}, from pace: {{.Pace.Name}}).
+{{else}}            # no local analyzer is built: the {{.Pace.Listener.Vendor}} service owns both
+            # halves. It exposes no end-of-turn timeout, so there is no ceiling of
+            # ours on it and `pace` is refused on this binding; the service's own
+            # timing decides how long a pause may run.
+{{end}}            vad_analyzer=SileroVADAnalyzer(),
+{{if .Pace.Eager}}            # eager: the service predicts an end of turn before it commits one, and
+            # the reply is generated while it decides. The framework holds that
+            # reply inside the LLM service and drops it if the caller resumes or
+            # the committed words differ, so an unconfirmed turn never reaches the
+            # caller, the context or a tool. Passed explicitly because the
+            # aggregator ignores a service's recommended strategies the moment the
+            # bot passes any of its own.
+            user_turn_strategies=EagerUserTurnStrategies(),
+{{else}}            # No user_turn_strategies of ours: the aggregator takes the external
+            # strategies the service recommends through its metadata frame, and
+            # would ignore that recommendation if one were passed here.
+{{end}}{{else}}            # The FLOOR: how long silence has to last before speech counts as
             # stopped. {{if .Pace.FloorAuthored}}Authored as endpointing_delay.{{else}}Pipecat's own default, and it does not move with the pace.{{end}}
             #
             # Widening this window makes some turns SLOWER, not more patient.
@@ -1962,7 +2105,7 @@ def build_stt():
                 ],
 {{end}}
             ),
-{{if .UserMuteStrategies}}            # The stretches of the call the caller cannot talk over, lowered from
+{{end}}{{if .UserMuteStrategies}}            # The stretches of the call the caller cannot talk over, lowered from
             # conversation.interruption. On a phone route the greeting is
             # protected by default: a phone leg has no echo cancellation, so
             # without this the agent hears its own opening line and cuts itself
@@ -2214,8 +2357,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     dev = install_dev_metrics(runner_args)
     try:
         await _run_bot(transport, runner_args, dev)
-    except Exception:
-        dev.finish(error=True)
+    except Exception as error:
+        # The dev page is where the author is looking when a call dies, so it
+        # names what stopped it. The type only: an exception's message quotes
+        # whatever it was working on, and that belongs in the log rather than
+        # on a page that carries no prompts, arguments or results.
+        dev.finish(error=True, reason=f"The agent stopped on {type(error).__name__}.")
         raise
     finally:
         dev.finish()

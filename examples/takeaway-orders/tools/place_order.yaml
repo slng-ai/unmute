@@ -1,0 +1,54 @@
+description: >-
+  Place the order once the caller has agreed to every dish and said whether it
+  is collection or delivery. Call it once, silently, and read back the order
+  number and the wait it returns. Never invent an order number.
+
+input:
+  type: object
+  properties:
+    items:
+      type: array
+      description: The menu names of the dishes ordered, one entry per portion.
+      items:
+        type: string
+    fulfilment:
+      type: string
+      enum:
+        - collection
+        - delivery
+    name:
+      type: string
+      description: The name the order is under, first name is enough.
+  required:
+    - items
+    - fulfilment
+    - name
+
+output:
+  type: object
+  properties:
+    status:
+      type: string
+      enum:
+        - placed
+        - rejected
+    order_number:
+      type: string
+    total:
+      type: number
+    wait_minutes:
+      type: integer
+    problem:
+      type: string
+  required:
+    - status
+    - order_number
+    - total
+    - wait_minutes
+    - problem
+
+local:
+  handler: tools/takeaway.py
+
+interruption: provider_default
+effect: returns_data

@@ -785,7 +785,7 @@ class BillingAgent(LLMWorker):
                     extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:billing", "X-Slng-Session-Id": self._slng_session_id}}),
             ))
             await super().on_activated(args)
-            # Pipecat 1.8 only runs on activation when messages are nonempty.
+            # Pipecat 1.8 and 1.9 only run on activation when messages are nonempty.
             # A handoff already shaped the shared context; request the reply
             # without adding a synthetic message or waiting for the caller.
             if args and args.get("run_llm") and not args.get("messages"):
@@ -868,7 +868,7 @@ class IntakeAgent(LLMWorker):
                     extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": self._slng_session_id}}),
             ))
             await super().on_activated(args)
-            # Pipecat 1.8 only runs on activation when messages are nonempty.
+            # Pipecat 1.8 and 1.9 only run on activation when messages are nonempty.
             # A handoff already shaped the shared context; request the reply
             # without adding a synthetic message or waiting for the caller.
             if args and args.get("run_llm") and not args.get("messages"):
@@ -1429,8 +1429,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     dev = install_dev_metrics(runner_args)
     try:
         await _run_bot(transport, runner_args, dev)
-    except Exception:
-        dev.finish(error=True)
+    except Exception as error:
+        # The dev page is where the author is looking when a call dies, so it
+        # names what stopped it. The type only: an exception's message quotes
+        # whatever it was working on, and that belongs in the log rather than
+        # on a page that carries no prompts, arguments or results.
+        dev.finish(error=True, reason=f"The agent stopped on {type(error).__name__}.")
         raise
     finally:
         dev.finish()

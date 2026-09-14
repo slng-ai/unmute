@@ -1,0 +1,193 @@
+---
+title: "Realtime"
+description: "One model that hears and answers, where you still choose who ends the turn and whose voice speaks."
+---
+
+`architecture: realtime` builds one model on a vendor's Realtime API. It hears
+the caller's audio and answers out loud, with no transcriber and no separate
+reasoning model in between.
+
+Two things stay yours, and they are the reason to pick this over
+[`live`](/build/architecture/live): you decide who ends the turn, and you can
+put your own synthesizer in front of the model.
+
+```yaml agent.yaml
+architecture: realtime
+
+models:
+  realtime:
+    - name: voice
+      provider: openai
+      model: gpt-realtime
+      voice: marin
+      turn_detection: semantic
+
+agents:
+  desk:
+    instructions: instructions.md
+    realtime: voice
+    tools:
+      - lookup_customer
+```
+
+On this page:
+
+- [Why pick it](#why-pick-it) - against the other two
+- [Every key a realtime entry takes](#every-key-a-realtime-entry-takes)
+- [Who ends the turn](#who-ends-the-turn) - the three answers
+- [Use your own voice](#use-your-own-voice) - the half cascade
+- [What it can still do](#what-it-can-still-do) - tools and knowledge
+- [What it cannot carry](#what-it-cannot-carry) - and why, honestly
+- [Troubleshooting](#troubleshooting)
+
+## Why pick it
+
+**Against `cascade`:** one model instead of four services, so a shorter pause
+before the agent answers. You give up tasks, handoffs and saved call state.
+
+**Against `live`:** you keep two decisions that `live` takes away. Who ends the
+turn is yours, and the voice can be a synthesizer you already use rather than
+the model's own. Tools run on the model itself here, so there is no `backend:`
+entry to name.
+
+## Every key a realtime entry takes
+
+`name`, `provider` and `model` are required.
+
+<ParamField path="name" type="string" required>
+  The entry's name. An agent binds it with `realtime: <name>`.
+</ParamField>
+
+<ParamField path="provider" type="openai" required>
+  The vendor. One name today, and the list is closed.
+</ParamField>
+
+<ParamField path="model" type="string" required>
+  The model id, sent exactly as written. No allowlist, so a typo shows up as a
+  vendor error on the first call.
+</ParamField>
+
+<ParamField path="voice" type="string">
+  The voice the model speaks in. Write this, or give the agent a `speak:`
+  binding for the half cascade. Both at once is refused, and so is neither,
+  because then nothing would speak.
+</ParamField>
+
+<ParamField path="turn_detection" type="server_vad | semantic | local">
+  Who decides the caller has finished. Left out, the vendor's own default
+  applies. See below.
+</ParamField>
+
+<ParamField path="description" type="string">
+  A note for whoever reads the package next. It reaches nothing at runtime.
+</ParamField>
+
+Every other model key is refused on a realtime entry by name, with its line and
+column. That includes `temperature`, which one vendor accepts on this API and
+then silently discards, so writing it would look like it worked.
+
+## Who ends the turn
+
+| Value | Who decides |
+|---|---|
+| `server_vad` | the vendor's voice detector, on a silence window |
+| `semantic` | the vendor's model, judging whether a thought is finished rather than whether a noise stopped |
+| `local` | this project's own detector, exactly as a cascade uses it |
+
+`local` is how a realtime package keeps the turn settings it would have had as a
+cascade. It is not a fallback: both vendors support handing the decision back,
+and the compiler emits what each one needs to make that happen.
+
+Leave `turn_detection:` out and the compiler writes nothing in its place,
+because writing one would send a setting you did not ask for.
+
+**The two targets then differ, so write the value if you care which you get.**
+On Pipecat nothing is sent and the vendor's own server default applies, which is
+the silence detector. On LiveKit the plugin fills the gap itself with the
+semantic detector before the request leaves the process. Same package, two
+different answers to who ends the turn.
+
+## Use your own voice
+
+Bind `speak:` on the agent instead of writing `voice:` on the entry. The model
+then produces text, and the synthesizer you named speaks it. This is the half
+cascade: the model still hears the caller directly and still decides how to
+answer, but the voice is one you chose.
+
+```yaml agent.yaml
+models:
+  realtime:
+    - name: voice
+      provider: openai
+      model: gpt-realtime
+      turn_detection: semantic
+  speak:
+    warm:
+      provider: cartesia
+      model: sonic-3
+      voice: "a-voice-id"
+
+agents:
+  desk:
+    realtime: voice
+    speak: warm
+```
+
+Writing both `voice:` and `speak:` is refused. They answer the same question two
+ways, and only one of them would reach the call.
+
+## What it can still do
+
+Two things a reader often assumes are lost here, and are not.
+
+**Tools.** The model runs them itself, over the same connection it speaks on.
+There is no `backend:` entry to name, which is the other difference from
+[`live`](/build/architecture/live).
+
+**Knowledge.** A `knowledge:` section works exactly as it does in a cascade. The
+documents are read and indexed when the worker starts, and a tool file naming
+the base makes them searchable mid-call. A search is a tool, and this shape
+calls tools.
+
+[`pharmacy-refills`](https://github.com/slng-ai/unmute/tree/main/examples/pharmacy-refills)
+is the shipped example. It is a repeat-prescription line, which is the use case
+where the turn setting on this page decides whether the call works: a caller
+reading a reference off a box pauses halfway through it.
+
+## What it cannot carry
+
+A realtime session takes a new prompt while the call is running. That is the one
+real difference between this API and the Live API, and it is why the two are
+separate words here rather than one.
+
+**It still carries no tasks.** Not because of the API, but because one of the two
+frameworks this compiler emits cannot reshape a running conversation without
+dropping the connection and starting over. Lifting the limit on one target would
+make one authored word mean two different things depending on where it compiles,
+which is worse than the limit.
+
+| Written | Why it is refused |
+|---|---|
+| a second agent, `tasks`, `task_groups`, `handoffs` | one framework cannot reshape a live conversation |
+| `escalations` | a transfer needs a phone leg this shape does not carry yet |
+| `listen` and `think` sections | the model does both itself |
+| `variables`, `prefetch` | this shape carries no call state yet |
+| `tracing` | this shape has no traced worker yet |
+| a phone connection | this shape compiles for the browser route |
+
+If you need tasks today, write `architecture: cascade`.
+
+## Troubleshooting
+
+**"has voice X and agent Y also binds speak Z"** pick one. Remove the entry's
+`voice:` for the half cascade, or the agent's `speak:` to let the model speak.
+
+**"names no voice and agent X binds no speak model"** nothing would speak. Add
+one of the two.
+
+**"turn_detection X is not one this compiler knows"** the message lists the
+three. There is no fourth.
+
+**The agent answers too eagerly, or waits too long.** Try `semantic` before
+touching numbers: it judges whether the caller finished a thought rather than
+whether a noise stopped, which is usually what you actually wanted.

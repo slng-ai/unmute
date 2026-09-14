@@ -58,18 +58,29 @@ func TestCheckVersionAgainstWindow(t *testing.T) {
 		version  string
 		wantErr  string // "" means accepted
 	}{
-		{name: "livekit exact", provider: LiveKit, version: "1.6.10"},
-		{name: "pipecat exact", provider: Pipecat, version: "1.8.0"},
+		{name: "livekit exact", provider: LiveKit, version: "1.8.1"},
+		{name: "pipecat exact", provider: Pipecat, version: "1.10.0"},
 
 		// The bump this feature ships is exactly the case a string compare gets
-		// wrong: "1.6.10" sorts below "1.6.4" lexically.
-		{name: "patch above ceiling", provider: LiveKit, version: "1.6.11", wantErr: "newer than this unmute supports"},
-		{name: "minor above ceiling", provider: LiveKit, version: "1.7.0", wantErr: "newer than this unmute supports"},
+		// wrong: "1.6.10" sorts below "1.6.4" lexically, and "1.10.0" sorts
+		// below "1.9.0" the same way, which is the pipecat pin as of spec 022.
+		{name: "patch above ceiling", provider: LiveKit, version: "1.8.2", wantErr: "newer than this unmute supports"},
+		{name: "minor above ceiling", provider: LiveKit, version: "1.9.0", wantErr: "newer than this unmute supports"},
 		{name: "major above ceiling", provider: Pipecat, version: "2.0.0", wantErr: "newer than this unmute supports"},
-		{name: "above ceiling names the fix", provider: Pipecat, version: "1.9.0", wantErr: "a newer unmute may support it"},
+		{name: "above ceiling names the fix", provider: Pipecat, version: "1.11.0", wantErr: "a newer unmute may support it"},
 
-		{name: "below pipecat floor", provider: Pipecat, version: "1.6.9", wantErr: "outside the supported range (exactly 1.8.0)"},
-		{name: "below livekit floor", provider: LiveKit, version: "1.6.9", wantErr: "outside the supported range (exactly 1.6.10)"},
+		{name: "below pipecat floor", provider: Pipecat, version: "1.6.9", wantErr: "outside the supported range (exactly 1.10.0)"},
+		// The previous pin, and the sharpest case in this table: "1.9.0" sorts
+		// ABOVE "1.10.0" as a string, so a lexical compare would call the old
+		// version newer than the one we support and tell the author to upgrade
+		// unmute. It is older, and the message has to say so.
+		{name: "previous pipecat pin reads as older", provider: Pipecat, version: "1.9.0", wantErr: "outside the supported range (exactly 1.10.0)"},
+		{name: "below livekit floor", provider: LiveKit, version: "1.8.0", wantErr: "outside the supported range (exactly 1.8.1)"},
+		// The previous livekit pin, and the same trap as the pipecat row above in
+		// the other direction: "1.6.10" sorts ABOVE "1.8.1" on the second
+		// component as a string compare would read it, and it is older. An author
+		// still on it has to be told to change the package, not to upgrade unmute.
+		{name: "previous livekit pin reads as older", provider: LiveKit, version: "1.6.10", wantErr: "outside the supported range (exactly 1.8.1)"},
 		{name: "far below floor", provider: LiveKit, version: "0.0.108", wantErr: "outside the supported range"},
 
 		{name: "partial version", provider: LiveKit, version: "1.6", wantErr: "must be three numbers"},

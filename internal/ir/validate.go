@@ -129,6 +129,17 @@ func forwardedBindings(resolved Target) []ForwardedBinding {
 			Target: resolved.Name, Role: role, Profile: profile, Binding: *binding, Params: params,
 		})
 	}
+	// Live first, because on a package that has one it is the whole pipeline and
+	// the report is read top down. Leaving it out was not a missing nicety: a
+	// live package's report carried its backend think entry and nothing else, so
+	// the one file `compile` sends a reader to for what it resolved showed a
+	// reason binding with no listen and no speak beside it, which is what a
+	// broken cascade looks like. The binding already carries the model, the
+	// voice and the backend name, so naming the role is the whole fix.
+	for _, name := range slices.Sorted(maps.Keys(resolved.Models.Live)) {
+		binding := resolved.Models.Live[name]
+		appendBinding("live", name, &binding)
+	}
 	appendBinding("listen", "", resolved.Models.Listen)
 	for _, fallback := range resolved.Models.ListenFallbacks {
 		binding := fallback.Binding
@@ -589,12 +600,14 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 		switch tool.Interruption {
 		case ToolContinue, ToolCancel, ToolProviderDefault:
 		default:
-			errors = add(errors, fmt.Sprintf("tool %q has invalid interruption %q", name, tool.Interruption))
+			errors = add(errors, fmt.Sprintf("tool %q has invalid interruption %q: write one of %s",
+				name, tool.Interruption, joinValues(ToolInterruptionValues())))
 		}
 		switch tool.Effect {
 		case ToolReturnsData, ToolEndsConversation:
 		default:
-			errors = add(errors, fmt.Sprintf("tool %q has invalid effect %q", name, tool.Effect))
+			errors = add(errors, fmt.Sprintf("tool %q has invalid effect %q: write one of %s",
+				name, tool.Effect, joinValues(ToolEffectValues())))
 		}
 	}
 	for name, channel := range agent.Channels {
@@ -747,7 +760,18 @@ func warnOnStepsThatOfferNothing(agent *Agent) []string {
 // Moving a check from generate to validate buys "before any artifact is
 // written". It does not buy a file and line: only spec.Load and ir.Build carry a
 // position (research D7). The generators keep their own errors as a backstop.
-func validateDriverValues(resolved Target, provider targetcap.Provider, row *TargetValidation) {
+// joinValues lists a closed set the way every refusal in this package lists one.
+// Generic because the two callers hold different named string types, and a
+// []string conversion at each call site is where one of them loses a value.
+func joinValues[T ~string](values []T) string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, string(value))
+	}
+	return strings.Join(out, ", ")
+}
+
+func validateDriverValues(agent *Agent, resolved Target, provider targetcap.Provider, row *TargetValidation) {
 	if err := targetcap.CheckSDKLanguage(provider, resolved.SDKLanguage); err != nil {
 		row.Errors = add(row.Errors, err.Error())
 	}
@@ -760,7 +784,13 @@ func validateDriverValues(resolved Target, provider targetcap.Provider, row *Tar
 			row.Errors = add(row.Errors, err.Error())
 		}
 	}
-	if provider == targetcap.LiveKit && resolved.Models.Turn != nil {
+	// Only a cascade has a turn model to get wrong. Under any other architecture
+	// the model decides the turn itself, and the refusal for writing a turn
+	// section at all is the whole answer: telling the author in the line above it
+	// to pick turn-detector-mini instead sends them to fix a setting that cannot
+	// be used here, and a reader works top down. Found by putting every refusal
+	// row to both targets, which is the only place the two disagreed.
+	if provider == targetcap.LiveKit && resolved.Models.Turn != nil && agent.Architecture == ArchitectureCascade {
 		if _, err := targetcap.LiveKitTurnVersion(resolved.Models.Turn.Model); err != nil {
 			row.Errors = add(row.Errors, err.Error())
 		}
@@ -820,7 +850,7 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	if targetcap.IsCode(provider) && resolved.Version == "" {
 		row.Errors = add(row.Errors, fmt.Sprintf("%s code target requires version", resolved.Provider))
 	}
-	validateDriverValues(resolved, provider, row)
+	validateDriverValues(agent, resolved, provider, row)
 	validateVaultTokens(agent, provider, row)
 	prefetchSkipWarnings(agent, resolved, row)
 	if provider == targetcap.Slng {
@@ -864,8 +894,43 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	if len(resolved.Models.ListenFallbacks) > 0 {
 		applyCapability(caps, targetcap.FieldListenFallback, provider, row)
 	}
+	// `eager` is a turn field. validateModelKind refuses it on an authored entry
+	// of any other kind, but a per-target `models:` override replaces a binding
+	// wholesale, so the same mistake can arrive here having never been an
+	// authored model at all.
+	for role, binding := range map[string]*Binding{"listen": resolved.Models.Listen} {
+		if binding != nil && binding.Eager {
+			row.Errors = add(row.Errors, fmt.Sprintf(
+				"the %s binding sets eager, which is a turn-model field: it reaches nothing here. Put it on the models.turn binding, beside provider: listen", role))
+		}
+	}
+	for role, set := range map[string]map[string]Binding{"think": resolved.Models.Reason, "speak": resolved.Models.Speak} {
+		for name := range set {
+			if set[name].Eager {
+				row.Errors = add(row.Errors, fmt.Sprintf(
+					"%s binding %q sets eager, which is a turn-model field: it reaches nothing here. Put it on the models.turn binding, beside provider: listen", role, name))
+			}
+		}
+	}
 	if b := resolved.Models.Turn; b != nil {
 		applyCapability(caps, targetcap.FieldTurnPlacement, provider, row)
+		if b.Provider == targetcap.TurnDeciderListen {
+			applyCapability(caps, targetcap.FieldTurnByListener, provider, row)
+			// The per-vendor checks make sense only where the row is supported:
+			// on a target that denies the decider the denial is the whole answer.
+			if caps.Capability(targetcap.FieldTurnByListener, provider).Tag == targetcap.Core {
+				validateListenDecider(agent, resolved, provider, b, row)
+			}
+		}
+		if b.Eager {
+			applyCapability(caps, targetcap.FieldTurnEager, provider, row)
+			// A per-target override can replace the base binding wholesale, so the
+			// pairing is checked on the effective binding too, not only on the
+			// authored one in validateModelKind.
+			if b.Provider != targetcap.TurnDeciderListen {
+				row.Errors = add(row.Errors, "turn binding sets eager without provider listen: the local detector cannot predict a turn before it ends. Set provider: listen with a Flux or Turns listening model, or remove eager")
+			}
+		}
 		if b.SemanticEndpointing != "" {
 			applyCapability(caps, targetcap.FieldSemanticEndpointing, provider, row)
 		}
@@ -975,7 +1040,16 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 			}
 			validateContext(control.Context.TaskContext, provider, caps, row)
 		case *HumanTransfer:
-			validateHumanTransfer(control, resolved, provider, caps, row)
+			// Only under a cascade. Any other architecture has already refused
+			// the escalation outright, and the route advice below it is about a
+			// phone leg a shape with no carrier route will never have: it told
+			// an author which transport to pick for a control that reaches
+			// nothing. It is also the one place the two code targets word the
+			// same refusal differently, for a reason that is real under a
+			// cascade and meaningless here.
+			if agent.Architecture == ArchitectureCascade {
+				validateHumanTransfer(control, resolved, provider, caps, row)
+			}
 		}
 	}
 	validateTools(agent, resolved, provider, caps, row)
@@ -1372,20 +1446,45 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 			row.Errors = add(row.Errors, fmt.Sprintf("%s %s binding provider %q has no language slot; remove the language field", provider, label, binding.Provider))
 		}
 	}
-	validateRoleBinding("listen", caps.Role(targetcap.Listen, provider), resolved.Models.Listen, row)
-	checkVendor(targetcap.Listen, resolved.Models.Listen)
-	checkLanguageSlot(targetcap.Listen, "listen", resolved.Models.Listen)
-	for _, fallback := range resolved.Models.ListenFallbacks {
-		binding := fallback.Binding
-		validatePlacement("listen."+fallback.Name, &binding, row)
-		checkVendor(targetcap.Listen, &binding)
-		checkLanguageSlot(targetcap.Listen, "listen."+fallback.Name, &binding)
+	if agent.Architecture != ArchitectureCascade {
+		// One model listens, thinks and speaks, so the open listen and turn
+		// roles are not required here; the per-architecture check refuses those
+		// sections if they are present at all, on targets that take the binding.
+		field := targetcap.FieldLiveModel
+		if agent.Architecture == ArchitectureRealtime {
+			field = targetcap.FieldRealtimeModel
+		}
+		applyCapability(caps, field, provider, row)
+		if caps.Capability(field, provider).Tag == targetcap.Core {
+			switch agent.Architecture {
+			case ArchitectureLive:
+				validateLive(agent, caps, resolved, liveAgentNames(agent), checkVendor, row)
+			case ArchitectureRealtime:
+				validateRealtime(agent, caps, provider, resolved, realtimeAgentNames(agent), checkVendor, row)
+			}
+		}
+	} else {
+		validateRoleBinding("listen", caps.Role(targetcap.Listen, provider), resolved.Models.Listen, row)
+		checkVendor(targetcap.Listen, resolved.Models.Listen)
+		checkLanguageSlot(targetcap.Listen, "listen", resolved.Models.Listen)
+		for _, fallback := range resolved.Models.ListenFallbacks {
+			binding := fallback.Binding
+			validatePlacement("listen."+fallback.Name, &binding, row)
+			checkVendor(targetcap.Listen, &binding)
+			checkLanguageSlot(targetcap.Listen, "listen."+fallback.Name, &binding)
+		}
+		validateRoleBinding("turn", caps.Role(targetcap.Turn, provider), resolved.Models.Turn, row)
+		checkVendor(targetcap.Turn, resolved.Models.Turn)
 	}
-	validateRoleBinding("turn", caps.Role(targetcap.Turn, provider), resolved.Models.Turn, row)
-	checkVendor(targetcap.Turn, resolved.Models.Turn)
 
 	models, voices := usedProfiles(agent)
 	for _, name := range slices.Sorted(maps.Keys(voices)) {
+		if name == "" && agent.Architecture != ArchitectureCascade {
+			// A speech to speech agent may name no speak model: the model speaks
+			// itself. A realtime agent that does name one is the half cascade,
+			// and that name is not empty, so it is checked like any other.
+			continue
+		}
 		binding, ok := resolved.Models.Speak[name]
 		if !ok || !bindingHasVoice(&binding) {
 			row.Errors = add(row.Errors, fmt.Sprintf("%s target %q is missing speak binding for voice %q", resolved.Provider, resolved.Name, name))
@@ -1400,6 +1499,16 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 		checkSpeakRequiredFields(catalog, provider, name, binding, row)
 	}
 	for _, name := range slices.Sorted(maps.Keys(models)) {
+		if name == "" && agent.Architecture != ArchitectureCascade {
+			// A speech to speech agent names no think model of its own, so it
+			// contributes an empty name here. Skipping every empty name instead
+			// would turn a future empty reference of any other kind into
+			// silence. Held to the architecture rather than to "is some agent
+			// bound to a live model", which is what it said first and which left
+			// a realtime package reporting two bindings it was never going to
+			// have.
+			continue
+		}
 		binding, ok := resolved.Models.Reason[name]
 		if !ok || binding.Model == "" {
 			row.Errors = add(row.Errors, fmt.Sprintf("%s target %q is missing reason binding for model %q", resolved.Provider, resolved.Name, name))
@@ -1841,7 +1950,12 @@ func checkResponsesParams(provider targetcap.Provider, profile string, binding B
 
 func validateRoleBinding(role string, kind targetcap.RoleKind, binding *Binding, row *TargetValidation) {
 	if kind == targetcap.Open {
-		if binding == nil || binding.Model == "" {
+		// A turn binding handing the decision to the transcriber names no model of
+		// its own: the listening model is the model. Everything else it needs
+		// (the vendor's turn-detecting class, the model family) is checked by
+		// validateListenDecider on the targets that support it.
+		listener := role == "turn" && binding != nil && binding.Provider == targetcap.TurnDeciderListen
+		if binding == nil || binding.Model == "" && !listener {
 			row.Errors = add(row.Errors, fmt.Sprintf("%s target %q is missing open %s binding", row.Provider, row.Name, role))
 			return
 		}
@@ -2098,7 +2212,13 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 		if tool.Execution == ToolMCP && targetcap.EmitsProject(provider) && tool.URLEnv == "" {
 			row.Errors = add(row.Errors, fmt.Sprintf("%s target connects to the MCP server itself: tool %q needs url_env, the environment variable holding the server address", provider, name))
 		}
-		if tool.Interruption != ToolProviderDefault {
+		// Only where the authored preference and the target's behaviour differ.
+		// A tool writing `continue` on LiveKit gets exactly what it asked for,
+		// and telling that author their setting is not enforced is a warning
+		// they cannot act on, printed on every run of a package that also
+		// targets the runtime which does read it.
+		if tool.Interruption != ToolProviderDefault &&
+			string(tool.Interruption) != targetcap.FixedToolInterruption(provider) {
 			applyCapability(caps, targetcap.FieldToolInterruption, provider, row)
 		}
 		if len(tool.Dependencies) > 0 {
@@ -2329,6 +2449,10 @@ func providerKeyEnvNames(agent *Agent, resolved Target) []struct{ name, site str
 		add(targetcap.Listen, "listen", fallback.Name, &binding)
 	}
 	add(targetcap.Turn, "turn", agent.Turn, resolved.Models.Turn)
+	for _, name := range sortedKeys(resolved.Models.Live) {
+		binding := resolved.Models.Live[name]
+		add(targetcap.Live, "live", name, &binding)
+	}
 	for _, name := range sortedKeys(resolved.Models.Speak) {
 		binding := resolved.Models.Speak[name]
 		add(targetcap.Speak, "speak", name, &binding)
@@ -3107,7 +3231,452 @@ func validateModelKind(name string, model ModelDef) []string {
 			}
 		}
 	}
+	errors = append(errors, eagerErrors(name, model)...)
 	return errors
+}
+
+// eagerErrors holds `eager` to the one place it means something: a turn binding
+// whose transcriber decides the turn. The local detector predicts nothing, so
+// `eager: true` beside `provider: local` would be a flag that reaches no code,
+// and Principle II says a field that reaches nothing is refused, not dropped.
+func eagerErrors(name string, model ModelDef) []string {
+	if model.Eager == nil {
+		return nil
+	}
+	if model.Kind != KindTurn {
+		return []string{fmt.Sprintf("model %q eager is a turn-model field: it belongs on a turn binding, not a %s binding", name, model.Kind)}
+	}
+	if *model.Eager && model.Provider != targetcap.TurnDeciderListen {
+		return []string{fmt.Sprintf(
+			"model %q eager needs turn provider listen: the local detector cannot predict a turn before it ends. Set provider: listen with a Flux or Turns listening model, or remove eager",
+			name)}
+	}
+	return nil
+}
+
+// validateListenDecider holds `turn: provider: listen` on a target that lets a
+// transcriber decide the turn. Three things have to be true for the emitted
+// service to connect and for every authored field to reach something: the
+// listening vendor ships a turn-detecting class, the listening model is one that
+// class serves, and no field that only the local pair reads is set.
+func validateListenDecider(agent *Agent, resolved Target, provider targetcap.Provider, turn *Binding, row *TargetValidation) {
+	vendor, model := "", ""
+	if listen := resolved.Models.Listen; listen != nil {
+		vendor, model = cmp.Or(listen.Provider, "openai"), listen.Model
+	}
+	detector, ok := targetcap.LookupListenTurnDetector(provider, vendor)
+	switch {
+	case !ok:
+		row.Errors = add(row.Errors, fmt.Sprintf(
+			"turn provider \"listen\" works with %s; the listening model is provider %q. Set the turn provider to local, or bind one of those listening models",
+			listenDeciderVendors(provider), vendor))
+	case !detector.ServesModel(model):
+		row.Errors = add(row.Errors, fmt.Sprintf(
+			"turn provider \"listen\" needs a listening model that detects turns itself; %s model %q does not. Use a %s model such as %s, or set the turn provider back to local",
+			vendor, model, strings.Join(detector.ModelPrefixes, "/"), detector.ExampleModel))
+	}
+	if turn.EndpointingDelay != "" {
+		row.Errors = add(row.Errors, fmt.Sprintf(
+			"endpointing_delay %s reaches nothing when the transcriber decides the turn: there is no local silence window to set. Remove it, or set the turn provider to local",
+			turn.EndpointingDelay))
+	}
+	if turn.SemanticEndpointing != "" {
+		row.Errors = add(row.Errors, fmt.Sprintf(
+			"semantic_endpointing %s reaches nothing when the transcriber decides the turn: it names a local analyzer that is not built. Remove it",
+			turn.SemanticEndpointing))
+	}
+	if agent.Conversation != nil && agent.Conversation.Interruption != nil && agent.Conversation.Interruption.MinimumWords > 0 {
+		row.Errors = add(row.Errors, "conversation.interruption.minimum_words reaches nothing when the transcriber decides the turn: it gates a local turn start the transcriber replaces. Remove it")
+	}
+	// Written when both rows in the table said yes, so it fired for nobody. As
+	// of pipecat 1.10.0 two vendors say no: Speechmatics and Gradium both report
+	// a turn that has ENDED, never one they expect to end. Without this the
+	// emitted constructor would pass a keyword those services do not have, and
+	// the author would find out from a traceback on the first call.
+	if ok && turn.Eager && !detector.Eager {
+		row.Errors = add(row.Errors, fmt.Sprintf(
+			"eager: true asks %s to answer a predicted end of turn, and it reports only a turn that has already ended. Remove eager, or bind a listening model that predicts one: %s",
+			vendor, eagerDeciderVendors(provider)))
+	}
+	// A pace ceiling under a listening decider IS that service's own end-of-turn
+	// timeout: the longest it waits after the caller stops before closing the
+	// turn whatever its confidence says. Flux and Turns each expose one field
+	// for it. Gradium and Speechmatics expose none.
+	//
+	// Refused rather than mapped onto the nearest-looking setting. Gradium's
+	// eot_horizon_s is which prediction horizon to READ, in seconds, not how
+	// long to wait; writing the ceiling there would make one authored word mean
+	// two different things per vendor, and the agent would wait for a length
+	// nobody asked for. This is the same rule that already refuses
+	// endpointing_delay here: a field reaching nothing is refused, not dropped.
+	if ok && !detector.HasCeiling() && turn.Pace != "" {
+		alternatives := ceilingDeciderVendors(provider)
+		advice := "Remove pace and let " + vendor + " use its own end-of-turn timing"
+		if alternatives != "" {
+			advice += ", or bind a listening model whose service takes one: " + alternatives
+		}
+		row.Errors = add(row.Errors, fmt.Sprintf(
+			"pace: %s reaches nothing when %s decides the turn: the service exposes no end-of-turn timeout for the ceiling to land in. %s",
+			turn.Pace, vendor, advice))
+	}
+}
+
+// liveAgentNames lists the agents bound to a live model, sorted.
+func liveAgentNames(agent *Agent) []string {
+	return speechAgentNames(agent, func(def AgentDef) string { return def.Live })
+}
+
+// realtimeAgentNames lists the agents bound to a realtime model, sorted.
+func realtimeAgentNames(agent *Agent) []string {
+	return speechAgentNames(agent, func(def AgentDef) string { return def.Realtime })
+}
+
+func speechAgentNames(agent *Agent, bound func(AgentDef) string) []string {
+	var names []string
+	for name, def := range agent.Agents {
+		if bound(def) != "" {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+// validateLive holds a package bound to a live model to what the Pipecat
+// driver can emit for one, and refuses every authored thing the live model does
+// itself or that this version's shape has no place for. Each refusal says what
+// to do instead (Principle II). The shape is the inline pipeline with the live
+// service where the transcriber, the model and the synthesizer sat, which is
+// why the first version takes one agent, the browser route, and no call state:
+// the live session fixes its instructions when it starts, and the inline shape
+// has no worker to carry state, tracing or a carrier leg.
+// realtimeAdvice is the half-sentence a live refusal ends with when the fix is
+// the other speech-to-speech architecture.
+//
+// It is computed rather than written out, because "write architecture: realtime"
+// is only useful advice where that architecture actually compiles. While the
+// driver emits none, an author who follows it hits a second refusal, having
+// spent a round on it. That is the same defect as advice above a refusal the
+// reader cannot act on, and this is the only place in the tree where one
+// refusal recommends a shape another row can deny.
+//
+// Reading the capability table rather than a written-out sentence also means
+// this corrects itself the day a driver starts emitting realtime: no refusal
+// has to be found and rewritten, and none can be missed.
+func realtimeAdvice(caps targetcap.Table, provider targetcap.Provider, suffix string) string {
+	if realtimeTakesASecondPrompt(caps, provider) {
+		return "write architecture: realtime, whose session " + suffix + ", or architecture: cascade"
+	}
+	return "write architecture: cascade. architecture: realtime is one model that listens, " +
+		"thinks and speaks, and its session " + suffix + ", but it carries no second agent " +
+		"and no tasks on " + string(provider) + " either"
+}
+
+// realtimeTakesASecondPrompt is whether an author sent to `architecture: realtime`
+// would actually be able to write what they are being refused for.
+//
+// It is false today on every target, and the vendor APIs are not the reason. A
+// realtime session does take a new prompt mid-call, which is the whole reason it
+// is a separate architecture from live. The blocker is one target's library:
+// pipecat-ai 1.10.0 ships `_handle_messages_append` as
+//
+//	async def _handle_messages_append(self, frame):
+//	    logger.error("!!! NEED TO IMPLEMENT MESSAGES APPEND")
+//
+// (services/openai/realtime/llm.py:693-694), and the emitted Pipecat bot queues
+// that frame everywhere it reshapes a conversation. Reshaping the server-side
+// conversation needs a reconnect there, so tasks would mean one word meaning two
+// things depending on the target.
+//
+// This is deliberately NOT the same question as "does realtime compile here".
+// Tying the advice to that was the first version and it was wrong in a way that
+// would have shipped: the day realtime compiled, every live refusal would have
+// started telling authors to write it for tasks, and they would have been
+// refused again on arrival. One capability answering two questions is how that
+// happens.
+func realtimeTakesASecondPrompt(caps targetcap.Table, provider targetcap.Provider) bool {
+	return caps.Capability(targetcap.FieldRealtimeTasks, provider).Tag == targetcap.Core
+}
+
+func validateLive(agent *Agent, caps targetcap.Table, resolved Target, names []string, checkVendor func(targetcap.Role, *Binding), row *TargetValidation) {
+	refuse := func(format string, args ...any) { row.Errors = add(row.Errors, fmt.Sprintf(format, args...)) }
+	if len(names) == 0 {
+		return // checkAgentBinding already refused an architecture with no binding
+	}
+	first := names[0]
+	model := agent.Agents[first].Live
+
+	// The three the live API itself forbids, because a live session fixes its
+	// instructions, its context and its tools when it starts. Both vendors say
+	// so in the same words: livekit-plugins-openai 1.8.1 declares
+	// mutable_instructions=False and mutable_chat_context=False on this model,
+	// and pipecat-ai 1.10.0 says model, voice and system_instruction "are fixed
+	// once the session has started". These never lift, so each one names
+	// architecture: realtime, which is the shape that can carry them.
+	if len(agent.Agents) > 1 {
+		var others []string
+		for _, name := range sortedKeys(agent.Agents) {
+			if name != first {
+				others = append(others, name)
+			}
+		}
+		refuse("architecture: live serves one agent: %q is bound by %q and the package also declares agent %s. A live session fixes its instructions when it starts, so it cannot hand the call to a second agent. Remove the second agent, or %s",
+			model, first, strings.Join(others, ", "),
+			realtimeAdvice(caps, targetcap.Provider(resolved.Provider), "can hand the call on"))
+	}
+	if len(agent.Tasks) > 0 || len(agent.TaskGroups) > 0 {
+		refuse("architecture: live has no place for tasks: a task changes the instructions mid-call and a live session fixes them when it starts. Remove the tasks and task groups, or %s",
+			realtimeAdvice(caps, targetcap.Provider(resolved.Provider), "takes new instructions mid-call"))
+	}
+	for _, name := range sortedKeys(agent.Controls) {
+		switch agent.Controls[name].(type) {
+		case *AgentTransfer, *Delegate:
+			refuse("architecture: live serves one agent: control %q hands the call to another agent or a task, which a live session cannot follow because its instructions are fixed. Remove it, or %s",
+				name, realtimeAdvice(caps, targetcap.Provider(resolved.Provider), "takes new instructions mid-call"))
+		case *HumanTransfer:
+			refuse("escalation %q is not emitted under architecture: live in this version: a transfer needs the carrier leg this shape does not carry yet. Remove it, or write architecture: cascade", name)
+		}
+	}
+
+	validateSpeechSections(agent, ArchitectureLive, first, model, refuse)
+
+	if agent.Conversation != nil && agent.Conversation.Interruption != nil {
+		refuse("conversation.interruption reaches nothing under architecture: live: the model handles being talked over itself and decides its own turns. Remove it")
+	}
+	if len(agent.Variables) > 0 || len(agent.Prefetch) > 0 {
+		refuse("variables and prefetch are not emitted under architecture: live in this version: the instructions are fixed when the session starts and this shape carries no call state yet. Remove them, or write architecture: cascade")
+	}
+	if agent.Tracing != nil {
+		refuse("tracing is not emitted under architecture: live in this version: this shape has no traced worker yet. Remove tracing, or write architecture: cascade")
+	}
+	for _, name := range sortedKeys(agent.Tools) {
+		if agent.Tools[name].Execution == ToolMCP {
+			refuse("mcp tool %q is not emitted under architecture: live in this version: this shape has no place to start and close a server connection yet. Remove it, or write architecture: cascade", name)
+		}
+	}
+	if resolved.Connection != "" || resolved.Telephony != nil {
+		refuse("architecture: live compiles for the browser route in this version: connection %q needs the carrier leg this shape does not carry yet. Remove the connection, or write architecture: cascade", resolved.Connection)
+	}
+
+	binding, ok := resolved.Models.Live[model]
+	if !ok {
+		refuse("%s target %q is missing live binding for model %q", resolved.Provider, resolved.Name, model)
+		return
+	}
+	checkVendor(targetcap.Live, &binding)
+	if binding.Model == "" {
+		refuse("live model %q names no model: write model: <the live model's id>", model)
+	}
+	def := agent.Models[model]
+	switch {
+	case def.Backend == "" && len(agent.Agents[first].Tools) > 0:
+		refuse("live model %q is bound by agent %q, which has tools, and names no backend: tools and reasoning run on the backend model, and with none the live model declines every request that would need one. Add backend: <name of a models.think entry with provider openai>", model, first)
+	case def.Backend != "":
+		backend, ok := resolved.Models.Reason[def.Backend]
+		switch {
+		case !ok:
+			refuse("live model %q backend %q has no reason binding on target %q", model, def.Backend, resolved.Name)
+		case backend.Model == "":
+			// Nothing else catches this. The backend is skipped by both binding
+			// loops above, because a speech to speech agent names no think model
+			// of its own, so an entry with no model id validated clean and was
+			// emitted as Settings(model=""), which only the first call reports.
+			refuse("live model %q backend %q names no model: write model: <the backend model's id> on that models.think entry", model, def.Backend)
+		default:
+			if vendor := cmp.Or(backend.Provider, "openai"); vendor != "openai" || backend.EndpointEnv != "" {
+				refuse("live model %q backend %q is provider %q: the handover happens inside the live session itself, so the backend runs at OpenAI. Name a think entry with provider openai and no endpoint_env", model, def.Backend, vendor)
+			}
+			// A backend entry is reached through the live session's delegation,
+			// and this compiler sends the model id and nothing else. Every other
+			// key on the entry is dropped, in silence, and worse than in silence:
+			// the compile report records the params as forwarded, so the one file
+			// an author checks says the setting arrived.
+			//
+			// A warning rather than a refusal, matching the turn binding that
+			// carries a field reaching nothing. The entry is legal and its model
+			// id is doing real work; it is the extra keys that land nowhere.
+			//
+			// The vendor's own delegation options take more than the model, so
+			// this is a limit of the driver rather than of the API. If that
+			// changes, this warning goes and the keys start arriving.
+			if len(backend.Params) > 0 {
+				row.Warnings = add(row.Warnings, fmt.Sprintf(
+					"live model %q backend %q carries params %s, which reach nothing: the backend is configured through the live session's delegation, and this compiler sends its model id alone. Remove them, or set them on a think entry an agent binds directly under architecture: cascade",
+					model, def.Backend, strings.Join(sortedKeys(backend.Params), ", ")))
+			}
+		}
+	}
+}
+
+// validateRealtime holds an `architecture: realtime` package to what the drivers
+// emit for one. It is a much shorter list than the live one and that is the
+// point of the two being separate sections: a realtime session is mutable while
+// the call runs, so the restrictions that exist because a live session is fixed
+// are not repeated here. What remains are the sections the model replaces, and
+// the two ways of answering the same question at once.
+func validateRealtime(agent *Agent, caps targetcap.Table, provider targetcap.Provider, resolved Target, names []string, checkVendor func(targetcap.Role, *Binding), row *TargetValidation) {
+	refuse := func(format string, args ...any) { row.Errors = add(row.Errors, fmt.Sprintf(format, args...)) }
+	if len(names) == 0 {
+		return // checkAgentBinding already refused an architecture with no binding
+	}
+	first := names[0]
+	model := agent.Agents[first].Realtime
+
+	// One agent and no tasks, for now, and the refusal reads the capability row
+	// rather than stating the limit itself. The two are different claims: the
+	// architecture compiles here, and it carries tasks nowhere, and folding them
+	// into one sentence is what sent authors to a dead end before.
+	//
+	// A realtime session genuinely does take a new prompt mid-call. What it
+	// cannot do on one of the two targets is reshape the conversation, and a
+	// per-target answer would make one authored word mean two things.
+	if caps.Capability(targetcap.FieldRealtimeTasks, provider).Tag != targetcap.Core {
+		if len(agent.Agents) > 1 {
+			var others []string
+			for _, name := range sortedKeys(agent.Agents) {
+				if name != first {
+					others = append(others, name)
+				}
+			}
+			refuse("architecture: realtime serves one agent in this version: %q is bound by %q and the package also declares agent %s: %s",
+				model, first, strings.Join(others, ", "), caps.Capability(targetcap.FieldRealtimeTasks, provider).Note)
+		}
+		if len(agent.Tasks) > 0 || len(agent.TaskGroups) > 0 {
+			refuse("architecture: realtime has no place for tasks in this version: %s",
+				caps.Capability(targetcap.FieldRealtimeTasks, provider).Note)
+		}
+		for _, name := range sortedKeys(agent.Controls) {
+			switch agent.Controls[name].(type) {
+			case *AgentTransfer, *Delegate:
+				refuse("architecture: realtime serves one agent in this version: control %q hands the call to another agent or a task: %s",
+					name, caps.Capability(targetcap.FieldRealtimeTasks, provider).Note)
+			}
+		}
+	}
+
+	// The four this release does not emit for a realtime package. Each was
+	// accepted in silence until a driver existed to expose it: a package could
+	// declare tracing and compile to a worker that exports nothing, which is the
+	// silent downgrade this project refuses to ship.
+	//
+	// Same sentences as the live architecture gives, because the reader's
+	// question is the same one and two wordings would read as two different
+	// limits. Only the architecture's name differs.
+	for _, name := range sortedKeys(agent.Controls) {
+		if _, ok := agent.Controls[name].(*HumanTransfer); ok {
+			refuse("escalation %q is not emitted under architecture: realtime in this version: a transfer needs the carrier leg this shape does not carry yet. Remove it, or write architecture: cascade", name)
+		}
+	}
+	if len(agent.Variables) > 0 || len(agent.Prefetch) > 0 {
+		refuse("variables and prefetch are not emitted under architecture: realtime in this version: this shape carries no call state yet. Remove them, or write architecture: cascade")
+	}
+	if agent.Tracing != nil {
+		refuse("tracing is not emitted under architecture: realtime in this version: this shape has no traced worker yet. Remove tracing, or write architecture: cascade")
+	}
+	for _, name := range sortedKeys(agent.Tools) {
+		if agent.Tools[name].Execution == ToolMCP {
+			refuse("mcp tool %q is not emitted under architecture: realtime in this version: this shape has no place to start and close a server connection yet. Remove it, or write architecture: cascade", name)
+		}
+	}
+	if resolved.Connection != "" {
+		refuse("architecture: realtime compiles for the browser route in this version: connection %q needs the carrier leg this shape does not carry yet. Remove the connection, or write architecture: cascade", resolved.Connection)
+	}
+
+	validateSpeechSections(agent, ArchitectureRealtime, first, model, refuse)
+
+	binding, ok := resolved.Models.Realtime[model]
+	if !ok {
+		refuse("%s target %q is missing realtime binding for model %q", resolved.Provider, resolved.Name, model)
+		return
+	}
+	checkVendor(targetcap.Realtime, &binding)
+	if binding.Model == "" {
+		refuse("realtime model %q names no model: write model: <the realtime model's id>", model)
+	}
+	if value := binding.TurnDetection; value != "" && !slices.Contains(packagespec.TurnDetectionValues(), value) {
+		refuse("realtime model %q turn_detection %q is not one this compiler knows; write one of %s", model, value, strings.Join(packagespec.TurnDetectionValues(), ", "))
+	}
+	// The half cascade, and the one way to ask for it twice. The frameworks read
+	// one of these and ignore the other, so which voice the caller hears would be
+	// decided by something the package never says.
+	speak := agent.Agents[first].Voice
+	switch {
+	case binding.Voice != "" && speak != "":
+		refuse("realtime model %q has voice %q and agent %q also binds speak %q: the model speaks itself, or a synthesizer speaks for it, and these ask for both. Remove the entry's voice: for the half cascade, or the agent's speak: to let the model speak", model, binding.Voice, first, speak)
+	case binding.Voice == "" && speak == "":
+		refuse("realtime model %q names no voice and agent %q binds no speak model, so nothing would speak. Write voice: <the model's voice> on the entry, or speak: <name of a models.speak entry> on the agent for the half cascade", model, first)
+	}
+}
+
+// validateSpeechSections refuses the cascade sections a speech to speech model
+// replaces. Shared by both architectures rather than written twice, because the
+// three sections are replaced for the same reason in both and two copies would
+// be two chances to describe them differently.
+//
+// speak: is the exception, and only under realtime: a realtime model can be
+// asked for text and let a synthesizer speak. A live model has no such mode.
+func validateSpeechSections(agent *Agent, architecture Architecture, boundAgent, model string, refuse func(string, ...any)) {
+	if agent.Listen != "" {
+		refuse("models.listen is not used under architecture: %s: agent %q binds %q, which listens itself. Remove the listen section", architecture, boundAgent, model)
+	}
+	if agent.Turn != "" {
+		hint := "Remove the turn section"
+		if architecture == ArchitectureRealtime {
+			hint = "Remove the turn section, or write turn_detection: local on the realtime entry to hand the turn back to this project's own detector"
+		}
+		refuse("models.turn is not used under architecture: %s: agent %q binds %q, which decides the turn itself. %s", architecture, boundAgent, model, hint)
+	}
+	if architecture == ArchitectureRealtime {
+		return // speak: is the half cascade here, checked by the caller
+	}
+	for _, name := range sortedKeys(agent.Models) {
+		if agent.Models[name].Kind == KindSpeak {
+			refuse("models.speak is not used under architecture: live: agent %q binds %q, which speaks itself. Remove the speak section, or write architecture: realtime, which can let a synthesizer speak for it", boundAgent, model)
+			break
+		}
+	}
+}
+
+// listenDeciderVendors reads the turn-detector table into the phrase a refusal
+// names, so a vendor added there reaches the message with no second list.
+//
+// A vendor reached through a second class names its model family, because that
+// is the part an author gets wrong. A vendor switched on by a keyword serves
+// every model it serves, so it names one example and no family, rather than
+// printing an empty pair of brackets.
+func listenDeciderVendors(provider targetcap.Provider) string {
+	return deciderVendorPhrase(provider, func(targetcap.ListenTurnDetector) bool { return true })
+}
+
+// eagerDeciderVendors names the vendors that predict a turn before it ends,
+// which is what `eager:` answers.
+func eagerDeciderVendors(provider targetcap.Provider) string {
+	return deciderVendorPhrase(provider, func(d targetcap.ListenTurnDetector) bool { return d.Eager })
+}
+
+// ceilingDeciderVendors names the vendors whose service takes a pace ceiling.
+func ceilingDeciderVendors(provider targetcap.Provider) string {
+	return deciderVendorPhrase(provider, targetcap.ListenTurnDetector.HasCeiling)
+}
+
+// deciderVendorPhrase is the one place these lists are built. Three refusals
+// name a subset of the same table, and three hand-written lists would drift:
+// the phrase that used to say "the LiveKit routes" went on saying it for two
+// releases after it stopped being true.
+func deciderVendorPhrase(provider targetcap.Provider, keep func(targetcap.ListenTurnDetector) bool) string {
+	var parts []string
+	for _, vendor := range targetcap.ListenTurnDetectorVendors(provider) {
+		detector, _ := targetcap.LookupListenTurnDetector(provider, vendor)
+		if !keep(detector) {
+			continue
+		}
+		if len(detector.ModelPrefixes) == 0 {
+			parts = append(parts, fmt.Sprintf("%s (such as %s)", vendor, detector.ExampleModel))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s (%s models such as %s)", vendor, strings.Join(detector.ModelPrefixes, "/"), detector.ExampleModel))
+	}
+	return strings.Join(parts, " and ")
 }
 
 func validPlacement(value Placement) bool {

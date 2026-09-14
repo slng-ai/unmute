@@ -87,6 +87,13 @@ from contextvars import copy_context
 from importlib.metadata import version
 from types import SimpleNamespace
 
+# The pin the compiler wrote, read rather than repeated. A literal in a smoke
+# script fails the whole suite on a framework bump, which is a version check
+# dressed as a behaviour test: the bump is already held by internal/target, and
+# the thing worth asserting here is that the venv installed what the project
+# asked for.
+_report = json.load(open("compile-report.json"))
+
 import agent
 import dev_metrics
 from livekit import rtc
@@ -1151,7 +1158,7 @@ async def check_livekit_lifecycle(capture):
 
 
 async def main(capture):
-    assert version("livekit-agents") == "1.6.10"
+    assert version("livekit-agents") == _report["version"], (version("livekit-agents"), _report["version"])
     for name in ("install_dev_metrics", "dev_llm_node", "dev_say"):
         assert callable(getattr(dev_metrics, name, None)), f"Missing streaming helper: {name}"
     assert agent.Greeter.llm_node is not Agent.llm_node, "Ordinary generated agent bypasses streaming helper"
@@ -1181,7 +1188,7 @@ if __name__ == "__main__":
     print("LiveKit streaming smoke passed: finality 5s, pre-audio text, native greeting, task retries, pass-through, env off")
 `
 
-const devStreamingPipecatScript = `"""Drive the generated bot through real Pipecat 1.8 workers, without providers.
+const devStreamingPipecatScript = `"""Drive the generated bot through real Pipecat 1.9 workers, without providers.
 
 Run this same script in inline and multi-agent artifacts. The Go harness removes
 tracing, prefetch and inactivity, and gives each artifact a fixed direct greeting.

@@ -9,7 +9,7 @@
 targets:
   livekit:
     provider: livekit
-    version: "1.6.10"
+    version: "1.8.1"
     sdk_language: python
     models:
       # override the vad entry: LiveKit runs its own turn model, not Silero
@@ -26,6 +26,6 @@ targets:
 
   pipecat:
     provider: pipecat
-    version: "1.8.0"
+    version: "1.10.0"
     # no model overrides: the agent.yaml defaults (SLNG + OpenAI + deepgram STT
     # + local silero VAD) run as defined

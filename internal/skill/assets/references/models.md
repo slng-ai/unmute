@@ -56,7 +56,7 @@ Read the `models:` block you actually have before you write the override.
 targets:
   livekit:
     provider: livekit
-    version: "1.6.10"
+    version: "1.8.1"
     sdk_language: python
     models:
       detector:
@@ -112,10 +112,198 @@ the tradeoff before reducing the agent to one language.
 | `semantic_endpointing` | `turn`: `required`, `preferred`, or `off` |
 | `pace` | `turn`: `snappy`, `balanced`, or `patient`. Defaults to `balanced`. No per-target override |
 | `endpointing_delay` | `turn`: a positive duration. The floor, and only the floor |
+| `eager` | `turn`, Pipecat only, with `provider: listen`: answer the transcriber's predicted end of turn before it is confirmed. Off unless set |
 | `fallback` | `think`, `listen` |
+| `name`, `provider`, `model`, `voice`, `backend`, `description` | `live`, LiveKit and Pipecat, and nothing else: every other field is refused on a live entry by name |
+| `name`, `provider`, `model`, `voice`, `turn_detection`, `description` | `realtime`, and nothing else. `turn_detection` is `server_vad`, `semantic` or `local`; `voice` and an agent `speak:` binding are mutually exclusive, and writing neither is refused |
 
 A target and vendor may narrow this further. For example, validation rejects
 `language` when that integration has no language slot.
+
+### The architecture key
+
+Every package compiles to one of three pipeline shapes, and `architecture:` at
+the top of `agent.yaml` says which. **Leave it out unless the user asks for
+speech to speech**: an absent key is `cascade`, which is every example here and
+the only shape that carries tasks, handoffs, saved values and telephony on every
+target.
+
+| Value | What it is | Sections it takes | Agent binds |
+|---|---|---|---|
+| `cascade` | a transcriber, a model, a synthesizer and a turn detector | `listen`, `think`, `speak`, `turn` | `think:` and `speak:` |
+| `realtime` | one model on a vendor's realtime API, mutable mid-call | `realtime` (and `speak` for the half cascade) | `realtime:` |
+| `live` | one model on a vendor's live API, fixed once the session starts | `live` (and `think` for the backend) | `live:` |
+
+The key decides which sections are legal. Writing a section or a binding that
+belongs to another architecture is refused at the key, with its line.
+
+Both speech-to-speech shapes compile on the two code targets and are refused on
+slng, which binds listen, think and speak by name and has no slot for one model
+doing all three. **Neither carries tasks, task groups or handoffs**, so a package
+that needs those is `architecture: cascade`. That limit is this release's rather
+than the vendors': a realtime session does take a new prompt mid-call, and one
+of the two frameworks cannot reshape a running conversation without reconnecting,
+so it is refused on both rather than working on one.
+
+### One realtime model, where you still choose the turn (both code targets)
+
+`architecture: realtime` plus a `models.realtime` section binds one model on a
+vendor's Realtime API. It hears the caller and answers, with no transcriber and
+no separate reasoning model. Two things stay the author's, and they are the
+reason to pick it over `live`: `turn_detection:` says who ends the turn, and an
+agent `speak:` binding puts a synthesizer of your choosing in front of the model.
+
+```yaml
+architecture: realtime
+
+models:
+  realtime:
+    - name: voice
+      provider: openai
+      model: gpt-realtime
+      voice: marin
+      turn_detection: semantic    # server_vad | semantic | local
+
+agents:
+  desk:
+    instructions: instructions.md
+    realtime: voice
+    tools:
+      - lookup_customer
+```
+
+`turn_detection: local` hands the turn back to the framework's own detector, the
+same one a cascade uses. Omit the key and the vendor's default stands, and the
+two targets do not agree on what that is: Pipecat sends nothing and gets the
+vendor's silence detector, while the LiveKit plugin fills the gap with the
+semantic one. Write the value if it matters.
+
+Tools run on the model itself here, so there is no `backend:` entry, which is the
+other difference from `live`.
+
+**Knowledge works on both speech-to-speech shapes**, exactly as it does in a
+cascade: declare the base under `knowledge:`, then give a tool file a
+`knowledge: base: <name>` block so the model can search it. The documents are
+indexed when the worker starts. `examples/pharmacy-refills` and
+`examples/takeaway-orders` each ship one.
+
+### One live model that listens, thinks and speaks (both code targets)
+
+`architecture: live` plus a `models.live` section binds one model that does the
+work of `listen`, `think` and `speak` together: it hears the caller's audio
+directly, decides what to say and when, and speaks in its own voice. The section
+is a **list** of entries carrying `name:`, and the agent names one with `live:`.
+`openai` is the one vendor, and `gpt-live-1` its live model.
+
+```yaml
+architecture: live
+
+models:
+  live:
+    - name: voice
+      provider: openai
+      model: gpt-live-1
+      voice: marin
+      backend: fast
+  think:
+    fast:
+      provider: openai
+      model: gpt-5.6-terra
+
+agents:
+  desk:
+    instructions: instructions.md
+    live: voice
+    tools:
+      - lookup_customer
+```
+
+`backend:` on the live entry names a `models.think` entry with
+`provider: openai` and no `endpoint_env`; the live model hands tools and hard
+reasoning to it on OpenAI's Responses API, inside the same live session, and
+keeps talking while it works. An agent with tools and no `backend:` is refused.
+That backend must be at OpenAI for the same reason: the handover happens inside
+the session the live model already holds. The greeting reaches the
+session as its opening instruction and the model paraphrases it, so tell the
+user the sense of the line is kept and not its letters.
+
+Write a live package only when the user asks for speech to speech, and say what
+it cannot carry in this version, because each is refused at validate:
+
+- `architecture: live` **serves one agent**, with no `tasks`, no `task_groups`,
+  no `handoffs` and no `escalations`: the session fixes its instructions when it
+  starts, so nothing may change them mid-call;
+- no `listen`, `speak` or `turn` sections, and no `conversation.interruption`:
+  the model listens, speaks and decides the turn itself;
+- no `variables` and no `prefetch`: the live shape carries no call state yet;
+- no `tracing`: the live shape has no traced worker yet;
+- no `mcp` tool: nothing in the live shape can start and close a server
+  connection yet;
+- no telephony connection: a live model compiles for the browser route in this
+  version;
+- no `temperature`, `language`, `speed`, `params`, `pace` or `endpoint_env` on
+  the entry, and no per-target override of it;
+- the `backend:` entry must be at OpenAI, and the target must be a code target,
+  because the slng target refuses it by name;
+- an agent that holds tools must name a `backend:`, on either target. With none
+  there is nowhere for the work the model hands over to run, so the tools could
+  never be called. An agent with no tools and no `backend:` is fine.
+
+`conversation.inactivity` still works: the nudge is put to the model in its own
+words and `end_after` ends the call.
+
+### Let the transcriber decide the turn (Pipecat)
+
+A `turn` entry's `provider` is `local` (the on-device pair) or, on Pipecat,
+`listen`: the listening model's own turn detection ends the turn and no local
+analyzer is built. Four listeners can take it, and two of them can also predict
+a turn before it is final:
+
+| Listener | `listen:` binding | `pace` | `eager` |
+|---|---|---|---|
+| Deepgram Flux | `provider: deepgram`, a `flux-` model such as `flux-general-en` | yes | yes |
+| Cartesia Turns | `provider: cartesia`, an `ink-` model such as `ink-2`, not `ink-whisper` | yes | yes |
+| Gradium | `provider: gradium`, any model it serves | refused | refused |
+| Speechmatics | `provider: speechmatics`, any model it serves | refused | refused |
+
+Any other listening vendor is refused naming these four. The first two are
+reached through a separate class that serves its own model family, which is why
+a Deepgram model that is not Flux is refused; the other two keep their ordinary
+service, so any model they serve can decide.
+
+```yaml
+models:
+  listen:
+    transcriber:
+      provider: deepgram
+      model: flux-general-en
+      language: en
+  turn:
+    detector:
+      provider: listen
+      eager: true
+      pace: snappy
+```
+
+`pace` applies on the first two: the ceiling becomes the transcriber's own
+end-of-turn timeout in milliseconds (`eot_timeout_ms` on Flux,
+`turn_end_timeout_ms` on Turns; snappy 1200, balanced 1600, patient 3000).
+Gradium and Speechmatics expose no such timeout, so `pace` is refused there
+rather than landing on a nearby setting that means something else.
+
+There is no floor either way, so `endpointing_delay`, `semantic_endpointing` and
+`interruption.minimum_words` are refused; `interruption.protect` still works.
+`eager: true` costs one model request per prediction, including the ones the
+transcriber withdraws, so leave it off unless the user wants the faster reply.
+`eager` is refused beside `provider: local` and on the two listeners that report
+only a turn that has already ended, and `provider: listen` is refused on LiveKit
+and slng.
+
+Speechmatics is the one vendor whose turn behaviour is written for the author.
+Its service closes turns itself by default as of Pipecat 1.10.0, so the compiler
+holds it to the caller-driven mode when the package names the local pair, and to
+its own mode when the package hands it the turn. Nothing is authored for this;
+the compile report says which was chosen.
 
 ## The default OpenAI think model needs `reasoning_effort`
 
@@ -145,7 +333,7 @@ instead of being dropped. The LiveKit Responses mode below is the narrow
 compiler-owned exception.
 
 On LiveKit there is a second reason to be explicit. `livekit-plugins-openai`
-1.6.10 injects `reasoning_effort="minimal"` by itself for several older ids in
+1.8.1 injects `reasoning_effort="minimal"` by itself for several older ids in
 the same GPT-5 family, and that is the same 400 once the agent has tools.
 
 ## The SLNG Context Router as the think provider
@@ -594,9 +782,51 @@ the catalogue holds.
 | pipecat | listen | `slng`, `assemblyai`, `cartesia`, `deepgram`, `elevenlabs`, `gradium`, `openai`, `soniox`, `speechmatics` |
 | pipecat | speak | `slng`, `cartesia`, `deepgram`, `elevenlabs`, `gradium`, `inworld`, `openai`, `rime`, `sarvam`, `soniox` |
 | pipecat | think | `slng`, `anthropic`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openrouter`, `qwen` |
+| pipecat | live | `openai` |
 | livekit | listen | `slng`, `assemblyai`, `cartesia`, `deepgram`, `elevenlabs`, `gradium`, `sarvam`, `soniox`, `speechmatics` |
 | livekit | speak | `slng`, `cartesia`, `deepgram`, `elevenlabs`, `gemini`, `gradium`, `inworld`, `rime`, `sarvam`, `soniox` |
 | livekit | think | `slng`, `anthropic`, `aws`, `azure`, `google`, `groq`, `mistralai`, `openai`, `openrouter`, `sarvam` |
+| livekit | live | `openai` |
+
+Some vendor facts on Pipecat change what an author writes. Each setting below is
+one `params:` line, which reaches the service's settings by name:
+
+- `deepgram` listen: since Pipecat 1.9.0 the profanity filter is off unless
+  asked for, because it rewrites the words it matches and a false positive
+  silently changes a transcript. `params: {profanity_filter: true}` turns it on.
+  `params: {version: "2021-03-17.0"}` pins a model version. A Flux model also
+  takes `params: {redact: ...}` to mask numbers.
+- `openai` listen: OpenAI retires its previous transcription model on
+  2027-02-26; `gpt-transcribe` is the current one. The transcriber pads each
+  speech segment with half a second of silence so the last word is not cut,
+  and the padding counts toward usage.
+- `elevenlabs` listen takes `params: {no_verbatim: true}` to drop filler words;
+  `speechmatics` listen takes `params: {enable_partials: true}` for partial
+  fragments as the caller speaks, and `params: {enable_diarization: true}` to
+  label speakers. Eleven Speechmatics settings are gone in Pipecat 1.10.0 and a
+  package still writing one is refused with the line and what to write instead,
+  so do not carry one over from an older package.
+- `cartesia` listen under a listening decider takes `turn_start_threshold`,
+  `turn_eager_end_threshold` and `turn_end_threshold`, which say how sure Turns
+  has to be. Leave them out and Cartesia's own defaults apply.
+- `gradium` listen under a listening decider takes `eot_horizon_s` and
+  `eot_threshold`, which say how sure its end-pointing has to be. Leave them out
+  and Gradium's own defaults apply.
+- `assemblyai` listen: `universal-3-5-pro` is the default and
+  `universal-3-6-pro` is the same model upgraded, with the same features.
+- `deepseek` think: since Pipecat 1.10.0 the reasoning pass is off unless asked
+  for, because V4 models otherwise reason before every answer and delay the
+  first spoken word. `params: {thinking: {type: enabled}}` turns it on.
+- `anthropic` think: since Pipecat 1.10.0 `temperature`, `top_p` and `top_k`
+  travel in the request body rather than as call parameters, because the
+  Anthropic SDK's 1.x line dropped them. They reach the API unchanged and keep
+  their names and meaning, so a package that sets them needs no edit.
+- `deepgram` speak takes `params: {speed: 1.1}`, Aura's speech rate, 0.7 to 1.5;
+  `soniox` speak takes `params: {reduce_silence: true}` to shorten the pauses
+  between words.
+- Two speaking defaults moved in 1.9.0: `cartesia` now speaks with `sonic-3.6`
+  and `sarvam` with `bulbul:v3`. Sarvam's API no longer serves `bulbul:v2`, so a
+  package naming it cannot speak at all.
 
 Read that table carefully rather than from memory. The two targets do not hold
 the same set, and the same company can appear under a different name: LiveKit

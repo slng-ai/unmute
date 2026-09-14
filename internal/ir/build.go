@@ -42,6 +42,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		return nil, fmt.Errorf("%s: unsupported tracing provider %q; supported providers: %s", pkg.Location("agent.yaml", "tracing:"), pkg.Agent.Tracing.Provider, strings.Join(TracingProviders, ", "))
 	}
 
+	if err := checkArchitecture(pkg); err != nil {
+		return nil, err
+	}
 	models, err := buildModels(pkg)
 	if err != nil {
 		return nil, err
@@ -63,9 +66,13 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	}
 	declared := shapeNames(shapes)
 	out := &Agent{
-		Manifest:     pkg.Manifest,
-		Version:      pkg.Agent.Version,
-		Name:         strings.TrimSpace(pkg.Agent.Name),
+		Manifest: pkg.Manifest,
+		Version:  pkg.Agent.Version,
+		Name:     strings.TrimSpace(pkg.Agent.Name),
+		// Resolved here so no reader downstream has to treat an omitted key as a
+		// fourth case. An omitted key is cascade, which is what every package
+		// written before this key existed gets.
+		Architecture: pkg.Agent.Architecture.Or(ArchitectureCascade),
 		EntryAgent:   pkg.Agent.EntryAgent,
 		Models:       models,
 		Listen:       listenName,
@@ -231,6 +238,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg, raw.Think))
 		out.Agents[name] = AgentDef{
 			Instructions: instructions, Model: raw.Think, Voice: raw.Speak,
+			Live: raw.Live, Realtime: raw.Realtime,
 			Tools: attached(raw.Tools, callables(raw, pkg), raw.Handoffs, raw.Escalations),
 		}
 	}
@@ -486,7 +494,170 @@ func buildModels(pkg *packagespec.Package) (map[string]ModelDef, error) {
 			result[name] = convertModelDef(section.entries[name], section.kind, fallback)
 		}
 	}
+	// The two speech to speech sections are lists, so their order is the
+	// author's and a name written twice is a mistake rather than a map key
+	// silently winning. Both are walked by one loop over a common shape, so the
+	// duplicate-name and cross-section-clash messages cannot drift apart.
+	speech := []struct {
+		kind    ModelKind
+		entries []speechEntry
+	}{
+		{KindRealtime, realtimeEntries(pkg.Agent.Models.Realtime)},
+		{KindLive, liveEntries(pkg.Agent.Models.Live)},
+	}
+	for _, section := range speech {
+		for _, raw := range section.entries {
+			if raw.name == "" {
+				return nil, fmt.Errorf("%s: a models.%s entry has no name", pkg.Location("agent.yaml", string(section.kind)), section.kind)
+			}
+			if prev, ok := result[raw.name]; ok {
+				// Two entries in one list is a different mistake from a clash
+				// with another section, and reading "appears in both live and
+				// live" sends the author looking for a section they did not
+				// write.
+				if prev.Kind == section.kind {
+					return nil, fmt.Errorf("%s: models.%s declares %q twice; give the second entry its own name or delete it", pkg.Location("agent.yaml", raw.name), section.kind, raw.name)
+				}
+				return nil, fmt.Errorf("%s: model name %q appears in both %s and %s; names share one namespace", pkg.Location("agent.yaml", raw.name), raw.name, prev.Kind, section.kind)
+			}
+			def := convertModelDef(packagespec.ModelDef{
+				Provider: raw.provider, Model: raw.model, Voice: raw.voice, Description: raw.description,
+			}, section.kind, nil)
+			def.Backend = raw.backend
+			def.TurnDetection = raw.turnDetection
+			result[raw.name] = def
+		}
+	}
 	return result, nil
+}
+
+// speechEntry is the common shape of a realtime and a live entry, so buildModels
+// walks one loop rather than two that have to be kept saying the same thing.
+// The fields that differ (backend, turn detection) are simply empty on the kind
+// that has no such key; the strict decoder already refused them at the source.
+type speechEntry struct {
+	name, provider, model, voice, description string
+	backend, turnDetection                    string
+}
+
+func realtimeEntries(raw []packagespec.RealtimeDef) []speechEntry {
+	out := make([]speechEntry, 0, len(raw))
+	for _, entry := range raw {
+		out = append(out, speechEntry{
+			name: entry.Name, provider: entry.Provider, model: entry.Model,
+			voice: entry.Voice, description: entry.Description,
+			turnDetection: entry.TurnDetection,
+		})
+	}
+	return out
+}
+
+func liveEntries(raw []packagespec.LiveDef) []speechEntry {
+	out := make([]speechEntry, 0, len(raw))
+	for _, entry := range raw {
+		out = append(out, speechEntry{
+			name: entry.Name, provider: entry.Provider, model: entry.Model,
+			voice: entry.Voice, description: entry.Description,
+			backend: entry.Backend,
+		})
+	}
+	return out
+}
+
+// checkArchitecture refuses an unknown value for the key, and refuses a models
+// section belonging to another architecture. Catching a stray section here, at
+// the key, is the whole reason the key is written rather than derived: the
+// derived form reports a section nobody asked for as several unrelated
+// missing-binding errors further downstream, none of which names the cause.
+func checkArchitecture(pkg *packagespec.Package) error {
+	architecture := pkg.Agent.Architecture
+	if architecture != "" && !architecture.Valid() {
+		names := make([]string, 0, len(packagespec.Architectures()))
+		for _, known := range packagespec.Architectures() {
+			names = append(names, string(known))
+		}
+		return fmt.Errorf("%s: architecture %q is not one this compiler knows; write one of %s",
+			pkg.KeyLocation("agent.yaml", "architecture"), architecture, strings.Join(names, ", "))
+	}
+	resolved := architecture.Or(packagespec.ArchitectureCascade)
+	// Each section is named with the architecture it belongs to, so a package
+	// that wrote the right section under the wrong key is told which of the two
+	// to change rather than being told the section does not exist.
+	sections := []struct {
+		key     string
+		belongs packagespec.Architecture
+		present bool
+	}{
+		{"realtime", packagespec.ArchitectureRealtime, len(pkg.Agent.Models.Realtime) > 0},
+		{"live", packagespec.ArchitectureLive, len(pkg.Agent.Models.Live) > 0},
+	}
+	for _, section := range sections {
+		if section.present && resolved != section.belongs {
+			return fmt.Errorf("%s: models.%s belongs to architecture: %s, but this package is architecture: %s. Write architecture: %s, or remove the section",
+				pkg.Location("agent.yaml", section.key+":"), section.key, section.belongs, resolved, section.belongs)
+		}
+		if !section.present && resolved == section.belongs {
+			return fmt.Errorf("%s: architecture: %s needs a models.%s section naming the model to run on, and this package declares none",
+				pkg.KeyLocation("agent.yaml", "architecture"), section.belongs, section.key)
+		}
+	}
+	return nil
+}
+
+// checkAgentBinding holds one agent's model bindings to the package's
+// architecture. The key decides and the binding is checked against it, never the
+// other way round: that is what keeps the two from drifting, and what lets every
+// refusal here name the shape the author chose rather than guess at it from
+// whichever key happened to be present.
+//
+// Each message names the architecture, what is wrong, and the one edit that
+// fixes it, including the option of changing the architecture instead of the
+// binding, because that is genuinely the fix as often as not.
+func checkAgentBinding(pkg *packagespec.Package, name string, agent packagespec.AgentDef) error {
+	at := pkg.Location("agent.yaml", name)
+	architecture := pkg.Agent.Architecture.Or(packagespec.ArchitectureCascade)
+	// Named once, so a refusal cannot describe a binding this function does not
+	// then go on to check.
+	wrongSection := func(wrote, belongs string) error {
+		return fmt.Errorf("%s: agent %q names %s:, which belongs to architecture: %s, but this package is architecture: %s. Write %s and the bindings it takes, or change the architecture",
+			at, name, wrote, belongs, architecture, architecture)
+	}
+	switch architecture {
+	case packagespec.ArchitectureCascade:
+		switch {
+		case agent.Realtime != "":
+			return wrongSection("realtime", "realtime")
+		case agent.Live != "":
+			return wrongSection("live", "live")
+		case agent.Think == "":
+			return fmt.Errorf("%s: agent %q names no think model: write think: <name of a models.think entry> and speak: <name of a models.speak entry>", at, name)
+		case agent.Speak == "":
+			return fmt.Errorf("%s: agent %q names no speak model: write speak: <name of a models.speak entry>", at, name)
+		}
+	case packagespec.ArchitectureRealtime:
+		switch {
+		case agent.Live != "":
+			return wrongSection("live", "live")
+		case agent.Realtime == "":
+			return fmt.Errorf("%s: agent %q names no realtime model: write realtime: <name of a models.realtime entry>", at, name)
+		case agent.Think != "":
+			return fmt.Errorf("%s: agent %q names realtime %q and also think: a realtime model does its own thinking, so remove think. A think entry is the live architecture's backend, not this one's", at, name, agent.Realtime)
+		}
+		// speak: is legal here and nowhere else: it is the half cascade, the
+		// realtime model listening and thinking while a synthesizer of the
+		// author's choosing speaks. Whether it clashes with the entry's own
+		// voice: is checked in validate, which has the resolved entry to name.
+	case packagespec.ArchitectureLive:
+		switch {
+		case agent.Realtime != "":
+			return wrongSection("realtime", "realtime")
+		case agent.Live == "":
+			return fmt.Errorf("%s: agent %q names no live model: write live: <name of a models.live entry>", at, name)
+		case agent.Think != "" || agent.Speak != "":
+			return fmt.Errorf("%s: agent %q names live %q and also think or speak: a live model listens, thinks and speaks itself. Remove them; a live model's backend is the entry's own backend:, not the agent's think:", at, name, agent.Live)
+		}
+	}
+	return nil
 }
 
 // checkModelReferences enforces that every reference lands in the right section
@@ -507,10 +678,30 @@ func checkModelReferences(pkg *packagespec.Package, models map[string]ModelDef) 
 	}
 	for _, agentName := range sortedKeys(pkg.Agent.Agents) {
 		agent := pkg.Agent.Agents[agentName]
+		// The architecture first, and it has to be first of all four: the kind
+		// checks below say a name is the wrong kind of model, which is true and
+		// a worse answer when the real mistake is that this agent wrote a
+		// binding its architecture does not take. Sitting below the think and
+		// speak checks, this told an author writing `think:` under
+		// architecture: live that their live entry was the wrong kind of model.
+		if err := checkAgentBinding(pkg, agentName, agent); err != nil {
+			return err
+		}
 		if err := check(agent.Think, KindThink, "think"); err != nil {
 			return err
 		}
 		if err := check(agent.Speak, KindSpeak, "speak"); err != nil {
+			return err
+		}
+		if err := check(agent.Live, KindLive, "live"); err != nil {
+			return err
+		}
+		if err := check(agent.Realtime, KindRealtime, "realtime"); err != nil {
+			return err
+		}
+	}
+	for _, raw := range pkg.Agent.Models.Live {
+		if err := check(raw.Backend, KindThink, "live "+raw.Name+" backend"); err != nil {
 			return err
 		}
 	}
@@ -583,6 +774,13 @@ func usedModelNames(pkg *packagespec.Package, models map[string]ModelDef) map[st
 	for _, agent := range pkg.Agent.Agents {
 		add(agent.Think)
 		add(agent.Speak)
+		add(agent.Live)
+		add(agent.Realtime)
+		if agent.Live != "" {
+			// The live model's backend is used because the live model is, even
+			// though nothing names it directly.
+			add(models[agent.Live].Backend)
+		}
 	}
 	for _, task := range pkg.Tasks {
 		add(task.Think)
@@ -610,6 +808,7 @@ func convertModelDef(raw packagespec.ModelDef, kind ModelKind, fallback []string
 		Placement: derivePlacement(raw), SemanticEndpointing: SemanticEndpointing(raw.SemanticEndpointing),
 		Pace:             Pace(raw.Pace),
 		EndpointingDelay: Duration(raw.EndpointingDelay),
+		Eager:            raw.Eager,
 		AgentID:          raw.AgentID, Upstream: convertUpstream(raw.Upstream),
 		PromptSuffix: raw.PromptSuffix,
 		Params:       raw.Params, Fallback: fallback, Description: raw.Description,
@@ -1247,8 +1446,15 @@ func stringSlice(value any) ([]string, error) {
 // stay inert.
 func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, agent *Agent, used map[string]bool) (Target, error) {
 	for _, key := range sortedKeys(raw.Models) {
-		if _, ok := agent.Models[key]; !ok {
+		def, ok := agent.Models[key]
+		if !ok {
 			return Target{}, fmt.Errorf("%s: target %q overrides %q, which is not a defined model", pkg.Location("targets.yaml", key), name, key)
+		}
+		// A live entry compiles on one target, so an override has nothing to
+		// vary; and a ModelDef override would drop the think reference the entry
+		// carries, silently. Refused rather than merged.
+		if def.Kind == KindLive {
+			return Target{}, fmt.Errorf("%s: target %q overrides live model %q; a live entry takes no per-target override, because it compiles on pipecat alone", pkg.Location("targets.yaml", key), name, key)
 		}
 	}
 	// Three fields moved out of a target. Each is refused by name, quoting the
@@ -1340,6 +1546,9 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 			built.ManifestModels[name] = convertModelDef(override, agent.Models[name].Kind, agent.Models[name].Fallback)
 		}
 	}
+	if err := checkRetiredParams(pkg, name, built); err != nil {
+		return Target{}, err
+	}
 	// The plan is what tells the emitter to emit the Bin, the transport entry,
 	// and the runbook. Without it a package would compile with telephony declared
 	// and no telephony emitted, which is the silent downgrade Principle II
@@ -1353,6 +1562,87 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 		}
 	}
 	return built, nil
+}
+
+// checkRetiredParams refuses a `params:` key the vendor's service no longer has
+// on this target's framework.
+//
+// Why this is worth a refusal at all: `params:` is forwarded by name with no
+// whitelist, which is what lets an author reach a vendor's whole settings object
+// without this compiler tracking each one. The cost is that a key the vendor
+// removed builds a constructor call that raises TypeError when the worker
+// starts, in a deployed container, on the first call. The traceback names a
+// dataclass nobody here wrote.
+//
+// Why it lives in Build rather than Validate: the refusal is only useful with a
+// line number, and Build is where the package's own source is still reachable.
+// Validate sees the resolved IR, which has no file or line.
+//
+// The lookup is keyed by framework, vendor and role together. All three matter:
+// `model` is a removed Speechmatics listening setting and an ordinary field on
+// every think binding here, and the LiveKit plugin for the same vendor lost none
+// of these.
+func checkRetiredParams(pkg *packagespec.Package, targetName string, built Target) error {
+	framework := targetcap.Provider(built.Provider)
+	check := func(role targetcap.Role, binding *Binding) error {
+		if binding == nil || len(binding.Params) == 0 {
+			return nil
+		}
+		vendor := binding.Provider
+		if vendor == "" {
+			vendor = "openai"
+		}
+		// Sorted, so a package writing two removed keys is refused on the same
+		// one every run rather than on whichever the map yielded first.
+		for _, key := range sortedKeys(binding.Params) {
+			retired, ok := targetcap.LookupRetiredParam(framework, vendor, role, key)
+			if !ok {
+				continue
+			}
+			return fmt.Errorf("%s: target %q binds %s %s with params.%s, which %s. %s",
+				retiredParamLocation(pkg, key), targetName, vendor, role, key,
+				retired.Fate(), upperFirst(retired.Advice()))
+		}
+		return nil
+	}
+	if err := check(targetcap.Listen, built.Models.Listen); err != nil {
+		return err
+	}
+	for _, name := range sortedKeys(built.Models.Reason) {
+		binding := built.Models.Reason[name]
+		if err := check(targetcap.Reason, &binding); err != nil {
+			return err
+		}
+	}
+	for _, name := range sortedKeys(built.Models.Speak) {
+		binding := built.Models.Speak[name]
+		if err := check(targetcap.Speak, &binding); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// retiredParamLocation finds the line the key was written on. A per-target
+// override lives in targets.yaml and a base binding in agent.yaml, so both are
+// tried; a key found in neither falls back to the file an author would look in
+// first rather than rendering an empty location.
+func retiredParamLocation(pkg *packagespec.Package, key string) string {
+	for _, file := range []string{"agent.yaml", "targets.yaml"} {
+		if found := pkg.Location(file, key+":"); found != file {
+			return found
+		}
+	}
+	return "agent.yaml"
+}
+
+// upperFirst capitalises the first letter, so a stored fragment reads as the
+// sentence it is appended as.
+func upperFirst(text string) string {
+	if text == "" {
+		return text
+	}
+	return strings.ToUpper(text[:1]) + text[1:]
 }
 
 // packagePlacesCalls reports whether the package dials anybody: an outbound phone
@@ -1697,6 +1987,13 @@ func resolveBindings(agent *Agent, used map[string]bool, overrides map[string]pa
 			if replaced.Pace == "" {
 				replaced.Pace = def.Pace
 			}
+			// And the same again for the early answer. An override that says
+			// nothing about it has not turned it off: dropping it would compile
+			// a bot with no speculative reply and no line saying so, on the one
+			// package shape that overrides its turn binding per target.
+			if replaced.Eager == nil {
+				replaced.Eager = def.Eager
+			}
 			def = replaced
 		}
 		return def
@@ -1720,6 +2017,16 @@ func resolveBindings(agent *Agent, used map[string]bool, overrides map[string]pa
 			bindings.Speak[name] = toBinding(def)
 		case KindThink:
 			bindings.Reason[name] = toBinding(def)
+		case KindLive:
+			if bindings.Live == nil {
+				bindings.Live = make(map[string]Binding)
+			}
+			bindings.Live[name] = toBinding(def)
+		case KindRealtime:
+			if bindings.Realtime == nil {
+				bindings.Realtime = make(map[string]Binding)
+			}
+			bindings.Realtime[name] = toBinding(def)
 		}
 	}
 	return bindings
@@ -1734,6 +2041,9 @@ func toBinding(def ModelDef) Binding {
 		EndpointEnv: def.EndpointEnv, Placement: def.Placement,
 		SemanticEndpointing: def.SemanticEndpointing, Pace: def.Pace,
 		EndpointingDelay: def.EndpointingDelay,
+		Eager:            def.Eager != nil && *def.Eager,
+		Backend:          def.Backend,
+		TurnDetection:    def.TurnDetection,
 		AgentID:          def.AgentID, Upstream: def.Upstream, PromptSuffix: def.PromptSuffix,
 		Params: foldParams(def),
 	}

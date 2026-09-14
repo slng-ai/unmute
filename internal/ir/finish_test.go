@@ -79,7 +79,7 @@ capacity:
 	write("instructions.md", "# Desk\n\nTake appointment calls for one salon.\n")
 	write("steps.md", "# Step\n\nBook the caller in.\n")
 	write("targets.yaml", "targets:\n  livekit:\n    provider: livekit\n    version: \"1.6.10\"\n    sdk_language: python\n")
-	write("tools/book_it.yaml", "description: Book one appointment.\n\ninput:\n  type: object\n  properties:\n    when:\n      type: string\n  required:\n    - when\n\noutput:\n"+output+"\nlocal:\n  handler: tools/salon.py\n\neffect: writes_data\n")
+	write("tools/book_it.yaml", "description: Book one appointment.\n\ninput:\n  type: object\n  properties:\n    when:\n      type: string\n  required:\n    - when\n\noutput:\n"+output+"\nlocal:\n  handler: tools/salon.py\n\neffect: returns_data\n")
 	write("tools/look_up.yaml", "description: Read the diary.\n\ninput:\n  type: object\n  properties: {}\n\noutput:\n  type: object\n  properties:\n    status:\n      type: string\n      enum:\n        - found\n  required:\n    - status\n\nlocal:\n  handler: tools/salon.py\n\neffect: returns_data\n")
 	write("tools/salon.py", "def book_it(when: str) -> dict:\n    return {\"status\": \"booked\", \"reference\": when}\n\n\ndef look_up() -> dict:\n    return {\"status\": \"found\"}\n")
 	pkg, err := packagespec.Load(root)

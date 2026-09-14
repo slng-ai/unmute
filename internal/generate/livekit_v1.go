@@ -47,6 +47,64 @@ type livekitChain struct {
 	Chain   []livekitService
 }
 
+// livekitRealtime is the `architecture: realtime` view of the session: the one
+// model that is built, who decides the turn, and the synthesizer that speaks for
+// it when the package asked for the half cascade.
+//
+// Turn taking is the fork here rather than the architecture, which is why
+// LocalTurn is a field and not something the template rederives. With
+// `turn_detection: local` this session builds the same voice activity detector
+// and the same turn detector a cascaded one builds, because that is what the
+// framework needs before it will take the decision back:
+// agent_activity.py:383-392 (livekit-agents 1.8.1) turns the model's own
+// detection off only when `self.vad is not None` AND the session was given an
+// explicit client-side turn detector. With no VAD loaded, `local` would compile
+// clean and change nothing on the call.
+type livekitRealtime struct {
+	// Service is the RealtimeModel construction, api key and all.
+	Service livekitService
+	// LocalTurn says this package wrote `turn_detection: local`, so the
+	// framework's own detector decides the turn and the emitted session carries
+	// the VAD and the turn_handling a cascaded one carries.
+	LocalTurn bool
+	// TTS is the half cascade: the agent bound `speak:`, so the model is asked
+	// for text only and this synthesizer speaks it. nil means the model speaks
+	// in its own voice.
+	TTS *livekitService
+	// Imports is every extra import line the construction names beyond the
+	// entry's own, today the turn-detection expression's module.
+	Imports []string
+}
+
+// SpeechToSpeech reports whether one model stands where a transcriber, a
+// reasoning model and a synthesizer stand. Both architectures answer yes, and
+// several template branches ask only this.
+func (d livekitData) SpeechToSpeech() bool { return d.Live != nil || d.Realtime != nil }
+
+// LocalTurnTaking reports whether this package's own turn settings decide the
+// turn, which is what a voice activity detector, a turn detector and the
+// turn_handling block exist for. A cascade always does. A live package never
+// does. A realtime package does exactly when it wrote `turn_detection: local`.
+func (d livekitData) LocalTurnTaking() bool {
+	if d.Live != nil {
+		return false
+	}
+	if d.Realtime != nil {
+		return d.Realtime.LocalTurn
+	}
+	return true
+}
+
+// ModelSpeaksItself reports whether the caller hears the model's own voice, with
+// no synthesizer of ours in between. That decides how the greeting and the idle
+// nudge are delivered: a package with a synthesizer can be told the exact words
+// through session.say(), and one without has to ask the model to say them.
+// agent_activity.py:1555-1565 is the framework's own version of this question:
+// say() raises without a TTS unless the model reports supports_say.
+func (d livekitData) ModelSpeaksItself() bool {
+	return d.Live != nil || d.Realtime != nil && d.Realtime.TTS == nil
+}
+
 func (l livekitChain) services() []livekitService {
 	return append([]livekitService{l.Primary}, l.Chain...)
 }
@@ -451,12 +509,29 @@ type livekitData struct {
 	// worker by it. Package name joined to target instance, so two packages in
 	// one LiveKit project cannot both claim it and one package's two same-provider
 	// targets cannot claim it twice.
-	AgentName   string
-	EntryAgent  string
-	EntryClass  string
-	STT         livekitChain
-	SessionLLM  livekitChain
-	SessionTTS  livekitService
+	AgentName  string
+	EntryAgent string
+	EntryClass string
+	STT        livekitChain
+	SessionLLM livekitChain
+	SessionTTS livekitService
+	// Live is set on an `architecture: live` package: one model that listens,
+	// thinks and speaks, standing where the three above stand. When it is set
+	// none of those three is built, and neither is a turn detector or a voice
+	// activity detector: the model decides the turn, and passing a detector
+	// would move that decision off it (specs/023 research R2).
+	Live *livekitService
+	// LiveBackend is the think entry the live entry names as its `backend:`,
+	// carried separately because it is a *second* binding: the live service's
+	// own call describes one. Empty means client delegation, which on this
+	// target has no tool channel at all.
+	LiveBackend string
+	// Realtime is set on an `architecture: realtime` package: one model on the
+	// vendor's realtime API, hearing the caller and answering. Set alongside
+	// neither STT nor SessionLLM, exactly as Live is. Never set at the same time
+	// as Live: the two are separate sections because a realtime session is
+	// mutable mid-call and a live one is not.
+	Realtime    *livekitRealtime
 	TurnVersion string
 	// Pace carries the resolved floor, ceiling and endpointing mode. It is never
 	// a zero value: an unset pace resolves to the balanced row, because the
@@ -646,6 +721,8 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldInterruptionMinWords:  true, // TurnHandlingOptions interruption min_words
 	targetcap.FieldInterruptionIgnore:    true, // generated stt_node filter mixin
 	targetcap.FieldInactivity:            true, // user_away_timeout + away handler
+	targetcap.FieldLiveModel:             true, // architecture: live — one duplex model as llm=, no stt/tts/turn/vad (specs/023)
+	targetcap.FieldRealtimeModel:         true, // architecture: realtime — one RealtimeModel as llm=, turn taking the package's to choose (specs/024)
 	targetcap.FieldMaxDuration:           true, // asyncio shutdown timer
 	targetcap.FieldThinkingAudio:         true, // BackgroundAudioPlayer thinking sound
 	targetcap.FieldToolOutput:            true, // tool returns response.json()

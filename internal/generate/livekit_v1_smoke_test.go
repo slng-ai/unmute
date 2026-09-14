@@ -93,9 +93,14 @@ import subprocess
 from importlib.metadata import version
 from types import SimpleNamespace
 
-assert version("livekit-agents") == "1.6.10"
+_report = json.load(open("compile-report.json"))
+# The pin the compiler wrote, read rather than repeated. A literal here fails
+# this whole suite on a framework bump, which is a version check dressed as a
+# behaviour test: the bump is already held by internal/target, and the thing
+# worth asserting here is that the venv installed what the project asked for.
+assert version("livekit-agents") == _report["version"], (version("livekit-agents"), _report["version"])
 
-for name in json.load(open("compile-report.json"))["required_env"]:
+for name in _report["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
 subprocess.run(["ruff", "check", "."], check=True)
@@ -503,9 +508,14 @@ import os
 import subprocess
 from importlib.metadata import version
 
-assert version("livekit-agents") == "1.6.10"
+_report = json.load(open("compile-report.json"))
+# The pin the compiler wrote, read rather than repeated. A literal here fails
+# this whole suite on a framework bump, which is a version check dressed as a
+# behaviour test: the bump is already held by internal/target, and the thing
+# worth asserting here is that the venv installed what the project asked for.
+assert version("livekit-agents") == _report["version"], (version("livekit-agents"), _report["version"])
 
-for name in json.load(open("compile-report.json"))["required_env"]:
+for name in _report["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
 subprocess.run(["ruff", "check", "."], check=True)
@@ -1314,9 +1324,23 @@ async def main() -> None:
     # Lifecycle hangs off the session directly, not off a turn.
     for name in ("start_agent_activity",):
         assert by_id[by_name[name].parent.span_id].name == "agent_session", name
-    # The root reads as the call, not as an envelope.
+    # The root reads as the call, not as an envelope: it carries the whole
+    # conversation rather than only the last line.
+    #
+    # Not an exact list of roles. This script drives the session twice with the
+    # same sentence, once by pushing audio the fake STT finalises and once by
+    # session.run(user_input=...), and how many conversation items that produces
+    # is the framework's timing, not ours. livekit-agents 1.6.10 reported one
+    # user item, 1.8.1 reports the pushed audio as a user turn of its own, so a
+    # ["user", "assistant"] literal failed the bump while the emitted tracing was
+    # recording exactly what it was told. What this test owns is that every line
+    # reaches the root, in order, with the reply on the output.
     transcript = json.loads(session.attributes["langfuse.observation.input"])
-    assert [m["role"] for m in transcript] == ["user", "assistant"], transcript
+    roles = [m["role"] for m in transcript]
+    assert roles[0] == "user", transcript
+    assert "assistant" in roles, transcript
+    assert [m["content"] for m in transcript if m["role"] == "assistant"] == ["traced"], transcript
+    assert {m["content"] for m in transcript if m["role"] == "user"} == {"trace this request"}, transcript
     assert session.attributes["langfuse.observation.output"] == "traced"
     # The correlating attributes reach every span, generations included, or the
     # call drops out of its own session in every view that groups by one.
@@ -1351,13 +1375,13 @@ func addLiveKitTaskTransfer(agent *ir.Agent) {
 
 func TestSmokeLiveKitV1TaskGroupContracts(t *testing.T) {
 	runLiveKitSmokeScript(t, "remy", func(target *ir.Target) {
-		target.Version = "1.6.10"
+		target.Version = "1.8.1"
 	}, addLiveKitTaskTransfer, livekitTaskGroupContractSmokeScript)
 }
 
 func TestSmokeLiveKitV1EmptyTaskResponse(t *testing.T) {
 	runLiveKitSmokeScript(t, "remy", func(target *ir.Target) {
-		target.Version = "1.6.10"
+		target.Version = "1.8.1"
 	}, addLiveKitTaskTransfer, livekitEmptyTaskResponseSmokeScript)
 }
 
@@ -1378,7 +1402,7 @@ func TestSmokeLiveKitV1OpenAIResponsesMode(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runLiveKitSmokeScript(t, "remy", func(target *ir.Target) {
-				target.Version = "1.6.10"
+				target.Version = "1.8.1"
 				binding := target.Models.Reason["reasoning"]
 				binding.Model = "gpt-5.6-terra"
 				binding.Params = tc.params
@@ -1482,7 +1506,7 @@ func TestSmokeV26LiveKitExamplesStaticCheck(t *testing.T) {
 			}
 			// dl§V26: the raw generator output is ruff-check + ty-clean.
 			for _, args := range [][]string{{"run", "ruff", "check", "."}, {"run", "ty", "check", "."}} {
-				cmd := exec.Command("uv", args...)
+				cmd := uvCommand(args...)
 				cmd.Dir = dir
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("uv %v failed:\n%s", args, out)
@@ -1493,12 +1517,12 @@ func TestSmokeV26LiveKitExamplesStaticCheck(t *testing.T) {
 			// format-stable (a second pass leaves no diff). Byte-format-stability
 			// of the raw generator output stays out of scope (C1: the generator
 			// never formats).
-			format := exec.Command("uv", "run", "ruff", "format", ".")
+			format := uvCommand("run", "ruff", "format", ".")
 			format.Dir = dir
 			if out, err := format.CombinedOutput(); err != nil {
 				t.Fatalf("uv run ruff format failed:\n%s", out)
 			}
-			diff := exec.Command("uv", "run", "ruff", "format", "--diff", ".")
+			diff := uvCommand("run", "ruff", "format", "--diff", ".")
 			diff.Dir = dir
 			if out, err := diff.CombinedOutput(); err != nil {
 				t.Fatalf("emitted project is not ruff-format-stable:\n%s", out)
@@ -1613,7 +1637,7 @@ func runLiveKitSmokeScript(t *testing.T, example string, mutate func(*ir.Target)
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command("uv", "run", "python", "smoke_check.py")
+	cmd := uvCommand("run", "python", "smoke_check.py")
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -1645,7 +1669,7 @@ func addLiveKitGroupStepHandoff(agent *ir.Agent) {
 // 2026-09-09 (spec 007); a deployed worker creates no RunResult.
 func TestSmokeLiveKitV1GroupStepHandoffMovesTheCaller(t *testing.T) {
 	runLiveKitSmokeScript(t, "remy", func(target *ir.Target) {
-		target.Version = "1.6.10"
+		target.Version = "1.8.1"
 	}, addLiveKitGroupStepHandoff, livekitGroupStepHandoffSmokeScript)
 }
 
@@ -1785,7 +1809,7 @@ func TestSmokeLiveKitHarnessRecoversAGroupStepHandoff(t *testing.T) {
 	}
 	addLiveKitGroupStepHandoff(agent)
 	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
-	tgt.Version = "1.6.10"
+	tgt.Version = "1.8.1"
 	artifact, err := Generate(agent, tgt, target.Default())
 	if err != nil {
 		t.Fatal(err)
@@ -1815,7 +1839,7 @@ func TestSmokeLiveKitHarnessRecoversAGroupStepHandoff(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command("uv", "run", "--project", filepath.Join("pkg", "build", "livekit"), "python", "smoke_check.py")
+	cmd := uvCommand("run", "--project", filepath.Join("pkg", "build", "livekit"), "python", "smoke_check.py")
 	cmd.Dir = dir
 	raw, err := cmd.CombinedOutput()
 	out := string(raw)

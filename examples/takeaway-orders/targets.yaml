@@ -1,0 +1,10 @@
+# Both code targets from one source, and no `connection:` on either. That makes
+# this a browser package: `unmute dev` runs it and no carrier account is needed.
+# A live package compiles for the browser route only in this version anyway.
+targets:
+  livekit:
+    provider: livekit
+    version: "1.8.1"
+  pipecat:
+    provider: pipecat
+    version: "1.10.0"

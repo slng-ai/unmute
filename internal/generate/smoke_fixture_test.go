@@ -403,6 +403,160 @@ func TestSmokeStubbedNamesExistInTheEmittedModule(t *testing.T) {
 	}
 }
 
+// TestSmokeStubbedNamesExistInTheListenerModule is the same contract for the
+// turn_listener fixture, which TestSmokeListenerDecidesTheTurn drives. Its
+// script leaves the emitted build_stt() in place and replaces the class it
+// names, so the class has to be named, called with keyword arguments only, and
+// read for its Settings; and the aggregator's VAD has to be constructed with no
+// arguments, because the shared stub for it takes only keywords.
+func TestSmokeStubbedNamesExistInTheListenerModule(t *testing.T) {
+	emitted := artifactFile(t, generateFor(t, "turn_listener", ir.ProviderPipecat), "bot.py")
+	for _, want := range []string{
+		"return DeepgramFluxSTTService(\n",
+		"settings=DeepgramFluxSTTService.Settings(",
+		"enable_eager_end_of_turn=True,",
+		"vad_analyzer=SileroVADAnalyzer(),",
+		"user_turn_strategies=EagerUserTurnStrategies(),",
+	} {
+		if !strings.Contains(emitted, want) {
+			t.Errorf("bot.py no longer emits %q, so the listener smoke's stand-in is not exercised", want)
+		}
+	}
+	// Every argument to the service is a keyword, so the stand-in's
+	// `__call__(self, **kwargs)` receives all of them.
+	idx := strings.Index(emitted, "return DeepgramFluxSTTService(\n")
+	if idx < 0 {
+		return
+	}
+	rest := emitted[idx:]
+	end := strings.Index(rest, "\n    )\n")
+	if end < 0 {
+		t.Fatal("the Flux constructor call does not close where the stand-in expects")
+	}
+	for _, line := range strings.Split(rest[:end], "\n")[1:] {
+		// Every emitted argument ends in a comma, so testing for one excluded
+		// the whole block and the check could never fire. What separates an
+		// argument from the line closing a nested call is the `=`, and the
+		// closer is recognised by what it is rather than by its comma.
+		arg := strings.TrimSpace(line)
+		if arg == "" || strings.HasPrefix(arg, ")") || strings.HasSuffix(arg, "(") {
+			continue
+		}
+		if !strings.Contains(arg, "=") {
+			t.Errorf("the Flux constructor takes a positional argument %q; the smoke stand-in accepts keywords only", arg)
+		}
+	}
+}
+
+// TestSmokeStubbedNamesExistInTheLiveModelModule is the same contract for the
+// live_model fixture, which TestSmokeLiveModel drives. That script replaces
+// nothing in the emitted module: it swaps the socket constructor inside the
+// framework's own live module and wraps the aggregator parameters to shorten the
+// idle timer, so the bot has to import the service from that module, call the
+// parameters with keywords only and an idle timeout among them, construct the VAD
+// with no arguments, and send the nudge as the commentary event the script waits
+// for.
+func TestSmokeStubbedNamesExistInTheLiveModelModule(t *testing.T) {
+	emitted := artifactFile(t, generateFor(t, "live_model", ir.ProviderPipecat), "bot.py")
+	for _, want := range []string{
+		"from pipecat.services.openai.live.llm import OpenAILiveLLMService",
+		"live = dev.observe_live(build_desk_live())",
+		"vad_analyzer=SileroVADAnalyzer(),",
+		"user_idle_timeout=20,",
+		"await live.send_client_event(",
+		"live_events.SessionCommentaryAppendEvent(",
+		"still there",
+		"tools.lookup_customer.lookup_customer(phone=phone)",
+	} {
+		if !strings.Contains(emitted, want) {
+			t.Errorf("bot.py no longer emits %q, so the live model smoke's stand-in is not exercised", want)
+		}
+	}
+	// Every argument to the aggregator parameters is a keyword, so the script's
+	// `lambda **kwargs` wrapper receives all of them and can override one.
+	idx := strings.Index(emitted, "user_params=LLMUserAggregatorParams(\n")
+	if idx < 0 {
+		t.Fatal("the aggregator parameters are not built where the live model smoke wraps them")
+	}
+	rest := emitted[idx:]
+	end := strings.Index(rest, "\n        ),\n")
+	if end < 0 {
+		t.Fatal("the aggregator parameters do not close where the live model smoke expects")
+	}
+	for _, line := range strings.Split(rest[:end], "\n")[1:] {
+		if arg := strings.TrimSpace(line); arg != "" && !strings.Contains(arg, "=") {
+			t.Errorf("the aggregator parameters take a positional argument %q; the smoke wrapper accepts keywords only", arg)
+		}
+	}
+}
+
+// TestSmokeStubbedNamesExistInTheLiveKitLiveModelModule is the same contract for
+// the LiveKit half of the live_model fixture, which TestSmokeLiveKitLiveModel
+// drives.
+//
+// That script replaces one name in the emitted module, AgentSession, and calls
+// one, entrypoint. Everything else it reaches for is inside the framework. So
+// what has to hold here is that the emitted module still names those two, still
+// builds the model the script's socket patch sits under, and still passes the
+// session its keywords the way the stand-in receives them: a positional
+// argument would never reach HarnessSession.__init__(**kwargs), and the script's
+// assertion that the session is the model alone would then be asserting nothing.
+//
+// The away window is pinned because the script shortens it and asserts the
+// emitted 20 on the way past, and the greeting and the nudge are pinned because
+// the script waits for each by its words.
+func TestSmokeStubbedNamesExistInTheLiveKitLiveModelModule(t *testing.T) {
+	emitted := artifactFile(t, generateFor(t, "live_model", ir.ProviderLiveKit), "agent.py")
+	for _, want := range []string{
+		"from livekit.plugins.openai.realtime import GPTLiveModel",
+		"async def entrypoint(ctx: JobContext) -> None:",
+		"session = AgentSession(",
+		"llm=GPTLiveModel(",
+		"user_away_timeout=20,",
+		"self.session.generate_reply(",
+		"Hi, this is Sage and Stone Salon. How can I help?",
+		"Briefly check whether they are still there.",
+		"tools.lookup_customer.lookup_customer(phone=phone)",
+	} {
+		if !strings.Contains(emitted, want) {
+			t.Errorf("agent.py no longer emits %q, so the LiveKit live model smoke's stand-in is not exercised", want)
+		}
+	}
+	// The script proves the four absences on the object the framework receives
+	// rather than in the emitted text, by reading the keywords the constructor
+	// was given. That only works while every one of them is a keyword.
+	idx := strings.Index(emitted, "session = AgentSession(\n")
+	if idx < 0 {
+		t.Fatal("the session is not built where the LiveKit live model smoke wraps it")
+	}
+	rest := emitted[idx:]
+	end := strings.Index(rest, "\n    )\n")
+	if end < 0 {
+		t.Fatal("the session constructor does not close where the LiveKit live model smoke expects")
+	}
+	for _, line := range strings.Split(rest[:end], "\n")[1:] {
+		arg := strings.TrimSpace(line)
+		if arg == "" || strings.HasPrefix(arg, "#") || strings.HasPrefix(arg, ")") || strings.HasSuffix(arg, "(") {
+			continue
+		}
+		if !strings.Contains(arg, "=") {
+			t.Errorf("the session takes a positional argument %q; the live model smoke's stand-in reads keywords only", arg)
+		}
+	}
+	// session.say() is not a route the adapter supports, and the script asserts
+	// the refusal. A module that started calling it would make that assertion a
+	// test of the framework rather than of what this compiler emits.
+	//
+	// Read per line with comment lines dropped, because the emitted module
+	// explains in a comment why it does not call say(): a plain substring search
+	// found that sentence and reported the module as calling it.
+	for _, line := range strings.Split(emitted, "\n") {
+		if body := strings.TrimSpace(line); !strings.HasPrefix(body, "#") && strings.Contains(body, "session.say(") {
+			t.Errorf("agent.py calls session.say(), which a live session has no synthesizer for: %s", body)
+		}
+	}
+}
+
 // livekitRunContextStandIn is the RunContext the LiveKit salon smokes hand to an
 // emitted tool body, shared by both scripts so there is one shape to keep right.
 //

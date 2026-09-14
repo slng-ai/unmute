@@ -51,7 +51,7 @@ binding:  provider=slng model=slng/deepgram/nova:3
 class:    slng.STT
 args:     api_key=os.environ["SLNG_API_KEY"], model="slng/deepgram/nova:3", language="es-MX", sample_rate=24000
 import:   from livekit.plugins import slng
-install:  livekit-plugins-slng>=1.6.1
+install:  livekit-plugins-slng>=1.8.1
 env:      SLNG_API_KEY
 
 === livekit listen soniox ===
@@ -70,6 +70,22 @@ args:     api_key=os.environ["SPEECHMATICS_API_KEY"], ="model-1", language="es-M
 import:   from livekit.plugins import speechmatics
 install:  livekit-agents[speechmatics]
 env:      SPEECHMATICS_API_KEY
+
+=== livekit live openai ===
+binding:  provider=openai model=model-1 voice=voice-1
+class:    GPTLiveModel
+args:     api_key=os.environ["OPENAI_API_KEY"], voice="voice-1", model="model-1", sample_rate=24000
+import:   from livekit.plugins.openai.realtime import GPTLiveModel
+install:  livekit-agents[openai]
+env:      OPENAI_API_KEY
+
+=== livekit realtime openai ===
+binding:  provider=openai model=model-1 voice=voice-1
+class:    RealtimeModel
+args:     api_key=os.environ["OPENAI_API_KEY"], voice="voice-1", model="model-1", sample_rate=24000
+import:   from livekit.plugins.openai.realtime import RealtimeModel
+install:  livekit-agents[openai]
+env:      OPENAI_API_KEY
 
 === livekit reason * ===
 binding:  provider="*" as acme model=model-1
@@ -226,7 +242,7 @@ binding:  provider=slng model=slng/deepgram/aura:2-en voice=voice-1
 class:    slng.TTS
 args:     api_key=os.environ["SLNG_API_KEY"], voice="voice-1", model="slng/deepgram/aura:2-en", language="es-MX", sample_rate=24000
 import:   from livekit.plugins import slng
-install:  livekit-plugins-slng>=1.6.1
+install:  livekit-plugins-slng>=1.8.1
 env:      SLNG_API_KEY
 
 === livekit speak soniox ===
@@ -325,6 +341,24 @@ settings: model="model-1", language="es-MX", sample_rate=24000
 import:   from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 install:  pipecat-ai[speechmatics]
 env:      SPEECHMATICS_API_KEY
+
+=== pipecat live openai ===
+binding:  provider=openai model=model-1 voice=voice-1
+class:    OpenAILiveLLMService
+args:     api_key=os.environ["OPENAI_API_KEY"]
+settings: voice="voice-1", model="model-1", sample_rate=24000
+import:   from pipecat.services.openai.live.llm import OpenAILiveLLMService
+install:  pipecat-ai[openai]
+env:      OPENAI_API_KEY
+
+=== pipecat realtime openai ===
+binding:  provider=openai model=model-1
+class:    OpenAIRealtimeLLMService
+args:     api_key=os.environ["OPENAI_API_KEY"]
+settings: model="model-1", sample_rate=24000
+import:   from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
+install:  pipecat-ai[openai]
+env:      OPENAI_API_KEY
 
 === pipecat reason * ===
 binding:  provider="*" as acme model=model-1 endpoint_env=ACME_BASE_URL
