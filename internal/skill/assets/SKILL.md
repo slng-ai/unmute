@@ -34,10 +34,10 @@ Open the first matching reference; load another only when needed.
 
 ## Choose the structure before files
 
-Read the whole brief first. If it names **required order**, **separate roles**
-or permissions, or a server's **next step**, open
-`references/orchestration.md`. Choose the smallest native shape and tell the
-user what you chose.
+Read the whole brief first. If it names **required order**, **separate roles** or permissions, or a server's **next step**, open `references/orchestration.md`.
+Choose the smallest native shape and tell the user what you chose.
+
+**Keep state small.** Keep only values needed across a task or handoff, by a later tool, or as prompt facts. Prefer one timestamp to separate date and time values; `references/variables.md` has the example.
 
 **Every agent-level list attaches something already declared, except `tasks:`,
 written where it runs.** Five kinds: `tools:`, `tasks:` and `task_groups:` come

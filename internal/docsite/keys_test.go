@@ -32,19 +32,12 @@ var paramField = regexp.MustCompile(`<ParamField\s+path="([^"]*)"(?:\s+type="([^
 // purpose. The reason is the point: without one, a page lands here because
 // somebody wanted the gate quiet.
 var keyExempt = map[string]string{
-	// The reference section leads with the complete list instead, which
-	// docs-site/README.md already names as the exception to the page shape.
-	"reference/agent-yaml.mdx":       "is the complete list",
-	"reference/targets-yaml.mdx":     "is the complete list",
-	"reference/connections-yaml.mdx": "is the complete list",
-	"reference/variables.mdx":        "is the complete list",
-	"reference/secrets.mdx":          "is the complete list",
-	"reference/cli/init.mdx":         "documents a command, and its flags are the list",
+	// Command flags are the complete list for this CLI page.
+	"reference/cli/init.mdx": "documents a command, and its flags are the list",
 
 	// Tutorials. Each walks one key at a time in the order an author writes
 	// them, and points at the page that owns the full set. Stating the set
 	// twice is how the two copies drift.
-	"build/your-first-agent.mdx":                   "walks each key in order and defers to the reference",
 	"build/orchestration/first-task.mdx":           "walks each key in order and defers to build/orchestration/tasks",
 	"build/orchestration/choosing-a-structure.mdx": "compares two shapes rather than documenting either",
 

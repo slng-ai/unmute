@@ -45,34 +45,33 @@ is the vendor's voice id.
 Which of `model:` and `voice:` are required depends on the vendor, and the
 refusal names whichever one is missing.
 
-<ParamField path="provider" type="a vendor from your target's list">
-  Who serves the model. The two lists below are per target, and an unlisted
-  name is refused. Left out, the code targets fall back to `openai`, so name
-  one rather than relying on that.
+<ParamField path="provider" type="string">
+  A provider supported for this role and target, listed on the model pages. Required for
+  an API binding; there is no inferred API provider. `local` selects local placement.
 </ParamField>
 
 <ParamField path="model" type="string">
-  The model id, forwarded to the vendor exactly as you write it. Required by
-  most vendors, including `slng` on both code targets. Unmute keeps no
-  allowlist, so a typo surfaces as a provider error on the first call.
+  Provider model id, passed through as written. Required where the selected integration
+  requires a model; otherwise its default applies. No model id is checked against a provider catalog.
 </ParamField>
 
 <ParamField path="voice" type="string">
-  The vendor's voice id, also forwarded verbatim. Required by most vendors.
-  A few carry the voice inside the model id instead, and for those this key is
-  refused rather than ignored.
+  A voice id accepted by the selected model and provider. Unmute forwards it
+  without checking a voice list. If omitted, the integration may choose its
+  default or require a value. An unknown id can fail only when speech runs.
 </ParamField>
 
 <ParamField path="speed" type="number">
-  How fast the voice speaks, forwarded to the vendor as written. Unmute does
-  not check it against the vendor's accepted range, so a value outside it
-  surfaces as a provider error.
+  Speaking speed on a `speak` entry. Provider-defined values and limits; omitted leaves
+  the provider default.
 </ParamField>
 
-<ParamField path="language" type="a BCP-47 tag, e.g. en or pt-BR">
-  The language to speak. Only some vendors take one. Where the vendor carries
-  language in the model id instead, this key is refused, and the message names
-  the provider.
+<ParamField path="language" type="string">
+  A fixed BCP-47 language tag such as `es` or `en-US`, on `listen` or `speak`
+  where the integration supports it. Accepted languages depend on the selected
+  provider and model. Omission keeps that integration's default; it does not
+  promise automatic detection. `{{language}}` is refused. Unmute exposes no
+  tool or variable binding that changes this setting during a call.
 </ParamField>
 
 <ParamField path="placement" type="api | local">
@@ -89,10 +88,10 @@ refusal names whichever one is missing.
   endpoint for this role there, and the slng target has none either.
 </ParamField>
 
-<ParamField path="params" type="free-form map">
-  Forwarded to the vendor's own client, unchecked, except for
-  `params.world_part`, which selects an SLNG speech gateway and is refused when
-  it is not one of them.
+<ParamField path="params" type="object">
+  Provider parameter names and values. Omit to add no extra parameters. Provider limits
+  apply; Unmute does not define a universal accepted set. SLNG `params.world_part`
+  is checked against its supported regions.
 </ParamField>
 
 A `speak` entry cannot carry `fallback:`. That key is legal only on `think`
@@ -146,8 +145,7 @@ separate model, worker and media regions.
 | `unmute init`, and every example, `hotel-concierge` on the `slng` target included | `deepgram/aura:2` | `aura-2-thalia-en` |
 | the SLNG-hosted English copy, which runs in `us-central` only, so an `slng` package deploying to `eu-central` cannot name it | `slng/deepgram/aura:2-en` | `aura-2-thalia-en` |
 
-Those are the only exact ids the docs name, because they are the ones the
-examples run. The full SLNG catalog is at
+These are the ids used by the scaffold and examples. The full SLNG catalog is at
 [docs.slng.ai/models](https://docs.slng.ai/models); any id from there goes in
 `model:` as written, for example `slng/cartesia/sonic-3` with a voice id of
 its own.
@@ -223,6 +221,40 @@ is spoken. **Fix:** move them to the `think` binding, or delete them.
 LiveKit has no custom speech endpoint at all. **Fix:** bind a vendor from the
 LiveKit list above, or compile to Pipecat, which emits the `endpoint_env`
 lookup.
+
+## Find a Soniox voice
+
+Use the [SLNG Soniox voice catalog](https://docs.slng.ai/voices/soniox) to hear
+voices and find their ids. Check the SLNG dashboard for voices available to
+your selected model if the catalog differs. Copy the id exactly; do not infer an id from a
+person's name or change its capitalization. For a direct Soniox binding, use
+[Soniox's voice documentation](https://soniox.com/docs/tts/concepts/voices).
+
+## Multilingual speech
+
+The reply text and its spoken delivery are separate. A model can produce correct
+Spanish text while TTS still uses an English language setting or voice accent.
+Listen to each intended language before shipping a multilingual agent.
+
+| TTS choice | Language behavior | What to configure |
+|---|---|---|
+| Soniox through SLNG | The stream has a language setting; the SLNG catalog documents `en` as the default | Set `language` deliberately and select a voice suited to it. Omission is not a multilingual switch |
+| ElevenLabs multilingual TTS | Can infer language from the text; model and voice still affect delivery | Choose a multilingual model and suitable voice; a fixed language setting can constrain it |
+
+See [SLNG's Soniox catalog](https://docs.slng.ai/voices/soniox) and
+[ElevenLabs language guidance](https://elevenlabs.io/docs/eleven-creative/playground/text-to-speech).
+Provider support for runtime changes does not mean Unmute exposes those changes.
+
+STT has its own language behavior. Do not assume that leaving `listen.language`
+out enables detection for every provider. For example, Deepgram multilingual
+recognition uses `language: multi`; see its
+[LiveKit integration](https://docs.livekit.io/agents/models/stt/deepgram/).
+Check the selected STT model separately from TTS.
+
+For a Spanish-only agent, use a Spanish prompt and a speech binding configured
+for Spanish. For a multilingual brief, choose TTS that handles the required
+languages with the settings Unmute can emit. If that is not possible, explain
+the tradeoff before reducing the agent to one language.
 
 ## Where to go next
 

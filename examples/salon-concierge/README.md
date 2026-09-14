@@ -7,6 +7,10 @@ The salon takes calls. The agent works out who is calling, books, moves and
 cancels appointments, answers questions from the salon's own documents, writes
 down complaints, and puts a caller through to a manager when they ask for one.
 
+This example deliberately combines many features. Its variable count is not a
+target to match: keep only the facts and saved results your own call needs.
+See [choosing fewer variables](https://unmute.ai/build/variables#keep-only-the-values-the-call-needs).
+
 On this page:
 
 - [Quickstart](#quickstart) - validate, compile, talk

@@ -172,13 +172,8 @@ func TestValidateOmitsPrerequisiteWithoutTheCapabilityThatNeedsIt(t *testing.T) 
 // US4: a region unmute cannot honour fails before any artifact exists, naming the
 // problem and the fix.
 //
-// Note what is deliberately absent. A region *code* is never checked against a
-// list: codes are forwarded exactly as written, the platform CLI is the
-// validator, and no list of codes lives in this
-// repository, because both platforms change theirs without notice. So the
-// refusals here are the three that are knowable without one: an empty entry, the
-// same region twice, and more than one region on a platform whose agent names are
-// globally unique across regions.
+// Pipecat forwards region codes; these shape errors apply before deployment.
+// LiveKit and SLNG additionally check their published region sets.
 func TestValidateRefusesARegionItCannotHonour(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -204,10 +199,7 @@ func TestValidateRefusesARegionItCannotHonour(t *testing.T) {
 	}
 }
 
-// A region code unmute does not recognise still compiles, because the platform is
-// the validator. Pinned as a test so nobody "helpfully" adds a region allow-list:
-// the platforms add regions outside our release cycle, and a list here would
-// refuse a package that is correct.
+// Pipecat still lets the platform validate region names.
 func TestValidateForwardsAnUnknownRegionCode(t *testing.T) {
 	dir := writeDailyPackage(t, "moon-base-1")
 	_, stderr, err := runValidateCommand(t, "--target", "pipecat", dir)

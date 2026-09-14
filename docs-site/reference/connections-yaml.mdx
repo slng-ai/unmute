@@ -20,11 +20,21 @@ environment:
 
 ## All keys
 
-| Key | Type | Required | Default | Allowed values | Meaning |
-|---|---|---|---|---|---|
-| `transport` | string | yes |  | `sip`, `connector`, `cloud-websocket`, `daily-sip`, as allowed by the target provider | mechanism that carries the call |
-| `carrier` | string | yes |  | `twilio`, `telnyx`, or `plivo`, as allowed by the route | carrier account behind the route |
-| `environment` | map of strings | when the route needs account values |  | route keys listed below to UPPER_SNAKE env names | names holding the route's account values |
+<ParamField path="transport" type="string" required>
+  Mechanism that carries the call. Accepts `sip`, `connector`, `cloud-websocket`,
+  `daily-sip`, as allowed by the target provider. Required; omission is refused.
+</ParamField>
+
+<ParamField path="carrier" type="string" required>
+  Carrier account behind the route. Accepts `twilio`, `telnyx`, or `plivo`, as allowed by
+  the route. Required; omission is refused.
+</ParamField>
+
+<ParamField path="environment" type="map of strings">
+  Names holding the route's account values. Accepts route keys listed below to UPPER_SNAKE
+  env names. Omission is allowed only when the route needs no account values, such as
+  receive-only Pipecat cloud-websocket. Otherwise the missing route keys are refused.
+</ParamField>
 
 The target names the file and says nothing else about telephony:
 

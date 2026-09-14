@@ -73,41 +73,41 @@ different settings.
   the folder name inside the build.
 </ParamField>
 
-<ParamField path="documents" type="folder path" required>
-  Folder path relative to the package root.
+<ParamField path="documents" type="string" required>
+  Path to a folder inside the package containing `.txt`, `.md`, or `.pdf` documents. No
+  folder is inferred.
 </ParamField>
 
-<ParamField path="embed" type="embedding service" default="openai">
-  One of the [embedding models](#embedding-models) below.
+<ParamField path="embed" type="string">
+  An [embedding service](/build/tools/knowledge#embedding-models). Omitted means `openai`.
+  Keyword mode makes no embedding call.
 </ParamField>
 
-<ParamField path="mode" type="meaning | keyword | hybrid" default="hybrid">
-  Which kind of search a lookup runs. See
-  [How the search works](#how-the-search-works).
+<ParamField path="mode" type="string">
+  Accepts `meaning`, `keyword`, or `hybrid`. Omitted means `hybrid`.
 </ParamField>
 
-<ParamField path="chunk_size" type="integer" default="90">
-  Passage size in **tokens**, 1 to 2048.
+<ParamField path="chunk_size" type="integer">
+  Passage size in tokens, from 1 to 2048. Omitted means `90`.
 </ParamField>
 
-<ParamField path="chunk_overlap" type="integer" default="20">
-  Tokens two neighbouring passages share; 0 or more, and never larger than
-  `chunk_size`.
+<ParamField path="chunk_overlap" type="integer">
+  Tokens shared by neighboring passages, from 0 through `chunk_size`. Omitted means `20`.
 </ParamField>
 
-<ParamField path="top_k" type="integer" default="3">
-  How many passages a lookup returns, 1 to 20.
+<ParamField path="top_k" type="integer">
+  Maximum passages returned by a lookup, from 1 to 20. Omitted means `3`.
 </ParamField>
 
 <ParamField path="min_score" type="number">
-  Drop results scoring below this, 0 to 1. Absent by default. Read
-  [Filtering by score](#filtering-by-score) before setting it.
+  Minimum accepted result score, from 0 to 1. Omit for no score filtering. Scores are
+  similarities, not probabilities.
 </ParamField>
 
 ## The `knowledge:` block on a tool
 
-<ParamField path="base" type="base name" required>
-  The name of a knowledge base declared in `knowledge:`.
+<ParamField path="base" type="string" required>
+  The name of a base declared under `knowledge` in `agent.yaml`. No base is inferred.
 </ParamField>
 
 Legal beside it: `description`, `announce`, `interruption`.

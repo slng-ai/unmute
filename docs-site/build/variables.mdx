@@ -16,6 +16,43 @@ On this page:
 - [Advanced](#advanced) - shapes, injection, and seeding a value locally
 - [Troubleshooting](#troubleshooting) - the four that come up most
 
+## Keep only the values the call needs
+
+**Keep state small.** Declare a variable when a value must survive a task or
+handoff, feed a later tool, or supply a needed call fact to a prompt. Before
+adding one used by only one prompt, check whether the agent needs the fact at
+all. Prefer fewer values that each represent one useful fact or result; do not
+split a timestamp into date and time just because both fields are available.
+
+For a clock, replace `current_date`, `current_weekday`, and `current_time` with
+`current_datetime` and `current_weekday`. The timestamp already carries the
+date and time. Keep the weekday only if the prompt must name it; reading the
+clock's answer avoids asking the model to calculate it. If nobody needs the
+weekday, keep just the timestamp.
+
+Merge these entries into an existing package:
+
+```yaml agent.yaml
+variables:
+  current_datetime:
+    type: str
+  current_weekday:
+    type: str
+
+prefetch:
+  - name: local_clock
+    clock: now
+    timezone: Europe/Madrid
+    assign:
+      - current_datetime: result.datetime
+      - current_weekday: result.day_of_week
+```
+
+Use a shape for fields that travel together as a task result. Pre-fetch fills
+plain values, so it cannot save the clock into a shape. Keep separate values
+when they have different confirmation steps or different readers.
+
+
 ## Quickstart
 
 Declare a value, save it when a task finishes, and read it in a later prompt:
@@ -68,35 +105,37 @@ That is the whole declaration. `requested_service` is the name you will use
 everywhere else, and `str` means it holds text.
 
 <ParamField path="type" type="string" required>
-  What the value holds. `str` for text, and
-  [nine more built-in types](#the-types-you-can-declare) for numbers, dates,
-  phone numbers and the rest.
+  A single-line Python type expression. Accepts `str`, `int`, `float`, `bool`, `Phone`,
+  `Date`, `Time`, `Id`, `EmailStr`, `NameEmail`, a declared shape name, `Literal[...]`,
+  `list[T]`, or `T | None`. The aliases `string`, `integer`, `number`, and `boolean` also
+  work. See the [type grammar](/reference/variables#the-type-grammar) for composition
+  rules and target limits.
 </ParamField>
 
 <ParamField path="description" type="string">
-  What this value means, in a sentence. When a task saves the variable, the
-  model reads this description to decide which answer belongs here. Say what
-  makes it different from a similar value, such as whether a date is requested
-  or already confirmed.
+  A sentence explaining what the value means. Used to describe the task finish argument
+  derived from this variable. Required for `source: conversation`; otherwise omit for no
+  extra description. The saved value is still shared only through placeholders.
 </ParamField>
 
-<ParamField path="default" type="matching the type">
-  A value to start from. Use it only when there is a useful answer before
-  anyone supplies one, such as a fallback name for the greeting. A requested
-  service has no useful default, so leave it unset.
+<ParamField path="default" type="matching the declared type">
+  A scalar starting value, checked against `type`. Shapes, lists, and `NameEmail` take no
+  authored default. If omitted, a scalar or shape starts unset and a list starts as `[]`.
+  An unset value renders as `none recorded yet.` in a prompt.
 </ParamField>
 
-<ParamField path="source" type="call_start | a call fact">
-  Where an initial value arrives from, when one does. `call_start` takes it
-  from the session that started the call; a call fact such as `from_number`
-  takes it from the phone route. See [sources](/reference/variables#sources).
+<ParamField path="source" type="string">
+  Accepts `call_start`, `conversation` (SLNG only), or a [system call
+  fact](/reference/variables#sources). If omitted, the variable has no automatic call-fact
+  source; a task, pre-fetch, or session payload can still fill it. Route support is
+  checked for system sources. `conversation` requires a description and forbids a default;
+  inbound code-target calls require a default for `call_start`.
 </ParamField>
 
-<ParamField path="confirm" type="task name">
-  Names the task that has to hear the caller agree before anything acts on this
-  value. Until then no other prompt can read it and no tool can quietly use it.
-  See [checking a value with the
-  caller](/build/prefetch#always-check-a-value-with-the-caller).
+<ParamField path="confirm" type="string">
+  The name of the task that must hear the caller agree to a pre-fetched value. Until
+  confirmed, only that task can read it in a prompt and tools cannot silently use it. If
+  omitted, the value is usable as soon as it arrives.
 </ParamField>
 
 A variable starts unset unless you give it a `default:`.
@@ -279,8 +318,19 @@ Three things you will not need on your first agent.
   separate variables are simpler to read and simpler to prompt.
 </Note>
 
-A shape is your own object type. Name it, declare its fields under `shapes:`,
-then set a variable's `type:` to that name:
+A pre-fetch cannot fill a shape or a list. Use a task to produce grouped fields;
+use separate scalar variables for clock and lookup pre-fetch results. A single
+pre-fetch may assign several scalar variables from one result.
+
+A shape defines your own reusable object type. Choose a name, then declare
+each field and its type under `shapes:`. Set a variable's `type:` to that
+name to store an object with those fields.
+
+One shape can be used by several variables. Each variable holds its own
+value, and a task assignment saves all of the object's fields together.
+
+For example, this package defines an object type called `Appointment` and
+uses it for the variable `appointment`:
 
 ```yaml agent.yaml
 shapes:

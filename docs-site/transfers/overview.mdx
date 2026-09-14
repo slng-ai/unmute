@@ -48,49 +48,44 @@ The escalation's name goes in the agent's own `escalations:` list. That half is
 enforced, not merely conventional. See [the control has to be
 attached](#the-escalation-has-to-be-attached) below.
 
-### Every key an escalation takes
-
-The name on the left is how an agent attaches it. Under the name are two parts:
-when to run it, and which shape it is.
+## Escalation fields
 
 <ParamField path="when" type="string">
-  What the model reads to decide to put the caller through. Nothing checks that
-  it is there, but write one: without it the model has nothing to decide on.
+  The situation the model reads to decide whether to transfer. Omission supplies no
+  trigger guidance, so write one.
 </ParamField>
 
-<ParamField path="cold" type="block">
-  The cold shape: hand the caller over and drop out. Exactly one of `cold:` or
-  `warm:` is written, never both and never neither.
+<ParamField path="cold" type="object">
+  A cold transfer using the destination and timeout fields below. Exactly one of `cold`
+  and `warm` is required; there is no default transfer form.
 </ParamField>
 
-<ParamField path="warm" type="block">
-  The warm shape: hold the caller, ring the person, brief them, then bridge the
-  two. Only the LiveKit `sip` route compiles it.
+<ParamField path="warm" type="object">
+  A warm transfer using the fields below, including optional `briefing`. Exactly one of
+  `cold` and `warm` is required. Supported only on LiveKit SIP.
 </ParamField>
 
-### Every key a shape block takes
+## Transfer fields
 
-`destination:` is required in both. `briefing:` is the one key `cold:` does not
-have.
+<ParamField path="destination" type="string" required>
+  A symbol declared in `destinations`, whose value names an environment variable holding
+  the destination. No destination is inferred. Valid inside both `cold` and `warm`.
+</ParamField>
 
-<ParamField path="destination" type="destinations entry name" required>
-  Which desk to reach, named symbolically. The name is resolved in
-  [`destinations:`](#destinations-are-symbolic) at the top level of `agent.yaml`.
+<ParamField path="ring_timeout" type="string">
+  A positive Go duration, such as `25s`. Omitted means 25 seconds on Pipecat; LiveKit
+  leaves it unset for the platform default.
+</ParamField>
+
+<ParamField path="on_unavailable" type="string">
+  Accepts `return_to_caller` or `hangup`. Omitted means `return_to_caller`. Pipecat
+  cloud-websocket requires explicit `hangup`, because the original media stream cannot be
+  reconnected.
 </ParamField>
 
 <ParamField path="briefing" type="string">
-  What to tell the person while the caller waits. `warm:` only, so it cannot be
-  written on a cold transfer. The drivers pass the call transcript alongside it.
-</ParamField>
-
-<ParamField path="ring_timeout" type="positive Go duration, e.g. 25s">
-  How long to ring before the person counts as unavailable. Left out, Pipecat
-  waits 25 seconds and LiveKit sets nothing, so its platform default applies.
-</ParamField>
-
-<ParamField path="on_unavailable" type="return_to_caller | hangup" default="return_to_caller">
-  What happens when nobody picks up. Pipecat `cloud-websocket` requires
-  `hangup` written out, because it cannot reconnect the original media stream.
+  Instructions for briefing the person before connecting the caller. Legal only inside
+  `warm`. Omit for the runtime’s standard briefing instructions.
 </ParamField>
 
 ## Destinations are symbolic

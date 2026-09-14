@@ -830,6 +830,13 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		applyCapability(caps, tracingCapability(agent.Tracing.Provider), provider, row)
 	}
 	row.Errors = append(row.Errors, validateRegions(resolved.DeploymentRegions)...)
+	if provider == targetcap.LiveKit {
+		for _, region := range resolved.DeploymentRegions {
+			if region != "" && !slices.Contains(targetcap.LiveKitDeploymentRegions, region) {
+				row.Errors = add(row.Errors, fmt.Sprintf("livekit deployment_region %q is unknown: choose one of %s; these are agent worker regions, not media region groups", region, strings.Join(targetcap.LiveKitDeploymentRegions, ", ")))
+			}
+		}
+	}
 	// Only a list of more than one is gated: one region works everywhere the
 	// field works, and the scalar form has since N18.
 	if len(resolved.DeploymentRegions) > 1 {

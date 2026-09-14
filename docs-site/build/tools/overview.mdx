@@ -200,123 +200,60 @@ not to.
 
 ## Fields inside each execution block
 
-### `webhook:`
+Each tool file declares exactly one execution block. Its page lists the fields,
+types, required conditions, and defaults:
 
-<ParamField path="url_env" type="UPPER_SNAKE name">
-  The name of an environment variable holding the base URL, read by the code
-  targets. At least one of `url_env` and `base_url` is required.
-</ParamField>
+- [Webhook](/build/tools/webhook#the-block): `url_env`, `base_url`, `path`, and `auth`.
+- [Python](/build/tools/python#the-block): `handler` and `dependencies`.
+- [MCP](/build/tools/mcp#the-block): `server`, `url_env`, `transport`, `auth`, and `tools`.
+- [Prebuilt](/build/tools/prebuilt#the-block): `id` and `instructions`.
+- [Knowledge](/build/tools/knowledge#the-knowledge-block-on-a-tool): `base`.
+- [Hosted](/build/tools/hosted#hosted-reference-fields): `slng` names a published tool.
 
-<ParamField path="base_url" type="literal https:// URL">
-  Read by SLNG, which stores the URL in the tool body instead of an environment.
-  At least one of `url_env` and `base_url` is required, and SLNG requires this
-  one.
-</ParamField>
-
-<ParamField path="path" type="string">
-  A path beginning with `/`. It may contain `{{variable}}` tokens.
-</ParamField>
-
-<ParamField path="auth" type="block">
-  Bearer or API-key authentication.
-</ParamField>
-
-A `webhook:` tool needs `url_env`, `base_url`, or both. Pipecat and LiveKit
-read `url_env` from the environment at run time and never look at `base_url`.
-SLNG stores the URL in the tool body it pushes, so it reads `base_url` and
-never looks at `url_env`. A package that targets both writes both fields; each
-target reads only the one it needs. Full rules in
-[Webhook tools](/build/tools/webhook#the-block).
-
-### `local:`
-
-<ParamField path="handler" type="package Python path">
-  Omitted means `tools/<tool-name>.py`.
-</ParamField>
-
-### `mcp:`
-
-<ParamField path="server" type="string">
-  The server's name on the platform, when it is not this tool's own name. Read
-  it with `voiceai mcp list`.
-</ParamField>
-
-<ParamField path="url_env" type="UPPER_SNAKE name">
-  The name of an environment variable holding the server URL. Required on
-  LiveKit and Pipecat, and not read by SLNG.
-</ParamField>
-
-<ParamField path="transport" type="sse | streamable_http">
-  Omitted lets the SDK infer it from the URL.
-</ParamField>
-
-<ParamField path="auth" type="block">
-  Bearer or API-key authentication. Never read by SLNG.
-</ParamField>
-
-<ParamField path="tools" type="list of names">
-  Non-empty, unique server tool names; omitted means all tools. Required on
-  slng, which attaches one reference per tool and has no "whole server"
-  attachment.
-</ParamField>
-
-### `builtin:`
-
-<ParamField path="id" type="registry id" required>
-  An id from the closed registry, listed on the
-  [prebuilt tools](/build/tools/prebuilt) page.
-</ParamField>
-
-<ParamField path="instructions" type="string">
-  Instruction applied by the prebuilt as it runs.
-</ParamField>
-
-### `knowledge:`
-
-<ParamField path="base" type="base name" required>
-  The name of a knowledge base declared in `knowledge:` in `agent.yaml`.
-</ParamField>
-
-### `client:` and `provider_hosted:`
-
-Neither takes a field. Write an explicit empty block only.
+`client` and `provider_hosted` take an empty object and are gated on every target.
+SLNG accepts published tool references; it refuses authored local and webhook bodies.
 
 ## Which fields the block allows
 
 The contract fields are shared, with one exception that matters:
 
-<ParamField path="description" type="string" required>
-  Optional on `builtin:`, illegal on `mcp:`, legal everywhere else.
+<ParamField path="description" type="string">
+  Required for local, webhook, and knowledge tools: explains when the model should call
+  the tool. Builtins use their registry description if omitted; hosted `slng` tools
+  inherit their published description. Refused on MCP sources.
 </ParamField>
 
-<ParamField path="input" type="JSON Schema object" required>
-  Required on tool contracts. Illegal on `builtin:`, `mcp:` and `knowledge:`,
-  required everywhere else.
+<ParamField path="input" type="object">
+  Required for authored local and webhook contracts: a JSON Schema with `type: object`
+  describing model arguments. Refused on builtin, MCP, knowledge, and hosted `slng` tools,
+  which own their schemas.
 </ParamField>
 
-<ParamField path="output" type="JSON Schema object">
-  Illegal on `builtin:`, `mcp:` and `knowledge:`. Elsewhere it is author-side
-  only: not sent to the model, not included in the compile report, and not
-  enforced at run time on the code targets.
+<ParamField path="output" type="object">
+  An author-side JSON Schema with `type: object`. Omit for no declared result schema. Used
+  by assignments and success checks; it is not a general runtime result validator or a
+  model prompt. Refused on builtin, MCP, knowledge, and hosted `slng` tools.
 </ParamField>
 
-<ParamField path="inject" type="list of pairs">
-  Legal on `webhook:`, `local:`, and hosted `slng:`. Authored values are scalars
-  or placeholder strings. See
-  [Variables](/reference/variables#passing-a-value-into-a-tool).
+<ParamField path="inject" type="list of one-key pairs">
+  Hidden argument/value pairs. Values are scalars or strings with `{{variable}}`
+  placeholders. Omit to inject nothing. Legal on local, webhook, and hosted `slng` tools;
+  builtin `send_sms` requires its literal `from_number` setting.
 </ParamField>
 
-<ParamField path="interruption" type="provider_default | continue | cancel">
-  Legal everywhere except `mcp:`.
+<ParamField path="interruption" type="string">
+  Accepts `provider_default`, `continue`, or `cancel`. Omitted means `provider_default`.
+  Refused on MCP sources. Target support is listed above.
 </ParamField>
 
-<ParamField path="effect" type="returns_data | ends_conversation">
-  Legal everywhere except `mcp:` and `knowledge:`.
+<ParamField path="effect" type="string">
+  Accepts `returns_data` or `ends_conversation`. Omitted means `returns_data`, except
+  builtins whose effect comes from the registry. Refused on MCP and knowledge tools.
 </ParamField>
 
-<ParamField path="announce" type="one sentence">
-  Legal on `webhook:`, `local:` and `knowledge:` only. A fixed sentence, with no
-  `{{variables}}`.
+<ParamField path="announce" type="string">
+  A fixed spoken sentence with no `{{variables}}`. Omit for no announcement. Legal on
+  local, webhook, knowledge, and hosted `slng` tools.
 </ParamField>
 
 An `mcp:` file carries none of them, because the server owns each tool's contract.
@@ -335,17 +272,19 @@ effect: returns_data
 announce: Let me check the calendar.
 ```
 
-<ParamField path="interruption" type="provider_default | continue | cancel" default="provider_default">
-  What happens to the call if the caller speaks while the tool runs.
+<ParamField path="interruption" type="string">
+  Accepts `provider_default`, `continue`, or `cancel`. Omitted means `provider_default`.
+  Refused on MCP sources. Target support is listed above.
 </ParamField>
 
-<ParamField path="effect" type="returns_data | ends_conversation" default="returns_data">
-  Whether the conversation continues after the tool.
+<ParamField path="effect" type="string">
+  Accepts `returns_data` or `ends_conversation`. Omitted means `returns_data`, except
+  builtins whose effect comes from the registry. Refused on MCP and knowledge tools.
 </ParamField>
 
-<ParamField path="announce" type="one sentence">
-  A fixed line the agent speaks as the tool starts, so a slow call is not
-  silence. Absent by default, and then nothing is spoken.
+<ParamField path="announce" type="string">
+  A fixed spoken sentence with no `{{variables}}`. Omit for no announcement. Legal on
+  local, webhook, knowledge, and hosted `slng` tools.
 </ParamField>
 
 All three are optional, and each is honored differently per target. Pipecat maps

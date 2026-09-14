@@ -28,6 +28,14 @@ announce: One moment while I look that up.
 hash, no mirror, and no `unmute pull` are required to validate, compile, or
 deploy this to SLNG.
 
+## Hosted reference fields
+
+<ParamField path="slng" type="string or legacy object" required>
+  The exact published tool name. No hosted name is inferred from a scalar reference. The
+  legacy object accepts `hash` and resolves the hosted name from the tool file name; see
+  the legacy form below. A tool file must have exactly one execution block.
+</ParamField>
+
 ## The file name and the hosted name are two different things
 
 The tool **file's** name is still the package reference: it is what an
@@ -81,24 +89,30 @@ These describe how your agent uses the tool, not what the tool is, so they
 stay yours to write, exactly as before:
 
 <ParamField path="description" type="string">
-  Overrides the platform's own. Omit it to inherit what the platform already
-  says.
+  Required for local, webhook, and knowledge tools: explains when the model should call
+  the tool. Builtins use their registry description if omitted; hosted `slng` tools
+  inherit their published description. Refused on MCP sources.
 </ParamField>
 
-<ParamField path="inject" type="list of pairs">
-  Values merged into every call, never shown to the model.
+<ParamField path="inject" type="list of one-key pairs">
+  Hidden argument/value pairs. Values are scalars or strings with `{{variable}}`
+  placeholders. Omit to inject nothing. Legal on local, webhook, and hosted `slng` tools;
+  builtin `send_sms` requires its literal `from_number` setting.
 </ParamField>
 
-<ParamField path="announce" type="one sentence">
-  One sentence the agent speaks as the tool starts.
+<ParamField path="interruption" type="string">
+  Accepts `provider_default`, `continue`, or `cancel`. Omitted means `provider_default`.
+  Refused on MCP sources. Target support is listed above.
 </ParamField>
 
-<ParamField path="effect" type="returns_data | ends_conversation">
-  Whether the call ends the conversation.
+<ParamField path="effect" type="string">
+  Accepts `returns_data` or `ends_conversation`. Omitted means `returns_data`, except
+  builtins whose effect comes from the registry. Refused on MCP and knowledge tools.
 </ParamField>
 
-<ParamField path="interruption" type="provider_default | continue | cancel">
-  Whether the caller can interrupt during the call.
+<ParamField path="announce" type="string">
+  A fixed spoken sentence with no `{{variables}}`. Omit for no announcement. Legal on
+  local, webhook, knowledge, and hosted `slng` tools.
 </ParamField>
 
 ```yaml tools/search_places_text.yaml

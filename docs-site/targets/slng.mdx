@@ -31,7 +31,7 @@ On this page:
 
 - [The trade](#the-trade) - what you give up, and what you get back
 - [What compiling writes](#what-compiling-writes) - the three files
-- [targets.yaml](#targetsyaml) - every key this target takes, and every one it refuses
+- [targets.yaml](#targets-yaml) - every key this target takes, and every one it refuses
 - [The pushed agent's name](#the-pushed-agents-name) - where the deployed name comes from
 - [Model names](#model-names) - how a vendor and a model are joined
 - [Push it](#push-it) - the command, the key, and where your tools come from
@@ -95,7 +95,7 @@ installed:
 brew install slng-ai/tap/voiceai
 ```
 
-## targets.yaml
+## Targets YAML
 
 ```yaml targets.yaml
 targets:
@@ -104,42 +104,50 @@ targets:
     deployment_region: eu-north
 ```
 
-That is the whole target.
+Write these inside `targets.<name>`. The name selects this target with
+`--target` and names its output folder under `build/`.
 
-### Every key the slng target takes
-
-Two are required, and the third is the one every target takes.
-
-<ParamField path="provider" type="slng" required>
-  What selects this target. It is the difference between compiling a deployment
-  body and compiling a Python project you host.
+<ParamField path="provider" type="string" required>
+  Use `slng` for this target. Omission is refused.
 </ParamField>
 
-<ParamField path="deployment_region" type="string" required>
-  Exactly one SLNG region: `us-east`, `us-west`, `br`, `eu-west`, `eu-north`,
-  `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, or `au`.
-  Speech, the Context Router and SLNG deployment share these names.
-  Leaving it out or using the retired `any` value is refused.
+<ParamField path="deployment_region" type="string or one-item list of strings" required>
+  Accepts `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`. Exactly one region is
+  required; omission, an unknown name, and multiple regions are refused.
+  The retired `any` value is refused. These are the same names speech and the router use.
 </ParamField>
 
-<ParamField path="models" type="model entry name to a model definition">
-  Per target overrides of named entries from `agent.yaml`, the same shape every
-  target takes. SLNG owns its own model list, so an override is forwarded as
-  written and no name is checked here.
+<ParamField path="models" type="map of model definitions">
+  Overrides keyed by existing model names from `agent.yaml`, using the
+  [model fields](/reference/agent-yaml#models). Omit to use the package's models.
+  An override replaces the entry, except that omitted `pace`, `endpointing_delay`,
+  `semantic_endpointing`, and `prompt_suffix` carry forward. An override cannot
+  author `pace` or a different `prompt_suffix`.
 </ParamField>
 
-### Every key the slng target refuses
+<ParamField path="version" type="string">
+  No non-empty value is accepted. Omit it: SLNG owns the runtime version.
+</ParamField>
 
-Each one is refused by name at validate, with what to do instead. Four of them
-describe a generated project, and there is none.
+<ParamField path="pins" type="map of strings">
+  No non-empty map is accepted. Omit it: there is no generated project whose
+  dependencies could be pinned.
+</ParamField>
 
-| Key | Why it is refused |
-|---|---|
-| `version` | SLNG owns the runtime version its agents run on |
-| `pins` | no generated project exists whose packages could be pinned |
-| `sdk_language` | no SDK is generated for this target |
-| `connection` | a package declares no carrier state on SLNG: buy the number and configure the trunk in the dashboard, and `unmute deploy` offers to attach a free trunk after a successful push |
-| `warm_instances` | SLNG runs the agent and exposes no instance pool of yours to keep warm |
+<ParamField path="sdk_language" type="string">
+  No non-empty value is accepted. Omit it: this target emits no SDK project.
+</ParamField>
+
+<ParamField path="connection" type="string">
+  No non-empty value is accepted. Omit it: configure the carrier route in SLNG
+  and attach its trunk at deployment, as described in
+  [phone setup](/deploy/slng#receive-phone-calls).
+</ParamField>
+
+<ParamField path="warm_instances" type="integer">
+  Positive and negative values are refused. Omit it: SLNG owns capacity.
+  Zero also emits no setting.
+</ParamField>
 
 ## The pushed agent's name
 

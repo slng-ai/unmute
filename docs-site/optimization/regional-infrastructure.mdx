@@ -93,6 +93,33 @@ Do not copy another provider's parameter names. Some services select their
 location automatically or offer no regional choice. Measure the route you
 actually use before deciding whether to change providers or model deployments.
 
+## Three region settings
+
+| Setting | Written on | Accepted values | What it moves |
+|---|---|---|---|
+| `params.world_part` | SLNG `listen` and `speak` models on code targets | `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au` | The speech gateway endpoint |
+| `params.world_part` | SLNG Context Router `think` models | `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au` | The router endpoint |
+| `deployment_region` | Each target in `targets.yaml` | LiveKit: `us-east`, `eu-central`, `ap-south`. SLNG: the same 13 world parts listed above. Pipecat: one platform region name, forwarded without a value check | The agent worker on code targets; call placement on SLNG |
+
+SLNG speech, routing, and deployment now share region names. LiveKit keeps its
+own worker names. Each setting is still independent of the others. None alone guarantees
+data residency: model providers, media, tools, traces, and storage have their
+own locations. A nearby speech gateway does not prove where its model runs.
+LiveKit's compute names come from its
+[agent region list](https://docs.livekit.io/deploy/admin/regions/endpoints/#agent-deployment-regions).
+
+<ParamField path="listen/speak.params.world_part" type="string">
+  Accepts the speech gateway values in the table. Omit to use the plugin's
+  default endpoint. An empty or unknown value is refused. Do not combine it
+  with `params.base_url` or `params.slng_base_url`.
+</ParamField>
+
+<ParamField path="think.params.world_part" type="string" required>
+  Accepts the same 13 world parts as speech. Required on a Context Router
+  think binding; omission is refused. It selects the router endpoint independently.
+  The old `world_part_override` key is refused; use `world_part`.
+</ParamField>
+
 ## Separate the regional settings
 
 Each part of the call has its own location:

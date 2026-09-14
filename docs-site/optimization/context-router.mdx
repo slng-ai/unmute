@@ -289,6 +289,74 @@ still comes from `key_env`. A Vertex `credentials_env` may hold the key JSON
 itself, that JSON base64 encoded, or a path to the key file, and the agent
 works out which at startup.
 
+## Upstream fields
+
+<ParamField path="provider" type="string" required>
+  Accepts `openai`, `openai-compat`, `azure`, `vertex`, or `bedrock`. No provider is
+  inferred. Fields belonging to another provider are refused.
+</ParamField>
+
+<ParamField path="url" type="string">
+  The upstream endpoint. Required for `openai-compat` and `azure`; defaults to
+  `https://api.openai.com/v1` for `openai`. On Azure, use the resource root, not a
+  deployment URL.
+</ParamField>
+
+<ParamField path="key_env" type="string">
+  An UPPER_SNAKE environment variable name. Required for `openai-compat` and `azure`;
+  defaults to `OPENAI_API_KEY` for `openai`.
+</ParamField>
+
+<ParamField path="auth_header" type="string">
+  Header name for `openai-compat` authentication. Omit to use the default bearer
+  Authorization header; the value still comes from `key_env`.
+</ParamField>
+
+<ParamField path="deployment" type="string">
+  Required for `azure`: the deployment name. No name is inferred.
+</ParamField>
+
+<ParamField path="api_version" type="string">
+  Required for `azure`: its API version string. No version is inferred.
+</ParamField>
+
+<ParamField path="credentials_env" type="string">
+  Required for `vertex`: an UPPER_SNAKE environment name holding service-account JSON,
+  base64 JSON, or a path to its file. No credentials are inferred.
+</ParamField>
+
+<ParamField path="location" type="string">
+  Required for `vertex`: its location name. No location is inferred.
+</ParamField>
+
+<ParamField path="project" type="string">
+  Vertex project id. Omit to use the project from the service-account key.
+</ParamField>
+
+<ParamField path="access_key_id_env" type="string">
+  Required for `bedrock`: an UPPER_SNAKE name holding the AWS access key id. No name is
+  inferred.
+</ParamField>
+
+<ParamField path="secret_access_key_env" type="string">
+  Required for `bedrock`: an UPPER_SNAKE name holding the AWS secret access key. No name
+  is inferred.
+</ParamField>
+
+<ParamField path="region" type="string">
+  Required for `bedrock`: an AWS region name. No region is inferred.
+</ParamField>
+
+<ParamField path="model_id" type="string">
+  Required for `bedrock`: its model id, which may differ from the model profile’s label.
+  No id is inferred.
+</ParamField>
+
+<ParamField path="session_token_env" type="string">
+  An UPPER_SNAKE name holding the temporary AWS session token for `bedrock`. Omit when the
+  credentials need no session token.
+</ParamField>
+
 ## Params ride the request body
 
 Everything under `params:` on a router think binding is passthrough. The compiler

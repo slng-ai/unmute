@@ -180,40 +180,45 @@ variables:
 
 ## Every key an entry takes
 
-An entry needs a `name:`, exactly one source, and an `assign:`. The rest depend
-on which source you picked.
-
 <ParamField path="name" type="string" required>
-  What this entry is called. It appears in refusals, in the run log, and in
-  `compile-report.json`, so give it a name you would recognise there.
+  A unique entry name used in errors and logs. Use lower snake case. No name is inferred.
 </ParamField>
 
-<ParamField path="clock | source | tool" type="string" required>
-  The one source this entry reads. Write exactly one of the three:
-
-  - `clock: now` reads the clock.
-  - `source: <fact>` reads a <Tooltip tip="Something the phone call already carries when it arrives, like the number that called you. There are eight of them.">fact the call carries</Tooltip>, such as `from_number`.
-  - `tool: <name>` runs a local or webhook tool.
+<ParamField path="clock" type="string">
+  Only `now` is accepted. Choose exactly one of `clock`, `source`, and `tool`; omitting
+  all three is refused.
 </ParamField>
 
-<ParamField path="assign" type="list of pairs" required>
-  Where the answer goes. One `- variable: result.field` per line. An entry may
-  fill as many variables as the result has fields.
+<ParamField path="timezone" type="string">
+  Required with `clock`: an IANA zone such as `Europe/Madrid`. There is no default,
+  because the container clock is UTC. Refused on source and tool entries.
 </ParamField>
 
-<ParamField path="timezone" type="IANA zone">
-  Required on a `clock:` entry, refused on any other. `Europe/Madrid`, not an
-  offset. Containers run on UTC, so there is no useful default.
+<ParamField path="source" type="string">
+  One of the eight [system call facts](/reference/variables#sources). Choose exactly one
+  of `clock`, `source`, and `tool`. An unavailable fact skips the entry and leaves its
+  destination values unchanged.
 </ParamField>
 
-<ParamField path="writes" type="true | false">
-  Required on a `tool:` entry, refused on any other. Your answer to "does
-  running this unasked, on every call, change anything?"
+<ParamField path="tool" type="string">
+  A declared local or webhook tool. Choose exactly one of `clock`, `source`, and `tool`.
+  No tool runs when this key is absent.
 </ParamField>
 
-<ParamField path="args" type="list of pairs">
-  The inputs a `tool:` entry passes. One `- name: value` per line. A value may
-  be fixed, or a `{{variable}}` an earlier entry filled.
+<ParamField path="writes" type="boolean">
+  Required with `tool`: `true` if this use changes data, or `false` if it only reads.
+  There is no inferred answer. Refused with `clock` or `source`.
+</ParamField>
+
+<ParamField path="args" type="list of one-key pairs">
+  Arguments for a tool entry, as argument/value pairs. Values may use declared variable
+  placeholders. Omit when the tool needs no authored arguments; required inputs must still
+  be supplied. Refused on clock and source entries.
+</ParamField>
+
+<ParamField path="assign" type="list of one-key pairs" required>
+  One or more `variable: result.field` pairs. Every destination must be declared. Values
+  are checked together before any are saved. No assignment is inferred.
 </ParamField>
 
 ## Entries run in order

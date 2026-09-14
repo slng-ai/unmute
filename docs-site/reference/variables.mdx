@@ -23,13 +23,39 @@ variables:
     description: Caller's first name, used in the greeting and the prompt.
 ```
 
-| Field | Required | What it is |
-|---|---|---|
-| `type` | yes | a type expression, see [the type grammar](#the-type-grammar) below |
-| `source` | no | where the value comes from |
-| `default` | no | the value to use when nothing supplies one |
-| `confirm` | no | the step that must hear the caller agree before anything acts on this value |
-| `description` | no | a note describing the value; also used to describe a task's derived finish argument, without sharing the saved value |
+<ParamField path="type" type="string" required>
+  A single-line Python type expression. Accepts `str`, `int`, `float`, `bool`, `Phone`,
+  `Date`, `Time`, `Id`, `EmailStr`, `NameEmail`, a declared shape name, `Literal[...]`,
+  `list[T]`, or `T | None`. The aliases `string`, `integer`, `number`, and `boolean` also
+  work. See the [type grammar](/reference/variables#the-type-grammar) for composition
+  rules and target limits.
+</ParamField>
+
+<ParamField path="description" type="string">
+  A sentence explaining what the value means. Used to describe the task finish argument
+  derived from this variable. Required for `source: conversation`; otherwise omit for no
+  extra description. The saved value is still shared only through placeholders.
+</ParamField>
+
+<ParamField path="default" type="matching the declared type">
+  A scalar starting value, checked against `type`. Shapes, lists, and `NameEmail` take no
+  authored default. If omitted, a scalar or shape starts unset and a list starts as `[]`.
+  An unset value renders as `none recorded yet.` in a prompt.
+</ParamField>
+
+<ParamField path="source" type="string">
+  Accepts `call_start`, `conversation` (SLNG only), or a [system call
+  fact](/reference/variables#sources). If omitted, the variable has no automatic call-fact
+  source; a task, pre-fetch, or session payload can still fill it. Route support is
+  checked for system sources. `conversation` requires a description and forbids a default;
+  inbound code-target calls require a default for `call_start`.
+</ParamField>
+
+<ParamField path="confirm" type="string">
+  The name of the task that must hear the caller agree to a pre-fetched value. Until
+  confirmed, only that task can read it in a prompt and tools cannot silently use it. If
+  omitted, the value is usable as soon as it arrives.
+</ParamField>
 
 ## The type grammar
 
@@ -179,6 +205,10 @@ assignment must satisfy the declared type's format.
 
 ## `shapes:` groups fields into a named type
 
+A pre-fetch cannot fill a shape or a list. Use a task to produce grouped fields;
+use separate scalar variables for clock and lookup pre-fetch results. A single
+pre-fetch may assign several scalar variables from one result.
+
 A top-level list of reusable object types. Each entry defines a name and
 typed fields. Use that name in a variable's `type:` to store an object with
 those fields. The name in this example, `Appointment`, is chosen by the author.
@@ -195,11 +225,20 @@ shapes:
         description: The service the caller asked for, in the salon's own words.
 ```
 
-| Key | Required | What it is |
-|---|---|---|
-| `name` | yes | what a `type:` refers to. Written in `CapWords`, because it names a generated class |
-| `description` | no | reaches the model as the class docstring |
-| `fields` | yes | one or more fields, in either form below |
+<ParamField path="name" type="string" required>
+  A unique `CapWords` type name, used by `type:`. Built-in type names are reserved. There
+  is no inferred name.
+</ParamField>
+
+<ParamField path="description" type="string">
+  Description of the shape, used as its class docstring. Omit it for no extra description.
+</ParamField>
+
+<ParamField path="fields" type="list of field definitions" required>
+  One or more fields. Each item is a one-key `field_name: Type` pair, or an object with
+  `name`, `type`, and optional `description`. Names and types are required in the long
+  form; omitted descriptions add no extra model guidance.
+</ParamField>
 
 Fields use either the short form, `- field_name: Type`, or a block with
 `name:`, `type:`, and an optional `description:`, as shown above.
@@ -294,16 +333,46 @@ with its line number.
 
 ### Prefetch fields
 
-| Field | Required | Meaning |
-|---|---|---|
-| `name` | yes | Identifies the entry in validation errors and logs |
-| `clock` | choose one source | Only `now` is accepted |
-| `timezone` | with `clock` | An IANA timezone such as `Europe/Madrid`; refused on other entry kinds |
-| `source` | choose one source | One of the eight system call facts listed under [Sources](#sources) |
-| `tool` | choose one source | A declared local or webhook tool |
-| `writes` | with `tool` | `false` for a read-only lookup; `true` when it changes data. Refused on clock and source entries |
-| `args` | when tool inputs need them | A list of one-key argument/value pairs; only for tool entries |
-| `assign` | yes | A non-empty list of one-key variable/result pairs; one entry may fill several variables |
+<ParamField path="name" type="string" required>
+  A unique entry name used in errors and logs. Use lower snake case. No name is inferred.
+</ParamField>
+
+<ParamField path="clock" type="string">
+  Only `now` is accepted. Choose exactly one of `clock`, `source`, and `tool`; omitting
+  all three is refused.
+</ParamField>
+
+<ParamField path="timezone" type="string">
+  Required with `clock`: an IANA zone such as `Europe/Madrid`. There is no default,
+  because the container clock is UTC. Refused on source and tool entries.
+</ParamField>
+
+<ParamField path="source" type="string">
+  One of the eight [system call facts](/reference/variables#sources). Choose exactly one
+  of `clock`, `source`, and `tool`. An unavailable fact skips the entry and leaves its
+  destination values unchanged.
+</ParamField>
+
+<ParamField path="tool" type="string">
+  A declared local or webhook tool. Choose exactly one of `clock`, `source`, and `tool`.
+  No tool runs when this key is absent.
+</ParamField>
+
+<ParamField path="writes" type="boolean">
+  Required with `tool`: `true` if this use changes data, or `false` if it only reads.
+  There is no inferred answer. Refused with `clock` or `source`.
+</ParamField>
+
+<ParamField path="args" type="list of one-key pairs">
+  Arguments for a tool entry, as argument/value pairs. Values may use declared variable
+  placeholders. Omit when the tool needs no authored arguments; required inputs must still
+  be supplied. Refused on clock and source entries.
+</ParamField>
+
+<ParamField path="assign" type="list of one-key pairs" required>
+  One or more `variable: result.field` pairs. Every destination must be declared. Values
+  are checked together before any are saved. No assignment is inferred.
+</ParamField>
 
 A tool entry reads fields from the tool's declared `output:` schema. Its
 arguments may be fixed scalars or reference values saved by earlier entries.

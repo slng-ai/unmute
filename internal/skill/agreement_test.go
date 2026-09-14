@@ -227,7 +227,9 @@ func TestCapacityRequirementMatchesPublicGuide(t *testing.T) {
 		"references/package.md":              bundleFile(t, "references/package.md"),
 		"docs-site/reference/agent-yaml.mdx": trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
 	} {
-		if !strings.Contains(content, row) {
+		param := regexp.MustCompile(`(?s)<ParamField path="capacity"[^>]*>(.*?)</ParamField>`).FindStringSubmatch(content)
+		paramStatesRequirement := param != nil && strings.Contains(strings.Join(strings.Fields(param[1]), " "), "Required for code targets or telephony")
+		if !strings.Contains(content, row) && !paramStatesRequirement {
 			t.Errorf("%s does not state the code-target capacity requirement", name)
 		}
 	}
@@ -362,6 +364,12 @@ func TestToolClosedValuesMatchCode(t *testing.T) {
 }
 
 func tableRowHasExactValues(content, field string, want []string) bool {
+	// Field references use ParamField; the skill still uses Markdown tables.
+	// Read only the accepted-values sentence, not defaults or related keys.
+	param := regexp.MustCompile(`(?s)<ParamField path="` + regexp.QuoteMeta(field) + `"[^>]*>\s*Accepts ([^.]+)\.`)
+	for _, match := range param.FindAllStringSubmatch(content, -1) {
+		content += "\n| `" + field + "` | " + match[1] + " |"
+	}
 	want = slices.Clone(want)
 	slices.Sort(want)
 	code := regexp.MustCompile("`([^`]+)`")
@@ -380,6 +388,24 @@ func tableRowHasExactValues(content, field string, want []string) bool {
 		}
 	}
 	return false
+}
+
+func TestClosedValuesInParamFields(t *testing.T) {
+	for _, tc := range []struct {
+		content string
+		want    bool
+	}{
+		{`<ParamField path="type" type="string" required>
+  Accepts ` + "`bearer` or `api_key`" + `. Other keys include ` + "`token_env`" + `.
+</ParamField>`, true},
+		{`<ParamField path="type" type="string">Accepts ` + "`bearer`" + `.</ParamField>`, false},
+		{`<ParamField path="type" type="string">Accepts ` + "`bearer`, `api_key`, or `basic`" + `.</ParamField>`, false},
+		{`<ParamField path="other" type="string">Accepts ` + "`bearer` or `api_key`" + `.</ParamField>`, false},
+	} {
+		if got := tableRowHasExactValues(tc.content, "type", []string{"bearer", "api_key"}); got != tc.want {
+			t.Errorf("closed values in %q = %v, want %v", tc.content, got, tc.want)
+		}
+	}
 }
 
 // TestModelsReferenceMatchesCatalog holds references/models.md against the
