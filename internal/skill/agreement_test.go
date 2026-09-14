@@ -503,7 +503,7 @@ func TestRealtimeSurfacesAgree(t *testing.T) {
 		"browser route in this version", "must be at OpenAI",
 		"refuse the binding by name",
 	}
-	fields := []string{"`name`", "`provider`", "`model`", "`voice`", "`think`", "`description`"}
+	fields := []string{"name", "provider", "model", "voice", "think", "description"}
 	surfaces := map[string]string{
 		"references/models.md":          bundleFile(t, "references/models.md"),
 		"docs-site/models/realtime.mdx": trackedFile(t, "docs-site/models/realtime.mdx"),
@@ -512,10 +512,20 @@ func TestRealtimeSurfacesAgree(t *testing.T) {
 		// Whitespace-normalised, because these are clauses rather than words and
 		// a clause is wrapped wherever its line ran out.
 		flat := strings.Join(strings.Fields(content), " ")
-		for _, want := range append(append(block, refused...), fields...) {
+		for _, want := range append(block, refused...) {
 			if !strings.Contains(flat, strings.Join(strings.Fields(want), " ")) {
 				t.Errorf("%s does not carry %q, which the other live-model surfaces teach", name, want)
 			}
+		}
+		// A field counts however the surface states its keys: the skill spells
+		// them in prose with backticks, and a docs-site page states them as
+		// <ParamField> blocks. Pinning one spelling made this fail on a page
+		// restructure that kept every field it is here to protect.
+		for _, field := range fields {
+			if strings.Contains(flat, "`"+field+"`") || strings.Contains(flat, `path="`+field+`"`) {
+				continue
+			}
+			t.Errorf("%s states no %q field, which the other live-model surfaces teach", name, field)
 		}
 		if !strings.Contains(content, "paraphrase") {
 			t.Errorf("%s does not say the greeting is paraphrased, which a live call makes obvious", name)
@@ -523,10 +533,24 @@ func TestRealtimeSurfacesAgree(t *testing.T) {
 	}
 	// The reference documents the entry's fields and the agent's `realtime:`
 	// key, and points at the page for the rest.
+	//
+	// The key is matched on its own rather than on a whole row, because the page
+	// states its keys as <ParamField> blocks and used to state them as a table.
+	// Pinning the table's pipes made this gate fail on a restructure that kept
+	// every fact it is here to protect.
 	reference := trackedFile(t, "docs-site/reference/agent-yaml.mdx")
-	for _, want := range append(fields, "| `realtime` | a `models.realtime` entry name", "/models/realtime") {
+	flatReference := strings.Join(strings.Fields(reference), " ")
+	for _, want := range append(fields, "/models/realtime") {
 		if !strings.Contains(reference, want) {
 			t.Errorf("docs-site/reference/agent-yaml.mdx does not carry %q", want)
+		}
+	}
+	for _, want := range []string{
+		`path="realtime"`,
+		"Name of an entry in `models.realtime`",
+	} {
+		if !strings.Contains(flatReference, strings.Join(strings.Fields(want), " ")) {
+			t.Errorf("docs-site/reference/agent-yaml.mdx does not state the agent's realtime key: missing %q", want)
 		}
 	}
 	// One vendor row, read from the catalogue rather than repeated here.

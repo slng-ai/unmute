@@ -38,16 +38,36 @@ agents:
 An agent names the entry with `realtime:` in place of `think:` and `speak:`.
 Writing both forms on one agent is refused.
 
-## What a realtime entry takes
+## Every key a realtime entry takes
 
-| Field | What it is |
-|---|---|
-| `name` | the entry's name; shares one namespace with the other model sections |
-| `provider` | `openai` is the one vendor with a live service on Pipecat |
-| `model` | the live model's id, passed through as written |
-| `voice` | the voice the model speaks in, passed through as written |
-| `think` | optional: a `models.think` entry with `provider: openai` that runs the model's tools and its harder reasoning |
-| `description` | author note |
+<ParamField path="name" type="string" required>
+  The entry's name, which an agent writes under `realtime:`. Shares one namespace
+  with the other model sections. Required; omission is refused.
+</ParamField>
+
+<ParamField path="provider" type="string" required>
+  Accepts `openai`, the one vendor with a live service on Pipecat. Required;
+  omission is refused.
+</ParamField>
+
+<ParamField path="model" type="string" required>
+  The live model's id, passed through as written. Required; omission is refused.
+</ParamField>
+
+<ParamField path="voice" type="string">
+  The voice the model speaks in, passed through as written. Omit to take the
+  model's own default.
+</ParamField>
+
+<ParamField path="think" type="string">
+  Name of a `models.think` entry with `provider: openai`, which runs the model's
+  tools and its harder reasoning. Required when the agent has tools; omit for an
+  agent with none.
+</ParamField>
+
+<ParamField path="description" type="string">
+  Author note. Omit for none; nothing reads it.
+</ParamField>
 
 Every other model field is refused on a live entry by name, with its line and
 column: `temperature`, `language`, `speed`, `params`, `pace`, `endpoint_env`.
