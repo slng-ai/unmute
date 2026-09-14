@@ -86,16 +86,14 @@ brew install slng-ai/tap/voiceai
 targets:
   slng:
     provider: slng
-    deployment_region: eu-central
+    deployment_region: eu-north
 ```
 
 That is the whole target. `version`, `pins`, `sdk_language` and `connection` are
 all refused by name: each describes a generated project, and there is none.
 
-`deployment_region` takes exactly one of `any`, `us-east`, `eu-central` or
-`ap-south`. `any` lets SLNG route each call itself. This is the only target
-whose region values are checked, because it is the only one whose platform
-publishes a closed set.
+`deployment_region` takes exactly one SLNG region: `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`.
+The same names apply to speech and the Context Router. `any` is no longer accepted.
 
 ## The pushed agent's name
 
@@ -157,7 +155,7 @@ asked for.
 
 That last one is the surprising one. Not every model exists in every region, and
 pinning `deployment_region` to a region a model does not serve fails at push.
-`any` avoids it by letting SLNG route each call.
+Choose a region that serves the model.
 
 Unmute writes no `llm_router_enabled`, so SLNG applies its own default. That is
 deliberate: a model your organisation brought its own key for has no entry in

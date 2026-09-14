@@ -48,17 +48,30 @@ type ActionHandler func(action, path string, out io.Writer) error
 
 // RunConsole displays Home with optional in-process maintenance actions.
 func RunConsole(in io.Reader, out io.Writer, accessible bool, actions ActionHandler) (Result, error) {
-	return runWithStart(in, out, accessible, false, actions)
+	return runWithStart(in, out, accessible, false, actions, nil, nil)
 }
 
 // RunCreate enters the create flow directly for `unmute init`.
 func RunCreate(in io.Reader, out io.Writer, accessible bool) (Result, error) {
-	return runWithStart(in, out, accessible, true, nil)
+	return runWithStart(in, out, accessible, true, nil, nil, nil)
 }
 
-func runWithStart(in io.Reader, out io.Writer, accessible, createOnly bool, actions ActionHandler) (Result, error) {
+// RunConsoleWithManifest uses the saved default for new agents from Home.
+func RunConsoleWithManifest(in io.Reader, out io.Writer, accessible bool, actions ActionHandler, raw []byte, manifestErr error) (Result, error) {
+	return runWithStart(in, out, accessible, false, actions, raw, manifestErr)
+}
+
+func runWithStart(in io.Reader, out io.Writer, accessible, createOnly bool, actions ActionHandler, raw []byte, manifestErr error) (Result, error) {
 	runner := newRunner(in, out, accessible)
 	runner.actions = actions
+	runner.manifestErr = manifestErr
+	if len(raw) > 0 {
+		rules, err := spec.ParseManifest(raw)
+		runner.manifestErr = err
+		runner.manifest = rules
+		runner.manifestBytes = raw
+	}
+
 	flow := func() (Result, error) {
 		if createOnly {
 			result, _, err := runCreate(runner)
@@ -105,6 +118,9 @@ func runHome(runner *fieldRunner) (Result, error) {
 }
 
 func runCreate(runner *fieldRunner) (Result, bool, error) {
+	if runner.manifestErr != nil {
+		return Result{}, false, runner.manifestErr
+	}
 	path := ""
 	back, err := runner.input("Agent name", agentNameHelp, &path, validateName)
 	if err != nil || back {
@@ -118,6 +134,12 @@ func runCreate(runner *fieldRunner) (Result, bool, error) {
 		Tools:        scaffold.DefaultTools(), // seeded, editable/removable in the Tools section
 	}
 	data.SetTarget(scaffold.DefaultTarget)
+	if runner.manifest != nil {
+		data.Manifest = runner.manifestBytes
+		if err := guideManifest(runner, &data); err != nil {
+			return Result{}, false, err
+		}
+	}
 	return editAgent(runner, Agent{Path: path, Data: data})
 }
 
@@ -228,12 +250,17 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 		}
 		switch choice {
 		case "target":
-			selected, back, err := runner.selectOne("Target / orchestrator", runner.describe("LiveKit and Pipecat both emit a runnable project."), createTargetOptions(), true)
+			selected, back, err := runner.selectOne("Target / orchestrator", runner.describe("LiveKit and Pipecat both emit a runnable project."), manifestTargetOptions(runner, createTargetOptions()), true)
 			if err != nil {
 				return Result{}, false, err
 			}
 			if !back && selected != actionBack {
 				result.Agent.Data.SetTarget(selected)
+				if runner.manifest != nil {
+					if err := guideManifestTarget(runner, &result.Agent.Data); err != nil {
+						return Result{}, false, err
+					}
+				}
 				dropUnsupportedBuiltins(&result.Agent.Data)
 				for i := range result.Agent.Data.Agents {
 					result.Agent.Data.Agents[i].Reason = result.Agent.Data.Reason
@@ -683,6 +710,12 @@ func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, bin
 		if err != nil || choice == actionBack {
 			return err
 		}
+		if runner.manifest != nil && manifestModelRules(runner.manifest, role) != nil && (choice == "provider" || choice == "distributor" || choice == "model") {
+			if err := chooseManifestBinding(runner, target, role, binding); err != nil {
+				return err
+			}
+			continue
+		}
 		switch choice {
 		case "provider":
 			providerChoices := providerOptions(framework, role)
@@ -737,6 +770,18 @@ func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, bin
 				return err
 			}
 		case "language":
+			if runner.manifest != nil && runner.manifest.Languages != nil {
+				var options []menuChoice
+				for _, language := range runner.manifest.Languages.Allow {
+					options = append(options, newChoice(language, language))
+				}
+				selected, err := manifestChoose(runner, string(role)+" language", options)
+				if err != nil {
+					return err
+				}
+				binding.Language = selected
+				continue
+			}
 			if _, err := runner.input("Language", "Per-model BCP-47 tag, for example en or es-MX. Blank uses the provider default. "+entryHint, &binding.Language, validateLanguage); err != nil {
 				return err
 			}
@@ -935,6 +980,9 @@ func editTools(runner *fieldRunner, data *scaffold.Data) error {
 		}
 		tool := scaffold.Tool{Execution: "webhook", Input: `{"type":"object","properties":{}}`}
 		back, err := runner.input("Tool name", "Lowercase snake_case.", &tool.Name, func(value string) error {
+			if runner.manifest != nil && runner.manifest.Tools != nil && !manifestPermits(runner.manifest.Tools.Names, value) {
+				return fmt.Errorf("manifest: choose an allowed tool name: %s", strings.Join(runner.manifest.Tools.Names.Allow, ", "))
+			}
 			if err := validateIdentifier(value); err != nil {
 				return err
 			}
@@ -947,6 +995,15 @@ func editTools(runner *fieldRunner, data *scaffold.Data) error {
 		})
 		if err != nil || back {
 			continue
+		}
+		if runner.manifest != nil && runner.manifest.Tools != nil {
+			back, err := chooseToolExecution(runner, data, &tool)
+			if err != nil {
+				return err
+			}
+			if back {
+				continue
+			}
 		}
 		tool.AttachTo = []string{cmp.Or(data.EntryAgent, "assistant")}
 		data.Tools = append(data.Tools, tool)
@@ -1022,6 +1079,12 @@ func chooseToolExecution(runner *fieldRunner, data *scaffold.Data, tool *scaffol
 		}
 		options := make([]menuChoice, 0, len(toolExecutionKinds)+1)
 		for _, kind := range toolExecutionKinds {
+			if runner.manifest != nil && runner.manifest.Tools != nil {
+				rules := runner.manifest.Tools
+				if !manifestPermits(rules.Kinds, kind.Value) || (kind.Value == "builtin" && !manifestPermits(rules.Builtin, "end_call")) {
+					continue
+				}
+			}
 			label := kind.Name + "  ·  " + detail[kind.Value]
 			if _, ok := toolExecutionGate(kind, target); !ok {
 				label = kind.Name + "  ·  unavailable on " + targetLabel(target)
@@ -3299,9 +3362,12 @@ func validateParams(value string) error {
 }
 
 type fieldRunner struct {
-	in         io.Reader
-	out        io.Writer
-	accessible bool
+	manifestErr   error
+	manifestBytes []byte
+	manifest      *spec.Manifest
+	in            io.Reader
+	out           io.Writer
+	accessible    bool
 	// One scanner for the whole accessible session. Per-prompt scanners are what
 	// forced the old one-byte reader: a second scanner over the same stream
 	// inherits none of the first one's buffer, so a read-ahead swallowed the

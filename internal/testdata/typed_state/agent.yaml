@@ -139,7 +139,7 @@ models:
         provider: openai
         key_env: OPENAI_API_KEY
       params:
-        world_part_override: eu
+        world_part: eu-north
         reasoning_effort: "none"
   speak:
     voice:

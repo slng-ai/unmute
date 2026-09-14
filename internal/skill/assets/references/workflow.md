@@ -7,6 +7,8 @@ Write, validate, read the error, fix, repeat. Then run it and listen.
 | Command | What it does |
 |---|---|
 | `unmute init <name>` | scaffold a new package |
+| `unmute manifest create [name]` | edit and save a reusable manifest |
+| `unmute manifest use <name>` | select the default manifest for future agents |
 | `unmute validate [dir]` | load, build, and check against every declared target |
 | `unmute compile [dir]` | validate, then write `build/<target>/` for each code target |
 | `unmute dev [dir]` | compile, run locally, and let you talk to the agent |
@@ -67,6 +69,14 @@ current directory. `--force` overwrites files that changed after they were
 installed, which is what the command otherwise refuses to do.
 
 ## Start with init
+
+When a saved default manifest exists, `init` uses it and guides the author
+through the allowed choices. `unmute init my-agent --from-manifest` opens the
+saved-manifest picker instead. The chosen file is copied into the package;
+validation and compilation need no computer config. Read
+[Manifest](manifests.md) for creation, storage, updates and the rules.
+
+With no saved default, the ordinary scaffold works as below.
 
 ```sh
 unmute init my-agent

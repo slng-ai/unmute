@@ -39,6 +39,9 @@ func Load(dir string) (*Package, error) {
 	if err := pkg.readYAML("agent.yaml", &pkg.Agent); err != nil {
 		return nil, err
 	}
+	if err := pkg.readManifest(); err != nil {
+		return nil, err
+	}
 	pkg.readVariableOrder()
 
 	for _, name := range pkg.Agent.Tools {

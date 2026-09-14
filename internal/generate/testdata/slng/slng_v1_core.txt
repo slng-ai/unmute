@@ -14,7 +14,7 @@ Everything in this directory is disposable. Edit the package and compile again.
 | `README.md` | this file |
 | `compile-report.json` | what was compiled, and which checks were left to deployment |
 
-The agent deploys to region **eu-central**.
+The agent deploys to region **eu-north**.
 
 ## 1. Vault entries
 
@@ -249,8 +249,7 @@ Compile from the package instead. That is the shape this file is.
   - the model is not enabled for agents in your organisation;
   - it is one of your own models and SLNG's router is off;
   - it is not served in the region and language this agent asked for. Not every
-    model exists in every region. `deployment_region: any` avoids this by letting
-    SLNG route each call, which is why it is worth trying before you pin one.
+    model exists in every region. Choose a region that serves the model.
 === agent.json ===
 {
   "schema_version": 2,
@@ -258,7 +257,7 @@ Compile from the package instead. That is the shape this file is.
   "system_prompt": "You are the front desk for Acme Support.\n\nAnswer in one or two short sentences. Use the caller's name once, near the\nstart, and not again.\n\nIf the caller says they are finished, or says goodbye, end the call.\n",
   "greeting": "Hi {{customer_name}}, you have reached Acme Support. How can I help?",
   "language": "en",
-  "region": "eu-central",
+  "region": "eu-north",
   "models": {
     "stt": "slng/deepgram/nova:3-en",
     "llm": "openai/gpt-5.6-luna",
@@ -295,7 +294,7 @@ Compile from the package instead. That is the shape this file is.
 {
   "target": "slng",
   "provider": "slng",
-  "region": "eu-central",
+  "region": "eu-north",
   "agent": "slng-core-fixture-slng",
   "files": [
     "README.md",
@@ -329,6 +328,6 @@ Compile from the package instead. That is the shape this file is.
   ],
   "notes": [
     "slng target: model strings are forwarded to SLNG exactly as written; SLNG owns its own model list, so unmute checks no vendor or model name here",
-    "slng target: region eu-central is written as declared"
+    "slng target: region eu-north is written as declared"
   ]
 }

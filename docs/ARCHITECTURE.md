@@ -60,17 +60,25 @@ Validation and generation use the same stages, so they cannot interpret a
 package differently.
 
 1. `internal/spec.Load` reads `agent.yaml`, `targets.yaml`, prompts, tools,
-   connections, and local handlers. Strict decoding rejects unknown fields.
+   connections, local handlers, and the linked package-root `manifest`.
+   Strict decoding rejects unknown fields.
 2. `internal/ir.Build` resolves names, model bindings, controls, connections,
    overrides, and routes into target-independent IR.
 3. `internal/ir.Validate` checks the IR against the selected target's
    capability table. Unsupported behavior fails before generation. Safe
-   target differences can produce warnings.
+   target differences can produce warnings. A package manifest additionally
+   checks every declared profile and target, including unselected alternatives.
 4. `internal/generate.Generate` validates again and dispatches to one target
    driver, which writes the native project.
 
 `internal/target` is the shared rulebook. Validation, the console, and the
 generators must not keep separate capability tables.
+
+`internal/manifest` owns the computer's saved contract library and default.
+Only creation reads that library: it copies the selected manifest into the
+package before scaffold preflight. The compiler reads that copy, never local
+config, so teammates and CI evaluate the same contract. The compile report
+records its company name, revision and language or region verification gaps.
 
 ## Target boundary
 

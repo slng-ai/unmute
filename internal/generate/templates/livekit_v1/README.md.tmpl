@@ -455,7 +455,7 @@ the upstream. This project sends:
 {{range .Slng.BodyParams}}{{.}}
 {{end}}```
 
-`world_part_override` never reaches the upstream: this compiler consumes it into
+`world_part` never reaches the upstream: this compiler consumes it into
 the router's regional base URL, and the line above says so. Everything else is
 passthrough, and the compiler does not know what any of it means, so it cannot
 tell you what the upstream will do with a value. If a value is wrong, the upstream says so and the

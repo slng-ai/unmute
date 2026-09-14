@@ -49,7 +49,7 @@ models:
       upstream:
         provider: openai
       params:
-        world_part_override: eu
+        world_part: eu-north
         reasoning_effort: "none"
 ```
 
@@ -157,22 +157,16 @@ truncating, because two truncated scopes could land on the same string.
 
 ## Regions
 
-`params.world_part_override` picks which router serves you.
+`params.world_part` uses the shared SLNG region list:
 
-| Value | Endpoint |
+| Group | Regions |
 |---|---|
-| `eu` | `https://eu.context-router.slng.ai/v1` |
-| `us` | `https://us.context-router.slng.ai/v1` |
-| `india` | `https://india.context-router.slng.ai/v1` |
-| `indonesia` | `https://indonesia.context-router.slng.ai/v1` |
+| Americas | `us-east`, `us-west`, `br` |
+| Europe | `eu-west`, `eu-north`, `gb`, `za`, `il` |
+| Asia | `jp`, `sg`, `id`, `in`, `au` |
 
-<Warning>
-  These four are the router's own regions. SLNG **speech gateways** use a
-  different set under `params.world_part`: for example, `in`
-  selects the Indian speech gateway, while this router requires `india`.
-  See [speech gateway values](/optimization/regional-infrastructure#choose-a-speech-gateway).
-  The compiler refuses a value the router does not serve and names the four.
-</Warning>
+These names also apply to speech and SLNG deployment. Choose a concrete region;
+`any` and the old router names are no longer accepted.
 
 The key is consumed rather than forwarded: it becomes the base URL.
 
@@ -237,7 +231,7 @@ reads two names and forwards the rest:
 
 | Key | What happens |
 |---|---|
-| `world_part_override` | consumed, and becomes the router's regional base URL |
+| `world_part` | consumed, and becomes the router's regional base URL |
 | `slng_pure_proxy` | consumed, and rides the body as the router's shadow-trial switch |
 | anything else | forwarded, in the request body, on both targets |
 
@@ -268,7 +262,7 @@ models:
         url: https://openrouter.ai/api/v1
         key_env: OPENROUTER_API_KEY
       params:
-        world_part_override: eu
+        world_part: eu-north
 ```
 
 The worked reason it exists: Qwen3 is a hybrid thinking model, and thinking

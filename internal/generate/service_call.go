@@ -61,7 +61,7 @@ type ServiceCall struct {
 func resolveService(fw targetcap.Provider, role targetcap.Role,
 	binding ir.Binding, env *envSet, site slngSite, extraSettings ...pyKV) (ServiceCall, targetcap.Entry, error) {
 
-	// A router think binding consumes params.world_part_override into the base
+	// A router think binding consumes params.world_part into the base
 	// URL, so it must not also reach the client as a kwarg the SDK never heard
 	// of (D2).
 	//

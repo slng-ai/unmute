@@ -63,6 +63,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	}
 	declared := shapeNames(shapes)
 	out := &Agent{
+		Manifest:     pkg.Manifest,
 		Version:      pkg.Agent.Version,
 		Name:         strings.TrimSpace(pkg.Agent.Name),
 		EntryAgent:   pkg.Agent.EntryAgent,
@@ -1332,6 +1333,12 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 		WarmInstances:     raw.WarmInstances,
 		Models:            resolveBindings(agent, used, raw.Models),
 		Destinations:      destinations,
+	}
+	if agent.Manifest != nil {
+		built.ManifestModels = make(map[string]ModelDef, len(raw.Models))
+		for name, override := range raw.Models {
+			built.ManifestModels[name] = convertModelDef(override, agent.Models[name].Kind, agent.Models[name].Fallback)
+		}
 	}
 	// The plan is what tells the emitter to emit the Bin, the transport entry,
 	// and the runbook. Without it a package would compile with telephony declared

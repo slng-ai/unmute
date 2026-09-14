@@ -162,7 +162,7 @@ func sampleBinding(entry targetcap.Entry) (ir.Binding, string) {
 		binding.Model = "gpt-5.6-luna"
 		binding.AgentID = "catalog-sample-v1"
 		binding.Upstream = &ir.Upstream{Provider: "openai"}
-		binding.Params["world_part_override"] = "eu"
+		binding.Params["world_part"] = "eu-north"
 	case entry.Vendor == "slng":
 		binding.Model = "slng/deepgram/nova:3"
 	default:

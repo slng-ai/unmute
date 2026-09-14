@@ -28,25 +28,27 @@ import (
 // something a person writes.
 func TestNoNewDictionaryInTheAuthoringSurface(t *testing.T) {
 	var found []string
-	walkAuthoringStructs(reflect.TypeOf(Package{}), map[reflect.Type]bool{}, func(owner reflect.Type, field reflect.StructField) {
-		if field.Type.Kind() != reflect.Map {
-			return
-		}
-		// `yaml:"-"` is not part of the authoring surface: the decoder never
-		// touches it, so nobody writes it. Package.Markdown, Handlers, Documents
-		// and files are all of this kind, holding file content keyed by path.
-		if yamlName(field) == "-:" || field.Tag.Get("yaml") == "" {
-			return
-		}
-		key := owner.Name() + "." + field.Name
-		if _, ok := permanentDictionaries[key]; ok {
-			return
-		}
-		if _, ok := dictionaryDebt[key]; ok {
-			return
-		}
-		found = append(found, fmt.Sprintf("%s (%s) is a %s", key, yamlName(field), field.Type))
-	})
+	for _, root := range []reflect.Type{reflect.TypeOf(Package{}), reflect.TypeOf(Manifest{})} {
+		walkAuthoringStructs(root, map[reflect.Type]bool{}, func(owner reflect.Type, field reflect.StructField) {
+			if field.Type.Kind() != reflect.Map {
+				return
+			}
+			// `yaml:"-"` is not part of the authoring surface: the decoder never
+			// touches it, so nobody writes it. Package.Markdown, Handlers, Documents
+			// and files are all of this kind, holding file content keyed by path.
+			if yamlName(field) == "-:" || field.Tag.Get("yaml") == "" {
+				return
+			}
+			key := owner.Name() + "." + field.Name
+			if _, ok := permanentDictionaries[key]; ok {
+				return
+			}
+			if _, ok := dictionaryDebt[key]; ok {
+				return
+			}
+			found = append(found, fmt.Sprintf("%s (%s) is a %s", key, yamlName(field), field.Type))
+		})
+	}
 	sort.Strings(found)
 	if len(found) > 0 {
 		t.Errorf(`%d map-typed field(s) in the authoring surface are on neither allowlist:

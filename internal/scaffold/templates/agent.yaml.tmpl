@@ -3,6 +3,9 @@
 # which runtime this compiles to lives in targets.yaml, so the same agent runs
 # on either one.
 version: 1
+[[- if .Manifest]]
+manifest: manifest
+[[- end]]
 [[- if .AgentName]]
 
 # What this agent is called where it is deployed under a name instead of an id.
@@ -12,6 +15,10 @@ version: 1
 name: [[yaml .AgentName]]
 [[- end]]
 entry_agent: [[.EntryAgent]]
+[[- if .Tracing]]
+tracing:
+  provider: [[yaml .Tracing.Provider]]
+[[- end]]
 
 # Each agent is a prompt plus the models it thinks and speaks with. The
 # instructions file is sent to the model verbatim as its system prompt, so

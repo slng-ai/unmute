@@ -127,6 +127,8 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 	data := scaffold.Data{
 		Name:              filepath.Base(pkg.Root),
 		AgentName:         pkg.Agent.Name,
+		Manifest:          pkg.ManifestBytes,
+		Tracing:           pkg.Agent.Tracing,
 		Target:            tgt.Provider,
 		EntryAgent:        pkg.Agent.EntryAgent,
 		TargetVersion:     tgt.Version,
@@ -532,6 +534,16 @@ func diffJSON(path string, left, right any, losses *[]string) {
 }
 
 func editMaintained(runner *fieldRunner, agent *maintainedAgent) error {
+	previous := runner.manifest
+	runner.manifest = nil
+	defer func() { runner.manifest = previous }()
+	if len(agent.data.Manifest) > 0 {
+		rules, err := packagespec.ParseManifest(agent.data.Manifest)
+		if err != nil {
+			return err
+		}
+		runner.manifest = rules
+	}
 	for {
 		options := editorSectionOptions(agent.data)
 		options = append(options,
@@ -608,37 +620,60 @@ func editMaintained(runner *fieldRunner, agent *maintainedAgent) error {
 }
 
 func editTarget(runner *fieldRunner, data *scaffold.Data) error {
-	selected, back, err := runner.selectOne("Target / orchestrator", "", maintainTargetOptions(data.Target), true)
+	selected, back, err := runner.selectOne("Target / orchestrator", "", manifestTargetOptions(runner, maintainTargetOptions(data.Target)), true)
 	if err == nil && !back && selected != actionBack && selected != data.Target {
 		data.SetTarget(selected)
+		if runner.manifest != nil {
+			return guideManifestTarget(runner, data)
+		}
 	}
 	return err
 }
 
 func validateMaintained(path string) error {
+	_, err := maintainedWarnings(path)
+	return err
+}
+
+func maintainedWarnings(path string) ([]string, error) {
 	pkg, err := packagespec.Load(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	agent, err := ir.Build(pkg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	names := slices.Sorted(maps.Keys(agent.Targets))
 	targets := make([]ir.Target, 0, len(names))
 	for _, name := range names {
 		targets = append(targets, agent.Targets[name])
 	}
-	_, err = ir.Validate(agent, targets, targetcap.Default())
-	return err
+	report, err := ir.Validate(agent, targets, targetcap.Default())
+	if err != nil {
+		return nil, err
+	}
+	if pkg.Manifest == nil {
+		return nil, nil
+	}
+	var warnings []string
+	for _, row := range report.PerTarget {
+		for _, warning := range row.Warnings {
+			if !slices.Contains(warnings, warning) {
+				warnings = append(warnings, warning)
+			}
+		}
+	}
+	return warnings, nil
 }
 
 func saveMaintained(runner *fieldRunner, agent *maintainedAgent) error {
 	if reflect.DeepEqual(agent.data, agent.initial) {
-		if err := validateMaintained(agent.path); err != nil {
+		warnings, err := maintainedWarnings(agent.path)
+		if err != nil {
 			return repairPreflight(runner, &agent.data, err)
 		}
-		return showNotice(runner, "No changes to save", "The package validates and every byte is unchanged.")
+		return showNotice(runner, "No changes to save", "The package validates and every byte is unchanged."+maintenanceWarningText(warnings))
 	}
 	root, err := os.MkdirTemp("", "unmute-maintain-save-")
 	if err != nil {
@@ -650,8 +685,14 @@ func saveMaintained(runner *fieldRunner, agent *maintainedAgent) error {
 	if err != nil {
 		return err
 	}
-	if err := validateMaintained(candidate); err != nil {
+	warnings, err := maintainedWarnings(candidate)
+	if err != nil {
 		return repairPreflight(runner, &agent.data, err)
+	}
+	if len(warnings) > 0 {
+		if err := showNotice(runner, "Manifest warnings", strings.Join(warnings, "\n")); err != nil {
+			return err
+		}
 	}
 	affected, removals, err := affectedFiles(agent.path, candidate, created)
 	if err != nil {
@@ -816,4 +857,11 @@ func applyCandidate(root, candidate string, affected, removals []string) error {
 		}
 	}
 	return nil
+}
+
+func maintenanceWarningText(warnings []string) string {
+	if len(warnings) == 0 {
+		return ""
+	}
+	return "\n\nWarnings:\n" + strings.Join(warnings, "\n")
 }

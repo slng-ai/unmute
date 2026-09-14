@@ -13,13 +13,13 @@ generated `build/` files.
 
 ## Start with one reference
 
-Open the first reference that matches the task. Load another only when the work
-reaches it.
+Open the first matching reference; load another only when needed.
 
 | Reference | Open it when |
 |---|---|
 | `references/package.md` | writing `agent.yaml`, `targets.yaml`, connections, or package files |
 | `references/workflow.md` | running a command or fixing its output |
+| `references/manifests.md` | creating a saved manifest, choosing its default, or following an agent's contract |
 | `references/models.md` | choosing listening, speaking, reasoning, or turn models |
 | `references/prompting.md` | writing prompts, greetings, tasks, or tool descriptions |
 | `references/tools.md` | calling an API, Python, MCP, or a builtin |
@@ -56,7 +56,7 @@ Use block-style YAML sequences in assistant-authored packages. Do not use anchor
 
 Run these steps in order:
 
-1. **Inspect the existing package.** Read `agent.yaml`, `targets.yaml`, named
+1. **Inspect the existing package.** Read `agent.yaml`, its linked `manifest`, `targets.yaml`, named
    connections, loaded tool YAML and local handlers, and every used prompt.
 2. **Run `unmute validate` before editing.** Record errors and warnings.
 3. **Fix invalid definitions.** Make the current package legal first.
@@ -66,7 +66,7 @@ Run these steps in order:
 
 ## The build loop
 
-For a new package, start with `unmute init <name>` and edit what it creates.
+For a new package, start with `unmute init <name>`; it uses the saved default manifest. Use `--from-manifest` to choose another. Read `references/manifests.md` for company rules, and preserve the package contract and link when editing.
 For every change:
 
 1. Write the package.

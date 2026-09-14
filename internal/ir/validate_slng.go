@@ -128,10 +128,8 @@ func validateSlngInjectText(agent *Agent, name, key, value string, row *TargetVa
 		name, key, refs[0], "{{"+refs[0]+"}}"))
 }
 
-// validateSlngRegions is the only region *value* check in the tree. Every other
-// target forwards whatever region string it is given, because its platform owns
-// the names; SLNG publishes a closed set of four, so an author can be told
-// before the push instead of after it.
+// validateSlngRegions checks deployment against the shared SLNG region list.
+// Other deployment targets own their region names and receive them unchanged.
 func validateSlngRegions(resolved Target, row *TargetValidation) {
 	// One region is FieldDeploymentMultiRegion's job to enforce, and it already
 	// refuses more than one. Checking every entry anyway means a package that

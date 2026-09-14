@@ -19,14 +19,9 @@ import (
 // slng-ai/backend@develop. Re-read before relying on any of them.
 const SlngTargetVerified = "2026-08-25"
 
-// SlngRegions is every deployment region SLNG accepts on a create body, from the
-// pattern on VoiceAgentCreate.region (app/schemas/voice_agent.py:955).
-//
-// `any` is a write-time value, not a stored one: normalize_public_region
-// persists it as eu-central with routing_mode unpinned and reverses it on read
-// (voice_agent_regions.py:271-278). So an author who writes `any` gets `any`
-// back, and SLNG picks the region per call.
-var SlngRegions = []string{"any", "us-east", "eu-central", "ap-south"}
+// SlngRegions is the shared deployment, speech and router region list,
+// supplied by the SLNG team on 2026-09-14.
+var SlngRegions = []string{"us-east", "us-west", "br", "eu-west", "eu-north", "gb", "za", "il", "jp", "sg", "id", "in", "au"}
 
 // The push tool's own surface, read from slng-ai/sdks on 2026-08-25: the CLI
 // lives in that monorepo under cli/, ships as the `voiceai` binary, and reads
@@ -327,10 +322,10 @@ func SlngDiagnostic(format string, args ...any) string {
 }
 
 // CheckSlngRegion reports whether a deployment region is one SLNG accepts. The
-// message lists all four, because the useful part of "eu-west is wrong" is which
+// message lists the accepted regions, because the useful part of a refusal is which
 // ones are right.
 //
-// This is the only region *value* check in the tree: validateRegions checks for
+// For other deployment targets, validateRegions checks for
 // an empty or duplicated entry and forwards whatever else it is given, because
 // every other target's platform owns its own region names.
 func CheckSlngRegion(region string) error {
@@ -338,9 +333,9 @@ func CheckSlngRegion(region string) error {
 		return nil
 	}
 	if region == "" {
-		return fmt.Errorf("%s", SlngDiagnostic("requires a deployment_region: one of %s, where any lets SLNG route the call itself",
+		return fmt.Errorf("%s", SlngDiagnostic("requires a deployment_region: one of %s",
 			strings.Join(SlngRegions, ", ")))
 	}
-	return fmt.Errorf("%s", SlngDiagnostic("does not deploy to region %q: use one of %s, where any lets SLNG route the call itself",
+	return fmt.Errorf("%s", SlngDiagnostic("does not deploy to region %q: use one of %s",
 		region, strings.Join(SlngRegions, ", ")))
 }

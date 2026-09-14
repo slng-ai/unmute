@@ -13,8 +13,7 @@ Everything in this directory is disposable. Edit the package and compile again.
 | `README.md` | this file |
 | `compile-report.json` | what was compiled, and which checks were left to deployment |
 
-The agent deploys to region **{{.Region}}**{{if eq .Region "any"}}, which lets
-SLNG route each call itself{{end}}.
+The agent deploys to region **{{.Region}}**.
 
 {{if .NeedsVault -}}
 ## 1. Create these Vault entries first
@@ -353,5 +352,4 @@ Compile from the package instead. That is the shape this file is.
   - the model is not enabled for agents in your organisation;
   - it is one of your own models and SLNG's router is off;
   - it is not served in the region and language this agent asked for. Not every
-    model exists in every region. `deployment_region: any` avoids this by letting
-    SLNG route each call, which is why it is worth trying before you pin one.
+    model exists in every region. Choose a region that serves the model.

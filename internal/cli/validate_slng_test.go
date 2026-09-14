@@ -123,13 +123,13 @@ func TestValidateSlngRefusesUnsupportedPackageShapes(t *testing.T) {
 		fix       string
 	}{
 		{
-			name: "region outside the four", file: "targets.yaml",
-			replace: "deployment_region: eu-central", with: "deployment_region: eu-west",
-			behaviour: `does not deploy to region "eu-west"`, fix: "ap-south",
+			name: "retired region", file: "targets.yaml",
+			replace: "deployment_region: eu-north", with: "deployment_region: any",
+			behaviour: `does not deploy to region "any"`, fix: "eu-north",
 		},
 		{
 			name: "two regions", file: "targets.yaml",
-			replace: "deployment_region: eu-central", with: "deployment_region: [us-east, eu-central]",
+			replace: "deployment_region: eu-north", with: "deployment_region: [us-east, eu-central]",
 			behaviour: "takes exactly one deployment region", fix: "name one of",
 		},
 		{

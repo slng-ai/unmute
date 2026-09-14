@@ -6,26 +6,28 @@ import (
 )
 
 func TestSlngRouterBaseURL(t *testing.T) {
-	for _, tc := range []struct {
-		region string
-		want   string
-	}{
-		{"eu", "https://eu.context-router.slng.ai/v1"},
-		{"us", "https://us.context-router.slng.ai/v1"},
-		{"india", "https://india.context-router.slng.ai/v1"},
-		{"indonesia", "https://indonesia.context-router.slng.ai/v1"},
-	} {
-		got, ok := SlngRouterBaseURL(tc.region)
-		if !ok || got != tc.want {
-			t.Errorf("SlngRouterBaseURL(%q) = %q, %v; want %q, true", tc.region, got, ok, tc.want)
+	for _, region := range SlngRegions {
+		want := "https://" + region + ".context-router.slng.ai/v1"
+		got, ok := SlngRouterBaseURL(region)
+		if !ok || got != want {
+			t.Errorf("region %s: got %s, %v; want %s", region, got, ok, want)
+		}
+		if err := CheckSlngRegion(region); err != nil {
+			t.Error(err)
+		}
+		if _, err := SlngSpeechBaseURL(map[string]any{"world_part": region}); err != nil {
+			t.Error(err)
 		}
 	}
-	// The speech world parts share the params key and not the accepted set, so
-	// each has to be refused here rather than silently produce a host that does
-	// not exist (D2).
-	for _, region := range []string{"", "na", "ap", "EU", "eu ", "europe"} {
-		if got, ok := SlngRouterBaseURL(region); ok {
-			t.Errorf("SlngRouterBaseURL(%q) = %q, true; want refused", region, got)
+	for _, region := range []string{"", "any", "eu", "us", "india", "indonesia", "eu-central", "ap-south", "na", "ap", "EU", "eu ", "europe"} {
+		if _, ok := SlngRouterBaseURL(region); ok {
+			t.Errorf("router accepted retired/invalid region %q", region)
+		}
+		if err := CheckSlngRegion(region); err == nil {
+			t.Errorf("deployment accepted retired/invalid region %q", region)
+		}
+		if _, err := SlngSpeechBaseURL(map[string]any{"world_part": region}); err == nil {
+			t.Errorf("speech accepted retired/invalid region %q", region)
 		}
 	}
 }

@@ -66,15 +66,10 @@ const (
 	SlngRequestHeadersArg = "extra_headers"
 )
 
-// SlngRouterRegions are the router's own regions, in the order the public docs
-// list them. SLNG speech gateways use params.world_part and SlngSpeechWorldParts,
-// a different accepted set.
-var SlngRouterRegions = []string{"eu", "us", "india", "indonesia"}
-
 // SlngRouterBaseURL maps a router region onto its regional Chat Completions
-// base URL. False for anything outside the set, a speech world part included.
+// base URL. Deployment and speech use the same region names.
 func SlngRouterBaseURL(region string) (string, bool) {
-	if !slices.Contains(SlngRouterRegions, region) {
+	if !slices.Contains(SlngRegions, region) {
 		return "", false
 	}
 	return "https://" + region + ".context-router.slng.ai/v1", true

@@ -1,0 +1,89 @@
+---
+title: "unmute manifest"
+description: "Create saved company contracts and choose the default for new agents."
+---
+
+Save company rules once in the computer's config directory. Plain `unmute init`
+uses the saved default automatically. The new package carries its own copy, so
+validation and compilation work without the computer's config.
+
+```text
+$ unmute manifest --help
+Save organization contracts on this computer.
+
+Usage:
+  unmute manifest [command]
+
+Available Commands:
+  create      Create a saved manifest in your editor.
+  use         Choose the default manifest for new agents.
+
+Flags:
+  -h, --help   help for manifest
+
+Use "unmute manifest [command] --help" for more information about a command.
+```
+
+## Create a manifest
+
+```sh
+unmute manifest create acme-corp
+```
+
+The command opens a commented YAML starter in `VISUAL`, falling back to
+`EDITOR`. Set an editor that waits until you finish, for example
+`EDITOR='code --wait'` or `EDITOR=vi`. With no local name, it asks for one.
+Names use letters, digits, hyphens and underscores.
+
+A valid file is saved under the user config directory at
+`unmute/manifests/<name>/manifest`. Its path is printed so you can reopen it
+later. Existing names are never overwritten. Invalid drafts are kept at the
+path in the error and are not installed.
+
+The first saved file becomes the default. Later creations offer to change the
+default. The default name is stored in `unmute/default-manifest`.
+
+```text
+$ unmute manifest create --help
+Create a saved manifest in your editor.
+
+Usage:
+  unmute manifest create [name] [flags]
+
+Flags:
+  -h, --help   help for create
+```
+
+## Change the default
+
+```sh
+unmute manifest use acme-corp
+```
+
+The named manifest must exist and validate. This changes the default for
+future agents; it does not update existing packages.
+
+```text
+$ unmute manifest use --help
+Choose the default manifest for new agents.
+
+Usage:
+  unmute manifest use <name> [flags]
+
+Flags:
+  -h, --help   help for use
+```
+
+## Choose for one agent
+
+```sh
+unmute init my-agent --from-manifest
+```
+
+The picker starts with the saved default selected. Choosing another manifest
+here changes only this new agent. With no saved manifests, the command tells
+you to create one first. A broken saved default is an error, never an implicit
+unrestricted agent.
+
+See [Manifest](/reference/manifest) for the full format, rule meanings,
+package copies and updates. See [unmute init](/reference/cli/init) for creation.

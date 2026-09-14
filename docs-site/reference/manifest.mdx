@@ -1,0 +1,421 @@
+---
+title: "Manifest"
+description: "Save company rules once and apply them to every new agent."
+---
+
+A manifest sets the company rules an agent must follow. Save it once on the
+computer, then reuse it when creating agents. It contains rules, not prompts or
+tool implementations.
+
+On this page:
+
+- [Quickstart](#quickstart): save a manifest and create an agent
+- [What an agent carries](#what-an-agent-carries): the copied contract and its link
+- [Example manifest](#example-manifest): one complete example
+- [Every key](#every-key): fields, types, accepted values and defaults
+- [Validation and limits](#validation-and-limits): what is checked
+
+## Quickstart
+
+```sh
+unmute manifest create acme-corp
+unmute init my-agent
+```
+
+`manifest create` opens a commented YAML starter in `VISUAL`, falling back to
+`EDITOR`. Configure a blocking editor command first, such as `EDITOR='code --wait'`
+or `EDITOR=vi`. With no name, the command asks for one. Local names use letters,
+digits, hyphens and underscores. An existing name is never overwritten.
+
+The first saved manifest becomes the default. Later creations offer to change
+the default. Plain `unmute init` uses that default and guides the author through
+the allowed choices. No saved default means the ordinary creation flow.
+
+```sh
+unmute init another-agent --from-manifest
+unmute manifest use acme-corp
+```
+
+`--from-manifest` opens a picker for this new agent only. `manifest use` changes
+the default for future agents. Manifest-based creation needs guided input;
+unattended creation is not supported.
+
+Saved files live in the operating system's user config directory, under
+`unmute/manifests/<name>/manifest`. `unmute/default-manifest` holds the default
+name. The create command prints the saved path; reopen that file in an editor
+to update the rules. Increase its `version` when publishing a new company
+revision. A missing or invalid saved default is an error, never a reason to
+silently create an unrestricted agent. An invalid editor draft is kept at the
+path named in the error and is not installed.
+
+## What an agent carries
+
+Initialization copies the chosen file into the new package as `manifest` and
+links it from `agent.yaml`:
+
+```yaml
+manifest: manifest
+```
+
+Commit both files. Validation and compilation read the package's copy, so they
+work on another computer and in CI without the local library. Changing the
+saved default or editing the saved source does not change existing packages.
+To update one, replace its `manifest`, then run `unmute validate` and
+`unmute compile`. Do not remove a rule to make an agent pass without the
+author's instruction to change the company contract.
+
+A root manifest requires its link. A link requires that file. Only the literal
+link `manifest: manifest` is supported; no parent paths or remote URLs. Packages
+with neither file nor link continue to work without a company contract.
+
+## Example manifest
+
+```yaml manifest
+manifest: acme-corp
+version: 1
+
+models:
+  listen:
+    - provider: slng
+      allow:
+        - deepgram/nova:3
+  speak:
+    - provider: slng
+      allow:
+        - deepgram/aura:2
+  think:
+    - provider: openai
+      allow:
+        - gpt-5.6-terra
+
+languages:
+  allow:
+    - en
+
+regions:
+  models:
+    - role: listen
+      provider: slng
+      allow:
+        - eu-north
+    - role: speak
+      provider: slng
+      allow:
+        - eu-north
+  deployments:
+    - provider: livekit
+      allow:
+        - eu-central
+
+targets:
+  allow:
+    - livekit
+
+tools:
+  kinds:
+    allow:
+      - builtin
+  names:
+    allow:
+      - end_call
+  builtin:
+    allow:
+      - end_call
+
+tracing:
+  allow:
+    - langfuse
+    - coval
+```
+
+## Every key
+
+Only `manifest` and `version` are required. Add the rule blocks you need.
+Omitting a rule adds no restriction. An explicit empty allowlist permits
+nothing. Lists cannot contain `null`, blank strings or duplicate entries, and
+unknown keys are refused.
+
+### Identity
+
+<ParamField path="manifest" type="string" required>
+  The name of the organization this manifest describes, such as `acme-corp`.
+  Any non-blank text is accepted. This is separate from the local name chosen
+  with `unmute manifest create`, which identifies the saved file.
+</ParamField>
+
+<ParamField path="version" type="integer" required>
+  The revision of this manifest: any integer greater than or equal to `1`.
+  Increase it when you publish changed rules. It does not select the agent
+  schema, an Unmute release, or a LiveKit or Pipecat SDK version.
+</ParamField>
+
+### Models
+
+<ParamField path="models" type="object">
+  Restricts model choices by role. Its only keys are `listen`, `speak` and
+  `think`. Each role contains a list of provider entries. Agents still define
+  their own model profiles; the manifest approves exact provider/model pairs.
+  Turn models are outside these rules.
+</ParamField>
+
+<ParamField path="models.listen" type="object[]">
+  Allowed speech-to-text (STT) providers and models. Omit it for no STT
+  restriction, or write `listen: []` to allow no STT models. When present,
+  providers missing from this list are forbidden for this role. A provider
+  may appear only once.
+</ParamField>
+
+<ParamField path="models.listen[].provider" type="string" required>
+  The exact provider value used by the agent's listen profile, such as `slng`
+  or `deepgram`. See [STT providers](/models/stt) for supported integrations
+  on each target. Provider names are strings, not a fixed manifest enum.
+</ParamField>
+
+<ParamField path="models.listen[].allow" type="string[]" required>
+  Exact model IDs approved for this provider, such as `deepgram/nova:3` with
+  `slng`. Model IDs are provider-defined strings. No wildcards or prefix
+  matching; case must match. An empty list approves none of this provider's
+  STT models. There is no default model.
+</ParamField>
+
+<ParamField path="models.speak" type="object[]">
+  Allowed text-to-speech (TTS) providers and models. Omit it for no TTS
+  restriction, or write `speak: []` to allow no TTS models. Providers not
+  listed are forbidden for this role. A provider may appear only once.
+</ParamField>
+
+<ParamField path="models.speak[].provider" type="string" required>
+  The exact provider value used by the agent's speak profile, such as `slng`
+  or `elevenlabs`. See [TTS providers](/models/tts) for target support.
+  Provider names are strings, not a fixed manifest enum.
+</ParamField>
+
+<ParamField path="models.speak[].allow" type="string[]" required>
+  Exact model IDs approved for this provider, such as `deepgram/aura:2` with
+  `slng`. IDs are provider-defined and case-sensitive; wildcards are not
+  supported. An empty list approves no models. This does not restrict voice
+  IDs or supply a default voice.
+</ParamField>
+
+<ParamField path="models.think" type="object[]">
+  Allowed language-model (LLM) providers and models. Omit it for no LLM
+  restriction, or write `think: []` to allow no LLM models. Providers not
+  listed are forbidden for this role. A provider may appear only once.
+</ParamField>
+
+<ParamField path="models.think[].provider" type="string" required>
+  The exact provider value used by the agent's think profile, such as
+  `openai` or `slng`. See [LLM providers](/models/llm) for target support.
+  Match the configured provider, including when it routes to another service.
+  Provider names are strings, not a fixed manifest enum.
+</ParamField>
+
+<ParamField path="models.think[].allow" type="string[]" required>
+  Exact model IDs approved for this provider, such as `gpt-5.6-terra` with
+  `openai`. IDs are provider-defined and case-sensitive. No wildcards,
+  provider-wide approval or automatic model choice. An empty list approves
+  no models.
+</ParamField>
+
+### Languages
+
+<ParamField path="languages" type="object">
+  Limits configured STT and TTS languages. Its only key is `allow`. Omitting
+  this block adds no language restriction. It changes no LLM prompt and
+  does not guarantee the language of every spoken word.
+</ParamField>
+
+<ParamField path="languages.allow" type="string[]" required>
+  Language tags such as `en`, `es` or `en-US`. Values are not a fixed enum:
+  the accepted shape is 2 to 8 letters, followed by zero or more hyphen-separated
+  groups of 1 to 8 letters or digits. The speech integration must also support
+  the configured tag.
+
+  Matching ignores case, but uses the whole tag: `en` does not approve
+  `en-US`. No language is chosen by omission. An empty list forbids all
+  speech languages, including an unset one. For a nonempty list, automatic
+  or hidden language settings that cannot be checked produce a warning.
+</ParamField>
+
+### Regions
+
+<ParamField path="regions" type="object">
+  Limits model-service and deployment regions separately. Its only keys are
+  `models` and `deployments`. Neither list sets the other location.
+</ParamField>
+
+<ParamField path="regions.models" type="object[]">
+  Region rules for model services, matched by `role` and `provider`. Each
+  pair may appear only once. An omitted or empty rule list adds no model
+  region restrictions; a rule's own empty `allow` list forbids that pair.
+  Providers and roles with no matching row have no added region rule.
+</ParamField>
+
+<ParamField path="regions.models[].role" type="listen | speak | think" required>
+  Exactly one of `listen` (STT), `speak` (TTS), or `think` (LLM).
+  There is no default and no `turn` option.
+</ParamField>
+
+<ParamField path="regions.models[].provider" type="string" required>
+  The exact configured model provider this row governs, such as `slng`
+  or `aws`. This is a model provider, not the deployment target. It must be
+  nonempty; provider names are not a fixed manifest enum.
+</ParamField>
+
+<ParamField path="regions.models[].allow" type="string[]" required>
+  Exact native region names for the matched service. There are no shared
+  `EU` aliases, wildcards or automatic geographic conversions. Matching is
+  case-sensitive. An empty list forbids this provider/role even when its
+  region is unknown. A nonempty list warns when the region cannot be checked.
+
+  The compiler currently reads these settings:
+
+  | Service | Agent setting | Region values |
+  |---|---|---|
+  | SLNG listen/speak/think on code targets | `params.world_part` | `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au` |
+  | AWS think on LiveKit | `params.region` | Native AWS region strings; there is no closed list in Unmute |
+
+  Other providers, unsupported settings and endpoints supplied through
+  environment variables do not establish a verifiable model region.
+  A checked gateway setting is not proof of the upstream processing location.
+</ParamField>
+
+<ParamField path="regions.deployments" type="object[]">
+  Region rules matched by deployment provider. Each provider may appear only
+  once. Omitting this list or a provider's row adds no region restriction
+  for that provider.
+</ParamField>
+
+<ParamField path="regions.deployments[].provider" type="livekit | pipecat | slng" required>
+  Exactly one of `livekit`, `pipecat`, or `slng`. Match the target's
+  `provider`, not its instance name. There is no default.
+</ParamField>
+
+<ParamField path="regions.deployments[].allow" type="string[]" required>
+  Exact native values permitted in the target's `deployment_region`.
+  If the target declares several regions, every region must be allowed.
+  An empty list forbids deployment on this provider, including when no
+  region is declared. With a nonempty list, an omitted region warns.
+
+  LiveKit and Pipecat use their platform's region strings; Unmute does not
+  maintain a closed list. SLNG uses the same 13 regions as its model services:
+  `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`. The retired `any` value is refused. See [Targets](/reference/targets-yaml).
+</ParamField>
+
+### Deployment targets
+
+<ParamField path="targets" type="object">
+  Restricts where the package can be compiled or deployed. Its only key is
+  `allow`. Omitting it adds no target restriction.
+</ParamField>
+
+<ParamField path="targets.allow" type="string[]" required>
+  Any subset of `livekit`, `pipecat`, and `slng`. These are deployment
+  providers, not target instance names. An empty list allows no target.
+  Every target declared in the package is checked, even when a command
+  selects only one of them.
+</ParamField>
+
+### Tools
+
+<ParamField path="tools" type="object">
+  Restricts tools by kind and identity. The available keys are `kinds`,
+  `names`, `builtin`, and `slng`. Every applicable rule must pass.
+  Permission does not create or attach a tool, and it does not add target
+  support for that tool.
+</ParamField>
+
+<ParamField path="tools.kinds" type="object">
+  Restricts execution kinds. Its only key is `allow`. Omit it to leave
+  execution kinds unrestricted by the manifest.
+</ParamField>
+
+<ParamField path="tools.kinds.allow" type="string[]" required>
+  Any subset of these eight values:
+
+  | Value | Tool kind |
+  |---|---|
+  | `webhook` | An HTTP tool |
+  | `local` | A local Python handler |
+  | `mcp` | A tool provided by an MCP server |
+  | `builtin` | A built-in tool ID |
+  | `client` | A client-side tool declaration; currently gated on all targets |
+  | `provider_hosted` | A provider-hosted declaration; currently gated on all targets |
+  | `knowledge` | A knowledge lookup |
+  | `slng` | A named tool hosted on SLNG |
+
+  An empty list allows no tools. The ordinary target capability checks still
+  apply; listing a gated kind here does not enable it.
+</ParamField>
+
+<ParamField path="tools.names" type="object">
+  Restricts package tool names. Its only key is `allow`. Omission adds no
+  package-name restriction.
+</ParamField>
+
+<ParamField path="tools.names.allow" type="string[]" required>
+  Exact names from the package's `tools` list: for example, `check_booking`
+  means `tools/check_booking.yaml`. Names are user-defined strings, with no
+  wildcard matching. An empty list permits no package tools.
+</ParamField>
+
+<ParamField path="tools.builtin" type="object">
+  Restricts builtin IDs in addition to any kind or package-name rules.
+  Its only key is `allow`. This rule applies only to builtin tools.
+</ParamField>
+
+<ParamField path="tools.builtin.allow" type="string[]" required>
+  Exact builtin IDs. Currently `end_call` is supported on all three targets;
+  `send_sms` is supported only on SLNG. The manifest accepts nonempty ID
+  strings, while tool validation checks whether the ID and target are
+  supported. An empty list forbids builtin tools.
+</ParamField>
+
+<ParamField path="tools.slng" type="object">
+  Restricts the identity of tools hosted on SLNG. Its only key is `allow`.
+  This rule applies to a `slng:` tool on any target that uses it.
+</ParamField>
+
+<ParamField path="tools.slng.allow" type="string[]" required>
+  Exact hosted tool names from `slng:`, which may differ from the local tool
+  filename. Names are organization-defined strings. There is no wildcard or
+  automatic discovery. The legacy pinned form uses the local package tool
+  name. An empty list forbids SLNG-hosted tools.
+</ParamField>
+
+### Tracing
+
+<ParamField path="tracing" type="object">
+  Restricts the tracing provider when tracing is enabled. Its only key is
+  `allow`. Tracing stays optional; this block does not turn it on or require it.
+</ParamField>
+
+<ParamField path="tracing.allow" type="string[]" required>
+  Any subset of `langfuse` and `coval`. An empty list requires tracing to
+  remain disabled. Omitting this block adds no provider restriction.
+  Target support and credential requirements still apply.
+</ParamField>
+
+## Validation and limits
+
+The contract covers the whole declared package, including unused profiles,
+fallbacks and every target override. Selecting one target for compilation does
+not hide a violation in another target. Known violations fail before output is
+written. Automatic or hidden language and region values that cannot be checked
+produce warnings. Read those warnings; a successful compile does not prove
+data residency. The compile report records the contract name, revision and
+verification warnings.
+
+Existing target capability checks still apply. Permission in a manifest does
+not add provider support or make an unsupported setting work.
+
+The creation console cannot collect custom model endpoint settings or a SLNG
+Context Router upstream. It excludes those model choices. If your contract
+allows only such bindings, author the package and its manifest link directly;
+validation and compilation still enforce the same rules.
+
+The contract checks declared settings, not arbitrary local tool code, the
+provider's actual processing location or tracing delivery. It is not signed
+and does not prevent somebody deleting both file and link. Pronunciation
+dictionaries, compliance libraries, placement, URL restrictions, dependency
+rules and prefetch limits are not part of this version.

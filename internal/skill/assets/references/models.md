@@ -135,7 +135,7 @@ models:
       upstream:
         provider: openai
       params:
-        world_part_override: eu
+        world_part: eu-north
         reasoning_effort: "none"
 ```
 
@@ -167,9 +167,7 @@ Four things are required and none has a default:
   alone, so a long id plus a long agent name can be refused where the id by
   itself passed. The refusal names the agent or task that produced the long value.
 - `upstream`, saying who actually serves the model.
-- `params.world_part_override`, from the router's own region set: `eu`, `us`,
-  `india`, `indonesia`. Speech gateways use a different set under `params.world_part`,
-  such as `in` for India. The compiler consumes this into the base URL and names
+- `params.world_part`, from the shared SLNG region set: `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`. The compiler consumes this into the base URL and names
   the substitution in the compile report.
 
 `params.reasoning_effort: "none"` is not optional once the agent has tools **when
@@ -186,7 +184,7 @@ and one silent one.
 
 ### Everything else under `params:` rides the request body
 
-The compiler consumes two names: `world_part_override` becomes the router's base
+The compiler consumes two names: `world_part` becomes the router's base
 URL and `slng_pure_proxy` is the router's shadow-trial switch. It forwards the rest
 in the request body, on both targets. The router passes a key it does not
 recognise to the upstream.
@@ -197,7 +195,7 @@ error. Nested values are fine, because the body is JSON:
 
 ```yaml
       params:
-        world_part_override: eu
+        world_part: eu-north
         provider:                     # forwarded to the router, and on to OpenRouter
           only: ["groq"]
 ```

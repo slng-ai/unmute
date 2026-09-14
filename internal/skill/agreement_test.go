@@ -534,7 +534,7 @@ func TestRegionalGuidanceStaysExplicit(t *testing.T) {
 		if strings.Contains(content, "region_override") || strings.Contains(content, "region-override") {
 			t.Errorf("%s still teaches the retired SLNG region override", name)
 		}
-		for _, part := range target.SlngSpeechWorldParts {
+		for _, part := range target.SlngRegions {
 			if !strings.Contains(content, "`"+part+"`") {
 				t.Errorf("%s omits speech gateway %q", name, part)
 			}

@@ -136,11 +136,9 @@ keeps its own deployment settings.
 ### SLNG reasoning uses the Context Router
 
 For a `think` model with `provider: slng`, the
-[Context Router](/optimization/context-router) has its own gateway locations:
-`eu`, `us`, `india`, and `indonesia`. Set `params.world_part_override` for the
-router and `params.world_part` for speech. Their values also differ: speech
-uses `in`, for example, while the router uses `india`. The LLM behind the router
-keeps its own provider settings.
+[Context Router](/optimization/context-router) uses the same 13 regions as SLNG
+speech and deployment. Set `params.world_part` to choose the router region.
+The LLM behind the router keeps its own provider settings.
 
 ## Place the worker near your users and models
 

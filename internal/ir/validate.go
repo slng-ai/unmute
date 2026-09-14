@@ -81,6 +81,9 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 		return ValidateReport{}, fmt.Errorf("validate: no targets selected")
 	}
 	global, globalWarnings := validateStructure(agent)
+	contractErrors, contractWarnings := ValidateManifest(agent)
+	global = append(global, contractErrors...)
+	globalWarnings = append(globalWarnings, contractWarnings...)
 	global = append(global, validateConfiguredTargets(agent, caps)...)
 	global = append(global, slngOneAgentIDPerPackage(agent)...)
 	global = append(global, slngScopeErrors(agent)...)
@@ -1438,7 +1441,7 @@ func validateSlngRouter(agent *Agent, resolved Target, row *TargetValidation) {
 		}
 		routers = append(routers, name)
 		if binding.EndpointEnv != "" {
-			row.Errors = add(row.Errors, fmt.Sprintf("think.%s sets endpoint_env, but params.world_part_override already selects the router endpoint and upstream owns the upstream one", name))
+			row.Errors = add(row.Errors, fmt.Sprintf("think.%s sets endpoint_env, but params.world_part already selects the router endpoint and upstream owns the upstream one", name))
 		}
 		row.Errors = append(row.Errors, slngRouterRegionErrors(name, binding)...)
 		if err := targetcap.ValidateSlngAgentID(binding.AgentID); err != nil {
@@ -1607,18 +1610,23 @@ func slngRouterTargets() []string {
 	return out
 }
 
-// slngRouterRegionErrors holds FR-003 and FR-005. The refusal names the four
-// router regions and distinguishes them from speech gateway codes.
+// slngRouterRegionErrors checks the shared region list. The refusal names the
+// shared SLNG regions.
 func slngRouterRegionErrors(profile string, binding Binding) []string {
-	regions := strings.Join(targetcap.SlngRouterRegions, ", ")
-	value, ok := binding.Params["world_part_override"]
+	regions := strings.Join(targetcap.SlngRegions, ", ")
+	for _, key := range []string{"world_part_override", "region_override"} {
+		if _, set := binding.Params[key]; set {
+			return []string{fmt.Sprintf("think.%s params.%s is no longer supported: replace it with params.world_part (one of %s)", profile, key, regions)}
+		}
+	}
+	value, ok := binding.Params["world_part"]
 	if !ok {
-		return []string{fmt.Sprintf("think.%s needs params.world_part_override to pick a router region: one of %s", profile, regions)}
+		return []string{fmt.Sprintf("think.%s needs params.world_part to pick a router region: one of %s", profile, regions)}
 	}
 	region, _ := value.(string)
 	if _, ok := targetcap.SlngRouterBaseURL(region); !ok {
 		return []string{fmt.Sprintf(
-			"think.%s params.world_part_override %q is not a router region: one of %s. These four are the router's own set; SLNG speech gateways use params.world_part with a different set of world parts",
+			"think.%s params.world_part %q is not a router region: one of %s. Use the shared SLNG deployment and speech region names",
 			profile, region, regions)}
 	}
 	return nil
