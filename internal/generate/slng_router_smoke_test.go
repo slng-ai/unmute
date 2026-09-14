@@ -175,7 +175,7 @@ func TestSmokeSlngRouterHelpers(t *testing.T) {
 			for profile, binding := range target.Models.Reason {
 				binding.Provider = ir.ProviderSlngRouter
 				binding.AgentID = "salon-router-smoke"
-				binding.Params["world_part"] = "eu-north"
+				binding.Params["world_part"] = "eu-west"
 				binding.Upstream = &ir.Upstream{
 					Provider: "vertex", CredentialsEnv: "SMOKE_GCP_KEY", Location: "europe-west4",
 				}
@@ -197,7 +197,7 @@ func TestSmokeSlngRouterHelpers(t *testing.T) {
 func scopedRouterFixture(agent *ir.Agent) {
 	for name, tgt := range agent.Targets {
 		for profile := range tgt.Models.Reason {
-			tgt.Models.Reason[profile] = ir.Binding{Provider: ir.ProviderSlngRouter, AgentID: "scoped", Model: "test", Params: map[string]any{"world_part": "eu-north"}, Upstream: &ir.Upstream{Provider: "openai"}}
+			tgt.Models.Reason[profile] = ir.Binding{Provider: ir.ProviderSlngRouter, AgentID: "scoped", Model: "test", Params: map[string]any{"world_part": "eu-west"}, Upstream: &ir.Upstream{Provider: "openai"}}
 		}
 		agent.Targets[name] = tgt
 	}

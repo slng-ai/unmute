@@ -8,12 +8,14 @@ import (
 	"strings"
 )
 
-// The SLNG Context Router's own facts: the regions it serves, the base URL each
-// one takes, what an agent id may be, and which fields each upstream provider
-// needs inside the inline endpoint object every think request carries.
+// The SLNG Context Router's own facts: the base URL a world part takes, what an
+// agent id may be, and which fields each upstream provider needs inside the
+// inline endpoint object every think request carries. The world parts themselves
+// live next door in slng_speech.go, because speech and the router serve the same
+// set.
 //
-// Both drivers and ir.Validate read this file, so the region set, the URL form
-// and the provider table have one owner instead of a literal per driver.
+// Both drivers and ir.Validate read this file, so the URL form and the provider
+// table have one owner instead of a literal per driver.
 //
 // The OpenAI-compatible upstream kind was exercised against the live router on
 // 2026-08-19, which covers the openai and openai-compat rows. The azure, vertex
@@ -25,7 +27,7 @@ import (
 // read 2026-08-19.
 const SlngRouterDocs = "https://docs.slng.ai/context-router/"
 
-// SlngRouterVerified is when the region set, the base URL form and the two
+// SlngRouterVerified is when the world part set, the base URL form and the two
 // identity headers were last read off that page.
 const SlngRouterVerified = "2026-08-19"
 
@@ -66,13 +68,19 @@ const (
 	SlngRequestHeadersArg = "extra_headers"
 )
 
-// SlngRouterBaseURL maps a router region onto its regional Chat Completions
-// base URL. Deployment and speech use the same region names.
-func SlngRouterBaseURL(region string) (string, bool) {
-	if !slices.Contains(SlngRegions, region) {
+// SlngRouterBaseURL maps a world part onto its Chat Completions base URL. False
+// for anything that is not a world part.
+//
+// The router used to take four names of its own, eu, us, india and indonesia,
+// while speech took the thirteen world parts. One author had to learn that
+// `in` and `india` were the same place spelled two ways. The router now serves
+// every world part, so both roles read SlngRegions and the host is the world
+// part: the URL form did not change, only how many names reach it.
+func SlngRouterBaseURL(worldPart string) (string, bool) {
+	if !slices.Contains(SlngRegions, worldPart) {
 		return "", false
 	}
-	return "https://" + region + ".context-router.slng.ai/v1", true
+	return "https://" + worldPart + ".context-router.slng.ai/v1", true
 }
 
 // SlngAgentIDMaxLen bounds the agent id. The value leaves as an HTTP header

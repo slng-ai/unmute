@@ -5,29 +5,31 @@ import (
 	"testing"
 )
 
-func TestSlngRouterBaseURL(t *testing.T) {
-	for _, region := range SlngRegions {
-		want := "https://" + region + ".context-router.slng.ai/v1"
-		got, ok := SlngRouterBaseURL(region)
+// The router serves every world part and nothing else. Asserted against
+// SlngRegions itself rather than a copy of the list, because a copy is how
+// the two sets drifted apart the first time: the router took four names of its
+// own, `eu`, `us`, `india` and `indonesia`, while speech took the thirteen world
+// parts, and `in` and `india` were the same place spelled two ways.
+func TestSlngRouterServesEveryWorldPartAndNothingElse(t *testing.T) {
+	for _, part := range SlngRegions {
+		want := "https://" + part + ".context-router.slng.ai/v1"
+		got, ok := SlngRouterBaseURL(part)
 		if !ok || got != want {
-			t.Errorf("region %s: got %s, %v; want %s", region, got, ok, want)
-		}
-		if err := CheckSlngRegion(region); err != nil {
-			t.Error(err)
-		}
-		if _, err := SlngSpeechBaseURL(map[string]any{"world_part": region}); err != nil {
-			t.Error(err)
+			t.Errorf("SlngRouterBaseURL(%q) = %q, %v; want %q, true", part, got, ok, want)
 		}
 	}
-	for _, region := range []string{"", "any", "eu", "us", "india", "indonesia", "eu-central", "ap-south", "na", "ap", "EU", "eu ", "europe"} {
-		if _, ok := SlngRouterBaseURL(region); ok {
-			t.Errorf("router accepted retired/invalid region %q", region)
+	// The four retired router names are refused rather than mapped to a guessed
+	// world part, because the spellings overlap and the meanings do not: `us`
+	// was a router region and is not a world part, so accepting it would send
+	// the request somewhere the author did not write.
+	for _, retired := range []string{"eu", "us", "india", "indonesia"} {
+		if got, ok := SlngRouterBaseURL(retired); ok {
+			t.Errorf("SlngRouterBaseURL(%q) = %q, true; want the retired name refused", retired, got)
 		}
-		if err := CheckSlngRegion(region); err == nil {
-			t.Errorf("deployment accepted retired/invalid region %q", region)
-		}
-		if _, err := SlngSpeechBaseURL(map[string]any{"world_part": region}); err == nil {
-			t.Errorf("speech accepted retired/invalid region %q", region)
+	}
+	for _, wrong := range []string{"", "na", "ap", "EU-WEST", "eu-west ", "europe"} {
+		if got, ok := SlngRouterBaseURL(wrong); ok {
+			t.Errorf("SlngRouterBaseURL(%q) = %q, true; want refused", wrong, got)
 		}
 	}
 }
@@ -348,5 +350,32 @@ func TestValidateSlngScope(t *testing.T) {
 	exact := strings.Repeat("y", SlngAgentIDMaxLen-len(SlngScopeSeparator)-len("concierge"))
 	if err := ValidateSlngScope(exact, site); err != nil {
 		t.Errorf("ValidateSlngScope refused a scope of exactly %d characters: %v", SlngAgentIDMaxLen, err)
+	}
+}
+
+func TestSlngAllRolesShareDeploymentRegions(t *testing.T) {
+	for _, region := range SlngRegions {
+		want := "https://" + region + ".context-router.slng.ai/v1"
+		got, ok := SlngRouterBaseURL(region)
+		if !ok || got != want {
+			t.Errorf("region %s: got %s, %v; want %s", region, got, ok, want)
+		}
+		if err := CheckSlngRegion(region); err != nil {
+			t.Error(err)
+		}
+		if _, err := SlngSpeechBaseURL(map[string]any{"world_part": region}); err != nil {
+			t.Error(err)
+		}
+	}
+	for _, region := range []string{"", "any", "eu", "us", "india", "indonesia", "eu-central", "ap-south", "na", "ap", "EU", "eu ", "europe"} {
+		if _, ok := SlngRouterBaseURL(region); ok {
+			t.Errorf("router accepted retired/invalid region %q", region)
+		}
+		if err := CheckSlngRegion(region); err == nil {
+			t.Errorf("deployment accepted retired/invalid region %q", region)
+		}
+		if _, err := SlngSpeechBaseURL(map[string]any{"world_part": region}); err == nil {
+			t.Errorf("speech accepted retired/invalid region %q", region)
+		}
 	}
 }

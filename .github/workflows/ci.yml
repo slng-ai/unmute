@@ -154,6 +154,7 @@ jobs:
       - run: pip install ruff==0.15.14
       # ruff honours .gitignore, so `.` is the tracked Python and nothing else.
       - run: ruff check .
+      - run: python3 -m unittest discover -s scripts -p 'test_render_changelog.py'
 
   # Known vulnerabilities, both in what we import and in the standard library we
   # link into every released binary. Same go.mod version as every other job, so

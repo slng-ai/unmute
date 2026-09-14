@@ -14,25 +14,59 @@ deployment body, not a project you start and keep running. It talks in a
 browser web session and on an inbound phone call, both on the one `slng`
 target.
 
-One package serves any property. The hotel's name, neighbourhood, city and
-website are template variables with defaults, so a phone call works with no
-input and a web session can override them from the same deployment. The
-hotel's identifier is pinned into the lookup, so the model never asks a guest
-which hotel they are in and can never send the wrong one.
+On this page:
 
-The agent also records one value the guest gives it. When a guest wants a text
-with the summary of the call, the agent asks for the mobile number, reads it
-back, and saves it only once the guest confirms. That number is a memory
-variable: no session supplies it, the model fills it, and the call record
-returns it. The text itself goes through SLNG's curated `send_sms`, with the
-sender pinned by the package and the Twilio credentials read from the vault by
-the platform.
+- [Quickstart](#quickstart) - validate, compile, deploy
+- [What it shows](#what-it-shows) - every slng feature once
+- [One package, any property](#one-package-any-property) - variables with defaults
+- [The text message](#the-text-message) - what the platform owns
+- [Structure](#structure) - the files, file by file
+- [Before you start](#before-you-start) - what your organisation needs
+- [Talk to it in the browser](#talk-to-it-in-the-browser) - a web session
+- [Receive phone calls](#receive-phone-calls) - trunk and carrier routing
+- [Advanced](#advanced) - your own LiveKit client
+- [Troubleshooting](#troubleshooting) - symptoms and their fixes
+- [Where to go next](#where-to-go-next) - related examples and pages
 
-Two facts about that text belong to the platform, not the package. SLNG sends
-it to the number the call came from: the model writes the message and does not
-choose the recipient, so the confirmed number is a record of the call, not the
-address. And SLNG offers the tool on phone calls only: in a browser web session
-the model has no text tool, and the prompt says so to the guest.
+## Quickstart
+
+Run these commands from the repository root. To test the current branch, run
+`make build` and use `./bin/unmute` in place of `unmute` below.
+
+`validate` and `compile` work with no credential and no mirror to fetch first:
+
+```bash
+unmute validate examples/hotel-concierge
+unmute compile examples/hotel-concierge --target slng
+ls build/slng
+```
+
+`unmute pull` does not apply: this package targets slng alone, and slng reads
+no mirror.
+
+A push needs the resources in [Before you start](#before-you-start), in the
+organisation the key belongs to.
+
+Validate, compile, and push in one command. A real push needs a `voiceai`
+release that supports a checked, resolved attachment; an older one is refused
+with upgrade guidance before anything is written. This flow has been verified
+with `voiceai 0.1.18`:
+
+```bash
+export SLNG_API_KEY=...
+unmute deploy examples/hotel-concierge --target slng --dry-run
+unmute deploy examples/hotel-concierge --target slng
+```
+
+`--dry-run` resolves every reference, checks the injected `hotel_id` against
+the published `hotel_info` schema, and previews the attachment changes without
+changing SLNG. Both commands write `build/slng/deploy-report.json`. Each real
+deployment resolves the latest published tools again and attaches the versions
+it checked. Rename the package's `name:` before deploying a separate test
+agent; otherwise this command replaces `hotel-concierge-slng` if it already
+exists.
+
+Then talk to it: [Talk to it in the browser](#talk-to-it-in-the-browser).
 
 ## What it shows
 
@@ -58,6 +92,30 @@ announcements, `prefetch:`, `confirm:` and declared shapes. Read the two salon
 examples for those. Reading the caller's number, detecting voicemail and
 telling the time are capabilities SLNG curates and attaches in the dashboard; a
 package reaches only `end_call` and `send_sms` by name.
+
+## One package, any property
+
+One package serves any property. The hotel's name, neighbourhood, city and
+website are template variables with defaults, so a phone call works with no
+input and a web session can override them from the same deployment. The
+hotel's identifier is pinned into the lookup, so the model never asks a guest
+which hotel they are in and can never send the wrong one.
+
+## The text message
+
+The agent also records one value the guest gives it. When a guest wants a text
+with the summary of the call, the agent asks for the mobile number, reads it
+back, and saves it only once the guest confirms. That number is a memory
+variable: no session supplies it, the model fills it, and the call record
+returns it. The text itself goes through SLNG's curated `send_sms`, with the
+sender pinned by the package and the Twilio credentials read from the vault by
+the platform.
+
+Two facts about that text belong to the platform, not the package. SLNG sends
+it to the number the call came from: the model writes the message and does not
+choose the recipient, so the confirmed number is a record of the call, not the
+address. And SLNG offers the tool on phone calls only: in a browser web session
+the model has no text tool, and the prompt says so to the guest.
 
 ## Structure
 
@@ -101,9 +159,6 @@ package reaches only `end_call` and `send_sms` by name.
   `compile-report.json`. That is all of it.
 
 ## Before you start
-
-Run these commands from the repository root. To test the current branch, run
-`make build` and use `./bin/unmute` in place of `unmute` below.
 
 Install the push tool once, so it is on your PATH:
 
@@ -198,67 +253,12 @@ Publish it, then run it once on the platform to see it answer:
 printf '{"hotel_id":"lumbre-sol"}\n' | voiceai tool run hotel_info --input - --confirm-side-effects
 ```
 
-## How to run it
-
-`validate` and `compile` work with no credential and no mirror to fetch first:
-
-```bash
-unmute validate examples/hotel-concierge
-unmute compile examples/hotel-concierge --target slng
-```
-
-`unmute pull` does not apply: this package targets slng alone, and slng reads
-no mirror.
-
-Validate, compile, and push in one command. A real push needs a `voiceai`
-release that supports a checked, resolved attachment; an older one is refused
-with upgrade guidance before anything is written. This flow has been verified
-with `voiceai 0.1.18`:
-
-```bash
-export SLNG_API_KEY=...
-unmute deploy examples/hotel-concierge --target slng --dry-run
-unmute deploy examples/hotel-concierge --target slng
-```
-
-`--dry-run` resolves every reference, checks the injected `hotel_id` against
-the published `hotel_info` schema, and previews the attachment changes without
-changing SLNG. Both commands write `build/slng/deploy-report.json`. Each real
-deployment resolves the latest published tools again and attaches the versions
-it checked. Rename the package's `name:` before deploying a separate test
-agent; otherwise this command replaces `hotel-concierge-slng` if it already
-exists.
-
-### Talk to it in the browser
+## Talk to it in the browser
 
 There is no `unmute dev` for this target. Open the deployed agent in the SLNG
 dashboard, choose **Test**, then **Web session**, and allow microphone access.
 The panel pre-fills every template variable with its default. See the
 [test panel guide](https://docs.slng.ai/dashboard/agent-infra#test-your-agent).
-
-To use your own LiveKit client instead, with the defaults:
-
-```bash
-cat > session.json <<'JSON'
-{"arguments":{},"participant_name":"you"}
-JSON
-voiceai agents web-sessions create <agent_id> --file session.json
-```
-
-`unmute deploy` prints this command with the agent id already filled in. The
-command returns `livekit_url` and `livekit_token`; it does not open a browser
-or microphone. Connect a LiveKit client with those details to talk.
-
-To hear the same deployment greet as a different hotel, override the
-variables. The lookup stays pinned to one property in `tools/hotel_info.yaml`,
-so the greeting and the neighbourhood change and the hotel's facts do not:
-
-```bash
-cat > session.json <<'JSON'
-{"arguments":{"hotel_name":"Hotel Lumbre Chamberí","neighbourhood":"Chamberí, north of the centre","city":"Madrid"},"participant_name":"you"}
-JSON
-voiceai agents web-sessions create <agent_id> --file session.json
-```
 
 What to say, and what each exercise proves:
 
@@ -291,7 +291,7 @@ injection, and the model's own arguments carry none. After a text was sent,
 `memory_variables` carries `caller_phone` with the number the guest confirmed,
 so you can check what was recorded without reading the transcript.
 
-### Receive phone calls
+## Receive phone calls
 
 First follow [SLNG Telephony setup](https://docs.slng.ai/dashboard/telephony)
 to route your carrier number to SLNG. `unmute deploy` offers a free inbound
@@ -305,6 +305,127 @@ greets as the default hotel. That is why every variable here has one: a
 required variable with no default would stop SLNG from attaching an inbound
 trunk at all.
 
+## Advanced
+
+<details>
+<summary>Talk to it with your own LiveKit client</summary>
+
+To use your own LiveKit client instead, with the defaults:
+
+```bash
+cat > session.json <<'JSON'
+{"arguments":{},"participant_name":"you"}
+JSON
+voiceai agents web-sessions create <agent_id> --file session.json
+```
+
+`unmute deploy` prints this command with the agent id already filled in. The
+command returns `livekit_url` and `livekit_token`; it does not open a browser
+or microphone. Connect a LiveKit client with those details to talk.
+
+</details>
+
+<details>
+<summary>Greet as a different hotel</summary>
+
+To hear the same deployment greet as a different hotel, override the
+variables. The lookup stays pinned to one property in `tools/hotel_info.yaml`,
+so the greeting and the neighbourhood change and the hotel's facts do not:
+
+```bash
+cat > session.json <<'JSON'
+{"arguments":{"hotel_name":"Hotel Lumbre Chamberí","neighbourhood":"Chamberí, north of the centre","city":"Madrid"},"participant_name":"you"}
+JSON
+voiceai agents web-sessions create <agent_id> --file session.json
+```
+
+</details>
+
+## Troubleshooting
+
+### `unmute deploy` says a tool is not in the organisation
+
+The push creates nothing. Both hosted tools and the MCP server have to exist
+before the push, in the organisation the key belongs to.
+
+**Fix:** list what the organisation holds, and check the name on the key:
+
+```bash
+unmute resources
+voiceai whoami
+```
+
+Then create whatever is missing from the table in
+[Before you start](#before-you-start).
+
+### The deploy is refused before it writes anything
+
+The preflight runs first, and a push tool that cannot make a checked, resolved
+attachment is refused with upgrade guidance. Nothing reaches SLNG when that
+happens.
+
+**Fix:** upgrade the push tool, then run the dry run again:
+
+```bash
+brew upgrade slng-ai/tap/voiceai
+unmute deploy examples/hotel-concierge --target slng --dry-run
+```
+
+### The push is refused because a model is not available
+
+Both speech models in `agent.yaml` are ones SLNG serves in the region
+`targets.yaml` names. A model id the region does not serve is refused by name.
+
+**Fix:** keep the ids as written, or pick ids the region serves and change the
+`models:` block.
+
+### The agent will not text me
+
+The text tool is attached on phone calls and not in a web session, so in the
+browser the model has nothing to send with.
+
+**Fix:** call the number instead. See
+[Receive phone calls](#receive-phone-calls).
+
+### The text never arrives on a phone call
+
+Two things have to be true. The guest has confirmed the number, because the
+agent saves nothing it has not read back, and SLNG can reach Twilio with the
+two vault entries it reads by name.
+
+**Fix:** check the vault holds both names, then read the call record for the
+tool call and the saved number:
+
+```bash
+unmute resources
+voiceai agents calls get <agent_id> <call_id> --json
+```
+
+### The lookup cannot find the hotel
+
+The identifier pinned in `tools/hotel_info.yaml` is not a row in the published
+module. The model never sees that value, so it cannot correct it mid-call.
+
+**Fix:** run the published tool once with the pinned identifier, and change
+either the `inject:` line or the module's table until the two agree:
+
+```bash
+printf '{"hotel_id":"lumbre-sol"}\n' | voiceai tool run hotel_info --input - --confirm-side-effects
+```
+
+### I called the number and no call record appeared
+
 Attachment does not change carrier routing: a number still pointing at another
-webhook will not reach SLNG. If no new call record appears, inspect the
-carrier's call log and route.
+webhook will not reach SLNG.
+
+**Fix:** If no new call record appears, inspect the carrier's call log and
+route.
+
+## Where to go next
+
+- [`salon-concierge`](../salon-concierge/) - tasks, pre-fetch and confirm, on the code targets
+- [`salon-concierge-single-prompt`](../salon-concierge-single-prompt/) - the same salon in one prompt
+- [The slng target](../../docs-site/targets/slng.mdx) - what this target takes and refuses
+- [Deploy to SLNG](../../docs-site/deploy/slng.mdx) - the push, the preflight and the trunk
+- [Hosted tools](../../docs-site/build/tools/hosted.mdx) - referencing a tool the platform hosts
+- [All the examples](../README.md) - what each one is for

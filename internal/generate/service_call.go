@@ -61,9 +61,8 @@ type ServiceCall struct {
 func resolveService(fw targetcap.Provider, role targetcap.Role,
 	binding ir.Binding, env *envSet, site slngSite, extraSettings ...pyKV) (ServiceCall, targetcap.Entry, error) {
 
-	// A router think binding consumes params.world_part into the base
-	// URL, so it must not also reach the client as a kwarg the SDK never heard
-	// of (D2).
+	// A router think binding consumes params.world_part into the base URL, so it
+	// must not also reach the client as a kwarg the SDK never heard of (D2).
 	//
 	// The filtered map is a local rather than a write back onto binding.Params,
 	// because slngRequestBody reads the pure-proxy switch and the forwardable
@@ -71,7 +70,7 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 	// already been consumed here is how the switch would silently stop being
 	// sent.
 	router := role == targetcap.Reason && binding.Router()
-	region := slngRegion(binding)
+	worldPart := slngWorldPart(binding)
 	params := binding.Params
 	if router {
 		params = slngConsumedParams(params)
@@ -144,12 +143,12 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 		flat(pyKV{Key: spec.Endpoint.Arg, Value: envRef(binding.EndpointEnv)})
 	}
 	if router {
-		// The region is the whole endpoint story here: one owner for the URL
+		// The world part is the whole endpoint story here: one owner for the URL
 		// form, and a compile-time literal rather than a variable the operator
 		// could set to something else (D2).
-		url, ok := targetcap.SlngRouterBaseURL(region)
+		url, ok := targetcap.SlngRouterBaseURL(worldPart)
 		if !ok {
-			return ServiceCall{}, entry, fmt.Errorf("%s reason binding provider %q: %q is not a router region", fw, vendor, region)
+			return ServiceCall{}, entry, fmt.Errorf("%s reason binding provider %q: %q is not an SLNG world part", fw, vendor, worldPart)
 		}
 		flat(pyKV{Key: spec.Endpoint.Arg, Value: pyQuote(url)})
 		// Every upstream credential the request body carries joins the startup

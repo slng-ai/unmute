@@ -536,7 +536,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		// the only way to see the router's provenance headers and the plugin gives
 		// no other seam. So the two values it would have passed to the client it
 		// builds itself come here instead.
-		if url, ok := targetcap.SlngRouterBaseURL(slngRegion(binding)); ok {
+		if url, ok := targetcap.SlngRouterBaseURL(slngWorldPart(binding)); ok {
 			data.Slng.ClientBaseURL = url
 			data.Slng.ClientKeyEnv = targetcap.SlngRouterKeyEnv
 			// That client is built with httpx, so the import is needed whether or

@@ -1,18 +1,61 @@
 ---
 title: "Variables"
-description: "Declare a type once, save a task's result, and use it only where it is needed."
+description: "Declare a value once, fill it during the call, and read it only where it is needed."
 ---
 
-Variables hold typed values for the duration of a call. Declare what each
-value holds, save it from call-start data, prefetch, or a task, and reference
-it in the prompts or tools that need it.
+A variable is a named value the call holds onto. You declare what it holds,
+something fills it during the call, and the prompts that need it name it.
 
-The snippets below extend an existing package. Merge them into the matching
-blocks in `agent.yaml`.
+On this page:
 
-## Declare a simple variable
+- [Quickstart](#quickstart) - declare, fill and read one value
+- [Declare it](#1-declare-it) - every key a variable takes
+- [Fill it](#2-fill-it) - a task, a pre-fetch, or the call itself
+- [Read it](#3-read-it-where-it-is-needed) - placeholders, and the greeting
+- [The types you can declare](#the-types-you-can-declare) - ten built in, plus lists and your own
+- [Advanced](#advanced) - shapes, injection, and seeding a value locally
+- [Troubleshooting](#troubleshooting) - the four that come up most
 
-A variable needs a name and a `type`. Start with plain text:
+## Quickstart
+
+Declare a value, save it when a task finishes, and read it in a later prompt:
+
+```yaml agent.yaml
+variables:
+  requested_service:
+    type: str
+    description: The service the caller chose for this booking.
+
+agents:
+  concierge:
+    tasks:
+      - name: choose_service
+        when: Find out which service the caller wants.
+        instructions: tasks/choose-service.md
+        assign:
+          - requested_service: result.service
+```
+
+```markdown tasks/booking.md
+Requested service: {{requested_service}}
+If no service is recorded, ask which service the caller wants.
+```
+
+```sh
+unmute validate my-agent
+```
+
+That is the whole loop: **declare, fill, read.** The rest of this page is each
+step in full.
+
+<Note>
+  The snippets below extend an existing package. Merge them into the matching
+  blocks in `agent.yaml`.
+</Note>
+
+## 1. Declare it
+
+A variable needs a name and a `type:`. Start with plain text:
 
 ```yaml agent.yaml
 variables:
@@ -21,28 +64,132 @@ variables:
     description: The service the caller chose for this booking.
 ```
 
-`requested_service` is the name you use in assignments and prompt placeholders.
-`str` means the value holds text. The declaration creates a place to save it.
+That is the whole declaration. `requested_service` is the name you will use
+everywhere else, and `str` means it holds text.
 
-A variable starts unset unless you supply an initial value. Use `default:`
-only when there is a useful answer before anyone supplies one, such as a
-fallback greeting name. Leave a requested service unset until it is known.
+<ParamField path="type" type="string" required>
+  What the value holds. `str` for text, and
+  [nine more built-in types](#the-types-you-can-declare) for numbers, dates,
+  phone numbers and the rest.
+</ParamField>
 
-### Add a description that explains the meaning
+<ParamField path="description" type="string">
+  What this value means, in a sentence. When a task saves the variable, the
+  model reads this description to decide which answer belongs here. Say what
+  makes it different from a similar value, such as whether a date is requested
+  or already confirmed.
+</ParamField>
 
-`description:` is optional. Explain what the value means and which answer
-belongs there. Include details that distinguish it from similar values,
-such as whether a date is requested or already confirmed.
+<ParamField path="default" type="matching the type">
+  A value to start from. Use it only when there is a useful answer before
+  anyone supplies one, such as a fallback name for the greeting. A requested
+  service has no useful default, so leave it unset.
+</ParamField>
 
-When a task saves the variable, Unmute includes this description in the
-finish argument shown to the model. The type controls which values are
-accepted; the description helps the model choose the right answer.
+<ParamField path="source" type="call_start | a call fact">
+  Where an initial value arrives from, when one does. `call_start` takes it
+  from the session that started the call; a call fact such as `from_number`
+  takes it from the phone route. See [sources](/reference/variables#sources).
+</ParamField>
 
-## Choose a type
+<ParamField path="confirm" type="task name">
+  Names the task that has to hear the caller agree before anything acts on this
+  value. Until then no other prompt can read it and no tool can quietly use it.
+  See [checking a value with the
+  caller](/build/prefetch#always-check-a-value-with-the-caller).
+</ParamField>
 
-Types give later steps a consistent value to work with. Unmute uses the
-variable's type to define the task's finish argument and validate its answer
-before saving it.
+A variable starts unset unless you give it a `default:`.
+
+## 2. Fill it
+
+Declaring a variable creates the box. Something still has to put a value in it.
+There are three ways, and each has its own page:
+
+| How | When it happens | Written where |
+|---|---|---|
+| A task's `assign:` | when that task finishes | on the [task](/build/orchestration/tasks) |
+| [`prefetch:`](/build/prefetch) | once, before the greeting | in a top-level `prefetch:` entry |
+| `source:` | as the call starts | on the variable itself |
+
+The common one is a task. Add `assign:` to the task that learns the value:
+
+```yaml agent.yaml
+agents:
+  concierge:
+    tasks:
+      - name: choose_service
+        when: Find out which service the caller wants.
+        instructions: tasks/choose-service.md
+        assign:
+          - requested_service: result.service
+```
+
+```markdown tasks/choose-service.md
+Find out which salon service the caller wants. Use what they have already
+said and ask only if the service is missing or unclear. Then finish with
+that service.
+```
+
+`assign:` creates a finish argument named `service` from the
+`requested_service` declaration. The destination already owns the type and the
+description, so the task does not repeat them.
+
+All assigned values are checked before any are saved. If one is invalid, the
+task stays open so the model can correct its answer, and nothing changes.
+
+## 3. Read it where it is needed
+
+Saving a value does not put it in any prompt. A prompt reads a value only when
+it names it:
+
+```markdown tasks/booking.md
+Requested service: {{requested_service}}
+Use it if present. If no service is recorded, ask which service the caller wants.
+```
+
+An unset value renders as `none recorded yet.`, so write the sentence to read
+whole either way. The instructions above work before and after the earlier task
+saves the service.
+
+<Warning>
+  The agent that owns a task needs its own placeholder to remember the result
+  after the task returns. It gets a completion status and its own earlier
+  conversation back, not the private conversation inside the task.
+</Warning>
+
+### Use one in the greeting
+
+The greeting renders once, before anyone speaks, so it can only name a value
+that is already settled: one supplied at session start, a `default:`, or a
+prefetch assignment.
+
+```yaml agent.yaml
+variables:
+  customer_name:
+    type: str
+    source: call_start
+    default: there
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi {{customer_name}}, how can I help?"
+```
+
+<Warning>
+  Do not greet a caller by a name you have not checked with them. A name looked
+  up from the number that called is a guess: people call from a partner's
+  phone. Mark it with
+  [`confirm:`](/build/prefetch#always-check-a-value-with-the-caller) and the
+  greeting cannot use it until they say yes.
+</Warning>
+
+## The types you can declare
+
+The type is what the call checks a value against before saving it. A task's
+finish argument is built from it too, so the model is told what shape of answer
+is wanted.
 
 ### Built-in types
 
@@ -62,49 +209,78 @@ before saving it.
 `string`, `integer`, `number`, and `boolean` are aliases for `str`, `int`,
 `float`, and `bool`.
 
-### Custom types and combinations
+Those ten cover most packages. The three forms below are for when they do not.
 
-| Form | What it holds |
-|---|---|
-| `Literal["value1", "value2"]` | One string from the choices you list |
-| Your shape's name | An object whose fields and types you define under `shapes:` |
-| `list[T]` | A list of values of type `T` |
-| `T \| None` | A value of type `T`, or `null` when absence is a valid result |
+### A fixed set of choices
 
-`NameEmail` is an object type too, so `{{contact.name}}` and `{{contact.email}}`
-read its parts. You do not declare it under `shapes:`. It is refused as a shape
-name, because it already means something.
+```yaml agent.yaml
+variables:
+  booking_status:
+    type: Literal["booked", "cancelled", "pending"]
+```
 
-Here, `T` stands for the type you choose. Use `Literal` for a fixed set of
-choices, a shape for related fields, and a list for several values. The next
-section shows how to define your own object type.
+Anything outside the set is refused where it enters, and the refusal lists what
+was allowed.
+
+### A value that may be absent
+
+`T | None` says `null` is a valid answer, not a failure. Use it when a lookup
+can honestly come back with nothing.
+
+### Several values of the same type
+
+`list[T]` holds many. See [Keep several records](#keep-several-records) below.
+
+<Note>
+  LiveKit and Pipecat support every type on this page. The SLNG target supports
+  the basic scalars only: `str`, `int`, `float`, `bool`, and their aliases. It
+  runs none of your package's code, so it has nowhere to check a shape.
+</Note>
+
+The [type reference](/reference/variables#the-type-grammar) has the exact
+formats and composition rules. Your tools still check business rules, such as
+whether a record exists and whether a slot is free.
 
 Every type on this page appears once in
 [`examples/customer-intake`](https://github.com/slng-ai/unmute/tree/main/examples/customer-intake),
-which is one agent that collects a caller's details and hands them to a tool.
-Read it when you want to see a declared value saved and then used.
+one agent that collects a caller's details and hands them to a tool.
 
-The [type reference](/reference/variables#the-type-grammar) gives the exact
-formats and composition rules. Your tools check business rules, such as
-record existence and availability.
+## Keep several records
+
+Declare `type: list[T]` when later steps need several values of the same type.
+A list starts as `[]`.
+
+In a task's `assign:`, `variable+:` appends one item and `variable:` replaces
+the whole list:
+
+```yaml agent.yaml
+variables:
+  complaints:
+    type: list[str]
+
+assign:
+  - complaints+: result.complaint
+```
+
+Appending skips `null` and skips an identical structured item. See
+[assignment rules](/reference/variables#assigning-a-task-result-to-a-variable),
+and [state design](/best-practices/state-design#choose-a-current-value-or-a-list)
+to choose between a current value and a list.
+
+## Advanced
+
+Three things you will not need on your first agent.
+
+### Group fields into a shape
 
 <Note>
-LiveKit and Pipecat support all these types. The SLNG target supports basic
-scalar variables: `str`, `int`, `float`, `bool`, and their aliases. It runs no
-code of your package, so it has nowhere to check a shape.
+  Skip this until you need it. A shape is worth declaring when several fields
+  always travel together and one tool fills all of them at once. Until then,
+  separate variables are simpler to read and simpler to prompt.
 </Note>
 
-## Group related fields into a shape
-
-A shape defines your own reusable object type. Choose a name, then declare
-each field and its type under `shapes:`. Set a variable's `type:` to that
-name to store an object with those fields.
-
-One shape can be used by several variables. Each variable holds its own
-value, and a task assignment saves all of the object's fields together.
-
-For example, this package defines an object type called `Appointment` and
-uses it for the variable `appointment`:
+A shape is your own object type. Name it, declare its fields under `shapes:`,
+then set a variable's `type:` to that name:
 
 ```yaml agent.yaml
 shapes:
@@ -121,89 +297,38 @@ variables:
     description: The latest appointment successfully saved by the booking tool.
 ```
 
-Use the short field form, `- field_name: Type`, or add a field description
-with `name:`, `type:`, and `description:`. A description on the shape explains
-the whole object; a description on a field explains that part to the model.
-See the [shape reference](/reference/variables#shapes-groups-fields-into-a-named-type)
-for both forms.
+A task assignment saves all of the object's fields together, and one shape can
+be used by several variables, each holding its own value.
 
-For deciding which fields belong together, separating requested changes from
-saved results, and choosing one record or a list, see
+Use the short field form, `- field_name: Type`, or the long form with `name:`,
+`type:` and `description:` when a field needs explaining to the model. See the
+[shape reference](/reference/variables#shapes-groups-fields-into-a-named-type)
+for both.
+
+<Warning>
+  Declare a field only when something in the package can fill it. A field no
+  tool returns leaves the model inventing a value or sending an empty one, and
+  it renders empty in every prompt that names it for the rest of the call.
+</Warning>
+
+#### Reading one field
+
+`{{appointment}}` renders the whole object as compact JSON. `{{appointment.date}}`
+reads one field, and a dotted path can follow nested shapes. To read fields
+from a list item, save that item into its own variable first.
+
+`NameEmail` is an object type too, so `{{contact.name}}` and `{{contact.email}}`
+work without declaring anything under `shapes:`. It is refused as a shape name,
+because it already means something.
+
+For deciding which fields belong together, separating a requested change from a
+saved result, and choosing one record or a list, see
 [Designing declared state](/best-practices/state-design#group-fields-that-describe-one-result).
 
-## Save a value when a task finishes
+### Hand a value to a tool
 
-Add this task under an agent in your package:
-
-```yaml agent.yaml
-agents:
-  concierge:
-    tasks:
-      - name: choose_service
-        when: Find out which service the caller wants.
-        instructions: tasks/choose-service.md
-        assign:
-          - requested_service: result.service
-```
-
-```markdown tasks/choose-service.md
-Find out which salon service the caller wants. Use what they have already
-said and ask only if the service is missing or unclear. Then finish with
-that service.
-```
-
-Here, `assign:` creates a finish argument named `service` from the
-`requested_service` declaration. The task receives the conversation by default.
-Its instructions say when to collect the answer and finish.
-
-Assignments also accept whole objects. Use `appointment: result.appointment`
-to save the shaped variable above. Tell a task using a tool to copy the
-successful tool result and finish immediately.
-
-All assigned values are checked before any are saved. If validation fails,
-the task stays open so the model can correct the answer.
-
-## Read a value where it is needed
-
-Add a placeholder to each prompt that should use the saved value:
-
-```markdown tasks/booking.md
-Requested service: {{requested_service}}
-Use it if present. If no service is recorded, ask which service the caller wants.
-```
-
-An unset value renders as `none recorded yet.` The instructions work before
-and after the earlier task saves the service.
-
-The owning agent also needs a reference if it should remember the result
-after the task returns. It receives a completion status and its earlier
-conversation, not the private conversation inside the task. This rule applies
-even when the task uses `history: messages`.
-
-### Read an object or one field
-
-Use `{{variable}}` for the whole object, rendered as compact JSON. Use
-`{{variable.field}}` for one field. A dotted path can follow nested shapes.
-To read fields from a list item, first save that item in its own variable.
-
-Tell the prompt how to use the value and what to do when it is missing.
-
-## Keep several records
-
-Declare `type: list[T]` when later steps need several values of the same
-type. A list starts as `[]`.
-
-In a task's `assign:`, use `variable+: result.field` to append one item or
-`variable: result.field` to replace the list. Appending skips `null` and
-identical structured items. See
-[assignment rules](/reference/variables#assigning-a-task-result-to-a-variable)
-for details, and [state design](/best-practices/state-design#choose-a-current-value-or-a-list)
-to choose between a current value and a list.
-
-## Hand a value to a tool
-
-Sometimes the tool needs a value the model does not need to read or type.
-Use `inject:` for that argument:
+Sometimes the tool needs a value the model does not need to read or type. Use
+`inject:` for that argument:
 
 ```yaml tools/check_availability.yaml
 input:
@@ -223,62 +348,97 @@ The model supplies `date`. The handler receives both `date` and the current
 `service`. Keep injected arguments out of `input.properties` and
 `input.required`.
 
-### What happens when the value is missing
+If the value is missing or unconfirmed, the tool stops before it runs. The
+error names the task that supplies or confirms the value when one is declared,
+and otherwise asks the model to collect it.
 
-A missing or unconfirmed injected value stops the tool before it runs. The
-error tells the model which task supplies or confirms the value, when one is
-declared. Otherwise it asks the model to collect the missing value.
+Injection is not the same as keeping a value private: tool results and spoken
+messages can still contain it. See
+[Reduce context sharing step by step](/best-practices/context-scope).
 
-Injection is separate from prompt sharing. Tool results and spoken messages
-can still contain the same value. See [Reduce context sharing step by
-step](/best-practices/context-scope).
-
-## Use one in the greeting
-
-If a name arrives with the call, declare it as a call-start value:
-
-```yaml agent.yaml
-variables:
-  customer_name:
-    type: str
-    source: call_start
-    default: there
-
-conversation:
-  greeting:
-    speaks_first: agent
-    text: "Hi {{customer_name}}, how can I help?"
-```
-
-The greeting renders once. It may name a value supplied at session start,
-a default, or a prefetch assignment. Do not put an unconfirmed customer name
-in the greeting; use [confirmation](/build/prefetch#always-check-a-value-with-the-caller)
-when the call's identity still needs to be checked.
-
-## Seed a value locally
+### Try it locally
 
 ```sh
 unmute dev my-agent --var customer_name=Priya
 ```
 
-Use `--var` for a declared variable with `source: call_start` or no `source`.
-Values are parsed against the variable's type. For an object or list, pass
-JSON and quote it for your shell.
+`--var` works for a declared variable with `source: call_start` or no `source:`
+at all. Values are parsed against the variable's type; pass JSON for an object
+or a list, quoted for your shell.
 
-System sources such as `from_number` depend on the phone route. LiveKit and
-Pipecat supply different facts in different directions; the
-[source reference](/reference/variables#sources) lists them. To exercise
-prefetch and confirmation locally, use `--source from_number=+15005550006`
-instead of seeding the phone variable directly.
+A system source such as `from_number` comes from the phone route instead, and
+your machine is not one. To exercise prefetch and confirmation locally, stand
+in for the network:
 
-## Credentials
+```sh
+unmute dev my-agent --source from_number=+15005550006
+```
 
-Store credentials in the environment and declare their names under
-[`secrets:`](/reference/secrets).
+Which facts a route supplies, and in which direction, is in the
+[source reference](/reference/variables#sources).
+
+## Troubleshooting
+
+### A prompt renders `none recorded yet.` on every call
+
+The variable is unset. Either nothing has filled it yet, or the prompt that
+reads it runs before the step that fills it.
+
+**Fix:** check which step owns the `assign:`, and write the sentence so it reads
+whole either way. An unset value is normal early in a call, so the prompt should
+say what to do about it:
+
+```markdown
+Requested service: {{requested_service}}
+If no service is recorded, ask which service the caller wants.
+```
+
+### The owning agent forgets a value after its task returns
+
+A task returns a completion status and the <Tooltip tip="The agent that started a task. When the task ends, the caller goes back to it.">owner</Tooltip>'s own earlier conversation. It
+does not hand back the private conversation inside the task.
+
+**Fix:** put a placeholder in the **owner's** prompt too. Saving is not sharing.
+
+### A tool refuses to run, naming a value
+
+The tool reads that value through `inject:` or a webhook path, and the value is
+empty or still unconfirmed.
+
+**Fix:** the refusal names the task that supplies or confirms it. Run that step
+first, or, when nothing supplies the value, have the model ask the caller.
+
+### `--var` is refused for a variable
+
+`--var` works only for a variable with `source: call_start` or no `source:` at
+all. A system source such as `from_number` comes from the phone route, and your
+machine is not one.
+
+**Fix:** use `--source` instead, which stands in for the network:
+
+```sh
+unmute dev my-agent --source from_number=+15005550006
+```
 
 ## Where to go next
 
-- [Prefetch](/build/prefetch): fill values that are known before the greeting.
-- [Tasks](/build/orchestration/tasks): save results and return control.
-- [Context scope](/best-practices/context-scope): keep continuity or share only selected facts.
-- [Variables reference](/reference/variables): every type, field, and assignment option.
+<Columns cols={2}>
+  <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
+    The usual way a variable gets filled: `assign:` on the task that learns it.
+  </Card>
+  <Card title="Pre-fetch" icon="timer" href="/build/prefetch">
+    Fill a value before the greeting, and confirm the ones about the caller.
+  </Card>
+  <Card title="Context scope" icon="scissors" href="/best-practices/context-scope">
+    Who can read what, and how to share less as the call goes on.
+  </Card>
+  <Card title="Designing declared state" icon="database" href="/best-practices/state-design">
+    Which fields belong together, and when a list beats a current value.
+  </Card>
+  <Card title="Credentials" icon="key" href="/build/credentials">
+    API keys and tokens, which are not variables.
+  </Card>
+  <Card title="Variables reference" icon="file-code" href="/reference/variables">
+    Every type, field, source and assignment option.
+  </Card>
+</Columns>

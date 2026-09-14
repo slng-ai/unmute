@@ -42,7 +42,7 @@ func routerFixture(t *testing.T) *ir.Agent {
 	pkg.Agent.Models.Think["fast_reasoning"] = spec.ModelDef{
 		Provider: "slng", Model: routerModel, AgentID: routerAgentID,
 		Upstream: &spec.Upstream{Provider: "openai"},
-		Params:   map[string]any{"world_part": "eu-north", "reasoning_effort": "none"},
+		Params:   map[string]any{"world_part": "eu-west", "reasoning_effort": "none"},
 	}
 	// Both agents on the one router profile, repointed before Build so the
 	// resolved bindings hold only the profile the package actually uses: on
@@ -690,7 +690,7 @@ func routerFixtureWithUpstream(t *testing.T, upstream *spec.Upstream, secrets []
 	pkg.Agent.Secrets = append(pkg.Agent.Secrets, secrets...)
 	router := spec.ModelDef{
 		Provider: "slng", Model: routerModel, AgentID: routerAgentID, Upstream: upstream,
-		Params: map[string]any{"world_part": "eu-north", "reasoning_effort": "none"},
+		Params: map[string]any{"world_part": "eu-west", "reasoning_effort": "none"},
 	}
 	pkg.Agent.Models.Think["fast_reasoning"] = router
 	// One router profile, the entry agent's, which is what livekit allows. The
@@ -843,14 +843,14 @@ func TestSlngRouterEmitsNothingWithoutABinding(t *testing.T) {
 	}
 }
 
-// The base URL comes from the region and nowhere else, and the request never
+// The base URL comes from the world part and nowhere else, and the request never
 // takes the Responses path (FR-013).
-func TestSlngRouterUsesTheRegionalChatCompletionsEndpoint(t *testing.T) {
+func TestSlngRouterUsesTheWorldPartsChatCompletionsEndpoint(t *testing.T) {
 	agent := routerFixture(t)
 	for _, tc := range routerTargets() {
 		source, _ := emitAgentSource(t, agent, tc.provider, tc.module)
-		if !strings.Contains(source, `base_url="https://eu-north.context-router.slng.ai/v1"`) {
-			t.Errorf("%s: the emitted client does not point at the regional router", tc.provider)
+		if !strings.Contains(source, `base_url="https://eu-west.context-router.slng.ai/v1"`) {
+			t.Errorf("%s: the emitted client does not point at the world part's router", tc.provider)
 		}
 		if !strings.Contains(source, `api_key=os.environ["SLNG_API_KEY"]`) {
 			t.Errorf("%s: the router key is not read from the environment", tc.provider)
@@ -917,7 +917,7 @@ func TestSlngRouterPureProxyRidesTheBody(t *testing.T) {
 						continue
 					}
 					binding.Params = map[string]any{
-						"world_part":       "eu-north",
+						"world_part":       "eu-west",
 						"reasoning_effort": "none",
 						"slng_pure_proxy":  true,
 					}
@@ -963,7 +963,7 @@ func TestSlngRouterForwardableParamsRideTheBody(t *testing.T) {
 						continue
 					}
 					binding.Params = map[string]any{
-						"world_part":       "eu-north",
+						"world_part":       "eu-west",
 						"provider":         map[string]any{"only": []any{"nebius"}},
 						"reasoning_effort": "none",
 					}
@@ -1015,7 +1015,7 @@ func TestSlngRouterFoldedFieldsStayInTheConstruction(t *testing.T) {
 						continue
 					}
 					binding.Params = map[string]any{
-						"world_part":  "eu-north",
+						"world_part":  "eu-west",
 						"temperature": 0.3,
 					}
 					tgt.Models.Reason[profile] = binding

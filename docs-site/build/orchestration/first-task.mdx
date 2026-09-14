@@ -13,13 +13,12 @@ the agent looks it up and says when the parcel is due. It is small on purpose.
 The shape is what matters, and you will swap the parcel for your own thing.
 
 <Note>
-  Tasks need a code target: Pipecat or LiveKit Agents. The package `unmute
-  init` writes targets LiveKit Agents, so it is ready. The SLNG target compiles
-  one agent with one prompt, and refuses a task with this line:
+  **Tasks need a code target: Pipecat or LiveKit.** The package `unmute init`
+  writes targets LiveKit, so you are ready.
 
-  ```text
-  slng: slng target writes one agent with one prompt, so a task has nowhere to go: fold the step into the agent's instructions, or compile to livekit or pipecat which emit multi-task agents
-  ```
+  SLNG compiles one agent with one prompt, so it refuses a task today and tells
+  you to fold the step into the agent's instructions instead. Tasks on SLNG are
+  coming.
 </Note>
 
 ## What a task is
@@ -38,16 +37,25 @@ One word to settle before we start. A task is one step of the call. Some of
 the compiler's messages say "step" for that reason. On this page the thing you
 write is always a task.
 
+On this page: nine steps, each ending with a package that validates, so you can
+stop anywhere and come back.
+
+1. **Start with no task** - confirm the package you already have still works
+2. **Give the agent a tool** - a lookup, so there is something to move
+3. **Say what you want to keep** - declare the variables
+4. **Add the task** - move the tool onto it
+5. **Save the answer** - `assign:`
+6. **Read it back** - a placeholder in the owner's prompt
+7. **Say what success looks like** - `finish:`, so the tool ends the step
+8. **Open with the question** - `announce:` and `opening: listen`
+9. **Run it** - talk to it in the browser
+
 <Steps>
   <Step title="Start with no task">
     This is the package from the last page. Make sure it still validates:
 
     ```sh
     unmute validate my-agent
-    ```
-
-    ```text
-    ✓ livekit (livekit)
     ```
 
     One agent, one prompt, one built-in tool so it can hang up. Keep this
@@ -152,10 +160,6 @@ write is always a task.
     unmute validate my-agent
     ```
 
-    ```text
-    ✓ livekit (livekit)
-    ```
-
     This already works, and for many agents it is enough. Stop here if the job
     is one lookup and one answer. The rest of this page is for when you want the
     lookup to be its own small conversation, and you want to keep what it
@@ -186,10 +190,6 @@ write is always a task.
 
     ```sh
     unmute validate my-agent
-    ```
-
-    ```text
-    ✓ livekit (livekit)
     ```
   </Step>
 
@@ -235,11 +235,10 @@ write is always a task.
     unmute validate my-agent
     ```
 
-    ```text
-    ✓ livekit (livekit)
+    It still validates, and it warns:
 
-    Warnings:
-      livekit: agent "assistant" holds every tool of its step "find_parcel" (look_up_parcel), so it can do the step's work without entering it and the step's assign may never run: drop look_up_parcel from agent "assistant" tools and leave them on the step
+    ```text wrap
+    agent "assistant" holds every tool of its step "find_parcel" (look_up_parcel), so it can do the step's work without entering it and the step's assign may never run: drop look_up_parcel from agent "assistant" tools and leave them on the step
     ```
 
     Read that warning, because it is the most common mistake with a first
@@ -279,10 +278,6 @@ write is always a task.
     unmute validate my-agent
     ```
 
-    ```text
-    ✓ livekit (livekit)
-    ```
-
     The warning is gone. The model now has one way to look up a parcel, and it
     goes through the task.
   </Step>
@@ -306,10 +301,6 @@ write is always a task.
 
     ```sh
     unmute validate my-agent
-    ```
-
-    ```text
-    ✓ livekit (livekit)
     ```
 
     Here is what that line did. Every task gets a `finish` call, a function
@@ -353,10 +344,6 @@ write is always a task.
     ```sh
     unmute validate my-agent
     ```
-
-    ```text
-    ✓ livekit (livekit)
-    ```
   </Step>
 
   <Step title="Say what success looks like">
@@ -384,10 +371,6 @@ write is always a task.
 
     ```sh
     unmute validate my-agent
-    ```
-
-    ```text
-    ✓ livekit (livekit)
     ```
 
     Read it as a sentence: "this task is finished when `look_up_parcel` returns
@@ -467,10 +450,6 @@ write is always a task.
     ```sh
     unmute validate my-agent
     ```
-
-    ```text
-    ✓ livekit (livekit)
-    ```
   </Step>
 
   <Step title="Run it">
@@ -485,8 +464,8 @@ write is always a task.
     Watch the dev page while you talk. The task shows up as its own row when
     the model enters it, then `look_up_parcel` gets a row of its own, and then
     the agent answers. If you never see the task's row, the model went round
-    it: check that the agent does not hold the task's tool, and that the
-    `when:` line describes what the caller actually said. [Running it
+    it. Check two things: that the agent does not hold the task's tool, and
+    that the `when:` line describes what the caller actually said. [Running it
     locally](/dev/overview) explains every row on that page.
   </Step>
 </Steps>

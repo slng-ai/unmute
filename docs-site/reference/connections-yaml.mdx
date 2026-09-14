@@ -93,8 +93,8 @@ connections/twilio_voice.yaml: connection "twilio_voice" requires environment ke
 |---|---|---|---|
 | Pipecat | `cloud-websocket` | `twilio` | `account_sid`, `auth_token`, `from_number`, and only when the package places or redirects a call |
 | Pipecat | `daily-sip` | `twilio` | `account_sid`, `auth_token`, `sip_address`, `from_number` |
-| LiveKit Agents | `sip` | `twilio`, `telnyx`, `plivo` | `sip_address`, `sip_username`, `sip_password`, `from_number` |
-| LiveKit Agents | `connector` | `twilio` | `account_sid`, `auth_token`, `from_number` |
+| LiveKit | `sip` | `twilio`, `telnyx`, `plivo` | `sip_address`, `sip_username`, `sip_password`, `from_number` |
+| LiveKit | `connector` | `twilio` | `account_sid`, `auth_token`, `from_number` |
 
 The SIP route uses standard SIP names rather than one vendor's, because the same
 generated code dials through any SIP carrier with them.
@@ -131,7 +131,9 @@ targets:
     connection: twilio_connector
 ```
 
-```yaml connections/twilio_websocket.yaml
+<CodeGroup>
+```yaml Pipecat
+# connections/twilio_websocket.yaml
 transport: cloud-websocket
 carrier: twilio
 environment:
@@ -140,7 +142,8 @@ environment:
   from_number: TWILIO_PHONE_NUMBER
 ```
 
-```yaml connections/twilio_connector.yaml
+```yaml LiveKit
+# connections/twilio_connector.yaml
 transport: connector
 carrier: twilio
 environment:
@@ -148,6 +151,7 @@ environment:
   auth_token: TWILIO_AUTH_TOKEN
   from_number: TWILIO_PHONE_NUMBER
 ```
+</CodeGroup>
 
 Same three names, different mechanism. The file name does not have to repeat the
 transport, but its stem must still be lower snake case.
@@ -195,10 +199,7 @@ the generated environment instructions and call-time checks; declaring it makes
 the package's explicit secret inventory agree with that inferred requirement:
 
 ```text wrap
-✓ livekit (livekit)
-
-Warnings:
-  livekit: environment variables referenced but not declared in secrets: SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address)
+livekit: environment variables referenced but not declared in secrets: SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address)
 ```
 
 **A connection nothing names is a warning, not an error.** The build succeeds and

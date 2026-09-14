@@ -3,9 +3,22 @@ title: "Checking what the agent did"
 description: "A transcript tells you what the caller heard. It does not tell you what the agent recorded, and the two disagree more often than you would expect."
 ---
 
+Checking an agent means reading what the call actually did: which steps
+finished, which tools ran, and which saved values each prompt received.
+
 An agent can hold a good conversation and record nothing. It can also record
 correctly and sound broken. The transcript only shows you one of those, so
 reading it is not checking.
+
+On this page:
+
+- [Read the trace, not the transcript](#read-the-trace-not-the-transcript) - what a transcript hides
+- [Check scoping by reading the prompt](#check-scoping-by-reading-the-prompt-that-was-sent) - verifying a negative
+- [Read requests in time order](#read-requests-in-time-order) - when a value was saved
+- [Count tool spans, not call rows](#count-tool-spans-not-call-rows) - what ran, not what was asked
+- [Find the layer the defect lives in](#find-the-layer-the-defect-lives-in) - the smallest layer that shows it
+- [Do not conclude from one call](#do-not-conclude-from-one-call) - three calls, or one
+- [Read the call back yourself](#read-the-call-back-yourself) - not somebody's description
 
 ## Read the trace, not the transcript
 

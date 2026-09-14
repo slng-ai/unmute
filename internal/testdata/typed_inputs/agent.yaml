@@ -77,7 +77,7 @@ models:
         provider: openai
         key_env: OPENAI_API_KEY
       params:
-        world_part: eu-north
+        world_part: eu-west
         reasoning_effort: "none"
   speak:
     voice:

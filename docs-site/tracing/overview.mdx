@@ -23,6 +23,20 @@ There are two providers.
 
 Pick one. `provider` takes a single value.
 
+## Every key the block takes
+
+One key, and writing the block at all is what turns tracing on.
+
+<ParamField path="provider" type="langfuse | coval" required>
+  Where the spans go. Those two names are the whole list, and any other value is
+  refused with both of them named. Leave the whole `tracing:` block out and the
+  agent exports nothing.
+</ParamField>
+
+There is no second key. Which project a trace lands in, and which credentials
+reach it, are the provider's environment names in the table above, read at run
+time rather than written in `agent.yaml`.
+
 ## What works where
 
 Tracing needs a process to instrument, so it works on the two code targets and

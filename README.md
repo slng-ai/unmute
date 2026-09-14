@@ -388,11 +388,14 @@ project: `slng_base_url=` on LiveKit, `base_url=` on Pipecat.
 
 The 13 are `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`,
 `jp`, `sg`, `id`, `in` and `au`. Leave `world_part` out and the existing default
-URL stands. Reasoning through the SLNG Context Router picks its own region with
-`params.world_part`, using the same 13 region names as speech and SLNG deployment. Where the worker itself runs is a
-third choice, `deployment_region` in `targets.yaml`, and none of the three has
-to match the others: `salon-concierge` deploys to `eu-central` and speaks
-through `eu-north`.
+URL stands. Reasoning through the SLNG Context Router reads the same key and the
+same 13 values, so one word covers listening, thinking and speaking. Where the
+worker itself runs is a separate choice, `deployment_region` in `targets.yaml`,
+and it does not have to match: `salon-concierge` deploys to `eu-central` and
+speaks through `eu-north`.
+
+SLNG deployment uses these same 13 region names. The location of each service
+is still chosen separately.
 
 ### Turn taking you can hear
 

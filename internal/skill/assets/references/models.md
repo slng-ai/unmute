@@ -135,7 +135,7 @@ models:
       upstream:
         provider: openai
       params:
-        world_part: eu-north
+        world_part: eu-west
         reasoning_effort: "none"
 ```
 
@@ -167,8 +167,12 @@ Four things are required and none has a default:
   alone, so a long id plus a long agent name can be refused where the id by
   itself passed. The refusal names the agent or task that produced the long value.
 - `upstream`, saying who actually serves the model.
-- `params.world_part`, from the shared SLNG region set: `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`. The compiler consumes this into the base URL and names
-  the substitution in the compile report.
+- `params.world_part`, the world part the request is thought in. The same key
+  and the same set speech and SLNG deployment take, so `eu-west` here and `eu-west` for
+  listening are the same place. The compiler consumes this into the base URL and
+  names the substitution in the compile report. The four old router-only names,
+  `eu`, `us`, `india` and `indonesia`, are refused with a line saying where they
+  moved.
 
 `params.reasoning_effort: "none"` is not optional once the agent has tools **when
 the upstream serves OpenAI's own models**, for the same reason as a direct OpenAI
@@ -179,13 +183,13 @@ on `qwen/qwen3-32b`, 2026-08-27: Nebius answers a request carrying it with a 400
 Groq accepts it with a 200 and ignores it. Same model, same param, one loud failure
 and one silent one.
 
-`endpoint_env` has no slot on a router binding: the region owns the router URL and
-`upstream` owns the upstream one.
+`endpoint_env` has no slot on a router binding: the world part owns the router
+URL and `upstream` owns the upstream one.
 
 ### Everything else under `params:` rides the request body
 
-The compiler consumes two names: `world_part` becomes the router's base
-URL and `slng_pure_proxy` is the router's shadow-trial switch. It forwards the rest
+The compiler consumes two names: `world_part` becomes the router's base URL and
+`slng_pure_proxy` is the router's shadow-trial switch. It forwards the rest
 in the request body, on both targets. The router passes a key it does not
 recognise to the upstream.
 
@@ -195,7 +199,7 @@ error. Nested values are fine, because the body is JSON:
 
 ```yaml
       params:
-        world_part: eu-north
+        world_part: eu-west
         provider:                     # forwarded to the router, and on to OpenRouter
           only: ["groq"]
 ```

@@ -3,61 +3,79 @@
 NVIDIA's [Nemotron Voice Agent blueprint](https://github.com/NVIDIA-AI-Blueprints/nemotron-voice-agent),
 expressed as an Unmute definition.
 
-One package. Three targets. Nothing rewritten between them.
+**Write once. Compile to Pipecat or LiveKit. Deploy anywhere.**
 
-```bash
+```sh
 unmute validate
 unmute compile --target pipecat     # writes a Pipecat project
 unmute compile --target livekit     # writes a LiveKit Agents project
-unmute deploy  --target slng        # hosted
+unmute dev                          # talk to it locally
 ```
 
-## Point it at your own models
+One `agent.yaml` file defines your voice agent. Point it at any NVIDIA NIM endpoint —
+build.nvidia.com, your workstation, a DGX box, or a Jetson — by changing environment
+variables, not code.
 
-```bash
+## Run it
+
+```sh
+NVIDIA_API_KEY=nvapi-...
+NVIDIA_NIM_BASE_URL=https://integrate.api.nvidia.com/v1
+```
+
+## Point it at your endpoints
+
+```sh
 NVIDIA_NIM_BASE_URL=https://integrate.api.nvidia.com/v1     # NVIDIA-hosted
 NVIDIA_NIM_BASE_URL=http://your-workstation:8000/v1         # your own NIM
-NVIDIA_NIM_BASE_URL=http://jetson.local:8000/v1             # edge
+NVIDIA_NIM_BASE_URL=http://jetson.local:8000/v1             # edge device
 ```
 
-Same package every time. `endpoint_env` is resolved at run time, so moving
-between NVCF, a DGX box and a Jetson is an environment variable, not a fork.
+Same `agent.yaml` every time. Change where your models run without changing your code.
 
-## The two axes
+## Customize for your NVIDIA endpoints
 
-The blueprint's deployment profiles combine two decisions that are actually
-independent:
+This example currently uses placeholder speech providers. To use your NVIDIA NIM speech
+endpoints, edit the `listen` and `speak` sections in `agent.yaml`:
 
-| | |
-| --- | --- |
-| **Where the models run** | `endpoint_env` — NVCF, your workstation, DGX Spark, Jetson Thor |
-| **Where the agent runs** | `--target` — Pipecat Cloud, LiveKit Cloud, SLNG, your own cloud |
+**ASR (Parakeet)** — NVIDIA's ASR NIM serves `/v1/audio/transcriptions`:
 
-So Nemotron on your own Jetson with the agent on LiveKit Cloud is a legal
-combination, and so is Nemotron on build.nvidia.com with the agent running
-in-region on SLNG. It is a matrix rather than one choice.
+```yaml
+listen:
+  transcriber:
+    provider: nvidia
+    model: "parakeet-ctc-1.1b"
+    endpoint_env: NVIDIA_NIM_BASE_URL
+```
 
-## What binds today, and what does not
+**TTS (Chatterbox)** — NVIDIA's TTS NIM serves `/v1/audio/synthesize`:
 
-**`think` — Nemotron — binds on both code targets with no new integration.**
-NIM LLM endpoints are OpenAI-compatible, which is exactly the route both
-compilers keep open for an unlisted provider: Pipecat accepts one named with
-`endpoint_env`, LiveKit accepts one through LiveKit Inference.
+```yaml
+speak:
+  voice:
+    provider: nvidia
+    model: "chatterbox-tts"
+    endpoint_env: NVIDIA_NIM_BASE_URL
+```
 
-**`listen` and `speak` are bound to SLNG speech here**, not to Parakeet and
-Chatterbox. NIM speech services are not OpenAI-compatible, so they do not
-travel the same wildcard route, and Unmute will not let you invent a provider
-name to pretend otherwise.
+**LLM (Nemotron)** — Already configured:
 
-Getting NVIDIA speech models into the catalogue is a small, well-defined piece
-of work rather than a blocker — and it is the one thing that would make this
-package bind the full NVIDIA stack end to end.
+```yaml
+think:
+  nemotron:
+    provider: nvidia
+    model: "nemotron-3.5-lightning-30b-a3b"
+    endpoint_env: NVIDIA_NIM_BASE_URL  # ← points at your endpoint
+```
+
+All three models use the same `NVIDIA_NIM_BASE_URL` environment variable. Change
+the URL, and all three models instantly point at your new endpoint — no code changes.
 
 ## Files
 
 ```
-agent.yaml       the agent: models, prompt, greeting, channel
-targets.yaml     where it runs. The LiveKit turn-detector override is the
-                 only line that differs between targets
-instructions.md  the prompt
+agent.yaml            the agent: models, prompt, greeting, channel, tool
+targets.yaml          the two frameworks, and the overrides LiveKit needs
+instructions.md       the prompt
+tools/end_call.yaml   lets the agent hang up
 ```

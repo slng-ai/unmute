@@ -4,6 +4,10 @@ description: "Settings that speed up a call, why each one matters, and how to wr
 sidebarTitle: "Overview"
 ---
 
+Optimizing an agent means cutting what the caller waits through: the model round
+trips a turn makes, how long the agent listens before it answers, and how far
+each request travels.
+
 A caller judges a voice agent on how long it waits. This page is the short list of
 settings that make a call faster, why each one matters, and where it goes in
 `agent.yaml`.
@@ -11,6 +15,67 @@ settings that make a call faster, why each one matters, and where it goes in
 Two different jobs, two different pages. This one is **what to change**. If you
 are looking at a slow call and want to know *which part* was slow, start with
 [Reading the latency numbers](/optimization/latency) instead, then come back here.
+
+On this page:
+
+- [All of it in one package](#all-of-it-in-one-package) - every setting at once
+- [Where the wait actually is](#where-the-wait-actually-is) - the spans in one turn
+- [The short list](#the-short-list) - eight changes, in order
+- [Troubleshooting](#troubleshooting) - settings that quietly do nothing
+
+## All of it in one package
+
+```yaml agent.yaml
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-luna
+      params:
+        # No thinking before the first token.
+        reasoning_effort: "none"
+  speak:
+    voice:
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+      language: en
+      params:
+        # Hold a socket open so the provider's setup is done before the text
+        # arrives. Off by default, and it holds a second connection open while
+        # an utterance runs.
+        warm_standby_enabled: true
+        # Connect through eu-north.api.slng.ai.
+        world_part: eu-north
+  listen:
+    transcriber:
+      provider: slng
+      # Chosen on time-to-final, not accuracy score.
+      model: "deepgram/nova:3"
+      language: en
+  turn:
+    detector:
+      provider: local
+      model: silero
+      # The floor on every turn. Come down from the default in steps and listen
+      # for interruptions. Defaults differ per target, so set it if you ship to
+      # both.
+      endpointing_delay: 400ms
+```
+
+```yaml targets.yaml
+targets:
+  livekit:
+    models:
+      # local/silero above is what Pipecat runs. LiveKit needs its own turn
+      # model, so a package shipping to both overrides it here.
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+```
+
+That is every setting on this page, in one file. The rest of the page is each
+one on its own, and why it matters.
 
 ## Where the wait actually is
 
@@ -32,15 +97,57 @@ off.
 
 The turn ceiling is the exception, and it is worth checking early rather than
 last. Nothing in a package could reach it before `pace` existed, so it sat at
-the framework default no matter how short the authored silence window was. A
-wait that stays flat and long, turn after turn, is usually the ceiling rather
-than the floor.
+the framework default no matter how short the authored silence window was.
 
 [Reading the latency numbers](/optimization/latency) shows what `unmute dev`
 reports for every turn, so you can see which span is slow on your own agent
 before you change anything.
 
 ## The short list
+
+Eight changes, in the order they reliably pay off. The keys they use:
+
+<ParamField path="provider: slng" type="on listen and speak">
+  Binds SLNG for listening and speaking. The caching and the per-connection
+  settings below rest on it.
+</ParamField>
+
+<ParamField path="model" type="on the listen binding">
+  The transcriber. Choose it on time from the end of speech to the final
+  transcript, not on its accuracy score.
+</ParamField>
+
+<ParamField path="params.world_part" type="gateway code">
+  The SLNG speech gateway each `listen` or `speak` model connects through.
+</ParamField>
+
+<ParamField path="params.warm_standby_enabled" type="true | false" default="false">
+  Holds the TTS connection open, so the provider's session setup is done before
+  the text arrives.
+</ParamField>
+
+<ParamField path="pace" type="snappy | balanced | patient" default="balanced">
+  On a `turn` binding. The ceiling: the longest the agent keeps waiting before
+  answering regardless.
+</ParamField>
+
+<ParamField path="endpointing_delay" type="positive duration">
+  On a `turn` binding. The floor: how long you have to stay quiet before the
+  agent believes you finished.
+</ParamField>
+
+<ParamField path="prefetch" type="list of entries">
+  Lookups that run once, before the greeting, into variables the prompt can
+  name.
+</ParamField>
+
+<ParamField path="params.reasoning_effort" type="string">
+  On a `think` binding. `"none"` asks for no thinking before the first token.
+</ParamField>
+
+<ParamField path="announce" type="string">
+  On a tool. A short line the agent says while the tool runs.
+</ParamField>
 
 ### Bind SLNG for listening and speaking
 
@@ -164,9 +271,9 @@ that feels flat and long is sitting at the ceiling, and only this moves it.
 
 `endpointing_delay` is the floor: how long you have to stay quiet before the
 agent believes you finished. Lowering it also makes short replies finalise
-sooner, because the transcriber is only asked to finalise once the silence window
-elapses, so it pays twice on a "yes, that's right". **But lowering the floor
-alone does not shorten a long turn.**
+sooner. The transcriber is only asked to finalise once the silence window
+elapses, so the change pays twice on a "yes, that's right". **But lowering the
+floor alone does not shorten a long turn.**
 
 ```yaml agent.yaml
 models:
@@ -289,69 +396,30 @@ local:
 announce: Let me check.
 ```
 
-Keep the line **shorter than the gap it covers**. A long line runs into the answer
-and breaks its own promise of a wait: "Okay, one sec." works where "One sec, let
-me pull up your details and see what we have" does not. Put it only on tools that
-fetch or push data, and never on two things that speak for one request: two tools
-in the same turn, or a tool at the end of one step and a task at the start of the next.
+Keep the line **shorter than the gap it covers**. A long line runs into the
+answer and breaks its own promise of a wait: "Okay, one sec." works where "One
+sec, let me pull up your details and see what we have" does not. Put it only on
+tools that fetch or push data. Never put it on two things that speak for one
+request: two tools in the same turn, or a tool at the end of one step and a
+task at the start of the next.
 
-## All of it in one package
+## Troubleshooting
 
-```yaml agent.yaml
-models:
-  think:
-    reasoning:
-      provider: openai
-      model: gpt-5.6-luna
-      params:
-        # No thinking before the first token.
-        reasoning_effort: "none"
-  speak:
-    voice:
-      provider: slng
-      model: "deepgram/aura:2"
-      voice: "aura-2-thalia-en"
-      language: en
-      params:
-        # Hold a socket open so the provider's setup is done before the text
-        # arrives. Off by default, and it holds a second connection open while
-        # an utterance runs.
-        warm_standby_enabled: true
-        # Connect through eu-north.api.slng.ai.
-        world_part: eu-north
-  listen:
-    transcriber:
-      provider: slng
-      # Chosen on time-to-final, not accuracy score.
-      model: "deepgram/nova:3"
-      language: en
-  turn:
-    detector:
-      provider: local
-      model: silero
-      # The floor on every turn. Come down from the default in steps and listen
-      # for interruptions. Defaults differ per target, so set it if you ship to
-      # both.
-      endpointing_delay: 400ms
-```
+### A param you authored never reaches a target
 
-```yaml targets.yaml
-targets:
-  livekit:
-    models:
-      # local/silero above is what Pipecat runs. LiveKit needs its own turn
-      # model, so a package shipping to both overrides it here.
-      detector:
-        provider: livekit
-        model: turn-detector-mini
-```
+If your package has a `targets.yaml` that overrides a model, a target's
+`params:` block **replaces** the base block rather than merging into it. A param
+authored on the base model never reaches that target, and nothing warns you.
 
-<Warning>
-  If your package has a `targets.yaml` that overrides a model, a target's
-  `params:` block **replaces** the base block rather than merging into it. A param
-  authored on the base model never reaches that target, and nothing warns you.
-  Author it on the override.
-</Warning>
+**Fix:** author it on the override.
+
+### The wait stays flat and long, turn after turn
+
+That is usually the ceiling rather than the floor, and lowering
+`endpointing_delay` will not move it.
+
+**Fix:** set `pace` on the `turn` binding. See
+[Turn taking](/optimization/turn-taking).
 
 ## Next
 

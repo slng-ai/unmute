@@ -38,12 +38,12 @@ needs this command.
 unmute pull acme-support
 ```
 
-One line per file, with what happened to it. `written` and `unchanged`
-describe the mirror files. `pinned` is where the two reference forms differ:
-for a **scalar** reference (`slng: check_order`), it means the generated
-`tools/check_order.slng.meta.json` was written or updated, and the tool file
-itself, `tools/check_order.yaml`, is never touched; for the **legacy** block
-(`slng: {hash: ...}`), it means that tool file's own `hash:` line was:
+One line per file, with what happened to it. `written` and `unchanged` describe
+the mirror files. `pinned` means something different for each of the two
+reference forms. For a **scalar** reference (`slng: check_order`), it means the
+generated `tools/check_order.slng.meta.json` was written or updated, and the
+tool file itself is never touched. For the **legacy** block (`slng: {hash:
+...}`), it means that tool file's own `hash:` line was:
 
 ```text expandable
 pull acme-support

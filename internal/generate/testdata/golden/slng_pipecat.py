@@ -734,7 +734,7 @@ The caller is {{customer_id}}, who goes by {{caller_alias}}."""
 def build_billing_llm(state=None, *, slng_session_id):
     return _SlngRouterLLMService(
         api_key=os.environ["SLNG_API_KEY"],
-        base_url="https://eu-north.context-router.slng.ai/v1",
+        base_url="https://eu-west.context-router.slng.ai/v1",
         slng_state=state,
         settings=OpenAILLMService.Settings(
             model="gpt-5.6-luna",
@@ -817,7 +817,7 @@ class BillingAgent(LLMWorker):
 def build_intake_llm(state=None, *, slng_session_id):
     return _SlngRouterLLMService(
         api_key=os.environ["SLNG_API_KEY"],
-        base_url="https://eu-north.context-router.slng.ai/v1",
+        base_url="https://eu-west.context-router.slng.ai/v1",
         slng_state=state,
         settings=OpenAILLMService.Settings(
             model="gpt-5.6-luna",
