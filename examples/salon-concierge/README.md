@@ -56,10 +56,17 @@ the package.
 
 | Name | Purpose |
 |---|---|
-| `OPENAI_API_KEY` | the OpenAI reasoning model and the knowledge embeddings at startup |
+| `GOOGLE_API_KEY` | Gemini 3.5 Flash-Lite through Google's EU Vertex endpoint; needs `aiplatform.endpoints.predict` access |
+| `OPENAI_API_KEY` | the knowledge embeddings at startup |
 | `SLNG_API_KEY` | the voice and the transcription. One key for both |
 | `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` | trace ingest. All three together, or startup fails |
 | `MANAGER_PHONE_NUMBER` | the transfer destination, in E.164. Needed only for a phone call |
+
+Both targets use their native Google plugin with Gemini 3.5 Flash-Lite and
+minimal thinking. The Vertex client is pinned to
+`https://aiplatform.eu.rep.googleapis.com`; no model request falls back globally.
+This selects the reasoning endpoint only. The knowledge embeddings still use
+OpenAI, and speech uses the SLNG gateways declared below.
 
 A real inbound call also needs its carrier credentials. The `livekit` target
 needs `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD` and
@@ -246,8 +253,8 @@ python3 scripts/read_langfuse_trace.py --env examples/salon-concierge/.env
 
 ### It stops at startup and nothing speaks
 
-A value the agent reads at startup is missing from `.env`. `OPENAI_API_KEY` is
-read for the reasoning model and to embed the knowledge documents, and the three
+A value the agent reads at startup is missing from `.env`. `GOOGLE_API_KEY` is
+read for Gemini, `OPENAI_API_KEY` embeds the knowledge documents, and the three
 Langfuse values have to be there together.
 
 **Fix:** take the names from the generated example file, fill them in, and run

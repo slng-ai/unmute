@@ -116,6 +116,15 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 	}
 
 	call := ServiceCall{Class: spec.Class}
+	if googleReason(fw, role, vendor) {
+		if err := targetcap.CheckGoogleParams(params); err != nil {
+			return ServiceCall{}, entry, fmt.Errorf("%s: %w", fw, err)
+		}
+		if params["vertexai"] == true {
+			call.Class = "_GoogleVertexLLM"
+			params = withoutParams(params, []string{"vertexai", "location"})
+		}
+	}
 	if responsesAPI {
 		call.Class = "openai.responses.LLM"
 	}
@@ -241,6 +250,10 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 			}
 		}
 		for _, kv := range forwardParams(fields) {
+			if googleReason(fw, role, vendor) && fw == targetcap.Pipecat && kv.Key == "thinking_config" {
+				kv.Key = "thinking"
+				kv.Value = "GoogleLLMService.ThinkingConfig(**" + kv.Value + ")"
+			}
 			if responsesAPI {
 				switch kv.Key {
 				case "api":

@@ -42,8 +42,8 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("target %q does not generate: %v", name, err)
 			}
-			if name == "livekit" && !strings.Contains(artifactFile(t, artifact, "agent.py"), "llm=openai.LLM(") {
-				t.Error("salon-concierge must use Chat Completions for the latency comparison")
+			if name == "livekit" && !strings.Contains(artifactFile(t, artifact, "agent.py"), "llm=_GoogleVertexLLM(") {
+				t.Error("salon-concierge must use native Gemini on Vertex EU")
 			}
 		})
 	}
@@ -82,19 +82,17 @@ func loadExample(t *testing.T, name string) *ir.Agent {
 
 func TestSalonConciergeFeatureContract(t *testing.T) {
 	resolved := loadExample(t, "salon-concierge")
-	// Keep the runnable example on direct OpenAI with reasoning disabled.
+	// Keep both targets on native Gemini with explicit EU routing.
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		reason := targetByProvider(t, resolved, provider).Models.Reason["reasoning"]
-		if reason.Provider != "openai" || reason.Model != "gpt-5.6-luna" || reason.Router() {
-			t.Errorf("%s reasoning must use direct OpenAI gpt-5.6-luna: %#v", provider, reason)
+		if reason.Provider != "google" || reason.Model != "gemini-3.5-flash-lite" || reason.Router() {
+			t.Errorf("%s reasoning must use native Gemini 3.5 Flash-Lite: %#v", provider, reason)
 		}
-		// reasoning_effort is not optional once the agent has tools: the GPT-5
-		// family rejects function tools on chat completions without it, and every
-		// tool turn comes back 400.
-		if reason.Params["reasoning_effort"] != "none" {
-			t.Errorf("%s reasoning params = %#v, want reasoning off before the first token", provider, reason.Params)
+		thinking, _ := reason.Params["thinking_config"].(map[string]any)
+		if reason.Params["vertexai"] != true || reason.Params["location"] != "eu" || thinking["thinking_level"] != "minimal" {
+			t.Errorf("%s reasoning params = %#v, want Vertex EU with minimal thinking", provider, reason.Params)
 		}
-		// No host pin and no prompt directive: this binding is on OpenAI's own
+		// No host pin and no prompt directive: this binding is on Google's own
 		// endpoint, which serves one implementation of the model.
 		//
 		// A qwen/qwen3-32b trial on OpenRouter was reverted on 2026-08-27. Measured
@@ -106,10 +104,10 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		// are here to swap the model, screen it on multi-turn tool routing first:
 		// latency and single-turn tool calls predict neither.
 		if _, pinned := reason.Params["provider"]; pinned {
-			t.Errorf("%s reasoning pins a host: %#v. OpenAI's endpoint serves one implementation", provider, reason.Params)
+			t.Errorf("%s reasoning pins another host: %#v", provider, reason.Params)
 		}
 		if reason.PromptSuffix != "" {
-			t.Errorf("%s reasoning sets prompt_suffix = %q; this model takes reasoning_effort instead", provider, reason.PromptSuffix)
+			t.Errorf("%s reasoning sets prompt_suffix = %q; use thinking_config instead", provider, reason.PromptSuffix)
 		}
 	}
 

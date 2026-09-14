@@ -518,12 +518,71 @@ repeat `provider`, `model` and `reasoning_effort` verbatim to keep them, and a
 duplicated binding is one somebody edits on one side only. Pipecat drops both
 and builds `OpenAILLMService` either way; `unmute validate` warns per param,
 naming the target, so the drop is reported rather than silent.
-`salon-concierge-single-prompt` shows this binding; `salon-concierge` uses Chat
-Completions with `reasoning_effort: "none"`.
+`salon-concierge-single-prompt` shows this binding.
 
 `use_websocket: true` keeps a WebSocket connection for Responses requests.
 HTTP clients can also reuse connections. Compare several calls with the same
 prompts and tools before choosing an API or transport for latency.
+
+## Gemini: API and routing choices
+
+Choose the API, model, authentication and routing for the package's needs.
+
+| Route | Targets | Configuration | Authentication |
+|---|---|---|---|
+| Gemini Developer API | LiveKit and Pipecat | `provider: google` (alias `gemini`); omit `vertexai` and `location` | `GOOGLE_API_KEY` for the Developer API |
+| Vertex EU API-key bridge | LiveKit and Pipecat | `provider: google`, `params.vertexai: true`, `params.location: eu` | `GOOGLE_API_KEY` with Vertex access |
+| LiveKit Inference | LiveKit | `provider: livekit`; use a Gemini model identifier supported by LiveKit Inference | LiveKit project credentials |
+
+### Gemini Developer API
+
+Both targets use their native Google plugin for `provider: google`. Choose a
+model available to your API key; this model is one example:
+
+```yaml
+models:
+  think:
+    reasoning:
+      provider: google
+      model: gemini-3.5-flash-lite
+```
+
+### Vertex EU endpoint
+
+For a package that needs the EU Vertex endpoint, add the routing params:
+
+```yaml
+models:
+  think:
+    reasoning:
+      provider: google
+      model: gemini-3.5-flash-lite
+      params:
+        vertexai: true
+        location: eu
+```
+
+This configuration reads `GOOGLE_API_KEY` and sends requests to
+`https://aiplatform.eu.rep.googleapis.com`, with no global fallback.
+The compiler currently accepts only `location: eu` for this binding and does
+not expose OAuth configuration. These are compiler constraints, independent of
+the API key's permissions or the endpoints available to its account.
+
+### LiveKit Inference
+
+Set the think binding's `provider` to `livekit` and its `model` to the identifier
+listed by LiveKit Inference for the model you want. This selects LiveKit's
+managed inference service. Check its model availability and routing separately;
+the native Google binding's Vertex params do not configure this route.
+
+### Thinking and credentials
+
+For native Google bindings, `params.thinking_config.thinking_level` is optional.
+Choose a level supported by the selected model based on response quality and
+latency. Omitting it leaves the SDK and model defaults in effect.
+
+Use a key for the chosen API even though both native routes read the same
+environment variable. A location without Vertex is refused.
 
 ## The vendors, per target per role
 
@@ -537,7 +596,7 @@ the catalogue holds.
 | pipecat | think | `slng`, `anthropic`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openrouter`, `qwen` |
 | livekit | listen | `slng`, `assemblyai`, `cartesia`, `deepgram`, `elevenlabs`, `gradium`, `sarvam`, `soniox`, `speechmatics` |
 | livekit | speak | `slng`, `cartesia`, `deepgram`, `elevenlabs`, `gemini`, `gradium`, `inworld`, `rime`, `sarvam`, `soniox` |
-| livekit | think | `slng`, `anthropic`, `aws`, `azure`, `groq`, `mistralai`, `openai`, `openrouter`, `sarvam` |
+| livekit | think | `slng`, `anthropic`, `aws`, `azure`, `google`, `groq`, `mistralai`, `openai`, `openrouter`, `sarvam` |
 
 Read that table carefully rather than from memory. The two targets do not hold
 the same set, and the same company can appear under a different name: LiveKit

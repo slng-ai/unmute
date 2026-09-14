@@ -19,6 +19,7 @@ On this page:
 - [Every key a think binding takes](#every-key-a-think-binding-takes) - the full shape
 - [Why `reasoning_effort` is there](#why-reasoning_effort-is-there) - the line that stops a 400
 - [LiveKit Responses API](#livekit-responses-api) - one target's own client
+- [Native Gemini in the EU](#native-gemini-in-the-eu) - Google Vertex with your API key
 - [Pipecat](#pipecat) and [LiveKit](#livekit) - the vendors each target can construct
 - [When your provider is not listed](#when-your-provider-is-not-listed) - two different answers
 - [Fallback](#fallback) - what to try when the first call fails
@@ -179,11 +180,49 @@ and two copies of one binding is a binding somebody edits on one side only.
 Pipecat drops both and builds `OpenAILLMService` either way, and `unmute
 validate` prints a warning per param naming the target, so you are told what
 did not apply. `salon-concierge-single-prompt` shows this binding;
-`salon-concierge` uses Chat Completions with `reasoning_effort: "none"`.
+`salon-concierge` uses native Gemini through Google's EU Vertex endpoint.
 
 `use_websocket: true` keeps a WebSocket connection for Responses requests.
 HTTP clients can also reuse connections, so compare latency on the package's
 own prompts and tools before choosing a transport.
+
+## Native Gemini in the EU
+
+`provider: google` uses the native Google plugin on both targets. `gemini` is
+also accepted. On LiveKit this uses `livekit-plugins-google`, with no LiveKit
+Inference request.
+
+```yaml
+models:
+  think:
+    reasoning:
+      provider: google
+      model: gemini-3.5-flash-lite
+      params:
+        vertexai: true
+        location: eu
+        thinking_config:
+          thinking_level: minimal
+```
+
+Set `GOOGLE_API_KEY` in the package's `.env`. This Vertex API-key path supports
+`location: eu` and pins every model request to
+`https://aiplatform.eu.rep.googleapis.com`. It has no global fallback.
+The pinned plugins handle streaming and tools; a small adapter supplies their
+Google GenAI client because their Vertex constructors expect OAuth credentials.
+
+<ParamField path="params.vertexai" type="boolean">
+  Set to `true` for the Vertex API-key path. Omit it for the Gemini Developer API.
+</ParamField>
+<ParamField path="params.location" type="string">
+  Set to `eu` with `vertexai: true`. A location without Vertex is refused.
+</ParamField>
+<ParamField path="params.thinking_config" type="object">
+  Google thinking options. Pipecat receives these as its native `ThinkingConfig`.
+</ParamField>
+<ParamField path="params.thinking_config.thinking_level" type="string">
+  This example uses `minimal`. Allowed levels depend on the selected model.
+</ParamField>
 
 ## Pipecat
 
@@ -192,7 +231,7 @@ own prompts and tools before choosing a transport.
 | `slng` | the [Context Router](/optimization/context-router): a cache in front of your own model, for the turns it judges repeatable |
 | `anthropic` | |
 | `deepseek` | |
-| `google` | |
+| `google` | native Gemini; also accepted as `gemini` |
 | `groq` | |
 | `mistral` | |
 | `openai` | |
@@ -207,6 +246,7 @@ own prompts and tools before choosing a transport.
 | `anthropic` | |
 | `aws` | credentials come from the AWS SDK environment |
 | `azure` | |
+| `google` | native Gemini; also accepted as `gemini` |
 | `groq` | |
 | `mistralai` | also accepted as `mistral` |
 | `openai` | |
@@ -216,7 +256,7 @@ own prompts and tools before choosing a transport.
 ## The differences that matter
 
 This is the role where the two lists diverge most. LiveKit adds `aws`, `azure`,
-and `sarvam`. Pipecat adds `deepseek`, `google`, and `qwen`. LiveKit spells the
+and `sarvam`. Pipecat adds `deepseek` and `qwen`. LiveKit spells the
 Mistral integration `mistralai`.
 
 ## When your provider is not listed
