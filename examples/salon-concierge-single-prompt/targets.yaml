@@ -9,6 +9,7 @@ targets:
       detector:
         provider: livekit
         model: turn-detector-mini
+        endpointing_delay: 300ms
 
   pipecat:
     provider: pipecat
