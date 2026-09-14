@@ -105,6 +105,33 @@ func (d livekitData) ModelSpeaksItself() bool {
 	return d.Live != nil || d.Realtime != nil && d.Realtime.TTS == nil
 }
 
+// NeedsDevSay reports whether any dev_say call site renders, which is what the
+// import has to follow: an imported name nothing calls is an F401 from the
+// emitted project's own ruff gate.
+//
+// Under a speech to speech architecture the greeting is the whole question,
+// because every other site, a transfer or delegate announcement, a task
+// opening, a telephony greeting, is refused there. The half cascade is the
+// shape that exposed this: it has a synthesizer again, so ModelSpeaksItself is
+// false and the import came out, while a caller-first call and a model-written
+// greeting both render something else entirely.
+//
+// A cascade keeps the unconditional answer it has always had.
+func (d livekitData) NeedsDevSay() bool {
+	if !d.SpeechToSpeech() {
+		return true
+	}
+	if d.ModelSpeaksItself() {
+		return false
+	}
+	for _, agent := range d.Agents {
+		if agent.Greeting != nil && agent.Greeting.Say != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (l livekitChain) services() []livekitService {
 	return append([]livekitService{l.Primary}, l.Chain...)
 }

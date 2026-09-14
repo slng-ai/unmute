@@ -302,7 +302,7 @@ from livekit.agents.voice import MetricsCollectedEvent
 {{- else}}from livekit.plugins import {{join .PluginModules ", "}}{{end}}
 
 import dev_metrics
-from dev_metrics import dev_llm_node{{if not .ModelSpeaksItself}}, dev_say{{end}}, install_dev_metrics
+from dev_metrics import dev_llm_node{{if .NeedsDevSay}}, dev_say{{end}}, install_dev_metrics
 {{if .Knowledge.Knowledge}}import knowledge
 {{end}}{{if .Tracing}}{{if eq .TracingProvider "coval"}}from tracing import setup_coval
 {{else}}from tracing import setup_langfuse

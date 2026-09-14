@@ -608,6 +608,16 @@ class DevReporter:
         async def llm_push(_processor, frame):
             self.stamp(frame)
             scope = self._frame_scope(frame)
+{{- if .SpeechToSpeech}}
+            # A live or realtime reply opens with no context frame in front of
+            # it, so every frame that follows it carries no scope of its own and
+            # the open reply has to be looked up. It is looked up here, above the
+            # tool event, and not below it: done below, every tool call recorded
+            # an empty cause and rendered on the dev page under unassigned
+            # activity, sitting beside the very reply that had called it.
+            if not scope.get("operation_id") and self._live_turn in self._requests:
+                scope = dict(self._requests[self._live_turn]["scope"])
+{{- end}}
             self._service_metrics(llm, "llm", frame, scope)
             self._tool_event(llm, frame, scope)
             if isinstance(frame, ErrorFrame) and scope.get("tool_operation_id"):
@@ -618,10 +628,6 @@ class DevReporter:
             operation = scope.get("operation_id")
             request = self._requests.get(operation)
 {{- if .SpeechToSpeech}}
-            if not request and self._live_turn:
-                operation = self._live_turn
-                request = self._requests.get(operation)
-                scope = dict(request["scope"])
             if isinstance(frame, LLMFullResponseStartFrame) and not request:
                 # The live model opens a reply with no context frame in front of
                 # it, so the reply is given a request of its own here and its

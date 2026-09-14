@@ -633,11 +633,22 @@ func inlineEligible(data *pipecatData) bool {
 func setImportNeeds(data *pipecatData) {
 	// asyncio is unconditional: every bot gates entry-agent activation on an
 	// asyncio.Event (B8/V14), so it is not an import-need flag anymore.
-	data.NeedsTurnStrategies = data.Interrupt != nil && data.Interrupt.MinWords > 0
-	// The idle nudge is an appended developer message on every shape but one: a
-	// realtime session takes it as two client events instead, because the frame's
-	// handler in pipecat-ai 1.10.0 logs an error and returns (llm.py:693-694).
-	data.NeedsAppendFrame = data.Inactivity != nil && !data.Realtime
+	// The strategy gates a local turn *start*, so it is built only where the
+	// aggregator decides the turn. Where the turn arrives from elsewhere, a
+	// listening transcriber or the model's own socket, the aggregator takes a
+	// VAD analyzer and nothing else, and the import stood there unused: an F401
+	// from the emitted project's own ruff gate. Validation refuses the authored
+	// key on both those paths, so this is the second net rather than the first.
+	data.NeedsTurnStrategies = data.Interrupt != nil && data.Interrupt.MinWords > 0 && !data.ExternalTurns
+	// The idle nudge is an appended developer message on a cascade alone. A
+	// realtime session takes it as two client events, because the frame's
+	// handler in pipecat-ai 1.10.0 logs an error and returns (llm.py:693-694),
+	// and a live session takes it as spoken commentary, because a later context
+	// frame never reaches one. A live package's *greeting* still rides in on
+	// this frame, and the branch that emits it adds the import itself; reaching
+	// it from here too put an unused import in every live bot with an idle
+	// nudge and no greeting, which the emitted project's ruff gate refuses.
+	data.NeedsAppendFrame = data.Inactivity != nil && !data.SpeechToSpeech
 	data.NeedsEndFrame = data.NeedsEndAfter
 	paramsClasses := map[string]bool{}
 	for _, a := range data.Agents {

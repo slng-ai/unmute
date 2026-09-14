@@ -140,6 +140,11 @@ func forwardedBindings(resolved Target) []ForwardedBinding {
 		binding := resolved.Models.Live[name]
 		appendBinding("live", name, &binding)
 	}
+	// And realtime, for the same reason and with the same consequence.
+	for _, name := range slices.Sorted(maps.Keys(resolved.Models.Realtime)) {
+		binding := resolved.Models.Realtime[name]
+		appendBinding("realtime", name, &binding)
+	}
 	appendBinding("listen", "", resolved.Models.Listen)
 	for _, fallback := range resolved.Models.ListenFallbacks {
 		binding := fallback.Binding
@@ -898,17 +903,22 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	// of any other kind, but a per-target `models:` override replaces a binding
 	// wholesale, so the same mistake can arrive here having never been an
 	// authored model at all.
-	for role, binding := range map[string]*Binding{"listen": resolved.Models.Listen} {
-		if binding != nil && binding.Eager {
-			row.Errors = add(row.Errors, fmt.Sprintf(
-				"the %s binding sets eager, which is a turn-model field: it reaches nothing here. Put it on the models.turn binding, beside provider: listen", role))
-		}
+	if binding := resolved.Models.Listen; binding != nil && binding.Eager {
+		row.Errors = add(row.Errors,
+			"the listen binding sets eager, which is a turn-model field: it reaches nothing here. Put it on the models.turn binding, beside provider: listen")
 	}
-	for role, set := range map[string]map[string]Binding{"think": resolved.Models.Reason, "speak": resolved.Models.Speak} {
-		for name := range set {
-			if set[name].Eager {
+	// Walked in a fixed order, roles and names both: a package can reach two of
+	// these at once, and ranging a map would print the same two refusals in a
+	// different order on different runs, which is a diff for a reader and a
+	// flake for anything that reads the output.
+	for _, section := range []struct {
+		role string
+		set  map[string]Binding
+	}{{"think", resolved.Models.Reason}, {"speak", resolved.Models.Speak}} {
+		for _, name := range sortedKeys(section.set) {
+			if section.set[name].Eager {
 				row.Errors = add(row.Errors, fmt.Sprintf(
-					"%s binding %q sets eager, which is a turn-model field: it reaches nothing here. Put it on the models.turn binding, beside provider: listen", role, name))
+					"%s binding %q sets eager, which is a turn-model field: it reaches nothing here. Put it on the models.turn binding, beside provider: listen", section.role, name))
 			}
 		}
 	}
@@ -2453,6 +2463,15 @@ func providerKeyEnvNames(agent *Agent, resolved Target) []struct{ name, site str
 		binding := resolved.Models.Live[name]
 		add(targetcap.Live, "live", name, &binding)
 	}
+	// Realtime beside it. Missed once already: a realtime package references no
+	// think, listen or speak binding, so the referenced set came back empty and
+	// a package that had declared no secrets at all was told about none of them.
+	// The undeclared-secret warning is the only thing between an author and a
+	// worker that starts, answers the phone and 401s on the first word.
+	for _, name := range sortedKeys(resolved.Models.Realtime) {
+		binding := resolved.Models.Realtime[name]
+		add(targetcap.Realtime, "realtime", name, &binding)
+	}
 	for _, name := range sortedKeys(resolved.Models.Speak) {
 		binding := resolved.Models.Speak[name]
 		add(targetcap.Speak, "speak", name, &binding)
@@ -3596,6 +3615,18 @@ func validateRealtime(agent *Agent, caps targetcap.Table, provider targetcap.Pro
 	if value := binding.TurnDetection; value != "" && !slices.Contains(packagespec.TurnDetectionValues(), value) {
 		refuse("realtime model %q turn_detection %q is not one this compiler knows; write one of %s", model, value, strings.Join(packagespec.TurnDetectionValues(), ", "))
 	}
+	// minimum_words gates a *local* turn start. Under every turn_detection but
+	// `local` the model decides the turn on its own socket, so the strategy is
+	// never constructed and the word count reaches nothing: the same shape the
+	// listening-decider path refuses, and refused in the same words. Silently
+	// ignoring it also emitted a strategy import nothing used, which the emitted
+	// project's own ruff gate refuses.
+	if binding.TurnDetection != targetcap.TurnDetectionLocal &&
+		agent.Conversation != nil && agent.Conversation.Interruption != nil &&
+		agent.Conversation.Interruption.MinimumWords > 0 {
+		refuse("conversation.interruption.minimum_words reaches nothing when realtime model %q decides the turn: it gates a local turn start the model replaces. Remove it, or write turn_detection: local on the entry", model)
+	}
+
 	// The half cascade, and the one way to ask for it twice. The frameworks read
 	// one of these and ignore the other, so which voice the caller hears would be
 	// decided by something the package never says.
@@ -3620,9 +3651,15 @@ func validateSpeechSections(agent *Agent, architecture Architecture, boundAgent,
 		refuse("models.listen is not used under architecture: %s: agent %q binds %q, which listens itself. Remove the listen section", architecture, boundAgent, model)
 	}
 	if agent.Turn != "" {
+		// One answer, on both architectures. The realtime branch used to add
+		// "or write turn_detection: local", which is not a second way out: it
+		// is refused just the same, and an author who had already written
+		// `local` was told to write the line sitting in front of them. Where
+		// the turn goes is the entry's own `turn_detection:`, so that is what
+		// the sentence names.
 		hint := "Remove the turn section"
 		if architecture == ArchitectureRealtime {
-			hint = "Remove the turn section, or write turn_detection: local on the realtime entry to hand the turn back to this project's own detector"
+			hint = "Where the turn is decided is turn_detection: on the realtime entry, and turn_detection: local hands it to this project's own detector. Remove the turn section"
 		}
 		refuse("models.turn is not used under architecture: %s: agent %q binds %q, which decides the turn itself. %s", architecture, boundAgent, model, hint)
 	}

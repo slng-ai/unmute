@@ -1994,6 +1994,19 @@ func resolveBindings(agent *Agent, used map[string]bool, overrides map[string]pa
 			if replaced.Eager == nil {
 				replaced.Eager = def.Eager
 			}
+			// And the speech to speech fields, which are the hardest of the set
+			// to lose: packagespec.ModelDef has no `turn_detection:` and no
+			// `backend:`, so an author cannot write either into an override and
+			// cannot mean to drop one. Without the carry-forward a target that
+			// overrides nothing but the model id compiled a bot with the
+			// provider's own detector in place of the authored one, silently,
+			// which is the exact downgrade `turn_detection:` exists to stop.
+			if replaced.TurnDetection == "" {
+				replaced.TurnDetection = def.TurnDetection
+			}
+			if replaced.Backend == "" {
+				replaced.Backend = def.Backend
+			}
 			def = replaced
 		}
 		return def

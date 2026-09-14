@@ -383,3 +383,42 @@ func TestRealtimeRefusesEverythingLiveRefusesForTheSameReason(t *testing.T) {
 		})
 	}
 }
+
+// TestRealtimeRefusesMinimumWordsOnAModelDecidedTurn: minimum_words gates a
+// turn *start* this project's own aggregator decides. Under every
+// turn_detection but `local` the model decides the turn on its own socket, so
+// the strategy is never built and the word count reaches nothing.
+//
+// Accepted in silence, it also put a strategy import into the emitted bot that
+// nothing called, which the emitted project's own ruff gate refuses: the
+// reader's first command after compiling reported an error the compiler wrote.
+// Under `local` the aggregator is back and the key works, so that half is held
+// here too rather than left to be assumed.
+func TestRealtimeRefusesMinimumWordsOnAModelDecidedTurn(t *testing.T) {
+	const want = "minimum_words reaches nothing when realtime model"
+	for _, tc := range []struct {
+		turn    string
+		refused bool
+	}{
+		{turn: packagespec.TurnDetectionSemantic, refused: true},
+		{turn: packagespec.TurnDetectionServerVAD, refused: true},
+		{turn: packagespec.TurnDetectionLocal, refused: false},
+	} {
+		t.Run(tc.turn, func(t *testing.T) {
+			agent := realtimeAgent(t, func(entry *packagespec.RealtimeDef, _ *packagespec.AgentDef) {
+				entry.TurnDetection = tc.turn
+			})
+			enabled := true
+			if agent.Conversation == nil {
+				agent.Conversation = &Conversation{}
+			}
+			agent.Conversation.Interruption = &Interruption{Enabled: &enabled, MinimumWords: 3}
+			tgt := targetFor(agent, ProviderPipecat)
+			report, _ := Validate(agent, []Target{tgt}, realtimeEnabled())
+			text := strings.Join(report.PerTarget[0].Errors, "\n")
+			if got := strings.Contains(text, want); got != tc.refused {
+				t.Errorf("turn_detection %s: refused = %v, want %v:\n%s", tc.turn, got, tc.refused, text)
+			}
+		})
+	}
+}
