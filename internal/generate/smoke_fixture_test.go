@@ -557,6 +557,73 @@ func TestSmokeStubbedNamesExistInTheLiveKitLiveModelModule(t *testing.T) {
 	}
 }
 
+// TestSmokeStubbedNamesExistInTheLiveKitRealtimeModule is the same contract for
+// the realtime fixture, which TestSmokeLiveKitRealtime drives.
+//
+// That script replaces one name in the emitted module, AgentSession, and calls
+// two: prewarm and entrypoint. Everything else it reaches for is inside the
+// framework, under the socket it swaps on RealtimeModel. So what has to hold
+// here is that the emitted module still names those, still builds the model the
+// socket patch sits under, still warms the VAD into the key the entrypoint reads
+// back, and still passes the session its keywords the way the stand-in receives
+// them: a positional argument would never reach HarnessSession.__init__(**kwargs),
+// and the script's assertion that the session is the model plus the framework's
+// own turn taking would then be asserting nothing.
+//
+// The greeting is pinned because the script waits for it by its words, and the
+// tool call is pinned because the script answers that one handler by name.
+func TestSmokeStubbedNamesExistInTheLiveKitRealtimeModule(t *testing.T) {
+	emitted := artifactFile(t, generateFor(t, "realtime_model", ir.ProviderLiveKit), "agent.py")
+	for _, want := range []string{
+		"from livekit.plugins.openai.realtime import RealtimeModel",
+		"def prewarm(proc: JobProcess) -> None:",
+		`proc.userdata["vad"] = silero.VAD.load(`,
+		"async def entrypoint(ctx: JobContext) -> None:",
+		"session = AgentSession(",
+		"llm=RealtimeModel(",
+		`vad=ctx.proc.userdata["vad"]`,
+		"turn_detection=inference.TurnDetector(),",
+		"self.session.generate_reply(",
+		"Hi, this is Sage and Stone Salon. How can I help?",
+		"tools.lookup_customer.lookup_customer(phone=phone)",
+	} {
+		if !strings.Contains(emitted, want) {
+			t.Errorf("agent.py no longer emits %q, so the LiveKit realtime smoke's stand-in is not exercised", want)
+		}
+	}
+	// The script proves the absences on the object the framework receives rather
+	// than in the emitted text, by reading the keywords the constructor was
+	// given. That only works while every one of them is a keyword.
+	idx := strings.Index(emitted, "session = AgentSession(\n")
+	if idx < 0 {
+		t.Fatal("the session is not built where the LiveKit realtime smoke wraps it")
+	}
+	rest := emitted[idx:]
+	end := strings.Index(rest, "\n    )\n")
+	if end < 0 {
+		t.Fatal("the session constructor does not close where the LiveKit realtime smoke expects")
+	}
+	for _, line := range strings.Split(rest[:end], "\n")[1:] {
+		arg := strings.TrimSpace(line)
+		if arg == "" || strings.HasPrefix(arg, "#") || strings.HasPrefix(arg, ")") || strings.HasSuffix(arg, "(") {
+			continue
+		}
+		if !strings.Contains(arg, "=") {
+			t.Errorf("the session takes a positional argument %q; the realtime smoke's stand-in reads keywords only", arg)
+		}
+	}
+	// say() is not a route a realtime session supports, and the script asserts
+	// the refusal. A module that started calling it would make that assertion a
+	// test of the framework rather than of what this compiler emits. Read per
+	// line with comment lines dropped, because the emitted module explains in a
+	// comment why it does not call say().
+	for _, line := range strings.Split(emitted, "\n") {
+		if body := strings.TrimSpace(line); !strings.HasPrefix(body, "#") && strings.Contains(body, "session.say(") {
+			t.Errorf("agent.py calls session.say(), which a realtime session has no synthesizer for: %s", body)
+		}
+	}
+}
+
 // livekitRunContextStandIn is the RunContext the LiveKit salon smokes hand to an
 // emitted tool body, shared by both scripts so there is one shape to keep right.
 //

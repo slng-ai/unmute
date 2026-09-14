@@ -24,6 +24,20 @@ import "fmt"
 // This is the only lowering in the tree where the correct emission is silence,
 // which is why it gets a field of its own rather than an empty Expr that a
 // reader would take for "not filled in yet".
+//
+// The two targets take different routes and arrive at the same place, which is
+// worth knowing before anybody makes them match. On the wire both send
+// `turn_detection: null`, which is the API's own way of saying nobody on the
+// server decides. LiveKit gets there by being passed nothing: the framework
+// then sees it may take the decision, and its session copy sets None
+// (realtime_model.py:891). Pipecat gets there from the literal False, which its
+// SessionUpdateEvent.model_dump rewrites to null on the way out, deliberately
+// and with a comment saying so (services/openai/realtime/events.py:390-411).
+//
+// So neither route is the other's, and swapping either one breaks it: passing
+// None on LiveKit costs the framework the decision before it is offered, and
+// passing None on Pipecat is dropped by exclude_none, which leaves the vendor's
+// own detector running. Both smokes assert the wire, not just the driver.
 type TurnDetectionProfile struct {
 	// Omit says to emit no turn-detection argument at all. See above.
 	Omit bool
