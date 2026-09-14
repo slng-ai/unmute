@@ -66,7 +66,8 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	}
 
 	entry := agent.Agents[agent.EntryAgent]
-	if agent.Architecture == ir.ArchitectureLive {
+	switch agent.Architecture {
+	case ir.ArchitectureLive:
 		// One service where three stand. The transcriber, the reasoning chain
 		// and the synthesizer are not built at all, which is what makes their
 		// absence in the emitted module a fact rather than a template accident.
@@ -76,7 +77,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		}
 		data.Live = &live
 		data.LiveBackend = tgt.Models.Live[entry.Live].Backend
-	} else if agent.Architecture == ir.ArchitectureRealtime {
+	case ir.ArchitectureRealtime:
 		// One model again, and the same three that are not built. What differs
 		// from live is who decides the turn and who speaks: both are the
 		// package's to choose here, so both are resolved in the builder below.
@@ -85,7 +86,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			return livekitData{}, fmt.Errorf("entry agent %q: %w", agent.EntryAgent, err)
 		}
 		data.Realtime = &realtime
-	} else {
+	default:
 		stt, err := livekitSTTService(tgt.Models.Listen, env)
 		if err != nil {
 			return livekitData{}, err

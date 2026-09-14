@@ -654,7 +654,7 @@ func checkAgentBinding(pkg *packagespec.Package, name string, agent packagespec.
 		case agent.Live == "":
 			return fmt.Errorf("%s: agent %q names no live model: write live: <name of a models.live entry>", at, name)
 		case agent.Think != "" || agent.Speak != "":
-			return fmt.Errorf("%s: agent %q names live %q and also think or speak: a live model listens, thinks and speaks itself. Remove them; a live model's backend is the entry's own backend:, not the agent's think:", at, name, agent.Live)
+			return fmt.Errorf("%s: agent %q names live %q and also think or speak: a live model listens, thinks and speaks itself. Remove both; the model a live entry hands its tools to is named by that entry's own backend key, not by the agent", at, name, agent.Live)
 		}
 	}
 	return nil

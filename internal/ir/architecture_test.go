@@ -110,7 +110,7 @@ func TestArchitectureDecidesWhichSectionsAreLegal(t *testing.T) {
 				def.Think = "voice"
 				pkg.Agent.Agents["desk"] = def
 			},
-			want: []string{`agent "desk" names live "voice" and also think or speak`, "a live model's backend is the entry's own backend:"},
+			want: []string{`agent "desk" names live "voice" and also think or speak`, "named by that entry's own backend key, not by the agent"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
