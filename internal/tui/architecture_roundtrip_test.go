@@ -126,3 +126,111 @@ func TestMaintainWritesNoArchitectureForACascade(t *testing.T) {
 		t.Errorf("a cascaded package gained an architecture: key it never wrote:\n%s", written)
 	}
 }
+
+// TestMaintainKeepsAHalfCascade is the round-trip for the shape where the
+// speech to speech model listens and thinks and a synthesizer of the author's
+// choosing speaks. Three things used to go missing here, and each one leaves a
+// file that reads fine:
+//
+//   - the agent's `speak:` binding, and the `models.speak` entry it names, so
+//     the rewritten package no longer validates at all;
+//   - the entry the agent binds, taken as the first in the section rather than
+//     read, so a package listing an alternate first came back pointing at it;
+//   - a backend named by two entries, written twice under one `think:` key, so
+//     the rewritten file stopped parsing and the console could not reopen it.
+func TestMaintainKeepsAHalfCascade(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "pkg")
+	data := scaffold.Data{
+		Name: "pkg", AgentName: "acme-desk", EntryAgent: "assistant",
+		Architecture: "realtime",
+		Realtime: []scaffold.SpeechModel{
+			// The alternate is first on purpose: the agent binds the second one.
+			{Name: "cheap", Provider: "openai", Model: "gpt-realtime-mini", Turn: "semantic"},
+			{Name: "voice", Provider: "openai", Model: "gpt-realtime", Turn: "semantic"},
+		},
+		SpeechBound: "voice",
+		SpeechSpeak: scaffold.SpeechBackend{
+			Name:    "warm",
+			Binding: scaffold.Binding{Provider: "cartesia", Model: "sonic-3", Voice: "a0e99841-438c-4a64-b679-ae501e7d6091"},
+		},
+	}
+	data.SetTarget("pipecat")
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := packagespec.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, ok := pkg.Agent.Agents["assistant"]
+	if !ok {
+		t.Fatalf("the agent is gone; agents = %+v", pkg.Agent.Agents)
+	}
+	if def.Realtime != "voice" {
+		t.Errorf("the agent binds %q, want voice: the console repointed it at another entry", def.Realtime)
+	}
+	if def.Speak != "warm" {
+		t.Errorf("the agent's speak binding = %q, want warm", def.Speak)
+	}
+	speak, ok := pkg.Agent.Models.Speak["warm"]
+	if !ok {
+		t.Fatalf("the synthesizer entry is gone; models.speak = %+v", pkg.Agent.Models.Speak)
+	}
+	if speak.Provider != "cartesia" || speak.Model != "sonic-3" {
+		t.Errorf("the synthesizer came back as %+v, want the authored provider and model", speak)
+	}
+	// A half cascade that no longer validates is the failure an author meets,
+	// so hold the whole build rather than the keys alone.
+	if _, err := ir.Build(pkg); err != nil {
+		t.Errorf("the console wrote a half cascade that no longer builds: %v", err)
+	}
+	// Reading it back through the console has to give the same answer, because
+	// that is the loop an author repeats.
+	agent, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.data.SpeechBound != "voice" || agent.data.SpeechSpeak.Name != "warm" {
+		t.Errorf("read back bound=%q speak=%q, want voice and warm", agent.data.SpeechBound, agent.data.SpeechSpeak.Name)
+	}
+}
+
+// TestMaintainWritesOneBackendPerName: two live entries may name one backend,
+// which is an ordinary palette and not a strange package. The backends render
+// as mapping keys under `think:`, so writing one per entry wrote a duplicate
+// key, and goccy refuses the file the console just produced.
+func TestMaintainWritesOneBackendPerName(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "pkg")
+	data := scaffold.Data{
+		Name: "pkg", AgentName: "acme-desk", EntryAgent: "assistant",
+		Architecture: "live",
+		Live: []scaffold.SpeechModel{
+			{Name: "voice", Provider: "openai", Model: "gpt-live-1", Voice: "marin", Backend: "fast"},
+			{Name: "spare", Provider: "openai", Model: "gpt-live-1", Voice: "cedar", Backend: "fast"},
+		},
+		SpeechBound: "voice",
+		Backends: []scaffold.SpeechBackend{{
+			Name: "fast", Binding: scaffold.Binding{Provider: "openai", Model: "gpt-5.6-terra"},
+		}},
+	}
+	data.SetTarget("pipecat")
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+	// Loading is the assertion: a duplicate mapping key is a parse error here,
+	// not something that surfaces later.
+	pkg, err := packagespec.Load(root)
+	if err != nil {
+		t.Fatalf("the console wrote a file it cannot read back: %v", err)
+	}
+	agent, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agent.data.Backends) != 1 {
+		t.Errorf("backends = %+v, want one entry for the one name both models share", agent.data.Backends)
+	}
+	if _, err := ir.Build(pkg); err != nil {
+		t.Errorf("the console wrote a live package that no longer builds: %v", err)
+	}
+}

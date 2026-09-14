@@ -47,6 +47,9 @@ agents:
     instructions: [[.PromptPath]]
 [[- if $.SpeechSection]]
     [[$.SpeechSection]]: [[$.SpeechName]]
+[[- if $.SpeechSpeak.Name]]
+    speak: [[$.SpeechSpeak.Name]]
+[[- end]]
 [[- else]]
     think: [[.ModelProfile]]
     speak: [[.VoiceProfile]]
@@ -182,6 +185,31 @@ knowledge:
 [[- if .Backend]]
       # Tools and the harder reasoning run here, while the model keeps talking.
       backend: [[.Backend]]
+[[- end]]
+[[- end]]
+[[- if .SpeechSpeak.Name]]
+  # The half cascade: the model above hears the caller and decides what to say,
+  # and this synthesizer speaks it. The model writes no voice of its own, which
+  # is what makes the pairing legal.
+  speak:
+    [[.SpeechSpeak.Name]]:
+[[- if .SpeechSpeak.Description]]
+      description: [[quote .SpeechSpeak.Description]]
+[[- end]]
+[[- if .SpeechSpeak.Binding.Provider]]
+      provider: [[.SpeechSpeak.Binding.Provider]]
+[[- end]]
+[[- if .SpeechSpeak.Binding.Model]]
+      model: [[quote .SpeechSpeak.Binding.Model]]
+[[- end]]
+[[- if .SpeechSpeak.Binding.Voice]]
+      voice: [[quote .SpeechSpeak.Binding.Voice]]
+[[- end]]
+[[- if .SpeechSpeak.Binding.Language]]
+      language: [[yaml .SpeechSpeak.Binding.Language]]
+[[- end]]
+[[- if .SpeechSpeak.Binding.Params]]
+      params:[[yamlBlock 8 .SpeechSpeak.Binding.Params]]
 [[- end]]
 [[- end]]
 [[- if .SpeechBackends]]

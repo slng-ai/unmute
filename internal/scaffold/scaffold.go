@@ -133,11 +133,19 @@ type Data struct {
 	// exists to stop: the rewritten file then still names a backend, still
 	// validates and still compiles, with the author's model id gone and an
 	// empty one in the emitted session.
-	Backends   []SpeechBackend
-	Target     string
-	Channel    string
-	Channels   []Channel
-	EntryAgent string
+	Backends []SpeechBackend
+	// SpeechBound is the speech entry the agent binds, and SpeechSpeak the
+	// synthesizer it binds beside it for a half cascade. Both are read off the
+	// package rather than derived: the entry used to be taken as the first in
+	// the section, which silently repointed an agent that had bound a later one,
+	// and the synthesizer was not carried at all, so a half cascade came back
+	// with nothing to speak with.
+	SpeechBound string
+	SpeechSpeak SpeechBackend
+	Target      string
+	Channel     string
+	Channels    []Channel
+	EntryAgent  string
 	// Transport and Carrier describe the route. They are written into
 	// connections/<Connection>.yaml, never onto the target: a target names one
 	// connection and says nothing else about how a call reaches it (FR-001).
@@ -687,10 +695,17 @@ func (d Data) SpeechModels() []SpeechModel {
 	return nil
 }
 
-// SpeechName is the entry an agent binds. A speech to speech package has one
-// agent, so it binds the first entry; alternates in the list are palette
-// entries the way they are in every other section.
+// SpeechName is the entry the agent binds. Read from the package where there is
+// one, because alternates in the list are palette entries the way they are in
+// every other section, and taking the first one rewrote a package onto a model
+// its author had deliberately not bound.
 func (d Data) SpeechName() string {
+	if d.SpeechBound != "" {
+		return d.SpeechBound
+	}
+	// A package the wizard just wrote has one entry and binds it, so the two
+	// agree. Falling back keeps that path working without the console having to
+	// set a field it has no answer for yet.
 	if models := d.SpeechModels(); len(models) > 0 {
 		return models[0].Name
 	}

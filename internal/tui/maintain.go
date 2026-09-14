@@ -166,10 +166,38 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		if entry.Backend == "" {
 			continue
 		}
+		// Once per backend, not once per entry that names it. The template
+		// renders these as mapping keys under think:, so two live entries
+		// sharing one backend wrote the same key twice and the rewritten file
+		// stopped parsing: the console could not even reopen the package.
+		// Two live entries is a legal palette, which is how a package gets
+		// there without doing anything unusual.
+		if slices.ContainsFunc(data.Backends, func(b scaffold.SpeechBackend) bool {
+			return b.Name == entry.Backend
+		}) {
+			continue
+		}
 		if def, ok := effectiveModelDef(pkg, tgt, entry.Backend); ok {
 			data.Backends = append(data.Backends, scaffold.SpeechBackend{
 				Name: entry.Backend, Description: def.Description, Binding: scaffoldBinding(def),
 			})
+		}
+	}
+	// The entry the agent actually binds, and the synthesizer it binds beside
+	// it for a half cascade. Both were derived rather than read: the name was
+	// taken as the first entry of the section, so a package listing a cheaper
+	// alternate first came back bound to it, and the speak binding was not
+	// carried at all, so a half cascade came back with nothing to speak with.
+	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.Agents)) {
+		def := pkg.Agent.Agents[name]
+		if bound := cmp.Or(def.Realtime, def.Live); bound != "" {
+			data.SpeechBound = bound
+			if speak, ok := effectiveModelDef(pkg, tgt, def.Speak); ok {
+				data.SpeechSpeak = scaffold.SpeechBackend{
+					Name: def.Speak, Description: speak.Description, Binding: scaffoldBinding(speak),
+				}
+			}
+			break
 		}
 	}
 	// Read so it survives the rewrite. The console offers no editor for it: the
