@@ -362,3 +362,43 @@ func TestValidatePaceIsStillTakenWhereItLands(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateRefusesATurnDetectingModelOnTheOrdinaryTranscriber is the other
+// direction of the model-family check, and it went unwritten for a while: the
+// compiler held a Nova model off the Flux service and let a Flux model onto the
+// ordinary Deepgram one, which is the same mismatch and the same first-packet
+// refusal from the vendor. It compiled clean and emitted the wrong class.
+//
+// Only where the vendor ships its turn detection as a separate class. A vendor
+// switched on by an argument or a setting has one class serving both models, so
+// there is nothing to mismatch and nothing to say.
+func TestValidateRefusesATurnDetectingModelOnTheOrdinaryTranscriber(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		vendor, model string
+		refused       bool
+	}{
+		{name: "a flux model on the ordinary deepgram service", vendor: "deepgram", model: "flux-general-en", refused: true},
+		{name: "an ink model on the ordinary cartesia service", vendor: "cartesia", model: "ink-2", refused: true},
+		{name: "the ordinary deepgram model", vendor: "deepgram", model: "nova-3", refused: false},
+		// Carved out of the ink family on purpose: it is the ordinary service's
+		// own model and the row excludes it, so the check has to let it past.
+		{name: "cartesia's own ordinary model", vendor: "cartesia", model: "ink-whisper", refused: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := safeAgent(t)
+			tgt := targetFor(agent, ProviderPipecat)
+			listen := *tgt.Models.Listen
+			listen.Provider, listen.Model, listen.Params = tc.vendor, tc.model, nil
+			tgt.Models.Listen = &listen
+			text := strings.Join(validateOne(t, agent, tgt).Errors, "\n")
+			got := strings.Contains(text, "turn-detecting model")
+			if got != tc.refused {
+				t.Errorf("refused = %v, want %v:\n%s", got, tc.refused, text)
+			}
+			if tc.refused && !strings.Contains(text, "turn: provider: listen") {
+				t.Errorf("the refusal names nothing to write instead:\n%s", text)
+			}
+		})
+	}
+}

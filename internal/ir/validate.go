@@ -931,6 +931,8 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 			if caps.Capability(targetcap.FieldTurnByListener, provider).Tag == targetcap.Core {
 				validateListenDecider(agent, resolved, provider, b, row)
 			}
+		} else {
+			validateListenModelFamily(resolved, provider, row)
 		}
 		if b.Eager {
 			applyCapability(caps, targetcap.FieldTurnEager, provider, row)
@@ -3271,6 +3273,31 @@ func eagerErrors(name string, model ModelDef) []string {
 			name)}
 	}
 	return nil
+}
+
+// validateListenModelFamily is the other direction of the same check, and it
+// went unwritten: a turn-detecting model id bound to the ordinary transcriber.
+//
+// Where a vendor ships its turn detection as a *separate class*, the two
+// services do not serve each other's models, and the connection is refused by
+// the vendor on the first packet. So `flux-general-en` on DeepgramSTTService
+// compiled clean, emitted the wrong class and endpoint for that model, and the
+// author found out from a live call. A vendor switched on by an argument or a
+// setting has one class serving both, so there is nothing to mismatch and this
+// says nothing about it.
+func validateListenModelFamily(resolved Target, provider targetcap.Provider, row *TargetValidation) {
+	listen := resolved.Models.Listen
+	if listen == nil || listen.Model == "" {
+		return
+	}
+	detector, ok := targetcap.LookupListenTurnDetector(provider, cmp.Or(listen.Provider, "openai"))
+	if !ok || !detector.SwapsClass() || !detector.ServesModel(listen.Model) {
+		return
+	}
+	row.Errors = add(row.Errors, fmt.Sprintf(
+		"listening model %q is a %s turn-detecting model, and the ordinary %s transcriber does not serve it: the vendor refuses the connection on the first packet. "+
+			"Write turn: provider: listen to build the service this model belongs to, or bind a listening model the ordinary service serves",
+		listen.Model, strings.Join(detector.ModelPrefixes, "/"), detector.Vendor))
 }
 
 // validateListenDecider holds `turn: provider: listen` on a target that lets a

@@ -36,11 +36,15 @@ type LiveDef struct {
 	//
 	// Omitted means the vendor's client delegation, where the work comes back to
 	// the application instead of running on a backend model. The two frameworks
-	// differ on what that is worth, and the capability table carries the
-	// difference: Pipecat's ClientDelegation wraps a worker that does run this
-	// project's tools, while LiveKit's sets `mutable_tools=False` and its own
-	// docstring says "no framework tool can answer" it. So an agent with tools
-	// and no backend compiles on one target and is refused on the other.
+	// differ on what that is worth: Pipecat's ClientDelegation wraps a worker
+	// that does run this project's tools, while LiveKit's sets
+	// `mutable_tools=False` and its own docstring says "no framework tool can
+	// answer" it.
+	//
+	// An agent with tools and no backend is nonetheless refused on BOTH, and
+	// deliberately: one authored package compiling to two different answers
+	// about whether its tools run is worse than a refusal an author can act on
+	// in one line. internal/ir/validate_live_test.go records the decision.
 	Backend     string `json:"backend,omitempty" yaml:"backend,omitempty"`
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 }

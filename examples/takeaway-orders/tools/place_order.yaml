@@ -38,6 +38,11 @@ output:
       type: number
     wait_minutes:
       type: integer
+    offer:
+      type: string
+      description: >-
+        The offer this order qualified for, already taken off the total, or
+        empty. Read it out so the caller hears why the sum is what it is.
     problem:
       type: string
   required:
@@ -45,6 +50,7 @@ output:
     - order_number
     - total
     - wait_minutes
+    - offer
     - problem
 
 local:

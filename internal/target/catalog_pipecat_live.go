@@ -2,7 +2,7 @@ package target
 
 // Pipecat live entries: one model that listens, thinks and speaks, standing
 // where the transcriber, the model and the synthesizer stood. Same contract as
-// catalog_pipecat.go (the pipecat_v1 driver templates, pipecat-ai ==1.9.0).
+// catalog_pipecat.go (the pipecat_v1 driver templates, pipecat-ai ==1.10.0).
 //
 // What "Verified" on the row below covers: the offline suite reading the emitted
 // module, and the opt-in smoke driving the real service with only its socket

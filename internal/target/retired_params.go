@@ -16,9 +16,10 @@ import "fmt"
 type RetiredParam struct {
 	// Framework, Vendor and Role are all part of the key.
 	//
-	// Vendor and Role, because `model:` is a removed Speechmatics listening
-	// setting and an ordinary field on every think binding in the tree, so a
-	// table keyed by name alone would refuse half the packages here.
+	// Vendor and Role, because a key one vendor's service dropped is an ordinary
+	// key somewhere else: `extra_params` is gone from the Speechmatics listening
+	// service and is a live key on other services and other roles, so a table
+	// keyed by name alone would refuse packages that are correct as written.
 	//
 	// Framework, because each driver reaches a vendor through its own SDK. The
 	// LiveKit Speechmatics plugin is not the Pipecat one and did not lose these
