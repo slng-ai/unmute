@@ -403,7 +403,7 @@ provider with different settings, for example `pipecat_twilio` and
 | `pins` | LiveKit-only known package pins, name to semantic version; refused on `slng` |
 | `sdk_language` | `python` when written; refused on `slng` |
 | `connection` | required for LiveKit or Pipecat telephony; illegal with no phone use; refused on `slng` |
-| `deployment_region` | one non-empty region, or a duplicate-free list; multiple regions are LiveKit-only; on `slng` exactly one of `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au` |
+| `deployment_region` | LiveKit: `us-east`, `eu-central`, or `ap-south`, one or a duplicate-free list; Pipecat: one non-empty region; on `slng` exactly one of `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au` |
 | `warm_instances` | instances the platform holds ready; zero or more; **Pipecat only**, refused on `livekit` and `slng` |
 | `models` | per target overrides of named `models` entries |
 
@@ -436,7 +436,24 @@ LiveKit refuses the field: `livekit.toml` carries only the project subdomain and
 the agent id, and a warm production replica on LiveKit Cloud is a property of the
 billing plan. SLNG refuses it too, because it exposes no pool of yours.
 
+## LiveKit deployment regions
+
+<ParamField path="deployment_region" type="string or list of strings">
+  LiveKit accepts `us-east` (Virginia), `eu-central` (Frankfurt), or `ap-south`
+  (Mumbai), as one region or a duplicate-free list. Omit to let the platform
+  choose placement. Unknown names, including `eu`, are refused. These are
+  [LiveKit's agent deployment regions](https://docs.livekit.io/deploy/admin/regions/endpoints/#agent-deployment-regions), not its media region groups.
+</ParamField>
+
+The region is chosen at the first `lk agent create` and cannot change on a
+redeploy. The CLI has no `lk region list` command. `lk agent list` shows the
+regions of existing agents in your project; it is not the full region catalog.
+Use the linked region list for a project with no agents.
+
 ## Deployment regions and model regions
+
+See [the three region settings](models.md#three-region-settings) before
+setting a worker region, speech gateway, or router endpoint.
 
 `deployment_region` chooses where the agent worker runs. Each STT, TTS and LLM
 provider keeps its own endpoint and location settings. Set those on the model

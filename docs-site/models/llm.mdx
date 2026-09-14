@@ -52,34 +52,35 @@ unmute validate my-agent
 `provider:` and `model:` carry a plain binding. The rest shape the request, or
 put the Context Router in front.
 
-<ParamField path="provider" type="a vendor from your target's list">
-  Who serves the model. The two lists below are per target. An unlisted name is
-  handled differently by each target, and [When your provider is not
-  listed](#when-your-provider-is-not-listed) explains both.
+<ParamField path="provider" type="string">
+  A provider supported for this role and target, listed on the model pages. Required for
+  an API binding; there is no inferred API provider. `local` selects local placement.
 </ParamField>
 
 <ParamField path="model" type="string">
-  The model id, forwarded to the vendor exactly as you write it.
+  Provider model id, passed through as written. Required where the selected integration
+  requires a model; otherwise its default applies. No model id is checked against a provider catalog.
 </ParamField>
 
-<ParamField path="params" type="free-form map">
-  Forwarded to the vendor as written. `reasoning_effort` lives here, and so do
-  the two LiveKit Responses directives. A name the target's settings object has
-  no field for rides that target's overflow field and still reaches the
-  provider.
+<ParamField path="params" type="object">
+  Provider parameter names and values. Omit to add no extra parameters. Provider limits
+  apply; Unmute does not define a universal accepted set. SLNG `params.world_part`
+  is checked against its supported regions.
 </ParamField>
 
 <ParamField path="temperature" type="number">
-  Forwarded as written, with no range check here. It is folded into `params:`
-  at compile time, and an explicit `params.temperature` wins over it.
+  Sampling temperature on a `think` entry. Provider-defined values and limits; omitted
+  leaves the provider default.
 </ParamField>
 
 <ParamField path="top_p" type="number">
-  Forwarded as written, folded into `params:` the same way.
+  Nucleus sampling value on a `think` entry. Provider-defined values and limits; omitted
+  leaves the provider default.
 </ParamField>
 
 <ParamField path="top_k" type="integer">
-  Forwarded as written, folded into `params:` the same way.
+  Sampling count on a `think` entry. Provider-defined values and limits; omitted leaves
+  the provider default.
 </ParamField>
 
 <ParamField path="endpoint_env" type="an environment variable name">
@@ -94,9 +95,9 @@ put the Context Router in front.
   model. `local` is refused on the slng target.
 </ParamField>
 
-<ParamField path="fallback" type="list of other think entry names">
-  Other entries in this same `think:` section, tried in order when the first
-  model's call fails. See [Fallback](#fallback).
+<ParamField path="fallback" type="list of strings">
+  Names from the same `think` or `listen` section, in retry order. Omit for no fallback
+  chain. Cycles and other roles are refused; Pipecat refuses generated fallback.
 </ParamField>
 
 <ParamField path="prompt_suffix" type="string, up to 512 characters">
@@ -363,6 +364,7 @@ against a Pipecat target refuses it. The SLNG list uses the same
 
 [Speech to text](/models/stt#fallback) documents the same field on the `listen`
 role.
+
 
 ## Troubleshooting
 

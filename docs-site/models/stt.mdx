@@ -45,21 +45,19 @@ the package refers to it.
 Only `model:` is required. The rest narrow where the model runs and what
 happens when it fails.
 
-<ParamField path="provider" type="a vendor from your target's list">
-  Who serves the model. The two lists below are per target, and an unlisted
-  name is refused. Left out, the code targets fall back to `openai`, so name
-  one rather than relying on that.
+<ParamField path="provider" type="string">
+  A provider supported for this role and target, listed on the model pages. Required for
+  an API binding; there is no inferred API provider. `local` selects local placement.
 </ParamField>
 
-<ParamField path="model" type="string" required>
-  The model id, forwarded to the vendor exactly as you write it. Unmute keeps
-  no allowlist, so a typo surfaces as a provider error on the first call.
+<ParamField path="model" type="string">
+  Provider model id, passed through as written. Required where the selected integration
+  requires a model; otherwise its default applies. No model id is checked against a provider catalog.
 </ParamField>
 
-<ParamField path="language" type="a BCP-47 tag, e.g. en or pt-BR">
-  The language to transcribe. Only some vendors take one. Where the vendor
-  carries language in the model id instead, this key is refused, and the
-  message names the provider.
+<ParamField path="language" type="string">
+  BCP-47 language tag, such as `en` or `en-US`, on `listen` or `speak`. Omit to leave
+  language selection to the integration.
 </ParamField>
 
 <ParamField path="placement" type="api | local">
@@ -75,16 +73,15 @@ happens when it fails.
   has no custom speech endpoint at all, and neither does the slng target.
 </ParamField>
 
-<ParamField path="params" type="free-form map">
-  Forwarded to the vendor's own client, unchecked, except for
-  `params.world_part`, which selects an SLNG speech gateway and is refused when
-  it is not one of them.
+<ParamField path="params" type="object">
+  Provider parameter names and values. Omit to add no extra parameters. Provider limits
+  apply; Unmute does not define a universal accepted set. SLNG `params.world_part`
+  is checked against its supported regions.
 </ParamField>
 
-<ParamField path="fallback" type="list of other listen entry names">
-  Other entries in this same `listen:` section, tried in order when the first
-  transcriber's call fails. See [Fallback](#fallback). Every entry in a chain
-  must share the same `placement`.
+<ParamField path="fallback" type="list of strings">
+  Names from the same `think` or `listen` section, in retry order. Omit for no fallback
+  chain. Cycles and other roles are refused; Pipecat refuses generated fallback.
 </ParamField>
 
 ## One key, many models
@@ -257,6 +254,7 @@ finished. **Fix:** move them; see [Turn detection](/models/turn-detection).
 
 Pipecat does not emit listen fallback yet. **Fix:** remove `fallback:` from
 the `listen` section, or keep that package on LiveKit or slng.
+
 
 ## Where to go next
 

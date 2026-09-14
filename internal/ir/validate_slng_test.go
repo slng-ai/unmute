@@ -113,9 +113,8 @@ func TestSlngRefusesProjectOnlySettings(t *testing.T) {
 	}
 }
 
-// The only region *value* check in the tree. validateRegions catches an empty or
-// duplicated entry and forwards everything else, because every other platform
-// owns its own region names.
+// SLNG checks its required region against the hosted platform's values.
+// The shared validateRegions check also catches empty and duplicate entries.
 func TestSlngRefusesRegionsOutsideTheFour(t *testing.T) {
 	for _, test := range []struct {
 		name    string

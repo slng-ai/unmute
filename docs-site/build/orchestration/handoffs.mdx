@@ -45,25 +45,25 @@ handoffs:
 
 ### Every key a handoff takes
 
-<ParamField path="to" type="agent name" required>
-  Which agent takes the caller. Names one entry under `agents:`.
+<ParamField path="to" type="string" required>
+  An existing agent name. The conversation moves to that agent and does not return. No
+  destination is inferred.
 </ParamField>
 
 <ParamField path="when" type="string">
-  What the model reads to decide whether to use this handoff. Write one: with
-  no `when:`, the model has nothing to decide on.
+  The situation the model reads to decide whether to hand over. Omission supplies no
+  trigger guidance, so write one.
 </ParamField>
 
 <ParamField path="announce" type="string">
-  One fixed sentence spoken before the new agent starts. Omit it for a silent
-  switch. It takes no `{{placeholders}}`.
+  Exact text spoken before handing over. Omit for a silent handoff.
 </ParamField>
 
-<ParamField path="context" type="block">
-  How much conversation travels with the caller. Its keys are `history:`,
-  `max_messages:`, `summarizer:` and `include_tool_calls:`. See
-  [Choose conversation history](#choose-conversation-history).
+<ParamField path="context" type="object">
+  The [history fields](/reference/agent-yaml#context). Omitted means `messages`. Saved
+  values are visible only where the receiving prompt names them.
 </ParamField>
+
 
 ## Share only intentional saved values
 

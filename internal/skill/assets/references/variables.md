@@ -3,6 +3,42 @@
 A variable is a named value that lives for one call. A secret is never a
 variable, and the two never mix.
 
+## Keep only the values the call needs
+
+**Keep state small.** Declare a variable when a value must survive a task or
+handoff, feed a later tool, or supply a needed call fact to a prompt. Before
+adding one used by only one prompt, check whether the agent needs the fact at
+all. Prefer fewer values that each represent one useful fact or result; do not
+split a timestamp into date and time just because both fields are available.
+
+For a clock, replace `current_date`, `current_weekday`, and `current_time` with
+`current_datetime` and `current_weekday`. The timestamp already carries the
+date and time. Keep the weekday only if the prompt must name it; reading the
+clock's answer avoids asking the model to calculate it. If nobody needs the
+weekday, keep just the timestamp.
+
+Merge these entries into an existing package:
+
+```yaml agent.yaml
+variables:
+  current_datetime:
+    type: str
+  current_weekday:
+    type: str
+
+prefetch:
+  - name: local_clock
+    clock: now
+    timezone: Europe/Madrid
+    assign:
+      - current_datetime: result.datetime
+      - current_weekday: result.day_of_week
+```
+
+Use a shape for fields that travel together as a task result. Pre-fetch fills
+plain values, so it cannot save the clock into a shape. Keep separate values
+when they have different confirmation steps or different readers.
+
 ## How a value moves
 
 Three parts write or read state:
@@ -142,6 +178,10 @@ prompt should say what to ask for and how to say it out loud, not what shape to
 write down.
 
 ## `shapes:` groups fields into a named type
+
+A pre-fetch cannot fill a shape or a list. Use a task to produce grouped fields;
+use separate scalar variables for clock and lookup pre-fetch results. A single
+pre-fetch may assign several scalar variables from one result.
 
 A top-level list, declared once, each item naming a group of fields a
 `type:` can then refer to:

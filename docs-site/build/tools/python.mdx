@@ -68,8 +68,9 @@ that shows a handler receiving an injected value. For real ones, every tool in
 
 ## The block
 
-<ParamField path="handler" type="package Python path">
-  A Python file inside the package. Omitted means `tools/<tool-name>.py`.
+<ParamField path="handler" type="string">
+  Path to a Python file inside the package. Omitted means `tools/<tool-name>.py`; that
+  file must exist. The file defines the callable described below.
 </ParamField>
 
 The function inside that file still has the tool name. For a tool named

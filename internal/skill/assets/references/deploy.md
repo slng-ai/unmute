@@ -22,6 +22,48 @@ pushes it in one command. See `references/package.md`, "The slng target".
 The same image runs locally and in production. Only the start command and the
 environment change.
 
+## LiveKit deployment regions
+
+<ParamField path="deployment_region" type="string or list of strings">
+  LiveKit accepts `us-east` (Virginia), `eu-central` (Frankfurt), or `ap-south`
+  (Mumbai), as one region or a duplicate-free list. Omit to let the platform
+  choose placement. Unknown names, including `eu`, are refused. These are
+  [LiveKit's agent deployment regions](https://docs.livekit.io/deploy/admin/regions/endpoints/#agent-deployment-regions), not its media region groups.
+</ParamField>
+
+The region is chosen at the first `lk agent create` and cannot change on a
+redeploy. The CLI has no `lk region list` command. `lk agent list` shows the
+regions of existing agents in your project; it is not the full region catalog.
+Use the linked region list for a project with no agents.
+
+## First LiveKit Cloud deploy
+
+Authenticate with `lk cloud auth` and select the project with
+`lk project set-default "<project-name>"` once. Then, for a target named `livekit`:
+
+1. From the package root, run `unmute compile . --target livekit`.
+2. Put the runtime values in `build/livekit/.env`. If the package-root `.env`
+   already holds them, run `cp .env build/livekit/.env`. Otherwise copy the
+   generated `.env.example` there and fill in its values.
+3. Run `cd build/livekit`. This directory contains `pyproject.toml` and the
+   `Dockerfile`; the package root is not a LiveKit agent project.
+4. Run `lk agent create --region eu-central --secrets-file .env`, replacing
+   `eu-central` with the region declared in your target. The `.env` path is
+   relative to this build directory, not the package root.
+
+For several declared LiveKit regions, use the generated README's create command
+and separate `--config` filename for each region. A later deploy uses
+`lk agent deploy` from the same build directory, with the matching config.
+
+Before recompiling, return to the package root with `cd ../..`.
+`unmute compile` reads the source package, not `build/livekit/`.
+
+Compilation replaces files in each selected `build/<target>/` directory,
+including generated Python, copied handlers, manifests, `Dockerfile`,
+`.env.example`, README, and report. It preserves `.env`, `livekit*.toml`, and
+`samples/*.json`. Other hand-edits do not survive. A target not selected with
+`--target` is left alone.
+
 ## The runbook is in the build
 
 Every `build/<target>/README.md` is written for that exact build: its required
@@ -266,7 +308,8 @@ Two things about `coval` that users get wrong, so say them before they ask:
 ## Changing the agent
 
 Edit the package, compile again, deploy again. **Never edit `build/`**, because
-the next compile rewrites all of it.
+the next compile replaces generated files while preserving `.env`,
+`livekit*.toml`, and `samples/*.json`.
 
 ```sh
 unmute validate ./my-agent

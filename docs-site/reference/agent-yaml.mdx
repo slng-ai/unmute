@@ -78,29 +78,111 @@ split this page and [targets.yaml](/reference/targets-yaml) hold between them.
 
 ## All keys
 
-| Key | Type | Required | Default | Allowed values | Meaning |
-|---|---|---|---|---|---|
-| `version` | integer | yes |  | `1` | schema version |
-| `name` | string | yes |  | lowercase letters, digits, single hyphens; 3 to 64 characters | what the deployed agent is called |
-| `entry_agent` | string | yes |  | declared agent name | agent that answers |
-| `models` | map | yes |  | sections `think`, `speak`, `listen`, `turn` | model palette grouped by kind |
-| `listen` | string | with 2 or more listen chain heads | sole chain head | declared `models.listen` name | listen entry to use |
-| `turn` | string | with 2 or more turn entries | sole entry | declared `models.turn` name | turn entry to use |
-| `variables` | map | no |  | lower snake case names | per-call values |
-| `shapes` | list | no |  | one or more named field groups, `CapWords` names | field groups a variable's `type:` can refer to |
-| `prefetch` | **list** | no |  | one entry per fact, each with a `name:` | facts resolved once per call, before the greeting, in the order written |
-| `secrets` | list of strings | no |  | UPPER_SNAKE names | environment values the generated project reads |
-| `destinations` | map of strings | when an escalation is used |  | lower snake case names to UPPER_SNAKE env names | phone destinations an escalation may use |
-| `knowledge` | map | no |  | 3 to 64 characters of `[a-z0-9_]` | folders of documents a tool can search |
-| `agents` | map | yes |  | one or more lower snake case names | agent prompts, models, nested tasks, and other callable names |
-| `task_groups` | map | no |  | lower snake case names | ordered task sequences, named by the agents that run them |
-| `handoffs` | map | no |  | lower snake case names | agent to agent, and never returns |
-| `escalations` | map | no |  | lower snake case names | agent to a person |
-| `tools` | list of strings | no |  | loaded tool file names | tool files to load |
-| `conversation` | object | no |  | keys below | greeting, interruption, inactivity, and limits |
-| `tracing` | object | no |  | `provider: langfuse` or `provider: coval` | tracing provider |
-| `channels` | map | yes |  | one or more channel definitions | how people reach the agent |
-| `capacity` | object | for telephony or code targets |  | positive values; constraints below | traffic estimate |
+<ParamField path="version" type="integer" required>
+  Schema version. Accepts `1`. Required; omission is refused.
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  What the deployed agent is called. Accepts lowercase letters, digits, single hyphens; 3
+  to 64 characters. Required; omission is refused.
+</ParamField>
+
+<ParamField path="entry_agent" type="string" required>
+  Agent that answers. Accepts declared agent name. Required; omission is refused.
+</ParamField>
+
+<ParamField path="models" type="map" required>
+  Model palette grouped by kind. Accepts sections `think`, `speak`, `listen`, `turn`.
+  Required; omission is refused.
+</ParamField>
+
+<ParamField path="listen" type="string">
+  Listen entry to use. Accepts declared `models.listen` name. Selects the sole listen
+  chain head; required when there are two or more.
+</ParamField>
+
+<ParamField path="turn" type="string">
+  Turn entry to use. Accepts declared `models.turn` name. Selects the sole turn entry;
+  required when there are two or more.
+</ParamField>
+
+<ParamField path="variables" type="map">
+  Per-call values. Accepts lower snake case names. If omitted, there are no declared
+  session values.
+</ParamField>
+
+<ParamField path="shapes" type="list">
+  Field groups a variable's `type:` can refer to. Accepts one or more named field groups,
+  `CapWords` names. If omitted, there are no custom types.
+</ParamField>
+
+<ParamField path="prefetch" type="list">
+  Facts resolved once per call, before the greeting, in the order written. Accepts one
+  entry per fact, each with a `name:`. If omitted, no pre-fetch runs.
+</ParamField>
+
+<ParamField path="secrets" type="list of strings">
+  Environment values the generated project reads. Accepts UPPER_SNAKE names. If omitted,
+  there is no explicit secret inventory; inferred requirements still apply and missing
+  declarations warn.
+</ParamField>
+
+<ParamField path="destinations" type="map of strings">
+  Phone destinations an escalation may use. Accepts lower snake case names to UPPER_SNAKE
+  env names. If omitted, there are no transfer destinations; required when an escalation
+  uses one.
+</ParamField>
+
+<ParamField path="knowledge" type="map">
+  Folders of documents a tool can search. Accepts 3 to 64 characters of `[a-z0-9_]`. If
+  omitted, there are no document bases.
+</ParamField>
+
+<ParamField path="agents" type="map" required>
+  Agent prompts, models, nested tasks, and other callable names. Accepts one or more lower
+  snake case names. Required; omission is refused.
+</ParamField>
+
+<ParamField path="task_groups" type="map">
+  Ordered task sequences, named by the agents that run them. Accepts lower snake case
+  names. If omitted, there are no task groups.
+</ParamField>
+
+<ParamField path="handoffs" type="map">
+  Agent to agent, and never returns. Accepts lower snake case names. If omitted, there are
+  no agent handoffs.
+</ParamField>
+
+<ParamField path="escalations" type="map">
+  Agent to a person. Accepts lower snake case names. If omitted, there are no human
+  transfers.
+</ParamField>
+
+<ParamField path="tools" type="list of strings">
+  Tool files to load. Accepts loaded tool file names. If omitted, no tool files are
+  loaded.
+</ParamField>
+
+<ParamField path="conversation" type="object">
+  Greeting, interruption, inactivity, and limits. Accepts keys below. If omitted, code
+  targets open with a model-written greeting and default interruption behavior. SLNG
+  requires an explicit greeting.
+</ParamField>
+
+<ParamField path="tracing" type="object">
+  Tracing provider. Accepts `provider: langfuse` or `provider: coval`. If omitted, no
+  tracing is configured.
+</ParamField>
+
+<ParamField path="channels" type="map" required>
+  How people reach the agent. Accepts one or more channel definitions. Required; omission
+  is refused.
+</ParamField>
+
+<ParamField path="capacity" type="object">
+  Traffic estimate. Accepts positive values; constraints below. Required for code targets
+  or telephony; otherwise no traffic estimate is declared.
+</ParamField>
 
 ## `name`
 
@@ -205,17 +287,108 @@ different jobs: the pace sets the ceiling on a turn, the duration sets only the
 floor. [Turn taking](/optimization/turn-taking) has every legal value and what
 each becomes on each target.
 
-| Field | Values and constraints |
-|---|---|
-| `provider` | a provider from the target's model catalogue; `local` also implies local placement |
-| `model`, `voice` | provider values, passed through as written |
-| `params` | provider values passed through as written, except the LiveKit OpenAI Responses directive described below |
-| `speed`, `temperature`, `top_p`, `top_k` | numeric provider values, forwarded as written |
-| `language` | BCP-47 tag such as `en` or `en-US` |
-| `endpoint_env` | UPPER_SNAKE environment variable name for a custom endpoint |
-| `placement` | `api` or `local`; when omitted, `provider: local` means local and another named model means API |
-| `fallback` | names in the same section; chains are flattened and cycles are refused. See [Reasoning model](/models/llm) and [Speech to text](/models/stt) |
-| `description` | author note |
+<ParamField path="provider" type="string">
+  A provider supported for this role and target, listed on the model pages. Required for
+  an API binding; there is no inferred API provider. `local` selects local placement.
+</ParamField>
+
+<ParamField path="model" type="string">
+  Provider model id, passed through as written. Required where the selected integration
+  requires a model; otherwise its default applies. LiveKit turn bindings accept only
+  `turn-detector-mini` or `turn-detector`.
+</ParamField>
+
+<ParamField path="voice" type="string">
+  Voice id on a `speak` entry. No voice is chosen by Unmute when omitted; the selected
+  integration may require one or use its own default.
+</ParamField>
+
+<ParamField path="speed" type="number">
+  Speaking speed on a `speak` entry. Provider-defined values and limits; omitted leaves
+  the provider default.
+</ParamField>
+
+<ParamField path="language" type="string">
+  BCP-47 language tag, such as `en` or `en-US`, on `listen` or `speak`. Omit to leave
+  language selection to the integration.
+</ParamField>
+
+<ParamField path="temperature" type="number">
+  Sampling temperature on a `think` entry. Provider-defined values and limits; omitted
+  leaves the provider default.
+</ParamField>
+
+<ParamField path="top_p" type="number">
+  Nucleus sampling value on a `think` entry. Provider-defined values and limits; omitted
+  leaves the provider default.
+</ParamField>
+
+<ParamField path="top_k" type="integer">
+  Sampling count on a `think` entry. Provider-defined values and limits; omitted leaves
+  the provider default.
+</ParamField>
+
+<ParamField path="endpoint_env" type="string">
+  An UPPER_SNAKE environment variable name holding a custom endpoint URL. Omit to use the
+  integration’s endpoint. Required for Pipecat’s unlisted-provider path.
+</ParamField>
+
+<ParamField path="placement" type="string">
+  Accepts `api` or `local`. If omitted, `provider: local` selects local placement; another
+  named model selects API placement. Target-specific turn detection may decide placement
+  itself.
+</ParamField>
+
+<ParamField path="params" type="object">
+  Provider parameter names and values. Omit to add no extra parameters. Provider limits
+  apply; Unmute does not define a universal accepted set. The Responses directive below is
+  checked separately.
+</ParamField>
+
+<ParamField path="fallback" type="list of strings">
+  Names from the same `think` or `listen` section, in retry order. Omit for no fallback
+  chain. Cycles and other roles are refused; Pipecat refuses generated fallback.
+</ParamField>
+
+<ParamField path="description" type="string">
+  An author note. Omit for no note.
+</ParamField>
+
+<ParamField path="semantic_endpointing" type="string">
+  On `turn`, accepts `required`, `preferred`, or `off`. Omit to keep the target’s semantic
+  detector. `off` removes it; see [turn
+  detection](/models/turn-detection#semantic-endpointing).
+</ParamField>
+
+<ParamField path="pace" type="string">
+  On `turn`, accepts `snappy`, `balanced`, or `patient`. Omitted means `balanced`. Sets
+  the ceiling and, unless `endpointing_delay` is present, the floor. Cannot be authored in
+  a per-target override.
+</ParamField>
+
+<ParamField path="endpointing_delay" type="string">
+  On `turn`, a positive Go duration such as `300ms`. Sets only the silence floor; LiveKit
+  requires at least `250ms`. Omit to use the pace’s floor. See [turn
+  taking](/optimization/turn-taking).
+</ParamField>
+
+<ParamField path="agent_id" type="string">
+  Required on a Context Router think binding: a stable id of at most 128 printable ASCII
+  characters, with no whitespace or colon. No id is generated. See [Context
+  Router](/optimization/context-router) for scope rules.
+</ParamField>
+
+<ParamField path="upstream" type="object">
+  Required on a Context Router think binding; no upstream is inferred. Names the provider
+  and its credentials. See [upstream
+  fields](/optimization/context-router#upstream-fields). Refused on other bindings.
+</ParamField>
+
+<ParamField path="prompt_suffix" type="string">
+  Literal text on a `think` entry, up to 512 characters, with no `{{variables}}`. Appended
+  to every prompt using the profile. Omit to append nothing. A target override cannot
+  declare a different value.
+</ParamField>
 
 Entries you do not reference are legal alternates.
 
@@ -246,17 +419,47 @@ variables:
     description: Caller's first name.
 ```
 
-| Field | Values |
-|---|---|
-| `type` | `string`, `number`, `integer`, `boolean` |
-| `source` | `call_start`, a system source, or left out |
-| `default` | any value of the declared type |
-| `confirm` | the step that must hear the caller agree before anything acts on this value |
-| `description` | a note for readers of the file; not sent to the model |
+<ParamField path="type" type="string" required>
+  A single-line Python type expression. Accepts `str`, `int`, `float`, `bool`, `Phone`,
+  `Date`, `Time`, `Id`, `EmailStr`, `NameEmail`, a declared shape name, `Literal[...]`,
+  `list[T]`, or `T | None`. The aliases `string`, `integer`, `number`, and `boolean` also
+  work. See the [type grammar](/reference/variables#the-type-grammar) for composition
+  rules and target limits.
+</ParamField>
+
+<ParamField path="description" type="string">
+  A sentence explaining what the value means. Used to describe the task finish argument
+  derived from this variable. Required for `source: conversation`; otherwise omit for no
+  extra description. The saved value is still shared only through placeholders.
+</ParamField>
+
+<ParamField path="default" type="matching the declared type">
+  A scalar starting value, checked against `type`. Shapes, lists, and `NameEmail` take no
+  authored default. If omitted, a scalar or shape starts unset and a list starts as `[]`.
+  An unset value renders as `none recorded yet.` in a prompt.
+</ParamField>
+
+<ParamField path="source" type="string">
+  Accepts `call_start`, `conversation` (SLNG only), or a [system call
+  fact](/reference/variables#sources). If omitted, the variable has no automatic call-fact
+  source; a task, pre-fetch, or session payload can still fill it. Route support is
+  checked for system sources. `conversation` requires a description and forbids a default;
+  inbound code-target calls require a default for `call_start`.
+</ParamField>
+
+<ParamField path="confirm" type="string">
+  The name of the task that must hear the caller agree to a pre-fetched value. Until
+  confirmed, only that task can read it in a prompt and tools cannot silently use it. If
+  omitted, the value is usable as soon as it arrives.
+</ParamField>
 
 Full detail on [variables](/reference/variables).
 
 ## `shapes`
+
+A pre-fetch cannot fill a shape or a list. Use a task to produce grouped fields;
+use separate scalar variables for clock and lookup pre-fetch results. A single
+pre-fetch may assign several scalar variables from one result.
 
 ```yaml
 shapes:
@@ -355,6 +558,9 @@ The model never sees a number, and cannot dial one that is not listed here.
 
 ## `knowledge`
 
+Each base has a name of 3 to 64 characters using `[a-z0-9_]`. The name is
+the map key and becomes the search collection and build folder name.
+
 ```yaml
 knowledge:
   refunds:
@@ -368,16 +574,36 @@ Folders of your own documents an agent can search, so it quotes them instead of
 guessing. Each folder is read, split and embedded once when the agent starts, and
 held in memory, so content is fixed until the next compile.
 
-| Field | Required | Default | Meaning |
-|---|---|---|---|
-| map key | yes |  | 3 to 64 characters of `[a-z0-9_]`. It is also the folder name inside the build and the search collection's name |
-| `documents` | yes |  | folder path relative to the package root, holding `.txt`, `.md` or `.pdf` files |
-| `embed` | no | `openai` | embedding service |
-| `mode` | no | `hybrid` | `meaning` (vector), `keyword` (BM25), or `hybrid` |
-| `chunk_size` | no | `90` | passage size in tokens, 1 to 2048 |
-| `chunk_overlap` | no | `20` | tokens two neighbouring passages share; 0 or more, never larger than `chunk_size` |
-| `top_k` | no | `3` | passages a lookup returns, 1 to 20 |
-| `min_score` | no | none | drop results scoring below this, 0 to 1 |
+<ParamField path="documents" type="string" required>
+  Path to a folder inside the package containing `.txt`, `.md`, or `.pdf` documents. No
+  folder is inferred.
+</ParamField>
+
+<ParamField path="embed" type="string">
+  An [embedding service](/build/tools/knowledge#embedding-models). Omitted means `openai`.
+  Keyword mode makes no embedding call.
+</ParamField>
+
+<ParamField path="mode" type="string">
+  Accepts `meaning`, `keyword`, or `hybrid`. Omitted means `hybrid`.
+</ParamField>
+
+<ParamField path="chunk_size" type="integer">
+  Passage size in tokens, from 1 to 2048. Omitted means `90`.
+</ParamField>
+
+<ParamField path="chunk_overlap" type="integer">
+  Tokens shared by neighboring passages, from 0 through `chunk_size`. Omitted means `20`.
+</ParamField>
+
+<ParamField path="top_k" type="integer">
+  Maximum passages returned by a lookup, from 1 to 20. Omitted means `3`.
+</ParamField>
+
+<ParamField path="min_score" type="number">
+  Minimum accepted result score, from 0 to 1. Omit for no score filtering. Scores are
+  similarities, not probabilities.
+</ParamField>
 
 The five retrieval fields are per base, because a price list and a prose policy
 want different treatment. `mode: keyword` is the one with a structural
@@ -392,7 +618,7 @@ every lookup, and the compiler warns above about 1500 tokens.
 
 A tool reaches a base by name, with a
 [`knowledge:` block](/build/tools/knowledge), and an agent reaches it by being
-given that tool. There is no retrieval mode and no relevance threshold.
+given that tool. The base selects a search mode and may set a minimum score.
 
 Full behaviour, every message, and what a lookup gives the model:
 [Knowledge bases](/build/tools/knowledge).
@@ -409,16 +635,38 @@ agents:
       - check_availability
 ```
 
-| Field | What it is |
-|---|---|
-| `instructions` | path to a Markdown prompt in the package |
-| `think` | a `models.think` entry name |
-| `speak` | a `models.speak` entry name |
-| `tools` | tool files this agent may call; definitions never go here |
-| `tasks` | tasks this agent can run: each entry is either a full definition or a bare name for a task another agent already defines, see [`tasks`](#tasks) below |
-| `task_groups` | entries under [`task_groups:`](#task_groups) this agent may run |
-| `handoffs` | entries under [`handoffs:`](#handoffs-escalations) this agent may trigger |
-| `escalations` | entries under [`escalations:`](#handoffs-escalations) this agent may trigger |
+<ParamField path="instructions" type="string" required>
+  Path to a Markdown prompt inside the package. No prompt is inferred.
+</ParamField>
+
+<ParamField path="think" type="string" required>
+  Name of an entry in `models.think`. No profile is inferred.
+</ParamField>
+
+<ParamField path="speak" type="string" required>
+  Name of an entry in `models.speak`. No profile is inferred.
+</ParamField>
+
+<ParamField path="tools" type="list of strings">
+  Names of loaded tool files this agent may call. Omit for no ordinary tools.
+</ParamField>
+
+<ParamField path="tasks" type="list of definitions or names">
+  Nested task definitions or bare names of tasks defined by another agent. Omit for no
+  tasks. See [task fields](/build/orchestration/tasks#every-key-a-task-takes).
+</ParamField>
+
+<ParamField path="task_groups" type="list of strings">
+  Names from the top-level `task_groups` catalog. Omit for no groups.
+</ParamField>
+
+<ParamField path="handoffs" type="list of strings">
+  Names from the top-level `handoffs` catalog. Omit for no agent handoffs.
+</ParamField>
+
+<ParamField path="escalations" type="list of strings">
+  Names from the top-level `escalations` catalog. Omit for no human transfers.
+</ParamField>
 
 ## `tasks`
 
@@ -446,19 +694,64 @@ agents:
       - customer_record
 ```
 
-| Field | What it is |
-|---|---|
-| `name` | the task's name; unique across the whole package, checked before anything else |
-| `instructions` | the task's own prompt file |
-| `when` | the situation the model reads to decide whether to run the task. Absent makes the task a definition only, valid solely as a step of a task group; an agent naming such a task by bare name is refused |
-| `announce` | optional. One fixed line, spoken exactly as written as the task is entered, or spoken by the task itself when `opening` is `listen`. It takes no `{{placeholders}}` |
-| `opening` | `generate` or `listen`; omitted means `generate`. `listen` speaks the `announce` line and waits for the caller, making no model request. See [End on a tool and open by listening](/build/orchestration/tasks#open-by-listening) |
-| `finish` | a list of the tools that end this step. Each item is `tool:` and a `success:` list of one-key `field: value` items, where a value may be a list of alternatives. A tool returning a result that meets every pair ends the step and saves `assign:` from it. Every value has to be one the tool declares in its output `enum:` |
-| `assign` | a list of one-key `variable: result.<field>` pairs. It derives the finish field's type and description from the destination and saves valid values together. The right side may be a dotted path into a declared shape |
-| `tools` | tool files this task may call; definitions never go here |
-| `handoffs` | entries under [`handoffs:`](#handoffs-escalations) this task may trigger |
-| `think` | optional. A `models.think` entry name this task runs on instead of the default. LiveKit only: Pipecat and SLNG refuse it. With no `think:` the task runs on the entry agent's think profile, not on the profile of the agent that defines it |
-| `context` | optional history choice; omission means `messages` |
+<ParamField path="name" type="string" required>
+  A lower snake case name, unique across all agents in the package. To reuse an existing
+  task, write its bare name instead of defining it again.
+</ParamField>
+
+<ParamField path="instructions" type="string" required>
+  Path to the task’s Markdown prompt inside the package. No prompt is inferred.
+</ParamField>
+
+<ParamField path="when" type="string">
+  The situation the model reads to decide whether to start the task. If omitted, the task
+  is a definition only and must be used in a task group; it cannot be attached elsewhere
+  by bare name.
+</ParamField>
+
+<ParamField path="announce" type="string">
+  A fixed spoken line with no `{{placeholders}}`. Omit it for no fixed announcement.
+  Required when `opening` is `listen`.
+</ParamField>
+
+<ParamField path="opening" type="string">
+  Accepts `generate` or `listen`. Omitted means `generate`, so the model writes the
+  opening turn. `listen` speaks `announce` and waits for the caller without a model
+  request.
+</ParamField>
+
+<ParamField path="tools" type="list of strings">
+  Names of tool files loaded by the package. Omit for no ordinary tools in this task; it
+  does not inherit its owner’s tools.
+</ParamField>
+
+<ParamField path="handoffs" type="list of strings">
+  Names from the top-level `handoffs` catalog. Omit for no handoffs from this task.
+</ParamField>
+
+<ParamField path="assign" type="list of one-key pairs">
+  Pairs of `variable: result.field`, including dotted result paths. Use `variable+` to
+  append one list item. Omit to save no values; the task can still finish. Types and
+  descriptions come from the destination variables.
+</ParamField>
+
+<ParamField path="finish" type="list of objects">
+  Tools whose successful results finish the task automatically. Each entry requires `tool`
+  and a non-empty `success` list of one-key output field/value pairs. Values must be
+  declared output enum choices; a list means alternatives. If omitted, the model ends the
+  task by calling its generated finish tool.
+</ParamField>
+
+<ParamField path="think" type="string">
+  A `models.think` entry name. LiveKit only. If omitted, use the entry agent’s think
+  profile, even when another agent defines the task.
+</ParamField>
+
+<ParamField path="context" type="object">
+  The [history fields](/reference/agent-yaml#context). Omit for `history: messages`. A
+  returning task restores its owner’s earlier context and adds only completion or unserved
+  status.
+</ParamField>
 
 `result`, `expect`, and `requires` are retired task fields. A package that
 writes one gets a located migration error. Declare variables, save them with
@@ -472,6 +765,7 @@ agent.yaml:17: task "verify_customer" is defined by agent "concierge" and again 
   one definition and let the other agent name it, "- verify_customer"
 ```
 
+`when` makes a task callable; `assign` says which values it saves.
 A task may omit `assign:` and still finish. Every generated finish also takes
 optional `unserved_request`; it returns only an `unserved` status to the owner.
 Ordinary tool `input:` and `output:` JSON Schemas are unchanged.
@@ -480,12 +774,26 @@ Ordinary tool `input:` and `output:` JSON Schemas are unchanged.
 
 Used by tasks and by handoffs.
 
-| Field | Values | Notes |
-|---|---|---|
-| `history` | `full`, `messages`, `last_n`, `summary`, `reset` | optional; omission means `messages`. `summary` compiles on livekit only; slng refuses every value |
-| `max_messages` | a positive integer | required with `last_n`; refused with other history choices |
-| `summarizer` | a `models.think` entry name | required with `summary`; refused with other history choices |
-| `include_tool_calls` | `true` or `false` | omitted behaves as `true` where the history mode keeps tool records; explicit `false` is LiveKit only |
+<ParamField path="history" type="string">
+  Accepts `full`, `messages`, `last_n`, `summary`, or `reset`. Omitted means `messages`:
+  keep speech and remove tool calls with their replies. `summary` is LiveKit only; SLNG
+  refuses authored context settings.
+</ParamField>
+
+<ParamField path="max_messages" type="integer">
+  Required and positive with `history: last_n`. There is no default count. Refused with
+  other history modes.
+</ParamField>
+
+<ParamField path="summarizer" type="string">
+  Required with `history: summary`: a `models.think` entry name. No model is inferred.
+  Refused with other history modes.
+</ParamField>
+
+<ParamField path="include_tool_calls" type="boolean">
+  Accepts `true` or `false`. Omitted behaves as `true` in modes that keep tool records. It
+  cannot add tool records to `messages` or `reset`. Explicit `false` is LiveKit only.
+</ParamField>
 
 | `history` | What the receiver gets |
 |---|---|
@@ -542,15 +850,39 @@ task_groups:
     merge: results
 ```
 
-| Field | Values |
-|---|---|
-| `steps` | the ordered run, at least one. Each step is a task name, or an item with `task:` and optionally `skip_when_confirmed:` naming a variable that step confirms. The group skips such a step when the variable is confirmed as the group starts |
-| `when` | the situation the model reads to decide whether to run the group. Nothing checks that it is there, and a group without one gives the model nothing to decide on, so write one |
-| `announce` | optional. One fixed line, spoken exactly as written as the group is entered. It takes no `{{placeholders}}` |
-| `context_scope` | `shared` or `isolated` |
-| `then` | `return`, `transfer`, or `end` |
-| `then_target` | an agent name, required with `transfer`, illegal otherwise |
-| `merge` | `results`; omitted also means `results` |
+<ParamField path="steps" type="list of strings or objects" required>
+  One or more task names, in execution order. An object requires `task` and may set
+  `skip_when_confirmed` to a variable that task confirms. Omit that condition to run the
+  step every time. An empty or absent steps list is refused.
+</ParamField>
+
+<ParamField path="when" type="string">
+  The situation the model reads to decide whether to run the group. Omission is accepted
+  but supplies no trigger guidance, so write one.
+</ParamField>
+
+<ParamField path="announce" type="string">
+  One fixed spoken line, with no `{{placeholders}}`, when the group starts. Omit for no
+  announcement.
+</ParamField>
+
+<ParamField path="context_scope" type="string" required>
+  Accepts `shared` or `isolated`. There is no default. Each member still applies its own
+  `context.history`; an isolated group cannot be widened by a member’s `full`.
+</ParamField>
+
+<ParamField path="then" type="string" required>
+  Accepts `return`, `transfer`, or `end`. There is no default.
+</ParamField>
+
+<ParamField path="then_target" type="string">
+  Required with `then: transfer`: an existing agent name. Refused for `return` or `end`;
+  there is no inferred destination.
+</ParamField>
+
+<ParamField path="merge" type="string">
+  Only `results` is accepted. Omission also means `results`.
+</ParamField>
 
 The group decides whether members share the group's running conversation. Each
 member still applies its own `context.history`. An isolated group cannot be
@@ -566,12 +898,24 @@ per kind. The block an entry is written in is what it is, so there is no
 
 The conversation becomes another agent, and never comes back.
 
-| Field | Notes |
-|---|---|
-| `to` | required; names an entry under `agents:` |
-| `when` | the situation the model reads |
-| `announce` | optional exact spoken text |
-| `context` | optional history choice; omission means `messages` |
+<ParamField path="to" type="string" required>
+  An existing agent name. The conversation moves to that agent and does not return. No
+  destination is inferred.
+</ParamField>
+
+<ParamField path="when" type="string">
+  The situation the model reads to decide whether to hand over. Omission supplies no
+  trigger guidance, so write one.
+</ParamField>
+
+<ParamField path="announce" type="string">
+  Exact text spoken before handing over. Omit for a silent handoff.
+</ParamField>
+
+<ParamField path="context" type="object">
+  The [history fields](/reference/agent-yaml#context). Omitted means `messages`. Saved
+  values are visible only where the receiving prompt names them.
+</ParamField>
 
 Saved state stays with the call, but the receiving model sees only values its
 prompt references. A reset handoff gets no automatic briefing or triggering
@@ -584,11 +928,20 @@ sentence the caller should hear. Omit it for a silent handoff.
 
 Puts the caller through to a person.
 
-| Field | Notes |
-|---|---|
-| `when` | the situation the model reads |
-| `cold` | one of; hand the caller over and drop out |
-| `warm` | one of; hold the caller, brief the person, then bridge |
+<ParamField path="when" type="string">
+  The situation the model reads to decide whether to transfer. Omission supplies no
+  trigger guidance, so write one.
+</ParamField>
+
+<ParamField path="cold" type="object">
+  A cold transfer using the destination and timeout fields below. Exactly one of `cold`
+  and `warm` is required; there is no default transfer form.
+</ParamField>
+
+<ParamField path="warm" type="object">
+  A warm transfer using the fields below, including optional `briefing`. Exactly one of
+  `cold` and `warm` is required. Supported only on LiveKit SIP.
+</ParamField>
 
 A human transfer names its shape with a block, so a warm only field cannot be
 written on a cold transfer:
@@ -606,6 +959,29 @@ Pipecat `cloud-websocket` requires explicit `on_unavailable: hangup`; it cannot
 reconnect the original media stream.
 `destination` is a symbol resolved in the top level
 [`destinations:`](#destinations) map above.
+
+### Transfer fields
+
+<ParamField path="destination" type="string" required>
+  A symbol declared in `destinations`, whose value names an environment variable holding
+  the destination. No destination is inferred. Valid inside both `cold` and `warm`.
+</ParamField>
+
+<ParamField path="ring_timeout" type="string">
+  A positive Go duration, such as `25s`. Omitted means 25 seconds on Pipecat; LiveKit
+  leaves it unset for the platform default.
+</ParamField>
+
+<ParamField path="on_unavailable" type="string">
+  Accepts `return_to_caller` or `hangup`. Omitted means `return_to_caller`. Pipecat
+  cloud-websocket requires explicit `hangup`, because the original media stream cannot be
+  reconnected.
+</ParamField>
+
+<ParamField path="briefing" type="string">
+  Instructions for briefing the person before connecting the caller. Legal only inside
+  `warm`. Omit for the runtime’s standard briefing instructions.
+</ParamField>
 
 Whether a route can carry the shape you asked for is decided by the connection.
 A warm transfer is supported only on LiveKit `sip`; Unmute does not support warm
@@ -641,23 +1017,53 @@ a `tools:` list in `agent.yaml`.
 One file per tool, in `tools/`. The top level is the contract with the model;
 exactly one execution block says how it runs.
 
-| Field | What it is |
-|---|---|
-| `description` | what the model reads |
-| `input` | JSON Schema of the parameters the model fills; required except on `builtin`, `mcp` and `knowledge`, where it is illegal |
-| `output` | optional author-side JSON Schema of the result; illegal on `builtin`, `mcp` and `knowledge`, and elsewhere not sent to the model, not emitted in the compile report, and not enforced at run time |
-| `inject` | hidden scalar arguments; string values may carry `{{variables}}`; legal on `webhook` and `local` |
-| `interruption` | `provider_default`, `continue`, `cancel` |
-| `effect` | `returns_data`, `ends_conversation` |
-| `announce` | one fixed sentence spoken as the tool starts; no `{{variables}}`; legal on `webhook`, `local` and `knowledge`; absent means nothing is spoken |
+<ParamField path="description" type="string">
+  Required for local, webhook, and knowledge tools: explains when the model should call
+  the tool. Builtins use their registry description if omitted; hosted `slng` tools
+  inherit their published description. Refused on MCP sources.
+</ParamField>
+
+<ParamField path="input" type="object">
+  Required for authored local and webhook contracts: a JSON Schema with `type: object`
+  describing model arguments. Refused on builtin, MCP, knowledge, and hosted `slng` tools,
+  which own their schemas.
+</ParamField>
+
+<ParamField path="output" type="object">
+  An author-side JSON Schema with `type: object`. Omit for no declared result schema. Used
+  by assignments and success checks; it is not a general runtime result validator or a
+  model prompt. Refused on builtin, MCP, knowledge, and hosted `slng` tools.
+</ParamField>
+
+<ParamField path="inject" type="list of one-key pairs">
+  Hidden argument/value pairs. Values are scalars or strings with `{{variable}}`
+  placeholders. Omit to inject nothing. Legal on local, webhook, and hosted `slng` tools;
+  builtin `send_sms` requires its literal `from_number` setting.
+</ParamField>
+
+<ParamField path="interruption" type="string">
+  Accepts `provider_default`, `continue`, or `cancel`. Omitted means `provider_default`.
+  Refused on MCP sources. Target support is listed above.
+</ParamField>
+
+<ParamField path="effect" type="string">
+  Accepts `returns_data` or `ends_conversation`. Omitted means `returns_data`, except
+  builtins whose effect comes from the registry. Refused on MCP and knowledge tools.
+</ParamField>
+
+<ParamField path="announce" type="string">
+  A fixed spoken sentence with no `{{variables}}`. Omit for no announcement. Legal on
+  local, webhook, knowledge, and hosted `slng` tools.
+</ParamField>
 
 | Execution block | Fields |
 |---|---|
 | `local` | optional `handler`; omitted means `tools/<tool-name>.py`. Optional `dependencies`, exact `name==version` pins for a SLNG per-tool environment; refused on LiveKit and Pipecat, which build one dependency list for the whole project |
-| `webhook` | `url_env` or `base_url`, at least one: `url_env` to compile on LiveKit or Pipecat, `base_url` (a literal `https` host) to deploy on SLNG; optional `path` and `auth`; a non-empty path starts with `/` |
+| `webhook` | `url_env` is required on LiveKit and Pipecat; `base_url` is a legacy literal HTTPS base that neither code target reads. SLNG refuses authored webhooks; optional `path` and `auth`; a non-empty path starts with `/` |
 | `mcp` | required `url_env`; optional `server` (the platform's name for it, when it differs from this tool's name), `transport`, `auth`, and non-empty unique `tools` entries |
 | `builtin` | required `id`; optional `instructions` |
 | `knowledge` | required `base`, naming an entry in [`knowledge:`](#knowledge) |
+| `slng` | a published tool name, or the [legacy hash block](/build/tools/hosted#the-legacy-form-still-loads) |
 | `client` | no fields; write `client: {}`; gated on every target today |
 | `provider_hosted` | no fields; write `provider_hosted: {}`; gated on every target today |
 
@@ -667,9 +1073,10 @@ both sides of its contract, taking one string and returning passages.
 An `mcp` file is the block and nothing else. The seven contract fields above are
 all illegal on one, because the server describes its own tools.
 
-| Field | Values |
-|---|---|
-| `transport` | `sse` or `streamable_http` |
+<ParamField path="transport" type="string">
+  Accepts `sse` or `streamable_http`. Inside `mcp`, omission uses the runtime’s
+  URL-based transport choice; a URL ending in `/mcp` selects streamable HTTP.
+</ParamField>
 
 Builtin ids: `end_call`, `send_sms`. `end_call` compiles on every target.
 `send_sms` is a capability SLNG curates, so it compiles on the `slng` target
@@ -681,11 +1088,19 @@ itself, and SLNG reads the Twilio credentials from your vault under
 
 `webhook.auth`:
 
-| Field | What it is |
-|---|---|
-| `type` | `bearer` or `api_key` |
-| `token_env` | environment variable holding the token |
-| `header` | header name, `api_key` only, defaults to `X-API-Key` |
+<ParamField path="type" type="string" required>
+  Accepts `bearer` or `api_key`. Required when `auth` is present; no scheme is inferred.
+</ParamField>
+
+<ParamField path="token_env" type="string" required>
+  An UPPER_SNAKE environment variable name holding the token, never the token itself.
+  There is no default.
+</ParamField>
+
+<ParamField path="header" type="string">
+  An HTTP header name, legal only with `type: api_key`. Omitted means `X-API-Key`. Bearer
+  authentication uses `Authorization: Bearer`.
+</ParamField>
 
 ## `conversation`
 
@@ -698,17 +1113,69 @@ conversation:
     enabled: true
 ```
 
-| Field | Values |
-|---|---|
-| `greeting.speaks_first` | `agent` or `user` |
-| `greeting.text` | the opening line, requires `speaks_first: agent` |
-| `interruption.enabled` | required when `interruption` is present |
-| `interruption.protect` | `greeting`, `tool_calls`, or both. Pipecat only. Names the stretches the caller cannot talk over while barge-in stays on elsewhere. A phone route protects the greeting by default, because a phone leg has no echo cancellation and the agent would otherwise hear its own opening line and cut itself off. Set `protect: []` for no protection. Refused alongside `enabled: false`, which already mutes the whole call. |
-| `interruption.minimum_words` | how much speech counts as an interruption |
-| `interruption.ignore_phrases` | phrases that do not interrupt |
-| `inactivity.nudge_after`, `inactivity.end_after` | durations |
-| `max_duration` | a duration |
-| `thinking_audio` | `none` or `subtle` |
+<ParamField path="greeting" type="object">
+  Opening behavior using `speaks_first` and optional `text`. If omitted, LiveKit and
+  Pipecat generate an opening line. SLNG requires an explicit greeting with text.
+</ParamField>
+
+<ParamField path="greeting.speaks_first" type="string">
+  Required when `greeting` is present. Accepts `agent` or `user`; there is no default
+  inside an authored block. SLNG requires `agent`.
+</ParamField>
+
+<ParamField path="greeting.text" type="string">
+  The exact opening line, with eligible variable placeholders. Requires `speaks_first:
+  agent`. If omitted on a code target, the model writes the greeting; SLNG requires text.
+</ParamField>
+
+<ParamField path="interruption" type="object">
+  Barge-in settings. If omitted, interruptions remain enabled. Pipecat phone routes also
+  protect the greeting by default.
+</ParamField>
+
+<ParamField path="interruption.enabled" type="boolean">
+  Required when `interruption` is present. Accepts `true` or `false`. There is no default
+  inside an authored block.
+</ParamField>
+
+<ParamField path="interruption.protect" type="list of strings">
+  Accepts `greeting`, `tool_calls`, or both on Pipecat. Omit to protect the greeting on a
+  Pipecat phone route and nothing on a browser route. Set `[]` to protect nothing.
+  Non-empty protection is refused with `enabled: false`.
+</ParamField>
+
+<ParamField path="interruption.minimum_words" type="integer">
+  A positive count sets how many words count as an interruption on code targets. Omitted
+  or zero leaves the runtime’s default word threshold.
+</ParamField>
+
+<ParamField path="interruption.ignore_phrases" type="list of strings">
+  Phrases that do not interrupt on code targets. Omit for no authored ignored phrases.
+</ParamField>
+
+<ParamField path="inactivity" type="object">
+  Optional `nudge_after` and `end_after` timers. Omit for no authored inactivity timers.
+  SLNG refuses this block.
+</ParamField>
+
+<ParamField path="inactivity.nudge_after" type="string">
+  A positive Go duration, such as `15s`, before an idle nudge. Omit for no authored nudge
+  timer.
+</ParamField>
+
+<ParamField path="inactivity.end_after" type="string">
+  A positive Go duration, such as `45s`, before ending an idle call. Omit for no authored
+  idle end timer.
+</ParamField>
+
+<ParamField path="max_duration" type="string">
+  A positive Go duration, such as `15m`, limiting a call on code targets. Omit for no
+  package-defined limit. SLNG refuses this field.
+</ParamField>
+
+<ParamField path="thinking_audio" type="string">
+  Accepts `none` or `subtle`. Omitted means no thinking audio. `subtle` is LiveKit only.
+</ParamField>
 
 ## `tracing`
 
@@ -716,6 +1183,14 @@ conversation:
 tracing:
   provider: langfuse
 ```
+
+### Tracing fields
+
+<ParamField path="provider" type="string" required>
+  Accepts `langfuse` or `coval`. Required inside `tracing`; no provider is inferred. Omit
+  the whole `tracing` block to disable tracing. Supported on LiveKit and Pipecat; refused
+  on SLNG.
+</ParamField>
 
 `provider` takes one of two values, `langfuse` or `coval`. Tracing works on both
 targets.
@@ -750,12 +1225,30 @@ channels:
     outbound: true
 ```
 
-| Field | Required | Values and constraints |
-|---|---|---|
-| `kind` | yes | `realtime_audio` or `telephony` |
-| `inbound`, `outbound` | for `telephony` | `true` or `false`; at least one must be `true`; illegal on `realtime_audio` |
-| `required_controls` | no | `cold_transfer`, `warm_transfer`, `dtmf_send`, `dtmf_receive`, `hold`, `hangup`, `voicemail_detection`, or `ivr_navigation`; illegal on `realtime_audio` |
-| `on_voicemail` | no | `hangup` or `leave_message`; requires `kind: telephony` and `outbound: true` |
+<ParamField path="kind" type="string" required>
+  Accepts `realtime_audio` or `telephony`. No kind is inferred.
+</ParamField>
+
+<ParamField path="inbound" type="boolean">
+  Accepts `true` or `false` for telephony only. Omitted does not enable inbound calls. At
+  least one of `inbound` and `outbound` must be `true`.
+</ParamField>
+
+<ParamField path="outbound" type="boolean">
+  Accepts `true` or `false` for telephony only. Omitted does not enable outbound calls.
+  Required as `true` for warm transfer or voicemail handling.
+</ParamField>
+
+<ParamField path="required_controls" type="list of strings">
+  Telephony only. Accepts `cold_transfer`, `warm_transfer`, `dtmf_send`, `dtmf_receive`,
+  `hold`, `hangup`, `voicemail_detection`, and `ivr_navigation`; the route must support
+  each requested control. Omit for no extra explicit requirements.
+</ParamField>
+
+<ParamField path="on_voicemail" type="string">
+  Accepts `hangup` or `leave_message` where supported by the route. Requires `kind:
+  telephony` and `outbound: true`. Omit for no package-defined voicemail action.
+</ParamField>
 
 ### Three rules a telephony channel brings with it
 
@@ -788,12 +1281,7 @@ the compiler sizes workers from. One is a fine answer for a first line.
 
 ## `capacity`
 
-Capacity is required for every code target, including both targets documented
-on this site. A telephony channel also makes `peak_starts_per_second` required.
-
-| Key | Required | What it is |
-|---|---|---|
-| `capacity` | for telephony or code targets | your traffic estimate |
+Capacity is required for LiveKit and Pipecat, the two code targets. A telephony channel also makes `peak_starts_per_second` required.
 
 ```yaml
 capacity:
@@ -802,12 +1290,23 @@ capacity:
   avg_session_duration: 5m
 ```
 
-| Field | What it is |
-|---|---|
-| `peak_sessions` | expected concurrent sessions at peak; must be positive |
-| `max_sessions` | the ceiling you want to support; must be positive and at least `peak_sessions` |
-| `peak_starts_per_second` | how fast calls arrive at peak. **Required and positive** as soon as any channel is `telephony`; optional otherwise |
-| `avg_session_duration` | a positive Go duration, for example `5m` |
+<ParamField path="peak_sessions" type="integer" required>
+  Expected concurrent sessions at peak; must be positive. No estimate is inferred.
+</ParamField>
+
+<ParamField path="max_sessions" type="integer" required>
+  Maximum concurrent sessions; must be positive and at least `peak_sessions`. No ceiling
+  is inferred.
+</ParamField>
+
+<ParamField path="peak_starts_per_second" type="number">
+  Required and positive for any telephony channel. Omit on a browser-only package to
+  declare no call-start rate.
+</ParamField>
+
+<ParamField path="avg_session_duration" type="string" required>
+  A positive Go duration, such as `5m`. No duration is inferred.
+</ParamField>
 
 The compiler turns these into worker and quota numbers, marked
 `[unbenchmarked]`.

@@ -29,6 +29,56 @@ my-agent/build/pipecat/
 └── compile-report.json   # what the compiler decided
 ```
 
+## Target fields
+
+Write these inside `targets.<name>` in `targets.yaml`. The name is your target
+instance name, used by `--target` and the `build/<name>/` output folder.
+
+<ParamField path="provider" type="string" required>
+  Use `pipecat` for this target. Omission is refused.
+</ParamField>
+
+<ParamField path="version" type="string" required>
+  An exact `x.y.z` framework version from the
+  [supported window](/reference/targets-yaml#framework-versions-are-exact).
+  Omission and unsupported versions are refused; there is no automatic upgrade.
+</ParamField>
+
+<ParamField path="sdk_language" type="string">
+  Accepts `python`. If omitted, the generated project still uses Python.
+</ParamField>
+
+<ParamField path="connection" type="string">
+  Required for telephony: the stem of a file under `connections/`, using
+  `cloud-websocket` or `daily-sip` with a supported carrier.
+  See [connection fields](/reference/connections-yaml#all-keys).
+  Omit for a browser-only package; a connection without phone use is refused.
+</ParamField>
+
+<ParamField path="deployment_region" type="string or list of strings">
+  One non-empty platform region name, as a string or a one-item list. More than one region is refused.
+  Unmute forwards region names as written and does not check them against the
+  platform's region list. If omitted, no region is passed and platform placement
+  applies. The generated manifest and secret-set instructions use the same region.
+  See [deployment regions](/optimization/regional-infrastructure).
+</ParamField>
+
+<ParamField path="models" type="map of model definitions">
+  Overrides keyed by existing model names from `agent.yaml`, using the
+  [model fields](/reference/agent-yaml#models). Omit to use the package's models.
+  An override replaces the entry, except that omitted `pace`, `endpointing_delay`,
+  `semantic_endpointing`, and `prompt_suffix` carry forward. An override cannot
+  author `pace` or a different `prompt_suffix`.
+</ParamField>
+
+<ParamField path="pins" type="map of strings">
+  This field is accepted but Pipecat does not read it. Omit it; the framework version and model catalog determine the generated dependencies.
+</ParamField>
+
+<ParamField path="warm_instances" type="integer">
+  A non-negative count of instances to keep ready. A positive value becomes min_agents in the deploy manifest. Omitted or zero emits no minimum, so the platform can scale to zero.
+</ParamField>
+
 ## bot.py
 
 One file holds the agent: the prompts as module constants, the model
@@ -60,6 +110,7 @@ of failing on the first spoken word.
 The generated README says it:
 
 ```sh
+cd my-agent/build/pipecat
 cp .env.example .env                      # then fill in your keys
 
 uv run bot.py -t webrtc                   # web: open the URL it prints
@@ -87,7 +138,8 @@ The generated README is the authority, with your own values filled in. The
 shape of it:
 
 ```sh
-cp .env.example .env
+cd my-agent/build/pipecat
+cp .env.example .env            # then fill in the values
 pipecat cloud secrets set acme-support-pipecat-secrets --file .env
 pipecat cloud deploy
 pipecat cloud agent status acme-support-pipecat

@@ -80,40 +80,38 @@ and saves the values needed later.
 
 ### Every key a group takes
 
-<ParamField path="steps" type="list" required>
-  The tasks to run, in order. Each entry is a bare task name, or an item with
-  `task:` and [`skip_when_confirmed:`](#skip-a-step-whose-work-is-already-done).
-</ParamField>
-
-<ParamField path="context_scope" type="shared | isolated" required>
-  Whether each step sees what the steps before it said. See
-  [Context between steps](#context-between-steps).
-</ParamField>
-
-<ParamField path="then" type="return | transfer | end" required>
-  What happens when the last step finishes: control returns to the owning
-  agent, the caller moves to another agent, or the call ends.
-</ParamField>
-
-<ParamField path="then_target" type="agent name">
-  Required with `then: transfer`, and meaningless otherwise. Which agent the
-  caller lands on.
+<ParamField path="steps" type="list of strings or objects" required>
+  One or more task names, in execution order. An object requires `task` and may set
+  `skip_when_confirmed` to a variable that task confirms. Omit that condition to run the
+  step every time. An empty or absent steps list is refused.
 </ParamField>
 
 <ParamField path="when" type="string">
-  What the model reads to decide whether to run the group. Nothing checks that
-  it is there, but write one: a group without a `when:` gives the model nothing
-  to decide on.
+  The situation the model reads to decide whether to run the group. Omission is accepted
+  but supplies no trigger guidance, so write one.
 </ParamField>
 
 <ParamField path="announce" type="string">
-  One fixed line, spoken exactly as written as the caller enters the group, to
-  cover the wait before the first step speaks. It takes no `{{placeholders}}`.
+  One fixed spoken line, with no `{{placeholders}}`, when the group starts. Omit for no
+  announcement.
 </ParamField>
 
-<ParamField path="merge" type="results" default="results">
-  How the group's step results come back. `results` is the only value, and
-  leaving it out means the same thing.
+<ParamField path="context_scope" type="string" required>
+  Accepts `shared` or `isolated`. There is no default. Each member still applies its own
+  `context.history`; an isolated group cannot be widened by a member’s `full`.
+</ParamField>
+
+<ParamField path="then" type="string" required>
+  Accepts `return`, `transfer`, or `end`. There is no default.
+</ParamField>
+
+<ParamField path="then_target" type="string">
+  Required with `then: transfer`: an existing agent name. Refused for `return` or `end`;
+  there is no inferred destination.
+</ParamField>
+
+<ParamField path="merge" type="string">
+  Only `results` is accepted. Omission also means `results`.
 </ParamField>
 
 ## Skip a step whose work is already done

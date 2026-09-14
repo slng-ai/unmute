@@ -23,19 +23,13 @@ There are two providers.
 
 Pick one. `provider` takes a single value.
 
-## Every key the block takes
+## Tracing fields
 
-One key, and writing the block at all is what turns tracing on.
-
-<ParamField path="provider" type="langfuse | coval" required>
-  Where the spans go. Those two names are the whole list, and any other value is
-  refused with both of them named. Leave the whole `tracing:` block out and the
-  agent exports nothing.
+<ParamField path="provider" type="string" required>
+  Accepts `langfuse` or `coval`. Required inside `tracing`; no provider is inferred. Omit
+  the whole `tracing` block to disable tracing. Supported on LiveKit and Pipecat; refused
+  on SLNG.
 </ParamField>
-
-There is no second key. Which project a trace lands in, and which credentials
-reach it, are the provider's environment names in the table above, read at run
-time rather than written in `agent.yaml`.
 
 ## What works where
 

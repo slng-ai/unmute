@@ -37,32 +37,29 @@ separate, because most routes support them differently.
 One key is required on any channel. A telephony channel adds two more, and
 takes two optional ones.
 
-<ParamField path="kind" type="realtime_audio | telephony" required>
-  What carries the conversation. `realtime_audio` is the browser, and it takes
-  none of the four keys below. `telephony` is a phone call.
+<ParamField path="kind" type="string" required>
+  Accepts `realtime_audio` or `telephony`. No kind is inferred.
 </ParamField>
 
-<ParamField path="inbound" type="true | false">
-  Whether this agent answers calls. Required on a `telephony` channel, refused
-  on `realtime_audio`, and at least one of the two directions must be `true`.
+<ParamField path="inbound" type="boolean">
+  Accepts `true` or `false` for telephony only. Omitted does not enable inbound calls. At
+  least one of `inbound` and `outbound` must be `true`.
 </ParamField>
 
-<ParamField path="outbound" type="true | false">
-  Whether this agent places calls. Same rules as `inbound`. Write it on a line
-  people only ring in on too, because a warm transfer dials out.
+<ParamField path="outbound" type="boolean">
+  Accepts `true` or `false` for telephony only. Omitted does not enable outbound calls.
+  Required as `true` for warm transfer or voicemail handling.
 </ParamField>
 
-<ParamField path="required_controls" type="list of control names">
-  What the route has to support, checked when you validate: `cold_transfer`,
-  `warm_transfer`, `dtmf_send`, `dtmf_receive`, `hold`, `hangup`,
-  `voicemail_detection`, `ivr_navigation`. A route that cannot do one is
-  refused rather than deployed. Refused on `realtime_audio`.
+<ParamField path="required_controls" type="list of strings">
+  Telephony only. Accepts `cold_transfer`, `warm_transfer`, `dtmf_send`, `dtmf_receive`,
+  `hold`, `hangup`, `voicemail_detection`, and `ivr_navigation`; the route must support
+  each requested control. Omit for no extra explicit requirements.
 </ParamField>
 
-<ParamField path="on_voicemail" type="hangup | leave_message">
-  What the agent does when it reaches a voicemail box. Needs `outbound: true`
-  and a route that can detect voicemail. Left out, the agent does not detect
-  one at all.
+<ParamField path="on_voicemail" type="string">
+  Accepts `hangup` or `leave_message` where supported by the route. Requires `kind:
+  telephony` and `outbound: true`. Omit for no package-defined voicemail action.
 </ParamField>
 
 Two rules arrive with that block, and validation enforces both:
@@ -272,6 +269,7 @@ carrier-side: finish the setup for your route, then call the number. There is
 no local phone loop. [`unmute dev`](/dev/overview) runs the agent in your
 browser, and that loop covers the prompt, the tools, and the models, but it
 stops exactly where the phone leg starts.
+
 
 ## Where to go next
 

@@ -129,7 +129,7 @@ func validateSlngInjectText(agent *Agent, name, key, value string, row *TargetVa
 }
 
 // validateSlngRegions checks deployment against the shared SLNG region list.
-// Other deployment targets own their region names and receive them unchanged.
+// LiveKit checks its own worker-region set; Pipecat forwards region names.
 func validateSlngRegions(resolved Target, row *TargetValidation) {
 	// One region is FieldDeploymentMultiRegion's job to enforce, and it already
 	// refuses more than one. Checking every entry anyway means a package that

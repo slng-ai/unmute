@@ -32,13 +32,15 @@ run.
 
 ## The block
 
-<ParamField path="id" type="registry id" required>
-  An id from the closed registry below.
+<ParamField path="id" type="string" required>
+  Accepts `end_call` or `send_sms` from the registry below. No id is inferred. `send_sms`
+  is SLNG only.
 </ParamField>
 
 <ParamField path="instructions" type="string">
-  An instruction the runtime gives the model as the prebuilt runs. For
-  `end_call`, use it for a final line or action before ending.
+  Instruction the runtime gives the model as the prebuilt runs. For `end_call`, use it for
+  a final line or action before ending. Omit to add no custom instructions to the
+  prebuilt.
 </ParamField>
 
 ## The registry, in full

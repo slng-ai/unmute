@@ -272,6 +272,41 @@ the agent in your browser:
 unmute dev my-agent
 ```
 
+## Agent fields
+
+<ParamField path="instructions" type="string" required>
+  Path to a Markdown prompt inside the package. No prompt is inferred.
+</ParamField>
+
+<ParamField path="think" type="string" required>
+  Name of an entry in `models.think`. No profile is inferred.
+</ParamField>
+
+<ParamField path="speak" type="string" required>
+  Name of an entry in `models.speak`. No profile is inferred.
+</ParamField>
+
+<ParamField path="tools" type="list of strings">
+  Names of loaded tool files this agent may call. Omit for no ordinary tools.
+</ParamField>
+
+<ParamField path="tasks" type="list of definitions or names">
+  Nested task definitions or bare names of tasks defined by another agent. Omit for no
+  tasks. See [task fields](/build/orchestration/tasks#every-key-a-task-takes).
+</ParamField>
+
+<ParamField path="task_groups" type="list of strings">
+  Names from the top-level `task_groups` catalog. Omit for no groups.
+</ParamField>
+
+<ParamField path="handoffs" type="list of strings">
+  Names from the top-level `handoffs` catalog. Omit for no agent handoffs.
+</ParamField>
+
+<ParamField path="escalations" type="list of strings">
+  Names from the top-level `escalations` catalog. Omit for no human transfers.
+</ParamField>
+
 ## Where to go next
 
 <Columns cols={2}>

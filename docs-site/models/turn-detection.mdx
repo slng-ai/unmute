@@ -55,27 +55,27 @@ shows.
 </ParamField>
 
 <ParamField path="model" type="string">
-  Forwarded as written on Pipecat. LiveKit accepts only the two identities its
-  own runtime knows, and refuses anything else by name.
+  Provider model id, passed through as written. Required where the selected integration
+  requires a model; otherwise its default applies. LiveKit turn bindings accept only
+  `turn-detector-mini` or `turn-detector`.
 </ParamField>
 
-<ParamField path="pace" type="snappy | balanced | patient">
-  How quickly the agent decides the caller has finished. It sets the ceiling on
-  a turn, and the floor too when `endpointing_delay` is absent. Left out, it is
-  `balanced`, which is deliberately not the same as leaving the runtime alone.
-  It takes no per-target override.
+<ParamField path="pace" type="string">
+  On `turn`, accepts `snappy`, `balanced`, or `patient`. Omitted means `balanced`. Sets
+  the ceiling and, unless `endpointing_delay` is present, the floor. Cannot be authored in
+  a per-target override.
 </ParamField>
 
-<ParamField path="endpointing_delay" type="a positive duration, e.g. 400ms">
-  The window of silence that has to pass before the caller counts as finished.
-  It is the floor on every turn, and only the floor. LiveKit refuses anything
-  under `250ms`.
+<ParamField path="endpointing_delay" type="string">
+  On `turn`, a positive Go duration such as `300ms`. Sets only the silence floor; LiveKit
+  requires at least `250ms`. Omit to use the pace’s floor. See [turn
+  taking](/optimization/turn-taking).
 </ParamField>
 
-<ParamField path="semantic_endpointing" type="required | preferred | off">
-  Whether a model, rather than silence alone, decides the turn has ended. `off`
-  removes the turn model; the other two are forwarded. See [Semantic
-  endpointing](#semantic-endpointing).
+<ParamField path="semantic_endpointing" type="string">
+  On `turn`, accepts `required`, `preferred`, or `off`. Omit to keep the target’s semantic
+  detector. `off` removes it; see [turn
+  detection](/models/turn-detection#semantic-endpointing).
 </ParamField>
 
 <ParamField path="placement" type="api | local">
@@ -139,10 +139,10 @@ Silero is the transport's voice activity analyzer: it decides you stopped making
 sound. Pipecat's own Smart Turn v3 classifier then decides whether you had
 finished a thought. The classifier is a small ONNX model shipped inside the
 framework, so it needs no extra install and no API call, and it runs in every
-package Unmute compiles whether or not you asked for it.
+package Unmute compiles unless you set `semantic_endpointing: off`.
 
 So `provider: local` and `model: silero` name the first stage. The second stage
-has no binding to name because it is the framework's own, and it is not optional.
+has no binding to name because it is the framework's own, and `semantic_endpointing: off` disables it.
 
 The two `stop_secs` are different fields with the same name: the first is the
 silence window, from `endpointing_delay`, and the second is the classifier's
@@ -253,6 +253,7 @@ override. **Fix:** move it here. For a per-target duration, use
 On that target the ceiling *is* the analyzer's own `stop_secs`, so removing the
 analyzer loses the ceiling with it. **Fix:** keep `preferred`, or set
 `endpointing_delay` to hold the floor yourself.
+
 
 ## Where to go next
 

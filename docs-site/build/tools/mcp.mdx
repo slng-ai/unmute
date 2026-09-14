@@ -64,26 +64,27 @@ other tools, so there was nothing for `auth:` to reach.
 ## The block
 
 <ParamField path="server" type="string">
-  The server's name on the platform, when that is not this tool's own file name.
+  The server’s registered platform name. Omit to use this tool file’s name.
 </ParamField>
 
-<ParamField path="url_env" type="UPPER_SNAKE name">
-  The name of the environment variable holding the server address. Required on
-  LiveKit and Pipecat, and not read by SLNG.
+<ParamField path="url_env" type="string">
+  An UPPER_SNAKE environment variable name holding the server URL. Required on LiveKit and
+  Pipecat. SLNG uses its registered server and does not read this field.
 </ParamField>
 
-<ParamField path="transport" type="sse | streamable_http">
-  How the client talks to the server.
+<ParamField path="transport" type="string">
+  Accepts `sse` or `streamable_http`. If omitted, use the runtime’s URL-based transport
+  selection; a URL ending in `/mcp` selects streamable HTTP.
 </ParamField>
 
-<ParamField path="auth" type="block">
-  `bearer` with `token_env`, or `api_key` with `token_env` and an optional
-  `header`. Never read by SLNG.
+<ParamField path="auth" type="object">
+  `type`, `token_env`, and optional `header`, as described below. Omit for no authored
+  authentication. SLNG uses its registered credentials and does not read this block.
 </ParamField>
 
-<ParamField path="tools" type="list of names">
-  Non-empty, unique server tool names to offer. Absent means all of them, and
-  slng requires the list.
+<ParamField path="tools" type="list of strings">
+  Unique, non-empty server tool names. Required on SLNG. If omitted on a code target,
+  expose every tool the server offers.
 </ParamField>
 
 **A package that only targets slng needs none of `url_env`, `transport` or
@@ -105,16 +106,18 @@ Write it when you want the choice visible instead of inferred.
 `auth` is the same shape webhook tools use, so there is nothing new to learn and
 no new code in the generated project. Its own three keys:
 
-<ParamField path="auth.type" type="bearer | api_key" required>
-  Which scheme the request uses.
+<ParamField path="type" type="string" required>
+  Accepts `bearer` or `api_key`. Required when `auth` is present; no scheme is inferred.
 </ParamField>
 
-<ParamField path="auth.token_env" type="UPPER_SNAKE name" required>
-  The environment variable name holding the token.
+<ParamField path="token_env" type="string" required>
+  An UPPER_SNAKE environment variable name holding the token, never the token itself.
+  There is no default.
 </ParamField>
 
-<ParamField path="auth.header" type="header name" default="X-API-Key">
-  Legal on `api_key` only.
+<ParamField path="header" type="string">
+  An HTTP header name, legal only with `type: api_key`. Omitted means `X-API-Key`. Bearer
+  authentication uses `Authorization: Bearer`.
 </ParamField>
 
 ## The file is the block, and nothing else

@@ -67,6 +67,40 @@ targets:
 If the user names their own vendor, use it. Check the table below first, and
 say what you bound.
 
+## Multilingual speech
+
+The reply text and its spoken delivery are separate. A model can produce correct
+Spanish text while TTS still uses an English language setting or voice accent.
+Listen to each intended language before shipping a multilingual agent.
+
+<ParamField path="language" type="string">
+  A fixed BCP-47 language tag such as `es` or `en-US`, on `listen` or `speak`
+  where the integration supports it. Accepted languages depend on the selected
+  provider and model. Omission keeps that integration's default; it does not
+  promise automatic detection. `{{language}}` is refused. Unmute exposes no
+  tool or variable binding that changes this setting during a call.
+</ParamField>
+
+| TTS choice | Language behavior | What to configure |
+|---|---|---|
+| Soniox through SLNG | The stream has a language setting; the SLNG catalog documents `en` as the default | Set `language` deliberately and select a voice suited to it. Omission is not a multilingual switch |
+| ElevenLabs multilingual TTS | Can infer language from the text; model and voice still affect delivery | Choose a multilingual model and suitable voice; a fixed language setting can constrain it |
+
+See [SLNG's Soniox catalog](https://docs.slng.ai/voices/soniox) and
+[ElevenLabs language guidance](https://elevenlabs.io/docs/eleven-creative/playground/text-to-speech).
+Provider support for runtime changes does not mean Unmute exposes those changes.
+
+STT has its own language behavior. Do not assume that leaving `listen.language`
+out enables detection for every provider. For example, Deepgram multilingual
+recognition uses `language: multi`; see its
+[LiveKit integration](https://docs.livekit.io/agents/models/stt/deepgram/).
+Check the selected STT model separately from TTS.
+
+For a Spanish-only agent, use a Spanish prompt and a speech binding configured
+for Spanish. For a multilingual brief, choose TTS that handles the required
+languages with the settings Unmute can emit. If that is not possible, explain
+the tradeoff before reducing the agent to one language.
+
 ## Fields by model section
 
 | Field | Legal section |
@@ -374,6 +408,33 @@ example binds to it today: both salon packages reach OpenAI directly, so an
 author who wants to see what the router is worth compiles one of them twice,
 once as it ships and once with the think binding pointed at the router.
 
+## Three region settings
+
+| Setting | Written on | Accepted values | What it moves |
+|---|---|---|---|
+| `params.world_part` | SLNG `listen` and `speak` models on code targets | `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au` | The speech gateway endpoint |
+| `params.world_part` | SLNG Context Router `think` models | `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au` | The router endpoint |
+| `deployment_region` | Each target in `targets.yaml` | LiveKit: `us-east`, `eu-central`, `ap-south`. SLNG: the same 13 world parts listed above. Pipecat: one platform region name, forwarded without a value check | The agent worker on code targets; call placement on SLNG |
+
+SLNG speech, routing, and deployment now share region names. LiveKit keeps its
+own worker names. Each setting is still independent of the others. None alone guarantees
+data residency: model providers, media, tools, traces, and storage have their
+own locations. A nearby speech gateway does not prove where its model runs.
+LiveKit's compute names come from its
+[agent region list](https://docs.livekit.io/deploy/admin/regions/endpoints/#agent-deployment-regions).
+
+<ParamField path="listen/speak.params.world_part" type="string">
+  Accepts the speech gateway values in the table. Omit to use the plugin's
+  default endpoint. An empty or unknown value is refused. Do not combine it
+  with `params.base_url` or `params.slng_base_url`.
+</ParamField>
+
+<ParamField path="think.params.world_part" type="string" required>
+  Accepts the same 13 world parts as speech. Required on a Context Router
+  think binding; omission is refused. It selects the router endpoint independently.
+  The old `world_part_override` key is refused; use `world_part`.
+</ParamField>
+
 ## Keep models close to callers
 
 Choose locations for STT, TTS and LLM services separately from the worker's
@@ -503,6 +564,20 @@ what to listen for when it is wrong, is in `conversation.md`.
 If a user asks for an unlisted vendor and no wildcard applies, say plainly that
 it is not available for that role on that target, and name what is. Do not guess
 at a spelling or bind it anyway and hope.
+
+## Find a Soniox voice
+
+Use the [SLNG Soniox voice catalog](https://docs.slng.ai/voices/soniox) to hear
+voices and find their ids. Check the SLNG dashboard for voices available to
+your selected model if the catalog differs. Copy the id exactly; do not infer an id from a
+person's name or change its capitalization. For a direct Soniox binding, use
+[Soniox's voice documentation](https://soniox.com/docs/tts/concepts/voices).
+
+<ParamField path="voice" type="string">
+  A voice id accepted by the selected model and provider. Unmute forwards it
+  without checking a voice list. If omitted, the integration may choose its
+  default or require a value. An unknown id can fail only when speech runs.
+</ParamField>
 
 ## Model ids are forwarded, not checked
 

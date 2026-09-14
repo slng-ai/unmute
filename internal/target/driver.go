@@ -62,6 +62,10 @@ var supportWindows = map[Provider]SupportWindow{
 	Pipecat: {Floor: "1.8.0", Ceiling: "1.8.0", Verified: "2026-08-27"},
 }
 
+// LiveKitDeploymentRegions are the agent compute regions, not media region groups.
+// Verified 2026-09-14: https://docs.livekit.io/deploy/admin/regions/endpoints/#agent-deployment-regions
+var LiveKitDeploymentRegions = []string{"us-east", "eu-central", "ap-south"}
+
 // frameworkPackages is the distribution each driver installs, so an error
 // message and an emitted dependency name it the same way.
 var frameworkPackages = map[Provider]string{

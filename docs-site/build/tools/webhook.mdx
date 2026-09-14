@@ -69,22 +69,24 @@ refused. Full rules in [the behavior fields](/build/tools/overview#the-three-beh
 
 ## The block
 
-<ParamField path="url_env" type="UPPER_SNAKE name">
-  The name of an environment variable holding the base URL. At least one of
-  `url_env` and `base_url` is required.
+<ParamField path="url_env" type="string">
+  An UPPER_SNAKE environment variable name holding the base URL. Required on LiveKit and
+  Pipecat. At least one of `url_env` and `base_url` must be present; no URL is inferred.
 </ParamField>
 
-<ParamField path="base_url" type="literal https:// URL">
-  The literal base URL. At least one of `url_env` and `base_url` is required.
+<ParamField path="base_url" type="string">
+  A literal HTTPS base URL. Omit it on code targets, which read `url_env` instead. The
+  SLNG target refuses authored webhooks: publish the tool on SLNG and use a hosted `slng`
+  reference.
 </ParamField>
 
 <ParamField path="path" type="string">
-  Appended to that base URL. When present it starts with `/` and may carry
-  `{{variable}}` tokens.
+  Path appended to the base URL. A non-empty path starts with `/` and may use
+  `{{variable}}` tokens, whose values are URL-encoded. Omit to use the base URL alone.
 </ParamField>
 
-<ParamField path="auth" type="block">
-  How the request authenticates. See [Authentication](#authentication).
+<ParamField path="auth" type="object">
+  Authentication using the fields below. Omit to add no authentication header.
 </ParamField>
 
 `url_env` holds a **name**, so the base URL is a deployment choice rather than a
@@ -114,8 +116,8 @@ half-formed request.
     token_env: SALON_API_TOKEN
 ```
 
-<ParamField path="type" type="bearer | api_key" required>
-  Which scheme the request uses.
+<ParamField path="type" type="string" required>
+  Accepts `bearer` or `api_key`. Required when `auth` is present; no scheme is inferred.
 </ParamField>
 
 <ParamField path="token_env" type="UPPER_SNAKE name" required>
