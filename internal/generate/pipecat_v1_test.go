@@ -982,7 +982,7 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 		`if self._run_verify_active_step != "verify":`,
 		`return {"status": "already handled"}, NO_RESPONSE`,
 		`async def on_activated(self, args) -> None:`,
-		`self.context.set_messages([dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")])`,
+		`self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))`,
 		`return {"transferred": True}, NO_RESPONSE`,
 		// The chain is a plan now, decided as the flow starts, because a group
 		// may skip a step whose confirmation holds and stops when one ends
@@ -3012,14 +3012,14 @@ func TestPipecatLastNLeavesNoOrphanedToolResult(t *testing.T) {
 	helper := pipecatMethodBody(t, bot, "def _last_n(", "\n\n\n")
 	for _, want := range []string{
 		`messages[-limit:]`,
-		`while window and window[0].get("role") == "tool":`,
+		`if leading and message.get("role") == "tool":`,
 	} {
 		if !containsCollapsed(helper, want) {
 			t.Errorf("the _last_n helper is missing %q:\n%s", want, helper)
 		}
 	}
 	sliceAt := strings.Index(helper, "messages[-limit:]")
-	dropAt := strings.Index(helper, `window[0].get("role") == "tool"`)
+	dropAt := strings.Index(helper, `message.get("role") == "tool"`)
 	if sliceAt < 0 || dropAt < sliceAt {
 		t.Errorf("the orphan drop must follow the cut that can create one:\n%s", helper)
 	}

@@ -700,7 +700,7 @@ class IntakeAgent(TracedLLMWorker):
         """Caller asks about billing, an invoice, or a refund."""
         # context.history on this handoff. One LLMContext is shared for the whole
         # call, so the receiver is given the shaped list rather than a copy.
-        self.context.set_messages([dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")])
+        self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))
         await self.activate_worker(
             "billing",
             args=LLMWorkerActivationArgs(
@@ -754,11 +754,11 @@ class IntakeAgent(TracedLLMWorker):
         self._run_collect_snapshot = (copy.deepcopy(self.context.get_messages()), self.context.tools)
         # context.history on this task. Shaped after the snapshot above, so the
         # finish path restores the owner's own context whatever this step saw.
-        self.context.set_messages([dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")])
+        self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))
         await flow.initialize(self._run_collect_node_collect())
 
     def _run_collect_node_collect(self) -> NodeConfig:
-        self.context.set_messages([dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")])
+        self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))
         return NodeConfig(
             name="collect",
             role_message="Ask for the caller's email, look them up, and confirm their account tier.\n\nWhen this step is complete, call `finish_run_collect_collect` with: tier, verified_flag.\n\n`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_collect_collect` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.",
@@ -840,7 +840,7 @@ class IntakeAgent(TracedLLMWorker):
         self._run_triage_snapshot = (copy.deepcopy(self.context.get_messages()), self.context.tools)
         # context.history on this task. Shaped after the snapshot above, so the
         # finish path restores the owner's own context whatever this step saw.
-        self.context.set_messages([dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")])
+        self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))
         await flow.initialize(self._run_triage_node(self._run_triage_active_step))
 
     def _run_triage_node(self, name) -> NodeConfig:
@@ -924,10 +924,12 @@ class IntakeAgent(TracedLLMWorker):
 def _settle_task_call(messages, name, status):
     """Replace this invocation's running reply before restoring the owner."""
     for message in reversed(messages):
+        if not isinstance(message, dict):
+            continue
         for call in message.get("tool_calls", []):
             if call.get("function", {}).get("name") == name:
                 for reply in messages:
-                    if reply.get("role") == "tool" and reply.get("tool_call_id") == call["id"]:
+                    if isinstance(reply, dict) and reply.get("role") == "tool" and reply.get("tool_call_id") == call["id"]:
                         reply["content"] = json.dumps(status)
                 return
 

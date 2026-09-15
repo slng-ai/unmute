@@ -1791,6 +1791,24 @@ func resultPyType(field ir.ResultField) string {
 	return pyType(field.Type)
 }
 
+// LiveKit derives tool schemas from these annotations. An array must stay a
+// list: emitting str makes a handler iterate a dish name character by character.
+func livekitToolInputType(prop map[string]any) string {
+	t, _ := prop["type"].(string)
+	switch t {
+	case "array":
+		items, _ := prop["items"].(map[string]any)
+		if len(items) == 0 {
+			return "list"
+		}
+		return "list[" + livekitToolInputType(items) + "]"
+	case "object":
+		return "dict"
+	default:
+		return pyTypeForJSON(t)
+	}
+}
+
 func livekitToolArgs(input map[string]any) []livekitArg {
 	props, _ := input["properties"].(map[string]any)
 	requiredList, _ := input["required"].([]any)
@@ -1811,9 +1829,7 @@ func livekitToolArgs(input map[string]any) []livekitArg {
 		var enum []string
 		var desc string
 		if prop, ok := props[n].(map[string]any); ok {
-			if t, ok := prop["type"].(string); ok {
-				pt = pyTypeForJSON(t)
-			}
+			pt = livekitToolInputType(prop)
 			// V2: carry the declared enum and per-property description across so
 			// the LLM sees the schema the tool YAML wrote (C4). Non-string enum
 			// values are left off Literal (falls back to the base type).

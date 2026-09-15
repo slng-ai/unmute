@@ -32,7 +32,7 @@ from __future__ import annotations
 
 {{if or (not .Inline) .NeedsEndAfter .Inactivity .NeedsPrefetchAsync}}import asyncio
 {{end}}{{if .Slng.Vertex}}import base64
-{{end}}{{if .HasFlows}}import copy
+{{end}}{{if or .HasFlows .NeedsHistoryCopy}}import copy
 {{end}}{{if .NeedsFunctionCalls}}import functools
 {{end}}{{if or .NeedsInspect .NeedsFunctionCalls}}import inspect
 {{end}}{{if or .HasFlows .CallStartVars .Slng.Vertex .NeedsPrefetchSeed .TypedState}}import json
@@ -807,11 +807,11 @@ def _mcp_params(url: str, headers: dict[str, str] | None = None):
 # --- context shaping ---------------------------------------------------------
 {{end}}
 {{- if .NeedsSpeechOnly}}
-def _speech_only(messages: list[dict]) -> list[dict]:
+def _speech_only(messages: list) -> list[dict]:
     """history: messages, what was said out loud and no tool record.
 
-    A tool record cannot be half-dropped. LLMContext holds provider-shaped
-    dicts, so a tool call is a `tool_calls` key on an assistant message while
+    A tool record cannot be half-dropped. In LLMContext's standard message
+    dicts, a tool call is a `tool_calls` key on an assistant message while
     only its reply carries role "tool". Filtering by role alone therefore keeps
     every call and drops everything answering it, and the provider rejects that
     request: "An assistant message with 'tool_calls' must be followed by tool
@@ -825,6 +825,9 @@ def _speech_only(messages: list[dict]) -> list[dict]:
     """
     kept: list[dict] = []
     for message in messages:
+        # Provider metadata (including Gemini thought signatures) is not speech.
+        if not isinstance(message, dict):
+            continue
         if message.get("role") not in ("user", "assistant"):
             continue
         if not message.get("tool_calls"):
@@ -836,20 +839,26 @@ def _speech_only(messages: list[dict]) -> list[dict]:
     return kept
 {{end}}
 {{- if .NeedsLastN}}
-def _last_n(messages: list[dict], limit: int) -> list[dict]:
+def _last_n(messages: list, limit: int) -> list:
     """history: last_n, the newest `limit` entries with no orphaned tool result.
 
-    LLMContext holds plain provider-shaped dicts and has no truncate() and no
-    exclusion filter, so this is list work. The window is cut at the front, so
+    LLMContext mixes standard dicts with provider metadata and has no truncate(),
+    so this is list work. The window is cut at the front, so
     the tail is whole and the only orphan possible is a tool result whose
     assistant call fell outside it. A tool message with no matching call is a
     request the provider rejects, so it goes. An assistant message carrying
     tool calls is safe at the front: its results follow it.
     """
     window = messages[-limit:] if limit > 0 else []
-    while window and window[0].get("role") == "tool":
-        window = window[1:]
-    return window
+    kept = []
+    leading = True
+    for message in window:
+        if isinstance(message, dict):
+            if leading and message.get("role") == "tool":
+                continue
+            leading = False
+        kept.append(message)
+    return kept
 {{end}}
 # --- prompts ----------------------------------------------------------------
 # Agent system instructions as module constants: one copy each, referenced by
@@ -1395,7 +1404,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         flow_messages = None
         flow_tools = None
         try:
-            flow_messages = [dict(message) for message in self.context.get_messages()]
+            flow_messages = copy.deepcopy(self.context.get_messages())
             flow_tools = self.context.tools
 {{if $x.Announce}}            await self._announce_handoff({{pyq $x.Announce}})
 {{end}}            messages, tools = self._{{$d.MethodName}}_snapshot
@@ -1569,7 +1578,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         flow_tools = None
         completion_started = False
         try:
-            flow_messages = [dict(message) for message in self.context.get_messages()]
+            flow_messages = copy.deepcopy(self.context.get_messages())
             flow_tools = self.context.tools
             completion_started = True
             return await self._{{$d.MethodName}}_complete_{{$t.Name}}()
@@ -1650,14 +1659,14 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
     taken before it arrived.
     """
     for message in reversed(messages):
-        if message.get("role") == "user":
+        if isinstance(message, dict) and message.get("role") == "user":
             return dict(message)
     return None
 
 
 def _caller_turns(messages):
     """How many turns the caller has taken in this message list."""
-    return sum(1 for message in messages if message.get("role") == "user")
+    return sum(1 for message in messages if isinstance(message, dict) and message.get("role") == "user")
 
 
 def _carried_messages(carried):
@@ -1676,10 +1685,12 @@ def _carried_messages(carried):
 {{end}}def _settle_task_call(messages, name, status):
     """Replace this invocation's running reply before restoring the owner."""
     for message in reversed(messages):
+        if not isinstance(message, dict):
+            continue
         for call in message.get("tool_calls", []):
             if call.get("function", {}).get("name") == name:
                 for reply in messages:
-                    if reply.get("role") == "tool" and reply.get("tool_call_id") == call["id"]:
+                    if isinstance(reply, dict) and reply.get("role") == "tool" and reply.get("tool_call_id") == call["id"]:
                         reply["content"] = json.dumps(status)
                 return
 

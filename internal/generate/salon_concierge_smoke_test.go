@@ -560,7 +560,7 @@ for name in _report["required_env"]:
 import bot  # noqa: E402
 from pipecat.flows import NO_RESPONSE  # noqa: E402
 from pipecat.frames.frames import Frame  # noqa: E402
-from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage  # noqa: E402
 from pipecat.processors.frame_processor import (  # noqa: E402
     FrameDirection,
     FrameProcessor,
@@ -715,12 +715,18 @@ async def verify_then_create():
     await bot._prefetch(state, None)
     context = LLMContext()
     context.add_message({"role": "user", "content": "A haircut tomorrow please, my number is 303 555 0199."})
+    signature = LLMSpecificMessage(llm="google", message={"type": "thought_signature", "signature": b"salon-probe"})
+    context.add_message(signature)
     worker = bot.ConciergeAgent(state=state, context=context, call_context={})
     await quiet(worker)
     flow_manager = SimpleNamespace(worker=worker)
     node = await enter_book(worker)
     assert worker._book_plan == ["verify_customer", "manage_booking"], worker._book_plan
     assert node["name"] == "verify_customer"
+    assert worker._book_snapshot[0][-1] == signature
+    assert worker._book_snapshot[0][-1] is not signature
+    assert all(isinstance(message, dict) for message in context.get_messages())
+    context.add_message(signature)
     status, node = await handlers(node)["find_or_create_customer"]({"phone": "3035550199"}, flow_manager)
     assert status == {"status": "completed"} and node["name"] == "manage_booking", (status, node)
     assert state.customer_phone == "+3035550199", state.customer_phone
@@ -731,6 +737,7 @@ async def verify_then_create():
     available = await step["check_availability"]({"service": "haircut", "date": requested}, flow_manager)
     slot_id = available["slots"][0]["slot_id"]
     context.add_message({"role": "user", "content": "Yes, book it."})
+    context.add_message(signature)
     result, next_node = await step["create_booking"](
         {"confirmed": True, "service": "haircut", "slot_id": slot_id, "additional": False}, flow_manager
     )
@@ -742,7 +749,8 @@ async def verify_then_create():
     messages = context.get_messages()
     assert owner_status(context) == {"status": "completed"}, messages[-1]
     assert messages[-2] == {"role": "user", "content": "Yes, book it."}, messages[-3:]
-    assert sum(1 for message in messages if message.get("role") == "user") == 2, messages
+    assert sum(1 for message in messages if isinstance(message, dict) and message.get("role") == "user") == 2, messages
+    assert signature in messages, "return lost the owner's provider metadata"
 
     # A second create while the caller holds a booking is the tool's own
     # refusal, an ordinary result: the step stays open, and modify_booking keeps

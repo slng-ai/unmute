@@ -39,12 +39,9 @@ models:
       # costs a little more per turn than a silence window and it buys the one
       # thing this caller needs.
       #
-      # local was the other candidate. It hands the turn back to this project's
-      # own detector, which is what a cascaded package uses and what you would
-      # write if you wanted `pace:` and `endpointing_delay` to apply. It is not
-      # the right answer here: the local detector hears audio, not words, so on
-      # a paused reference number it makes the same mistake server_vad makes,
-      # with another service in the path.
+      # local gives turn completion to the framework. It does not enable
+      # models.turn or package-level turn/listen selectors in this architecture.
+      # Compare the same paused reference on both targets before changing it.
       turn_detection: semantic
 
 # A folder of documents the agent reads to answer a policy question, instead of

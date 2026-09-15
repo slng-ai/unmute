@@ -1,153 +1,200 @@
 ---
 title: "Live"
-description: "One model that hears, thinks, speaks and decides its own turns, with a second model for its tools."
+description: "Run an OpenAI live voice agent and give it a reasoning backend for tools and knowledge."
 ---
 
-`architecture: live` builds one model on a vendor's Live API. It hears the
-caller's audio, decides when to answer, and speaks in its own voice. There is no
-transcriber, no synthesizer and no turn detector, because the model does all of
-that itself.
+Let a live voice model hold the conversation while a reasoning backend handles its tools.
+`models.live` names the voice model; `backend:` points to an OpenAI entry in `models.think`.
+The live model decides when to speak and how to respond to interruptions.
 
-Its tools and its harder thinking run somewhere else: a `think:` entry you name
-as its `backend:`. The model hands work over and keeps talking while it waits.
+On this page:
 
-```yaml agent.yaml
+- [Quickstart](#quickstart) - a complete live agent
+- [Bind the voice](#1-bind-the-live-model) - select the model
+- [Attach tools](#2-give-the-backend-a-tool) - let it do useful work
+- [Try the conversation](#3-try-tools-and-knowledge-in-a-call) - verify the result
+- [Advanced](#advanced) - defaults and limits
+- [Troubleshooting](#troubleshooting) - fix setup and call failures
+- [Where to go next](#where-to-go-next) - references and alternatives
+
+## Quickstart
+
+Create a new package with a LiveKit target. If initialization opens the console, select LiveKit and finish creating the package.
+
+```sh Terminal
+unmute init voice-desk
+```
+
+Replace `voice-desk/agent.yaml` with this **complete file**:
+
+```yaml voice-desk/agent.yaml
+version: 1
+name: voice-desk
 architecture: live
-
+entry_agent: desk
+secrets:
+  - OPENAI_API_KEY
 models:
   live:
     - name: voice
       provider: openai
       model: gpt-live-1
       voice: marin
-      backend: fast        # runs the tools and the hard reasoning
+      backend: reasoning
   think:
-    fast:
+    reasoning:
       provider: openai
       model: gpt-5.6-terra
-
 agents:
   desk:
     instructions: instructions.md
     live: voice
-    tools:
-      - lookup_customer
+channels:
+  web:
+    kind: realtime_audio
+capacity:
+  peak_sessions: 1
+  max_sessions: 2
+  avg_session_duration: 3m
 ```
 
-On this page:
+Keep the scaffold's `targets.yaml`, but remove its target-level `models:` overrides because the model palette above replaces the scaffold's.
+Keep its framework provider and version pin, and remove any phone `connection:` for this browser example. Replace `voice-desk/instructions.md` with this complete prompt:
 
-- [Why pick it](#why-pick-it) - and when not to
-- [Every key a live entry takes](#every-key-a-live-entry-takes)
-- [What the backend is for](#what-the-backend-is-for)
-- [What it can still do](#what-it-can-still-do) - tools and knowledge
-- [What it cannot carry](#what-it-cannot-carry) - and why
-- [Troubleshooting](#troubleshooting)
+```markdown voice-desk/instructions.md
+You are a friendly information desk. Answer in short spoken sentences.
+Ask one question at a time. If you do not know an answer, say so.
+```
 
-The full reference, including the per-target differences and the vendor lists,
-is on [Live model](/models/live). This page is the shape and the trade.
+Set `OPENAI_API_KEY` in your shell or the package's `.env`, then run:
 
-## Why pick it
+```sh Terminal
+unmute validate voice-desk
+unmute compile voice-desk
+unmute dev voice-desk --target livekit
+```
 
-**The shortest pause.** Nothing is turned into text and back, so the caller
-waits for one model rather than four services in a row.
+Use Docker for this LiveKit run. The [Pipecat target](/targets/pipecat) is another option; it runs locally with `uv`.
+The example below stays with this same `desk` agent.
 
-**It handles being talked over.** The model decides when the caller has finished
-and what to do when they cut in. You write no turn settings at all, because
-none of them reach it.
+## 1. Bind the live model
 
-**Pick `realtime` instead** if you want to decide who ends the turn, or to keep
-a voice you already use. Pick `cascade` if you need tasks, handoffs or saved
-call state.
+The quickstart's `desk` names `voice` through its `live:` binding.
+That entry uses `gpt-live-1` and names `reasoning` as its backend.
+Both use `OPENAI_API_KEY`; your account must have access to both models.
 
-## Every key a live entry takes
-
-`name`, `provider` and `model` are required.
-
-<ParamField path="name" type="string" required>
-  The entry's name. An agent binds it with `live: <name>`.
+<ParamField path="architecture" type="cascade | realtime | live" required>
+  Set `live` explicitly. Omitted means `cascade`, which cannot use a live binding.
 </ParamField>
 
-<ParamField path="provider" type="openai" required>
-  The vendor. One name today, and the list is closed.
-</ParamField>
-
-<ParamField path="model" type="string" required>
-  The model id, sent exactly as written.
-</ParamField>
-
-<ParamField path="voice" type="string">
-  The voice the model speaks in. Left out, the vendor's default applies.
+<ParamField path="live" type="a models.live entry name" required>
+  Agent-level binding. It replaces `think:` and `speak:` on this agent.
 </ParamField>
 
 <ParamField path="backend" type="a models.think entry name">
-  The entry that runs this model's tools and its harder thinking. Required as
-  soon as the agent holds a tool.
+  OpenAI reasoning entry used by the live model. Required when the agent has tools, including knowledge lookup. It cannot use `endpoint_env`.
 </ParamField>
 
-<ParamField path="description" type="string">
-  A note for whoever reads the package next. It reaches nothing at runtime.
-</ParamField>
+See [Live model fields](/models/live) for the full entry reference.
+Do not add separate listen, speak, or turn sections; live owns those jobs.
 
-## What the backend is for
+## 2. Give the backend a tool
 
-A live model is good at talking and less good at careful work. So it does not do
-the careful work: it hands the request to the `backend:` entry, which calls your
-tools and thinks the hard part, and the answer comes back as something the live
-model says out loud.
+Add one local tool to the same desk. Create these two **complete new files**:
 
-Two consequences worth knowing before you write one:
+```yaml voice-desk/tools/opening_hours.yaml
+description: Look up the information desk's opening hours.
+input:
+  type: object
+  properties: {}
+local:
+  handler: tools/opening_hours.py
+```
 
-- **An agent with tools must name a `backend:`.** With none there is nowhere for
-  the handed-over work to run, and the vendor's own code says so rather than
-  failing quietly. The compiler refuses at compile instead.
-- **The backend must be at the same vendor**, because the handover happens
-  inside the live session itself.
+```python voice-desk/tools/opening_hours.py
+def opening_hours():
+    return {"hours": "Monday to Friday, nine in the morning to five in the afternoon."}
+```
 
-An agent with no tools needs no backend. It declines anything that would need
-one, and the emitted runbook says so.
+Merge these attachments into `agent.yaml`. Keep the existing `instructions` and `live` binding under `desk`:
 
-## What it can still do
+```yaml voice-desk/agent.yaml
+tools:
+  - opening_hours
+agents:
+  desk:
+    tools:
+      - opening_hours
+```
 
-**Knowledge.** A `knowledge:` section works exactly as it does in a cascade. The
-documents are read and indexed when the worker starts, and a tool file naming
-the base makes them searchable mid-call. The search runs on the backend with
-every other tool, and the answer comes back as something the live model says.
+Append this instruction to the existing prompt:
 
-[`takeaway-orders`](https://github.com/slng-ai/unmute/tree/main/examples/takeaway-orders)
-is the shipped example. It is a takeaway taking phone orders, which is the use
-case where this shape earns its place: the caller wants a fast back-and-forth,
-and the menu lookup and the pricing go to the backend while the model keeps
-talking.
+```markdown voice-desk/instructions.md
+Use opening_hours when asked when the desk is open. Read the returned hours.
+```
 
-## What it cannot carry
+The live model hands the lookup to its backend and speaks the answer.
+A tool's returned data should determine the answer; the model should not invent it.
 
-A live session fixes its instructions, its conversation and its tool list when
-it starts. Everything below changes one of those mid-call, so none of them fit.
+## 3. Try tools and knowledge in a call
 
-| Written | Why it is refused |
-|---|---|
-| a second agent, `tasks`, `task_groups`, `handoffs` | each changes the prompt mid-call |
-| `escalations` | a transfer needs a phone leg this shape does not carry yet |
-| `listen`, `speak`, `turn`, `conversation.interruption` | the model does all of this itself |
-| `variables`, `prefetch` | the instructions are fixed when the session starts |
-| `tracing` | this shape has no traced worker yet |
-| an `mcp:` tool | no place to open and close a server connection yet |
-| a phone connection | this shape compiles for the browser route |
+Stop the earlier dev run, then validate and restart:
 
-The rows saying "yet" are limits of this release. They are refused rather than
-emitted half working, so a package that compiles is one whose every setting
-reaches the call.
+```sh Terminal
+unmute validate voice-desk
+unmute dev voice-desk --target livekit
+```
+
+Ask when the desk opens, then interrupt with a follow-up question.
+Check that the dev page records the tool and that the spoken answer matches its result.
+
+For document lookup, follow [Knowledge bases](/build/tools/knowledge) and attach the resulting search tool to this same agent.
+It runs through the backend too. The complete [takeaway example](https://github.com/slng-ai/unmute/tree/main/examples/takeaway-orders) combines orders and knowledge on both frameworks.
+
+## Advanced
+
+<Accordion title="Defaults and supported settings">
+The live entry's voice is optional; omitted means the provider's default.
+With no tools, the backend is optional, but requests needing one may be declined.
+The backend binding forwards its model name; do not rely on its `params:` being applied to the live session.
+A greeting is an opening instruction, so its exact wording can change.
+See [Live model](/models/live) for fields and target differences.
+</Accordion>
+
+<Accordion title="Switch an existing package">
+Use the [switching steps](/build/architecture/overview#3-replace-the-models-and-agent-bindings).
+Live supports one agent and browser audio on Pipecat and LiveKit.
+It does not support tasks, handoffs, variables, pre-fetch, tracing, MCP tools, or phone connections.
+Remove `conversation.interruption`; the model manages interruptions itself.
+Keep cascade when these features are part of your required workflow.
+</Accordion>
 
 ## Troubleshooting
 
-**"is bound by agent X, which has tools, and names no backend"** add
-`backend:` naming a `think:` entry at the same vendor, or remove the agent's
-tools.
+### Validation says the live model needs a backend
 
-**"architecture: live has no place for tasks"** write `architecture: cascade`.
-The message also names `architecture: realtime`, and then says that shape
-carries no tasks either. Both are true.
+An attached tool has no reasoning backend to run it.
+**Fix:** add `backend: reasoning` to the live entry and keep the OpenAI `models.think.reasoning` entry from the quickstart.
 
-**The greeting does not match what you wrote.** It will not. The greeting reaches
-the model as an instruction rather than a line to read out, because there is no
-synthesizer to read it with. Expect the sense of the line, not its words.
+### The model speaks but cannot use my tool
+
+The tool may be unattached, its arguments may be wrong, or its handler may return a refusal.
+**Fix:** check the dev tool row and logs, verify both tool attachments, and compare the result with what the agent said.
+See [Local tools](/build/tools/python) for the tool contract.
+
+### The call fails at session start
+
+A configured model or voice may be unavailable to the API key.
+**Fix:** read the provider error in the dev logs and verify access to the live model and its backend.
+
+### The greeting sounds different
+
+The live model paraphrases the opening instruction.
+**Fix:** write the intended meaning in the greeting; use cascade if exact synthesized wording is required.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Live model fields" icon="microphone" href="/models/live">Review fields and target support.</Card>
+  <Card title="Realtime" icon="waveform" href="/build/architecture/realtime">Choose turn detection or another voice.</Card>
+</Columns>

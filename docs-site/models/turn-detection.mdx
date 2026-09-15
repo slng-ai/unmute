@@ -40,7 +40,7 @@ models:
       model: silero
 ```
 
-That is what every shipped example writes. A package scaffolded by `unmute init`
+That is the Pipecat binding used by the cascade examples. A package scaffolded by `unmute init`
 targets LiveKit, so it writes the LiveKit binding below in this spot instead.
 
 A package on a [live model](/models/live) has no `turn:` section at all: the
@@ -49,9 +49,9 @@ beside a `live:` binding is refused.
 
 ## Every key a turn binding takes
 
-Nothing here is required. Left out entirely, each target builds its own
-default pipeline, which [What each target builds](#what-each-target-builds)
-shows.
+A cascade needs a turn binding. Its optional timing settings default to the target’s behavior, described in [What each target builds](#what-each-target-builds).
+Live and realtime do not accept `models.turn`; realtime selects turn handling on its own model entry.
+See [Realtime turn detection](/build/architecture/realtime#2-choose-who-ends-the-turn).
 
 <ParamField path="provider" type="string">
   Forwarded to the runtime as written. There is no vendor list to pick from,
