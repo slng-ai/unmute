@@ -36,7 +36,7 @@ agents:
 
 On this page:
 
-- [Why pick it](#why-pick-it) - and when not to
+- [Why pick it](#why-pick-it) - pros and cons
 - [Every key a live entry takes](#every-key-a-live-entry-takes)
 - [What the backend is for](#what-the-backend-is-for)
 - [What it can still do](#what-it-can-still-do) - tools and knowledge
@@ -48,16 +48,25 @@ is on [Live model](/models/live). This page is the shape and the trade.
 
 ## Why pick it
 
-**The shortest pause.** Nothing is turned into text and back, so the caller
-waits for one model rather than four services in a row.
+Pick Live when you want the model to manage the spoken exchange and send
+tool work to a backend. It fits an agent that can work within the model's
+own turn and voice behavior.
 
-**It handles being talked over.** The model decides when the caller has finished
-and what to do when they cut in. You write no turn settings at all, because
-none of them reach it.
+| Pros | Cons |
+|---|---|
+| The model hears audio directly and manages turns and interruptions | Unmute exposes no separate turn detector or interruption settings here |
+| The model can keep speaking while backend work runs | Tool completion still waits for that backend and the tools it calls |
+| A dedicated backend handles tool requests and reasoning | The backend must use the same provider; it is not an unrestricted second pipeline |
+| Tools and knowledge searches remain available | Unmute currently supports no tasks, handoffs, saved variables, tracing, or phone route here |
 
-**Pick `realtime` instead** if you want to decide who ends the turn, or to keep
-a voice you already use. Pick `cascade` if you need tasks, handoffs or saved
-call state.
+Live can respond with fewer speech-processing stages, but is not guaranteed
+to beat Realtime or a tuned Cascade on every interaction. Compare both reply
+time and successful tool completion.
+
+Choose [Realtime](/build/architecture/realtime) for selectable turn modes or a
+separate voice. Choose [Cascade](/build/architecture/cascade) when the workflow
+needs more steps and state. The [overview](/build/architecture/overview#pros-and-cons)
+compares all three and links the LiveKit and Coval articles.
 
 ## Every key a live entry takes
 
@@ -90,10 +99,9 @@ call state.
 
 ## What the backend is for
 
-A live model is good at talking and less good at careful work. So it does not do
-the careful work: it hands the request to the `backend:` entry, which calls your
-tools and thinks the hard part, and the answer comes back as something the live
-model says out loud.
+The live model sends a request to the `backend:` entry. That model requests
+the tool calls, the application executes them, and the live model speaks the
+result. This separates the spoken exchange from backend work.
 
 Two consequences worth knowing before you write one:
 
@@ -114,15 +122,16 @@ the base makes them searchable mid-call. The search runs on the backend with
 every other tool, and the answer comes back as something the live model says.
 
 [`takeaway-orders`](https://github.com/slng-ai/unmute/tree/main/examples/takeaway-orders)
-is the shipped example. It is a takeaway taking phone orders, which is the use
+is the shipped example. It is a takeaway order assistant, which is the use
 case where this shape earns its place: the caller wants a fast back-and-forth,
 and the menu lookup and the pricing go to the backend while the model keeps
 talking.
 
 ## What it cannot carry
 
-A live session fixes its instructions, its conversation and its tool list when
-it starts. Everything below changes one of those mid-call, so none of them fit.
+The current Live integration fixes its instructions and tool setup when the
+session starts. Unmute does not expose conversation restructuring for it.
+The restrictions below describe this integration, not every speech-to-speech API.
 
 | Written | Why it is refused |
 |---|---|

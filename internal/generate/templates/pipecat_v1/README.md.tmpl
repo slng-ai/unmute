@@ -785,14 +785,41 @@ deploy cannot start without it:
 ```sh
 cp .env.example .env            # then fill in the values
 pipecat cloud secrets set {{.SecretSet}} --file .env{{if .DeploymentRegion}} --region {{.DeploymentRegion}}{{end}}
+pipecat cloud secrets list {{.SecretSet}}
+```
+
+The listing shows names and readiness, without values. Wait for `ready`, then deploy:
+
+```sh
 pipecat cloud deploy
 pipecat cloud agent status {{.AgentName}}
 ```
 
-Run the same `secrets set` command again to change a value. If that set name is
-already taken (secret-set names are globally unique across the platform), create
-yours under another name and pass `--secrets <other-name>` on the deploy command,
-which overrides the manifest.
+If that set name is already taken, create yours under another name and pass
+`--secrets <other-name>` on every deploy, which overrides the manifest.
+
+### Update secrets without rebuilding
+
+Run the same `secrets set` command after changing `.env`. It adds new names and
+replaces supplied values; omitted names keep their values. Remove an obsolete
+name explicitly with `pipecat cloud secrets unset {{.SecretSet}} OLD_API_KEY`.
+Use the same organization and region as the agent.
+
+Wait for `pipecat cloud secrets list {{.SecretSet}}` to report `ready`.
+The set does not refresh running agents, so roll out each deployment using it.
+Read the current build ID from deployment history and replace the placeholder below:
+
+```sh
+pipecat cloud agent deployments {{.AgentName}}
+pipecat cloud deploy --build-id <current-build-id> --force
+pipecat cloud agent status {{.AgentName}}
+```
+
+This reuses the current image without rebuilding. `--force` replaces running
+instances and can interrupt active sessions. Verify a fresh interaction afterward.
+Updating a stored value does not create or revoke its provider key.
+See [secret updates](https://docs.pipecat.ai/pipecat-cloud/fundamentals/secrets)
+and [reusing a build](https://docs.pipecat.ai/pipecat-cloud/guides/cloud-builds#redeploying-a-previous-build).
 {{- if .DailyCarrier}}
 
 The set only needs the agent-side names listed under **Required environment**.
@@ -1109,8 +1136,9 @@ cp .env.example .env      # then fill in the values, agent side and helper side
 pipecat cloud secrets set {{.SecretSet}} --file .env{{if .DeploymentRegion}} --region {{.DeploymentRegion}}{{end}}
 ```
 
-Re-run this whenever a value changes. The set only needs the agent-side names;
-see the note in **Deploy to Pipecat Cloud** above.
+Wait for `pipecat cloud secrets list {{.SecretSet}}` to report `ready`.
+The set only needs the agent-side names; see **Deploy to Pipecat Cloud** above.
+For a later value change, follow **Update secrets without rebuilding** above.
 
 **5. Deploy, and wait for ready.**
 {{else}}
@@ -1494,6 +1522,9 @@ cp .env.example .env      # then fill in the values
 pipecat cloud secrets set {{.SecretSet}} --file .env{{if .DeploymentRegion}} --region {{.DeploymentRegion}}{{end}}
 ```
 
+Wait for `pipecat cloud secrets list {{.SecretSet}}` to report `ready`.
+For a later value change, follow **Update secrets without rebuilding** above.
+
 **4. Deploy, and wait for ready.**
 {{else}}
 **3. Deploy, and wait for ready.**
@@ -1677,13 +1708,15 @@ Complete at least one user turn before reviewing the trace.
 ### Getting traces from the deployed agent
 
 1. Put `COVAL_API_KEY` in `.env`.
-2. Push it with the rest of the secrets, before or after you deploy:
+2. Push it with the rest of the secrets:
 
    ```bash
    pipecat cloud secrets set {{.SecretSet}} --file .env{{if .DeploymentRegion}} --region {{.DeploymentRegion}}{{end}}
    ```
 
-3. Deploy, place one call, and hang up. The trace is filed when the call ends,
+3. Wait for the set to report `ready`, then deploy. For an existing deployment,
+   follow **Update secrets without rebuilding** above to refresh its environment.
+   Place one call and hang up. The trace is filed when the call ends,
    so nothing appears until then. Open **Observability → Conversations** in
    Coval and filter on `{{.EntryAgent}}-{{.AgentName}}`; the call is normally
    there within a few seconds of hangup, and a minute is the outside case.

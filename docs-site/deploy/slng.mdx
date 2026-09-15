@@ -1,425 +1,396 @@
 ---
 title: "Deploy to SLNG"
-description: "One command from a package to a live agent on SLNG, what you need before you run it, and what this target refuses to create for you."
+description: "Deploy a package to SLNG, update the existing agent, and manage its credentials."
 sidebarTitle: "SLNG"
 ---
 
-SLNG hosts the agent, so there is no project to run and no image to build. One
-command takes a package to a live agent, with no mirror and no pull to run
-first:
+Deploy your package as a managed SLNG agent and test it in the browser.
+Unmute turns your authored files into a deployment body. SLNG runs the agent,
+so this route needs no Docker image or Python project.
 
-```sh
-export SLNG_API_KEY=...
-unmute deploy examples/hotel-concierge
+On this page:
+
+- [Quickstart](#quickstart) - the native deployment command
+- [Choose the target](#1-choose-the-target) - region and supported package features
+- [Select the organisation](#2-select-the-organisation) - authentication and destination
+- [Supply credentials](#3-supply-credentials) - model keys and tool secrets
+- [Preview and deploy](#4-preview-and-deploy) - files, checks and identity
+- [Verify the agent](#5-verify-the-agent) - a complete browser interaction
+- [Every later deploy](#every-later-deploy) - update the same agent
+- [Secrets-only updates](#secrets-only-updates) - add, replace and remove values
+- [Advanced](#advanced) - hosted tools and optional integrations
+- [Troubleshooting](#troubleshooting) - symptoms and fixes
+- [Where to go next](#where-to-go-next) - related guides
+
+## Quickstart
+
+For a new package, run this from the directory that will contain `my-agent`:
+
+```sh Terminal
+unmute init
 ```
 
-That validates the package, compiles it, resolves every tool reference
-against your organisation's published tools, checks what it resolved, and
-pushes. The agent is written only after its required checks pass. A real deploy
-may first refresh MCP discovery or fill a Vault entry with your consent; its
-report records those changes even if a later check fails. A dry run does neither.
+In the console:
 
-<Warning> A real deploy needs a `voiceai` release that supports a checked,
-resolved push; this flow was verified with `voiceai 0.1.18`. `unmute deploy`
-checks for that support before writing anything. An older `voiceai` is refused,
-with upgrade guidance naming the missing capability and the install command. It
-never falls back to an unchecked push that attaches whatever is newest. `unmute
-validate` and `unmute compile` are unaffected: both work offline against any
-installed `voiceai`, because neither one reads your account at all. </Warning>
+1. Enter `my-agent` as the name.
+2. Open **Identity → Target** and select **SLNG**.
+3. Open **Behavior → Advanced → Advanced target settings → Deployment region** and enter one supported [SLNG region](/targets/slng#targets-yaml).
+4. Return to **Create agent**, review the package and confirm.
 
-## What works today
+The region field is labelled optional in the console, but SLNG requires it.
+This path creates a package without code-target turn settings. A saved
+organisation manifest may restrict the choices; see
+[manifest-based initialization](/reference/cli/init#with-a-saved-manifest).
+
+Already have a package declaring a `slng` target? Start here. Run these commands
+from the directory containing `my-agent`:
+
+```sh Terminal
+brew install slng-ai/tap/voiceai
+voiceai login --profile production
+unmute deploy my-agent --target slng --profile production --dry-run
+unmute deploy my-agent --target slng --profile production
+```
+
+The profile name `production` is your local label for a credential. Use your
+own name. Before deploying, check the organisation shown by the preview and
+supply any missing resources it names.
+
+A successful deploy prints the agent ID. Open that agent in the SLNG dashboard
+and choose **Test → Web session**. The sections below explain each step.
+
+## 1. Choose the target
+
+Merge this target into an existing `targets.yaml`. `eu-north` is one example;
+choose a supported region that serves your models and language.
+
+```yaml targets.yaml
+targets:
+  slng:
+    provider: slng
+    deployment_region: eu-north
+```
+
+<ParamField path="provider" type="string" required>
+  Set to `slng`. The surrounding target name selects this build with `--target`
+  and names its directory under `build/`.
+</ParamField>
+
+<ParamField path="deployment_region" type="string or one-item list of strings" required>
+  Exactly one [SLNG region](/targets/slng#targets-yaml). There is no default.
+  Omission, an unknown region and multiple regions are refused.
+</ParamField>
+
+The package needs a name, one entry agent, a prompt, a fixed greeting, and
+bindings for reasoning, speech recognition and speech generation. Keep those
+in `agent.yaml` and the prompt files it references.
+
+SLNG owns runtime versions, capacity and turn detection. Omit target `version`,
+`pins`, `sdk_language`, `connection` and `warm_instances`. Tasks, handoffs and
+package-local Python are unavailable on this target. See the
+[complete target limits](/targets/slng#what-a-slng-package-may-not-ask-for).
+
+### Choose models and their region
+
+Set model bindings under `models.think`, `models.listen` and `models.speak` in
+`agent.yaml`. A target can override an existing binding by name. See
+[model configuration](/reference/agent-yaml#models) for the authored shape.
+
+The SLNG driver joins a provider and model with `/`, unless the model already
+contains `/`. It forwards each binding's `params` into that component's
+provider options. It does not test model availability or provider option
+support offline.
+
+Use SLNG's [model discovery instructions](https://docs.slng.ai/examples/agents-config#finding-models)
+to select models available to your organisation, language and region. The
+[Unmute model pages](/models/stt) explain the bindings and target differences.
+Provider defaults apply to omitted options; an accepted package can still fail
+when a provider receives its first request.
+
+`deployment_region` selects the hosted agent's region. An upstream model's
+inference location is a separate provider setting. Choosing a hosting region
+does not move that provider's inference service.
+
+## 2. Select the organisation
+
+Install the [voiceai CLI](https://docs.slng.ai/sdks/cli) and sign in with an API
+key from the destination organisation. The login prompt keeps the key out of
+your command history:
+
+```sh Terminal
+voiceai login --profile production
+voiceai --profile production whoami
+```
+
+Unmute needs a `voiceai` release that supports checked, resolved pushes.
+It checks that capability before pushing and gives upgrade guidance if it is
+missing. `voiceai 0.1.18` supports this flow. No Python SDK version is yours
+to install for this target.
 
 <Warning>
-  **SLNG creates no tool from your package.** A `local:` or `webhook:` block
-  is refused here: reference a tool your organisation already has with
-  `slng:` instead, or compile the package to `pipecat` or `livekit`, where
-  your own handler or endpoint runs.
+  Environment keys override the selected profile. Unmute reads `SLNG_API_KEY`,
+  then `VOICEAI_API_KEY`, then the profile. It also loads the package's `.env`
+  and `.env.local`. Remove unintended deployment keys from those files and
+  your shell when using a profile. Check the preview's organisation before deploying.
 </Warning>
 
-A builtin names a capability SLNG already owns, so the push has nothing to
-create first. In a package that is a `builtin:` block naming `id: end_call`,
-or `id: send_sms` with the sender pinned by `inject: from_number`. The other
-curated capabilities, voicemail detection, current date and time, and the
-caller's phone number, are attached to the agent in the SLNG dashboard rather
-than written in the package. A value the model records during the call, such
-as a number the caller confirms, is a variable with `source: conversation`,
-which becomes one of the agent's runtime variables and comes back on the call
-record.
+There is no separate Unmute project selector for SLNG. The credential selects
+the organisation, and `--profile` selects a saved credential when no environment
+key overrides it. Use the same profile for every command below.
 
-[`hotel-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/hotel-concierge)
-is the working example and the shape to copy. It has two hosted tools by name,
-two named MCP tools, a builtin, template variables with defaults in the
-greeting and the prompt, an injected argument, a tool announcement and a model
-fallback. It needs no session inputs. Does your agent need a tool SLNG does not
-host yet? Create it in the SLNG dashboard and reference it with `slng:` (see
-[Hosted tools](/build/tools/hosted)). Or compile the package to `pipecat` or
-`livekit` instead, where the handler runs in the project you host.
+## 3. Supply credentials
 
-## Before you start
+These settings have different owners:
 
-<Steps>
-  <Step title="Install the voiceai CLI">
-    SLNG hosts the agent, and `voiceai` is the tool that owns your account and
-    the push. `unmute deploy` runs it for you, so it has to be on your PATH.
-
-    ```sh
-    brew install slng-ai/tap/voiceai
-    ```
-
-    Unmute's compiler opens no connection to SLNG at any point, at validate time
-    or compile time. It writes files and stops.
-  </Step>
-  <Step title="Get an API key">
-    One SLNG key serves every SLNG role, so this is the same key a generated
-    livekit or pipecat project reads at run time to reach SLNG models.
-
-    ```sh
-    export SLNG_API_KEY=...
-    ```
-
-    Get one at [app.slng.ai/api-keys](https://app.slng.ai/api-keys).
-
-    `unmute deploy` reads `SLNG_API_KEY`, then `VOICEAI_API_KEY`, then whatever
-    profile `voiceai login` stored. It also reads a package's `.env` and
-    `.env.local`, the same files `unmute dev` reads, so a key on a line there
-    needs no export.
-
-    <Warning>
-      An exported key and a stored `voiceai` profile can belong to **different
-      organisations**. `unmute deploy` prints the organisation it resolved on
-      every run. Read that line before you read anything else.
-    </Warning>
-  </Step>
-</Steps>
-
-## The walkthrough
-
-Follow these against `examples/hotel-concierge` from a clone of the repository.
-It references two hosted tools and one MCP server, all three by name, with no
-mirror committed anywhere in the package.
-
-Those names belong to the organisation this example was written for. In a new
-organisation, publish the two tools and register the MCP server with its selected
-tools and credentials, or replace the references with your own. Run
-`unmute resources` to inspect your catalogue. Validation is offline and cannot
-prove those resources exist in your account.
-
-<Steps>
-  <Step title="Validate">
-    ```sh
-    unmute validate examples/hotel-concierge
-    ```
-
-    This is local and needs no key. It checks each `slng:` reference for its
-    own shape, never for whether the name exists on the platform: that check,
-    like the tool sandbox behind it, belongs to deployment.
-  </Step>
-
-  <Step title="Compile">
-    ```sh
-    unmute compile examples/hotel-concierge --target slng
-    ```
-
-    ```text
-    examples/hotel-concierge/build/slng/agent.json
-    examples/hotel-concierge/build/slng/README.md
-    examples/hotel-concierge/build/slng/compile-report.json
-    ```
-
-    Also local, also no key. `agent.json` carries each tool by name only.
-    `compile-report.json` names, under `deferred_checks`, exactly what this
-    step could not establish: that the organisation still publishes each
-    name, that an injected argument fits its published parameters, and which
-    Vault entries it needs. `unmute deploy` is what completes those three.
-  </Step>
-
-  <Step title="Preview the push">
-    ```sh
-    unmute deploy examples/hotel-concierge --dry-run
-    ```
-
-    This is the step that needs the `voiceai` release described above. With
-    one installed, a clean preview names the organisation it resolved,
-    resolves `hotel_info`, `search_places_text` and `end_call` against it,
-    checks their published contracts and reports the version it would attach
-    for each reference, without writing anything:
-
-    ```text
-    slng: hotel_info v<n>
-    slng: search_places_text v<n>
-    slng: dry run, nothing was created or changed
-    ```
-
-    A reference the agent already has reads `v<n>, from v<m>`, and one it does
-    not reads `v<n>, new`. The deploy step below prints a different line, and
-    the difference is the point: a preview says what it would attach and a
-    deploy says what it did.
-
-    On a package that already has a live agent, the same run also names what a
-    replacement would remove. That is a reference the package no longer names,
-    or a setting the agent has now that the package does not declare: a
-    description typed in the dashboard, say, or a `call_start` trigger somebody
-    added there. Full shape of the preview, including what it says about a
-    changed published description or schema, is at [`unmute
-    deploy`](/reference/cli/deploy).
-  </Step>
-
-  <Step title="Deploy">
-    ```sh
-    unmute deploy examples/hotel-concierge
-    ```
-
-    A successful run prints the version it attached for every reference and
-    the agent id:
-
-    ```text
-    slng: attached hotel_info v<n>
-    slng: attached search_places_text v<n>
-    slng: attached end_call v<n>
-    slng: attached firecrawl-mcp-2 firecrawl_scrape
-    slng: attached firecrawl-mcp-2 firecrawl_search
-    slng: agent created <agent_id>
-    slng: deployed. Talk to it: voiceai agents web-sessions create <agent_id> --file session.json
-    ```
-
-    An MCP selection carries no version, because a server tool has none: what
-    was checked for it is the schema hash SLNG's own snapshot recorded, and
-    `deploy-report.json` carries that.
-
-    `v<n>` is the latest published version this run resolved and checked, not
-    a version the package pinned: run it again after somebody publishes a new
-    one and the next deploy resolves that one instead. Keep the agent id.
-    `voiceai agents list` finds it again, because unmute stores no id, writes
-    no lockfile, and keeps no local state about your account.
-  </Step>
-
-  <Step title="Talk to it">
-    There is no `unmute dev` for this target. `dev` runs a generated project
-    locally and this target generates none. Open the deployed agent in the
-    SLNG dashboard, click **Test**, choose **Web session**, and allow microphone
-    access. Fill any required inputs shown by the test panel; this example has
-    none. See [SLNG's test panel guide](https://docs.slng.ai/dashboard/agent-infra#test-your-agent).
-
-    To connect your own LiveKit client instead, create a session with the CLI:
-
-    ```sh
-    export VOICEAI_API_KEY="$SLNG_API_KEY"
-    cat > session.json <<'JSON'
-    {"arguments": {}, "participant_name": "you"}
-    JSON
-    voiceai agents web-sessions create <agent_id> --file session.json
-    ```
-
-    ```json
-    {
-      "call_id": "3ee08739-a329-49ee-a3a0-542b8ee9f8de",
-      "room_name": "agent-3ee08739-a329-49ee-a3a0-542b8ee9f8de",
-      "livekit_dispatch_id": "AD_6bSrcp7fowVe",
-      "livekit_url": "wss://slng-atlas-6sw2n5o2.livekit.cloud",
-      "livekit_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9…",
-      "max_session_seconds": 300
-    }
-    ```
-
-    This command returns connection details and requests a worker; it does not
-    open a browser or microphone. Connect a LiveKit client with `livekit_url`
-    and `livekit_token` to talk. A `livekit_dispatch_id` alone does not prove
-    that the worker joined or a conversation happened. Setting `VOICEAI_API_KEY`
-    above keeps this standalone command in the same account as your deploy.
-
-    Supply the agent id and the request body using `--file`. This example
-    needs no session arguments; the model supplies tool arguments from the
-    caller's request.
-
-    Other packages can use `arguments` to supply declared variables for one
-    web session. Inbound phone calls do not supply that payload. A required
-    injected input therefore needs a valid default before an inbound trunk
-    can be attached, or the tool must leave that argument to the model.
-
-    Ask for the status of order A-1001, listen for the tool's announcement,
-    then say goodbye. Read the resulting call using the returned `call_id`:
-
-    ```sh
-    voiceai agents calls get <agent_id> <call_id> --json
-    ```
-
-    The call record shows whether the tool ran and what it returned.
-  </Step>
-</Steps>
-
-## Why the package is shorter here
-
-A slng package is smaller than the same agent written for pipecat or livekit,
-and it is worth being clear about what is missing: not capability, but the parts
-you would otherwise have to stand up yourself.
-
-| On a code target you author | On slng |
+| Setting | Where it belongs |
 |---|---|
-| a Python project, a `Dockerfile`, an image to build and host | nothing; SLNG runs the agent |
-| worker counts, concurrency, scaling | SLNG's, already provisioned |
-| a VAD, a turn model, endpointing windows | SLNG's turn taking |
-| the event loop that wires STT to LLM to TTS | SLNG's pipeline |
-| where each provider is called from | one region, chosen per call |
+| SLNG deployment key | Local `voiceai` profile or deployment environment |
+| Model provider key | SLNG's [Bring Your Own Key page](https://docs.slng.ai/dashboard/byok), when using your own provider account |
+| Hosted tool or MCP credential | Organisation Vault, under the exact required name |
+| Shared non-secret text | A Vault variable, where the target supports it |
+| Per-call input | An authored [variable](/build/variables) supplied at session start |
+| Worker connection settings | SLNG manages them; this target emits no environment file |
 
-So on slng you author **intent**, the prompt, models, tools, greeting and
-variables, and the layer under it is already running. That layer is the trade:
-you give up owning the runtime, and you get a runtime that is already deployed
-in-region, already warm, with STT, LLM, TTS and the tool sandbox one network hop
-apart instead of one internet apart.
+Model credentials registered through BYOK are separate from tool secrets.
+Choose a supported model in the organisation; putting its provider key in a
+local `.env` file does not configure managed-agent BYOK.
 
-That is also why four `targets.yaml` keys are **refused by name** on this target
-rather than ignored: `version`, `pins`, `sdk_language` and `connection` each
-describe a generated project, and there is none. Other `agent.yaml` features go
-the same way, including `turn:` and `tracing:`. See
-[what a slng package may not ask for](/targets/slng#what-a-slng-package-may-not-ask-for)
-for the complete list. `unmute validate` names each one and says what owns it
-instead, so a setting never disappears quietly.
+The generated `build/slng/README.md` lists the Vault requirements visible to the
+compiler. Deployment also checks credentials required by published tools and
+MCP servers. A declaration names a requirement; it does not supply its value.
+See [Credentials](/build/credentials) and [the SLNG Vault](/targets/slng#the-vault).
 
-<Card title="Regional infrastructure" icon="globe" href="/optimization/regional-infrastructure">
-  What "one region" buys, measured.
-</Card>
+Create a missing tool secret by name and enter its value at the hidden prompt:
+
+```sh Terminal
+voiceai --profile production secret create SERVICE_API_TOKEN
+voiceai --profile production secret get SERVICE_API_TOKEN
+```
+
+Replace `SERVICE_API_TOKEN` with a name in your package's requirements.
+The read command reports metadata, including `has_value`, without displaying
+the value. Vault writes require an organisation admin.
+
+For a batch, prepare a private file containing only required tool credentials:
+
+```dotenv runtime.secrets.env — placeholders; replace before use
+SERVICE_API_TOKEN=replace-with-the-service-token
+```
+
+```sh Terminal
+voiceai --profile production secret create --secrets-file runtime.secrets.env
+```
+
+Keep the file outside `build/` and out of source control. Do not upload an
+entire development environment or the deployment key as a tool secret.
+A real `unmute deploy` can also offer to fill missing Vault entries with your
+consent; a dry run cannot fill them.
+
+## 4. Preview and deploy
+
+You can inspect the generated files before any account checks:
+
+```sh Terminal — from the directory containing my-agent
+unmute validate my-agent --target slng
+unmute compile my-agent --target slng
+```
+
+Both commands work offline. Compilation writes `agent.json`, `README.md` and
+`compile-report.json` into `my-agent/build/slng/`. The report lists checks
+that need the live account. Edit the authored package and compile again;
+generated files are replaced.
+
+Deploy from the same parent directory, passing the authored package path:
+
+```sh Terminal
+unmute deploy my-agent --target slng --profile production --dry-run
+unmute deploy my-agent --target slng --profile production
+```
+
+`deploy` validates and compiles again automatically. It resolves hosted tool
+names and MCP selections in the chosen organisation, checks the resolved
+contracts, and pushes that checked body. It writes a `deploy-report.json`
+beside the generated files when it reaches the push stage.
+
+A dry run changes no remote state. A real run may refresh MCP discovery or
+create Vault entries with your consent before a later check fails. Its report
+records those changes. The agent is written only after its required checks pass.
+
+The deployed name joins the package name and target name: package `my-agent`
+with target `slng` deploys as `my-agent-slng`. SLNG assigns a separate agent ID.
+The report records that ID, but Unmute stores no deployment lockfile: later
+pushes resolve the name again. Find the resource with:
+
+```sh Terminal
+voiceai --profile production agents list
+```
+
+Do not post `build/slng/agent.json` with `voiceai agents create`. The compiled
+body still contains names that deployment must resolve to platform identifiers.
+
+## 5. Verify the agent
+
+Open the deployed agent in the dashboard and choose **Test → Web session**.
+Fill required call inputs, allow microphone access, and start the session.
+See [SLNG's test panel](https://docs.slng.ai/dashboard/agent-infra#test-your-agent).
+
+Say a short question and wait for a relevant answer. If the package uses a
+tool, exercise one safe tool interaction and check the result. A greeting
+proves audio output; a response to your question also checks input and reasoning.
+
+Use the returned agent ID and call ID to read the call. Replace the angle-bracket
+placeholders before running:
+
+```sh Terminal
+voiceai --profile production agents calls list <agent_id> --json
+voiceai --profile production agents calls get <agent_id> <call_id> --json
+```
+
+Check the transcript, tool results and any `call_end_reason`. A completed push
+proves that the platform accepted the configuration. A completed interaction
+is the deployment smoke check; application-specific tests still come next.
 
 ## Every later deploy
 
-`unmute deploy` validates, compiles and pushes in one command, so there is no
-stale build to worry about here as there is on the other two targets:
+Change your authored prompt, model bindings, configuration or tool references,
+then preview and update with the same target and profile:
 
-```sh
-unmute deploy ./my-agent
+```sh Terminal
+unmute deploy my-agent --target slng --profile production --dry-run
+unmute deploy my-agent --target slng --profile production
 ```
 
-A push **replaces**. Updating an agent replaces it with what the package
-declares, so a field that differs from the live agent is overwritten and a tool
-reference the package no longer names is detached. `--dry-run` names both before
-anything happens. A push that changes nothing writes no version and does not
-relabel the previous one, so re-running a deploy is safe and cheap.
+Unmute regenerates the body on each run. There is no image to rebuild and no
+secrets file required on update. Existing Vault values remain in the Vault.
 
-An ordinary redeploy moves nothing else. The region is fixed at create and the
-agent id does not change, so a web session or a dashboard attachment holding
-that id keeps working.
+A push replaces the agent configuration. Fields edited only in the dashboard
+can be overwritten, and tool references removed from the package are detached.
+Read the preview's removals. Hosted tools resolve to their latest published
+versions on each deploy; a committed code-target mirror does not pin them here.
 
-SLNG itself never goes stale between deploys: every run resolves the latest
-published version of each hosted tool fresh, so there is nothing local to
-fall behind. What can go out of date is a **mirror**, if your package has
-one, because it exists only for a `pipecat` or `livekit` build of the same
-package. Somebody edits the tool in the SLNG dashboard, and the committed
-mirror is now the old definition, so it is worth checking:
+The same deployed name updates the existing agent. If the name is ambiguous,
+pass `--agent-id <agent_id>`. The ID remains the same on update. An unchanged
+push creates no version. Test a fresh session after each change; Unmute offers
+no worker restart or rolling-update controls for this managed runtime.
 
-```sh
-unmute pull ./my-agent --check
+For rollback, SLNG's [Versions tab](https://docs.slng.ai/dashboard/agent-infra#versions)
+can restore a saved version after showing its checks. Bring the authored package
+back into agreement before the next deploy, which would replace that restored
+configuration again.
+
+### Renaming the agent
+
+Changing the package or target name creates a different deployment name.
+It can create a second agent and leave the first running. Integrations holding
+the old ID keep reaching the old agent. Inspect `agents list` and update those
+integrations deliberately; a rename is not a migration.
+
+## Secrets-only updates
+
+For an existing Vault name, update its value without compiling or deploying:
+
+```sh Terminal
+voiceai --profile production secret create SERVICE_API_TOKEN --overwrite
+voiceai --profile production secret get SERVICE_API_TOKEN
 ```
 
-It writes nothing and exits 1 on drift, which is what makes it usable in CI.
-`unmute pull` then brings the mirror forward. A slng-only package, such as
-`examples/hotel-concierge`, carries no mirror and has nothing here to check.
+The first command prompts for the replacement. Omit `--overwrite` when adding
+a new name. If it already exists, the CLI asks before replacing it; a
+non-interactive run refuses without overwrite consent.
 
-## Renaming the agent
+For a file, `--secrets-file runtime.secrets.env --overwrite` adds new entries
+and replaces listed existing entries. It does not remove entries omitted from
+the file. List metadata with `voiceai --profile production secret list`.
 
-A push resolves the agent by name, so a new name pushes a **second** agent and
-leaves the first one exactly where it was. What a rename strands is the **agent
-id**. Anything holding the old one still addresses the old agent: a saved web
-session, a dashboard attachment, an integration.
+SLNG resolves tool credentials at execution time, so changing an existing
+Vault value needs no agent rebuild. Check a fresh tool interaction after
+rotation; do not assume an active call has refreshed every credential.
 
-Take the new id from the push output, or find it again:
+To remove a secret, use the dashboard's Vault page. The CLI has no delete
+command. SLNG blocks deletion while active configurations or calls still
+reference it. Remove the use first, deploy that change if needed, then delete.
+See [Vault management](https://docs.slng.ai/dashboard/vault).
 
-```sh
-voiceai agents list
+Replacing a stored value does not create or revoke its provider key. Do those
+operations in the provider's account. For model credentials, use
+[BYOK rotation](https://docs.slng.ai/dashboard/byok#rotating-a-key).
+
+## Advanced
+
+### Reuse tools and shared code
+
+Start with supported package declarations. For external services, reference
+published [hosted tools](/build/tools/hosted) or select named
+[MCP tools](/build/tools/mcp) from your organisation.
+
+The SLNG target publishes no tool code and refuses `local:` and `webhook:`
+tool bodies. It has no package-local Python imports, shared-module packaging,
+custom Dockerfile, dependency override or lifecycle hook. Publish and maintain
+the tool on SLNG, or choose LiveKit or Pipecat when the package must own Python.
+
+A hosted tool needs no local mirror for this target. `unmute pull` is for a
+package that also compiles to a code target, where that mirrored tool runs.
+
+### Receive phone calls
+
+Configure a carrier connection through
+[SLNG Telephony](https://docs.slng.ai/dashboard/telephony), then attach the
+inbound trunk when `unmute deploy` offers it or in the agent's Telephony tab.
+The attachment does not change the carrier's routing.
+
+Inbound calls supply no web-session input payload. Give required injected
+inputs valid defaults or leave those arguments for the model to collect.
+Call the number and inspect the new SLNG call record. Outbound calling needs
+its own outbound connection; an inbound attachment does not enable it.
+
+### Create a session for your own client
+
+Save this complete request body, filling any required call inputs in `arguments`:
+
+```json session.json
+{"arguments": {}, "participant_name": "tester"}
 ```
 
-Then delete the old agent, or point those places at the new id.
-
-## When it refuses
-
-Problems name what to fix. The agent is written only after its required checks
-pass; a real deploy may already have refreshed MCP discovery or filled a Vault
-entry with your consent. Inspect `deploy-report.json` for completed changes.
-
-| It says | What to do |
-|---|---|
-| `vault missing` | create each name in [the vault](https://app.slng.ai/vault/secrets). A name that exists as a *variable* does not count. |
-| `hosted tool ... this organisation has no tool of this name` | the package names a tool your organisation cannot see. Rename the reference, or create the tool in the dashboard. Unmute creates none. |
-| `hosted tool ... could not be listed` / `published contract was not checked` | this run could not read the organisation's tools, or the one published version it needed. Nothing is attached unverified: fix what blocked the read (often a credential scope) and run again. |
-| `--require-resolved` in the message, naming `brew install` | the installed `voiceai` does not support a checked, resolved push. See the warning near the top of this page. |
-| `agent ambiguous` | two agents share the package's name. Pass `--agent-id`. |
-
-These problems block the agent push. A dry run makes no remote changes. A
-`slng:` tool's mirror is never checked here. `unmute deploy` compiles only the
-slng target, and that target reads no mirror. A `no mirror of it is committed`
-or `does not match the hash` refusal comes from [a `livekit` or `pipecat`
-compile](/build/tools/hosted), not from this command.
-
-## Receive phone calls
-
-Phone setup has two separate parts:
-
-1. Configure an inbound connection in [SLNG Telephony](https://docs.slng.ai/dashboard/telephony).
-   Use the guided Twilio setup or your provider's SIP setup to route the number
-   to SLNG's inbound destination. A number still pointing at Twilio Dev Phone,
-   an old webhook or another application will not reach this agent.
-2. Run `unmute deploy` and select that free inbound trunk when prompted, or
-   assign it in the agent editor's **Telephony** tab. Choosing `0` leaves it
-   unattached. The CLI attaches an existing connection; it does not rewrite
-   your carrier's routing.
-
-An `attached` or `usable` result describes SLNG account state. It is not proof
-of a completed carrier call. Call the number, then check for a new call:
-
-```sh
-export VOICEAI_API_KEY="$SLNG_API_KEY"
-voiceai agents calls list <agent_id> --json
-voiceai agents calls get <agent_id> <call_id> --json
+```sh Terminal
+voiceai --profile production agents web-sessions create <agent_id> --file session.json
 ```
 
-No new SLNG call means you should check carrier routing and SIP delivery first.
-A recorded call with an error gives you the next component to investigate.
-For outbound calls, assign an outbound connection separately; an inbound
-attachment does not enable outbound calls.
+The result contains `livekit_url` and `livekit_token` for your client.
+Treat the token as a credential. This command requests a session; it opens no
+browser and does not prove a worker joined. Keep deployment keys on your server.
 
-## When the agent answers with silence
+## Troubleshooting
 
-A model can pass every check at create time and still fail on the call. The
-create body is validated against what your organisation is *allowed* to use.
-Whether the provider behind it answers is a different question, and nothing in
-`build/` can tell you.
+| Symptom | Cause | Fix |
+|---|---|---|
+| The preview names the wrong organisation | An environment key overrides the profile | Check the package's `.env` files and shell keys, then preview again with the intended profile |
+| A second agent appears | The package name, target name or destination changed | Find both with `agents list`; restore the intended name and select the correct ID |
+| `agent ambiguous` | More than one agent matches the name | Pass `--agent-id <agent_id>` after checking the destination |
+| `vault missing` | A required secret is absent or exists as a variable | Create the exact case-sensitive name with the required Vault kind |
+| A hosted tool is missing | The organisation has no published tool with that name | Publish it in SLNG or change the authored reference |
+| `--require-resolved` is refused | The installed CLI lacks checked pushes | Upgrade `voiceai` using the install instructions above |
+| `AGENT_MODEL_UNAVAILABLE` | The organisation, region or language cannot use the selected model | Choose a compatible model using SLNG's model selector and update the package |
+| The greeting plays but input is absent | The client is muted or its microphone is blocked | Allow microphone access, unmute and check for caller text in the transcript |
+| A call ends with a component error | STT, LLM, TTS or a tool failed at runtime | Read the call details, fix that component's credentials or options, then test again |
+| No phone call appears in SLNG | Carrier routing failed before the agent started | Check the number's routing and inbound connection |
 
-The call record is where it shows up:
-
-```sh
-voiceai agents calls list <agent_id> --json
-```
-
-`status` is `in_progress` while the agent is up and waiting. Once a call ends,
-read `call_end_reason`. A line like
-
-```text
-terminal failure: component=llm reason=hard_fail
-```
-
-names the component to investigate: `llm`, `stt` or `tts`. Read its error and
-call details before changing a binding; a short duration alone does not identify
-the cause. If no new SLNG call appears, inspect the carrier's logs and incoming
-number routing first: the call may have failed before the agent started.
-
-A model SLNG does not have enabled for your organisation is rejected at push
-with `AGENT_MODEL_UNAVAILABLE`, naming the field. Unmute cannot check this: the
-list is per-organisation, and model strings are forwarded exactly as written.
-Three things cause it. The model is not enabled for agents, it is your own model
-and SLNG's router is off, or it is not served in the region and language this
-agent asked for. Choose a region that serves the model.
+A dry run may report an unusable MCP snapshot. A real deploy can refresh it
+once and recheck it. A local-module error belongs to a LiveKit or Pipecat
+build: SLNG does not execute the package's Python files.
 
 ## Where to go next
 
 <CardGroup cols={2}>
-  <Card title="unmute deploy" icon="cloud-upload" href="/reference/cli/deploy">
-    Every flag, and what each output line means.
+  <Card title="Going live" icon="cloud-upload" href="/deploy/going-live">
+    The package-to-deployment workflow across targets.
+  </Card>
+  <Card title="unmute deploy" icon="terminal" href="/reference/cli/deploy">
+    Every flag and deployment check.
   </Card>
   <Card title="The SLNG target" icon="boxes" href="/targets/slng">
-    What the compiler writes, and what SLNG refuses.
+    Model bindings, Vault references and target limits.
   </Card>
-  <Card title="Hosted tools" icon="wrench" href="/build/tools/hosted">
-    The `slng:` block: one line, no mirror needed.
-  </Card>
-  <Card title="unmute pull" icon="download" href="/reference/cli/pull">
-    Optional, and only for a livekit or pipecat build of the same package.
+  <Card title="Credentials" icon="key" href="/build/credentials">
+    Declare names and supply values separately.
   </Card>
 </CardGroup>

@@ -9,7 +9,7 @@ name it from the tool file.
 Reach for a Python handler when:
 
 - the work is logic, not a request: a calculation, or a lookup in data you already have
-- you are wrapping an SDK that is easier to call from Python than over HTTP
+- you are using a library already included in the generated project
 - the request needs a signature, a custom header scheme, or a retry rule
 
 If it is just an authenticated HTTP call, use
@@ -23,13 +23,21 @@ on the platform with [`slng:`](/build/tools/hosted) instead.
 
 On this page:
 
+- [Quickstart](#quickstart) - add one callable
 - [The block](#the-block) - the one key it takes
 - [The rules the function follows](#the-rules-the-function-follows) - five rules
 - [When the handler is slow](#when-the-handler-is-slow) - cover the wait
 - [Where it ends up](#where-it-ends-up) - inside the generated project
+- [Share a helper between tools](#share-a-helper-between-tools) - one source file, two callables
 - [Credentials, when a real handler needs one](#credentials-when-a-real-handler-needs-one) - names, never values
-- [Advanced](#advanced) - what the SLNG sandbox expects
+- [Advanced](#advanced) - modules, dependencies, data, and SLNG limits
 - [Troubleshooting](#troubleshooting) - the two worth reading
+
+## Quickstart
+
+These files extend an existing package that declares `customer_id`. Add
+`cancel_appointment` to the package tool list and the agent
+[tool list](/build/tools/overview#define-once-attach-by-name), then validate the package.
 
 ```yaml tools/cancel_appointment.yaml expandable wrap
 description: Cancel the appointment outright. Call it only when the customer says plainly that they want to cancel, never when they want a different time.
@@ -152,6 +160,95 @@ function hands it to `params.result_callback` instead, which is how Pipecat's
 own function-calling convention reports a result. Either way the same handler
 file runs unchanged: only the three lines that call it differ.
 
+## Share a helper between tools
+
+Keep two callables and their helper in **one authored file**. Both tool files
+point to it, so you maintain the helper once. This works on LiveKit and Pipecat.
+
+Create these three complete files in an existing package:
+
+```python tools/text_helpers.py
+def _words(text):
+    return text.split()
+
+
+def count_words(text):
+    return {"count": len(_words(text))}
+
+
+def first_word(text):
+    words = _words(text)
+    return {"word": words[0] if words else ""}
+```
+
+```yaml tools/count_words.yaml
+description: Count the words in text.
+input:
+  type: object
+  properties:
+    text:
+      type: string
+  required:
+    - text
+local:
+  handler: tools/text_helpers.py
+```
+
+```yaml tools/first_word.yaml
+description: Return the first word in text, or empty text when there are no words.
+input:
+  type: object
+  properties:
+    text:
+      type: string
+  required:
+    - text
+local:
+  handler: tools/text_helpers.py
+```
+
+Merge these names into both existing lists; keep the other agent fields:
+
+```yaml agent.yaml
+tools:
+  - count_words
+  - first_word
+
+agents:
+  assistant:
+    tools:
+      - count_words
+      - first_word
+```
+
+From the package directory, compile the declared targets:
+
+```sh Terminal
+unmute validate
+unmute compile
+```
+
+Each build contains `tools/count_words.py` and `tools/first_word.py`. Both
+contain the source above. The generated wrapper imports each tool's module and
+calls the function matching its tool name.
+
+<Note>
+  This shares authored code, not module state. Each emitted copy is a separate
+  Python module. Do not use its globals to share a cache or connection between tools.
+</Note>
+
+### Separate imported helpers are not bundled
+
+A layout where two handler files import `tools/shared.py` is not supported
+natively. The compiler reads the files named by `local.handler`; it does not
+follow their imports or copy the rest of the source directory.
+
+The original filename is not the emitted module name: `tools/text_helpers.py`
+above becomes one copy per tool. An import of `tools.text_helpers` would
+therefore fail. Put reusable functions in that same authored file, or move the
+operation behind a [webhook](/build/tools/webhook) or
+[MCP server](/build/tools/mcp).
+
 ## Credentials, when a real handler needs one
 
 ```python
@@ -162,6 +259,32 @@ Only the **name** belongs in the file. Put that name in `agent.yaml` under
 `secrets:`; keep the value in your environment or secret store.
 
 ## Advanced
+
+### Dependencies, files, and regeneration
+
+Handlers run from the generated project root, `/app` in the emitted images.
+Their module path is `tools.<tool-name>`, regardless of the authored handler's
+location. Imports use that generated layout, not your source package directory.
+
+The runtime requirement lives in generated `pyproject.toml`, and the compiler
+selects dependencies from the chosen providers. Python's standard library is
+available. Check that generated dependency list before importing another library.
+
+A `local.dependencies` declaration is refused on both code targets. LiveKit's
+[target pins](/targets/overview#targets-yaml) only override recognized packages;
+there is no supported package field for adding arbitrary third-party dependencies.
+A library installed on your laptop does not become part of the deployed image.
+
+Adjacent JSON files, templates, certificates, and other module trees are not
+copied with a handler. [Knowledge documents](/build/tools/knowledge) have their
+own declared inclusion path; that is not a general-purpose file packaging hook.
+For a small constant, keep it in the handler source. Otherwise use a remote service
+until the package supports the files and dependencies your operation needs.
+
+Edit the authored file and recompile to update its generated copies. Compilation
+replaces added modules and changes to the generated Dockerfile or dependency
+manifest. Unmute has no authored lifecycle-hook or custom build-file API.
+
 
 ### What the SLNG sandbox expects
 
@@ -213,6 +336,14 @@ same as on a webhook tool: nothing sends it to the model or checks the
 handler's return value against it.
 
 ## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `ModuleNotFoundError` for a helper | The imported file was not selected as a handler | Use the single-file helper pattern above |
+| An SDK imports locally but fails in the image | Local installations do not enter generated dependencies | Check `pyproject.toml`; use a remote tool when a required dependency is unsupported |
+| A handler cannot open an adjacent file | Arbitrary data files are not bundled | Keep small constants in source or read the data through a remote service |
+| An edit disappears on compile | The edit was under `build/` | Change the authored handler and regenerate |
+
 
 ### `unmute validate` warns that a credential is not declared
 

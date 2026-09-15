@@ -1,15 +1,18 @@
 ---
 title: "Cascade"
-description: "Four services in a row: a transcriber, a model, a synthesizer and a turn detector, each one yours to pick."
+description: "Trade some latency for control over models, tools, and more complex call workflows."
 ---
 
-`architecture: cascade` builds four services and runs them in order. The caller
-speaks, a transcriber writes down the words, a model reads them and writes a
-reply, a synthesizer speaks it. A fourth service watches for the caller to stop
-talking and decides when the turn is over.
+Choose Cascade when your agent needs control over each stage and a workflow
+with several steps. It usually adds latency, but lets you choose how the agent
+hears, reasons, speaks, and moves between tasks.
 
-It is the default. Leave `architecture:` out and this is what you get, which is
-what every package written before that key existed gets.
+Speech recognition produces text, a reasoning model writes a reply, and speech
+synthesis turns it into audio. Turn detection decides when to answer. The
+stages can overlap through streaming, which reduces the wait between them.
+
+Leave `architecture:` out and Unmute uses `cascade`. This partial example shows
+the bindings; merge it into an existing package and supply a real voice ID.
 
 ```yaml agent.yaml
 models:
@@ -37,29 +40,63 @@ agents:
 
 On this page:
 
-- [Why pick it](#why-pick-it) - what the other two cannot do
+- [Why pick it](#why-pick-it) - pros and cons
+- [Build a more complex workflow](#build-a-more-complex-workflow) - turn control into clear steps
+- [Every key this page shows](#every-key-this-page-shows)
 - [The four roles](#the-four-roles) - and where each is taught
 - [What it costs](#what-it-costs) - the pause between turns
 - [Troubleshooting](#troubleshooting)
+- [Where to go next](#where-to-go-next)
 
 ## Why pick it
 
-**It is the only shape that carries tasks, handoffs and saved call state.** A
-task changes the agent's prompt in the middle of a call. A cascade rebuilds the
-model's request every turn, so a new prompt is just the next request. A
-speech-to-speech session fixes what it knows when it starts.
+### Pros
 
-**You can mix vendors.** The transcriber, the model and the voice are three
-separate choices, and nothing makes you take all three from one company. A
-speech-to-speech model is one vendor for the whole job.
+- **Control the workflow.** On LiveKit and Pipecat, combine tasks, handoffs, saved values, and tool calls. Each step can have its own instructions and access to the values it needs.
+- **Choose each role.** Use a supported transcriber, reasoning model, and voice independently. Spend more on the part that needs better quality without replacing the others.
+- **Find the failing stage.** Compare the recognized text, model reply, tool result, and spoken output. A wrong transcription needs a different fix from a failed tool.
 
-**Every part is replaceable.** If one vendor's transcriber is wrong for your
-callers, swap that one entry. Nothing else in the package changes.
+### Cons
+
+- **More sources of delay.** Turn detection, transcription, reasoning, speech generation, and tools all contribute. Streaming reduces the wait, but does not remove those costs.
+- **More parts to operate.** Several integrations bring separate credentials, availability limits, and failure modes.
+- **Less audio context for reasoning.** A transcript carries the words, but can lose tone, hesitation, and other clues in the caller's voice.
+
+[LiveKit's comparison](https://livekit.com/blog/realtime-vs-cascade) explains these
+component tradeoffs. [Coval's comparison](https://www.coval.ai/blog/speech-to-speech-vs-cascaded-voice-ai-which-architecture-should-you-deploy/)
+shows why control and diagnosis matter when the agent must complete real work.
+
+## Build a more complex workflow
+
+Consider a caller who wants to change an existing request:
+
+1. Look up the request with a tool.
+2. Collect the change in a task and save the result.
+3. Confirm the details before running the update tool.
+4. Handle a refused update, or hand the conversation to another agent with the context it needs.
+
+In a cascade package on LiveKit or Pipecat, those can be separate
+[tasks](/build/orchestration/tasks) using [saved values](/build/variables).
+The prompts name what each step may read, and your tool enforces the conditions
+for changing the record. This gives you more control than putting every step
+into one large prompt.
+
+That control does not make a tool call automatically correct. Test the successful
+path, missing inputs, and failed actions. The value of cascade is having clear
+places to express and check that behavior.
+
+<Note>
+  Tasks, groups, and handoffs are supported on Unmute's LiveKit and Pipecat
+  cascade targets. SLNG also uses a cascade, but has its own
+  [target limits](/targets/slng#what-a-slng-package-may-not-ask-for).
+  Realtime and Live support tools today, but Unmute does not yet give them
+  these task and state controls.
+</Note>
 
 ## Every key this page shows
 
 A cascade writes no key of its own. `architecture: cascade` is the default, so
-the block above is four ordinary model entries and one agent binding them. Each
+the block above is three model entries and one agent binding them. Each
 role's own keys are on its own page, listed below.
 
 <ParamField path="listen" type="a models.listen entry name" required>
@@ -94,15 +131,19 @@ each target builds its own default.
 
 ## What it costs
 
-Four services means four hops, and every hop is time the caller spends waiting.
-The caller stops talking, the turn detector notices, the transcriber finishes,
-the model thinks, the synthesizer starts speaking. Each step waits for the one
-before it.
+The tradeoff is usually a longer wait for the first audio than a comparable
+speech-to-speech setup. It is not a fixed penalty: model choice, turn timing,
+network placement, and tool calls all affect it.
 
-A speech-to-speech model collapses that into one. If the pause between turns is
-the thing you are trying to fix, read [Latency](/optimization/latency) first: a
-lot of that wait is settings rather than architecture, and moving architecture
-costs you tasks.
+Transcription can run while the caller speaks, and speech synthesis can begin
+while the model is still generating text. Do not add every stage's duration
+as though all work happens one stage at a time. See
+[where the time goes](/optimization/latency#where-the-time-goes).
+
+Start by tuning the slow stage. Keep the workflow controls that your use case
+needs, then compare response time and completed actions with an alternative.
+The [architecture overview](/build/architecture/overview#pros-and-cons) puts the
+tradeoffs side by side.
 
 ## Troubleshooting
 
@@ -115,3 +156,14 @@ shorter window answers faster and cuts people off more.
 
 **A vendor name is refused.** Each role has its own list, and an unlisted name
 is refused with the list. The role pages above carry them.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Build the workflow" icon="git-branch" href="/build/orchestration/overview">
+    Separate tasks, share the needed context, and control handoffs.
+  </Card>
+  <Card title="Tune latency" icon="gauge" href="/optimization/latency">
+    Find where the caller waits before changing the architecture.
+  </Card>
+</Columns>

@@ -102,8 +102,15 @@ OPENAI_API_KEY=
 SLNG_API_KEY=
 ```
 
-Both platforms take a secrets file on the first deploy. After that, changing a
-value is one command and it belongs to the secret store, not to the repository.
+Provision required runtime values through the platform's secret store.
+Pipecat `secrets set` merges supplied names and values; `secrets unset` removes a
+name. Wait for `pipecat cloud secrets list <set>` to report `ready`, then refresh
+existing instances with `pipecat cloud deploy --build-id <current-build-id> --force`
+from the compiled directory. Read that ID from `pipecat cloud agent deployments
+<agent-name>`: reusing it avoids a rebuild. A forced rollout can interrupt active
+sessions. See [Pipecat secret updates](https://docs.pipecat.ai/pipecat-cloud/fundamentals/secrets).
+LiveKit uses `lk agent update-secrets` for a value change. Neither operation
+creates or revokes the provider key.
 
 Every variable name must be a valid shell identifier: letters, digits, and
 underscores, never starting with a digit. Platforms export secrets through a
@@ -297,8 +304,8 @@ Two things about `coval` that users get wrong, so say them before they ask:
   deployed, is filed as a Coval **conversation** when it ends, and appears under
   Observability → Conversations and in Trace Search. A real phone call is never
   in a run. Getting the key onto the platform is the deploy step that matters:
-  `pipecat cloud secrets set <set> --file .env`, or `lk agent update-secrets
-  --secrets-file .env`.
+  `pipecat cloud secrets set <set> --file .env`, followed by readiness and the
+  forced rollout described above, or `lk agent update-secrets --secrets-file .env`.
 - **Local and deployed runs are labelled apart.** `unmute dev` traces under
   `<entry-agent>-<agent-name>-local`; the same build deployed traces under
   `<entry-agent>-<agent-name>`. Decided at start-up, not at compile time, so one

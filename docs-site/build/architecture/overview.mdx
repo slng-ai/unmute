@@ -1,13 +1,15 @@
 ---
 title: "Architecture"
-description: "The three pipeline shapes a package can compile to, what each costs, and how to pick one."
+description: "Compare control, latency, and workflow support across Cascade, Realtime, and Live."
 ---
 
-`architecture:` is the first line of `agent.yaml`. It says which pipeline to
-build. Everything else in the file is read against it.
+Choose an architecture around the work your agent must complete. Cascade gives
+you separate control over listening, reasoning, and speech, with more room for
+complex workflows. Realtime and Live favor direct audio interaction and can
+reduce the pause before a reply.
 
-There are three shapes. One splits the work across four services. Two give the
-whole job to a single model that hears the caller and answers out loud.
+`architecture:` in `agent.yaml` selects the pipeline. Cascade is the default;
+the other two use speech-to-speech models with different controls in Unmute.
 
 ```yaml agent.yaml
 architecture: cascade     # the default; leave it out and you get this
@@ -15,27 +17,41 @@ architecture: cascade     # the default; leave it out and you get this
 
 On this page:
 
-- [The three shapes](#the-three-shapes) - one paragraph each
+- [The three shapes](#the-three-shapes) - how each works
+- [Pros and cons](#pros-and-cons) - what you gain and give up
 - [Every key this page adds](#every-key-this-page-adds) - there is one
 - [Which to pick](#which-to-pick) - the questions that decide it
-- [What each one costs](#what-each-one-costs) - latency, control, price
+- [What each one costs](#what-each-one-costs) - current Unmute capabilities
 - [Which sections each one takes](#which-sections-each-one-takes) - the full table
 - [What compiles where](#what-compiles-where) - per target
 - [Troubleshooting](#troubleshooting) - the refusals that come up most
+- [Further reading](#further-reading) - LiveKit and Coval comparisons
+- [Where to go next](#where-to-go-next)
 
 ## The three shapes
 
-**`cascade`** is four services in a row. A transcriber turns the caller's audio
-into words. A model reads the words and writes a reply. A synthesizer speaks it.
-A turn detector decides when the caller has finished. You pick each one, and you
-can mix vendors freely.
+**`cascade`** separates speech recognition, reasoning, and speech generation.
+Turn detection decides when to answer. You choose each role from the supported
+providers, and can change one without replacing the whole pipeline.
 
-**`realtime`** is one model on a vendor's Realtime API. It hears the audio
-itself and answers out loud. You still choose who decides the turn, and you can
-put your own synthesizer in front of it.
+**`realtime`** sends audio to one model on a Realtime API. It can answer with
+its own voice or send text to a separate synthesizer. You choose the turn mode.
 
-**`live`** is one model on a vendor's Live API. It hears, thinks and speaks, and
-it decides the turn itself. Its tools run on a second model you name.
+**`live`** uses a Live API model that listens, speaks, and controls its own
+turns. Tool work goes to a separate reasoning model named as its backend.
+
+## Pros and cons
+
+| Architecture | Pros | Cons |
+|---|---|---|
+| [Cascade](/build/architecture/cascade) | Independent model choices and clearer stage-by-stage diagnosis; Unmute's richest workflow controls on LiveKit and Pipecat | More components to tune and usually more latency; reasoning sees a transcript rather than the caller's tone |
+| [Realtime](/build/architecture/realtime) | Direct audio understanding, potentially quicker replies, a choice of turn mode and optional separate voice | Less freedom to change the reasoning model; Unmute currently limits it to one agent without tasks or saved state |
+| [Live](/build/architecture/live) | The model handles turns, with a separate backend for tool work | No authored turn controls or separate synthesizer; Unmute currently limits it to one agent without tasks or saved state |
+
+**The extra control is often worth the latency.** If a call must collect details,
+confirm them, run an action, and recover when it fails, choose the architecture
+that lets you express those steps clearly. A faster first reply is only one
+part of a successful call.
 
 ## Every key this page adds
 
@@ -51,52 +67,54 @@ the file, because it decides which `models:` sections are legal.
 
 ## Which to pick
 
-Three questions, in the order that settles it fastest.
+**Does the call need several steps, tasks, handoffs, or saved values?** Start
+with `cascade` on LiveKit or Pipecat. Those are current Unmute capabilities;
+speech-to-speech models are not inherently unable to run complex applications.
 
-**Do you need tasks, handoffs, or saved call state?** Then `cascade`. It is the
-only shape that carries them today, and the reason is in
-[What each one costs](#what-each-one-costs).
+**Do you need independent transcription, reasoning, and voice choices?** Use
+`cascade`. Choose supported providers for each role. Realtime also lets you
+keep a separate synthesizer, but its audio understanding and reasoning stay
+with the realtime model.
 
-**Do you need to mix vendors?** Then `cascade`. A speech-to-speech model is one
-vendor for the whole job.
+**Is direct audio interaction the main priority?** Consider `realtime` or
+`live` if their current limits fit the use case. Choose Realtime for control
+over turns and voice; choose Live for automatic turns and a backend for tool work.
 
-**Do you want the shortest possible pause before the agent answers?** Then
-`realtime` or `live`. Nothing is converted to text and back, so the wait is one
-model's, not four services'.
-
-Between the two speech-to-speech shapes: pick `realtime` if you want to decide
-who ends the turn, or to keep a voice you already use. Pick `live` if you want
-the model to handle turns itself and hand its harder thinking to a second model.
+Compare a complete interaction: correct inputs, successful actions, recovery,
+and response time. No architecture guarantees the fastest or cheapest result
+for every model, network, and tool workload.
 
 ## What each one costs
 
+These are **current Unmute capabilities**, not universal limits of the model APIs.
+
 | | `cascade` | `realtime` | `live` |
 |---|---|---|---|
-| Services built | four | one | one |
-| Vendors | mix freely | one | one |
-| Who decides the turn | you | you choose | the model |
-| Whose voice | any synthesizer | the model's, or yours | the model's |
-| Tasks and handoffs | yes | no | no |
-| Saved call state | yes | no | no |
-| Phone calls | yes | no | no |
+| Main models | separate transcription, reasoning, and speech | one audio model; optional synthesizer | one audio model; backend for tools |
+| Provider choice | independent per role | audio model; optional separate voice provider | live model and a backend at the same provider |
+| Who decides the turn | supported detector or listener | your selected turn mode | the model |
+| Tasks and handoffs | LiveKit and Pipecat | no | no |
+| Saved call state | yes, with target-specific limits | no | no |
+| Phone calls | supported routes | no | no |
 
-The last three rows are the trade. A speech-to-speech session fixes most of what
-it knows when the call starts, so the things that change mid-call are the things
-it cannot carry.
+Cascade gives you more places to tune quality, cost, and timing. Those choices
+also mean more integrations to manage. Speech-to-speech removes some stage
+boundaries, but tools, network calls, and turn timing still add delay.
 
 ## Which sections each one takes
 
 | Section | `cascade` | `realtime` | `live` |
 |---|---|---|---|
 | `models.listen` | required | refused | refused |
-| `models.think` | required | refused | the `backend:` entry |
+| `models.think` | required | no agent binding | the `backend:` entry |
 | `models.speak` | required | the half cascade | refused |
 | `models.turn` | optional | refused | refused |
 | `models.realtime` | refused | required | refused |
 | `models.live` | refused | refused | required |
 
-A section refused under one architecture is refused by name, with its line, and
-the message says which architecture does use it.
+An unused reasoning entry can remain in a Realtime package, but the agent
+cannot bind it with `think:`. Target restrictions still apply to every shape.
+A refused section is named in the validation error with its source line.
 
 ## What compiles where
 
@@ -125,13 +143,23 @@ answer is `architecture: cascade`.
 **"slng target ... has no slot for one model that does all three"** compile to
 `livekit` or `pipecat`, or write `architecture: cascade`.
 
+## Further reading
+
+[LiveKit's pipeline and realtime comparison](https://livekit.com/blog/realtime-vs-cascade)
+explains the balance between latency, direct audio understanding, and modular
+control. It also describes how streaming and hybrid designs narrow the gap.
+
+[Coval's speech-to-speech and cascade comparison](https://www.coval.ai/blog/speech-to-speech-vs-cascaded-voice-ai-which-architecture-should-you-deploy/)
+focuses on workflow control, diagnosing failures, and evaluating completed
+conversations. Use the tables above for what Unmute supports today.
+
 ## Where to go next
 
 <Columns cols={3}>
-  <Card title="Cascade" icon="layer-group" href="/build/architecture/cascade">
-    Four services in a row: what each does and where each is taught.
+  <Card title="Cascade" icon="layers" href="/build/architecture/cascade">
+    Separate control over each role, for calls with more steps and state.
   </Card>
-  <Card title="Realtime" icon="waveform" href="/build/architecture/realtime">
+  <Card title="Realtime" icon="audio-lines" href="/build/architecture/realtime">
     One model, your turn settings, and optionally your own voice.
   </Card>
   <Card title="Live" icon="bolt" href="/build/architecture/live">

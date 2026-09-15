@@ -157,7 +157,7 @@
           },
           {
             "group": "Architecture",
-            "icon": "sitemap",
+            "icon": "network",
             "root": "build/architecture/overview",
             "pages": [
               "build/architecture/cascade",
