@@ -51,11 +51,17 @@ with its own tool.
 
 | Command | What it does |
 |---|---|
-| [`manifest create`](/reference/cli/manifest) | edit and save a reusable manifest |
+| [`manifest create`](/reference/cli/manifest) | create a reusable manifest with guided setup |
+| [`manifest edit`](/reference/cli/manifest) | edit a saved manifest with guided setup |
 | [`manifest use`](/reference/cli/manifest) | choose the default for future agents |
 
-`init` uses the saved default automatically. Add `--from-manifest` to pick a
-different saved contract for one new agent. See [Manifest](/reference/manifest).
+`init` uses the saved default automatically. Add `--manifest <name>` for direct
+selection, or `--from-manifest` to open a picker for one new agent.
+For a coding assistant, `init <agent> --manifest <name> --draft` creates an
+unfinished package without prompts. The skill reads the copied rules, completes
+the use case, then validates and compiles it. Follow the
+[draft quickstart](/reference/cli/init#quickstart) for commands and a copyable
+assistant brief.
 
 ## Two commands off that path
 

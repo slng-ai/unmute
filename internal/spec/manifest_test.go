@@ -99,7 +99,7 @@ func TestLoadManifestLink(t *testing.T) {
 }
 
 func TestManifestRoundTripPreservesEmptyRoleAllowlist(t *testing.T) {
-	for _, body := range []string{"", "models:\n  listen: []\n"} {
+	for _, body := range []string{"", "models:\n  listen: []\n", "models:\n  listen:\n    - provider: slng\n", "models:\n  listen:\n    - provider: slng\n      allow: []\n"} {
 		manifest, err := ParseManifest([]byte("manifest: acme\nversion: 1\n" + body))
 		if err != nil {
 			t.Fatal(err)
@@ -112,6 +112,9 @@ func TestManifestRoundTripPreservesEmptyRoleAllowlist(t *testing.T) {
 			restored, err := ParseManifest(data)
 			if err != nil {
 				t.Fatalf("%s: %v", data, err)
+			}
+			if len(manifest.Models.Listen) > 0 && (manifest.Models.Listen[0].Allow == nil) != (restored.Models.Listen[0].Allow == nil) {
+				t.Fatalf("provider policy changed: %s", data)
 			}
 			if (manifest.Models.Listen == nil) != (restored.Models.Listen == nil) {
 				t.Fatalf("empty role lost its restriction: %s", data)
@@ -134,6 +137,9 @@ func TestManifestSchemaMatchesNullAndIdentityRules(t *testing.T) {
 		valid bool
 	}{
 		{`{"manifest":"acme","version":1}`, true},
+		{`{"manifest":"acme","version":1,"models":{"listen":[{"provider":"slng"}]}}`, true},
+		{`{"manifest":"acme","version":1,"models":{"listen":[{"provider":"slng","allow":[]}]}}`, true},
+		{`{"manifest":"acme","version":1,"models":{"listen":[{"provider":"slng","allow":null}]}}`, false},
 		{`{"manifest":"acme","version":1,"models":{"listen":[]}}`, true},
 		{`{"manifest":"acme","version":1,"languages":{"allow":[]}}`, true},
 		{`{"manifest":"acme","version":1,"languages":null}`, false},

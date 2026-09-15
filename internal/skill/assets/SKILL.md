@@ -7,9 +7,7 @@ metadata:
 
 # Build voice agents with Unmute
 
-Unmute compiles one declarative package into native LiveKit Agents or Pipecat
-projects. Author the package; do not hand-write framework Python or edit
-generated `build/` files.
+Unmute compiles one declarative package into native LiveKit Agents or Pipecat projects. Author the package; do not hand-write framework Python or edit generated `build/` files.
 
 ## Start with one reference
 
@@ -39,10 +37,7 @@ Choose the smallest native shape and tell the user what you chose.
 
 **Keep state small.** Keep only values needed across a task or handoff, by a later tool, or as prompt facts. Prefer one timestamp to separate date and time values; `references/variables.md` has the example.
 
-**Every agent-level list attaches something already declared, except `tasks:`,
-written where it runs.** Five kinds: `tools:`, `tasks:` and `task_groups:` come
-back, `handoffs:` and `escalations:` do not. No `kind:` field, and all five share
-one namespace. `references/orchestration.md` has the table.
+**Every agent-level list attaches something already declared, except `tasks:`, written where it runs.** Five kinds: `tools:`, `tasks:` and `task_groups:` come back, `handoffs:` and `escalations:` do not. No `kind:` field, and all five share one namespace. `references/orchestration.md` has the table.
 **Define each tool once.** Its contract lives in `tools/<name>.yaml`; `tools:` lists hold names only.
 
 **Task `assign:` and tool `output:` are different contracts.** Task finish fields come from destination variables; do not repeat their types.
@@ -56,8 +51,7 @@ Use block-style YAML sequences in assistant-authored packages. Do not use anchor
 
 Run these steps in order:
 
-1. **Inspect the existing package.** Read `agent.yaml`, its linked `manifest`, `targets.yaml`, named
-   connections, loaded tool YAML and local handlers, and every used prompt.
+1. **Inspect the existing package.** Read `agent.yaml`, its linked `manifest`, `targets.yaml`, named connections, loaded tool YAML and local handlers, and every used prompt.
 2. **Run `unmute validate` before editing.** Record errors and warnings.
 3. **Fix invalid definitions.** Make the current package legal first.
 4. **Simplify.** Keep the smallest shape that still meets the brief.
@@ -66,15 +60,21 @@ Run these steps in order:
 
 ## The build loop
 
-For a new package, start with `unmute init <name>`; it uses the saved default manifest. Use `--from-manifest` to choose another. Read `references/manifests.md` for company rules, and preserve the package contract and link when editing.
+For a new company-governed package, use the user's saved manifest name; ask if absent. Never invent a contract.
+Run `unmute init <agent> --manifest <name> --draft`, then read the copied `manifest` before choosing any bindings.
+Follow `references/manifests.md` and the package, model, tool and orchestration references to complete the use case. The draft is unfinished and not runnable.
+Choose exact approved model IDs when listed; provider-wide approval does not establish target or provider support. SLNG stays provider `slng` even when IDs name other model makers.
+Preserve the contract and its link. Explain conflicts instead of weakening company rules.
+Human-guided setup uses `unmute init <agent> --manifest <name>`; `--from-manifest` opens the picker.
+Refresh this workflow with `unmute skill install` after updating the CLI; review local edits before using `--force`.
+
 For every change:
 
 1. Write the package.
 2. Run `unmute validate`; read the exact error and fix the package, not the refusal.
 3. Run `unmute compile` when validation is clean.
 4. Run `unmute dev` and talk to the agent.
-5. For a slng target only, `unmute deploy` pushes it. Run `unmute deploy --dry-run`
-   first: a push replaces the live agent rather than merging with it.
+5. For a slng target only, `unmute deploy` pushes it. Run `unmute deploy --dry-run` first: a push replaces the live agent rather than merging with it.
 
 Repeat validation until clean. If commands cannot run, give the exact package
 path and commands and ask for their output. If audio cannot be heard, run the

@@ -54,7 +54,9 @@ func ValidateManifest(agent *Agent) (errors, warnings []string) {
 					break
 				}
 			}
-			check(path+".model", modelID, "models."+role+" (provider "+binding.Provider+")", &packagespec.ManifestAllow{Allow: allowed})
+			if allowed != nil {
+				check(path+".model", modelID, "models."+role+" (provider "+binding.Provider+")", &packagespec.ManifestAllow{Allow: allowed})
+			}
 		}
 		if m.Languages != nil && (model.Kind == KindListen || model.Kind == KindSpeak) {
 			language := binding.Language

@@ -21,7 +21,7 @@ var helpCapture = filepath.Join("testdata", "help.txt")
 
 // helpCommands are the command paths the docs document, in the order the
 // capture file lists them.
-var helpCommands = [][]string{{}, {"init"}, {"manifest"}, {"manifest", "create"}, {"manifest", "use"}, {"validate"}, {"compile"}, {"deploy"}, {"dev"}, {"pull"}, {"resources"}, {"skill"}, {"skill", "install"}, {"completion"}}
+var helpCommands = [][]string{{}, {"init"}, {"manifest"}, {"manifest", "create"}, {"manifest", "edit"}, {"manifest", "use"}, {"validate"}, {"compile"}, {"deploy"}, {"dev"}, {"pull"}, {"resources"}, {"skill"}, {"skill", "install"}, {"completion"}}
 
 func renderHelp(t *testing.T) string {
 	t.Helper()
@@ -79,6 +79,7 @@ func TestDocsSiteCLIPagesQuoteHelp(t *testing.T) {
 		"init":            "init",
 		"manifest":        "manifest",
 		"manifest create": "manifest",
+		"manifest edit":   "manifest",
 		"manifest use":    "manifest",
 		"validate":        "validate",
 		"compile":         "compile",

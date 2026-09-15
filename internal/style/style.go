@@ -156,3 +156,23 @@ func (u Writer) Badge(s string) string {
 func (u Writer) Header(title string) string {
 	return u.Badge("UNMUTE//") + " " + u.Dim(title)
 }
+
+// Panel is a rounded box; the focused panel carries the accent border, the other
+// the muted border (V44). NO_COLOR draws the border with no color.
+func Panel(w, h int, focus bool) lipgloss.Style {
+	s := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
+	if w > 2 {
+		s = s.Width(w - 2)
+	}
+	if h > 2 {
+		s = s.Height(h - 2)
+	}
+	if !NoColor() {
+		if focus {
+			s = s.BorderForeground(lipgloss.Color(Accent))
+		} else {
+			s = s.BorderForeground(Border)
+		}
+	}
+	return s
+}

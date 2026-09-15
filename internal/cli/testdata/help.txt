@@ -31,8 +31,10 @@ Usage:
   unmute init [name] [flags]
 
 Flags:
-      --from-manifest   Choose a saved organization manifest.
-  -h, --help            help for init
+      --draft             Write an unfinished package without prompts (requires name and --manifest).
+      --from-manifest     Choose a saved organization manifest.
+  -h, --help              help for init
+      --manifest string   Use a saved organization manifest by name.
 
 $ unmute manifest --help
 Save organization contracts on this computer.
@@ -41,7 +43,8 @@ Usage:
   unmute manifest [command]
 
 Available Commands:
-  create      Create a saved manifest in your editor.
+  create      Create a saved manifest with guided setup.
+  edit        Edit a saved manifest with guided setup.
   use         Choose the default manifest for new agents.
 
 Flags:
@@ -50,13 +53,24 @@ Flags:
 Use "unmute manifest [command] --help" for more information about a command.
 
 $ unmute manifest create --help
-Create a saved manifest in your editor.
+Create a saved manifest with guided setup.
 
 Usage:
   unmute manifest create [name] [flags]
 
 Flags:
-  -h, --help   help for create
+      --editor   Edit YAML in VISUAL or EDITOR instead.
+  -h, --help     help for create
+
+$ unmute manifest edit --help
+Edit a saved manifest with guided setup.
+
+Usage:
+  unmute manifest edit <name> [flags]
+
+Flags:
+      --editor   Edit YAML in VISUAL or EDITOR instead.
+  -h, --help     help for edit
 
 $ unmute manifest use --help
 Choose the default manifest for new agents.
