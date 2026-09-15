@@ -110,16 +110,16 @@ homebrew_casks:
     homepage: https://github.com/slng-ai/unmute
     description: Compile a declarative voice-agent package to Pipecat or LiveKit
     # Casks have no license field (FR-017); the archives carry LICENSE instead.
-    hooks:
-      post:
-        # An unsigned binary downloaded by brew is quarantined, and macOS refuses
-        # to run it with a dialog that offers no way out. Stripping the attribute
-        # at install time is what makes `unmute --version` work right after
-        # `brew install`.
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/unmute"]
-          end
+    # Keep the unsigned binary runnable on macOS. hooks.post.install emits the
+    # deprecated postflight stanza; custom_block lets Homebrew use structured steps.
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr",
+              args: ["-dr", "com.apple.quarantine", "unmute"],
+              chdir: "."
+        end
+      end
 
 # The Windows channel that works the moment this run finishes: nobody reviews a
 # Scoop manifest. Direct push rather than a pull request, because only release

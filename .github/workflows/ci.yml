@@ -100,6 +100,13 @@ jobs:
           expect '*.zip' "$(count '*.zip')" 2
           expect '*_checksums.txt' "$(count '*_checksums.txt')" 1
           expect '*.sbom.json' "$(count '*.sbom.json')" 6
+          # GoReleaser accepts legacy hooks even when Homebrew deprecates them.
+          cask=dist/homebrew/Casks/unmute.rb
+          if ! grep -Eq '^[[:space:]]*postflight_steps do$' "$cask" ||
+             grep -Eq '^[[:space:]]*postflight do$' "$cask"; then
+            echo "Homebrew cask must use postflight_steps instead of postflight"
+            exit 1
+          fi
           # A dropped or renamed main.commit / main.date stamp would quietly fall
           # back to the bare version, so assert the whole shape, not just the tag.
           bin=$(find dist -type f -name unmute -path '*linux_amd64*' | head -1)
