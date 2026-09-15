@@ -1,175 +1,155 @@
 # takeaway-orders
 
-One agent on `architecture: live`: a single OpenAI model hears the caller, decides
-when they have finished and speaks back in its own voice, while a backend model
-searches the menu, prices the order and answers questions from the shop's own
-documents.
-
-It is the package for one question: **when is speech to speech worth it?** A busy
-takeaway is the answer. The caller talks over the agent, changes their mind
-halfway through a sentence and reads a list of dishes out at speed, and none of
-that waits on a transcriber, a turn detector and a synthesizer taking their turns.
-
-No phone route and no carrier account. Browser audio on both code targets. It
-needs one value, `OPENAI_API_KEY`, which covers the live model, the backend model
-and the embeddings the knowledge index is built from.
+Take a takeaway order with an OpenAI live voice model and tools that look up dishes and calculate the total.
+The live model handles the conversation. Its OpenAI backend runs local tools and searches the shop documents.
 
 On this page:
 
-- [Quickstart](#quickstart) - validate, run, talk to it
-- [What it shows](#what-it-shows) - the four things worth reading
-- [The live model and its backend](#the-live-model-and-its-backend) - who does what
-- [Knowledge](#knowledge) - documents, not prompt text
-- [Files](#files) - what each file holds
-- [What a live package cannot carry](#what-a-live-package-cannot-carry) - and why
-- [Troubleshooting](#troubleshooting) - when something goes wrong
-- [Where to go next](#where-to-go-next) - packages and pages
+- [Quickstart](#quickstart) - start the browser call
+- [1. Try the workflow](#1-try-the-workflow) - check tools and answers
+- [2. Read the configuration](#2-read-the-configuration) - models and defaults
+- [3. Change the knowledge](#3-change-the-knowledge) - edit the source documents
+- [Files](#files) - find the package parts
+- [Advanced](#advanced) - customize or switch architecture
+- [Troubleshooting](#troubleshooting) - symptoms and fixes
+- [Where to go next](#where-to-go-next) - guides and examples
 
 ## Quickstart
 
+This is a complete package. From the repository root, set `OPENAI_API_KEY` in your shell or `examples/takeaway-orders/.env`.
+Keep any existing secrets when editing `.env`.
+
 ```sh
+# Terminal, from the repository root
 unmute validate examples/takeaway-orders
 unmute compile examples/takeaway-orders
-cp examples/takeaway-orders/build/pipecat/.env.example .env   # then fill it in
 unmute dev examples/takeaway-orders --target pipecat
 ```
 
-Swap `--target livekit` for the other one. Both are browser audio over WebRTC,
-so `unmute dev` opens a page you talk to and no carrier is involved.
+Pipecat runs locally with `uv`. Open the dev page, allow microphone access, and connect.
+The package supports **browser audio** on Pipecat and LiveKit. It declares no phone connection.
 
-Try this, in this order. It is the shortest route through everything the package
-does:
-
-1. Ask for the crispy duck. It is off tonight, and the agent finds that out from
-   the tool rather than from its prompt.
-2. Order salt and pepper chicken and egg fried rice for collection.
-3. While it is reading the order back, talk over it and ask whether there are
-   nuts in the kung pao. That question goes to the knowledge documents.
-4. Ask what time it closes on a Monday.
-
-The two local tools are one Python file, `tools/takeaway.py`. Run its own check
-without compiling anything:
+To test LiveKit, stop the first run, start Docker, and run:
 
 ```sh
+# Terminal, from the repository root
+unmute dev examples/takeaway-orders --target livekit
+```
+
+The same OpenAI key serves the voice model, backend, and knowledge embeddings.
+Your account must have access to the configured models.
+
+## 1. Try the workflow
+
+1. Ask for crispy duck. The menu tool should report that it is unavailable.
+2. Order salt and pepper chicken and egg fried rice for collection.
+3. Ask about nuts in kung pao chicken. The answer should come from the kitchen documents.
+4. Confirm the order and check the tool result for its total and order number.
+5. Interrupt the reply with a question about Monday opening hours.
+
+Watch the dev page's tool rows and compare their results with the spoken answer.
+These handlers use a demo store; they do not send orders to a restaurant.
+Run their local checks separately:
+
+```sh
+# Terminal, from the repository root
 python3 examples/takeaway-orders/tools/takeaway.py
 ```
 
-## What it shows
+## 2. Read the configuration
 
-**A live model doing three jobs.** `architecture: live` plus a `models.live`
-entry replaces the transcriber, the model and the synthesizer with one service.
-The emitted project builds no speech recognition and no speech synthesis at all.
+The following is a **reference fragment** from `agent.yaml`, not a replacement file.
+Keep the existing agent instructions and tool attachments.
 
-**A backend that does the careful work.** `backend:` names a `models.think` entry
-at OpenAI. The live model hands it anything needing a tool or real thought and
-keeps talking meanwhile.
+```yaml
+# examples/takeaway-orders/agent.yaml
+architecture: live
+models:
+  live:
+    - name: counter_voice
+      provider: openai
+      model: gpt-live-1
+      voice: marin
+      backend: kitchen
+  think:
+    kitchen:
+      provider: openai
+      model: gpt-5.6-terra
+```
 
-**Knowledge on speech to speech.** A `knowledge:` section and a tool file with
-`knowledge: base:` give the agent three documents to search. Allergens and
-opening hours are facts that change and that a caller will hold you to, so they
-are documents rather than sentences in a prompt.
+The `counter` agent binds `live: counter_voice`.
+The live model controls speech and interruptions; it has no separate transcriber or synthesizer.
+The backend is required because this agent has tools, including knowledge lookup.
+Only the backend model name reaches the live service; its `params:` would not apply.
 
-**A greeting the model paraphrases.** The greeting under `conversation:` reaches
-the live session as its opening instruction, not as a line to read. The model
-says something with the sense of it and different words each call. That is
-working as intended, not a bug in your run.
+`voice:` is explicit here. If omitted, the provider chooses its default.
+The greeting is an opening instruction, so the live model can paraphrase it.
 
-## The live model and its backend
+## 3. Change the knowledge
 
-The live model is quick and loose. It is very good at knowing when a caller has
-stopped, at being talked over, and at sounding like a person answering a phone in
-a busy shop. It is not good at adding a bill up or remembering which dish costs
-what.
+Edit the documents under `knowledge/kitchen/`.
+The package declares that folder as a knowledge base, and `tools/look_up_kitchen_info.yaml` exposes its search tool.
+Default retrieval settings are used; see [Knowledge bases](../../docs-site/build/tools/knowledge.mdx) for tuning.
 
-So the package splits the work:
+Recompile and restart the dev run after changing documents. The worker builds its index at startup from the compiled content.
 
-| Who | Does |
-|---|---|
-| `counter_voice`, the live model | hears the caller, decides the turn, speaks |
-| `kitchen`, the backend think model | runs the three tools, and the reasoning around them |
-
-The handover happens inside the live session. The caller hears the live model go
-on talking while a lookup runs. This is the reason the backend has to be an
-OpenAI think entry with no `endpoint_env`, and the reason an agent that holds
-tools and names no `backend:` is refused at validate on both targets.
-
-One thing to know before you copy this: a `params:` block on the think entry
-reaches the emitted live service nowhere. Only the model name crosses over. It
-is written up in `compile-report.json` either way, so read that rather than
-assuming a setting arrived.
-
-## Knowledge
-
-`knowledge:` in `agent.yaml` declares one base, `kitchen`, pointing at
-`knowledge/kitchen/`. Every `.md`, `.txt` and `.pdf` in that folder is read,
-chunked and indexed when the worker starts.
-
-`tools/look_up_kitchen_info.yaml` is the search tool. A knowledge tool owns both
-sides of its contract, so it declares no `input:` and no `output:`: it takes a
-query and hands passages back.
-
-The documents are deliberately written the way a real shop would write them, with
-the hedges kept in. The allergen document says the kitchen is not allergen free
-and says what to do when the answer is not there, because that is the honest
-answer and the agent will read it out.
-
-Add a document to the folder and recompile. Nothing else changes.
+```sh
+# Terminal, from the repository root
+unmute compile examples/takeaway-orders
+unmute dev examples/takeaway-orders --target pipecat
+```
 
 ## Files
 
-| File | Holds |
+| File | Purpose |
 |---|---|
-| `agent.yaml` | the architecture, the two models, the knowledge base, the greeting and the idle timer |
-| `targets.yaml` | both code targets, no connection on either, so browser only |
-| `instructions.md` | the counter's prompt: how to take an order and when to look something up |
-| `tools/look_up_dish.yaml` | menu lookup, one spoken name in, real name and price out |
-| `tools/place_order.yaml` | places the order and returns the number, the total and the wait |
-| `tools/look_up_kitchen_info.yaml` | the knowledge search over the `kitchen` base |
-| `tools/takeaway.py` | both local handlers and the in process demo store |
-| `knowledge/kitchen/*.md` | opening hours and delivery, allergens, set meals and offers |
+| `agent.yaml` | Architecture, models, tool attachments, knowledge, and conversation settings. |
+| `targets.yaml` | Pipecat and LiveKit targets, both with browser audio. |
+| `instructions.md` | Conversation instructions and when to call tools. |
+| `tools/*.yaml` | Local tool contracts, knowledge lookup. |
+| `tools/takeaway.py` | Local handlers, demo records, and runnable checks. |
+| `knowledge/kitchen/*.md` | Menu policies, allergens, and opening hours. |
 
-## What a live package cannot carry
+## Advanced
 
-A live session fixes its instructions, its model and its voice when it starts.
-That is the vendor's rule, not this compiler's, and it is why this package is one
-agent and nothing else. Tasks, task groups, handoffs, a second agent, variables,
-prefetch, tracing, an mcp tool, escalations, a telephony connection,
-`listen:`, `speak:`, `turn:` and `conversation.interruption` are each refused at
-validate with a sentence saying what to write instead.
+<details>
+<summary>Change the live model or backend</summary>
 
-If you need any of them, the shape is `architecture: cascade`.
-[`customer-intake`](../customer-intake/) is the small cascaded package, and
-[`salon-concierge`](../salon-concierge/) is the full one.
+Edit `models.live` and its referenced `models.think` entry in `agent.yaml`.
+The backend must use OpenAI and cannot set `endpoint_env`.
+Keep `backend: kitchen` while tools are attached. Validate and restart after each change.
+See [Live model fields](../../docs-site/models/live.mdx) for supported settings.
+
+</details>
+
+<details>
+<summary>Switch architecture or add a larger workflow</summary>
+
+Both S2S architectures currently support one agent and browser audio.
+They do not support tasks, task groups, handoffs, variables, pre-fetch, tracing, MCP tools, escalations, or phone connections.
+Live also refuses separate listen, speak, and turn sections and `conversation.interruption`.
+
+For those features, follow the [architecture switching guide](../../docs-site/build/architecture/overview.mdx) and use cascade.
+Omitting `architecture` defaults to cascade, but you must also replace the model palette and agent bindings.
+
+</details>
 
 ## Troubleshooting
 
-**The agent says something other than the greeting.** Expected. The live model
-paraphrases the greeting rather than reading it.
-
-**It answers an allergen question from nowhere.** Check that
-`knowledge/kitchen/` still holds the three documents and that the worker logged
-the index build at startup. An empty folder is refused at validate, so a package
-that compiles has documents.
-
-**A tool call never happens.** An agent with tools needs `backend:`. Without it
-validate refuses the package, so if you have edited `models.live` and it will not
-compile, that is the line to look at.
-
-**`OPENAI_API_KEY` is set and the call still fails on the first word.** The live
-model and the backend are separate model ids on the same key. A key without
-access to the live model fails at session start, before any tool runs.
-
-**The order total looks wrong.** `tools/takeaway.py` is a demo store with about
-ten dishes. Run it on its own to see what it holds.
-
-**Nothing is said at all after the page connects.** The idle nudge is at twenty
-seconds and the call ends at sixty. Both are in `conversation.inactivity`.
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Startup reports a missing key | The worker cannot read `OPENAI_API_KEY`. | Set it in the shell or package `.env`, preserving existing secrets, then restart. |
+| The first turn fails with a provider error | The model or voice is unavailable to the key. | Read the dev logs and check access to each configured model. |
+| The model speaks but a tool does not run | The tool is unattached, its arguments are wrong, or its handler refused the request. | Check tool rows and logs; compare attachments and arguments with `tools/*.yaml`. |
+| A knowledge answer is missing | The documents do not cover the question, or the compiled content is stale. | Update the source document, compile, and restart. |
+| Validation asks for a backend | The agent has tools but its live entry has no backend. | Restore `backend: kitchen` and its OpenAI think entry. |
+| The greeting uses different words | The live model paraphrases its opening instruction. | Write the intended meaning; exact wording is not guaranteed. |
+| The order total seems wrong | The demo menu or quantities differ from the request. | Inspect `place_order` arguments and run the Python demo check. |
 
 ## Where to go next
 
-- [`customer-intake`](../customer-intake/) - the same browser only shape on a
-  cascaded pipeline, with typed state and a confirming step.
-- [`salon-concierge`](../salon-concierge/) - two agents, five tasks, knowledge,
-  tracing and two phone routes.
-- [Live model](../../docs-site/models/live.mdx) - every key a live entry takes and
-  every shape a live package is refused.
+- [Live architecture](../../docs-site/build/architecture/live.mdx) - build a small agent from scratch.
+- [Switch architecture](../../docs-site/build/architecture/overview.mdx) - compare defaults, bindings, and limits.
+- [Knowledge bases](../../docs-site/build/tools/knowledge.mdx) - configure document search.
+- [pharmacy-refills](../pharmacy-refills/) - try the other S2S architecture.
+- [salon-concierge](../salon-concierge/) - a cascade workflow with tasks and phone routes.

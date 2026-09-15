@@ -1,260 +1,156 @@
 # pharmacy-refills
 
-A repeat prescription line, built on `architecture: realtime`. One model hears
-the caller and answers in its own voice. There is no transcriber and no
-synthesizer in the path.
-
-It is the small package for one question: **who decides the caller has
-finished?** On this line that question is the whole product. Callers read a
-seven character prescription reference off a box, and they stop in the middle of
-it to check the label. A pipeline that ends the turn on silence talks over them
-every time.
-
-No phone route and no carrier account. Browser audio on both code targets. It
-needs one credential, `OPENAI_API_KEY`, which serves the realtime model and the
-knowledge base together.
+Try a prescription refill conversation with an OpenAI realtime model that hears and speaks directly.
+The realtime model runs the tools itself. Its explicit `turn_detection: semantic` setting asks the provider to judge when the caller has finished.
 
 On this page:
 
-- [Quickstart](#quickstart) - validate, compile, run
-- [Why the turn setting is the package](#why-the-turn-setting-is-the-package) - the one decision
-- [What it knows](#what-it-knows) - the documents it answers from
-- [Files](#files) - what each file holds
-- [What it cannot have](#what-it-cannot-have) - and what to write instead
-- [Advanced](#advanced) - the other two turn settings, the half cascade
-- [Troubleshooting](#troubleshooting) - when something goes wrong
-- [Where to go next](#where-to-go-next) - packages and pages
+- [Quickstart](#quickstart) - start the browser call
+- [1. Try the workflow](#1-try-the-workflow) - check tools and answers
+- [2. Read the configuration](#2-read-the-configuration) - models and defaults
+- [3. Change the knowledge](#3-change-the-knowledge) - edit the source documents
+- [Files](#files) - find the package parts
+- [Advanced](#advanced) - customize or switch architecture
+- [Troubleshooting](#troubleshooting) - symptoms and fixes
+- [Where to go next](#where-to-go-next) - guides and examples
 
 ## Quickstart
 
+This is a complete package. From the repository root, set `OPENAI_API_KEY` in your shell or `examples/pharmacy-refills/.env`.
+Keep any existing secrets when editing `.env`.
+
 ```sh
+# Terminal, from the repository root
 unmute validate examples/pharmacy-refills
 unmute compile examples/pharmacy-refills
-cp examples/pharmacy-refills/build/pipecat/.env.example .env   # then fill it in
 unmute dev examples/pharmacy-refills --target pipecat
 ```
 
-`unmute dev` is browser audio. That is the only transport this package declares:
-`targets.yaml` names no `connection:`, so there is no phone leg, no tunnel and
-nothing to set up with a carrier.
+Pipecat runs locally with `uv`. Open the dev page, allow microphone access, and connect.
+The package supports **browser audio** on Pipecat and LiveKit. It declares no phone connection.
 
-Swap the target to hear the same package on the other framework.
+To test LiveKit, stop the first run, start Docker, and run:
 
 ```sh
+# Terminal, from the repository root
 unmute dev examples/pharmacy-refills --target livekit
 ```
 
-The two local tools live in one Python file, `tools/pharmacy.py`. Run its own
-check without compiling anything:
+The same OpenAI key serves the voice model and knowledge embeddings.
+Your account must have access to the configured models.
+
+## 1. Try the workflow
+
+1. Ask for a refill on reference R X four eight two one B, with a pause in the middle.
+2. Check that the agent collects the full reference before calling `look_up_prescription`.
+3. Follow the verification questions and confirm the refill request.
+4. Check the `request_refill` result and the agent's explanation of that result.
+5. Ask about collection or delivery. The answer should come from the policy documents.
+
+Watch the dev page's tool rows and compare their results with the spoken answer.
+These handlers use a demo store; they do not submit prescriptions to a pharmacy.
+Run their local checks separately:
 
 ```sh
+# Terminal, from the repository root
 python3 examples/pharmacy-refills/tools/pharmacy.py
 ```
 
-Ask for a refill on reference R X four eight two one B, read slowly, with a
-pause in the middle. That is the call this package exists for.
+## 2. Read the configuration
 
-## Why the turn setting is the package
+The following is a **reference fragment** from `agent.yaml`, not a replacement file.
+Keep the existing agent instructions and tool attachments.
 
-`turn_detection:` is written out in `agent.yaml`, and it is set to `semantic`.
-There were three answers and the reference number picked one.
+```yaml
+# examples/pharmacy-refills/agent.yaml
+architecture: realtime
+models:
+  realtime:
+    - name: counter
+      provider: openai
+      model: gpt-realtime
+      voice: marin
+      turn_detection: semantic
+```
 
-| Value | What decides | Why not here |
+The `refills` agent binds `realtime: counter`. There is no separate backend model.
+A provider voice is required unless the agent binds a separate synthesizer.
+
+| Turn setting | Who ends the turn | What to try |
 |---|---|---|
-| `server_vad` | a silence window at the vendor | A caller pausing to turn the box over has been silent long enough, so the model answers half a reference. |
-| `semantic` | the model, on whether the caller finished a thought | **This one.** Half a reference is not a finished thought. |
-| `local` | this project's own turn detector, the one a cascaded package uses | The local detector hears audio, not words, so it makes the same mistake on a paused number, with another service in the path. |
+| `semantic` | Provider judges whether the thought is complete | Read a reference with pauses, as this package expects. |
+| `server_vad` | Provider detects a silence window | Compare short replies with a reference read in groups. |
+| `local` | Framework controls turn completion | Compare framework behavior on each target. |
 
-Write `local` when you want `pace:` and `endpointing_delay` to apply, because
-those settings belong to this project's detector and reach nothing while the
-vendor decides. On LiveKit `local` lowers to emitting no turn argument at all,
-which is what lets the framework take over.
+Omitting `turn_detection` leaves the integration default: Pipecat uses provider server VAD, while LiveKit currently defaults to semantic detection.
+Set it explicitly to keep the intended behavior across targets. No setting guarantees that every pause is handled correctly.
 
-Leaving the key out is not the same as writing one. An omitted value sends
-nothing and the vendor's own default applies, which is semantic detection on
-today's release and may not be on the next one. Writing it is how a package pins
-the behaviour it was tested with.
+## 3. Change the knowledge
 
-## What it knows
+Edit the documents under `knowledge/policies/`.
+The package declares that folder as a knowledge base, and `tools/look_up_pharmacy_policy.yaml` exposes its search tool.
+Default retrieval settings are used; see [Knowledge bases](../../docs-site/build/tools/knowledge.mdx) for tuning.
 
-The agent answers questions about the pharmacy from documents, not from its
-prompt. Three short markdown files under `knowledge/policies/`: repeat
-prescriptions, collection and delivery, and controlled medicines.
+Recompile and restart the dev run after changing documents. The worker builds its index at startup from the compiled content.
 
-Two authored pieces make that work. The package declares the base:
-
-```yaml
-knowledge:
-  policies:
-    documents: knowledge/policies
+```sh
+# Terminal, from the repository root
+unmute compile examples/pharmacy-refills
+unmute dev examples/pharmacy-refills --target pipecat
 ```
-
-and a tool reads it:
-
-```yaml
-knowledge:
-  base: policies
-```
-
-That tool file carries no `input:` and no `output:`. A knowledge tool owns both
-sides of its own contract: it takes the caller's question and returns passages
-with their sources, so there is nothing for an author to declare.
-
-The documents are read, split and embedded once when the process starts, and
-held in memory. Content is fixed until the next compile, so editing a file here
-changes nothing until you run `unmute compile` again.
-
-Everything the retrieval settings could hold is left at the default: `hybrid`
-search over passages of 90 tokens, three returned per lookup, no score cutoff.
-This corpus is three short pages, and none of those numbers changes an answer on
-it. [Knowledge bases](../../docs-site/build/tools/knowledge.mdx) says what each
-one does and when to move it.
 
 ## Files
 
-| File | What is in it |
+| File | Purpose |
 |---|---|
-| `agent.yaml` | the architecture key, the realtime model, `turn_detection:`, the knowledge base, the greeting and the nudge |
-| `targets.yaml` | both code targets, no `connection:`, which is what makes it browser only |
-| `instructions.md` | the agent's own prompt, including how to wait for a reference and how to read one back |
-| `tools/look_up_prescription.yaml` | one argument, six fields back, so a miss has the same shape as a hit |
-| `tools/request_refill.yaml` | the write, with four named outcomes the model reports rather than invents |
-| `tools/pharmacy.py` | both handlers, a four record demo store, and a `_demo()` self-check |
-| `tools/look_up_pharmacy_policy.yaml` | the knowledge lookup: a `base:` and a description, nothing else |
-| `tools/end_call.yaml` | the built-in that hangs up |
-| `knowledge/policies/*.md` | the three documents the agent answers policy questions from |
-
-## What it cannot have
-
-A realtime package is one agent and one model, and this release emits nothing
-else for it. Each of these is refused at `unmute validate`, with its own sentence
-saying what to write instead:
-
-- tasks, task groups, handoffs, and any control that hands the call on
-- a second agent
-- `variables:` and `prefetch:`, because this shape carries no call state yet
-- `tracing:`, because there is no traced worker for it yet
-- an `mcp:` tool, because there is nowhere to start and close the connection
-- an escalation and a `connection:`, because both need the carrier leg this
-  shape does not carry yet
-
-For any of those, write `architecture: cascade`, which is what every other
-example here runs on. [`salon-concierge`](../salon-concierge/) has all of them
-working together.
-
-The cascade sections are refused too, and for a different reason: the model
-replaces them. There is no `models.listen`, no `models.turn` and no `think:`,
-because this one model does all three jobs.
+| `agent.yaml` | Architecture, models, tool attachments, knowledge, and conversation settings. |
+| `targets.yaml` | Pipecat and LiveKit targets, both with browser audio. |
+| `instructions.md` | Conversation instructions and when to call tools. |
+| `tools/*.yaml` | Local tool contracts, knowledge lookup, and end-call tool. |
+| `tools/pharmacy.py` | Local handlers, demo records, and runnable checks. |
+| `knowledge/policies/*.md` | Refill, collection, delivery, and controlled-medicine policies. |
 
 ## Advanced
 
 <details>
-<summary>Hear the other two turn settings</summary>
+<summary>Compare turn detection or use a separate voice</summary>
 
-Change one line in `agent.yaml` and run the same call. Read a reference slowly
-and stop in the middle of it on each value.
+Change `turn_detection` on the existing realtime entry, validate, and repeat the same reference-reading test.
+With `local`, the framework controls completion, but `models.turn` and package-level `turn` or `listen` bindings remain unsupported.
+See [Turn detection](../../docs-site/models/turn-detection.mdx) for target behavior.
 
-```yaml
-turn_detection: server_vad   # then semantic, then local
-```
-
-`local` also wants a decision about what takes over. On LiveKit the framework's
-own detector does; on Pipecat the service goes into manual mode and this
-project's turn settings decide. Once you are on `local`, a `turn:` binding and
-`pace:` become legal and start to matter.
+For a separate synthesizer, remove `voice` from the realtime entry and add an agent `speak` binding.
+Follow the [complete customization steps](../../docs-site/build/architecture/realtime.mdx#advanced); setting both voices is refused.
 
 </details>
 
 <details>
-<summary>Let a synthesizer speak instead of the model</summary>
+<summary>Switch architecture or add a larger workflow</summary>
 
-A realtime model can be asked for text and let a voice of your choosing speak
-it. That is the half cascade: the model still listens and thinks, and a
-`speak:` binding on the agent renders the words.
+Both S2S architectures currently support one agent and browser audio.
+They do not support tasks, task groups, handoffs, variables, pre-fetch, tracing, MCP tools, escalations, or phone connections.
+Realtime refuses separate listen, think, and turn model sections.
 
-Remove `voice:` from the realtime entry and bind a `models.speak` entry on the
-agent instead. Asking for both is refused, because the frameworks read one and
-ignore the other, so which voice the caller hears would be decided by something
-the package never says.
+For those features, follow the [architecture switching guide](../../docs-site/build/architecture/overview.mdx) and use cascade.
+Omitting `architecture` defaults to cascade, but you must also replace the model palette and agent bindings.
 
 </details>
 
 ## Troubleshooting
 
-### It stops at startup and says an environment variable is missing
-
-`OPENAI_API_KEY` has to hold a value before the first turn. It serves the
-realtime model and the embedding calls that build the knowledge index, so a
-missing one is a session that never starts.
-
-**Fix:** fill in the generated `.env.example`.
-
-```sh
-unmute compile examples/pharmacy-refills
-cp examples/pharmacy-refills/build/pipecat/.env.example .env
-```
-
-### The agent answers before the caller has finished the reference
-
-That is the turn decision, and it is the one thing this package is about. Check
-which value `agent.yaml` carries.
-
-**Fix:** put it back to `semantic`, which asks the model whether the caller
-finished a thought rather than only went quiet.
-
-```yaml
-turn_detection: semantic
-```
-
-If it is already `semantic` and the model still cuts in, the caller's pause is
-long enough that the model believes the sentence ended. Say in the prompt that a
-reference is read in groups and that a pause in the middle is normal, which is
-what the "Let the caller finish" section of `instructions.md` does.
-
-### The agent waits too long after the caller has clearly stopped
-
-The other side of the same setting. `semantic` costs a beat over a silence
-window, because a judgement is made about what was said.
-
-**Fix:** if your callers say short things and never spell anything out,
-`server_vad` is cheaper and faster and is the right answer for that line.
-
-### A policy answer is vague, or it says it has nothing written down
-
-The lookup ran and the documents did not cover the question, or the question did
-not match the words the documents use.
-
-**Fix:** the documents are the content. Edit or add a file under
-`knowledge/policies/` and compile again. Nothing changes until you do: the index
-is built from what was compiled in.
-
-```sh
-unmute compile examples/pharmacy-refills
-```
-
-### I added tasks and validate refused the package
-
-A realtime package serves one agent in this version. The refusal names the
-capability row it read, so it is telling you where the limit lives rather than
-restating it.
-
-**Fix:** write `architecture: cascade`, which carries tasks, or keep the flow in
-the one prompt.
-
-### I added a phone connection and validate refused it
-
-Realtime compiles for the browser route in this version. The carrier leg is not
-in this shape yet.
-
-**Fix:** keep the package on browser audio, or move the phone work to a cascade
-package. [`salon-concierge`](../salon-concierge/) has the two shipped phone
-routes.
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Startup reports a missing key | The worker cannot read `OPENAI_API_KEY`. | Set it in the shell or package `.env`, preserving existing secrets, then restart. |
+| The first turn fails with a provider error | The model or voice is unavailable to the key. | Read the dev logs and check access to each configured model. |
+| The model speaks but a tool does not run | The tool is unattached, its arguments are wrong, or its handler refused the request. | Check tool rows and logs; compare attachments and arguments with `tools/*.yaml`. |
+| A knowledge answer is missing | The documents do not cover the question, or the compiled content is stale. | Update the source document, compile, and restart. |
+| The agent interrupts a reference | The turn detector judged the pause as completion. | Restore `semantic` and the prompt instruction to wait for the full reference; repeat the same call. |
+| Replies wait too long | Turn detection waits longer than this conversation needs. | Compare `server_vad` with `semantic` using the same requests. |
 
 ## Where to go next
 
-- [Realtime architecture](../../docs-site/build/architecture/realtime.mdx) - every key a realtime package takes
-- [Turn detection](../../docs-site/models/turn-detection.mdx) - who ends the turn, on every architecture
-- [Knowledge bases](../../docs-site/build/tools/knowledge.mdx) - documents, chunking and retrieval
-- [`salon-concierge`](../salon-concierge/) - the full cascade package, with knowledge and two phone routes
-- [`customer-intake`](../customer-intake/) - one agent, typed saved values, browser only
-- [All the examples](../README.md) - what each one is for
+- [Realtime architecture](../../docs-site/build/architecture/realtime.mdx) - build a small agent from scratch.
+- [Switch architecture](../../docs-site/build/architecture/overview.mdx) - compare defaults, bindings, and limits.
+- [Knowledge bases](../../docs-site/build/tools/knowledge.mdx) - configure document search.
+- [takeaway-orders](../takeaway-orders/) - try the other S2S architecture.
+- [salon-concierge](../salon-concierge/) - a cascade workflow with tasks and phone routes.

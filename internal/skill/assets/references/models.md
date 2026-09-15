@@ -124,7 +124,7 @@ A target and vendor may narrow this further. For example, validation rejects
 
 Every package compiles to one of three pipeline shapes, and `architecture:` at
 the top of `agent.yaml` says which. **Leave it out unless the user asks for
-speech to speech**: an absent key is `cascade`, which is every example here and
+speech to speech**: an absent key is `cascade`, which is the default for ordinary voice agents and
 the only shape that carries tasks, handoffs, saved values and telephony on every
 target.
 
@@ -177,6 +177,9 @@ same one a cascade uses. Omit the key and the vendor's default stands, and the
 two targets do not agree on what that is: Pipecat sends nothing and gets the
 vendor's silence detector, while the LiveKit plugin fills the gap with the
 semantic one. Write the value if it matters.
+
+`models.turn` and top-level `turn` or `listen` bindings remain unsupported even
+with `turn_detection: local`.
 
 Tools run on the model itself here, so there is no `backend:` entry, which is the
 other difference from `live`.

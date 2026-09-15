@@ -1,140 +1,201 @@
 ---
 title: "Architecture"
-description: "The three pipeline shapes a package can compile to, what each costs, and how to pick one."
+description: "Choose a pipeline, switch an existing agent, and check that its models and bindings agree."
 ---
 
-`architecture:` is the first line of `agent.yaml`. It says which pipeline to
-build. Everything else in the file is read against it.
-
-There are three shapes. One splits the work across four services. Two give the
-whole job to a single model that hears the caller and answers out loud.
-
-```yaml agent.yaml
-architecture: cascade     # the default; leave it out and you get this
-```
+Choose how your agent listens, reasons, and speaks with `architecture:` in `agent.yaml`.
+The architecture chooses the pipeline; `targets.yaml` chooses the framework that runs it.
+Changing one does not change the other.
 
 On this page:
 
-- [The three shapes](#the-three-shapes) - one paragraph each
-- [Every key this page adds](#every-key-this-page-adds) - there is one
-- [Which to pick](#which-to-pick) - the questions that decide it
-- [What each one costs](#what-each-one-costs) - latency, control, price
-- [Which sections each one takes](#which-sections-each-one-takes) - the full table
-- [What compiles where](#what-compiles-where) - per target
-- [Troubleshooting](#troubleshooting) - the refusals that come up most
+- [Quickstart](#quickstart) - run a complete example
+- [Choose the pipeline](#1-choose-the-pipeline) - compare the three choices
+- [Check your package](#2-check-what-your-package-needs) - keep required capabilities
+- [Replace the bindings](#3-replace-the-models-and-agent-bindings) - switch the same agent
+- [Validate and run](#4-validate-compile-and-start-a-new-call) - check every target
+- [What compiles where](#what-compiles-where) - target support
+- [Advanced](#advanced) - voices and turn settings
+- [Troubleshooting](#troubleshooting) - fix a refused switch
+- [Where to go next](#where-to-go-next) - build each shape
 
-## The three shapes
+## Quickstart
 
-**`cascade`** is four services in a row. A transcriber turns the caller's audio
-into words. A model reads the words and writes a reply. A synthesizer speaks it.
-A turn detector decides when the caller has finished. You pick each one, and you
-can mix vendors freely.
+From a clone of [Unmute](https://github.com/slng-ai/unmute), run the complete realtime example.
+Install the [CLI and runtime prerequisites](/start/installation) first, and set `OPENAI_API_KEY` in your shell or existing repository-root `.env`.
 
-**`realtime`** is one model on a vendor's Realtime API. It hears the audio
-itself and answers out loud. You still choose who decides the turn, and you can
-put your own synthesizer in front of it.
+```sh Repository root
+unmute validate examples/pharmacy-refills
+unmute compile examples/pharmacy-refills
+unmute dev examples/pharmacy-refills --target pipecat
+```
 
-**`live`** is one model on a vendor's Live API. It hears, thinks and speaks, and
-it decides the turn itself. Its tools run on a second model you name.
+Ask for a refill on the demo reference RX4821B, pausing halfway through the reference.
+Stop the process before trying `--target livekit` with the same package.
+Pipecat runs locally with `uv`; LiveKit uses Docker Compose.
 
-## Every key this page adds
+That is the loop: **choose the architecture, bind its models, validate, talk**.
+The steps below explain how to switch an existing package.
 
-One key, at the top level of `agent.yaml`. It is read before anything else in
-the file, because it decides which `models:` sections are legal.
+## 1. Choose the pipeline
+
+| Value | Who does the work | Choose it when |
+|---|---|---|
+| `cascade` | Separate transcription, reasoning, speech synthesis, and turn detection | You need tasks, handoffs, saved state, or phone routes |
+| `realtime` | One speech-to-speech model, with a choice of turn detection and voice output | You want direct audio with explicit turn settings |
+| `live` | A voice model with an optional reasoning backend | You want the model to manage conversation while its backend runs tools |
 
 <ParamField path="architecture" type="cascade | realtime | live">
-  Which pipeline to build. Left out, you get `cascade`, which is what every
-  package written before this key existed gets. An agent that binds a shape the
-  key does not name is refused, and the message names the architecture rather
-  than the binding.
+  Package-level pipeline choice. Omitted means `cascade`. It applies to the whole package, not to one agent or target.
 </ParamField>
 
-## Which to pick
+Both speech-to-speech architectures support Pipecat and LiveKit browser audio.
+The SLNG target supports `cascade` only. Model providers and target frameworks are separate choices.
 
-Three questions, in the order that settles it fastest.
+## 2. Check what your package needs
 
-**Do you need tasks, handoffs, or saved call state?** Then `cascade`. It is the
-only shape that carries them today, and the reason is in
-[What each one costs](#what-each-one-costs).
+Before switching a cascade, check this list. Removing a feature changes what your agent can do.
+Keep `cascade` if any required feature is unavailable on the destination architecture.
 
-**Do you need to mix vendors?** Then `cascade`. A speech-to-speech model is one
-vendor for the whole job.
-
-**Do you want the shortest possible pause before the agent answers?** Then
-`realtime` or `live`. Nothing is converted to text and back, so the wait is one
-model's, not four services'.
-
-Between the two speech-to-speech shapes: pick `realtime` if you want to decide
-who ends the turn, or to keep a voice you already use. Pick `live` if you want
-the model to handle turns itself and hand its harder thinking to a second model.
-
-## What each one costs
-
-| | `cascade` | `realtime` | `live` |
+| Capability | Cascade | Realtime | Live |
 |---|---|---|---|
-| Services built | four | one | one |
-| Vendors | mix freely | one | one |
-| Who decides the turn | you | you choose | the model |
-| Whose voice | any synthesizer | the model's, or yours | the model's |
-| Tasks and handoffs | yes | no | no |
-| Saved call state | yes | no | no |
-| Phone calls | yes | no | no |
+| Local tools and knowledge lookup | Yes | Yes | Yes, through a backend |
+| Multiple agents, tasks, task groups, handoffs | Yes | No | No |
+| Variables and pre-fetch | Yes | No | No |
+| Tracing and MCP tools | Yes on supported targets | No | No |
+| Phone routes and human transfers | On supported routes | No | No |
+| Separate speech synthesizer | Yes | Optional | No |
 
-The last three rows are the trade. A speech-to-speech session fixes most of what
-it knows when the call starts, so the things that change mid-call are the things
-it cannot carry.
+For example, `salon-concierge` uses tasks, handoffs, variables, and tracing.
+Changing its architecture line cannot preserve that workflow. Start with a single-agent S2S example instead.
 
-## Which sections each one takes
+## 3. Replace the models and agent bindings
 
-| Section | `cascade` | `realtime` | `live` |
-|---|---|---|---|
-| `models.listen` | required | refused | refused |
-| `models.think` | required | refused | the `backend:` entry |
-| `models.speak` | required | the half cascade | refused |
-| `models.turn` | optional | refused | refused |
-| `models.realtime` | refused | required | refused |
-| `models.live` | refused | refused | required |
+Switch a simple agent called `desk` by replacing its `architecture:`, entire `models:` block, and model bindings.
+These are **replacement fragments**, not complete packages. Keep its `instructions`, tool attachments, and other supported settings.
+Do not paste a second `models:` or `agents:` block alongside the first.
 
-A section refused under one architecture is refused by name, with its line, and
-the message says which architecture does use it.
+<CodeGroup>
+```yaml Realtime: agent.yaml
+architecture: realtime
+models:
+  realtime:
+    - name: voice
+      provider: openai
+      model: gpt-realtime
+      voice: marin
+      turn_detection: semantic
+agents:
+  desk:
+    instructions: instructions.md
+    realtime: voice
+```
+
+```yaml Live: agent.yaml
+architecture: live
+models:
+  live:
+    - name: voice
+      provider: openai
+      model: gpt-live-1
+      voice: marin
+      backend: reasoning
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-terra
+agents:
+  desk:
+    instructions: instructions.md
+    live: voice
+```
+</CodeGroup>
+
+Use your existing agent name in place of `desk`, and keep `entry_agent` pointing to it.
+The [cascade guide](/build/architecture/cascade) supplies the corresponding listening, reasoning, and speaking bindings for switching back.
+
+| Destination | Remove or replace |
+|---|---|
+| Realtime | Remove `live:` or agent `think:`/`speak:` bindings; replace the live or cascade models with `models.realtime` |
+| Live | Remove `realtime:` or agent `think:`/`speak:` bindings; replace their models with `models.live` and the backend's `models.think` entry |
+| Cascade | Remove agent `live:`/`realtime:` and their model sections; restore `models.listen`, `models.think`, `models.speak`, `models.turn`, and agent `think:`/`speak:` |
+
+For either S2S destination, remove package-level `listen:` and `turn:` selectors and their model sections.
+For live, also remove `conversation.interruption`; the model owns interruption behavior.
+Realtime can retain a separate synthesizer only through the [Advanced voice setup](/build/architecture/realtime#advanced).
+
+Update `secrets:` to match the remaining providers. The S2S fragments above require `OPENAI_API_KEY`.
+In `targets.yaml`, remove model overrides for entries you deleted. Keep target names, providers, and supported framework pins.
+Remove phone connections and keep the browser channel when switching to S2S.
+
+## 4. Validate, compile, and start a new call
+
+Run these from the directory containing your package. `voice-desk` is its directory name here.
+
+```sh Terminal
+unmute validate voice-desk
+unmute compile voice-desk
+unmute dev voice-desk --target livekit
+```
+
+Without `--target`, validate and compile check every declared target.
+Use `--target pipecat` to run that framework if the package declares it.
+Stop the old dev process and start a new call after switching; an active session keeps its current architecture.
+
+Test a greeting, a tool call, knowledge lookup, and interruption.
+A successful compile checks the package; it does not prove provider access or audible behavior.
 
 ## What compiles where
 
-| Architecture | LiveKit | Pipecat | slng |
+| Architecture | LiveKit | Pipecat | SLNG |
 |---|---|---|---|
 | `cascade` | yes | yes | yes |
 | `realtime` | yes | yes | no |
 | `live` | yes | yes | no |
 
-A cell that says no is a refusal at compile, with a sentence saying which
-architecture to write or which target to compile to. The slng target binds
-listen, think and speak by name, so it has no slot for one model that does all
-three. That is a fact about the target, not a gap in a driver.
+S2S support covers browser audio. Check the feature limits in step 2 before switching.
+
+## Advanced
+
+<Accordion title="Keep a separate voice or tune who ends the turn">
+Realtime supports `turn_detection` and an optional `speak:` binding.
+Follow [Realtime](/build/architecture/realtime#advanced) to add them to the same agent.
+Live decides turns itself and uses its own voice.
+</Accordion>
+
+<Accordion title="Compare latency without changing everything at once">
+Keep the prompt and local tools as similar as the architectures allow.
+Compare the dev page's reported measurements and the conversation you hear.
+Speech-to-speech removes separate transcription and synthesis stages, but does not guarantee a faster call.
+See [Latency](/optimization/latency).
+</Accordion>
 
 ## Troubleshooting
 
-**"models.listen is not used under architecture: live"** you moved a package
-to a speech-to-speech shape and left the cascade's sections behind. Delete them.
-The model does that job now.
+### Validation says a model section is not used
 
-**"architecture: live has no place for tasks"** the message names
-`architecture: realtime` as the shape whose session takes new instructions
-mid-call, and then says it carries no tasks either. Both are true. Today the
-answer is `architecture: cascade`.
+The architecture changed, but an old model section or selector remains.
+**Fix:** replace the models and bindings together using step 3, then validate again.
 
-**"slng target ... has no slot for one model that does all three"** compile to
-`livekit` or `pipecat`, or write `architecture: cascade`.
+### A target overrides a model that no longer exists
+
+`targets.yaml` still names a deleted cascade or backend entry.
+**Fix:** delete that override or point it at a supported remaining model. Do not add a dummy model just to satisfy it.
+
+### Validation refuses tasks or saved variables
+
+The destination S2S architecture does not support those capabilities.
+**Fix:** keep `architecture: cascade`, or start a separate single-agent package with the supported workflow.
+
+### The call still uses the old architecture
+
+The running process was started from an earlier build.
+**Fix:** stop it, rerun `unmute dev`, and open a new call.
 
 ## Where to go next
 
 <Columns cols={3}>
-  <Card title="Cascade" icon="layer-group" href="/build/architecture/cascade">
-    Four services in a row: what each does and where each is taught.
-  </Card>
-  <Card title="Realtime" icon="waveform" href="/build/architecture/realtime">
-    One model, your turn settings, and optionally your own voice.
-  </Card>
-  <Card title="Live" icon="bolt" href="/build/architecture/live">
-    One model that decides its own turns, with a backend for its tools.
-  </Card>
+  <Card title="Cascade" icon="layer-group" href="/build/architecture/cascade">Build with separate models.</Card>
+  <Card title="Realtime" icon="waveform" href="/build/architecture/realtime">Choose the turn and voice.</Card>
+  <Card title="Live" icon="bolt" href="/build/architecture/live">Add a voice model and backend.</Card>
 </Columns>

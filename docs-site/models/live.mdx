@@ -1,211 +1,178 @@
 ---
 title: "Live model"
-description: "The live architecture on both code targets: one model that listens, thinks and speaks, what it does with the greeting and the tools, and what a live package cannot carry yet."
+description: "Configure the OpenAI live model, its voice, and the backend that runs tools."
 ---
 
-<Note>
-  `architecture: live` compiles on both code targets. The slng target refuses it
-  by name, because it binds a transcriber, a model and a synthesizer separately
-  and has no slot for one model that does all three. The three shapes are
-  compared side by side on [Architecture](/build/architecture/overview).
-</Note>
+Connect a live voice model to the reasoning backend that runs your agent's tools.
+The agent binds a named `models.live` entry through `live:`; that entry can bind an OpenAI `models.think` entry through `backend:`.
 
-A package writes `architecture: live` and then a `models.live` section, which
-binds one model that does the three jobs a cascade splits up: it hears the
-caller's audio, decides what to say and when, and speaks in its own voice. There
-is no transcriber, no speech synthesizer and no turn detector in the emitted
-pipeline, because the model does all of that itself.
+On this page:
 
-```yaml agent.yaml
+- [Quickstart](#quickstart) - start with a working package
+- [Configure the entry](#1-configure-the-live-entry) - fields and defaults
+- [Attach the backend](#2-attach-a-backend-for-tools) - tools and knowledge
+- [Pipecat](#pipecat) - target support
+- [LiveKit Agents](#livekit-agents) - target support
+- [Advanced](#advanced) - session behavior and limits
+- [Troubleshooting](#troubleshooting) - symptoms and fixes
+- [Where to go next](#where-to-go-next) - guides and references
+
+## Quickstart
+
+From a clone of the [examples](https://github.com/slng-ai/unmute/tree/main/examples), set `OPENAI_API_KEY` in your shell or `examples/takeaway-orders/.env`.
+The package is complete and includes a live model, backend, local tools, and knowledge lookup.
+
+```sh Terminal, from the repository root
+unmute validate examples/takeaway-orders
+unmute compile examples/takeaway-orders
+unmute dev examples/takeaway-orders --target pipecat
+```
+
+Ask for salt and pepper chicken and egg fried rice for collection.
+Check that the tool results determine the order and its total.
+For a new package, follow the complete [Live quickstart](/build/architecture/live#quickstart).
+
+## 1. Configure the live entry
+
+To reuse the takeaway setup, replace its model palette and live binding with this **replacement fragment**.
+It uses shorter names, `voice` and `fast`. Keep the existing instructions, tool attachments, and other package settings.
+
+```yaml examples/takeaway-orders/agent.yaml
 architecture: live
-
 models:
   live:
     - name: voice
       provider: openai
       model: gpt-live-1
       voice: marin
-      backend: fast        # runs the tools and the hard reasoning, at OpenAI
+      backend: fast
   think:
     fast:
       provider: openai
       model: gpt-5.6-terra
-
 agents:
-  desk:
+  counter:
     instructions: instructions.md
     live: voice
-    tools:
-      - lookup_customer
 ```
 
-An agent names the entry with `live:`, which is the section's own name, in place
-of `think:` and `speak:`. Writing both forms on one agent is refused, and so is
-writing `live:` under any architecture but this one.
+Set `architecture: live` explicitly. If omitted, the architecture is `cascade`.
+The agent's `live:` binding replaces its `think:` and `speak:` bindings.
 
-## Every key a live entry takes
-
-`name`, `provider` and `model` are required. `voice`, `backend` and
-`description` are optional.
+`name`, `provider`, and `model` are required. `voice`, `backend`, and `description` are optional unless the tool setup requires a backend.
 
 <ParamField path="name" type="string" required>
-  The entry's name. It shares one namespace with the other model sections, so
-  it cannot collide with a `think:` or `speak:` entry. An agent binds it with
-  `live: <name>`.
+  Name used by the agent's `live:` binding. It must be unique across model sections.
 </ParamField>
 
 <ParamField path="provider" type="openai" required>
-  Who serves the model. `openai` is the only vendor with a live service on
-  either code target, and the list is closed: there is no wildcard route.
+  OpenAI is the supported live provider on both code targets. There is no wildcard provider route.
 </ParamField>
 
 <ParamField path="model" type="string" required>
-  The live model's id, forwarded exactly as you write it. Unmute keeps no
-  allowlist, so a typo surfaces as a provider error on the first call.
+  Provider model ID, such as `gpt-live-1`. It is forwarded as written; access and availability are checked by the provider when the session starts.
 </ParamField>
 
 <ParamField path="voice" type="string">
-  The voice the model speaks in, forwarded as written. Left out, the vendor's
-  own default applies.
+  Provider voice ID. Omitted means the provider's default voice.
 </ParamField>
 
 <ParamField path="backend" type="a models.think entry name">
-  The entry that runs this model's tools and its harder reasoning. It has to be
-  an OpenAI `think:` entry with no `endpoint_env`, because the handover happens
-  inside the live session itself. Required as soon as the agent holds a tool;
-  left out on an agent with no tools, the model simply declines anything that
-  would need one.
+  OpenAI backend for tools and reasoning. Required when the agent has tools, including knowledge lookup. The referenced entry cannot set `endpoint_env`.
 </ParamField>
 
 <ParamField path="description" type="string">
-  A note for whoever reads the package next. It reaches nothing at runtime.
+  Optional note for package readers. It has no runtime effect.
 </ParamField>
 
-Every other model key is refused on a live entry by name, with its line and
-column: `temperature`, `language`, `speed`, `params`, `pace` and
-`endpoint_env`. A live session has no slot for them, and refusing is what keeps
-a setting from being dropped in silence. A live entry takes no per-target
-override either.
+A live entry does not accept `temperature`, `language`, `speed`, `params`, `pace`, `endpoint_env`, or per-target model overrides.
+Validation refuses these settings rather than ignoring them.
 
-## What the emitted bot does
+## 2. Attach a backend for tools
 
-**One service where three stood.** The live service sits where the transcriber,
-the model and the synthesizer would sit. It receives the caller's audio directly
-and streams its own speech back.
+With the replacement names above, `voice` hands tool work to `fast`.
+The backend calls the attached local and knowledge tools, and the live model speaks the result.
+The backend must be at OpenAI. Both models and the knowledge embeddings use `OPENAI_API_KEY`.
 
-The two targets differ in one visible way, and it is about the voice activity
-detector rather than about the model. On Pipecat one still runs, for the
-speaking frames the idle timer and the latency measurement anchor on, but it
-ends no turn.
+Only the backend's **model name** reaches the live service.
+Its `params:` do not configure the live session, even when they appear in `compile-report.json`.
+With no attached tools, `backend:` is optional; requests that need a backend may be declined.
 
-On LiveKit none is built at all, and neither is the prewarm that loads one. The
-framework reads the model's own reports of the caller's speech only while no
-detector of ours is present. Passing one would move that decision off the model,
-quietly. So the emitted LiveKit project installs no `silero` plugin either.
-
-**The instructions are fixed when the session starts.** The agent's rendered
-prompt, the model and the voice are set at session start and cannot change
-until the call ends. That is why a live package has one agent and no tasks: a
-handoff or a step would have to change the instructions mid-call.
-
-**The greeting is spoken in the model's own words.** A greeting with
-`speaks_first: agent` reaches the session as its opening instruction. The model
-paraphrases it rather than reading it out, so expect the sense of the line and
-not its letters.
-
-**Tools and hard reasoning run on the backend.** The live model hands a request
-that needs a tool or careful reasoning to the model named in `backend:`, on
-OpenAI's Responses API, and keeps talking while it works. The backend calls this
-project's tools, which are registered exactly as they are for a cascaded
-pipeline, and the answer comes back as something the live model says. The
-backend has to be an OpenAI think entry with no `endpoint_env`, because the
-handover happens inside the live session itself. An agent with tools and no
-`backend:` is refused; an agent with neither is allowed, and the runbook says the
-model declines any request that would need one.
-
-**Turn taking is the model's.** It decides when the caller has finished and how
-to handle being talked over. `conversation.interruption` is refused because
-nothing reads it.
-
-**Inactivity works the same way.** `nudge_after` asks the model, in its own
-words, to check whether the caller is still there, and `end_after` ends the
-call.
+Use the [Live tool walkthrough](/build/architecture/live#2-give-the-backend-a-tool) to attach a new tool.
+Use [Knowledge bases](/build/tools/knowledge) for document lookup.
 
 ## Pipecat
 
-| Provider | Notes |
+| Provider | Configuration |
 |---|---|
-| `openai` | OpenAI Live (`gpt-live-1`): full duplex speech to speech. `OPENAI_API_KEY`. The `backend:` entry it hands its tools to has to be an OpenAI one too. |
+| `openai` | `gpt-live-1`, `OPENAI_API_KEY`, and an OpenAI backend when tools are attached. |
+
+Pipecat keeps local voice activity detection for inactivity and reply measurements.
+It does not use that detector to end the live model's turn.
 
 ## LiveKit Agents
 
-| Provider | Notes |
+| Provider | Configuration |
 |---|---|
-| `openai` | OpenAI Live (`gpt-live-1`): full duplex speech to speech. `OPENAI_API_KEY`. The `backend:` entry it hands its tools to has to be an OpenAI one too. |
+| `openai` | `gpt-live-1`, `OPENAI_API_KEY`, and an OpenAI backend when tools are attached. |
 
-Both lists are closed. There is no wildcard route for a live model.
+LiveKit uses the model's speech events and adds no local voice activity detector to the live session.
+Both targets support browser audio. The slng target refuses `architecture: live`.
 
-### Tools need a backend, on both targets
+## Advanced
 
-An agent that holds tools and names no `backend:` is refused, on either target
-and in the same words.
+<Accordion title="Session behavior and the dev page">
+The session fixes its instructions, model, and voice when it starts.
+A greeting is an opening instruction, so the model can paraphrase it.
+The model also controls interruptions; `conversation.interruption` is refused.
 
-With no backend there is nowhere for the work the model hands over to run. Both
-vendors say so themselves rather than failing quietly: LiveKit's plugin raises
-if tools are registered with nothing to answer them, and a Pipecat live service
-with no backend configured has nothing to answer them either. Refusing at
-compile is the same fact, moved to where you can act on it instead of finding it
-the first time a caller asks for something.
+Inactivity nudges ask the model to check whether the caller is still there.
+The inactivity end timer ends the call.
+The dev page shows speech transcripts, replies, and backend tool calls with their durations.
+It does not show per-reply first-token or request timing for live speech.
+</Accordion>
 
-An agent with **no** tools and no `backend:` is fine on both. The model simply
-declines anything that would need one, and the runbook says so.
+<Accordion title="Supported package features">
+Live serves one agent, with local and webhook tools, built-in tools, and knowledge lookup.
 
-## What a live package cannot carry
-
-Each of these is refused at validate with one sentence saying what to do
-instead. Several mention `architecture: realtime`, because a live session fixes
-its instructions when it starts and a realtime session does not.
-
-<Warning>
-  `architecture: realtime` compiles on both code targets now, and it still
-  carries no tasks and no second agent. So today the fix for these rows is
-  `architecture: cascade`, and the refusals say so. That sentence is read from
-  the capability table rather than written out, so it changes on its own if that
-  limit lifts.
-</Warning>
-
-| Written | Why it is refused |
+| Unsupported setting | Reason |
 |---|---|
-| a second agent, `tasks`, `task_groups`, `handoffs` | `architecture: live` serves one agent, with no `tasks`, no `task_groups` and no `handoffs`: a task or a handoff changes the instructions mid-call, and the session fixes them when it starts. `architecture: realtime` is the shape whose session takes new instructions |
-| `escalations` | a transfer needs the carrier leg the live shape does not carry yet |
-| `listen`, `speak` or `turn` sections, and `conversation.interruption` | the model listens, speaks and decides the turn itself |
-| `variables`, `prefetch` | the instructions are fixed at session start and the live shape carries no call state yet |
-| `tracing` | the live shape has no traced worker yet |
-| an `mcp:` tool | the live shape has no place to start and close a server connection yet |
-| a telephony connection | a live model compiles for the browser route in this version |
-| a `backend:` entry that is not at OpenAI | the backend must be at OpenAI: the handover happens inside the live session itself |
-| an slng target | that target binds a transcriber, a model and a synthesizer by name, and has no slot for one model that does all three |
+| Tasks and transfers | The session has no `tasks`, task groups, `handoffs`, or `escalations`. |
+| Listen, speak, and turn sections | The model listens, speaks and decides the turn itself. |
+| Variables and pre-fetch | This shape carries no call state yet. |
+| Tracing | This shape has no traced worker yet. |
+| MCP tools | This shape cannot start and close a server connection yet. |
+| Phone connections | Live compiles for the browser route in this version. |
 
-The rows marked "yet" and "in this version" are limits of this release, not of
-the model. They are refused rather than emitted half working, so a package that
-compiles is a package whose every setting reaches the call.
+Use [Cascade](/build/architecture/cascade) when your workflow needs these features.
+See the [architecture comparison](/build/architecture/overview#2-check-what-your-package-needs) before switching an existing package.
+</Accordion>
 
-## What the dev page shows
+## Troubleshooting
 
-`unmute dev` shows the caller's words and the model's words as the model
-transcribes them, each turn of the model's as one reply, and every tool call
-the backend makes with its duration. The model's text is marked as transcribed
-speech rather than generated text, because that is what it is. No first-token
-or request timing is shown per reply: nothing was requested, the model simply
-spoke.
+### Validation asks for a backend
+
+The agent has a tool, but its live entry has no backend.
+**Fix:** set `backend: fast` and provide the OpenAI think entry shown above.
+
+### A backend setting has no effect
+
+The live service receives only the backend model name.
+**Fix:** remove unsupported tuning assumptions; choose a suitable backend model and verify the result in a call.
+
+### The first call fails with a provider error
+
+The API key may lack access to the selected model or voice.
+**Fix:** read the provider error in the dev logs and check both the live and backend model IDs.
+
+### Validation refuses a task or phone connection
+
+Those features need the cascade architecture.
+**Fix:** follow the [switching guide](/build/architecture/overview), or keep this package as a single browser agent.
 
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="Architecture" icon="sitemap" href="/build/architecture/overview">
-    The three pipeline shapes side by side, and what each one costs you.
-  </Card>
-  <Card title="agent.yaml" icon="file-code" href="/reference/agent-yaml">
-    Every field a model entry takes.
-  </Card>
+  <Card title="Build a live agent" icon="microphone" href="/build/architecture/live">Start from a complete package and add a tool.</Card>
+  <Card title="Choose an architecture" icon="sitemap" href="/build/architecture/overview">Compare live, realtime, and cascade.</Card>
 </Columns>
