@@ -4,6 +4,13 @@ description: "What unmute compile writes for a Pipecat target, and how to run it
 sidebarTitle: "Pipecat"
 ---
 
+This page describes the generated Pipecat project and its target settings.
+
+<Card title="Deploy to Pipecat Cloud" icon="rocket" href="/deploy/pipecat-cloud">
+  Start here to create a deployment, choose its destination, supply credentials,
+  and update its code or secrets.
+</Card>
+
 ```sh
 unmute compile my-agent --target pipecat
 ```
@@ -149,25 +156,18 @@ to the environment it lists.
 
 ## Deploy
 
-The generated README is the authority, with your own values filled in. The
-shape of it:
+Follow [Deploy to Pipecat Cloud](/deploy/pipecat-cloud) for the complete sequence:
+package preparation, destination selection, runtime values, first deployment,
+updates, and a test interaction. The guide also covers secrets-only changes.
 
-```sh
-cd my-agent/build/pipecat
-cp .env.example .env            # then fill in the values
-pipecat cloud secrets set acme-support-pipecat-secrets --file .env
-pipecat cloud deploy
-pipecat cloud agent status acme-support-pipecat
-```
-
-The secret set comes first, because the manifest already names it and a deploy
-cannot start without it. `pipecat cloud deploy` builds the image in the cloud
-from the generated `Dockerfile`.
+Use the generated `build/pipecat/` directory as the build context. Keep secret
+values out of the image and upload only the names this deployment needs, as
+listed by its `.env.example` and runbook.
 
 ### The deployed agent's name
 
-`acme-support-pipecat` above is the package's
-[`name:`](/reference/agent-yaml#name) joined to the target it was compiled for,
+A package named `my-agent` with target `pipecat` deploys as `my-agent-pipecat`.
+This is the package's [`name:`](/reference/agent-yaml#name) joined to its target,
 and it is `agent_name` in `pcc-deploy.toml`. Pipecat Cloud agent names are
 unique across an organisation and a deploy updates the agent matching the name,
 so it has to say which package this is. Unmute used to write the target name

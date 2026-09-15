@@ -4,6 +4,13 @@ description: "What unmute compile writes for a LiveKit target, and how to run it
 sidebarTitle: "LiveKit"
 ---
 
+This page describes the generated LiveKit project and its target settings.
+
+<Card title="Deploy to LiveKit Cloud" icon="rocket" href="/deploy/livekit-cloud">
+  Start here to create a deployment, choose its destination, supply credentials,
+  and update its code or secrets.
+</Card>
+
 ```sh
 unmute compile my-agent --target livekit
 ```
@@ -135,30 +142,13 @@ Extras and plugins follow the providers your package binds.
 
 ## Deploy
 
-Two paths, both running the project as generated. The generated README carries
-the exact commands. The shape of the LiveKit Cloud path:
+Follow [Deploy to LiveKit Cloud](/deploy/livekit-cloud) for the complete sequence:
+package preparation, destination selection, runtime values, first deployment,
+updates, and a test interaction. The guide also covers secrets-only changes.
 
-```sh
-lk cloud auth                   # once
-lk project set-default "<name>" # once
-cd my-agent
-unmute compile . --target livekit
-cp .env build/livekit/.env      # if the package-root .env already has the values
-cd build/livekit
-lk agent create --region eu-central --secrets-file .env
-```
-
-If no package-root `.env` exists, copy the generated `.env.example` to
-`build/livekit/.env` and fill it in first. Choose a region from the field above.
-The [numbered runbook](/deploy/livekit-cloud#the-first-deploy-is-create) also
-explains what survives a recompile.
-
-The first deploy registers the agent, builds the image from the generated
-`Dockerfile`, and writes the `livekit.toml` that the generated directory
-deliberately does not ship, because the platform assigns both of its values.
-Every later version is `lk agent deploy`.
-
-The other path is a worker you host yourself, from the same `Dockerfile`.
+Use the generated `build/livekit/` directory as the build context. Keep secret
+values out of the image and upload only the names this deployment needs, as
+listed by its `.env.example` and runbook.
 
 ### The worker's agent name
 

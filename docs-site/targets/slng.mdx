@@ -4,14 +4,13 @@ description: "What unmute compile writes for a slng target, what SLNG runs for y
 sidebarTitle: "SLNG"
 ---
 
-SLNG hosts the agent. There is no project to run and nothing to keep alive, so
-the compiler writes a deployment body and a runbook instead of Python, and one
-command sends them:
+SLNG hosts the agent. The compiler writes a deployment body and a runbook
+instead of Python. This page describes those files and the target's settings.
 
-```sh
-export SLNG_API_KEY=...
-unmute deploy examples/hotel-concierge
-```
+<Card title="Deploy to SLNG" icon="rocket" href="/deploy/slng">
+  Start here to create a package, select the organisation, supply credentials,
+  and deploy or update the agent.
+</Card>
 
 <Warning>
   SLNG creates no tool from your package. A `local:` or `webhook:` block is
@@ -20,12 +19,6 @@ unmute deploy examples/hotel-concierge
   livekit, where your own handler or endpoint runs. The rest of this page
   describes the target in full, including the tool shapes.
 </Warning>
-
-<Card title="Deploy to SLNG" icon="cloud-upload" href="/deploy/slng">
-  The walkthrough: the worked example, what you need first, and every failure
-  message. Start there if you want a running agent. This page is the reference
-  behind it.
-</Card>
 
 On this page:
 
@@ -219,17 +212,12 @@ in a package asks for that.
 
 ## Push it
 
-The runbook in `build/slng/README.md` is the authority for your package. In
-outline:
+Follow [Deploy to SLNG](/deploy/slng) to create the package, select an
+organisation, preview the changes, and push the agent. That guide also covers
+updates, Vault credentials, and testing a complete interaction.
 
-```sh
-export SLNG_API_KEY=...
-unmute deploy examples/hotel-concierge
-```
-
-An agent id comes back, and you need it to open a session. Read
-[the command's own page](/reference/cli/deploy) for the flags; the one that
-matters first is `--dry-run`, which changes nothing.
+The generated `build/slng/README.md` lists your package's requirements. The
+[deploy command reference](/reference/cli/deploy) describes every flag.
 
 `unmute deploy` reads `SLNG_API_KEY`, then `VOICEAI_API_KEY`, then whatever
 profile `voiceai login` stored. Those are two names for one token: a single SLNG
