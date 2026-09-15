@@ -32,7 +32,7 @@ agents:
 
 On this page:
 
-- [Why pick it](#why-pick-it) - pros and cons
+- [Why pick it](#why-pick-it) - against the other two
 - [Every key a realtime entry takes](#every-key-a-realtime-entry-takes)
 - [Who ends the turn](#who-ends-the-turn) - the three answers
 - [Use your own voice](#use-your-own-voice) - the half cascade
@@ -42,22 +42,13 @@ On this page:
 
 ## Why pick it
 
-Pick Realtime when direct audio interaction matters and the call fits one
-agent with tools. It keeps more control over turn detection and voice than
-Unmute's Live architecture.
+**Against `cascade`:** one model instead of four services, so a shorter pause
+before the agent answers. You give up tasks, handoffs and saved call state.
 
-| Pros | Cons |
-|---|---|
-| Direct audio input retains clues that may be lost in transcription | Audio understanding and reasoning stay with the chosen realtime model |
-| Fewer stage boundaries can reduce response delay | Provider, turn settings, network, and tools still determine the actual wait |
-| Choose a turn mode and optionally keep a separate synthesizer | A separate synthesizer adds another component and its response time |
-| Tools and knowledge searches remain available | Unmute currently supports no tasks, handoffs, saved variables, tracing, or phone route here |
-
-For a workflow that collects, confirms, and acts across several tasks, use
-[Cascade](/build/architecture/cascade#build-a-more-complex-workflow).
-Its extra control can be worth a longer pause. See the
-[comparison and further reading](/build/architecture/overview#pros-and-cons)
-for the wider tradeoff.
+**Against `live`:** you keep two decisions that `live` takes away. Who ends the
+turn is yours, and the voice can be a synthesizer you already use rather than
+the model's own. Tools run on the model itself here, so there is no `backend:`
+entry to name.
 
 ## Every key a realtime entry takes
 
@@ -104,8 +95,8 @@ then silently discards, so writing it would look like it worked.
 | `local` | this project's own detector, exactly as a cascade uses it |
 
 `local` is how a realtime package keeps the turn settings it would have had as a
-cascade. It is not a fallback: both code targets support handing the decision
-back to the application.
+cascade. It is not a fallback: both vendors support handing the decision back,
+and the compiler emits what each one needs to make that happen.
 
 Leave `turn_detection:` out and the compiler writes nothing in its place,
 because writing one would send a setting you did not ask for.
@@ -149,9 +140,8 @@ ways, and only one of them would reach the call.
 
 Two things a reader often assumes are lost here, and are not.
 
-**Tools.** The realtime model requests tool calls, and the generated application
-executes them and returns results. There is no separate `backend:` model to
-name, which is the other difference from
+**Tools.** The model runs them itself, over the same connection it speaks on.
+There is no `backend:` entry to name, which is the other difference from
 [`live`](/build/architecture/live).
 
 **Knowledge.** A `knowledge:` section works exactly as it does in a cascade. The
@@ -166,12 +156,15 @@ reading a reference off a box pauses halfway through it.
 
 ## What it cannot carry
 
-The Realtime API can accept instruction updates during a call. Unmute still
-refuses tasks and handoffs in this architecture because its current integration
-cannot provide those transitions consistently across both code targets.
+A realtime session takes a new prompt while the call is running. That is the one
+real difference between this API and the Live API, and it is why the two are
+separate words here rather than one.
 
-These are limits of Unmute's current support, not a claim that speech-to-speech
-cannot support complex workflows:
+**It still carries no tasks.** Not because of the API, but because one of the two
+frameworks this compiler emits cannot reshape a running conversation without
+dropping the connection and starting over. Lifting the limit on one target would
+make one authored word mean two different things depending on where it compiles,
+which is worse than the limit.
 
 | Written | Why it is refused |
 |---|---|
@@ -180,7 +173,6 @@ cannot support complex workflows:
 | `listen` and `think` sections | the model does both itself |
 | `variables`, `prefetch` | this shape carries no call state yet |
 | `tracing` | this shape has no traced worker yet |
-| an `mcp:` tool | server lifecycle handling is not supported here yet |
 | a phone connection | this shape compiles for the browser route |
 
 If you need tasks today, write `architecture: cascade`.
