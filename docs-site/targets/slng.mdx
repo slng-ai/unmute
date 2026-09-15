@@ -27,47 +27,33 @@ On this page:
 - [targets.yaml](#targets-yaml) - every key this target takes, and every one it refuses
 - [The pushed agent's name](#the-pushed-agents-name) - where the deployed name comes from
 - [Model names](#model-names) - how a vendor and a model are joined
-- [Push it](#push-it) - the command, the key, and where your tools come from
+- [Push it](#push-it) - deployment and tool resolution
 - [Hosted tool dependencies](#hosted-tool-dependencies) - only for a package that also targets code
 - [The Vault](#the-vault) - where secrets live, and what a compile can see
 - [What a slng package may not ask for](#what-a-slng-package-may-not-ask-for) - the refusals in full
-- [If the agent answers with silence](#if-the-agent-answers-with-silence) - reading `call_end_reason`
+- [If the agent answers with silence](#if-the-agent-answers-with-silence) - where to inspect a failed call
 - [There is no unmute dev](#there-is-no-unmute-dev) - how to talk to a pushed agent
 - [Where to go next](#where-to-go-next) - the deploy walkthrough
 
 ## The trade
 
-A slng package is shorter than the same agent written for pipecat or livekit, and
-what is missing is not capability. It is the layer you would otherwise stand up
-yourself.
+You author prompts, models, tools, a greeting, and variables. SLNG runs the
+pipeline and owns its capacity and turn taking. There is no generated Python
+project or container to maintain.
 
-| On a code target you author | On slng |
-|---|---|
-| a Python project, a `Dockerfile`, an image to host | nothing; SLNG runs the agent |
-| worker counts, concurrency, scaling | SLNG's, already provisioned |
-| a VAD, a turn model, endpointing windows | SLNG's turn taking |
-| the event loop wiring STT to LLM to TTS | SLNG's pipeline |
-| where each provider is called from | one region, chosen per call |
-
-So here you author intent: prompt, models, tools, greeting, variables. The layer
-under it is already running, already in-region, already warm, with STT, LLM,
-TTS and the tool sandbox one network hop apart rather than one internet apart.
-You give up owning the runtime and you get one that is co-located and tuned.
-
-That is also why the refusals below are refusals rather than silent drops: a
-setting that describes a runtime you no longer own has nothing to act on, and
-being told is better than having it disappear.
+Some package features need a runtime you control. Check the
+[target limits](#what-a-slng-package-may-not-ask-for) before choosing SLNG.
 
 ## What compiling writes
 
 To stop at the files:
 
 ```sh
-unmute compile examples/hotel-concierge --target slng
+unmute compile my-agent --target slng
 ```
 
 ```text
-examples/hotel-concierge/build/slng/
+my-agent/build/slng/
 ├── agent.json                # the agent create body
 ├── README.md                 # the runbook: what to create, what to run, what to watch
 └── compile-report.json       # what was compiled, and which checks were left to deployment
@@ -79,14 +65,8 @@ resolves by name against your organisation, so there is never a body of your
 own to write beside it. A `slng:` reference needs no mirror to reach even
 this point: `agent.json` carries the name, and nothing else about the tool.
 
-Unmute's compiler opens no connection to SLNG, at validate time or compile time.
-It writes files and stops. [`unmute deploy`](/reference/cli/deploy) hands them to
-the `voiceai` CLI, which owns your account and the push, so it has to be
-installed:
-
-```sh
-brew install slng-ai/tap/voiceai
-```
+Validation and compilation run offline. Follow the
+[deployment guide](/deploy/slng) to install `voiceai` and push the generated body.
 
 ## Targets YAML
 
@@ -144,33 +124,12 @@ Write these inside `targets.<name>`. The name selects this target with
 
 ## The pushed agent's name
 
-The agent is pushed under the package's [`name:`](/reference/agent-yaml#name)
-joined to the target it was compiled for. This target has no project to deploy
-into, so that name is the whole identity.
+The deployed name joins the package's [`name:`](/reference/agent-yaml#name) to
+its target. A package named `my-agent` with target `slng` becomes `my-agent-slng`.
 
-```yaml agent.yaml
-version: 1
-name: acme-support
-entry_agent: support
-```
-
-With the target above, that pushes an agent called **acme-support-slng**.
-
-SLNG names are unique across an organisation and a push resolves which agent to
-write by matching the name in the body, so pushing under a name that already
-exists replaces that agent rather than adding one. Unmute used to write the
-target name here, and every package on this target calls its target `slng`. Two
-packages in one organisation both pushed an agent called `slng`, and the second
-replaced the first one's prompt, models and tool attachments.
-
-Check a name is free before you claim it:
-
-```bash
-voiceai agents list
-```
-
-Renaming later does not move a deployed agent: it leaves the old one running and
-creates a second.
+Deployment resolves an existing agent by name, or uses `--agent-id` when supplied.
+Check the dry run before pushing. See [updates and renames](/deploy/slng#every-later-deploy)
+for how to keep or replace an existing deployment.
 
 ## Model names
 
@@ -190,25 +149,9 @@ That reaches SLNG as one string. A model name that already carries a slash is
 passed through whole rather than joined twice, which is how a SLNG Context
 Router model such as `slng/deepgram/nova:3-en` reaches the body unchanged.
 
-Nothing else about a model is checked here. SLNG owns its own model list, so
-Unmute forwards the values as written and validates none of them.
-
-That makes a model string the field most likely to fail your push, and it fails
-loudly: `AGENT_MODEL_UNAVAILABLE`, naming `models.stt`, `models.llm` or
-`models.tts` and the string it rejected. Three different things cause it: the
-model is not enabled for agents in your organisation, it is one of your own and
-SLNG's router is off, or it is not served in the region and language this agent
-asked for.
-
-That last one is the surprising one. Not every model exists in every region, and
-pinning `deployment_region` to a region a model does not serve fails at push.
-Choose a region that serves the model.
-
-Unmute writes no `llm_router_enabled`, so SLNG applies its own default. That is
-deliberate: a model your organisation brought its own key for has no entry in
-SLNG's shared catalogue, and SLNG accepts one only when the router is on.
-Writing the field off would refuse a whole class of your own models, and nothing
-in a package asks for that.
+Model availability depends on your organisation and the selected region.
+Follow [Choose models and their region](/deploy/slng#choose-models-and-their-region)
+to check the available bindings before deployment.
 
 ## Push it
 
@@ -219,37 +162,14 @@ updates, Vault credentials, and testing a complete interaction.
 The generated `build/slng/README.md` lists your package's requirements. The
 [deploy command reference](/reference/cli/deploy) describes every flag.
 
-`unmute deploy` reads `SLNG_API_KEY`, then `VOICEAI_API_KEY`, then whatever
-profile `voiceai login` stored. Those are two names for one token: a single SLNG
-key serves every SLNG role, including the Context Router key a generated livekit
-or pipecat project reads at run time. `VOICEAI_API_KEY` is the name the push tool
-itself reads, so export whichever your shell already has.
-
-The organisation is printed on every run, because an exported key and a stored
-profile can belong to different ones.
-
 Use `unmute deploy` for checked deployment. Running `voiceai agents push`
-directly bypasses Unmute's binding checks and resolved staging. For standalone
-`voiceai` commands, set `export VOICEAI_API_KEY="$SLNG_API_KEY"` to use the
-same account.
+directly bypasses Unmute's binding checks and resolved staging.
 
 ### Where your tools come from
 
-A tool on SLNG runs inside the platform's own sandbox, in the region serving
-the call, one hop from the model rather than a whole internet away. Code
-there has no network access of its own: an `api_request` tool is how SLNG
-itself reaches an outside service.
-
-Reference what your organisation already has by name with
-[`slng:`](/build/tools/hosted), for the reason at the top of this page. This
-target needs nothing else: no mirror, no hash, no `unmute pull`, because the
-published tool is the only copy and this target resolves it by name at deploy
-time. `unmute pull` is only for a package that also compiles to livekit or
-pipecat. Those targets build and run the tool themselves, so they need a real
-copy of its definition, mirrored into your package. [Hosted
-tools](/build/tools/hosted) has the field-by-field version, including the one
-limit: a hosted tool's Python dependencies compile to slng and are refused on
-the two code targets.
+Reference published tools by name with [`slng:`](/build/tools/hosted).
+This target needs no local mirror. A package that also targets LiveKit or Pipecat
+needs `unmute pull`, because those targets run a local copy of the tool.
 
 ### Names, not identifiers
 
@@ -286,45 +206,22 @@ The runbook says which case your package is in.
 
 ### A push replaces
 
-Updating an agent replaces it with what the package declares. A tool reference
-the package no longer names is detached, and a field that differs is
-overwritten. `unmute deploy --dry-run` names both before anything happens.
-
-The agent's name is `name:` joined to the target, so a run that reports `update`
-when you expected `create` means an agent of that name already exists. Change
-`name:` in `agent.yaml`, or let `--agent-id` pick a different one.
+Updates replace the agent with what the package declares, including its tool
+attachments. Preview the changes with `unmute deploy --dry-run`; follow
+[Every later deploy](/deploy/slng#every-later-deploy) for the full sequence.
 
 ### Do not push a dashboard export back
 
-An agent document exported from SLNG is not always a body the API accepts. The
-export carries `orchestrator`, which the create body forbids: an export from an
-agent running on LiveKit omits the field at its default and posts cleanly, and
-the same export from a Pipecat agent is rejected. Several other fields differ,
-and `llm_router_enabled` defaults the opposite way on the two shapes.
-
-Compile from the package instead.
+A dashboard export is not a deployment request. Compile from the authored
+package, then use `unmute deploy` to resolve and push the body.
 
 ## Hosted tool dependencies
 
-This section is about a package that also targets livekit or pipecat and has
-pulled a mirror. An slng-only deploy never reads a dependency list at all: SLNG
-installs whatever the published tool declares on its own side, invisible to
-unmute.
+SLNG installs the dependencies declared by the published tool. An SLNG-only
+package needs no local dependency list.
 
-A hosted tool's Python dependencies are the platform's own, mirrored by
-`unmute pull` into `tools/<name>.slng.json` rather than written by you. Each
-is an exact `name==version` pin, because SLNG builds a locked, hash-verified
-environment per tool.
-
-The sandbox runs Python 3.14 with `pydantic` already installed, so a hosted
-tool using only the standard library and pydantic needs no dependencies
-mirrored at all.
-
-This is slng-only. The code drivers build one dependency list for the whole
-generated project out of the provider catalogue, and read nothing per tool. So
-a hosted tool that declares dependencies is refused on `livekit` and `pipecat`,
-rather than having the pins silently dropped. See [Hosted
-tools](/build/tools/hosted) for the full story.
+LiveKit and Pipecat refuse hosted tools that declare Python dependencies.
+See [Hosted tools](/build/tools/hosted) before sharing a package across targets.
 
 ## The Vault
 
@@ -381,39 +278,15 @@ run reports it without refreshing.
 
 ## If the agent answers with silence
 
-A model can pass every check at create time and still fail on the call. Create
-validates what your organisation is allowed to use; whether the provider behind
-it answers is a different question.
-
-```sh
-voiceai agents calls list <agent_id> --json
-```
-
-`call_end_reason` on the latest call names the layer:
-`terminal failure: component=llm reason=hard_fail` is the LLM, and `stt` and
-`tts` appear the same way. That is a model or provider problem rather than a
-problem with the compiled body, and swapping that one binding is the fix.
+A successful deployment does not prove that each provider answers during a call.
+Follow [Verify the agent](/deploy/slng#5-verify-the-agent) to test an interaction
+and [Troubleshooting](/deploy/slng#troubleshooting) to inspect a failure.
 
 ## There is no `unmute dev`
 
-`dev` runs the generated project locally, and this target compiles no project.
-To talk to a pushed agent, open a web session:
-
-```sh
-voiceai agents web-sessions create <agent_id> --file session.json
-```
-
-The agent id is the one `unmute deploy` printed; `voiceai agents list` finds it
-again. The command returns LiveKit connection details; it does not open a
-microphone or prove the worker joined. For a browser test, open the agent in
-the SLNG dashboard, choose **Test**, then **Web session**, and allow microphone
-access. See [the test panel guide](https://docs.slng.ai/dashboard/agent-infra#test-your-agent).
-
-Supply the request body with `--file`. A minimal `session.json` is
-`{"arguments": {}}`; fill any required inputs without defaults in `arguments`.
-For inbound calls, those inputs need defaults because the carrier supplies no
-web-session payload. Follow [the phone setup](/deploy/slng#receive-phone-calls)
-for both carrier routing and trunk attachment.
+`unmute dev` runs a generated project locally; this target emits no project.
+Use the SLNG dashboard to [test the deployed agent](/deploy/slng#5-verify-the-agent),
+or [create a session for your own client](/deploy/slng#create-a-session-for-your-own-client).
 
 ## Where to go next
 
