@@ -1562,11 +1562,11 @@ async def entrypoint(ctx: JobContext) -> None:
 {
   "target": "livekit",
   "provider": "livekit",
-  "version": "1.6.10",
+  "version": "1.8.1",
   "supported": {
-    "floor": "1.6.10",
-    "ceiling": "1.6.10",
-    "verified": "2026-08-16"
+    "floor": "1.8.1",
+    "ceiling": "1.8.1",
+    "verified": "2026-09-13"
   },
   "entry_agent": "Greeter",
   "agents": [
@@ -1696,9 +1696,9 @@ async def entrypoint(ctx: JobContext) -> None:
     }
   ],
   "notes": [
-    "listen: slng via slng.STT (livekit-plugins-slng\u003e=1.6.1, verified 2026-07-15)",
+    "listen: slng via slng.STT (livekit-plugins-slng\u003e=1.8.1, verified 2026-07-15)",
     "reason: openai via openai.LLM (livekit-agents[openai], verified 2026-07-18)",
-    "speak: slng via slng.TTS (livekit-plugins-slng\u003e=1.6.1, verified 2026-07-15)",
+    "speak: slng via slng.TTS (livekit-plugins-slng\u003e=1.8.1, verified 2026-07-15)",
     "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory",
     "turn pace balanced (silence 0.3s from the pace, closes at 1.6s)"
   ]
@@ -1822,7 +1822,7 @@ def _emit(record: dict) -> None:
 
 
 def _native_speech(session):
-    # ponytail: private reads pinned to LiveKit 1.6.10; replace with public
+    # ponytail: private reads pinned to LiveKit 1.8.1; replace with public
     # identity/input events when available. Missing fields lose association,
     # never speech. current_speech names playback, not this coroutine's work.
     speech_var = getattr(agent_activity, "_SpeechHandleContextVar", None)
@@ -2512,9 +2512,9 @@ requires-python = ">=3.11"
 dependencies = [
     "httpx",
     "langfuse>=4,<5",
-    "livekit-agents[openai]==1.6.10",
-    "livekit-plugins-silero>=1.6.1",
-    "livekit-plugins-slng>=1.6.1",
+    "livekit-agents[openai]==1.8.1",
+    "livekit-plugins-silero>=1.8.1",
+    "livekit-plugins-slng>=1.8.1",
     "opentelemetry-sdk>=1.33,<2",
     "python-dotenv",
 ]
@@ -2562,8 +2562,8 @@ class CallTrace(SpanProcessor):
 
     It copies the call's correlating attributes onto every span, because
     Langfuse v4 filters and sums over observations and an attribute that sits
-    only on the top span cannot group the spans underneath it. On 1.6.10
-    livekit's own metadata= does this too, but 1.8.0 rewrote that processor to
+    only on the top span cannot group the spans underneath it. Before 1.8.0
+    livekit's own metadata= did this too, but 1.8.0 rewrote that processor to
     stamp the job's room and job id instead, so this does not rely on it.
 
     It groups each exchange under a `turn` span. livekit has no span covering
@@ -2732,11 +2732,11 @@ def setup_langfuse(
         )
 
     trace_provider = TracerProvider()
-    # Our own processor, not livekit-agents' metadata= below. On 1.6.10 that
-    # argument does stamp every span, but 1.8.0 rewrote its processor to stamp
-    # the job's own room_id and job_id instead and return early, so from 1.8.0
-    # on the metadata= route reaches nothing inside a job. This one is the same
-    # on both.
+    # Our own processor, not livekit-agents' metadata= below. Before 1.8.0 that
+    # argument did stamp every span, but 1.8.0 rewrote its processor to stamp
+    # the job's own room_id and job_id instead and return early, so at the
+    # supported version the metadata= route reaches nothing inside a job. This
+    # one works either way.
     # The tracer is taken before the patch so this module's own spans are not
     # wrapped by it. They name no turn span, so it would change nothing, but a
     # tracer that wraps itself is a bad thing to leave for the next reader.

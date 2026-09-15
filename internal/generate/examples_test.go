@@ -55,7 +55,7 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 // single-agent shape the compiler tests need.
 func examplePackagePath(name string) string {
 	switch name {
-	case "remy", "safe_core", "daily_carrier", "simple-prompt", "typed_state", "typed_inputs", "prefetch_core", "terminal_step":
+	case "remy", "safe_core", "daily_carrier", "simple-prompt", "typed_state", "typed_inputs", "prefetch_core", "terminal_step", "turn_listener", "turn_listener_gradium", "speechmatics_local", "speechmatics_listen", "live_model":
 		return filepath.Join("..", "testdata", name)
 	case "salon-concierge-v2", "salon-concierge-v3":
 		// Not a shipped example. It is a package we run against real providers,
@@ -1246,11 +1246,31 @@ func TestPublicExamplePackages(t *testing.T) {
 	// are under internal/voice-agents-tests and are deliberately not
 	// reader-facing. TestCustomerIntakeCoversEveryDeclaredType is what stops it
 	// quietly losing the coverage it exists for.
+	// pharmacy-refills and takeaway-orders are the fifth and sixth, added
+	// 2026-09-13, and they are one pair: the two speech-to-speech architectures,
+	// both at OpenAI, both browser only, so a reader can hold them against each
+	// other and against a cascade. Each is the use case where its own shape
+	// earns its place rather than a generic demo wearing a different key.
+	//
+	// pharmacy-refills is `architecture: realtime`, because a caller reading a
+	// prescription reference off a box pauses mid-reference, and who ends the
+	// turn is the one thing that decides whether that call works. It is the only
+	// architecture where an author can say.
+	//
+	// takeaway-orders is `architecture: live`, because the caller wants a fast
+	// back-and-forth and the model handles being talked over itself, while the
+	// menu lookup and the pricing go to the backend it names.
+	//
+	// Both carry a knowledge base with real documents, which is deliberate:
+	// knowledge on a speech-to-speech package built no index until 2026-09-13,
+	// and nothing shipped exercised it.
 	want := []string{
 		"customer-intake",
 		"hotel-concierge",
+		"pharmacy-refills",
 		"salon-concierge",
 		"salon-concierge-single-prompt",
+		"takeaway-orders",
 	}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)

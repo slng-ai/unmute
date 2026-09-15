@@ -140,7 +140,7 @@ dispatch rule keeps naming the old worker, so inbound calls stop.
 
 ## models
 
-Four sections, and the section an entry sits in decides its kind.
+Five sections, and the section an entry sits in decides its kind.
 
 | Section | Job | Common name |
 |---|---|---|
@@ -148,10 +148,13 @@ Four sections, and the section an entry sits in decides its kind.
 | `speak` | turns text into audio | TTS |
 | `listen` | turns audio into text | STT |
 | `turn` | decides when the caller has finished speaking | turn detection or VAD |
+| `live` | listens, thinks and speaks as one model; LiveKit and Pipecat, a list of entries with `name:` | speech to speech, live model |
 
 Entry names are yours and share one namespace across sections. An agent points
 at an entry by name. Entries you never reference are legal alternates, so
-swapping a voice is a one line change.
+swapping a voice is a one line change. An agent names either `think` and
+`speak`, or `live`; `models.md` has the live model's block and what it
+refuses.
 
 Each section allows these fields:
 
@@ -167,10 +170,13 @@ Each section allows these fields:
 | `fallback` | `think`, `listen` |
 
 The `turn:` section is the only thing that ends a turn. Some transcribers
-(AssemblyAI, Cartesia, Soniox, Speechmatics) detect turns themselves, but on
-Pipecat 1.8.0 they only propose an ending and the `turn:` entry still decides.
+(AssemblyAI, Cartesia, Soniox) detect turns themselves, but while `turn:` names
+the local pair they only propose an ending and the `turn:` entry still decides.
 So never drop `turn:` or set `semantic_endpointing: off` on the theory that the
-transcriber covers it.
+transcriber covers it. On Pipecat the one way to hand the decision over is
+explicit: `turn: provider: listen` with a Deepgram Flux, Cartesia Turns, Gradium
+or Speechmatics listener, and `eager: true` on the first two to answer a
+prediction early; the models reference has the shape and the refusals.
 
 Unmute keeps no list of valid model ids. `model:` and `voice:` are forwarded to
 the provider exactly as written, so a typo is a provider error at run time, not
@@ -207,6 +213,7 @@ agents:
 | `instructions` | path to a Markdown prompt in the package |
 | `think` | a `models.think` entry name |
 | `speak` | a `models.speak` entry name |
+| `live` | a `models.live` entry name, in place of `think` and `speak`; LiveKit and Pipecat, one agent, no tasks |
 | `tools` | tool files this agent may call, by name |
 | `tasks` | tasks this agent can run: each item is a full definition, or a bare name for a task another agent already defines |
 | `task_groups` | entries under `task_groups:` this agent may run |
@@ -379,11 +386,11 @@ data until its access and retention rules are approved.
 targets:
   pipecat:
     provider: pipecat
-    version: "1.8.0"
+    version: "1.10.0"
 
   livekit:
     provider: livekit
-    version: "1.6.10"
+    version: "1.8.1"
     sdk_language: python
     models:
       detector:

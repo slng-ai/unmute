@@ -689,8 +689,8 @@ async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
     merely win, it wins in silence. That is why no router model here is built
     with either field.
 
-    The body restates the framework's own default (livekit-agents 1.6.10,
-    agents/voice/agent.py:524-545), because that default passes no per-request
+    The body restates the framework's own default (livekit-agents 1.8.1,
+    agents/voice/agent.py:559-580), because that default passes no per-request
     extras and ModelSettings carries only tool_choice, so there is no supported
     seam short of the node. The version pin is exact, floor equal to ceiling, so
     a framework bump is already a deliberate step; checking this against the new
@@ -708,7 +708,7 @@ async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
     """
     session = agent.session
     # The activity resolves a per-class override against the session default the
-    # same way (agent_activity.py:4628-4630). isinstance covers both the not-given and
+    # same way (agent_activity.py:4938). isinstance covers both the not-given and
     # the None case without reaching for a private helper.
     activity_llm = agent.llm if isinstance(agent.llm, llm.LLM) else session.llm
     tool_choice = model_settings.tool_choice if model_settings else NOT_GIVEN

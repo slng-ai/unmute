@@ -21,7 +21,7 @@ var livekitCatalog = []Entry{
 		Framework: LiveKit, Role: Listen, Vendor: "slng",
 		Distributes: []string{"deepgram"},
 		Verified:    "2026-07-15", Docs: "https://docs.livekit.io/agents/models/stt/slng/",
-		Install: InstallSpec{Package: "livekit-plugins-slng", Constraint: ">=1.6.1"},
+		Install: InstallSpec{Package: "livekit-plugins-slng", Constraint: ">=1.8.1"},
 		Import:  "from livekit.plugins import slng",
 		Call: &CallSpec{
 			Class: "slng.STT", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",
@@ -137,7 +137,7 @@ var livekitCatalog = []Entry{
 		Framework: LiveKit, Role: Speak, Vendor: "slng",
 		Distributes: []string{"cartesia", "deepgram"},
 		Verified:    "2026-07-15", Docs: "https://docs.livekit.io/agents/models/tts/slng/",
-		Install: InstallSpec{Package: "livekit-plugins-slng", Constraint: ">=1.6.1"},
+		Install: InstallSpec{Package: "livekit-plugins-slng", Constraint: ">=1.8.1"},
 		Import:  "from livekit.plugins import slng",
 		Call: &CallSpec{
 			Class: "slng.TTS", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",
@@ -309,11 +309,11 @@ var livekitCatalog = []Entry{
 		// would reach LiveKit Inference instead of the router (FR-014).
 		//
 		// extra_headers and extra_body are constructor kwargs on openai.LLM and
-		// are forwarded into every chat() call. Re-read 2026-08-22 against the
-		// pinned 1.6.10, where chat() builds its extras at llm.py:953-968: a
-		// per-request extra_kwargs is merged in first, and then a constructor
-		// value **replaces** the whole entry, `extra["extra_headers"] =
-		// self._opts.extra_headers` at :961-962. Not a per-key merge.
+		// are forwarded into every chat() call. Re-read 2026-09-13 against the
+		// pinned 1.8.1, where chat() builds its extras at llm.py:958-968: a
+		// per-request extra_kwargs is merged in first (:961-962), and then a
+		// constructor value **replaces** the whole entry, `extra["extra_headers"]
+		// = self._opts.extra_headers` at :967-968. Not a per-key merge.
 		//
 		// That line is load-bearing now rather than background. extra_body still
 		// belongs here, because one inline configuration serves the whole job. The

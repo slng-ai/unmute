@@ -9,7 +9,7 @@
 targets:
   livekit:
     provider: livekit
-    version: "1.6.10"
+    version: "1.8.1"
     sdk_language: python
 
   # Added 2026-08-28. This fixture is the only package left with a task group
@@ -17,4 +17,4 @@ targets:
   # used examples/task-groups and examples/subagents run here now.
   pipecat:
     provider: pipecat
-    version: "1.8.0"
+    version: "1.10.0"

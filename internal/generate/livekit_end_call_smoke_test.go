@@ -83,7 +83,7 @@ async def check_end_call(capture, *, enabled):
 
 
 async def main(capture):
-    assert version("livekit-agents") == "1.6.10"
+    assert version("livekit-agents") == _report["version"], (version("livekit-agents"), _report["version"])
     await check_end_call(capture, enabled=True)
     await check_end_call(capture, enabled=False)
 

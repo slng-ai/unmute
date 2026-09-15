@@ -105,6 +105,12 @@ def require_env() -> None:
 A missing key stops the container at startup and names what is missing, instead
 of failing on the first spoken word.
 
+A package that binds a [live model](/models/live) emits one service where the
+transcriber, the model and the synthesizer would be built. It hears the caller's
+audio directly, speaks in its own voice, and hands its tools to the `think` entry
+it names. It is the one shape whose emitted `bot.py` builds no transcriber and no
+synthesizer.
+
 ## Run it without Unmute
 
 The generated README says it:
@@ -122,7 +128,7 @@ uv run bot.py -t webrtc                   # web: open the URL it prints
 
 ```toml pyproject.toml
 dependencies = [
-    "pipecat-ai[openai,runner,silero,tracing,webrtc]==1.8.0",
+    "pipecat-ai[openai,runner,silero,tracing,webrtc]==1.10.0",
     "pipecat-slng>=0.5.2",
     "python-dotenv>=1.0",
 ]
@@ -131,6 +137,15 @@ dependencies = [
 The extras are derived from what your package actually uses: the providers you
 bound, the turn detector, tracing if you enabled it. The framework version is
 the `version:` from your target.
+
+One thing to know if you change the base image. The OpenAI SDK this resolves
+verifies TLS against the operating system's certificate store rather than a
+bundle inside the package. The base image the generated Dockerfile uses is the
+framework vendor's own and carries them. Swap it for a minimal image with no
+certificates and every provider call fails at the handshake, with an error that
+names TLS and not the provider. Install `ca-certificates` in your image, or set
+`SSL_CERT_FILE` to a bundle you supply. The generated README says the same, next
+to the environment it lists.
 
 ## Deploy
 

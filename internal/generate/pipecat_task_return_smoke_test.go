@@ -2,10 +2,42 @@
 
 package generate
 
-import "testing"
+import (
+	"testing"
 
+	"github.com/slng-ai/unmute/internal/ir"
+)
+
+// The think binding is pinned to OpenAI for this one smoke, and the reason is
+// worth keeping next to it.
+//
+// What this test is about is the context an owner gets back when a task
+// returns: which messages are there, which tools it advertises, and that no
+// task-private value leaked. It reads those off the request body, and the body
+// it knows how to read is the OpenAI chat-completions shape: `messages` with a
+// `role`, `tools` with a `function.name`, a `tool_call_id` per call.
+//
+// The salon example's own think vendor is not part of that subject, and it
+// moved: it was OpenAI when this was written and is native Gemini on Vertex
+// now. A Google service builds its request differently and has no
+// `build_chat_completion_params`, so the stand-in below raised on it and the
+// whole suite failed for a reason that had nothing to do with task return.
+//
+// Pinning the vendor keeps the assertions meaningful and stops this test from
+// breaking every time the example changes model. Whether the emitted bot works
+// on Vertex is a different question, and the other salon smokes compile and run
+// the example as it actually ships.
 func TestSmokePipecatTaskReturnSettlesOriginalCall(t *testing.T) {
-	runPipecatSmokeScript(t, "salon-concierge", nil, nil, pipecatTaskReturnSmokeScript)
+	openAIThink := func(tgt *ir.Target) {
+		binding, ok := tgt.Models.Reason["reasoning"]
+		if !ok {
+			t.Fatal("salon-concierge has no think entry named reasoning to pin")
+		}
+		binding.Provider, binding.Model = "openai", "gpt-5.6-luna"
+		binding.Params = map[string]any{"reasoning_effort": "none"}
+		tgt.Models.Reason["reasoning"] = binding
+	}
+	runPipecatSmokeScript(t, "salon-concierge", openAIThink, nil, pipecatTaskReturnSmokeScript)
 }
 
 const pipecatTaskReturnSmokeScript = `"""A completed verification cannot remain running in the owner's context."""

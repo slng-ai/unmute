@@ -1,0 +1,153 @@
+---
+title: "Live"
+description: "One model that hears, thinks, speaks and decides its own turns, with a second model for its tools."
+---
+
+`architecture: live` builds one model on a vendor's Live API. It hears the
+caller's audio, decides when to answer, and speaks in its own voice. There is no
+transcriber, no synthesizer and no turn detector, because the model does all of
+that itself.
+
+Its tools and its harder thinking run somewhere else: a `think:` entry you name
+as its `backend:`. The model hands work over and keeps talking while it waits.
+
+```yaml agent.yaml
+architecture: live
+
+models:
+  live:
+    - name: voice
+      provider: openai
+      model: gpt-live-1
+      voice: marin
+      backend: fast        # runs the tools and the hard reasoning
+  think:
+    fast:
+      provider: openai
+      model: gpt-5.6-terra
+
+agents:
+  desk:
+    instructions: instructions.md
+    live: voice
+    tools:
+      - lookup_customer
+```
+
+On this page:
+
+- [Why pick it](#why-pick-it) - and when not to
+- [Every key a live entry takes](#every-key-a-live-entry-takes)
+- [What the backend is for](#what-the-backend-is-for)
+- [What it can still do](#what-it-can-still-do) - tools and knowledge
+- [What it cannot carry](#what-it-cannot-carry) - and why
+- [Troubleshooting](#troubleshooting)
+
+The full reference, including the per-target differences and the vendor lists,
+is on [Live model](/models/live). This page is the shape and the trade.
+
+## Why pick it
+
+**The shortest pause.** Nothing is turned into text and back, so the caller
+waits for one model rather than four services in a row.
+
+**It handles being talked over.** The model decides when the caller has finished
+and what to do when they cut in. You write no turn settings at all, because
+none of them reach it.
+
+**Pick `realtime` instead** if you want to decide who ends the turn, or to keep
+a voice you already use. Pick `cascade` if you need tasks, handoffs or saved
+call state.
+
+## Every key a live entry takes
+
+`name`, `provider` and `model` are required.
+
+<ParamField path="name" type="string" required>
+  The entry's name. An agent binds it with `live: <name>`.
+</ParamField>
+
+<ParamField path="provider" type="openai" required>
+  The vendor. One name today, and the list is closed.
+</ParamField>
+
+<ParamField path="model" type="string" required>
+  The model id, sent exactly as written.
+</ParamField>
+
+<ParamField path="voice" type="string">
+  The voice the model speaks in. Left out, the vendor's default applies.
+</ParamField>
+
+<ParamField path="backend" type="a models.think entry name">
+  The entry that runs this model's tools and its harder thinking. Required as
+  soon as the agent holds a tool.
+</ParamField>
+
+<ParamField path="description" type="string">
+  A note for whoever reads the package next. It reaches nothing at runtime.
+</ParamField>
+
+## What the backend is for
+
+A live model is good at talking and less good at careful work. So it does not do
+the careful work: it hands the request to the `backend:` entry, which calls your
+tools and thinks the hard part, and the answer comes back as something the live
+model says out loud.
+
+Two consequences worth knowing before you write one:
+
+- **An agent with tools must name a `backend:`.** With none there is nowhere for
+  the handed-over work to run, and the vendor's own code says so rather than
+  failing quietly. The compiler refuses at compile instead.
+- **The backend must be at the same vendor**, because the handover happens
+  inside the live session itself.
+
+An agent with no tools needs no backend. It declines anything that would need
+one, and the emitted runbook says so.
+
+## What it can still do
+
+**Knowledge.** A `knowledge:` section works exactly as it does in a cascade. The
+documents are read and indexed when the worker starts, and a tool file naming
+the base makes them searchable mid-call. The search runs on the backend with
+every other tool, and the answer comes back as something the live model says.
+
+[`takeaway-orders`](https://github.com/slng-ai/unmute/tree/main/examples/takeaway-orders)
+is the shipped example. It is a takeaway taking phone orders, which is the use
+case where this shape earns its place: the caller wants a fast back-and-forth,
+and the menu lookup and the pricing go to the backend while the model keeps
+talking.
+
+## What it cannot carry
+
+A live session fixes its instructions, its conversation and its tool list when
+it starts. Everything below changes one of those mid-call, so none of them fit.
+
+| Written | Why it is refused |
+|---|---|
+| a second agent, `tasks`, `task_groups`, `handoffs` | each changes the prompt mid-call |
+| `escalations` | a transfer needs a phone leg this shape does not carry yet |
+| `listen`, `speak`, `turn`, `conversation.interruption` | the model does all of this itself |
+| `variables`, `prefetch` | the instructions are fixed when the session starts |
+| `tracing` | this shape has no traced worker yet |
+| an `mcp:` tool | no place to open and close a server connection yet |
+| a phone connection | this shape compiles for the browser route |
+
+The rows saying "yet" are limits of this release. They are refused rather than
+emitted half working, so a package that compiles is one whose every setting
+reaches the call.
+
+## Troubleshooting
+
+**"is bound by agent X, which has tools, and names no backend"** add
+`backend:` naming a `think:` entry at the same vendor, or remove the agent's
+tools.
+
+**"architecture: live has no place for tasks"** write `architecture: cascade`.
+The message also names `architecture: realtime`, and then says that shape
+carries no tasks either. Both are true.
+
+**The greeting does not match what you wrote.** It will not. The greeting reaches
+the model as an instruction rather than a line to read out, because there is no
+synthesizer to read it with. Expect the sense of the line, not its words.

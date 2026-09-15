@@ -182,15 +182,28 @@ func TestAbsentTimingStaysNil(t *testing.T) {
 	}
 }
 
+// TestStreamingContract names the kinds each target reports rather than counting
+// them: only Pipecat has a framework observer that splits a reply's interval, so
+// the breakdown belongs to one fixture and its absence from the other is the
+// contract rather than an omission.
 func TestStreamingContract(t *testing.T) {
-	for _, target := range []string{"livekit", "pipecat"} {
+	for target, want := range map[string][]string{
+		"livekit": {KindCall, KindExchange, KindText, KindOperation, KindMeasurement},
+		"pipecat": {KindCall, KindExchange, KindText, KindOperation, KindMeasurement, KindBreakdown},
+	} {
 		records := readFixture(t, "streaming-"+target+".jsonl")
 		kinds := map[string]bool{}
 		for _, record := range records {
 			kinds[record.Kind] = true
 		}
-		if len(kinds) != 5 {
-			t.Fatalf("%s: got %v", target, kinds)
+		for _, kind := range want {
+			if !kinds[kind] {
+				t.Errorf("%s reports no %s record", target, kind)
+			}
+			delete(kinds, kind)
+		}
+		for kind := range kinds {
+			t.Errorf("%s reports a %s record this contract does not name", target, kind)
 		}
 	}
 }
@@ -305,5 +318,77 @@ func TestHandoffIsAnOperationTypeOfItsOwn(t *testing.T) {
 	}
 	if _, _, err := Extract([]byte(Sentinel + strings.Replace(row, `"handoff"`, `"transfer"`, 1))); err == nil {
 		t.Error("accepted an operation type no producer emits")
+	}
+}
+
+// breakdownLine is one reply's interval, split the way the Pipecat observer
+// splits it: a wait the VAD setting owns, two services, and the pipeline time
+// between them. The durations add up to the total, which is the whole point.
+const breakdownLine = `{"version":2,"kind":"breakdown","call_id":"call-a","id":"breakdown-1","revision":1,"order":1,` +
+	`"breakdown":{"measured_from":"user_silence","total_secs":1.02,"parts":[` +
+	`{"key":"endpointing_wait","label":"endpointing wait","owner":"config: VAD stop_secs","owner_kind":"setting","start_time":1757606400.1,"duration_secs":0.2},` +
+	`{"key":"stt","label":"transcription","owner":"DeepgramSTTService#0","owner_kind":"service","start_time":1757606400.3,"duration_secs":0.12},` +
+	`{"key":"pipeline","label":"pipeline","owner":"pipeline","owner_kind":"pipeline","start_time":1757606400.42,"duration_secs":0.04},` +
+	`{"key":"llm","label":"LLM inference","owner":"OpenAILLMService#0","owner_kind":"service","start_time":1757606400.46,"duration_secs":0.66}]}}`
+
+// TestBreakdownPartsAddUpToTheTotal is the one lie this record can tell. The
+// parts account for the whole interval, so a producer that drops a part and
+// keeps the framework's total shows a reader a timeline that is missing time
+// and says nothing about it. Arithmetic catches that here; nothing downstream
+// would.
+func TestBreakdownPartsAddUpToTheTotal(t *testing.T) {
+	record, found, err := Extract([]byte(Sentinel + breakdownLine))
+	if err != nil || !found {
+		t.Fatalf("a whole breakdown was refused: %v", err)
+	}
+	if record.Breakdown.MeasuredFrom != "user_silence" || len(record.Breakdown.Parts) != 4 {
+		t.Fatalf("decoded %+v", record.Breakdown)
+	}
+	if first := record.Breakdown.Parts[0]; first.Key != "endpointing_wait" || first.OwnerKind != "setting" || first.DurationSecs != 0.2 {
+		t.Errorf("first part decoded to %+v", first)
+	}
+	for name, bad := range map[string]string{
+		"a part dropped but the total kept": strings.Replace(breakdownLine,
+			`{"key":"pipeline","label":"pipeline","owner":"pipeline","owner_kind":"pipeline","start_time":1757606400.42,"duration_secs":0.04},`, "", 1),
+		"an owner kind nothing groups on":  strings.Replace(breakdownLine, `"owner_kind":"setting"`, `"owner_kind":"vad"`, 1),
+		"an anchor that names no interval": strings.Replace(breakdownLine, `"user_silence"`, `"somewhere"`, 1),
+		"a part that gives time back":      strings.Replace(breakdownLine, `"duration_secs":0.2`, `"duration_secs":-0.2`, 1),
+		"a part with no owner":             strings.Replace(breakdownLine, `"owner":"pipeline"`, `"owner":""`, 1),
+		"a part with no key":               strings.Replace(breakdownLine, `"key":"stt"`, `"key":""`, 1),
+		"no parts at all":                  `{"version":2,"kind":"breakdown","call_id":"call-a","id":"b","revision":1,"order":1,"breakdown":{"measured_from":"user_silence","total_secs":0,"parts":[]}}`,
+		"a total that is not a number":     strings.Replace(breakdownLine, `"total_secs":1.02`, `"total_secs":1e999`, 1),
+		"a second payload beside it":       strings.Replace(breakdownLine, `"breakdown":{`, `"text":{},"breakdown":{`, 1),
+	} {
+		if _, _, err := Extract([]byte(Sentinel + bad)); err == nil {
+			t.Errorf("accepted %s", name)
+		}
+	}
+	// A greeting is anchored on the client connecting, not on a caller falling
+	// silent, and the page says so rather than comparing the two.
+	if _, _, err := Extract([]byte(Sentinel + strings.Replace(breakdownLine, `"user_silence"`, `"client_connected"`, 1))); err != nil {
+		t.Errorf("a greeting's breakdown was refused: %v", err)
+	}
+}
+
+// TestAToolThatRanOutOfTimeSaysSo: a handler that raised and one that ran past
+// its deadline are different answers to "why is there no result", and both are
+// states of their own carrying the text that explains them. A reason on a row
+// that returned has nothing to explain, so it is refused.
+func TestAToolThatRanOutOfTimeSaysSo(t *testing.T) {
+	row := `{"version":2,"kind":"operation","call_id":"call-a","id":"tool-1","revision":1,"order":1,` +
+		`"operation":{"type":"tool","name":"check_availability","state":"timed_out","reason":"ran past its 5s deadline"}}`
+	record, found, err := Extract([]byte(Sentinel + row))
+	if err != nil || !found {
+		t.Fatalf("a timed-out tool was refused: %v", err)
+	}
+	if record.Operation.State != "timed_out" || record.Operation.Reason == "" {
+		t.Fatalf("decoded %+v", record.Operation)
+	}
+	if _, _, err := Extract([]byte(Sentinel + strings.Replace(row, `"timed_out"`, `"returned"`, 1))); err == nil {
+		t.Error("accepted a reason on a row that returned, which has nothing to explain")
+	}
+	failed := strings.Replace(row, `"timed_out"`, `"failed"`, 1)
+	if _, _, err := Extract([]byte(Sentinel + failed)); err != nil {
+		t.Errorf("a failed tool with its error text was refused: %v", err)
 	}
 }

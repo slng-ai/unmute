@@ -1,0 +1,140 @@
+---
+title: "Architecture"
+description: "The three pipeline shapes a package can compile to, what each costs, and how to pick one."
+---
+
+`architecture:` is the first line of `agent.yaml`. It says which pipeline to
+build. Everything else in the file is read against it.
+
+There are three shapes. One splits the work across four services. Two give the
+whole job to a single model that hears the caller and answers out loud.
+
+```yaml agent.yaml
+architecture: cascade     # the default; leave it out and you get this
+```
+
+On this page:
+
+- [The three shapes](#the-three-shapes) - one paragraph each
+- [Every key this page adds](#every-key-this-page-adds) - there is one
+- [Which to pick](#which-to-pick) - the questions that decide it
+- [What each one costs](#what-each-one-costs) - latency, control, price
+- [Which sections each one takes](#which-sections-each-one-takes) - the full table
+- [What compiles where](#what-compiles-where) - per target
+- [Troubleshooting](#troubleshooting) - the refusals that come up most
+
+## The three shapes
+
+**`cascade`** is four services in a row. A transcriber turns the caller's audio
+into words. A model reads the words and writes a reply. A synthesizer speaks it.
+A turn detector decides when the caller has finished. You pick each one, and you
+can mix vendors freely.
+
+**`realtime`** is one model on a vendor's Realtime API. It hears the audio
+itself and answers out loud. You still choose who decides the turn, and you can
+put your own synthesizer in front of it.
+
+**`live`** is one model on a vendor's Live API. It hears, thinks and speaks, and
+it decides the turn itself. Its tools run on a second model you name.
+
+## Every key this page adds
+
+One key, at the top level of `agent.yaml`. It is read before anything else in
+the file, because it decides which `models:` sections are legal.
+
+<ParamField path="architecture" type="cascade | realtime | live">
+  Which pipeline to build. Left out, you get `cascade`, which is what every
+  package written before this key existed gets. An agent that binds a shape the
+  key does not name is refused, and the message names the architecture rather
+  than the binding.
+</ParamField>
+
+## Which to pick
+
+Three questions, in the order that settles it fastest.
+
+**Do you need tasks, handoffs, or saved call state?** Then `cascade`. It is the
+only shape that carries them today, and the reason is in
+[What each one costs](#what-each-one-costs).
+
+**Do you need to mix vendors?** Then `cascade`. A speech-to-speech model is one
+vendor for the whole job.
+
+**Do you want the shortest possible pause before the agent answers?** Then
+`realtime` or `live`. Nothing is converted to text and back, so the wait is one
+model's, not four services'.
+
+Between the two speech-to-speech shapes: pick `realtime` if you want to decide
+who ends the turn, or to keep a voice you already use. Pick `live` if you want
+the model to handle turns itself and hand its harder thinking to a second model.
+
+## What each one costs
+
+| | `cascade` | `realtime` | `live` |
+|---|---|---|---|
+| Services built | four | one | one |
+| Vendors | mix freely | one | one |
+| Who decides the turn | you | you choose | the model |
+| Whose voice | any synthesizer | the model's, or yours | the model's |
+| Tasks and handoffs | yes | no | no |
+| Saved call state | yes | no | no |
+| Phone calls | yes | no | no |
+
+The last three rows are the trade. A speech-to-speech session fixes most of what
+it knows when the call starts, so the things that change mid-call are the things
+it cannot carry.
+
+## Which sections each one takes
+
+| Section | `cascade` | `realtime` | `live` |
+|---|---|---|---|
+| `models.listen` | required | refused | refused |
+| `models.think` | required | refused | the `backend:` entry |
+| `models.speak` | required | the half cascade | refused |
+| `models.turn` | optional | refused | refused |
+| `models.realtime` | refused | required | refused |
+| `models.live` | refused | refused | required |
+
+A section refused under one architecture is refused by name, with its line, and
+the message says which architecture does use it.
+
+## What compiles where
+
+| Architecture | LiveKit | Pipecat | slng |
+|---|---|---|---|
+| `cascade` | yes | yes | yes |
+| `realtime` | yes | yes | no |
+| `live` | yes | yes | no |
+
+A cell that says no is a refusal at compile, with a sentence saying which
+architecture to write or which target to compile to. The slng target binds
+listen, think and speak by name, so it has no slot for one model that does all
+three. That is a fact about the target, not a gap in a driver.
+
+## Troubleshooting
+
+**"models.listen is not used under architecture: live"** you moved a package
+to a speech-to-speech shape and left the cascade's sections behind. Delete them.
+The model does that job now.
+
+**"architecture: live has no place for tasks"** the message names
+`architecture: realtime` as the shape whose session takes new instructions
+mid-call, and then says it carries no tasks either. Both are true. Today the
+answer is `architecture: cascade`.
+
+**"slng target ... has no slot for one model that does all three"** compile to
+`livekit` or `pipecat`, or write `architecture: cascade`.
+
+## Where to go next
+
+<Columns cols={3}>
+  <Card title="Cascade" icon="layer-group" href="/build/architecture/cascade">
+    Four services in a row: what each does and where each is taught.
+  </Card>
+  <Card title="Realtime" icon="waveform" href="/build/architecture/realtime">
+    One model, your turn settings, and optionally your own voice.
+  </Card>
+  <Card title="Live" icon="bolt" href="/build/architecture/live">
+    One model that decides its own turns, with a backend for its tools.
+  </Card>
+</Columns>

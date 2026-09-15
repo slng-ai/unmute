@@ -27,6 +27,23 @@ The LLM is usually the largest and the silence window the most predictable.
 **Fix them in the order below, which is order of certainty, not order of size.**
 Most wasted effort goes on the smallest span.
 
+On Pipecat you do not have to guess which of the four it was. Each measured
+reply is split into the parts that make it up, and `unmute dev` shows them in
+time order under the reply latency: the wait, the transcription, the model, the
+synthesis, and the framework time between them. The parts add up to the total,
+so time that belongs to no service shows as its own part rather than going
+missing. Every part names an owner, and the owner's kind says who can change it:
+a `service` you bound, a `setting` you wrote, the `bot`'s own generated code, or
+the `pipeline` itself. Read that before changing anything, and only the parts
+owned by a service or a setting are yours to act on. On LiveKit the per-request
+timings are the equivalent, and there is no such split.
+
+A tool that produced no result says why: `failed` names the kind of error the
+handler raised, `timed_out` means it ran past its deadline, and a call that ended
+because something broke names the service that stopped it. The messages are in
+`build/<target>/dev.log`, not on the page, because an error's text quotes what it
+was working on.
+
 Two traps to avoid when measuring:
 
 - **`e2e_latency` is not silence.** It anchors on `stopped_speaking_at`, which is

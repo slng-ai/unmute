@@ -1,0 +1,53 @@
+# The smallest Pipecat package on the realtime architecture: one agent, two
+# tools, a greeting the model speaks in its own words, and an idle nudge. One
+# model hears the caller and answers, and the tools run over the same socket.
+#
+# turn_detection is written out rather than left off, because `local` is the
+# value that puts the Pipecat service in manual mode and hands the turn back to
+# this project's own detector. internal/generate/pipecat_realtime_test.go reads
+# the emitted module.
+version: 1
+
+name: realtime-pipecat
+architecture: realtime
+entry_agent: desk
+
+secrets:
+  - OPENAI_API_KEY
+
+models:
+  realtime:
+    - name: voice
+      provider: openai
+      model: gpt-realtime-2.1
+      voice: marin
+      turn_detection: local
+
+agents:
+  desk:
+    instructions: instructions.md
+    realtime: voice
+    tools:
+      - lookup_customer
+      - check_availability
+
+tools:
+  - lookup_customer
+  - check_availability
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, this is Sage and Stone Salon. How can I help?"
+  inactivity:
+    nudge_after: 20s
+    end_after: 60s
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m

@@ -206,12 +206,12 @@ gate is a refusal rather than a warning:
 livekit: LiveKit MCP tools require sdk_language: python
 ```
 
-This Unmute release supports exactly `livekit-agents` 1.6.10. A target that
+This Unmute release supports exactly `livekit-agents` 1.8.1. A target that
 names any other version fails the global version check rather than having its
 version quietly changed:
 
 ```text
-livekit: livekit version "1.5.2" is outside the supported range (exactly 1.6.10)
+livekit: livekit version "1.5.2" is outside the supported range (exactly 1.8.1)
 ```
 
 **Pipecat needs nothing extra.** It emits one client per source, started with the
@@ -224,8 +224,8 @@ Pipecat refuses to start when an agent tool, task function, or MCP source on the
 Either way the dependency the project declares picks up an `mcp` extra for
 you, alongside whatever your other models already need. Compiling the worked
 example above, with its other roles filled in, writes
-`livekit-agents[cartesia,deepgram,mcp,openai]==1.6.10` and
-`pipecat-ai[cartesia,deepgram,mcp,openai,runner,silero,webrtc]==1.8.0`.
+`livekit-agents[cartesia,deepgram,mcp,openai]==1.8.1` and
+`pipecat-ai[cartesia,deepgram,mcp,openai,runner,silero,webrtc]==1.10.0`.
 
 ## Advanced
 

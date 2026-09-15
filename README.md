@@ -136,11 +136,11 @@ Three things to notice:
 targets:
   pipecat:
     provider: pipecat
-    version: "1.8.0"
+    version: "1.10.0"
 
   livekit:
     provider: livekit
-    version: "1.6.10"
+    version: "1.8.1"
     sdk_language: python
     models:
       detector:

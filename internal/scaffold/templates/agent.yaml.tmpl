@@ -14,6 +14,14 @@ manifest: manifest
 # overwriting one live agent. Rename it here, not by renaming this folder.
 name: [[yaml .AgentName]]
 [[- end]]
+[[- if .Architecture]]
+
+# Which pipeline this package compiles to. `cascade` is a transcriber, a model,
+# a synthesizer and a turn detector, four services you swap and measure
+# separately, and it is what you get when this key is absent. `realtime` and
+# `live` are one model doing all three jobs, on a vendor's own API.
+architecture: [[.Architecture]]
+[[- end]]
 entry_agent: [[.EntryAgent]]
 [[- if .Tracing]]
 tracing:
@@ -37,8 +45,15 @@ tracing:
 agents:
 [[range .AllAgents]]  [[.Name]]:
     instructions: [[.PromptPath]]
+[[- if $.SpeechSection]]
+    [[$.SpeechSection]]: [[$.SpeechName]]
+[[- if $.SpeechSpeak.Name]]
+    speak: [[$.SpeechSpeak.Name]]
+[[- end]]
+[[- else]]
     think: [[.ModelProfile]]
     speak: [[.VoiceProfile]]
+[[- end]]
 [[$tools := $.AgentTools .Name]][[if $tools]]    tools:
 [[range $tools]]      - [[.]]
 [[end]][[end]][[$tasks := $.AgentTasks .Name]][[if $tasks]]    tasks:
@@ -142,11 +157,80 @@ knowledge:
     documents: [[.Documents]]
 [[if .Embed]]    embed: [[.Embed]]
 [[end]][[end]]
-[[end]]# Every model is defined here once, in the central map grouped by kind (N15):
+[[end]][[if .SpeechSection]]# Every model is defined here once, in the central map grouped by kind (N15).
+# This package's architecture is one model doing the three jobs a cascade
+# splits up, so the section below is the whole pipeline.
+[[else]]# Every model is defined here once, in the central map grouped by kind (N15):
 # think (LLM), speak (TTS), listen (STT), turn (VAD). Agents reference think
 # and speak entries by name; the sole listen/turn entries select themselves.
 # Add alternates alongside and swap with a top-level `listen: <name>` pointer.
-models:
+[[end]]models:
+[[- if .SpeechSection]]
+  # One model listens, thinks and speaks, so there is no transcriber, no
+  # synthesizer and no turn detector here: it does all three itself.
+  [[.SpeechSection]]:
+[[- range .SpeechModels]]
+    - name: [[.Name]]
+[[- if .Description]]
+      description: [[quote .Description]]
+[[- end]]
+      provider: [[.Provider]]
+      model: [[quote .Model]]
+[[- if .Voice]]
+      voice: [[quote .Voice]]
+[[- end]]
+[[- if .Turn]]
+      turn_detection: [[.Turn]]
+[[- end]]
+[[- if .Backend]]
+      # Tools and the harder reasoning run here, while the model keeps talking.
+      backend: [[.Backend]]
+[[- end]]
+[[- end]]
+[[- if .SpeechSpeak.Name]]
+  # The half cascade: the model above hears the caller and decides what to say,
+  # and this synthesizer speaks it. The model writes no voice of its own, which
+  # is what makes the pairing legal.
+  speak:
+    [[.SpeechSpeak.Name]]:
+[[- if .SpeechSpeak.Description]]
+      description: [[quote .SpeechSpeak.Description]]
+[[- end]]
+[[- if .SpeechSpeak.Binding.Provider]]
+      provider: [[.SpeechSpeak.Binding.Provider]]
+[[- end]]
+[[- if .SpeechSpeak.Binding.Model]]
+      model: [[quote .SpeechSpeak.Binding.Model]]
+[[- end]]
+[[- if .SpeechSpeak.Binding.Voice]]
+      voice: [[quote .SpeechSpeak.Binding.Voice]]
+[[- end]]
+[[- if .SpeechSpeak.Binding.Language]]
+      language: [[yaml .SpeechSpeak.Binding.Language]]
+[[- end]]
+[[- if .SpeechSpeak.Binding.Params]]
+      params:[[yamlBlock 8 .SpeechSpeak.Binding.Params]]
+[[- end]]
+[[- end]]
+[[- if .SpeechBackends]]
+  think:
+[[- range .SpeechBackends]]
+    [[.Name]]:
+[[- if .Description]]
+      description: [[quote .Description]]
+[[- end]]
+[[- if .Binding.Provider]]
+      provider: [[.Binding.Provider]]
+[[- end]]
+[[- if .Binding.Model]]
+      model: [[quote .Binding.Model]]
+[[- end]]
+[[- if .Binding.Params]]
+      params:[[yamlBlock 8 .Binding.Params]]
+[[- end]]
+[[- end]]
+[[- end]]
+[[else]]
   think:
 [[range .AllAgents]]    [[.ModelProfile]]:
       description: [[.ModelDescription]]
@@ -185,7 +269,7 @@ models:
     detector:
       provider: livekit
       model: turn-detector-mini
-[[end]]
+[[end]][[end]]
 [[if .Tools]]tools:
 [[range .Tools]]  - [[.Name]]
 [[end]]

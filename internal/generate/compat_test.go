@@ -48,11 +48,17 @@ var compatAllowlist = map[string]string{
 	"testdata/remy": "a group stops on unserved, and a handoff waits for a terminal call to settle",
 }
 
-// newAuthoringKey matches `finish:`, `opening:` or `skip_when_confirmed:` where
-// a package writes one: at the start of a line, after an indent, or as the
-// first key of a list item. A package that writes one of them is expected to
-// change, so it is not held to a digest here; its own gate holds it instead.
-var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_when_confirmed):`)
+// newAuthoringKey matches a key a package writes to ask for a feature that
+// moves its emitted bytes: at the start of a line, after an indent, or as the
+// first key of a list item. A package that writes one is expected to change, so
+// it is not held to a digest here; its own gate holds it instead.
+//
+// `architecture:` is here for the reason the rest are, and is the load-bearing
+// one for speech to speech: a package that writes it compiles to a different
+// pipeline on purpose, and every package that does not must still compile to
+// the bytes it compiled to before the key existed. That is the whole promise
+// the key makes, and this is where it is kept.
+var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_when_confirmed|architecture):`)
 
 // TestPackagesWritingNoNewKeyEmitTheSameBytes is the compatibility guard for
 // spec 010. Every shipped, fixture and test package that writes none of the
@@ -113,7 +119,7 @@ func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {
 			t.Logf("%s changed, allowed: %s", key, reason)
 			continue
 		}
-		t.Errorf("%s writes none of finish:, skip_when_confirmed: or opening: and its emitted bytes changed; that is a regression for every package that asked for none of this feature. Read the diff before touching this test", key)
+		t.Errorf("%s writes none of finish:, skip_when_confirmed:, opening: or architecture: and its emitted bytes changed; that is a regression for every package that asked for none of this feature. Read the diff before touching this test", key)
 	}
 	for key := range want {
 		if _, ok := got[key]; !ok {

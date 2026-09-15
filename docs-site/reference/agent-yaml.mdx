@@ -65,7 +65,7 @@ names its own detector in [targets.yaml](/reference/targets-yaml):
 targets:
   livekit:
     provider: livekit
-    version: "1.6.10"
+    version: "1.8.1"
     sdk_language: python
     models:
       detector:
@@ -91,8 +91,15 @@ split this page and [targets.yaml](/reference/targets-yaml) hold between them.
   Agent that answers. Accepts declared agent name. Required; omission is refused.
 </ParamField>
 
+<ParamField path="architecture" type="cascade | realtime | live">
+  Which pipeline to build. Left out, it is `cascade`. It decides which `models`
+  sections are legal, so it is read before the rest of the file. See
+  [Architecture](/build/architecture/overview).
+</ParamField>
+
 <ParamField path="models" type="map" required>
-  Model palette grouped by kind. Accepts sections `think`, `speak`, `listen`, `turn`.
+  Model palette grouped by kind. Accepts sections `think`, `speak`, `listen`, `turn`,
+  and the speech to speech sections `realtime` and `live`.
   Required; omission is refused.
 </ParamField>
 
@@ -253,9 +260,13 @@ rename deliberately, with the steps above, rather than discovering it on a call.
 
 ## `models`
 
-Four sections. The section an entry sits in decides its kind: `think` (LLM),
-`speak` (TTS), `listen` (STT), `turn` (turn detection). Entry names share one
-namespace across sections and are yours to choose.
+Six sections. The section an entry sits in decides its kind: `think` (LLM),
+`speak` (TTS), `listen` (STT), `turn` (turn detection), and `realtime` and
+`live`, a
+[live model](/models/live) that does the first three as one and compiles on
+both code targets. The first four are maps keyed by entry name; `live` is a list
+whose items carry `name:`. Entry names share one namespace across sections and
+are yours to choose.
 
 ```yaml
 models:
@@ -278,7 +289,18 @@ Which fields are legal depends on the section:
 | `semantic_endpointing` | `turn`: `required`, `preferred`, or `off` |
 | `pace` | `turn`: `snappy`, `balanced`, or `patient`. How quickly the agent decides the caller has finished. Sets the ceiling on a turn, and the floor when `endpointing_delay` is absent. Defaults to `balanced`. No per-target override |
 | `endpointing_delay` | `turn`: a positive duration, the window of silence before the caller counts as finished. The floor on every turn, and only the floor. LiveKit refuses under `250ms` |
+| `eager` | `turn`, Pipecat only, with `provider: listen`: `true` answers the transcriber's predicted end of turn before it is confirmed, dropping the early reply if the caller goes on. Off unless set; costs one model request per prediction |
+
+A `turn` entry's `provider` is `local` (the on-device pair) or, on Pipecat,
+`listen`, which hands the decision to the listening model's own turn detection.
+`listen` takes no `model` of its own and needs a Deepgram Flux or Cartesia Turns
+listening model. Under `listen` the `pace` ceiling becomes the transcriber's own
+end-of-turn timeout, and `semantic_endpointing`, `endpointing_delay` and
+`interruption.minimum_words` are refused because nothing reads them; see
+[Turn detection](/models/turn-detection).
 | `fallback` | `think`, `listen` |
+| `name`, `provider`, `model`, `voice`, `backend`, `description` | `live`, and nothing else: every other field is refused on a live entry by name, with its line. `backend` names a `models.think` entry with `provider: openai` that runs the model's tools and reasoning. See [Live model](/models/live) |
+| `name`, `provider`, `model`, `voice`, `turn_detection`, `description` | `realtime`, and nothing else. `turn_detection` is `server_vad`, `semantic` or `local`. `voice` and an agent `speak:` binding are mutually exclusive, and neither is refused. See [Realtime](/build/architecture/realtime) |
 | `prompt_suffix` | `think`: literal text appended to every prompt this binding sends, up to 512 characters, no `{{variables}}`. A per-target override cannot name a different value. See [Context Router](/optimization/context-router) |
 | `agent_id`, `upstream` | `think`, and only on a binding routed through the SLNG Context Router; refused on any other binding. See [Context Router](/optimization/context-router) |
 
@@ -640,7 +662,19 @@ agents:
 </ParamField>
 
 <ParamField path="think" type="string" required>
-  Name of an entry in `models.think`. No profile is inferred.
+  Name of an entry in `models.think`. No profile is inferred. Required under
+  `architecture: cascade`, and refused under the other two, where one model does
+  this job.
+</ParamField>
+
+<ParamField path="realtime" type="string">
+  Name of an entry in `models.realtime`, in place of `think` and `speak`. Legal
+  only under `architecture: realtime`.
+</ParamField>
+
+<ParamField path="live" type="string">
+  Name of an entry in `models.live`, in place of `think` and `speak`. Legal only
+  under `architecture: live`.
 </ParamField>
 
 <ParamField path="speak" type="string" required>

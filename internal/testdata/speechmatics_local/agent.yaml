@@ -1,0 +1,69 @@
+# A Speechmatics listening binding with the LOCAL turn decider, which is what
+# every package that bound this vendor had before pipecat 1.10.0.
+#
+# It exists because 1.10.0 flipped the service's turn_detection_mode default from
+# EXTERNAL (the caller drives turns, meaning Pipecat's own detector) to VAD (the
+# service closes turns itself). Left implicit, this package would change who ends
+# the caller's turn on a version bump with nobody asking. The emitted bot writes
+# the external mode back, and internal/generate/turn_listener_test.go holds it.
+#
+# The turn section is written out rather than left off so the assertion is about
+# the local decider rather than about the default. Its sibling
+# internal/testdata/speechmatics_listen hands the turn to the transcriber.
+version: 1
+
+name: speechmatics-local
+entry_agent: desk
+
+secrets:
+  - OPENAI_API_KEY
+  - SPEECHMATICS_API_KEY
+  - SLNG_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-terra
+      params:
+        reasoning_effort: "none"
+  speak:
+    voice:
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: speechmatics
+      model: linden-1
+      language: en
+  turn:
+    detector:
+      provider: local
+      model: silero
+      pace: balanced
+
+agents:
+  desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tools:
+      - lookup_customer
+
+tools:
+  - lookup_customer
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, this is Sage and Stone Salon. How can I help?"
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m

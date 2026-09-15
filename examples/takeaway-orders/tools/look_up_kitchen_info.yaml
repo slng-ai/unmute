@@ -1,0 +1,11 @@
+description: >-
+  Look up anything about how the Golden Wok works: opening hours, collection and
+  delivery times, the delivery area and charge, allergens and ingredients, set
+  meals and offers. Use this whenever a caller asks a question the menu does not
+  answer, and quote what comes back rather than guessing. Allergen answers in
+  particular must come from here.
+
+# A knowledge tool owns both sides of its contract, so it declares no input and
+# no output: the search takes one query and hands back passages.
+knowledge:
+  base: kitchen

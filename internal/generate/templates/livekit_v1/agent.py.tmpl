@@ -258,14 +258,18 @@ import os
 {{- if .NeedsFunctionTools}}
     RunContext,
 {{- end}}
+{{- if .LocalTurnTaking}}
     TurnHandlingOptions,
+{{- end}}
 {{- if .NeedsFunctionTools}}
     function_tool,
 {{- end}}
 {{- if .HasColdTransfer}}
     get_job_context,
 {{- end}}
+{{- if .LocalTurnTaking}}
     inference,
+{{- end}}
 {{- if .NeedsLLM}}
     llm,
 {{- end}}
@@ -290,10 +294,15 @@ from livekit.agents.llm import ToolError
 from livekit.agents.beta.tools import EndCallTool  # prebuilt end_call (beta)
 {{- end}}
 from livekit.agents.voice import MetricsCollectedEvent
-from livekit.plugins import {{join .PluginModules ", "}}
+{{if .Live}}{{.Live.Entry.Import}}
+{{else if .Realtime}}{{.Realtime.Service.Entry.Import}}
+{{range .Realtime.Imports}}{{.}}
+{{end}}{{if .PluginModules}}from livekit.plugins import {{join .PluginModules ", "}}
+{{end}}
+{{- else}}from livekit.plugins import {{join .PluginModules ", "}}{{end}}
 
 import dev_metrics
-from dev_metrics import dev_llm_node, dev_say, install_dev_metrics
+from dev_metrics import dev_llm_node{{if .NeedsDevSay}}, dev_say{{end}}, install_dev_metrics
 {{if .Knowledge.Knowledge}}import knowledge
 {{end}}{{if .Tracing}}{{if eq .TracingProvider "coval"}}from tracing import setup_coval
 {{else}}from tracing import setup_langfuse
@@ -1130,8 +1139,8 @@ async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
     merely win, it wins in silence. That is why no router model here is built
     with either field.
 
-    The body restates the framework's own default (livekit-agents 1.6.10,
-    agents/voice/agent.py:524-545), because that default passes no per-request
+    The body restates the framework's own default (livekit-agents 1.8.1,
+    agents/voice/agent.py:559-580), because that default passes no per-request
     extras and ModelSettings carries only tool_choice, so there is no supported
     seam short of the node. The version pin is exact, floor equal to ceiling, so
     a framework bump is already a deliberate step; checking this against the new
@@ -1149,7 +1158,7 @@ async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
     """
     session = agent.session
     # The activity resolves a per-class override against the session default the
-    # same way (agent_activity.py:4628-4630). isinstance covers both the not-given and
+    # same way (agent_activity.py:4938). isinstance covers both the not-given and
     # the None case without reaching for a private helper.
     activity_llm = agent.llm if isinstance(agent.llm, llm.LLM) else session.llm
     tool_choice = model_settings.tool_choice if model_settings else NOT_GIVEN
@@ -1190,7 +1199,16 @@ class _SlngScoped:
 # --- agents ----------------------------------------------------------------
 {{range .Agents}}
 class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
-    def tts_node(self, text, model_settings):
+{{if $.Live}}    # Neither hook below can fire on this package. A live session's model is a
+    # DuplexModel, which the framework wraps as a RealtimeModel, and it dispatches
+    # a reply on that instead of the pipeline these two sit in
+    # (AgentActivity._on_speech_created, agent_activity.py:1682-1700). tts_node's
+    # three call sites are all closed too: say() raises first, the pipeline path is
+    # the same unreachable one, and the realtime path asks for it only when the
+    # reply has no audio modality, which a duplex model never reports. They are
+    # left in place because each raises rather than misbehaves if that ever
+    # changes, and because removing them would be the dev feed's decision to make.
+{{end}}    def tts_node(self, text, model_settings):
         return dev_metrics.dev_tts_node(self, text, model_settings)
 
 {{if not .SlngScope}}    def llm_node(self, chat_ctx, tools, model_settings):
@@ -1246,7 +1264,19 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- end}}
 {{- if .Greeting}}
 {{- if .Greeting.Say}}
+{{- if $.ModelSpeaksItself}}
+        # The greeting is put to the model rather than spoken for it. There is
+        # nothing to speak it with: session.say() raises without a synthesizer
+        # unless the model reports supports_say, and neither of these does
+        # (agent_activity.py:1555-1565). The model paraphrases this rather than
+        # reading it out, so expect the sense of the line and not its letters.
+        self.session.generate_reply(
+            instructions="Open the call with this greeting, in these words as far as you can: "
+            + {{if .Greeting.Templated}}_render({{pyq .Greeting.Say}}, self.session.userdata){{else}}{{pyq .Greeting.Say}}{{end}}
+        )
+{{- else}}
         await dev_say(self.session, {{if .Greeting.Templated}}_render({{pyq .Greeting.Say}}, self.session.userdata){{else}}{{pyq .Greeting.Say}}{{end}})
+{{- end}}
 {{- else if .Greeting.RunLLM}}
 {{- if .Transfers}}
 {{template "opening_guard_note" .}}        self.session.generate_reply(instructions="Greet the caller and offer to help.", {{template "opening_tools" .}})
@@ -2019,6 +2049,21 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 
 # --- session ---------------------------------------------------------------
 def prewarm(proc: JobProcess) -> None:
+{{- if not .LocalTurnTaking}}
+    # No voice activity detector. The model reports the caller's speech itself,
+    # and the framework only listens to it when no detector of ours is present:
+    # AgentActivity._on_input_speech_started sets the user state under
+    # `if self.vad is None or self.using_default_vad`. Loading one here would
+    # not error, it would quietly move "is the caller speaking" off the model.
+{{- if .Realtime}}
+    # A realtime package writing `turn_detection: local` takes the other branch
+    # and loads one, because that is what the framework requires before it will
+    # take the turn decision back (agent_activity.py:383-392).
+{{- end}}
+{{- if not .Knowledge.Knowledge}}
+    return
+{{- end}}
+{{- else}}
     # The FLOOR: how long silence has to last before the runtime treats the
     # caller as finished. {{if .Pace.FloorAuthored}}Authored as endpointing_delay.{{else}}From pace: {{.Pace.Name}}.{{end}}
     #
@@ -2029,6 +2074,7 @@ def prewarm(proc: JobProcess) -> None:
     # Lowering this alone does not shorten a turn. The ceiling is in the session's
     # turn_handling endpointing below, and that is where a 2.5s turn came from.
     proc.userdata["vad"] = silero.VAD.load(min_silence_duration={{.Pace.Floor}})
+{{- end}}
 {{- if .Knowledge.Knowledge}}
     # Read, split and embed every knowledge base here, not on the call path.
     # LiveKit documents prewarm as the place for static data a job needs, and it
@@ -2095,9 +2141,52 @@ async def entrypoint(ctx: JobContext) -> None:
 {{- if .HasUserdata}}
         userdata={{if .Slng.Any}}slng_state{{else}}Userdata(){{end}},
 {{- end}}
+{{- if .Live}}
+        # One model listens, thinks and speaks. It is an llm.DuplexModel, and
+        # AgentSession wraps one in DuplexRealtimeAdapter itself, so it is passed
+        # as llm= with nothing of ours around it.
+        #
+        # Four things a cascaded session is given are deliberately absent, and
+        # each would do damage rather than nothing:
+        #   stt= / tts=  the model hears and speaks itself; a synthesizer here
+        #                would give the call two voices
+        #   turn_handling  the model decides the turn; the adapter reports
+        #                  turn_detection=True and the package can set none of it
+        #   vad=         see prewarm above
+        llm={{template "svc" .Live.Call}},
+{{- if or .InactivityNudgeSecs .InactivityEndSecs}}
+        user_away_timeout={{if .InactivityNudgeSecs}}{{.InactivityNudgeSecs}}{{else}}{{.InactivityEndSecs}}{{end}},
+{{- end}}
+    )
+{{- else}}
+{{- if .Realtime}}
+        # One model hears the caller and answers. It is an llm.RealtimeModel, so
+        # it is passed as llm= with nothing of ours around it, and no transcriber
+        # and no reasoning model are built.
+{{- if .Realtime.TTS}}
+        # The half cascade: the model was asked for text only, and the
+        # synthesizer below speaks it. agent_activity.py:4180 routes a reply
+        # carrying no audio modality through tts_node.
+{{- else}}
+        # The model speaks in its own voice, so there is no synthesizer here. One
+        # would give the call two voices.
+{{- end}}
+        llm={{template "svc" .Realtime.Service.Call}},
+{{- if .Realtime.TTS}}
+        tts={{template "svc" .Realtime.TTS.Call}},
+{{- end}}
+{{- if not .LocalTurnTaking}}
+        # No turn_handling and no vad. The model decides the turn, and the
+        # framework hands that decision back only when a detector of ours is
+        # present and asked for (agent_activity.py:383-392), so passing either
+        # here would move the turn off the model without the package saying so.
+{{- end}}
+{{- else}}
         stt={{template "sttexpr" .STT}},
         llm={{template "llmexpr" .SessionLLM}},
         tts={{template "svc" .SessionTTS.Call}},
+{{- end}}
+{{- if .LocalTurnTaking}}
 {{- if .Interruption}}
         turn_handling=TurnHandlingOptions(
 {{- if .SemanticOff}}
@@ -2131,10 +2220,12 @@ async def entrypoint(ctx: JobContext) -> None:
         ),
 {{- end}}
         vad=ctx.proc.userdata["vad"],
+{{- end}}
 {{- if or .InactivityNudgeSecs .InactivityEndSecs}}
         user_away_timeout={{if .InactivityNudgeSecs}}{{.InactivityNudgeSecs}}{{else}}{{.InactivityEndSecs}}{{end}},
 {{- end}}
     )
+{{- end}}
 
 {{if .Tracing}}{{if eq .TracingProvider "coval"}}
     # The simulation ID arrives with the call, and on a SIP call it arrives after

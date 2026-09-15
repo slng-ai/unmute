@@ -1,0 +1,50 @@
+description: >-
+  Place the reorder for one repeat prescription. Call it only after
+  look_up_prescription found the prescription and the caller has agreed the
+  reference you read back. It answers with one of four states: placed,
+  already_ordered, no_repeats_left, or unknown_reference. Tell the caller which
+  one it was in plain words, and give the collection day only when it returns
+  one.
+
+input:
+  type: object
+  properties:
+    reference:
+      type: string
+      description: >-
+        The same reference look_up_prescription found, exactly as it came back
+        from that tool.
+  required:
+    - reference
+
+output:
+  type: object
+  properties:
+    status:
+      type: string
+      enum:
+        - placed
+        - already_ordered
+        - no_repeats_left
+        - unknown_reference
+    reference:
+      type: string
+    medicine:
+      type: string
+    ready_on:
+      type: string
+  required:
+    - status
+    - reference
+    - medicine
+    - ready_on
+
+local:
+  handler: tools/pharmacy.py
+
+# Once this has started, the order is placed whether or not the caller talks
+# over the answer, so say so rather than leaving it to each runtime's default.
+# Pipecat reads this and will not cancel the call; LiveKit runs every tool to
+# completion anyway, so it is already true there.
+interruption: continue
+effect: returns_data

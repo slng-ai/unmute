@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -107,6 +108,79 @@ func TestTurnDetectionDocsiteHasNoVendorList(t *testing.T) {
 	if m := row.FindStringSubmatch(string(raw)); m != nil {
 		t.Errorf("%s carries a provider-style row for %q, but the turn role has no catalogue vendors", path, m[1])
 	}
+}
+
+// TestLiveDocsiteMatchesCatalog holds the fifth Models page. A live model
+// has a vendor table on Pipecat alone: the other two targets refuse the binding
+// by name, so the page carries one `## Pipecat` table and no LiveKit one, and
+// that table is the catalogue's live row.
+func TestLiveDocsiteMatchesCatalog(t *testing.T) {
+	path := filepath.Join("..", "..", "docs-site", "models", "live.mdx")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only the target section is a vendor table. The page's other tables list
+	// the entry's fields and what a live package cannot carry, in the same
+	// backticked shape, so the section is what tells them apart.
+	row := regexp.MustCompile("^\\| `([a-z_]+)` \\|")
+	documented := map[string][]string{}
+	var section string
+	var sections []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "## ") {
+			section = strings.TrimSpace(line)
+			sections = append(sections, section)
+			continue
+		}
+		if m := row.FindStringSubmatch(line); m != nil {
+			if _, ok := headingFramework[section]; ok {
+				documented[section] = append(documented[section], m[1])
+			}
+		}
+	}
+	cat := DefaultCatalog()
+	// Each code target has its own vendor table, and each is held against the
+	// catalogue both ways. Before this architecture compiled on two targets the
+	// page had one section and this test refused a second; now a framework with
+	// catalogued vendors and no section is what fails, which is the same rule
+	// pointed at the current truth rather than the old one.
+	for heading, fw := range headingFramework {
+		if !slices.Contains(sections, heading) {
+			t.Fatalf("models/live.mdx has no %q section, so the %s vendor table cannot be found", heading, fw)
+		}
+		catalogued := cat.Vendors(fw, Live)
+		for _, vendor := range documented[heading] {
+			if !contains(catalogued, vendor) {
+				t.Errorf("models/live.mdx lists %s live %q, which the catalogue does not have", fw, vendor)
+			}
+		}
+		for _, vendor := range catalogued {
+			if !contains(documented[heading], vendor) {
+				t.Errorf("catalogue entry %s/live/%s is missing from models/live.mdx", fw, vendor)
+			}
+		}
+	}
+	for _, heading := range sections {
+		if heading == "## slng" {
+			t.Errorf("models/live.mdx has a %q section; the slng target binds three roles by name and has no slot for a live model", heading)
+		}
+	}
+	if vendors := cat.Vendors(Slng, Live); len(vendors) != 0 {
+		t.Errorf("the catalogue now has slng live vendors %v: models/live.mdx must grow a section and this test a parser for it", vendors)
+	}
+	if !strings.Contains(string(raw), "slng target refuses") {
+		t.Error("models/live.mdx does not say the slng target refuses a live model")
+	}
+}
+
+// headingFramework maps each vendor-table heading on models/live.mdx onto the
+// framework whose catalogue rows it must match. Only these headings are read as
+// vendor tables: the page's other tables list the entry's fields and what a live
+// package cannot carry, in the same backticked shape.
+var headingFramework = map[string]Provider{
+	"## Pipecat":        Pipecat,
+	"## LiveKit Agents": LiveKit,
 }
 
 func contains(list []string, want string) bool {

@@ -1,0 +1,12 @@
+description: >-
+  Look up how the pharmacy works: opening hours, collection and delivery, how
+  long an order takes, what happens when the repeats have run out, controlled
+  medicines, and what somebody needs to bring to collect for a relative. Use it
+  for any question about the pharmacy rather than answering from memory, and
+  quote what it returns instead of estimating.
+
+  This is not a clinical source. It says nothing about what a medicine does, a
+  dose, or a side effect, and none of those is a question to answer from it.
+
+knowledge:
+  base: policies

@@ -1,0 +1,66 @@
+# The half cascade: the realtime model hears the caller and decides what to say,
+# and a synthesizer of the package's own choosing speaks it.
+#
+# It exists because the half cascade was proven only by a test that mutated an
+# agent in memory, so no package a person could compile or run exercised it.
+# That is the shape most likely to break without anybody noticing: it is the one
+# pairing where the model must be asked for text rather than audio, and the
+# framework logs an error instead of refusing when that pairing is half made.
+#
+# The entry writes no voice:, and the agent binds speak:. Writing both is
+# refused, and writing neither is refused, because then nothing would speak.
+version: 1
+
+name: realtime-half-cascade
+architecture: realtime
+entry_agent: desk
+
+secrets:
+  - OPENAI_API_KEY
+  # The synthesizer's own key. A half cascade is the one realtime shape that
+  # talks to two vendors, so it is the one that needs two keys.
+  - CARTESIA_API_KEY
+
+models:
+  realtime:
+    - name: voice
+      provider: openai
+      model: gpt-realtime
+      # No voice: here. The agent's speak: binding below answers the same
+      # question, and writing both is refused.
+      turn_detection: semantic
+  speak:
+    warm:
+      provider: cartesia
+      model: sonic-3
+      voice: "794f9389-aac1-45b6-b726-9d9369183238"
+
+agents:
+  desk:
+    instructions: instructions.md
+    realtime: voice
+    speak: warm
+    tools:
+      - lookup_customer
+      - check_availability
+
+tools:
+  - lookup_customer
+  - check_availability
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, this is Sage and Stone Salon. How can I help?"
+  inactivity:
+    nudge_after: 20s
+    end_after: 60s
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m

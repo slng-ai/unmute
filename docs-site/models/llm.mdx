@@ -140,7 +140,7 @@ exception below.
 
 <Note>
   On LiveKit the line matters for a second reason. `livekit-plugins-openai`
-  1.6.10 injects `reasoning_effort="minimal"` by itself for several older ids in
+  1.8.1 injects `reasoning_effort="minimal"` by itself for several older ids in
   the same GPT-5 family, which is the same 400 once the agent has tools. Setting
   the param yourself is what avoids it.
 </Note>
@@ -246,8 +246,8 @@ with `GOOGLE_API_KEY`.
 | Provider | Notes |
 |---|---|
 | `slng` | the [Context Router](/optimization/context-router): a cache in front of your own model, for the turns it judges repeatable |
-| `anthropic` | |
-| `deepseek` | |
+| `anthropic` | Since Pipecat 1.10.0 `temperature`, `top_p` and `top_k` travel in the request body rather than as call parameters, because the Anthropic SDK's 1.x line dropped them. They reach the API unchanged and keep their names and meaning, so a package that sets them needs no edit. |
+| `deepseek` | Since Pipecat 1.10.0 the reasoning pass is off unless you ask for it: V4 models otherwise reason before every answer, which delays the first spoken word. `params: {thinking: {type: enabled}}` turns it on. |
 | `google` | native Gemini; also accepted as `gemini` |
 | `groq` | |
 | `mistral` | |
@@ -459,7 +459,7 @@ answer it differently.
   <Card title="Turn detection" icon="mic" href="/models/turn-detection">
     Knowing when the caller has finished.
   </Card>
-  <Card title="agent.yaml" icon="file-code" href="/reference/agent-yaml">
-    Every field a model entry takes.
+  <Card title="Live model" icon="waveform-lines" href="/models/live">
+    One model that listens, thinks and speaks, on Pipecat.
   </Card>
 </Columns>

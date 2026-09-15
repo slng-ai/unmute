@@ -66,6 +66,11 @@ const (
 	FieldSemanticEndpointing Field = "pipeline.turn.semantic_endpointing"
 	FieldEndpointingDelay    Field = "pipeline.turn.endpointing_delay"
 	FieldPace                Field = "pipeline.turn.pace"
+	FieldTurnByListener      Field = "pipeline.turn.listener"
+	FieldTurnEager           Field = "pipeline.turn.eager"
+	FieldLiveModel           Field = "models.live"
+	FieldRealtimeModel       Field = "models.realtime"
+	FieldRealtimeTasks       Field = "models.realtime.tasks"
 	FieldFallback            Field = "models.fallback"
 	FieldListenFallback      Field = "models.listen.fallback"
 	FieldTask                Field = "tasks"
@@ -160,6 +165,13 @@ const (
 	Turn   Role = "turn"
 	Speak  Role = "speak"
 	Reason Role = "reason"
+	// Realtime and Live are the two speech to speech roles, one model each doing
+	// the three jobs above. They have catalogue entries (a vendor's own class)
+	// but no row in Table.Roles: neither is ever required, and where a package
+	// binds one the three open roles are not. Which one a package may bind is
+	// decided by its architecture, not by this table.
+	Realtime Role = "realtime"
+	Live     Role = "live"
 )
 
 type RoleKind string
@@ -234,6 +246,21 @@ func (t Table) Control(control TelephonyControl, provider Provider, transport, c
 		return Capability{Tag: Gated, Note: support.ConditionNote}
 	}
 	return support.Capability
+}
+
+// FixedToolInterruption is the interruption behaviour a target has whatever the
+// package writes, or "" where the target reads the preference.
+//
+// It exists so a warning can name a difference rather than a setting. LiveKit
+// runs a tool execution to completion, which is what `continue` asks for, so
+// only `cancel` is a real disagreement there. Pipecat enforces what it is told,
+// so nothing is fixed. SLNG has no per-tool setting at all and denies the field
+// outright, which is a different answer and stays in its own row.
+func FixedToolInterruption(provider Provider) string {
+	if provider == LiveKit {
+		return "continue"
+	}
+	return ""
 }
 
 func (t Table) CapabilityForValue(field Field, provider Provider, value string) Capability {
@@ -319,6 +346,61 @@ func Default() Table {
 			// a duration in disguise and endpointing_delay already is one.
 			FieldPace: field(
 				deny(Slng, "slng target owns its own turn taking, so a pace reaches nothing: remove it, or compile to livekit or pipecat, which set the turn window themselves"),
+			),
+			// `turn: provider: listen`: the listening model's own turn detection
+			// ends the turn, and the local pair is not built. Pipecat has a class
+			// for it per vendor (turn_listener.go). LiveKit runs its turn model
+			// beside whatever transcriber is bound and has no path that hands the
+			// decision to the transcriber, so the only honest answer there is the
+			// local detector it does have.
+			FieldTurnByListener: field(
+				deny(LiveKit, "turn provider \"listen\" is not available on livekit: its turn model runs beside the transcriber. Use turn-detector-mini (local) or turn-detector (LiveKit Cloud)"),
+				deny(Slng, "slng target owns its own turn taking, so turn provider \"listen\" reaches nothing: set the turn provider to local, or compile to pipecat, where the transcriber can decide the turn"),
+			),
+			// `eager: true` answers the transcriber's predicted end of turn before
+			// it is confirmed, so the gap is spent generating rather than waiting.
+			// It is meaningful only where a transcriber decides the turn, which
+			// is the row above; the same two targets refuse it for the same
+			// reasons.
+			FieldTurnEager: field(
+				deny(LiveKit, "eager is not available on livekit: no transcriber decides the turn there, so there is no prediction to answer early. Remove eager, or compile to pipecat with turn provider listen"),
+				deny(Slng, "slng target owns its own turn taking, so eager reaches nothing: remove it, or compile to pipecat with turn provider listen"),
+			),
+			// The two speech to speech architectures. Both code drivers have a
+			// pipeline shape for each: one service sits where the transcriber,
+			// the model and the synthesizer sat.
+			//
+			// They are two rows rather than one because the two vendor APIs
+			// differ in what a session may change while it runs, and that decides
+			// what a package may carry. Neither takes tasks today, but for
+			// different reasons, and only one of those reasons is permanent.
+			//
+			// SLNG denies both and always will: it binds listen, think and speak
+			// by name, so there is no slot for one model doing all three. That
+			// is a shape fact about the target rather than a driver gap, which
+			// is why its note says what to write instead rather than "yet".
+			FieldLiveModel: field(
+				deny(Slng, "slng target binds listen, think and speak by name and has no slot for one model that does all three: compile to a code target, or write architecture: cascade"),
+			),
+			FieldRealtimeModel: field(
+				deny(Slng, "slng target binds listen, think and speak by name and has no slot for one model that does all three, so architecture: realtime reaches nothing here: write architecture: cascade"),
+			),
+			// Whether a realtime package may carry a second agent and tasks.
+			// Denied everywhere today, and a row of its own rather than a fact
+			// folded into the row above, because the two answers move apart: the
+			// architecture compiles on both code targets and takes tasks on
+			// neither.
+			//
+			// The blocker is one library rather than either vendor's API. A
+			// realtime session does take a new prompt mid-call. pipecat-ai 1.10.0
+			// ships _handle_messages_append as a logged error and nothing else
+			// (services/openai/realtime/llm.py:693-694), and reshaping the
+			// server-side conversation there needs a reconnect. Lifting this on
+			// LiveKit alone would make one authored word mean two things.
+			FieldRealtimeTasks: field(
+				deny(LiveKit, "the shape is emitted on both code targets and takes tasks on neither, so it is refused here too rather than working on one target and not the other. Write architecture: cascade"),
+				deny(Pipecat, "the pipecat realtime service cannot reshape a running conversation without reconnecting, so this is refused on both code targets rather than working on one. Write architecture: cascade"),
+				deny(Slng, "slng target binds listen, think and speak by name and has no slot for architecture: realtime at all: write architecture: cascade"),
 			),
 			// SLNG has a real fallback slot per component: fallbacks.stt and
 			// fallbacks.llm take model strings, fallbacks.tts takes model and voice
@@ -565,8 +647,15 @@ func Default() Table {
 				// and it reaches the runbook and the deploy preflight from there.
 				deny(Slng, "slng target does not create tools, so there is no tool body for an `auth:` block to land in: a hosted tool keeps its own credential, which SLNG stores, so reference it with `slng:`, or compile to livekit or pipecat which send the header themselves"),
 			),
+			// The warning fires only where the authored preference and the
+			// target's own behaviour disagree. See FixedToolInterruption: on
+			// LiveKit `continue` asks for what the framework already does, and
+			// warning about it told an author their setting reached nothing when
+			// the call behaves exactly as they asked. A package targeting both
+			// runtimes is the normal shape, so that warning printed forever on
+			// every validate and could not be acted on.
 			FieldToolInterruption: field(
-				warn(LiveKit, "LiveKit runs tool executions to completion; a per-tool interruption preference is not enforced"),
+				warn(LiveKit, "LiveKit runs tool executions to completion, so a tool asking to be cancelled mid-call is not: the call keeps the tool's result. Write interruption: continue, which is what happens here anyway, or compile to pipecat which cancels"),
 				deny(Slng, "slng target has no per-tool interruption setting: leave the tool at the provider default, or compile to pipecat which enforces the preference"),
 			),
 			FieldToolAnnounce: field(allow(Slng)),
@@ -574,7 +663,7 @@ func Default() Table {
 			// function that holds FunctionCallParams, but a task tool as a flows
 			// handler, which holds a FlowManager instead. Both have a seam:
 			// FlowManager.worker is the documented way to queue a frame from
-			// inside a handler, verified on pipecat-ai 1.8.0, the pinned version,
+			// inside a handler, verified on pipecat-ai 1.9.0, the pinned version,
 			// where flows ships bundled as pipecat.flows rather than the
 			// standalone pipecat_flows package.
 			//

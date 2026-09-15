@@ -7,6 +7,17 @@ import (
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
+// Architecture is the pipeline shape, carried through from the authored key.
+// An alias rather than a parallel enum: there is one vocabulary for this, and a
+// second copy is how a value reaches one list and goes missing from another.
+type Architecture = packagespec.Architecture
+
+const (
+	ArchitectureCascade  = packagespec.ArchitectureCascade
+	ArchitectureRealtime = packagespec.ArchitectureRealtime
+	ArchitectureLive     = packagespec.ArchitectureLive
+)
+
 // Agent is the resolved v1 package. References remain names so the graph is
 // acyclic and schema derivation does not recurse through agent handoffs.
 type Agent struct {
@@ -16,9 +27,14 @@ type Agent struct {
 	// trimmed. Empty when the author wrote none, which only the slng target
 	// refuses: it is the one target that deploys under a name instead of into a
 	// project the author already named.
-	Name       string `json:"name,omitempty" yaml:"name,omitempty"`
-	EntryAgent string `json:"entry_agent" yaml:"entry_agent"`
-	// Models flattens the four authoring sections into one name-keyed map; each
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+	// Architecture is the resolved pipeline shape: cascade, realtime or live.
+	// Always one of the three by the time anything reads it, because Build
+	// resolves an omitted key to cascade, so no reader has to treat empty as a
+	// fourth case.
+	Architecture Architecture `json:"architecture" yaml:"architecture"`
+	EntryAgent   string       `json:"entry_agent" yaml:"entry_agent"`
+	// Models flattens the authoring sections into one name-keyed map; each
 	// entry's Kind records its section (names are one namespace, N15).
 	Models map[string]ModelDef `json:"models" yaml:"models"`
 	// Listen/Turn are the resolved selection names into Models ("" = none).
@@ -221,6 +237,12 @@ const (
 	KindSpeak  ModelKind = "speak"
 	KindListen ModelKind = "listen"
 	KindTurn   ModelKind = "turn"
+	// KindRealtime and KindLive are the two speech to speech kinds: one model
+	// doing the three jobs above, referenced from an agent's `realtime:` or
+	// `live:` rather than its think and speak. Which one a package may write is
+	// decided by its `architecture:`.
+	KindRealtime ModelKind = "realtime"
+	KindLive     ModelKind = "live"
 )
 
 // ModelDef is the resolved unified model definition (N15). provider+model carry
@@ -249,6 +271,17 @@ type ModelDef struct {
 	// It sets the floor only. The ceiling comes from Pace, so a package that
 	// tuned this value keeps it and still gets a shorter ceiling.
 	EndpointingDelay Duration `json:"endpointing_delay,omitempty" yaml:"endpointing_delay,omitempty"`
+	// Eager answers a transcriber's predicted end of turn before it is confirmed.
+	// Turn models only, and only with provider listen; nil is the same as false.
+	Eager *bool `json:"eager,omitempty" yaml:"eager,omitempty"`
+	// Backend is the think entry a live model hands its tools and reasoning
+	// to. Live models only; empty means client delegation, where the work comes
+	// back to the application rather than running on a backend model.
+	Backend string `json:"backend,omitempty" yaml:"backend,omitempty"`
+	// TurnDetection is who decides the caller has finished on a realtime model:
+	// the vendor's voice activity detector, its semantic detector, or the
+	// framework's own. Realtime models only; empty leaves the vendor's default.
+	TurnDetection string `json:"turn_detection,omitempty" yaml:"turn_detection,omitempty"`
 	// AgentID and Upstream are the SLNG Context Router's two authored fields,
 	// carried verbatim: the id scopes the router's cache and the block says
 	// which upstream serves the model. Neither folds into Params, because params
@@ -493,10 +526,16 @@ const (
 )
 
 type AgentDef struct {
-	Instructions string   `json:"instructions" yaml:"instructions"`
-	Model        string   `json:"model" yaml:"model"`
-	Voice        string   `json:"voice" yaml:"voice"`
-	Tools        []string `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Instructions string `json:"instructions" yaml:"instructions"`
+	Model        string `json:"model" yaml:"model"`
+	Voice        string `json:"voice" yaml:"voice"`
+	// Realtime and Live name the speech to speech model this agent runs on, in
+	// place of Model. At most one of the two is set, decided by the package's
+	// architecture. Voice stays set alongside Realtime for the half cascade,
+	// where the realtime model listens and thinks and a synthesizer speaks.
+	Realtime string   `json:"realtime,omitempty" yaml:"realtime,omitempty"`
+	Live     string   `json:"live,omitempty" yaml:"live,omitempty"`
+	Tools    []string `json:"tools,omitempty" yaml:"tools,omitempty"`
 }
 
 type Task struct {
@@ -852,12 +891,26 @@ const (
 	ToolProviderDefault ToolInterruption = "provider_default"
 )
 
+// ToolInterruptionValues is every legal interruption, in the order a refusal
+// names them. One ordered list rather than a switch and a sentence, because the
+// two drift: the refusal used to name the bad value and stop, so an author who
+// guessed wrong had to find the legal set themselves.
+func ToolInterruptionValues() []ToolInterruption {
+	return []ToolInterruption{ToolContinue, ToolCancel, ToolProviderDefault}
+}
+
 type ToolEffect string
 
 const (
 	ToolReturnsData      ToolEffect = "returns_data"
 	ToolEndsConversation ToolEffect = "ends_conversation"
 )
+
+// ToolEffectValues is every legal effect, in the order a refusal names them.
+// See ToolInterruptionValues for why this is a list and not a sentence.
+func ToolEffectValues() []ToolEffect {
+	return []ToolEffect{ToolReturnsData, ToolEndsConversation}
+}
 
 type Conversation struct {
 	Greeting      *Greeting     `json:"greeting,omitempty" yaml:"greeting,omitempty"`
@@ -1047,6 +1100,10 @@ type Bindings struct {
 	Turn            *Binding           `json:"turn,omitempty" yaml:"turn,omitempty"`
 	Speak           map[string]Binding `json:"speak,omitempty" yaml:"speak,omitempty"`
 	Reason          map[string]Binding `json:"reason,omitempty" yaml:"reason,omitempty"`
+	// Realtime and Live hold the used speech to speech models, by name. Both nil
+	// on every cascaded package, so the resolved shape of one is unchanged.
+	Realtime map[string]Binding `json:"realtime,omitempty" yaml:"realtime,omitempty"`
+	Live     map[string]Binding `json:"live,omitempty" yaml:"live,omitempty"`
 }
 
 // ListenFallback pairs a chain entry's model name with its resolved binding.
@@ -1073,6 +1130,15 @@ type Binding struct {
 	// has to stay quiet before the runtime treats them as finished. It is the
 	// floor on every turn's wait. Turn models only; LiveKit floors it at 250ms.
 	EndpointingDelay Duration `json:"endpointing_delay,omitempty" yaml:"endpointing_delay,omitempty"`
+	// Eager is set only on a turn binding whose provider is listen: the driver
+	// asks the transcriber to predict the end of turn and answers the prediction.
+	Eager bool `json:"eager,omitempty" yaml:"eager,omitempty"`
+	// Backend is set only on a live binding: the think entry that runs the live
+	// model's tools and reasoning. Empty means client delegation.
+	Backend string `json:"backend,omitempty" yaml:"backend,omitempty"`
+	// TurnDetection is set only on a realtime binding: who decides the caller
+	// has finished. Empty leaves the vendor's own default in place.
+	TurnDetection string `json:"turn_detection,omitempty" yaml:"turn_detection,omitempty"`
 	// AgentID and Upstream are set only on a SLNG Context Router think binding.
 	AgentID  string    `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
 	Upstream *Upstream `json:"upstream,omitempty" yaml:"upstream,omitempty"`
