@@ -10,6 +10,7 @@ Changing one does not change the other.
 On this page:
 
 - [Quickstart](#quickstart) - run a complete example
+- [Pros and cons](#pros-and-cons) - control and response time
 - [Choose the pipeline](#1-choose-the-pipeline) - compare the three choices
 - [Check your package](#2-check-what-your-package-needs) - keep required capabilities
 - [Replace the bindings](#3-replace-the-models-and-agent-bindings) - switch the same agent
@@ -17,6 +18,7 @@ On this page:
 - [What compiles where](#what-compiles-where) - target support
 - [Advanced](#advanced) - voices and turn settings
 - [Troubleshooting](#troubleshooting) - fix a refused switch
+- [Further reading](#further-reading) - LiveKit and Coval comparisons
 - [Where to go next](#where-to-go-next) - build each shape
 
 ## Quickstart
@@ -36,6 +38,22 @@ Pipecat runs locally with `uv`; LiveKit uses Docker Compose.
 
 That is the loop: **choose the architecture, bind its models, validate, talk**.
 The steps below explain how to switch an existing package.
+
+## Pros and cons
+
+| Architecture | Pros | Cons |
+|---|---|---|
+| [Cascade](/build/architecture/cascade) | Independent model choices and clearer stage-by-stage diagnosis; Unmute's richest workflow controls on LiveKit and Pipecat | More components to tune and usually more latency; reasoning sees a transcript rather than the caller's tone |
+| [Realtime](/build/architecture/realtime) | Direct audio understanding, potentially quicker replies, a choice of turn mode and optional separate voice | Less freedom to change the reasoning model; Unmute currently limits it to one agent without tasks or saved state |
+| [Live](/build/architecture/live) | The model handles turns, with a separate backend for tool work | No authored turn controls or separate synthesizer; Unmute currently limits it to one agent without tasks or saved state |
+
+**The extra control is often worth the latency.** If a call must collect details,
+confirm them, run an action, and recover when it fails, choose the architecture
+that lets you express those steps clearly. A faster first reply is only one
+part of a successful call.
+
+These are current Unmute capabilities, not universal limits of speech-to-speech APIs.
+Compare completed actions, recovery from failures, and response time before choosing.
 
 ## 1. Choose the pipeline
 
@@ -60,7 +78,7 @@ Keep `cascade` if any required feature is unavailable on the destination archite
 | Capability | Cascade | Realtime | Live |
 |---|---|---|---|
 | Local tools and knowledge lookup | Yes | Yes | Yes, through a backend |
-| Multiple agents, tasks, task groups, handoffs | Yes | No | No |
+| Multiple agents, tasks, task groups, handoffs | LiveKit and Pipecat | No | No |
 | Variables and pre-fetch | Yes | No | No |
 | Tracing and MCP tools | Yes on supported targets | No | No |
 | Phone routes and human transfers | On supported routes | No | No |
@@ -192,10 +210,20 @@ The destination S2S architecture does not support those capabilities.
 The running process was started from an earlier build.
 **Fix:** stop it, rerun `unmute dev`, and open a new call.
 
+## Further reading
+
+[LiveKit's pipeline and realtime comparison](https://livekit.com/blog/realtime-vs-cascade)
+explains the balance between latency, direct audio understanding, and modular
+control. It also describes how streaming and hybrid designs narrow the gap.
+
+[Coval's speech-to-speech and cascade comparison](https://www.coval.ai/blog/speech-to-speech-vs-cascaded-voice-ai-which-architecture-should-you-deploy/)
+focuses on workflow control, diagnosing failures, and evaluating completed
+conversations. Use the tables above for what Unmute supports today.
+
 ## Where to go next
 
 <Columns cols={3}>
-  <Card title="Cascade" icon="layer-group" href="/build/architecture/cascade">Build with separate models.</Card>
-  <Card title="Realtime" icon="waveform" href="/build/architecture/realtime">Choose the turn and voice.</Card>
+  <Card title="Cascade" icon="layers" href="/build/architecture/cascade">Build with separate models.</Card>
+  <Card title="Realtime" icon="audio-lines" href="/build/architecture/realtime">Choose the turn and voice.</Card>
   <Card title="Live" icon="bolt" href="/build/architecture/live">Add a voice model and backend.</Card>
 </Columns>

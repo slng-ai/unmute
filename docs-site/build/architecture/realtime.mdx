@@ -9,6 +9,7 @@ The model takes audio directly. `turn_detection` chooses who ends the caller's t
 On this page:
 
 - [Quickstart](#quickstart) - a complete realtime agent
+- [Pros and cons](#pros-and-cons) - strengths and limits
 - [Bind the model](#1-bind-the-realtime-model) - choose the voice
 - [Choose turn detection](#2-choose-who-ends-the-turn) - defaults and limits
 - [Attach tools](#3-add-tools-and-knowledge) - extend the same desk
@@ -72,10 +73,30 @@ unmute dev voice-desk --target livekit
 Use Docker for this LiveKit run. The [Pipecat target](/targets/pipecat) is another option; it runs locally with `uv`.
 The example below stays with this same `desk` agent.
 
+## Pros and cons
+
+Pick Realtime when direct audio interaction matters and the call fits one
+agent with tools. It keeps more control over turn detection and voice than
+Unmute's Live architecture.
+
+| Pros | Cons |
+|---|---|
+| Direct audio input retains clues that may be lost in transcription | Audio understanding and reasoning stay with the chosen realtime model |
+| Fewer stage boundaries can reduce response delay | Provider, turn settings, network, and tools still determine the actual wait |
+| Choose a turn mode and optionally keep a separate synthesizer | A separate synthesizer adds another component and its response time |
+| Tools and knowledge searches remain available | Unmute currently supports no tasks, handoffs, saved variables, tracing, or phone route here |
+
+For a workflow that collects, confirms, and acts across several tasks, use
+[Cascade](/build/architecture/cascade#3-add-tools-tasks-or-saved-state).
+Its extra control can be worth a longer pause. See the
+[comparison and further reading](/build/architecture/overview#pros-and-cons)
+for the wider tradeoff.
+
 ## 1. Bind the realtime model
 
 The `desk` agent names the `voice` entry through `realtime:`.
 Its OpenAI model listens and speaks, so this package has no separate transcriber or reasoning binding.
+An unused `models.think` entry may remain, but the agent cannot bind it with `think:`. Remove unused entries to keep the package clear.
 
 <ParamField path="architecture" type="cascade | realtime | live" required>
   Set `realtime` explicitly. Omitted means `cascade`.
@@ -131,7 +152,8 @@ Those cascade sections are refused. `conversation.interruption.minimum_words` re
 
 Keep the same tool files and attachments described in [Add a local tool](/build/tools/python).
 Merge the tool name into the package's `tools:` list and `agents.desk.tools`, keeping the existing `instructions` and `realtime` binding.
-Realtime runs tools through its own model session; it has no `backend:` entry.
+The realtime model requests tool calls; the generated application runs them and returns the results.
+It has no separate `backend:` model.
 
 For document questions, add a [knowledge search tool](/build/tools/knowledge) in the same way.
 The [pharmacy example](https://github.com/slng-ai/unmute/tree/main/examples/pharmacy-refills) combines local tools, knowledge, and semantic turn detection.
@@ -174,7 +196,8 @@ Choose other supported synthesizers from [Voices](/models/tts).
 
 <Accordion title="Switch architecture or extend the workflow">
 Follow [Switch architecture](/build/architecture/overview#3-replace-the-models-and-agent-bindings) to replace the models and bindings together.
-Realtime currently supports one agent, browser audio, tools, and knowledge.
+The Realtime API can accept instruction updates during a call.
+Unmute currently supports one agent, browser audio, tools, and knowledge; it does not yet provide task and handoff transitions consistently across both code targets.
 Tasks, task groups, handoffs, variables, pre-fetch, tracing, MCP tools, and phone connections are unavailable.
 Use cascade if your workflow needs them.
 </Accordion>

@@ -5,11 +5,12 @@ description: "Build an agent with separate listening, reasoning, and speaking mo
 
 Use separate models to choose how your agent hears a caller and speaks its answer.
 In a cascade, transcription produces text, a reasoning model answers, and a synthesizer speaks.
-Turn detection decides when to start the reply.
+Turn detection decides when to start the reply. Streaming lets some stages overlap.
 
 On this page:
 
 - [Quickstart](#quickstart) - a complete voice desk
+- [Pros and cons](#pros-and-cons) - control and complexity
 - [Bind the models](#1-bind-the-three-models) - one job per entry
 - [Choose the turn](#2-choose-when-the-agent-replies) - defaults and selectors
 - [Extend the desk](#3-add-tools-tasks-or-saved-state) - grow the workflow
@@ -88,6 +89,24 @@ unmute dev voice-desk --target livekit
 Use Docker for this LiveKit run. The [Pipecat target](/targets/pipecat) is another option; it runs locally with `uv`.
 The example below stays with this same `desk` agent.
 
+## Pros and cons
+
+### Pros
+
+- **Control the workflow.** On LiveKit and Pipecat, combine tasks, handoffs, saved values, and tool calls. Each step can have its own instructions and access to the values it needs.
+- **Choose each role.** Use a supported transcriber, reasoning model, and voice independently. Spend more on the part that needs better quality without replacing the others.
+- **Find the failing stage.** Compare the recognized text, model reply, tool result, and spoken output. A wrong transcription needs a different fix from a failed tool.
+
+### Cons
+
+- **More sources of delay.** Turn detection, transcription, reasoning, speech generation, and tools all contribute. Streaming reduces the wait, but does not remove those costs.
+- **More parts to operate.** Several integrations bring separate credentials, availability limits, and failure modes.
+- **Less audio context for reasoning.** A transcript carries the words, but can lose tone, hesitation, and other clues in the caller's voice.
+
+[LiveKit's comparison](https://livekit.com/blog/realtime-vs-cascade) explains these
+component tradeoffs. [Coval's comparison](https://www.coval.ai/blog/speech-to-speech-vs-cascaded-voice-ai-which-architecture-should-you-deploy/)
+shows why control and diagnosis matter when the agent must complete real work.
+
 ## 1. Bind the three models
 
 The quickstart names the transcriber, reasoning model, and voice under `models`.
@@ -132,14 +151,35 @@ A shorter silence window can answer faster but may cut off callers who pause mid
 
 ## 3. Add tools, tasks, or saved state
 
-Extend this desk with a [local tool](/build/tools/python), then add a [task](/build/orchestration/tasks) when a job needs its own steps.
-Use [variables](/build/variables) only for values that must survive those steps.
-Tasks and saved state currently require cascade; all three architectures support local tools.
+Extend the same desk with a [local tool](/build/tools/python), then add a [task](/build/orchestration/tasks) when a job needs its own steps.
+For example, the caller wants to change an existing request:
+
+1. Look up the request with a tool.
+2. Collect the change in a task and save its result.
+3. Confirm the details before running the update tool.
+4. Handle a refused update, or hand the call to another agent with the context it needs.
+
+[Variables](/build/variables) hold values across steps. Each prompt names the values it may read; the tool checks the conditions for changing the record.
+Separate steps give you places to check the behavior, but do not guarantee a correct tool call.
+Test successful updates, missing inputs, and failed actions.
+
+Tasks, task groups, and handoffs are supported on LiveKit and Pipecat cascade targets.
+SLNG has its own [target limits](/targets/slng#what-a-slng-package-may-not-ask-for).
+Both S2S architectures support tools, but their current Unmute integrations do not support these task and state controls.
 
 The complete [salon concierge](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge) shows booking, task return, and handoff.
 Its phone routes and tracing need their own configuration and credentials.
 
 ## Advanced
+
+<Accordion title="Compare latency across architectures">
+Transcription can run while the caller speaks, and synthesis can begin while the model generates text.
+Do not add all stage durations as though every stage waits for the previous one to finish.
+Model choice, turn timing, network placement, and tools affect the wait for the first audio.
+
+Tune the slow stage before replacing the architecture, and compare completed actions as well as response time.
+See [where the time goes](/optimization/latency#where-the-time-goes) and the [architecture comparison](/build/architecture/overview#pros-and-cons).
+</Accordion>
 
 <Accordion title="Switch this desk to speech-to-speech">
 Follow [Switch architecture](/build/architecture/overview#3-replace-the-models-and-agent-bindings).
@@ -175,5 +215,5 @@ Targets support different providers for each role.
 
 <Columns cols={2}>
   <Card title="Add a task" icon="list-check" href="/build/orchestration/tasks">Give one job its own workflow.</Card>
-  <Card title="Choose architecture" icon="layer-group" href="/build/architecture/overview">Compare and switch pipelines.</Card>
+  <Card title="Choose architecture" icon="layers" href="/build/architecture/overview">Compare and switch pipelines.</Card>
 </Columns>

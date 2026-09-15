@@ -10,6 +10,7 @@ The live model decides when to speak and how to respond to interruptions.
 On this page:
 
 - [Quickstart](#quickstart) - a complete live agent
+- [Pros and cons](#pros-and-cons) - strengths and limits
 - [Bind the voice](#1-bind-the-live-model) - select the model
 - [Attach tools](#2-give-the-backend-a-tool) - let it do useful work
 - [Try the conversation](#3-try-tools-and-knowledge-in-a-call) - verify the result
@@ -77,6 +78,28 @@ unmute dev voice-desk --target livekit
 Use Docker for this LiveKit run. The [Pipecat target](/targets/pipecat) is another option; it runs locally with `uv`.
 The example below stays with this same `desk` agent.
 
+## Pros and cons
+
+Pick Live when you want the model to manage the spoken exchange and send
+tool work to a backend. It fits an agent that can work within the model's
+own turn and voice behavior.
+
+| Pros | Cons |
+|---|---|
+| The model hears audio directly and manages turns and interruptions | Unmute exposes no separate turn detector or interruption settings here |
+| The model can keep speaking while backend work runs | Tool completion still waits for that backend and the tools it calls |
+| A dedicated backend handles tool requests and reasoning | The backend must use the same provider; it is not an unrestricted second pipeline |
+| Tools and knowledge searches remain available | Unmute currently supports no tasks, handoffs, saved variables, tracing, or phone route here |
+
+Live can respond with fewer speech-processing stages, but is not guaranteed
+to beat Realtime or a tuned Cascade on every interaction. Compare both reply
+time and successful tool completion.
+
+Choose [Realtime](/build/architecture/realtime) for selectable turn modes or a
+separate voice. Choose [Cascade](/build/architecture/cascade) when the workflow
+needs more steps and state. The [overview](/build/architecture/overview#pros-and-cons)
+compares all three and links the LiveKit and Coval articles.
+
 ## 1. Bind the live model
 
 The quickstart's `desk` names `voice` through its `live:` binding.
@@ -133,7 +156,7 @@ Append this instruction to the existing prompt:
 Use opening_hours when asked when the desk is open. Read the returned hours.
 ```
 
-The live model hands the lookup to its backend and speaks the answer.
+The live model sends the request to its backend. The backend requests a tool call, the generated application runs the handler, and the live model speaks the result.
 A tool's returned data should determine the answer; the model should not invent it.
 
 ## 3. Try tools and knowledge in a call
@@ -163,7 +186,9 @@ See [Live model](/models/live) for fields and target differences.
 
 <Accordion title="Switch an existing package">
 Use the [switching steps](/build/architecture/overview#3-replace-the-models-and-agent-bindings).
-Live supports one agent and browser audio on Pipecat and LiveKit.
+The current Live integration fixes instructions and tool setup at session start.
+It supports one agent and browser audio on Pipecat and LiveKit.
+These are limits of Unmute’s integration, not of every speech-to-speech API.
 It does not support tasks, handoffs, variables, pre-fetch, tracing, MCP tools, or phone connections.
 Remove `conversation.interruption`; the model manages interruptions itself.
 Keep cascade when these features are part of your required workflow.
@@ -196,5 +221,5 @@ The live model paraphrases the opening instruction.
 
 <Columns cols={2}>
   <Card title="Live model fields" icon="microphone" href="/models/live">Review fields and target support.</Card>
-  <Card title="Realtime" icon="waveform" href="/build/architecture/realtime">Choose turn detection or another voice.</Card>
+  <Card title="Realtime" icon="audio-lines" href="/build/architecture/realtime">Choose turn detection or another voice.</Card>
 </Columns>
