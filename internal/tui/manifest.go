@@ -111,7 +111,7 @@ func manifestTargetOptions(runner *fieldRunner, options []menuChoice) []menuChoi
 			}
 			found := false
 			for _, row := range rows {
-				if _, ok := manifestScaffoldEntry(c.value, role, row.Provider); ok && len(row.Allow) > 0 {
+				if _, ok := manifestScaffoldEntry(c.value, role, row.Provider); ok && (row.Allow == nil || len(row.Allow) > 0) {
 					found = true
 					break
 				}
@@ -145,6 +145,10 @@ func chooseManifestBinding(runner *fieldRunner, target string, role targetcap.Ro
 			if _, ok := manifestScaffoldEntry(target, role, row.Provider); !ok {
 				continue
 			}
+			if row.Allow == nil {
+				options = append(options, newChoice(row.Provider+" / Enter model ID", fmt.Sprint(len(bindings))))
+				bindings = append(bindings, scaffold.Binding{Provider: row.Provider})
+			}
 			for _, model := range row.Allow {
 				options = append(options, newChoice(row.Provider+" / "+model, fmt.Sprint(len(bindings))))
 				bindings = append(bindings, scaffold.Binding{Provider: row.Provider, Model: model})
@@ -157,6 +161,14 @@ func chooseManifestBinding(runner *fieldRunner, target string, role targetcap.Ro
 		for i, option := range options {
 			if option.value == selected {
 				next := bindings[i]
+				if next.Model == "" {
+					if next.Provider == binding.Provider {
+						next.Model = binding.Model
+					}
+					if _, err := runner.input("Model ID", "All models from this provider are allowed. Enter the exact model ID.", &next.Model, validateRequiredBasic); err != nil {
+						return err
+					}
+				}
 				changed = next.Provider != binding.Provider || next.Model != binding.Model
 				if next.Provider == binding.Provider && next.Model == binding.Model {
 					next.Voice = binding.Voice

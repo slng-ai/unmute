@@ -2,6 +2,7 @@
 package manifest
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -16,6 +17,50 @@ type Saved struct {
 	Name, Path string
 	Data       []byte
 	Rules      *spec.Manifest
+}
+
+// Path resolves a local name without parsing the file, so an editor can repair it.
+func (s Store) Path(name string) (string, error) {
+	if err := ValidateName(name); err != nil {
+		return "", err
+	}
+	return filepath.Join(s.Root, "manifests", name, "manifest"), nil
+}
+
+// Update keeps the exact previous bytes before replacing a saved manifest.
+func (s Store) Update(name string, data []byte) (path, backup string, err error) {
+	path, err = s.Path(name)
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := spec.ParseManifest(data); err != nil {
+		return "", "", err
+	}
+	old, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", fmt.Errorf("read manifest %s: %w", name, err)
+	}
+	if bytes.Equal(old, data) {
+		return path, "", nil
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), "manifest.backup-*")
+	if err != nil {
+		return "", "", fmt.Errorf("back up manifest: %w", err)
+	}
+	backup = f.Name()
+	if _, err := f.Write(old); err != nil {
+		_ = f.Close()
+		_ = os.Remove(backup)
+		return "", "", fmt.Errorf("back up manifest: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(backup)
+		return "", "", fmt.Errorf("close manifest backup: %w", err)
+	}
+	if err := atomicWrite(path, data); err != nil {
+		return "", backup, fmt.Errorf("backup kept at %s: %w", backup, err)
+	}
+	return path, backup, nil
 }
 
 func DefaultStore() (Store, error) {

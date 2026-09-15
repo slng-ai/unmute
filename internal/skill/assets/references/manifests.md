@@ -19,31 +19,83 @@ unmute manifest create acme-corp
 unmute init my-agent
 ```
 
-`manifest create` opens a commented YAML starter in `VISUAL`, falling back to
-`EDITOR`. Configure a blocking editor command first, such as `EDITOR='code --wait'`
-or `EDITOR=vi`. With no name, the command asks for one. Local names use letters,
-digits, hyphens and underscores. An existing name is never overwritten.
+`manifest create` opens a dedicated terminal editor. Choose a section, set its
+rules, then review and save. No text editor setup is needed. With no name, the
+command asks for one. Local names use letters, digits, hyphens and underscores.
+An existing name is never overwritten.
+
+Lists separate rule settings, numbered values, actions and navigation controls.
+Apply completes a form; selecting a preset value keeps it immediately.
+Add stays selected after each addition: press Enter to add the next value.
+New provider and region entries join the draft when their required fields
+are complete. Back cancels an unfinished form or incomplete setup and keeps
+completed edits. Only **Review and save** writes the file.
+
+Use arrows and Enter in lists, and Tab or Shift+Tab between form fields and
+controls. Press **F2** to choose another section and **F1** for help.
+Switching sections asks before discarding incomplete input.
+Plain prompts use `:sections` and `:help`.
+
+Model roles offer **No restriction** or selected providers with all models or selected model
+IDs. Other rule lists also offer **Allow nothing**.
+Advanced holds region rules and named tool restrictions.
 
 The first saved manifest becomes the default. Later creations offer to change
 the default. Plain `unmute init` uses that default and guides the author through
 the allowed choices. No saved default means the ordinary creation flow.
 
 ```sh
+unmute init another-agent --manifest acme-corp
 unmute init another-agent --from-manifest
 unmute manifest use acme-corp
 ```
 
-`--from-manifest` opens a picker for this new agent only. `manifest use` changes
-the default for future agents. Manifest-based creation needs guided input;
-unattended creation is not supported.
+`--manifest <name>` selects a saved contract directly, even if the default is
+broken. `--from-manifest` opens a picker for this new agent only.
+Do not combine these flags. `manifest use` changes the default for future agents.
+
+For a coding assistant, create an unfinished package without prompts:
+
+```sh
+unmute init my-agent --manifest acme-corp --draft
+```
+
+Both the agent name and `--manifest` are required. `--draft` cannot use the picker.
+The draft contains `agent.yaml`, `targets.yaml`, `instructions.md`, `.gitignore`,
+`.env.example` and an exact copy of the manifest. It chooses no models, targets
+or channels, and adds no tools, tracing or provider credentials.
+Validation and compilation refuse the draft until the agent is complete.
+
+Use the saved manifest name supplied by the user; ask if it is missing.
+Read the copied `manifest` before implementing the use case.
+Choose exact approved model IDs when listed. Provider-wide approval still
+requires checking target support and the provider's accepted model IDs.
+Keep `slng` as the service provider for SLNG models from different makers.
+Preserve the contract and its link; explain conflicting requirements instead
+of weakening rules. Then validate the completed package and compile it.
+Report runtime testing separately.
+
+Run `unmute skill install` after updating the CLI to refresh the bundled workflow.
+Review local skill edits before using `--force` to replace them.
 
 Saved files live in the operating system's user config directory, under
 `unmute/manifests/<name>/manifest`. `unmute/default-manifest` holds the default
-name. The create command prints the saved path; reopen that file in an editor
-to update the rules. Increase its `version` when publishing a new company
-revision. A missing or invalid saved default is an error, never a reason to
-silently create an unrestricted agent. An invalid editor draft is kept at the
-path named in the error and is not installed.
+name. Create prints the saved path. Use the same terminal editor for later changes:
+
+```sh
+unmute manifest edit acme-corp
+```
+
+Saving an edit writes clean YAML and keeps an exact backup beside the original.
+The review explains that comments and formatting will be replaced. Unchanged
+edits keep the original file. Revision numbers change only when you edit them.
+A missing or invalid saved default is an error, never a reason to silently
+create an unrestricted agent.
+
+To edit YAML directly, pass `--editor` to create or edit. This uses `VISUAL`,
+falling back to `EDITOR`, such as `EDITOR='code --wait'`. Invalid drafts are
+kept at the path in the error. `manifest edit acme-corp --editor` can also
+repair an invalid saved file.
 
 ## What an agent carries
 
@@ -152,6 +204,21 @@ schema, an Unmute release, or a LiveKit or Pipecat SDK version.
 
 ### Models
 
+A **provider** is the service the agent connects to. A **model maker** creates
+the model that service offers. For models served through SLNG, keep the
+provider as `slng`, even when their IDs name Deepgram, Cartesia or Soniox.
+
+Each role can allow several providers, and each provider can allow several
+models. **Add provider** opens the service picker, then offers **Allow all models**
+or **Add model ID**. Adding a model opens the input directly.
+Use **Add model ID** again for more models, or **Add provider** for another service. Completed entries stay in your draft as you move between
+screens; no extra Apply step is needed.
+
+The guided editor does not offer **Allow nothing** for models.
+Existing empty model rules remain visible and must be repaired before saving.
+Add models, choose **Allow all models** for a provider, or choose **No restriction** for the role.
+The YAML format and `--editor` still support explicitly empty lists.
+
 #### `models`
 
 Type: `object`. Optional.
@@ -180,7 +247,10 @@ on each target. Provider names are strings, not a fixed manifest enum.
 
 #### `models.listen[].allow`
 
-Type: `string[]`. Required within its block.
+Type: `string[]`. Optional.
+
+Omit this field to allow all current and future models from this provider.
+Other providers remain forbidden unless listed for the role.
 
 Exact model IDs approved for this provider, such as `deepgram/nova:3` with
 `slng`. Model IDs are provider-defined strings. No wildcards or prefix
@@ -205,7 +275,10 @@ Provider names are strings, not a fixed manifest enum.
 
 #### `models.speak[].allow`
 
-Type: `string[]`. Required within its block.
+Type: `string[]`. Optional.
+
+Omit this field to allow all current and future models from this provider.
+Other providers remain forbidden unless listed for the role.
 
 Exact model IDs approved for this provider, such as `deepgram/aura:2` with
 `slng`. IDs are provider-defined and case-sensitive; wildcards are not
@@ -231,11 +304,13 @@ Provider names are strings, not a fixed manifest enum.
 
 #### `models.think[].allow`
 
-Type: `string[]`. Required within its block.
+Type: `string[]`. Optional.
+
+Omit this field to allow all current and future models from this provider.
+Other providers remain forbidden unless listed for the role.
 
 Exact model IDs approved for this provider, such as `gpt-5.6-terra` with
-`openai`. IDs are provider-defined and case-sensitive. No wildcards,
-provider-wide approval or automatic model choice. An empty list approves
+`openai`. IDs are provider-defined and case-sensitive. No wildcards or automatic model choice. An empty list approves
 no models.
 
 ### Languages
@@ -478,8 +553,9 @@ not add provider support or make an unsupported setting work.
 
 The creation console cannot collect custom model endpoint settings or a SLNG
 Context Router upstream. It excludes those model choices. If your contract
-allows only such bindings, author the package and its manifest link directly;
-validation and compilation still enforce the same rules.
+allows only such bindings, use `--manifest <name> --draft` and complete the
+package by hand or with a coding assistant. Validation and compilation still
+enforce the same rules.
 
 The contract checks declared settings, not arbitrary local tool code, the
 provider's actual processing location or tracing delivery. It is not signed

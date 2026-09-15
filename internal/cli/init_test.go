@@ -8,12 +8,24 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/slng-ai/unmute/internal/manifest"
 	"github.com/slng-ai/unmute/internal/scaffold"
 )
+
+// Ordinary init tests must not inherit a developer's saved company contract.
+// Manifest-specific tests install their own store and use their own command tree.
+func useEmptyManifestStore(t *testing.T) {
+	t.Helper()
+	previous := manifestStore
+	store := manifest.Store{Root: t.TempDir()}
+	manifestStore = func() (manifest.Store, error) { return store, nil }
+	t.Cleanup(func() { manifestStore = previous })
+}
 
 // run executes a fresh command tree (rule 1) and returns captured output + err.
 func run(t *testing.T, args ...string) (string, error) {
 	t.Helper()
+	useEmptyManifestStore(t)
 	cmd := newRootCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
@@ -25,6 +37,7 @@ func run(t *testing.T, args ...string) (string, error) {
 
 func runWithInput(t *testing.T, input string, args ...string) (string, error) {
 	t.Helper()
+	useEmptyManifestStore(t)
 	cmd := newRootCmd()
 	var out bytes.Buffer
 	cmd.SetIn(strings.NewReader(input))
@@ -177,6 +190,7 @@ func TestConsoleActionUsesCommandPaths(t *testing.T) {
 // one is refused before anything is written, and refused with a message about
 // the argument the author typed rather than about a field they never wrote.
 func TestInitRefusesAFolderThatCannotBeAnAgentName(t *testing.T) {
+	useEmptyManifestStore(t)
 	dir := filepath.Join(t.TempDir(), "it")
 	cmd := newRootCmd()
 	var out, errOut bytes.Buffer
@@ -200,6 +214,7 @@ func TestInitRefusesAFolderThatCannotBeAnAgentName(t *testing.T) {
 // The usual case: a folder becomes a legal name, and the package it writes is
 // one the compiler accepts.
 func TestInitWritesAPackageThatValidates(t *testing.T) {
+	useEmptyManifestStore(t)
 	dir := filepath.Join(t.TempDir(), "Acme_Support")
 	cmd := newRootCmd()
 	var out, errOut bytes.Buffer

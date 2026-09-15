@@ -1,117 +1,179 @@
 ---
 title: "Cascade"
-description: "Four services in a row: a transcriber, a model, a synthesizer and a turn detector, each one yours to pick."
+description: "Build an agent with separate listening, reasoning, and speaking models, then extend it with tasks and state."
 ---
 
-`architecture: cascade` builds four services and runs them in order. The caller
-speaks, a transcriber writes down the words, a model reads them and writes a
-reply, a synthesizer speaks it. A fourth service watches for the caller to stop
-talking and decides when the turn is over.
-
-It is the default. Leave `architecture:` out and this is what you get, which is
-what every package written before that key existed gets.
-
-```yaml agent.yaml
-models:
-  listen:
-    ears:
-      provider: deepgram
-      model: nova-3
-  think:
-    brain:
-      provider: openai
-      model: gpt-5.6-terra
-  speak:
-    mouth:
-      provider: cartesia
-      model: sonic-3
-      voice: "a-voice-id"
-
-agents:
-  desk:
-    instructions: instructions.md
-    listen: ears
-    think: brain
-    speak: mouth
-```
+Use separate models to choose how your agent hears a caller and speaks its answer.
+In a cascade, transcription produces text, a reasoning model answers, and a synthesizer speaks.
+Turn detection decides when to start the reply.
 
 On this page:
 
-- [Why pick it](#why-pick-it) - what the other two cannot do
-- [The four roles](#the-four-roles) - and where each is taught
-- [What it costs](#what-it-costs) - the pause between turns
-- [Troubleshooting](#troubleshooting)
+- [Quickstart](#quickstart) - a complete voice desk
+- [Bind the models](#1-bind-the-three-models) - one job per entry
+- [Choose the turn](#2-choose-when-the-agent-replies) - defaults and selectors
+- [Extend the desk](#3-add-tools-tasks-or-saved-state) - grow the workflow
+- [Advanced](#advanced) - switch architecture
+- [Troubleshooting](#troubleshooting) - correct common failures
+- [Where to go next](#where-to-go-next) - model references
 
-## Why pick it
+## Quickstart
 
-**It is the only shape that carries tasks, handoffs and saved call state.** A
-task changes the agent's prompt in the middle of a call. A cascade rebuilds the
-model's request every turn, so a new prompt is just the next request. A
-speech-to-speech session fixes what it knows when it starts.
+Create a new package with a LiveKit target. If initialization opens the console, select LiveKit and finish creating the package.
 
-**You can mix vendors.** The transcriber, the model and the voice are three
-separate choices, and nothing makes you take all three from one company. A
-speech-to-speech model is one vendor for the whole job.
+```sh Terminal
+unmute init voice-desk
+```
 
-**Every part is replaceable.** If one vendor's transcriber is wrong for your
-callers, swap that one entry. Nothing else in the package changes.
+Replace `voice-desk/agent.yaml` with this **complete file**:
 
-## Every key this page shows
+```yaml voice-desk/agent.yaml
+version: 1
+name: voice-desk
+architecture: cascade
+entry_agent: desk
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+models:
+  turn:
+    detector:
+      provider: livekit
+      model: turn-detector-mini
+  listen:
+    transcriber:
+      provider: slng
+      model: "deepgram/nova:3"
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-terra
+      params:
+        reasoning_effort: none
+  speak:
+    voice:
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: aura-2-thalia-en
+agents:
+  desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+channels:
+  web:
+    kind: realtime_audio
+capacity:
+  peak_sessions: 1
+  max_sessions: 2
+  avg_session_duration: 3m
+```
 
-A cascade writes no key of its own. `architecture: cascade` is the default, so
-the block above is four ordinary model entries and one agent binding them. Each
-role's own keys are on its own page, listed below.
+Keep the scaffold's `targets.yaml`, but remove its target-level `models:` overrides because the model palette above replaces the scaffold's.
+Keep its framework provider and version pin, and remove any phone `connection:` for this browser example. Replace `voice-desk/instructions.md` with this complete prompt:
 
-<ParamField path="listen" type="a models.listen entry name" required>
-  The transcriber this agent uses. Full key list on
-  [Transcription](/models/stt).
+```markdown voice-desk/instructions.md
+You are a friendly information desk. Answer in short spoken sentences.
+Ask one question at a time. If you do not know an answer, say so.
+```
+
+Set `OPENAI_API_KEY` and `SLNG_API_KEY` in your shell or the package's `.env`, then run:
+
+```sh Terminal
+unmute validate voice-desk
+unmute compile voice-desk
+unmute dev voice-desk --target livekit
+```
+
+Use Docker for this LiveKit run. The [Pipecat target](/targets/pipecat) is another option; it runs locally with `uv`.
+The example below stays with this same `desk` agent.
+
+## 1. Bind the three models
+
+The quickstart names the transcriber, reasoning model, and voice under `models`.
+The agent binds its reasoning and voice by name. A single transcriber is selected automatically for the package.
+
+<ParamField path="architecture" type="cascade | realtime | live">
+  Set `cascade`, or omit the key for the same result. Cascade is supported on all three targets, subject to each target's model and feature limits.
 </ParamField>
 
 <ParamField path="think" type="a models.think entry name" required>
-  The reasoning model. Full key list on [Reasoning](/models/llm).
+  Agent-level reasoning binding, such as `agents.desk.think: reasoning`.
 </ParamField>
 
 <ParamField path="speak" type="a models.speak entry name" required>
-  The synthesizer. Full key list on [Voices](/models/tts).
+  Agent-level voice binding, such as `agents.desk.speak: voice`.
 </ParamField>
+
+<ParamField path="listen" type="a models.listen entry name">
+  Package-level selector. Omit it when there is one transcriber; name an entry when there is more than one. It does not belong under an agent.
+</ParamField>
+
+| Role | Where to configure it |
+|---|---|
+| Listening | [Transcription](/models/stt) |
+| Reasoning | [Reasoning models](/models/llm) |
+| Speaking | [Voices](/models/tts) |
+
+A model name is forwarded to its provider. Validation checks the binding, not whether your account can use that model.
+
+## 2. Choose when the agent replies
+
+The quickstart binds LiveKit’s local turn detector. A cascade needs a turn binding.
+When adding Pipecat, override `detector` for that target with `provider: local` and `model: silero`.
+Follow [Turn detection](/models/turn-detection) for the target override shape and timing options.
 
 <ParamField path="turn" type="a models.turn entry name">
-  Who decides the caller has finished. Optional: left out, each target builds
-  its own default. Full key list on [Turn detection](/models/turn-detection).
+  Package-level selector. One turn entry is selected automatically. With several entries, name the one to use here.
 </ParamField>
 
-## The four roles
+Listen for pauses and interruptions before changing settings.
+A shorter silence window can answer faster but may cut off callers who pause mid-sentence.
 
-| Role | What it does | Where it is taught |
-|---|---|---|
-| `listen` | turns the caller's audio into text | [Transcription](/models/stt) |
-| `think` | reads the text and writes the reply | [Reasoning](/models/llm) |
-| `speak` | turns the reply into audio | [Voices](/models/tts) |
-| `turn` | decides the caller has finished | [Turn detection](/models/turn-detection) |
+## 3. Add tools, tasks, or saved state
 
-`listen`, `think` and `speak` are required. `turn` is optional, and left out
-each target builds its own default.
+Extend this desk with a [local tool](/build/tools/python), then add a [task](/build/orchestration/tasks) when a job needs its own steps.
+Use [variables](/build/variables) only for values that must survive those steps.
+Tasks and saved state currently require cascade; all three architectures support local tools.
 
-## What it costs
+The complete [salon concierge](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge) shows booking, task return, and handoff.
+Its phone routes and tracing need their own configuration and credentials.
 
-Four services means four hops, and every hop is time the caller spends waiting.
-The caller stops talking, the turn detector notices, the transcriber finishes,
-the model thinks, the synthesizer starts speaking. Each step waits for the one
-before it.
+## Advanced
 
-A speech-to-speech model collapses that into one. If the pause between turns is
-the thing you are trying to fix, read [Latency](/optimization/latency) first: a
-lot of that wait is settings rather than architecture, and moving architecture
-costs you tasks.
+<Accordion title="Switch this desk to speech-to-speech">
+Follow [Switch architecture](/build/architecture/overview#3-replace-the-models-and-agent-bindings).
+Replace the model palette and the agent's `think:`/`speak:` bindings together.
+Remove old target overrides and any features the destination refuses.
+</Accordion>
+
+<Accordion title="Switch back from live or realtime">
+Use the quickstart's complete `agent.yaml` for a minimal cascade, keeping your prompt file.
+For an existing package, copy its model palette and `think:`/`speak:` bindings instead, and add the required provider secrets.
+Remove `models.live`, `models.realtime`, and the old agent binding before validating.
+Do not replace a larger package's whole file if you need to retain its tools or workflow.
+</Accordion>
 
 ## Troubleshooting
 
-**The agent answers too slowly.** Start with
-[Turn taking](/optimization/turn-taking). The silence window before the turn
-ends is usually the largest single piece, and it is one line.
+### Validation rejects an agent-level listen field
 
-**The agent interrupts the caller.** The same page, in the other direction. A
-shorter window answers faster and cuts people off more.
+Listening is selected for the package, not for each agent.
+**Fix:** move the selector to the top level, or omit it when only one transcriber exists.
 
-**A vendor name is refused.** Each role has its own list, and an unlisted name
-is refused with the list. The role pages above carry them.
+### The agent waits too long or cuts callers off
+
+Turn settings or provider latency may be responsible.
+**Fix:** inspect the dev measurements and follow [Turn taking](/optimization/turn-taking) before replacing all three models.
+
+### A provider is refused for one role
+
+Targets support different providers for each role.
+**Fix:** choose a supported integration from that role's reference, then validate every declared target.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Add a task" icon="list-check" href="/build/orchestration/tasks">Give one job its own workflow.</Card>
+  <Card title="Choose architecture" icon="layer-group" href="/build/architecture/overview">Compare and switch pipelines.</Card>
+</Columns>

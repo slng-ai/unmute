@@ -34,9 +34,11 @@ type ManifestModels struct {
 	Speak  []ManifestModel `json:"speak,omitzero" yaml:"speak,omitzero"`
 	Think  []ManifestModel `json:"think,omitzero" yaml:"think,omitzero"`
 }
+
+// A nil Allow permits every model from this provider; an explicit empty list permits none.
 type ManifestModel struct {
 	Provider string   `json:"provider" yaml:"provider"`
-	Allow    []string `json:"allow" yaml:"allow"`
+	Allow    []string `json:"allow,omitzero" yaml:"allow,omitzero"`
 }
 type ManifestRegions struct {
 	Models      []ManifestModelRegion      `json:"models,omitempty" yaml:"models,omitempty"`
@@ -156,7 +158,7 @@ func manifestFields(value reflect.Value, path string) error {
 			field := value.Type().Field(i)
 			name := strings.Split(field.Tag.Get("yaml"), ",")[0]
 			item := value.Field(i)
-			if name == "allow" && item.IsNil() {
+			if name == "allow" && item.IsNil() && value.Type() != reflect.TypeFor[ManifestModel]() {
 				return fmt.Errorf("%s.allow: write an allowlist, including [] to allow nothing", path)
 			}
 			if name == "provider" && item.String() == "" {
@@ -227,6 +229,12 @@ func (p *Package) readManifest() error {
 
 var manifestLanguagePattern = regexp.MustCompile(`^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$`)
 
+// ManifestToolKinds returns every execution kind a company contract can allow.
+func ManifestToolKinds() []string { return slices.Clone(executionBlocks) }
+
+// ManifestTracingProviders is shared by validation and the manifest editor.
+func ManifestTracingProviders() []string { return []string{"langfuse", "coval"} }
+
 func manifestKnownValues(m *Manifest) error {
 	check := func(path string, rule *ManifestAllow, allowed []string) error {
 		if rule == nil {
@@ -246,7 +254,7 @@ func manifestKnownValues(m *Manifest) error {
 	if err := check("targets.allow", m.Targets, providers); err != nil {
 		return err
 	}
-	if err := check("tracing.allow", m.Tracing, []string{"langfuse", "coval"}); err != nil {
+	if err := check("tracing.allow", m.Tracing, ManifestTracingProviders()); err != nil {
 		return err
 	}
 	if m.Tools != nil {

@@ -1,74 +1,136 @@
 ---
 title: "Manifest"
-description: "Save company rules once and apply them to every new agent."
+description: "Keep agents and coding assistants within your company's approved choices."
 ---
 
-A manifest sets the company rules an agent must follow. Save it once on the
-computer, then reuse it when creating agents. It contains rules, not prompts or
-tool implementations.
+Use a manifest to keep new agents within your company's approved choices.
+
+A manifest is a contract: it allows providers, models and other settings.
+The agent package holds the prompts and tools that implement the use case.
+**Save the rules, copy them into an agent, check the result.**
 
 On this page:
 
-- [Quickstart](#quickstart): save a manifest and create an agent
-- [What an agent carries](#what-an-agent-carries): the copied contract and its link
-- [Example manifest](#example-manifest): one complete example
-- [Every key](#every-key): fields, types, accepted values and defaults
-- [Validation and limits](#validation-and-limits): what is checked
+- [Quickstart](#quickstart) - save a contract and create an agent
+- [Save the company rules](#1-save-the-company-rules) - what a restriction means
+- [Create an agent from them](#2-create-an-agent-from-them) - guided setup or a coding assistant
+- [Check the package](#3-check-the-package) - validation and compilation
+- [What an agent carries](#what-an-agent-carries) - the copied contract and its link
+- [Example manifest](#example-manifest) - one complete contract
+- [Every key](#every-key) - field reference
+- [Advanced](#advanced) - saved defaults and later edits
+- [Validation and limits](#validation-and-limits) - what checks can establish
+- [Troubleshooting](#troubleshooting)
+- [Where to go next](#where-to-go-next)
 
 ## Quickstart
 
-```sh
+These complete commands create a saved contract and a new agent package.
+Both creation steps are interactive; finish and save each before continuing.
+
+```sh Terminal — project folder
 unmute manifest create acme-corp
-unmute init my-agent
+unmute init hotel-agent --manifest acme-corp
+unmute validate hotel-agent
+unmute compile hotel-agent
 ```
 
-`manifest create` opens a commented YAML starter in `VISUAL`, falling back to
-`EDITOR`. Configure a blocking editor command first, such as `EDITOR='code --wait'`
-or `EDITOR=vi`. With no name, the command asks for one. Local names use letters,
-digits, hyphens and underscores. An existing name is never overwritten.
+Choose the company's approved settings in the manifest editor.
+Omitted rules add no restriction; a new manifest starts unrestricted.
+The agent setup then offers choices within the saved contract.
 
-The first saved manifest becomes the default. Later creations offer to change
-the default. Plain `unmute init` uses that default and guides the author through
-the allowed choices. No saved default means the ordinary creation flow.
+For a coding assistant, use the [draft quickstart](/reference/cli/init#quickstart).
+It creates an unfinished package without prompts and includes a brief you can
+copy into your assistant.
 
-```sh
-unmute init another-agent --from-manifest
-unmute manifest use acme-corp
+## 1. Save the company rules
+
+`acme-corp` is the local storage name. The editor separately lets you set the
+company name and revision. The revision starts at `1` and changes only when
+you edit it; it is not an Unmute or SDK version.
+
+| Choice | Meaning |
+|---|---|
+| No restriction | Omit the rule and allow any otherwise-supported value |
+| Selected values | Allow only the listed values |
+| Allow nothing | Explicitly allow no values; available for non-model rules in the editor |
+| Allow all models | Permit every current and future model from one listed provider |
+
+A provider is the service the agent connects to. SLNG can serve models from
+different makers. Keep provider `slng` for those models, even when their IDs
+name Cartesia or Deepgram. Each role supports several providers and model IDs.
+
+Choosing **Allow all models** omits that provider's `allow` field.
+Providers missing from a restricted role remain forbidden. Permission does not
+add target support or verify that an ID exists at the service.
+See [Models](#models) for the field meanings.
+
+Use arrows and Enter in menus, and Tab or Shift+Tab between form fields and
+controls. F1 opens help; F2 switches sections. A form's Apply keeps the entry
+in the draft. Only **Review and save** writes it to disk.
+See [editor controls](/reference/cli/manifest) for the full workflow.
+
+## 2. Create an agent from them
+
+Use the same saved name when creating the package. These are alternatives;
+choose one for a new directory.
+
+| Who completes the package | Command |
+|---|---|
+| A person in guided setup | `unmute init hotel-agent --manifest acme-corp` |
+| A coding assistant editing files | `unmute init hotel-agent --manifest acme-corp --draft` |
+
+The draft selects no models, targets or channels. Install the
+[Unmute skill](/reference/cli/skill), then give the assistant the use case and
+ask it to complete the existing package under `hotel-agent/manifest`.
+The CLI copies the contract; the assistant writes the agent.
+
+The skill reads company rules before choosing bindings or tools. It uses exact
+approved IDs when listed, preserves the contract, and explains conflicts
+instead of weakening rules. Use the [complete assistant brief](/reference/cli/init#quickstart)
+when handing it a draft.
+
+## 3. Check the package
+
+After guided setup or the coding assistant completes the package, run:
+
+```sh Terminal — project folder
+unmute validate hotel-agent
+unmute compile hotel-agent
 ```
 
-`--from-manifest` opens a picker for this new agent only. `manifest use` changes
-the default for future agents. Manifest-based creation needs guided input;
-unattended creation is not supported.
+Validation checks the package's own contract. Compilation also enforces it.
+A draft fails these checks until its required settings are filled in.
+Fix the agent's choices when they violate a rule; do not remove the rule to
+make the check pass.
 
-Saved files live in the operating system's user config directory, under
-`unmute/manifests/<name>/manifest`. `unmute/default-manifest` holds the default
-name. The create command prints the saved path; reopen that file in an editor
-to update the rules. Increase its `version` when publishing a new company
-revision. A missing or invalid saved default is an error, never a reason to
-silently create an unrestricted agent. An invalid editor draft is kept at the
-path named in the error and is not installed.
+A successful compile is not a runtime test. Use the [browser loop](/dev/overview)
+for LiveKit or Pipecat. SLNG runs on its hosted platform and has no `unmute dev`;
+follow the [deployment workflow](/reference/cli/deploy).
 
 ## What an agent carries
 
-Initialization copies the chosen file into the new package as `manifest` and
-links it from `agent.yaml`:
+Initialization copies the selected file to `hotel-agent/manifest`, preserving
+its exact bytes. It also writes this link in `agent.yaml`.
+If attaching a contract by hand, merge this single field into the existing
+package; it is not a complete `agent.yaml`:
 
-```yaml
+```yaml agent.yaml
 manifest: manifest
 ```
 
-Commit both files. Validation and compilation read the package's copy, so they
-work on another computer and in CI without the local library. Changing the
-saved default or editing the saved source does not change existing packages.
-To update one, replace its `manifest`, then run `unmute validate` and
-`unmute compile`. Do not remove a rule to make an agent pass without the
-author's instruction to change the company contract.
+Commit both files. Validation and compilation work on another computer or in CI
+without the saved library. Changing the library or its default never updates
+an existing package automatically.
 
 A root manifest requires its link. A link requires that file. Only the literal
-link `manifest: manifest` is supported; no parent paths or remote URLs. Packages
-with neither file nor link continue to work without a company contract.
+link `manifest: manifest` is supported; no parent paths or remote URLs.
+Packages with neither file nor link continue to work without a company contract.
 
 ## Example manifest
+
+This is a complete contract file, not an agent package. Use it as a starting
+point for company review; replace the example approvals with your own.
 
 ```yaml manifest
 manifest: acme-corp
@@ -151,6 +213,21 @@ unknown keys are refused.
 
 ### Models
 
+A **provider** is the service the agent connects to. A **model maker** creates
+the model that service offers. For models served through SLNG, keep the
+provider as `slng`, even when their IDs name Deepgram, Cartesia or Soniox.
+
+Each role can allow several providers, and each provider can allow several
+models. **Add provider** opens the service picker, then offers **Allow all models**
+or **Add model ID**. Adding a model opens the input directly.
+Use **Add model ID** again for more models, or **Add provider** for another service. Completed entries stay in your draft as you move between
+screens; no extra Apply step is needed.
+
+The guided editor does not offer **Allow nothing** for models.
+Existing empty model rules remain visible and must be repaired before saving.
+Add models, choose **Allow all models** for a provider, or choose **No restriction** for the role.
+The YAML format and `--editor` still support explicitly empty lists.
+
 <ParamField path="models" type="object">
   Restricts model choices by role. Its only keys are `listen`, `speak` and
   `think`. Each role contains a list of provider entries. Agents still define
@@ -171,7 +248,9 @@ unknown keys are refused.
   on each target. Provider names are strings, not a fixed manifest enum.
 </ParamField>
 
-<ParamField path="models.listen[].allow" type="string[]" required>
+<ParamField path="models.listen[].allow" type="string[]">
+  Omit this field to allow all current and future models from this provider.
+  Other providers remain forbidden unless listed for the role.
   Exact model IDs approved for this provider, such as `deepgram/nova:3` with
   `slng`. Model IDs are provider-defined strings. No wildcards or prefix
   matching; case must match. An empty list approves none of this provider's
@@ -190,7 +269,9 @@ unknown keys are refused.
   Provider names are strings, not a fixed manifest enum.
 </ParamField>
 
-<ParamField path="models.speak[].allow" type="string[]" required>
+<ParamField path="models.speak[].allow" type="string[]">
+  Omit this field to allow all current and future models from this provider.
+  Other providers remain forbidden unless listed for the role.
   Exact model IDs approved for this provider, such as `deepgram/aura:2` with
   `slng`. IDs are provider-defined and case-sensitive; wildcards are not
   supported. An empty list approves no models. This does not restrict voice
@@ -210,10 +291,11 @@ unknown keys are refused.
   Provider names are strings, not a fixed manifest enum.
 </ParamField>
 
-<ParamField path="models.think[].allow" type="string[]" required>
+<ParamField path="models.think[].allow" type="string[]">
+  Omit this field to allow all current and future models from this provider.
+  Other providers remain forbidden unless listed for the role.
   Exact model IDs approved for this provider, such as `gpt-5.6-terra` with
-  `openai`. IDs are provider-defined and case-sensitive. No wildcards,
-  provider-wide approval or automatic model choice. An empty list approves
+  `openai`. IDs are provider-defined and case-sensitive. No wildcards or automatic model choice. An empty list approves
   no models.
 </ParamField>
 
@@ -396,6 +478,49 @@ unknown keys are refused.
   Target support and credential requirements still apply.
 </ParamField>
 
+## Advanced
+
+### Choose a different default
+
+The first saved manifest becomes the default. Later creations offer to change it.
+Plain `unmute init` uses that default and opens guided setup. Without a saved
+default, it uses the ordinary creation flow.
+
+This complete command changes the default for future agents:
+
+```sh Terminal — select a saved default
+unmute manifest use acme-corp
+```
+
+Use `--manifest acme-corp` for one agent without changing the default.
+Use `--from-manifest` to open a picker instead; it takes no name.
+A broken default is an error unless you select a saved manifest directly.
+Draft creation always requires an explicit agent name and `--manifest`.
+
+### Edit the saved source
+
+Saved contracts live under the operating system's user config directory at
+`unmute/manifests/<name>/manifest`. The CLI prints the path after saving.
+This complete command reopens the example contract:
+
+```sh Terminal — edit the saved contract
+unmute manifest edit acme-corp
+```
+
+Saving replaces comments and formatting with clean YAML and first keeps an
+exact backup beside the original. Both paths are printed. Unchanged edits
+preserve the original bytes and create no backup. Revisions stay manual.
+
+Use `--editor` only when you want external YAML editing or need to repair an
+invalid saved file. See [external editor setup](/reference/cli/manifest).
+
+### Update an existing agent's contract
+
+When the contract owner approves a new revision, replace the package's
+`manifest` with that approved file, then validate and compile again.
+Keep its `manifest: manifest` link. Neither editing the library nor changing
+the default performs this replacement for you.
+
 ## Validation and limits
 
 The contract covers the whole declared package, including unused profiles,
@@ -411,11 +536,41 @@ not add provider support or make an unsupported setting work.
 
 The creation console cannot collect custom model endpoint settings or a SLNG
 Context Router upstream. It excludes those model choices. If your contract
-allows only such bindings, author the package and its manifest link directly;
-validation and compilation still enforce the same rules.
+allows only such bindings, use `--manifest <name> --draft` and complete the
+package by hand or with a coding assistant. Validation and compilation still
+enforce the same rules.
 
 The contract checks declared settings, not arbitrary local tool code, the
 provider's actual processing location or tracing delivery. It is not signed
 and does not prevent somebody deleting both file and link. Pronunciation
 dictionaries, compliance libraries, placement, URL restrictions, dependency
 rules and prefetch limits are not part of this version.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| An agent violates a model rule | Its provider or model ID is not approved for that role | Choose an approved pair; keep `slng` for SLNG-served models |
+| A provider's models are all blocked | Its `allow` list is explicitly empty | Ask the contract owner to add approved IDs or choose Allow all models |
+| A copied agent still follows old rules | Each package keeps its own contract | Replace the copy with the approved revision, then validate and compile |
+| Validation says the manifest is missing or unlinked | The file and `agent.yaml` link do not match | Keep the root `manifest` file and `manifest: manifest` together |
+| A draft reports no targets selected | The assistant has not completed the package | Supply the use-case brief and have it fill the required settings |
+| A permitted provider is unavailable in guided setup | The console cannot collect its endpoint or router settings | Use `--manifest acme-corp --draft` and follow the provider's reference |
+| A region warning remains after compilation | The declared location cannot be verified | Check the target's region support and the provider's configuration |
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Create the agent" icon="terminal" href="/reference/cli/init">
+    Hand a manifest-backed draft to your coding assistant.
+  </Card>
+  <Card title="Edit company rules" icon="file" href="/reference/cli/manifest">
+    Navigate the editor, save changes and manage backups.
+  </Card>
+  <Card title="Install the skill" icon="book-open" href="/reference/cli/skill">
+    Give the assistant Unmute's authoring and validation workflow.
+  </Card>
+  <Card title="Read validation results" icon="check" href="/reference/cli/validate">
+    Fix package errors before compiling.
+  </Card>
+</CardGroup>

@@ -116,10 +116,12 @@ func TestInitUsesSavedDefaultAndPickerDoesNotChangeIt(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name, input, want string
+		named             bool
 		pick              bool
 	}{
-		{"default-agent", "7\n\n", contract, false},
-		{"other-agent", "2\n7\n\n", other, true},
+		{"default-agent", "7\n\n", contract, false, false},
+		{"other-agent", "2\n7\n\n", other, false, true},
+		{"named-agent", "7\n\n", other, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), tc.name)
@@ -129,6 +131,9 @@ func TestInitUsesSavedDefaultAndPickerDoesNotChangeIt(t *testing.T) {
 			cmd.SetErr(&out)
 			cmd.SetIn(strings.NewReader(tc.input))
 			args := []string{"init", dir}
+			if tc.named {
+				args = append(args, "--manifest", "other")
+			}
 			if tc.pick {
 				args = append(args, "--from-manifest")
 			}

@@ -1,0 +1,28 @@
+ UNMUTE//   Manifests › Manifest                                                                    
+╭──────────────────────╮ ╭─────────────────────────────────────────────────────────────────────────╮
+│ SECTIONS             │ │ Manifest                                                                │
+│                      │ │                                                                         │
+│   Identity           │ │ Choose the company rules to set. Nothing is saved until you review      │
+│   Models             │ │ and save.                                                               │
+│   Languages          │ │ › Identity · acme · revision 1                                          │
+│   Targets            │ │   Models · No restriction                                               │
+│   Tools              │ │   Languages · No restriction                                            │
+│   Tracing            │ │   Targets · No restriction                                              │
+│   Advanced           │ │   Tools · No restriction                                                │
+│   Review and save    │ │   Tracing · No restriction                                              │
+│                      │ │   Advanced · No restriction                                             │
+│                      │ │   Review and save                                                       │
+│                      │ │   Cancel                                                                │
+│                      │ │                                                                         │
+│                      │ │                                                                         │
+│                      │ │                                                                         │
+│                      │ │                                                                         │
+│                      │ │                                                                         │
+│                      │ │                                                                         │
+│                      │ │                                                                         │
+│                      │ │                                                                         │
+│                      │ │                                                                         │
+│                      │ │                                                                         │
+│                      │ │                                                                         │
+╰──────────────────────╯ ╰─────────────────────────────────────────────────────────────────────────╯
+↑/↓ move · enter select · esc back · ctrl+c exit · F1 help · F2 sections                            

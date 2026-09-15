@@ -439,6 +439,7 @@ print("smoke ok:", ", ".join(builders))
 
 const pipecatTaskTransferSmokeScript = `"""Smoke check: task transfer obeys Pipecat 1.9 Flow termination."""
 import asyncio
+import copy
 import json
 import os
 import subprocess
@@ -450,7 +451,7 @@ import bot  # noqa: E402
 from pipecat.bus import AsyncQueueBus, BusActivateWorkerMessage  # noqa: E402
 from pipecat.flows import FlowManager, NO_RESPONSE  # noqa: E402
 from pipecat.frames.frames import LLMSetToolsFrame  # noqa: E402
-from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage  # noqa: E402
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair  # noqa: E402
 from pipecat.services.llm_service import FunctionCallParams  # noqa: E402
 from pipecat.utils.asyncio.task_manager import TaskManager  # noqa: E402
@@ -505,7 +506,9 @@ async def main() -> None:
     registered = task_tools.standard_tools
     handlers = {function.name: function.handler for function in registered}
     owner_messages = [{"role": "user", "content": "I need help."}]
+    signature = LLMSpecificMessage(llm="google", message={"type": "thought_signature", "signature": b"probe"})
     task_messages = [
+        signature,
         {"role": "developer", "content": "Begin this step."},
         {"role": "user", "content": "This is really about billing."},
         {
@@ -587,7 +590,8 @@ async def main() -> None:
     assert callbacks[-1][0] == {"transferred": True}
     assert callbacks[-1][1].run_llm is False, "NO_RESPONSE must suppress the source LLM"
     assert len(activations) == 1
-    assert [message["role"] for message in context.get_messages()] == [
+    assert signature in context.get_messages(), "full history lost provider metadata"
+    assert [message["role"] for message in context.get_messages() if isinstance(message, dict)] == [
         "user", "user", "assistant", "tool", "assistant",
     ], "history: full lost task records or retained Flow developer controls"
 
@@ -724,7 +728,8 @@ async def main() -> None:
 
     owner.queue_frame = capture_prompt_restore
     owner.flush_pipeline = fail_first_flush
-    before_final_messages = [dict(message) for message in context.get_messages()]
+    context.add_message(signature)
+    before_final_messages = copy.deepcopy(context.get_messages())
     before_final_tools = context.tools
     try:
         await owner._run_verify_finish_complete({"complete": True}, flow)

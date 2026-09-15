@@ -464,6 +464,7 @@ a completed or unserved status.
 from __future__ import annotations
 
 import asyncio
+import copy
 import functools
 import inspect
 import json
@@ -1130,7 +1131,7 @@ class IntakeAgent(LLMWorker):
         """Caller asks about billing, an invoice, or a refund."""
         # context.history on this handoff. One LLMContext is shared for the whole
         # call, so the receiver is given the shaped list rather than a copy.
-        self.context.set_messages([dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")])
+        self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))
         await self.activate_worker(
             "billing",
             args=LLMWorkerActivationArgs(
