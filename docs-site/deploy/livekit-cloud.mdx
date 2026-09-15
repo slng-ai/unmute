@@ -1,291 +1,337 @@
 ---
 title: "Go live on LiveKit Cloud"
-description: "Take the generated LiveKit project to production with the lk CLI, in the order the commands actually work."
+description: "Create a LiveKit Cloud agent from your package, then update its code and runtime secrets."
 sidebarTitle: "LiveKit Cloud"
 ---
 
-`unmute compile` gives you a normal LiveKit project with a `Dockerfile`.
-LiveKit Cloud builds and runs that project for you, and the `lk` CLI is how you
-drive it.
+Deploy your compiled package to a LiveKit Cloud project, then update the same agent.
+Unmute writes the runnable project; LiveKit's `lk` CLI builds and hosts it.
+Edit your authored package and compile again when its behavior changes.
+`unmute deploy` handles SLNG; this route uses `lk agent`.
 
-<Note>
-  The runbook of record is `build/<target>/README.md` in your own build. It was
-  generated from your package, so it names your region, your agent, and your
-  variables. This page is the same path with the reasons attached, and it is not a
-  substitute for reading that file.
-</Note>
+On this page:
 
-## Before the first command
+- [Quickstart](#quickstart) - compile and create the first deployment
+- [Choose the project](#1-choose-the-project) - authentication and destination
+- [Prepare the package](#2-prepare-the-package) - target, build files and credentials
+- [The first deploy is create](#the-first-deploy-is-create) - create and save its identity
+- [Check it, and recover it](#check-it-and-recover-it) - status and a real interaction
+- [Every later deploy is deploy](#every-later-deploy-is-deploy) - update the existing agent
+- [Secrets](#secrets) - change values without rebuilding
+- [Advanced](#advanced) - regions, phone routes and customization
+- [Troubleshooting](#troubleshooting) - symptoms and fixes
+- [Where to go next](#where-to-go-next)
 
-Install the [LiveKit CLI](https://docs.livekit.io/reference/developer-tools/livekit-cli),
-then authenticate once and pick the project this agent belongs to:
+## Quickstart
 
-```sh
+Start with a package that declares a LiveKit target named `livekit`.
+[Create a package](/deploy/going-live) first if you do not have one.
+Install the [LiveKit CLI](https://docs.livekit.io/reference/developer-tools/livekit-cli/)
+and prepare the runtime secret file described below.
+
+From the package root; replace both placeholders with your destination:
+
+```sh Package root
 lk cloud auth
 lk project list
-lk project set-default "<project-name>"
+unmute validate . --target livekit
+unmute compile . --target livekit
+cd build/livekit
+lk --project "<project-name>" agent create --region "<region>" --secrets-file ../../.env.livekit
+lk --project "<project-name>" agent status
 ```
 
-`lk cloud auth` opens a browser to link the project. Setting a default matters more
-than it looks: without one, later commands fail with a subdomain mismatch that does
-not say which side is wrong.
+`create` writes `livekit.toml` with the new agent ID and project.
+Keep it for later updates. The following sections explain each step.
+
+## 1. Choose the project
+
+`lk cloud auth` links a project through your browser. This authenticates the
+CLI on your machine; it does not provision your model providers' keys.
+Use an account with access to manage agents in the destination project.
+
+`lk project list` shows linked projects. Pass `--project "<project-name>"`
+on deployment commands so the destination is explicit. You can also set a
+default with `lk project set-default "<project-name>"`.
+See [project selection](https://docs.livekit.io/reference/developer-tools/livekit-cli/projects/).
+
+On later runs, `livekit.toml` identifies the project and agent. The explicit
+project must match that file. Changing the CLI's default does not move an agent.
+
+## 2. Prepare the package
+
+### Set the target and models
+
+Declare `provider: livekit` and an exact supported framework `version:` in
+`targets.yaml`. See the [LiveKit target fields](/targets/livekit#target-fields)
+and [supported versions](/reference/targets-yaml#framework-versions-are-exact).
+The generated image supplies Python; you do not need a local Python environment
+to validate or compile.
+
+Choose [reasoning](/models/llm), [speech recognition](/models/stt),
+[speech generation](/models/tts), and [turn detection](/models/turn-detection)
+in the package, or use the target's model overrides. Provider parameters and credentials follow those bindings.
+Changing a model uses the same compile and deploy steps.
+
+`unmute validate` checks declarations and target support. Compilation also
+validates, then writes `build/livekit/`. Neither operation proves a provider
+will accept a request with your account and credentials.
+
+### Use the generated build directory
+
+Run LiveKit commands from `build/livekit/`, where these files are generated:
+
+| File | Role |
+| --- | --- |
+| `agent.py` | Worker and compiled prompts, tasks and tool wiring |
+| `pyproject.toml` | Python project manifest and selected dependencies |
+| `Dockerfile` and `.dockerignore` | Image build and file exclusions |
+| `tools/` | Copied local tool handlers, when declared |
+| `.env.example` | Environment names for this package and route |
+| `README.md` | Package-specific runbook |
+| `compile-report.json` | Resolved bindings and compiler decisions |
+
+The compiler supplies the project manifest and Dockerfile. No custom adapter
+or Dockerfile is needed for this route. LiveKit builds the image remotely from
+this directory; files elsewhere in the authored package are not its build context.
+See [LiveKit builds](https://docs.livekit.io/deploy/agents/builds/).
+
+### Supply only the runtime values
+
+Declare secret names in the package as described in
+[credentials](/build/credentials). Supply their values separately.
+Create `.env.livekit` in the package root, outside the generated build directory,
+and exclude it from source control.
+
+This is a format example. Replace the name with a required name from your
+build's `.env.example`, then add only the other runtime values it needs:
+
+```dotenv .env.livekit — package root, placeholders only
+SERVICE_API_KEY=replace-with-the-provider-key
+```
+
+Obtain keys from the provider linked by your [model binding](/models/llm).
+Do not copy a whole development environment into this file. Remove unused names,
+blank placeholders, and local-only connection settings.
+
+| Value | Where it belongs |
+| --- | --- |
+| CLI authentication | The linked project on your machine |
+| Provider, tracing and tool credentials | Runtime secrets supplied to the deployed agent |
+| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | Injected by LiveKit Cloud; omit from the upload |
+| Local SIP `REDIS_URL` | Local infrastructure; omit for managed Cloud SIP |
+| Non-secret settings a handler reads from its environment | May use the same runtime environment file |
+| Conversation variables | Package/session state; see [variables](/build/variables) |
+
+LiveKit excludes its three connection credentials from secret uploads.
+It does not create or revoke your provider keys.
+See [runtime secret storage](https://docs.livekit.io/deploy/agents/secrets/).
 
 ## The first deploy is `create`
 
-Authenticate with `lk cloud auth` and select the project with
-`lk project set-default "<project-name>"` once. Then, for a target named `livekit`:
+From `build/livekit/`, choose a supported worker region and create the agent:
 
-1. From the package root, run `unmute compile . --target livekit`.
-2. Put the runtime values in `build/livekit/.env`. If the package-root `.env`
-   already holds them, run `cp .env build/livekit/.env`. Otherwise copy the
-   generated `.env.example` there and fill in its values.
-3. Run `cd build/livekit`. This directory contains `pyproject.toml` and the
-   `Dockerfile`; the package root is not a LiveKit agent project.
-4. Run `lk agent create --region eu-central --secrets-file .env`, replacing
-   `eu-central` with the region declared in your target. The `.env` path is
-   relative to this build directory, not the package root.
-
-For several declared LiveKit regions, use the generated README's create command
-and separate `--config` filename for each region. A later deploy uses
-`lk agent deploy` from the same build directory, with the matching config.
-
-Before recompiling, return to the package root with `cd ../..`.
-`unmute compile` reads the source package, not `build/livekit/`.
-
-Compilation replaces files in each selected `build/<target>/` directory,
-including generated Python, copied handlers, manifests, `Dockerfile`,
-`.env.example`, README, and report. It preserves `.env`, `livekit*.toml`, and
-`samples/*.json`. Other hand-edits do not survive. A target not selected with
-`--target` is left alone.
-
-That registers the agent, uploads the project, builds the image from the generated
-`Dockerfile` in LiveKit's build service, and writes a `livekit.toml` holding the
-agent id and project. The generated directory deliberately does not ship that file,
-because the platform assigns both of its values.
-
-`unmute compile` preserves any `livekit*.toml` the platform wrote there, so
-recompiling does not cost you the agent.
-
-## Every later deploy is `deploy`
-
-Compile first. `lk agent deploy` reads `build/livekit/` and nothing else, so a
-redeploy is only as current as the last compile, and a stale build deploys
-without complaining.
-
-From the package root:
-
-```sh
-unmute compile . --target livekit
-cd build/livekit
-lk agent deploy
+```sh build/livekit/
+lk --project "<project-name>" agent create --region "<region>" --secrets-file ../../.env.livekit
 ```
 
-<Warning>
-  `unmute compile ./my-agent --target livekit` compiles **only** this target. A
-  package that also deploys to pipecat or slng leaves those builds untouched,
-  however old they are, and the next deploy from one of them ships the previous
-  build's agent name and secret set. With no `--target`, every target is
-  compiled.
-</Warning>
+Choose the region declared by your target, if any. See
+[region selection](#region-is-chosen-once) below.
+If the package needs no uploaded runtime values, omit `--secrets-file`.
 
-`create` is the first deploy and refuses to run when a config file of that name
-already exists. `deploy` ships a new version of an agent that already exists, and
-takes no region. Running them the wrong way round either refuses, or registers a
-second billable agent with dispatch split between two versions.
+`create` registers a resource, writes `livekit.toml`, uploads the build context,
+and starts the image build and deployment. It expects no existing config with
+that filename. Use `deploy` for an existing resource.
+See LiveKit's [first deployment](https://docs.livekit.io/deploy/agents/quickstart/).
 
-Confirm the new version is the one serving:
+| Name | What it identifies |
+| --- | --- |
+| Package `name:` | The authored package |
+| Target name, such as `livekit` | The selected target and build directory |
+| Dispatch name | Package name joined to target name, such as `my-agent-livekit` |
+| Cloud agent ID | The resource created by LiveKit and saved in `livekit.toml` |
 
-```sh
-lk agent list
-```
-
-An ordinary redeploy moves nothing else. Secrets stay on the agent, the region is
-fixed at create, and the carrier keeps pointing where it pointed. Three files in
-`build/livekit/` are yours rather than the compiler's and survive every recompile:
-`.env`, `livekit*.toml`, and any tool sample under `samples/`.
-
-Renaming the agent is the exception, and it is
-[the dispatch rule that breaks](#renaming-the-agent-breaks-that-rule) rather than
-the agent.
-
-## Secrets
-
-`--secrets-file .env` sends every name in the file to the platform, which injects
-them as environment variables at run time.
-
-Three names are the platform's own and are dropped from your file:
-`LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`. LiveKit Cloud generates
-them for the project and they cannot be set as secrets, so their absence from the
-deployed list is correct rather than a mistake. `REDIS_URL` is in the same
-category on Cloud, where the SIP service is managed: leave that group blank.
-
-Changing a value later does not need a redeploy:
-
-```sh
-lk agent update-secrets --secrets-file .env              # merges into the existing set
-lk agent update-secrets --secrets-file .env --overwrite  # replaces the whole set
-```
-
-<Warning>
-  Every name must be UPPER_SNAKE: an uppercase letter, then only uppercase
-  letters, digits, and underscores. Unmute refuses a bad name before it writes
-  the project. LiveKit applies the same rule to any names added outside the package;
-  those names must use only letters, numbers, and underscores too.
-</Warning>
-
-## Region is chosen once
-
-<ParamField path="deployment_region" type="string or list of strings">
-  LiveKit accepts `us-east` (Virginia), `eu-central` (Frankfurt), or `ap-south`
-  (Mumbai), as one region or a duplicate-free list. Omit to let the platform
-  choose placement. Unknown names, including `eu`, are refused. These are
-  [LiveKit's agent deployment regions](https://docs.livekit.io/deploy/admin/regions/endpoints/#agent-deployment-regions), not its media region groups.
-</ParamField>
-
-The region is chosen at the first `lk agent create` and cannot change on a
-redeploy. The CLI has no `lk region list` command. `lk agent list` shows the
-regions of existing agents in your project; it is not the full region catalog.
-Use the linked region list for a project with no agents.
-
-Region is set at `create` and is immutable. Moving an agent means creating it in the
-new region and deleting the old one; the platform will not move it in place.
-See LiveKit's current [agent deployment regions](https://docs.livekit.io/deploy/admin/regions/agent-deployment/).
-
-When `deployment_region` is a list, the generated README prints one `create`
-command and one config file per region. All deployments keep the same dispatch
-name. LiveKit normally routes callers to the nearest deployment, but it may use
-another declared region when the nearest one is at capacity. For strict worker
-locality, use separate agent names and explicit dispatch. Use the generated
-commands rather than repeating the single-region command above by hand.
-
-This setting places the worker only. LiveKit media and SLNG speech compute have
-their own controls. LiveKit lists its realtime options under
-[region pinning](https://docs.livekit.io/deploy/admin/regions/region-pinning/) and
-[region groups](https://docs.livekit.io/deploy/admin/regions/endpoints/#region-groups).
-See [regional infrastructure](/optimization/regional-infrastructure) before making a
-data residency claim.
+Recompiling preserves `livekit*.toml`, `.env`, and `samples/*.json` within this
+build directory. It replaces everything else there. Keep authored changes in
+the package, and retain a backup of deployment config files.
 
 ## Check it, and recover it
 
-```sh
-lk agent status                 # Sleeping is healthy on plans that scale to zero
-lk agent logs
-lk agent config --id CA_xxx     # rebuild a lost config file, then deploy again
+From `build/livekit/`, inspect the selected deployment:
+
+```sh build/livekit/
+lk --project "<project-name>" agent status
+lk --project "<project-name>" agent list
+lk --project "<project-name>" agent logs
 ```
 
-If a config file belongs to a different project than the current default, the deploy
-fails with that same subdomain mismatch. Check `lk project list` and set the default
-that matches the file.
+A successful image build does not prove the worker is ready. Check its status
+and startup logs, then start a session with its dispatch name in the
+[Agent Console](https://docs.livekit.io/agents/start/console/)
+or your existing frontend.
 
-## Telephony needs two more records
+Ask one short question and confirm the agent receives it and answers it.
+A greeting alone does not prove caller input reached the model. Exercise one tool
+if the package uses tools. Read the new session's logs for provider and tool
+errors, without sharing secret values or sensitive conversation content.
 
-A deployed agent on the `sip` route still cannot take a call, because nothing in
-your LiveKit project claims your phone number yet. Your build generates the two
-records and the script that creates them:
+This is a deployment smoke check. Phone routes still need
+[carrier setup and a deployed call](/telephony/overview#point-the-carrier-at-the-deployment),
+and application testing still needs its own cases.
 
-```sh
-bash telephony-setup.sh
+If you lose the config, recover it using the existing ID from `agent list`:
+
+```sh build/livekit/
+lk --project "<project-name>" agent config --id "<agent-id>"
 ```
 
-It creates an inbound trunk that claims the number and a dispatch rule that
-sends those calls to this agent. Run it after `lk agent create`, because the
-rule names the agent. It needs `jq` as well as `lk`, and running it again is
-safe. See [create the LiveKit records](/telephony/livekit-twilio#create-the-livekit-records)
-for the detail, and [the Twilio setup](/telephony/twilio) for the carrier half.
+## Every later deploy is `deploy`
+
+Change authored prompts, tool handlers, declarations or model bindings. Return
+to the package root before validating and compiling:
+
+```sh Package root
+unmute validate . --target livekit
+unmute compile . --target livekit
+cd build/livekit
+lk --project "<project-name>" agent deploy
+```
+
+`deploy` builds a new image for the ID in `livekit.toml`. It does not read the
+authored files outside this directory. Target selection leaves other targets'
+builds untouched, so compile each target you intend to update.
+
+The secrets file is optional on update. Existing secrets remain unless you
+change them. If the CLI offers to import a discovered environment file,
+decline when you intend a code-only update. Use [secrets-only updates](#secrets)
+for deliberate credential changes.
+
+LiveKit rolls out new workers for new sessions and gives old workers up to an
+hour to finish active sessions. Repeat the status and interaction checks after
+the rollout. See [deployment management and rollback](https://docs.livekit.io/deploy/agents/managing-deployments/)
+for recovery options and plan limits.
+
+## Secrets
+
+From `build/livekit/`, add or replace the values in your runtime file:
+
+```sh build/livekit/
+lk --project "<project-name>" agent update-secrets --secrets-file ../../.env.livekit
+lk --project "<project-name>" agent secrets
+```
+
+The update merges supplied names into the existing set. Removing a line from
+the file does not delete the deployed secret.
+
+To remove names, prepare the complete set you want to retain, then replace
+the deployed set:
+
+```sh build/livekit/
+lk --project "<project-name>" agent update-secrets --secrets-file ../../.env.livekit --overwrite
+```
+
+`--overwrite` removes existing names absent from the supplied set. Check the
+retained file before running it. The command uses the same project access and
+agent identity as deployment.
+
+Both updates trigger a rolling restart without rebuilding the image. New
+sessions receive the new values. `agent secrets` displays names and timestamps,
+never values. Test a fresh session after updating a credential.
+See [LiveKit secret semantics](https://docs.livekit.io/deploy/agents/secrets/).
+
+Rotating a key has two separate parts: update this deployed value, then revoke
+the old key with its provider after confirming the replacement works.
+
+## Advanced
+
+### Region is chosen once
+
+<ParamField path="deployment_region" type="string or list of strings">
+  On the LiveKit target, Unmute accepts `us-east`, `eu-central`, or `ap-south`,
+  either singly or as a list without duplicates. Omission emits no region flag.
+  Use an explicit `--region` when destination placement matters.
+</ParamField>
+
+This controls worker hosting. Provider inference locations, provider routing
+parameters and LiveKit media placement are separate settings. See
+[regional infrastructure](/optimization/regional-infrastructure).
+
+LiveKit documents a deployment's region as fixed after creation. To move,
+create in the new region and retire the old deployment after verification.
+For several regions, the generated README supplies one create command and one
+`livekit.<region>.toml` per region. Pass the matching `--config` on subsequent
+updates, secret changes and inspection commands.
+
+All those workers share the dispatch name. Routing may use another region
+when the nearest is at capacity. See [multi-region routing](https://docs.livekit.io/deploy/admin/regions/agent-deployment/)
+before relying on worker placement for strict locality.
+
+### Telephony needs two more records
+
+For an inbound SIP route, the generated `telephony-setup.sh` creates the
+LiveKit trunk and dispatch rule. Run it from `build/livekit/` after deploying,
+with the matching project selected. It needs `lk`, `jq`, and the route values
+in `.env`; these local script inputs are separate from Cloud secret storage.
+Follow [LiveKit carrier setup](/telephony/livekit-twilio#create-the-livekit-records)
+for the full sequence.
 
 ### Renaming the agent breaks that rule
 
-The dispatch rule names the worker by the exact string in
-[`name:`](/reference/agent-yaml#name) joined to the target, so changing either
-one leaves the rule pointing at a worker nobody registers. Calls to the number
-ring and nothing answers, and `lk agent status` still reads ready, because the
-agent is healthy and simply never dispatched.
+Changing the package name changes the dispatch name. Within the same build
+directory, `deploy` still updates the resource ID in the preserved config.
+Renaming the target changes the build directory too: recover the existing
+agent config there with `lk agent config --id` before updating.
 
-Re-running the script does not repair it. "Running it again is safe" means it
-reuses any rule that already names your trunk rather than creating a second one,
-and that is exactly why it skips the step you need. Delete the stale rule first.
+An existing SIP dispatch rule keeps its old name. The setup script reuses that rule, so rerunning it
+alone does not fix the route.
 
-The agent itself needs nothing: `lk agent deploy` targets the id in
-`livekit.toml`, which `unmute compile` preserves across rebuilds, so the same
-agent re-registers under the new name. Only the rule has to be replaced.
+Deploy the new worker and confirm its dispatch name with `lk agent list`.
+Then list the rules with `lk sip dispatch list`, remove the stale rule with
+`lk sip dispatch delete <rule-id>`, and rerun `bash telephony-setup.sh`.
+The number is unrouted between deletion and recreation. Verify the rule names
+the new worker, then make a test call.
 
-<Steps>
-  <Step title="Deploy, and read back the name it registered">
-    ```sh
-    unmute compile ./my-agent && cd build/livekit && lk agent deploy
-    ```
+For the `connector` route, redeploy the bridge from the new build: its
+`AGENT_NAME` also carries the dispatch name.
 
-    ```sh
-    lk agent list
-    ```
+### Customize the supported inputs
 
-    Do not continue until Dispatch Name reads the new value. Building the next
-    record from a stale listing is the easiest way to get this wrong twice.
-  </Step>
-  <Step title="Delete the rule naming the old worker">
-    ```sh
-    lk sip dispatch list
-    ```
+Use [model bindings](/models/llm), [tools](/build/tools/overview), and
+[LiveKit target fields](/targets/livekit#target-fields) first. Local Python
+handlers are supported; arbitrary neighboring modules and data files are not
+automatically copied. See [local handlers](/build/tools/python).
 
-    ```sh
-    lk sip dispatch delete <SDR_...>
-    ```
+Target `pins:` can override known catalog dependencies within validated bounds.
+It is not an arbitrary Python requirements list. Unmute exposes no authored
+Dockerfile override or general worker lifecycle hook. Generated edits disappear
+on compilation.
 
-    The number is unrouted from here until the next step finishes.
-  </Step>
-  <Step title="Recreate it">
-    ```sh
-    bash telephony-setup.sh
-    ```
+For self-hosting, use the [generated LiveKit project](/targets/livekit) and
+[LiveKit's self-hosted deployment guide](https://docs.livekit.io/deploy/custom/deployments/).
+You supply your own LiveKit server URL and API credentials on that route.
 
-    From `build/livekit/`. It reads `SIP_FROM_NUMBER` from `.env`, reuses the
-    inbound trunk that already claims that number, and creates one rule naming
-    the new worker. The trunk is untouched by a rename: it claims a number and
-    says nothing about which agent answers.
-  </Step>
-  <Step title="Check the two strings match">
-    ```sh
-    lk sip dispatch list
-    ```
+## Troubleshooting
 
-    The Agents column for your trunk must equal the Dispatch Name from step 1.
-    Then call the number.
-  </Step>
-</Steps>
-
-On the `connector` route there is no dispatch rule, and the same string is
-compiled into the bridge you host as `AGENT_NAME`. Redeploy the bridge from the
-new build.
-
-## Verifying a phone route
-
-`lk agent status` reporting ready is not the finish line: see [a phone call is
-verified after you deploy](/telephony/overview#point-the-carrier-at-the-deployment).
-
-A call that rings forever usually means a declared secret never reached the
-platform. `lk agent secrets` lists what the deploy actually holds, and every
-name in `.env.example` belongs there.
-
-## Hosting it yourself instead
-
-The generated worker connects out to a LiveKit Server you run. Build the
-`Dockerfile`, set `LIVEKIT_URL` and the API key pair to your server's values
-plus the provider keys from `.env.example`, and start it:
-
-```sh
-python -m livekit.agents start agent.py
-```
-
-On this path Redis is yours as well, because the managed SIP service is not in the
-picture.
+| Symptom | Cause → fix |
+| --- | --- |
+| Project or manifest not recognized | Wrong working directory or incomplete build → compile and run from `build/livekit/`, containing `pyproject.toml` and `Dockerfile`. |
+| Config already exists during create | This directory already identifies an agent → use `deploy`, or recover the intended config before proceeding. |
+| Project mismatch or wrong destination | CLI selection and config disagree → compare `lk project list` with `livekit.toml` and use the matching `--project`. |
+| Build passes, worker is not ready | Startup, dependency or provider failure → read `agent logs`; check `agent status` before testing. An idle deployment may have scaled to zero. |
+| Missing credentials | Required values were omitted or the key has the wrong provider scope → inspect names with `agent secrets`, then correct and update the required values. |
+| Provider rejects a parameter or region | Local validation does not verify provider account access → check the binding's provider documentation, correct the authored setting, compile and deploy. |
+| Missing shared module or data file | The file was not included by the compiler → use supported tool inputs; see [local handlers](/build/tools/python). |
+| Greeting works, caller input does not | The client may not publish microphone audio → check browser permission, selected input and mute state; inspect the session before changing models. |
+| New behavior is absent | Stale target build, wrong config or an older active session → compile the intended target, deploy its config and start a fresh session. |
+| Phone rings without an answer | Carrier routing, dispatch or runtime failure → follow the route's [telephony checks](/telephony/overview). |
 
 ## Where to go next
 
 <Columns cols={2}>
   <Card title="Going live" icon="rocket" href="/deploy/going-live">
-    The checklist both platforms share.
+    The package-to-deployment workflow across targets.
   </Card>
-  <Card title="Pipecat Cloud" icon="cloud" href="/deploy/pipecat-cloud">
-    The same trip on the other platform.
+  <Card title="LiveKit project" icon="file-code" href="/targets/livekit">
+    Generated files and supported target settings.
   </Card>
 </Columns>

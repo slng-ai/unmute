@@ -1,211 +1,322 @@
 ---
 title: "Going live"
-description: "From a generated build to production: what the compiler gives you and what stays yours."
+description: "Create a package, choose a host, and deploy it with the right configuration and credentials."
 ---
 
-You have an agent that works in the browser, tuned through `unmute dev`. This
-page takes it somewhere real. It covers the **code targets**, pipecat and
-livekit. `unmute compile` hands you a project, and deploying it is deploying a
-normal Python container. Unmute is not involved at run time and is not a
-dependency of the thing you ship. A phone route is finished on the Phone calls
-pages, once the agent is live.
+Deploy an Unmute package to LiveKit Cloud, Pipecat Cloud, or SLNG, then update
+it from the same authored files. Validation checks your declarations;
+compilation turns them into what the selected target runs.
 
-<Note>
-A **slng** target is the other shape: SLNG hosts the agent, so there is no
-container, no image and no platform step. One command does the whole thing.
-See [Deploy to SLNG](/deploy/slng).
-</Note>
+On this page:
 
-## What you get, what you provide
+- [Quickstart](#quickstart) - create, compile, and choose a host
+- [Keep the package as the source](#1-keep-the-package-as-the-source) - what belongs where
+- [Choose models and regions](#2-choose-models-and-regions) - configuration and target limits
+- [Separate accounts and credentials](#3-separate-accounts-and-credentials) - names and values
+- [Deploy and verify](#4-deploy-and-verify) - follow the hosting route
+- [Update the agent](#5-update-the-agent) - code, secrets, and names
+- [Advanced](#advanced) - custom code and hosting limits
+- [Troubleshooting](#troubleshooting) - symptom, cause, and fix
+- [Where to go next](#where-to-go-next)
 
-| The compiler emits | You provide |
+## Quickstart
+
+Run these commands from the directory that will hold your new package:
+
+```sh Terminal
+unmute init my-agent
+cd my-agent
+unmute validate
+unmute compile
+```
+
+With no saved organization manifest, named initialization creates a LiveKit
+package. Run `unmute init` without a name for the interactive target choices.
+A saved manifest guides creation through its allowed choices; see
+[initialization](/reference/cli/init#1-choose-the-contract).
+
+Already have a package? Start inside it at `unmute validate`. To change its
+target, follow [Switching a package](/targets/overview#switching-a-package-to-another-target),
+including the model changes that target needs. `--target` selects a declared
+instance; it does not convert the package to another framework.
+
+Then follow **one** hosting guide:
+
+| Destination | What you deploy | First deployment |
+|---|---|---|
+| [LiveKit Cloud](/deploy/livekit-cloud) | Generated Python project | `lk agent create` from `build/livekit/` |
+| [Pipecat Cloud](/deploy/pipecat-cloud) | Generated Python project | `pipecat cloud deploy` from `build/pipecat/` |
+| [SLNG](/deploy/slng) | Compiled agent body | `unmute deploy --target slng` from the package |
+
+The target guides supply the authentication, destination, region, and secret
+steps those commands need. `unmute deploy` currently pushes **SLNG only**.
+
+## 1. Keep the package as the source
+
+| Authored file | What you change |
 |---|---|
-| the Python project and a `Dockerfile` | somewhere to run containers |
-| an `.env.example` naming values you supply | the values, from your secret store |
-| Compose files for local development | production networking, TLS, DNS, ingress |
-| a deploy manifest | Redis where the route needs it, scaling, monitoring |
-| a `README.md` runbook written for that platform | the decision to press go |
+| `agent.yaml` | Agent declarations, model bindings, call behavior, and secret names |
+| `instructions.md` and task prompt files | What the agent should do and say |
+| `targets.yaml` | Target instances, supported framework version, and deployment settings |
+| `tools/<name>.yaml` | Tool inputs and execution choice |
+| Python files named by `local.handler` | Your tool functions, on LiveKit and Pipecat |
+| `connections/<name>.yaml` | A supported phone route and its environment names |
 
-The same image runs locally and in production. Only the start command and the
-environment change.
+`unmute validate` checks the package against each selected target.
+`unmute compile` performs those checks too, then writes
+`build/<target-instance>/`. No provider credentials are needed to compile.
 
-## The runbook is in the build
+On LiveKit and Pipecat, that directory includes a `Dockerfile`,
+`pyproject.toml`, runtime code, `.env.example`, and `README.md`. Pipecat also
+gets `pcc-deploy.toml`. SLNG gets an agent body and a runbook, with no Python
+project or container to build.
 
-Every `build/<target>/README.md` is written for that exact build: its required
-variables, its platform commands, and its carrier steps if it has a phone
-route. It is the authority for that project, because it was generated from the
-same package the code was.
+Read the generated `README.md` for your build's commands and required values.
+`compile-report.json` records resolved models, dependencies, sizing, environment
+names, and target limits. Generated files hold names, never credential values.
 
-Read it before you deploy. This page is the shape; that file has your values.
+Recompilation replaces the selected build directory. Keep authored code outside
+`build/`. The compiler preserves `.env`, `livekit*.toml`, and `samples/*.json`;
+it does not preserve arbitrary edits or added modules.
 
-## Secrets
+## 2. Choose models and regions
 
-Generated files carry environment variable **names**, never values.
-`.env.example` lists the values you supply for this build:
+Models live under `models` in `agent.yaml`. Agents bind a named reasoning and
+voice entry; the package also supplies listening and turn detection where its
+[pipeline](/build/architecture/overview) uses them.
 
-```text
-# Environment for livekit (generated by unmute).
-# Copy this file to `.env` and fill in the values. Never commit `.env`.
-OPENAI_API_KEY=
-SLNG_API_KEY=
+For example, this is the reasoning entry from the current scaffold. Merge it
+into the existing `models.think` block; it is one supported choice:
+
+```yaml agent.yaml
+models:
+  think:
+    assistant_model:
+      provider: openai
+      model: gpt-5.6-terra
+      params:
+        reasoning_effort: none
 ```
 
-That is a browser-only LiveKit build, the shape `unmute init` scaffolds. The
-worker still requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
-`LIVEKIT_API_SECRET`, but the runtime or operator supplies them, so they are
-not on this to-do list. The list is per build; read the one your compile wrote.
+<ParamField path="provider" type="supported provider name" required>
+  Selects an integration for this model role and target. See the role pages below.
+</ParamField>
+<ParamField path="model" type="string">
+  The provider's model identifier. Requiredness and defaults depend on the integration;
+  copy a supported binding from its role page.
+</ParamField>
+<ParamField path="params" type="object">
+  Provider settings for this binding. Omit to use the integration's defaults.
+  These are not an unrestricted runtime configuration API.
+</ParamField>
 
-Both platforms take a secrets file on the first deploy. After that, changing a
-value is one command, and it belongs to your secret store, not to the
-repository.
+| Role | Bindings, credentials, and target support |
+|---|---|
+| Reasoning | [Language models](/models/llm) |
+| Speech recognition | [Speech to text](/models/stt) |
+| Speech generation | [Text to speech](/models/tts) |
+| Turn detection | [Turn detection](/models/turn-detection) |
+| A live speech model | [Live models](/models/live) |
 
-<Warning>
-  Every variable name must be UPPER_SNAKE: an uppercase letter, then only
-  uppercase letters, digits, and underscores. Platforms export secrets through a
-  shell, so a name like `2FACTOR_API_KEY` fails at export and the value is simply
-  missing at run time. The compiler refuses one before you get there:
+Unmute checks provider support and known invalid settings. It transforms some
+settings and forwards others to the provider integration; the compile report
+shows the resolved binding. Validation cannot prove a model exists in your
+account or that every forwarded parameter will succeed.
 
-  ```text
-  connections/twilio_sip.yaml:6: connection "twilio_sip" environment sip_password is not a
-    valid environment variable name: use upper case letters, digits, and underscores, and
-    do not start with a digit. This field takes a name and never a value. A deployment
-    platform exports secrets through a shell, so a bad name would be missing at runtime
-    with no error of its own
-  ```
-</Warning>
+The role pages link to the provider's parameter and credential documentation.
+For a target-specific choice, use a [model override](/targets/overview#overrides-not-forks).
+An override replaces the provider, model, and parameters. Omitted shared
+behavior settings, such as turn timing, carry forward.
 
-## Sizing
+Keep three different region choices separate:
 
-Unmute turns your `capacity:` block into worker and quota numbers for the
-deploy. They come from a conservative assumption, one session per worker, not
-from a measurement of your agent. Use them as a starting point and then
-measure.
+| Setting | What it controls |
+|---|---|
+| Target `deployment_region` | Where the host runs the agent; allowed values and defaults are target-specific |
+| Provider inference region or endpoint | Where a model request runs, when that integration supports choosing it |
+| Provider routing, such as SLNG `params.world_part` | Which provider gateway receives the request |
 
-## Production concerns, both targets
+A hosting region does not move a provider's inference service. See
+[target fields](/targets/overview#targets-yaml) and the
+[SLNG router](/optimization/context-router) for their respective settings.
 
-- **Redis** is needed for LiveKit SIP and a multi-node self-hosted LiveKit
-  Server. Pipecat `cloud-websocket` and `daily-sip` do not use it.
-- **Separate environments.** Keep production and staging apart, and never point
-  a development worker at a production server.
-- **Logs.** Workers and the Pipecat application log to stdout. Ship those logs.
-  Pipecat logs default to `INFO`; set `UNMUTE_LOG_LEVEL=DEBUG` only in a
-  controlled environment because logs can contain caller speech, tool data,
-  and phone details.
-- **Model providers.** Hosting the orchestrator yourself does not host the
-  models. Speech and reasoning calls still go to the providers you bound.
+## 3. Separate accounts and credentials
 
-## Hosting the generated container yourself
+| Concept | Where it belongs |
+|---|---|
+| Deployment authentication | Your host CLI login or deployment credential, on the developer machine or CI runner |
+| Destination account or project | The host CLI's explicit project or organization selection |
+| Provider credentials | Keys issued by the selected model or service provider |
+| Runtime secrets | Values provisioned into the deployed agent's environment or SLNG Vault |
+| Platform-injected values | Connection settings the host supplies, such as LiveKit Cloud's connection URL and key pair |
+| Application configuration | Non-secret environment values, such as an API base URL, read through a supported field or handler |
 
-The managed-cloud pages are the supported deployment path, but the generated
-projects are ordinary containers and can run on infrastructure you control.
+For a code target, declare environment names separately from provisioning their
+values. Merge the names your package reads into this list:
 
-For LiveKit, the agent worker connects out to LiveKit Server and needs no
-inbound port. The server is the public edge: it needs a trusted TLS domain,
-public WebRTC ports, and TURN for callers behind strict firewalls. Add LiveKit
-SIP beside it for phone calls, with public SIP signalling and RTP. An HTTPS
-tunnel is not enough for SIP.
-
-For Pipecat browser calls, expose the bot port over HTTPS and make WebRTC media
-reachable. Cross-network calls need STUN or TURN; the generated SmallWebRTC
-configuration does not add ICE servers today, so treat that as required work
-before a self-hosted browser deployment.
-
-Pipecat's phone routes both stay light on your infrastructure. The
-`cloud-websocket` route hosts nothing of yours: Pipecat Cloud terminates the
-carrier's media itself. The `daily-sip` carrier form emits only a small
-webhook helper; the deployed agent still exposes no inbound service.
-
-Scale by active sessions, not HTTP request rate. Keep each long-lived
-WebSocket on the replica that accepted it, and give shutdown enough time to
-drain the longest call. LiveKit distributes jobs to registered workers; do not
-put a load balancer in front of those workers.
-
-## Phone routes
-
-<Note>
-  A phone call reaches an agent that is deployed. Deploy it, finish the
-  carrier setup below, then call the number: that is how you confirm the
-  phone path works. `unmute dev` covers the prompt, tools, and models in the
-  browser, and stops where the phone leg starts.
-</Note>
-
-If the target declares a phone route, the generated README carries the carrier
-steps: the markup to paste, the trunk to configure, or the number to attach.
-Those steps are per route and per carrier, and they are the part no compiler can
-do for you.
-
-<Card title="Phone calls" icon="phone" href="/telephony/overview">
-  Carrier setup, verifying a call, and transfers, once the agent above is
-  deployed.
-</Card>
-
-## Changing the agent
-
-Edit the package, compile again, deploy again. Never edit `build/`.
-
-```sh
-unmute validate ./my-agent
-unmute compile ./my-agent
+```yaml agent.yaml
+secrets:
+  - SERVICE_API_TOKEN
+  - SERVICE_API_URL
 ```
 
-Each platform page carries that loop in full, including what a rename leaves
-behind: [SLNG](/deploy/slng#every-later-deploy),
-[LiveKit Cloud](/deploy/livekit-cloud#every-later-deploy-is-deploy),
-[Pipecat Cloud](/deploy/pipecat-cloud#every-later-deploy).
+<ParamField path="secrets" type="list of UPPER_SNAKE names">
+  Inventory of environment names the generated project reads, including non-secret
+  configuration. Declaring a name does not create or populate a host secret.
+  SLNG derives its Vault requirements from the compiled body instead.
+</ParamField>
 
-<Warning>
-  `--target` compiles one target. `unmute compile ./my-agent --target livekit`
-  leaves `build/pipecat/` untouched however old it is, and the next deploy from
-  there ships the previous build's agent name and secret set. With no `--target`,
-  every target is compiled.
-</Warning>
+After compiling, make a deployment file from that target's `.env.example`.
+Fill only the names read by the deployed agent. Some routes also list values
+for a separately hosted helper; follow the comments rather than uploading the
+whole development environment.
+
+For a handler that reads these two names, a minimal file has this shape.
+Replace the placeholders privately before using it:
+
+```dotenv .env.deploy (outside the build directory)
+SERVICE_API_TOKEN=REPLACE_WITH_PROVIDER_ISSUED_VALUE
+SERVICE_API_URL=https://api.example.com
+```
+
+Keep this file out of source control and the uploaded build context. Use a
+secret manager or a private editor to fill values; do not put them in command
+arguments, generated code, or image layers. See [Credentials](/build/credentials)
+for the fields that read environment names.
+
+Call [variables](/build/variables) hold conversation data. Prompt interpolation
+is not a way to deliver credentials. Updating a deployed value also does not
+create or revoke its provider key; manage that key with its issuing provider.
+
+## 4. Deploy and verify
+
+Each hosting guide separates first creation, later code updates, and
+secrets-only changes. It also explains how the host finds the existing agent:
+[LiveKit](/deploy/livekit-cloud), [Pipecat](/deploy/pipecat-cloud),
+[SLNG](/deploy/slng).
+
+Check each stage separately:
+
+1. **Validation passes:** the package fits the target. Provider access remains untested.
+2. **The build finishes:** the host has an image or agent body. Check readiness next.
+3. **The worker is ready:** open a new session through the selected host and transport.
+4. **A full interaction works:** speak a short question, confirm the input was received, and hear a relevant answer.
+5. **The application works:** exercise a tool or task that matters to your agent, then end the session.
+
+A greeting proves output works; it does not prove microphone input or tool
+credentials work. Use host status and logs from the target guide to locate the
+failed stage. Keep transcript and credential values out of diagnostic reports.
+
+For phone calls, deploy first, then finish the
+[carrier setup](/telephony/overview). `unmute dev` is the
+[local browser workflow](/dev/overview), not a deployed phone test.
+
+## 5. Update the agent
+
+Change the authored prompt, tool, model, or configuration, then run from the
+package directory:
+
+```sh Terminal
+unmute validate
+unmute compile
+```
+
+Follow the target's **update** command using the existing deployment identity.
+Code targets build a new image for changed code or compiled settings. SLNG's
+`unmute deploy` validates and recompiles automatically before pushing.
+
+A changed value under an existing environment name needs the host's
+secrets-only workflow. Adding a new required name also changes the package's
+inventory, so compile and deploy that source change. Check a new session after
+either update.
+
+`--target livekit` replaces only `build/livekit/`. Deploying from another build
+directory can ship stale code, names, or requirements. Compile the instance
+you intend to deploy.
 
 ### Except changing its name
 
-[`name:`](/reference/agent-yaml#name) is the one field where "deploy again" is
-not enough, because joined to the target it *is* the deployed thing's identity.
-A rename does not move a deployment. It leaves the old one where it was and
-addresses a new one.
+The package's `name` joined to its target instance becomes the deployment name.
+A rename is an identity change, and phone routing may still point at the old one.
 
-| Target | What the next deploy does | What you do |
+| Target | What a rename changes |
+|---|---|
+| LiveKit | A package rename changes the dispatch name; the same build directory keeps its cloud agent ID in `livekit.toml` |
+| Pipecat | The manifest names a new agent and secret set; the old agent remains |
+| SLNG | The push resolves the new name; existing callers still use the old agent ID |
+
+Renaming a target also changes its build directory. On LiveKit, recover the
+existing agent config in that new directory before updating; compilation does
+not move it from the old folder.
+
+Follow the rename steps for [LiveKit](/deploy/livekit-cloud#renaming-the-agent-breaks-that-rule),
+[Pipecat](/deploy/pipecat-cloud#renaming-the-agent), or
+[SLNG](/deploy/slng#renaming-the-agent) before changing a production name.
+
+## Advanced
+
+### Add only the code you need
+
+Start with native declarations and [tools](/build/tools/overview). Use a
+webhook for an HTTP service or MCP for a supported remote tool server. Use a
+[local Python handler](/build/tools/python) for logic inside the generated
+LiveKit or Pipecat process.
+
+[Sharing Python helpers](/build/tools/python#share-a-helper-between-tools)
+explains the supported single-source-file pattern and the limit on separate
+imported modules. Arbitrary module trees and data files are not copied into the
+build. Declared [knowledge documents](/build/tools/knowledge) have their own
+supported inclusion path.
+
+There is no authored lifecycle-hook API or custom Dockerfile hook. LiveKit's
+[target pins](/targets/overview#targets-yaml) can change versions of recognized
+dependencies within supported bounds; they cannot add arbitrary packages.
+Pipecat does not support those overrides. Per-tool dependency declarations are
+refused on both code targets.
+
+Use the compiler-owned build files for the native workflow. An SDK that needs
+an extra package or a custom startup service has no durable package extension
+point today; consider a remote tool service instead.
+
+### Hosting the generated container yourself
+
+The managed-host pages cover the native deployment commands. Operating the
+container yourself also means supplying networking, credentials, monitoring,
+and session draining.
+
+A LiveKit worker connects out to LiveKit Server. The server needs public media
+connectivity and trusted TLS; SIP adds its own signaling and media service.
+Follow [LiveKit's self-hosting documentation](https://docs.livekit.io/transport/self-hosting/).
+
+For self-hosted Pipecat browser calls, the generated SmallWebRTC configuration
+adds no ICE servers. Cross-network use needs a supported STUN/TURN setup that
+Unmute does not currently expose as an authored deployment option.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
 |---|---|---|
-| `slng` | pushes a second agent under the new name | delete the old agent, or point your sessions at the new id |
-| `pipecat` | creates a second agent; the old one keeps running and keeps billing | deploy, confirm `ready`, then `pipecat cloud agent delete <old-name>`; create the secret set under the new name first |
-| `livekit` | updates the same agent in place, under the new worker name | delete the SIP dispatch rule naming the old worker, then re-run `telephony-setup.sh`; see [renaming the agent breaks that rule](/deploy/livekit-cloud#renaming-the-agent-breaks-that-rule) |
-
-On `livekit` the agent survives because `lk agent deploy` targets the id in the
-preserved `livekit.toml`. On the other two the name is how the platform finds
-the resource, so a new name means a new resource.
-
-A rename also strands the record that routes calls to the agent, and that record
-is different on every phone route. It is not part of the agent, so no deploy
-updates it: the number rings and nothing answers, while the agent reports
-healthy because it is. It was never dispatched.
-
-| Route | The record naming the agent | Walked in |
-|---|---|---|
-| LiveKit `sip` | the SIP dispatch rule | [LiveKit Cloud](/deploy/livekit-cloud#renaming-the-agent-breaks-that-rule) |
-| LiveKit `connector` | `AGENT_NAME` in the bridge you host | [LiveKit Cloud](/deploy/livekit-cloud#renaming-the-agent-breaks-that-rule) |
-| Pipecat `cloud-websocket` | `_pipecatCloudServiceHost` in the TwiML Bin | [Pipecat Cloud](/deploy/pipecat-cloud#renaming-the-agent) |
-| Pipecat `daily-sip` | `AGENT_NAME` in the helper you host | [Pipecat Cloud](/deploy/pipecat-cloud#renaming-the-agent) |
-| `slng` | none; the agent id is what goes stale | [SLNG](/deploy/slng#renaming-the-agent) |
+| The host cannot find a project | Deployment ran from the authored package or a partial build | Compile, then use the complete `build/<target>/` directory named by the guide |
+| An imported module or data file is missing | Compilation copies selected handlers, not their import tree or adjacent files | Use the supported shared-handler layout or move the operation to a remote tool |
+| A worker reports a missing credential | Declaring a name did not provision its value, or it went to another destination | Compare the generated inventory with the selected host's secret names |
+| A model request rejects a parameter or region | Provider acceptance is not fully checked offline | Read that integration's supported parameters and account availability, then change the binding |
+| An update creates another agent | The name, destination, or saved identity changed | Check the target's identity and rename steps before deploying again |
+| The first session fails | The image exists but the worker is still starting | Wait for readiness and read startup logs before testing again |
+| The greeting plays but the agent hears nothing | The client may have no active microphone input | Check microphone permission, selected device, and mute state; then inspect input events |
 
 ## Where to go next
 
 <Columns cols={2}>
   <Card title="LiveKit Cloud" icon="cloud" href="/deploy/livekit-cloud">
-    The `lk` CLI path, in order.
+    Create a cloud agent, update it, and manage its secrets.
   </Card>
   <Card title="Pipecat Cloud" icon="cloud" href="/deploy/pipecat-cloud">
-    The `pipecat` CLI path, in order.
+    Deploy the generated project to a chosen organization and region.
   </Card>
-  <Card title="Phone calls" icon="phone" href="/telephony/overview">
-    Carrier setup, verifying a call, and transfers, once the agent is deployed.
+  <Card title="SLNG" icon="cloud" href="/deploy/slng">
+    Push an agent body and resolve its hosted dependencies.
   </Card>
-  <Card title="CLI reference" icon="terminal" href="/reference/cli/overview">
-    Every command, flag, and exit code.
-  </Card>
-  <Card title="Models" icon="list" href="/models/stt">
-    Which vendors each target supports, per role.
+  <Card title="Python tools" icon="code" href="/build/tools/python">
+    Keep reusable tool logic in the authored package.
   </Card>
 </Columns>

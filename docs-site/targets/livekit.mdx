@@ -4,6 +4,13 @@ description: "What unmute compile writes for a LiveKit target, and how to run it
 sidebarTitle: "LiveKit"
 ---
 
+This page describes the generated LiveKit project and its target settings.
+
+<Card title="Deploy to LiveKit Cloud" icon="rocket" href="/deploy/livekit-cloud">
+  Start here to create a deployment, choose its destination, supply credentials,
+  and update its code or secrets.
+</Card>
+
 ```sh
 unmute compile my-agent --target livekit
 ```
@@ -97,68 +104,30 @@ It imports LiveKit and your handlers. Nothing from Unmute.
 ```sh
 cd my-agent/build/livekit
 uv sync                       # or: pip install -e .
-cp .env.example .env          # then fill in the selected provider values
+cp .env.example .env          # then fill in the required values
 uv run python -m livekit.agents start agent.py    # the worker
 ```
 
-`start` runs the worker against a LiveKit server. Add `--log-format colored`
+`start` needs a running LiveKit server and its `LIVEKIT_URL`,
+`LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` in the environment. Add `--log-format colored`
 for readable logs while developing, which is what the generated development
 Compose file does.
 
-<Note>
-  `unmute dev --target livekit` runs the worker in Docker beside a local
-  `livekit-server` in development mode, and waits for the worker to register
-  before opening the browser. That is why the first LiveKit run takes longer
-  than the first Pipecat one.
-</Note>
-
 ## Dependencies are pinned
 
-```toml pyproject.toml
-dependencies = [
-    "httpx",
-    "langfuse>=4,<5",
-    "livekit-agents[openai]==1.8.1",
-    "livekit-plugins-silero>=1.6.1",
-    "livekit-plugins-slng>=1.6.1",
-    "opentelemetry-sdk>=1.33,<2",
-    "python-dotenv",
-]
-```
-
-The two tracing lines above come from `tracing.provider: langfuse`. With
-`provider: coval` they are `opentelemetry-sdk` and
-`opentelemetry-exporter-otlp-proto-http` instead, and `langfuse` is not
-declared at all. See [tracing](/tracing/overview).
-
-Extras and plugins follow the providers your package binds.
+The generated `pyproject.toml` follows your target's framework version, selected
+providers, and tracing settings. Use the [target fields](#target-fields) to
+change supported pins, then compile again.
 
 ## Deploy
 
-Two paths, both running the project as generated. The generated README carries
-the exact commands. The shape of the LiveKit Cloud path:
+Follow [Deploy to LiveKit Cloud](/deploy/livekit-cloud) for the complete sequence:
+package preparation, destination selection, runtime values, first deployment,
+updates, and a test interaction. The guide also covers secrets-only changes.
 
-```sh
-lk cloud auth                   # once
-lk project set-default "<name>" # once
-cd my-agent
-unmute compile . --target livekit
-cp .env build/livekit/.env      # if the package-root .env already has the values
-cd build/livekit
-lk agent create --region eu-central --secrets-file .env
-```
-
-If no package-root `.env` exists, copy the generated `.env.example` to
-`build/livekit/.env` and fill it in first. Choose a region from the field above.
-The [numbered runbook](/deploy/livekit-cloud#the-first-deploy-is-create) also
-explains what survives a recompile.
-
-The first deploy registers the agent, builds the image from the generated
-`Dockerfile`, and writes the `livekit.toml` that the generated directory
-deliberately does not ship, because the platform assigns both of its values.
-Every later version is `lk agent deploy`.
-
-The other path is a worker you host yourself, from the same `Dockerfile`.
+Use the generated `build/livekit/` directory as the build context. Keep secret
+values out of the image. Supply the runtime values listed by its `.env.example`
+and runbook through the platform's secret store.
 
 ### The worker's agent name
 
@@ -169,16 +138,9 @@ so `name: acme-support` on a target called `livekit` registers
 the emitted `sip-dispatch-rule.json` and `telephony-setup.sh` both name the same
 one.
 
-It has to come from the package. Unmute used to register the target name, and
-every package on this target calls its target `livekit`: two packages in one
-LiveKit project registered the same worker name, and inbound calls reached
-whichever answered first.
-
-Renaming it leaves the existing dispatch rule naming the old worker, so inbound
-calls ring and nothing answers. Re-running the emitted `telephony-setup.sh` does
-not fix that: it reuses any rule already naming your trunk, which is what makes
-it safe to run twice. Delete the stale rule with `lk sip dispatch delete <id>`
-first, then run the script.
+Renaming the package changes the worker name. Follow the
+[rename steps](/deploy/livekit-cloud#renaming-the-agent-breaks-that-rule) to
+update the SIP dispatch rule too.
 
 <Warning>
   Do not edit files in `build/`. Change the source package and compile again.

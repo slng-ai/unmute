@@ -102,8 +102,15 @@ OPENAI_API_KEY=
 SLNG_API_KEY=
 ```
 
-Both platforms take a secrets file on the first deploy. After that, changing a
-value is one command and it belongs to the secret store, not to the repository.
+Provision required runtime values through the platform's secret store.
+Pipecat `secrets set` merges supplied names and values; `secrets unset` removes a
+name. Wait for `pipecat cloud secrets list <set>` to report `ready`, then refresh
+existing instances with `pipecat cloud deploy --build-id <current-build-id> --force`
+from the compiled directory. Read that ID from `pipecat cloud agent deployments
+<agent-name>`: reusing it avoids a rebuild. A forced rollout can interrupt active
+sessions. See [Pipecat secret updates](https://docs.pipecat.ai/pipecat-cloud/fundamentals/secrets).
+LiveKit uses `lk agent update-secrets` for a value change. Neither operation
+creates or revokes the provider key.
 
 Every variable name must be a valid shell identifier: letters, digits, and
 underscores, never starting with a digit. Platforms export secrets through a
@@ -297,8 +304,8 @@ Two things about `coval` that users get wrong, so say them before they ask:
   deployed, is filed as a Coval **conversation** when it ends, and appears under
   Observability → Conversations and in Trace Search. A real phone call is never
   in a run. Getting the key onto the platform is the deploy step that matters:
-  `pipecat cloud secrets set <set> --file .env`, or `lk agent update-secrets
-  --secrets-file .env`.
+  `pipecat cloud secrets set <set> --file .env`, followed by readiness and the
+  forced rollout described above, or `lk agent update-secrets --secrets-file .env`.
 - **Local and deployed runs are labelled apart.** `unmute dev` traces under
   `<entry-agent>-<agent-name>-local`; the same build deployed traces under
   `<entry-agent>-<agent-name>`. Decided at start-up, not at compile time, so one
@@ -315,3 +322,26 @@ the next compile replaces generated files while preserving `.env`,
 unmute validate ./my-agent
 unmute compile ./my-agent
 ```
+
+## Known deployment gaps
+
+Checked against this checkout on 2026-09-15. These are missing package features,
+not extra steps developers must add to the native deployment workflow.
+
+| User need | Exact unsupported operation | Evidence | Supported option today |
+|---|---|---|---|
+| Reuse a separate Python helper across local handlers | Bundle a module imported by a handler without making it an exposed tool | `internal/spec/load.go` loads only named handler files; `internal/generate/{livekit,pipecat}_v1.go` emits one copy per tool name | Put the functions and helper in one authored handler file; each tool gets an independent module copy |
+| Ship arbitrary runtime data with local code | Include adjacent JSON, templates, certificates, or an authored module tree | The loader and both generators have no general asset inclusion field | Small constants in the handler; declared knowledge documents use their own inclusion path; otherwise a remote service |
+| Use a third-party SDK absent from the generated dependencies | Add a durable package dependency on LiveKit or Pipecat | `internal/spec/package.go:ToolLocal` and `internal/target/table.go:FieldToolDependencies`; both code targets refuse per-tool pins | Use available dependencies or a remote webhook/MCP service; LiveKit target pins only adjust recognized packages |
+| Customize worker startup or the image through authored files | Supply a lifecycle hook, custom Dockerfile, or general build override that survives compilation | Target/spec fields and compiler-owned templates; `internal/cli/compile.go:writeArtifactFiles` replaces output | Native settings, supported tool handlers, or host CLI options kept outside the build directory |
+| Choose a valid SLNG region in the console | See that deployment region is required when SLNG is selected | The console labels the shared region field optional; SLNG validation refuses omission | Enter a supported region through Advanced target settings before creating the package |
+| Deploy every target through Unmute | Run `unmute deploy` for LiveKit or Pipecat | `internal/cli/deploy.go` accepts SLNG only | Use the host CLI from the generated project directory |
+
+SLNG deliberately runs hosted tool references rather than package-local Python.
+That target boundary is documented; it is not a request to add a Python runtime.
+
+The dependency refusal text still suggests editing generated `pyproject.toml`
+and compiling local tools to SLNG. Those are not durable native alternatives:
+compilation replaces the file, and the SLNG target refuses local tool bodies.
+The public guide explains the actual limits. Correcting the diagnostic is a
+separate code change.

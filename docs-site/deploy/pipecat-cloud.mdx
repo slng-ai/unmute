@@ -1,408 +1,392 @@
 ---
 title: "Go live on Pipecat Cloud"
-description: "Take the generated Pipecat project to production with the pipecat CLI, secret set first."
+description: "Compile your package, choose an organization, deploy it, and update its code or secrets."
 sidebarTitle: "Pipecat Cloud"
 ---
 
-`unmute compile` gives you a normal Pipecat project with a `Dockerfile` and a
-deploy manifest. Pipecat Cloud builds the image from that Dockerfile in the cloud
-and runs it, and the `pipecat` CLI is how you drive it.
+Deploy your Unmute package as a managed Pipecat Cloud agent.
+Unmute writes the runnable project; Pipecat Cloud builds and hosts it.
+Change the authored package, then compile again before deploying code changes.
 
-<Note>
-  The runbook of record is `build/<target>/README.md` in your own build. It was
-  generated from your package, so it names your region, your agent, your secret
-  set, and your variables. This page is the same path with the reasons attached.
-</Note>
+On this page:
 
-## The manifest the compiler wrote
+- [Quickstart](#quickstart) - the first deployment
+- [Prepare the package](#1-prepare-the-package) - target, version, and build files
+- [Choose the destination](#2-choose-the-destination) - login, organization, and region
+- [Supply runtime values](#3-supply-runtime-values) - a dedicated secret set
+- [Deploy and verify](#4-deploy-and-verify) - readiness and a complete interaction
+- [Every later deploy](#every-later-deploy) - update the existing agent
+- [Secrets-only updates](#secrets-only-updates) - change values without rebuilding
+- [Advanced](#advanced) - warm instances, names, and customization
+- [Troubleshooting](#troubleshooting) - symptom, cause, and fix
+- [Where to go next](#where-to-go-next)
 
-`agent_name` is your package's [`name:`](/reference/agent-yaml#name) joined to
-the target it was compiled for, and it is the agent's identity: names are unique
-across your organisation and a deploy updates whichever agent matches. The
-secret set follows the same name.
+## Quickstart
 
-Changing it creates a second agent rather than moving the first: see
-[renaming the agent](#renaming-the-agent).
+Start with a package named `my-agent` and a target named `pipecat`.
+[Create a package](/deploy/going-live) first if you do not have one.
+Install the [Pipecat CLI](https://docs.pipecat.ai/api-reference/cli/overview)
+with its cloud commands; this needs Python 3.11 or later and `uv`:
 
-```toml pcc-deploy.toml
-agent_name = "acme-support-pipecat"
-region = "eu-central"
-secret_set = "acme-support-pipecat-secrets"
-
-[scaling]
-min_agents = 1
-```
-
-Every line comes from your package: the agent name, the
-`deployment_region` you declared, the secret set the deploy will read, and the
-`warm_instances` you declared. The manifest names **no image**, deliberately:
-naming one switches cloud builds off. The `[scaling]` table appears only when the
-target declares `warm_instances`, and it comes last because in TOML any key after
-a table header belongs to that table.
-
-## Install the CLI
-
-You need Python 3.11 or later and `uv`. Install the
-[Pipecat CLI](https://docs.pipecat.ai/api-reference/cli/overview), then check it:
-
-```sh
-uv tool install pipecat-ai-cli
-pipecat --version
-```
-
-## Secret set first, then deploy
-
-The manifest already references the secret set, so a deploy cannot start until it
-exists. In order:
-
-```sh
-cd my-agent/build/pipecat
-cp .env.example .env            # then fill in the values
+```sh Terminal
+uv tool install "pipecat-ai[cli]" --with pipecatcloud
 pipecat cloud auth login
-pipecat cloud secrets set acme-support-pipecat-secrets --file .env --region eu-central
-pipecat cloud deploy
-pipecat cloud agent status acme-support-pipecat
+pipecat cloud organizations select
+pipecat cloud organizations list
 ```
 
-`--file .env` uploads every name in the file as one set. Run the same
-`secrets set` command again to change a value.
+Run these from the directory containing `my-agent/`:
 
-A secret set is **region-scoped**, and an agent can only read one in its own region.
-That is why the region appears twice above and comes from one line in your package:
-change `deployment_region` and recompile, and both move together.
+```sh Terminal
+unmute validate my-agent --target pipecat
+unmute compile my-agent --target pipecat
+cd my-agent/build/pipecat
+cp .env.example .env
+```
 
-Secret-set names are globally unique across the platform. If yours is taken, create
-it under another name and pass `--secrets <other-name>` on the deploy, which
-overrides the manifest.
+Fill `.env` with only the deployed agent's required values, as described below.
+Read `agent_name`, `secret_set`, and any `region` in the generated
+`pcc-deploy.toml`. These examples use the names derived from `my-agent`.
 
-## What `deploy` does, and does not do
+```sh Terminal — from my-agent/build/pipecat
+pipecat cloud secrets set my-agent-pipecat-secrets --file .env
+pipecat cloud secrets list my-agent-pipecat-secrets
+```
 
-One command does the first deploy and every later one. Deploying the same agent
-name again updates the existing agent rather than making a second one. Sessions
-already running finish on the old image, and a deploy that fails leaves the previous
-ready version serving traffic.
+Wait until the set reports `ready`, then deploy:
 
-`status` reporting `ready` means the agent is healthy. It does **not** mean the
-agent is running the code you just compiled. See [read the Build ID, not
-`ready`](#read-the-build-id-not-ready).
+```sh Terminal — from my-agent/build/pipecat
+pipecat cloud deploy
+pipecat cloud agent status my-agent-pipecat
+```
 
-No warm instance is kept unless you ask for one. Ask in the package, on the
-target:
+If the manifest declares a region, pass that same region to `secrets set`.
+If it has no `secret_set`, skip creating one.
+Finish with the [interaction check](#4-deploy-and-verify).
+
+## 1. Prepare the package
+
+Merge this target into an existing package's `targets.yaml`:
 
 ```yaml targets.yaml
 targets:
   pipecat:
     provider: pipecat
-    warm_instances: 1
+    version: "1.10.0"
 ```
 
-That becomes `[scaling] min_agents` in the manifest, so it applies to this deploy
-and every later one. On a phone route it is not a latency nicety: a cold start can
-outrun the session window, and then the call is never answered at all rather than
-answered slowly. See [Pipecat over Twilio](/telephony/pipecat-twilio#deploy-with-a-warm-instance)
-for what a cold start costs on that route.
-
-`pipecat cloud deploy --min-agents 1` does the same for one deploy, which is worth
-knowing for a quick test. It is not the durable answer, and neither is editing the
-manifest: `unmute compile` rewrites that file.
-
-### Every key a warm pool takes
-
-One key, on the target in `targets.yaml`.
-
-<ParamField path="warm_instances" type="integer, 0 or more" default="0">
-  How many instances Pipecat Cloud holds ready, written into the manifest as
-  `[scaling] min_agents`. Left out or `0`, no `[scaling]` table is written and
-  the platform scales to zero, so the first call after a quiet period waits for
-  a container to start. A negative number is refused, and so is a pool of one
-  or more on livekit or slng.
+<ParamField path="targets" type="map of target definitions" required>
+  Targets the package can compile. The entry name selects `--target` and the build folder.
 </ParamField>
+
+<ParamField path="provider" type="string" required>
+  Use `pipecat` for this hosting route.
+</ParamField>
+
+<ParamField path="version" type="string" required>
+  Exact framework version. This release supports `1.10.0`; omitted or unsupported
+  versions are refused. The cloud CLI is installed separately from this runtime pin.
+</ParamField>
+
+Keep prompts, models, and tools in the authored package. Select models through
+[model bindings](/reference/agent-yaml#models), with any target overrides in
+[`targets.yaml`](/reference/targets-yaml#models-overrides).
+See [Pipecat support](/targets/pipecat) for model and transport limits.
+
+`compile` validates the selected target before writing
+`my-agent/build/pipecat/`. It needs no hosting login. Validation checks the
+package and known capabilities; it does not make a successful provider request.
+`unmute deploy` currently pushes SLNG targets only.
+
+| Generated file | Role |
+|---|---|
+| `pcc-deploy.toml` | Deployment name, optional region and secret set, and declared scaling |
+| `Dockerfile` | Compiler-owned Cloud build using the Pipecat base image and Python 3.12 |
+| `pyproject.toml` | Exact framework version and generated dependencies |
+| `bot.py` and supporting files | Runnable agent, local handlers, and declared knowledge files |
+| `.dockerignore` | Excludes `.env`, `.env.*`, and local Python environments from the build |
+| `.env.example` | Environment names to review and fill |
+| `README.md` | Package-specific setup, including transport requirements |
+| `compile-report.json` | Resolved bindings, sizing, and validation details |
+
+Keep the generated directory together as the build context. No custom
+Dockerfile, container registry, or local Docker build is required for this path.
+
+## 2. Choose the destination
+
+Login authenticates the deployment operator. The selected organization decides
+where commands act; it is separate from model-provider accounts.
+`organizations select` saves that choice in the CLI's local configuration.
+Run `organizations list` before each deployment to confirm it.
+
+For scripts, use `--organization` on deployment and secret commands with the
+organization identifier from the listing. See the
+[organization commands](https://docs.pipecat.ai/api-reference/cli/cloud/organizations)
+and [account permissions](https://docs.pipecat.ai/pipecat-cloud/fundamentals/accounts-and-organizations).
+Use an account permitted to manage agents and secrets in that organization.
+
+### Choose a hosting region
+
+```sh Terminal
+pipecat cloud regions list
+pipecat cloud organizations default-region
+```
+
+Omitting `deployment_region` uses the organization's default placement. To
+choose explicitly, add it to the existing target and recompile:
+
+```yaml targets.yaml — merge into the existing target
+targets:
+  pipecat:
+    deployment_region: eu-central
+```
+
+<ParamField path="deployment_region" type="string">
+  One Pipecat Cloud worker region. `eu-central` is an example, not a requirement.
+  Unmute forwards the name without checking availability; choose from `regions list`.
+  Omission uses platform placement. Multiple regions on one Pipecat target are refused.
+</ParamField>
+
+The secret set must use the same region. For the example above:
+
+```sh Terminal — from my-agent/build/pipecat
+pipecat cloud secrets set my-agent-pipecat-secrets --file .env --region eu-central
+```
+
+Hosting region places the worker. Provider inference regions and SLNG
+`params.world_part` are separate model settings. See
+[regional infrastructure](/optimization/regional-infrastructure).
+
+## 3. Supply runtime values
+
+[Declare secret names](/build/credentials) in the package and provision their
+values separately. Use the generated `.env.example` and the runbook's required
+environment section to prepare a dedicated deployment `.env`.
+
+This example shows placeholders only. Replace the names with those your package
+requires, and fill their values privately:
+
+```dotenv .env — example values only
+MODEL_API_KEY=replace-with-provider-key
+SERVICE_API_TOKEN=replace-with-service-token
+SERVICE_API_URL=https://api.example.com
+```
+
+| Kind of value | Where it belongs |
+|---|---|
+| CLI login or deployment token | The operator's CLI configuration or deployment environment |
+| Required provider and tool credentials | The deployed agent's secret set |
+| Runtime application URLs and other environment settings | The same set, under the names the package reads |
+| Helper-only phone settings | The separately hosted helper, as identified in the runbook |
+| Platform session connection details | Supplied by the selected Cloud transport when the session starts |
+
+Do not upload the operator's unrelated development credentials.
+On a `daily-sip` route, remove helper-only entries from the file uploaded to the
+agent. Keep entries marked as shared. Other routes have their own requirements
+in the generated runbook.
+
+`--file` sends every entry in the file. The generated Dockerfile reads no secret
+values, and `.dockerignore` excludes `.env`. Keep the value file out of source
+control. Unmute preserves this `.env` when it recompiles, but rewrites
+`.env.example` with the current requirements.
+
+Provider keys come from the chosen provider; the [model pages](/models/llm)
+link to setup instructions. Prompt [variables](/build/variables) hold call state
+and do not supply credentials.
+
+## 4. Deploy and verify
+
+Run `pipecat cloud deploy` inside `my-agent/build/pipecat/`.
+The command reads `pcc-deploy.toml` and builds the directory's Dockerfile in
+Cloud. It uses `agent_name` to create the resource, or asks to update a matching
+resource. See the [deploy reference](https://docs.pipecat.ai/api-reference/cli/cloud/deploy).
+
+Unmute derives `my-agent-pipecat` from the package name and target name.
+That identity is regenerated in `pcc-deploy.toml`; the destination organization
+lives in your CLI configuration. Pipecat does not write a separate local agent-ID
+file for this workflow.
+
+Check the deployment, then open a session through the transport your package
+uses. For a browser session supported by the generated project, select a Cloud
+public API key and start a Daily session:
+
+```sh Terminal
+pipecat cloud organizations keys use
+pipecat cloud agent start my-agent-pipecat --use-daily
+```
+
+Create a key through `organizations keys create` if none exists. This public
+session key is separate from the deployment login and your model-provider keys.
+Use the returned session connection details in your supported client. Phone
+routes need their own [carrier setup and test](/telephony/overview).
+
+| Check | What it establishes |
+|---|---|
+| Build succeeded | The generated project became an image |
+| Agent status is ready | The platform can serve sessions |
+| Latest deployment names the expected build | The intended compiled image is selected |
+| Speak a short request and receive a relevant reply | Input, model request, and output all worked |
+
+A greeting alone does not prove input works. Allow microphone access and unmute the
+client before speaking. Then exercise one tool if the package uses tools.
+This is deployment smoke acceptance; application-specific end-to-end tests come
+next.
+
+```sh Terminal
+pipecat cloud agent deployments my-agent-pipecat
+pipecat cloud agent logs my-agent-pipecat
+```
+
+Use the [agent commands](https://docs.pipecat.ai/api-reference/cli/cloud/agent)
+to select a session or deployment in logs. Leave the log level unset to see errors
+as well as normal messages. Avoid sharing logs that contain caller data or secrets.
 
 ## Every later deploy
 
-`pipecat cloud deploy` reads `build/pipecat/` and nothing else, so a redeploy is
-only as current as your last compile, and a stale build deploys without
-complaining. Five steps, in this order, every time.
+Edit the authored prompts, tools, supported local handlers, or model settings.
+From the directory containing `my-agent/`:
 
-<Steps>
-  <Step title="Compile">
-    ```sh
-    unmute compile ./my-agent
-    ```
-
-    <Warning>
-      `unmute compile ./my-agent --target pipecat` compiles **only** this target.
-      A package that also deploys to livekit or slng leaves those builds
-      untouched, however old they are. With no `--target`, every target is
-      compiled.
-    </Warning>
-
-    Compile and deploy from the same checkout. A second checkout or a git
-    worktree has its own `build/pipecat/`, so compiling in one and deploying from
-    the other ships the older of the two without saying so.
-  </Step>
-
-  <Step title="Check the .env still covers the build">
-    ```sh
-    cd build/pipecat
-    cut -d= -f1 .env.example | grep -E '^[A-Z]' | sort -u > /tmp/required
-    cut -d= -f1 .env | grep -E '^[A-Z]' | sort -u > /tmp/present
-    comm -23 /tmp/required /tmp/present
-    ```
-
-    `.env` is yours and survives every recompile. `.env.example` is the
-    compiler's and is rewritten every time, so a renamed or added variable lands
-    in one and not the other. Anything the last line prints is missing from your
-    `.env`.
-
-    Fill it in before going on. A missing name deploys cleanly, reports ready,
-    and then refuses every session: see [your `.env` does not follow a
-    rename](#your-env-does-not-follow-a-rename).
-  </Step>
-
-  <Step title="Upload the secret set">
-    ```sh
-    pipecat cloud secrets set acme-support-pipecat-secrets --file .env --region eu-central
-    ```
-
-    Needed only when `.env` changed, and safe to run when it did not: it merges
-    rather than replaces, so names you do not pass keep their values. It restarts
-    the agent.
-  </Step>
-
-  <Step title="Deploy">
-    ```sh
-    pipecat cloud deploy
-    ```
-
-    From `build/pipecat`, where step 2 left you. Run it anywhere else and it stops
-    with `Agent name is required`, which is about your working directory and not
-    your manifest.
-  </Step>
-
-  <Step title="Confirm the Build ID changed">
-    ```sh
-    pipecat cloud agent status acme-support-pipecat
-    ```
-
-    A new `Build` value is the only proof your code shipped. `Ready`, `Updated
-    At` and `Active Deployment ID` all move without a new image: see [read the
-    Build ID, not `ready`](#read-the-build-id-not-ready).
-  </Step>
-</Steps>
-
-A redeploy moves nothing beyond those steps. The region and the carrier
-configuration stay as they are, and any tool sample under `samples/` survives the
-recompile alongside your `.env`.
-
-Changing a secret on its own needs no deploy at all, though it does restart the
-agent. Step 3 is the whole procedure.
-
-## When the deploy looks fine and the call does not
-
-A deploy can report success while a call reaches old code, or reaches nothing at
-all. Four causes, in the order they are worth checking. All four are silent: none
-of them fails a deploy.
-
-### Read the Build ID, not `ready`
-
-Three fields on `status` move on their own and say nothing about your code.
-`Updated At` changes on any deploy. `Active Deployment ID` changes whenever the
-agent is re-rolled, including onto the image it was already running. `Ready`
-describes the agent's health.
-
-**`Build` is the field to read.** It changes only when a new image was built, so it
-is the one thing that proves your compile shipped.
-
-```sh
-pipecat cloud agent status acme-support-pipecat
+```sh Terminal
+unmute validate my-agent --target pipecat
+unmute compile my-agent --target pipecat
+cd my-agent/build/pipecat
+pipecat cloud organizations list
+pipecat cloud deploy
+pipecat cloud agent status my-agent-pipecat
 ```
 
-`Ready: True` beside a Build ID from two hours ago means a two-hour-old agent is
-healthy.
+Check the regenerated `.env.example` before deploying. A new provider, renamed
+setting, or new tool may need another runtime value. Update the set only when
+its values change; an unchanged code deployment uses its existing values and
+needs no local secrets file. Keep the same organization, agent name, and secret
+set to update the intended resource.
 
-### Deploy from the directory that holds the manifest
+Cloud builds can reuse an identical build. Compare the selected build with your
+intended version, then repeat the interaction check. Compilation replaces the
+generated directory except `.env`, saved LiveKit manifests, and JSON tool samples.
+Any hand-edited generated Python or manifest settings are replaced.
 
-`pipecat cloud deploy` reads `pcc-deploy.toml` from the working directory and
-nothing else. Run it anywhere else and it stops with an error about your agent
-rather than your directory:
+Normal updates let active sessions finish on their existing image. New sessions
+move to the new deployment as it rolls out. A failed deployment can leave the
+previous ready version serving requests. See
+[deployment behavior](https://docs.pipecat.ai/pipecat-cloud/fundamentals/deploy).
 
-```
-Agent name is required
-```
+To return to a previous image, select its build ID from deployment history and
+follow [redeploying a previous build](https://docs.pipecat.ai/pipecat-cloud/guides/cloud-builds#redeploying-a-previous-build).
+This does not restore earlier secret values or authored files.
 
-The manifest is fine. Go back to [every later deploy](#every-later-deploy) and run
-the steps from `build/pipecat`.
+## Secrets-only updates
 
-### The carrier may point at a different agent
+Changing the value of an existing runtime name requires no compile or new image.
+Run these commands in the generated directory, using the existing set and region:
 
-On the `cloud-websocket` route the agent name is half of
-`_pipecatCloudServiceHost` in your TwiML, and nothing keeps that value in step
-with your manifest. It names an agent, so a wrong name is not an error. It is a
-different agent.
-
-| What the parameter names | What a call does |
-|---|---|
-| the agent you just deployed | works |
-| another agent in your organisation | answers with **that** agent's prompt, models and tools |
-| an agent that no longer exists | connects, then drops in under a second |
-
-The middle row is the one that costs an afternoon, because the call is answered and
-sounds like your agent ignoring every change you make. Read the parameter against
-the deployed name before you suspect the build:
-
-```sh
-pipecat cloud agent list
+```sh Terminal — from my-agent/build/pipecat
+pipecat cloud secrets set my-agent-pipecat-secrets --file .env
+pipecat cloud secrets list my-agent-pipecat-secrets
 ```
 
-The value must be `<agent-name>.<organization>`, where the organization is the slug
-from `pipecat cloud organizations list`.
+`set` adds new names and replaces supplied values; names omitted from the file
+remain in the set. Removing a line from `.env` therefore does not remove a
+deployed secret. Remove an obsolete name explicitly:
 
-### Your `.env` does not follow a rename
-
-`.env` is yours, so `unmute compile` never rewrites it. `.env.example` is the
-compiler's, and it is rewritten every time. Rename a transfer destination, or add a
-provider, and the two drift apart: the new name is in `.env.example`, missing from
-`.env`, and therefore missing from the secret set. The container then starts,
-refuses the session and stops:
-
-```
-Exception running bot(): Missing environment for a phone call: MANAGER_PHONE_NUMBER
+```sh Terminal
+pipecat cloud secrets unset my-agent-pipecat-secrets OLD_API_KEY
 ```
 
-Compile does not warn about this, which is why comparing the two files is [step 2
-of a redeploy](#every-later-deploy). Add the missing name, upload the set, then
-deploy.
+The listing shows names and readiness, without values. Wait for `ready` after
+changes. Updating the set does not refresh running agents. Each deployment using
+it needs a forced rollout, as described in
+[Pipecat secret management](https://docs.pipecat.ai/pipecat-cloud/fundamentals/secrets).
 
-Names left in `.env` that no longer appear in `.env.example` are harmless. Delete
-them anyway, so the next person does not read a renamed variable as a live one.
+Read the current image's build ID from deployment history. Replace the
+placeholder below with that ID to roll out the same image without rebuilding:
 
-## Renaming the agent
-
-A deploy resolves the agent by name, so a new name is a **new agent**. The old
-one keeps running, keeps billing, and keeps answering the phone number that
-still points at it.
-
-<Steps>
-  <Step title="Create the secret set under the new name">
-    ```sh
-    pipecat cloud secrets set <new-name>-secrets --file .env --region <region>
-    ```
-
-    Before the deploy, not after: the manifest references the set by name and a
-    deploy cannot start without it. A new agent has no secrets of its own.
-  </Step>
-  <Step title="Compile, deploy, wait for ready">
-    ```sh
-    unmute compile ./my-agent && cd build/pipecat && pipecat cloud deploy
-    ```
-
-    ```sh
-    pipecat cloud agent status <new-name>
-    ```
-  </Step>
-  <Step title="Repoint the carrier">
-    On the `cloud-websocket` route the agent name is half of the service host
-    your TwiML carries, and nothing updates it for you. Edit the Bin for this
-    number in the Twilio Console:
-
-    ```xml
-    <Parameter name="_pipecatCloudServiceHost" value="<new-name>.<your-organization>"/>
-    ```
-
-    The organization is the **slug** from `pipecat cloud organizations list`, the
-    one shaped like `three-random-words-12345`, never the display name. Until
-    this is saved, calls keep reaching the old agent.
-
-    On the `daily-sip` route the name is compiled into the helper you host, as
-    `AGENT_NAME`. Redeploy the helper from the new build instead; the Twilio
-    webhook points at your helper, so it does not change.
-  </Step>
-  <Step title="Call the number, then delete the old agent">
-    ```sh
-    pipecat cloud agent delete <old-name>
-    ```
-
-    ```sh
-    pipecat cloud secrets delete <old-name>-secrets
-    ```
-
-    Only once a real call to the new agent works. Until then the old one is your
-    way back.
-  </Step>
-</Steps>
-
-## Verifying a phone route
-
-`status` reporting `ready` is not the finish line: see [a phone call is verified
-after you deploy](/telephony/overview#point-the-carrier-at-the-deployment).
-
-Two checks come before the call, and both are cheaper than dialling.
-
-`pipecat cloud agent start <agent-name>` opens a session against the deployed
-container with no phone leg, so it proves the image boots and `bot()` runs. If this
-fails, the carrier was never the problem. It needs a public API key, which is a
-separate thing from your CLI login:
-
-```sh
-pipecat cloud organizations keys create
-pipecat cloud organizations keys use
+```sh Terminal — from my-agent/build/pipecat
+pipecat cloud agent deployments my-agent-pipecat
+pipecat cloud deploy --build-id <current-build-id> --force
+pipecat cloud agent status my-agent-pipecat
 ```
 
-`pipecat cloud agent logs <agent-name>` is where a refused session says why.
+`--force` replaces running instances and can interrupt active sessions.
+Verify a fresh interaction with the new value. Updating a stored value does not
+create or revoke its provider key. Do that with the provider's key management.
+If the code must start reading a new name, also change the package and recompile.
 
-<Warning>
-  Do not pass `-l DEBUG` to `agent logs`. It filters to that level **only**, which
-  hides the `ERROR` line you are looking for.
-</Warning>
+## Advanced
 
-Then call, and read the duration in the Twilio call log before anything else. A
-call Twilio records as `completed` after a second or two was answered by the
-platform and dropped, so the fault sits in front of your agent: the service host,
-or a container refusing the session. A call that lasts and stays silent is a
-different layer, and that is when the logs matter.
+### Keep an instance ready
 
-## Regions
+Merge this into the existing target and compile again:
 
-```sh
-pipecat cloud regions list
+```yaml targets.yaml
+targets:
+  pipecat:
+    warm_instances: 1
 ```
 
-See Pipecat's [regions guide](https://docs.pipecat.ai/pipecat-cloud/guides/regions)
-for the current worker regions and matching telephony WebSocket endpoints.
+<ParamField path="warm_instances" type="integer, 0 or more" default="0">
+  Instances Pipecat Cloud holds ready. A positive value emits `[scaling] min_agents`
+  in the manifest. Omitted or zero emits no minimum; the platform can scale to zero.
+  A positive value adds a standing cost. Other targets refuse a positive value.
+</ParamField>
 
-A second region is a second agent, because agent names are globally unique across
-regions:
+A warm instance avoids cold starts. Some phone routes need it to answer within
+the carrier's session window; see [Pipecat over Twilio](/telephony/pipecat-twilio#deploy-with-a-warm-instance).
 
-```sh
-pipecat cloud secrets set acme-support-pipecat-<region>-secrets --file .env --region <region>
-pipecat cloud deploy acme-support-pipecat-<region> --region <region> --secrets acme-support-pipecat-<region>-secrets
-```
+### Renaming the agent
 
-This setting places the worker only. SLNG speech compute has its own regional
-params. See [regional infrastructure](/optimization/regional-infrastructure) before
-making a data residency claim.
+Changing the package or target name creates another deployment; it does not move
+the existing one. A second hosting region also needs a distinct agent name and
+a secret set in that region.
 
-## Every name in `.env.example` is in the set
+Compile the new target, provision its set, deploy, and verify an interaction.
+Then point clients and carrier routes at the new name before retiring the old
+agent. For `cloud-websocket`, update the service host in carrier markup; for
+`daily-sip`, redeploy the helper with its new `AGENT_NAME`.
+See the [phone guide](/telephony/pipecat-twilio) for route-specific steps.
 
-On this platform the generated `.env.example` is usually one group, because one thing
-reads it: the deployed agent. If your build has a phone route, the carrier
-credentials and `PIPECAT_CLOUD_ORGANIZATION` are in that same group and belong in
-the same set.
+### Customize supported code
 
-<Warning>
-  Every name must be UPPER_SNAKE: an uppercase letter, then only uppercase
-  letters, digits, and underscores. Unmute refuses a bad name before it writes
-  the project. Pipecat Cloud applies the same rule to names added outside the package.
-</Warning>
+Use native model settings and tools first. Local handlers compile into the
+project; shared Python modules and dependency limits are covered in
+[Going live](/deploy/going-live#advanced).
+Unmute has no general Pipecat build hook or arbitrary dependency declaration.
+Editing generated files does not create a supported extension.
+
+For a temporary host setting, Pipecat's deploy flags override the generated
+manifest. Keep repeatable overrides in your deployment script outside `build/`.
+Use the [deployment reference](https://docs.pipecat.ai/api-reference/cli/cloud/deploy)
+for host options and the [target reference](/reference/targets-yaml) for settings
+Unmute owns.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Deploy asks for an agent name or cannot find a Dockerfile | Wrong working directory or incomplete build | Compile, then deploy inside `my-agent/build/pipecat/` |
+| Secret set is missing or not ready | Wrong organization/region, or provisioning is pending | Confirm the destination and matching region; wait for the set to report `ready` |
+| Deploy reports ready but behavior stays old | Old compiled files, cached image, or client points elsewhere | Check the selected build and agent name; compile the changed package and redeploy |
+| New secret value has no effect | Existing instances still hold their environment | Force a rollout of the current build after the set is ready |
+| Session fails with a missing environment name | `.env` did not follow a package change | Compare with the current runbook and `.env.example`, then update the set and roll out |
+| Import or data-file lookup fails | The module, dependency, or file was never packaged | Use the supported local-code layout and check the [customization limits](/deploy/going-live#advanced) |
+| Provider rejects a parameter or region | Provider availability differs from package validation | Check that model's provider reference, credentials, and inference region; fix the binding and compile again |
+| Another agent appears after a deploy | Organization, package name, or target name changed | Restore the intended destination and identity; inspect both resources before retiring either |
+| Agent speaks but never hears you | Client microphone is muted or blocked | Enable the microphone and check the selected transport's input path |
+| First session times out after an idle period | Worker is still starting | Wait for readiness and consider `warm_instances` for that route |
 
 ## Where to go next
 
 <Columns cols={2}>
   <Card title="Going live" icon="rocket" href="/deploy/going-live">
-    The checklist both platforms share.
+    The package lifecycle and supported customization.
+  </Card>
+  <Card title="Pipecat target" icon="code" href="/targets/pipecat">
+    Supported models, transport choices, and target settings.
+  </Card>
+  <Card title="Credentials" icon="key" href="/build/credentials">
+    Declare runtime names separately from their values.
   </Card>
   <Card title="Phone calls" icon="phone" href="/telephony/overview">
-    Carrier setup, verifying a call, and transfers, once the agent is deployed.
+    Connect and verify the carrier route your package uses.
   </Card>
 </Columns>

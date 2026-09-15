@@ -23,11 +23,13 @@ import (
 func TestSlngPushCommandsAgree(t *testing.T) {
 	root := filepath.Join("..", "..")
 	surfaces := map[string]string{
-		"the emitted runbook": filepath.Join(root, "internal", "generate", "templates", "slng_v1", "README.md.tmpl"),
-		"the example README":  filepath.Join(root, "examples", "hotel-concierge", "README.md"),
-		"the docs-site page":  filepath.Join(root, "docs-site", "targets", "slng.mdx"),
-		"the shipped skill":   filepath.Join(root, "internal", "skill", "assets", "references", "package.md"),
+		"the emitted runbook":  filepath.Join(root, "internal", "generate", "templates", "slng_v1", "README.md.tmpl"),
+		"the example README":   filepath.Join(root, "examples", "hotel-concierge", "README.md"),
+		"the deployment guide": filepath.Join(root, "docs-site", "deploy", "slng.mdx"),
+		"the shipped skill":    filepath.Join(root, "internal", "skill", "assets", "references", "package.md"),
 	}
+	// A selected profile changes authentication, not the command or its arguments.
+	profileFlag := regexp.MustCompile(`voiceai --profile \S+ `)
 	for name, path := range surfaces {
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -50,7 +52,8 @@ func TestSlngPushCommandsAgree(t *testing.T) {
 		}
 		// The web-session command takes an agent id. Every surface that names the
 		// command has to name the id with it.
-		if strings.Contains(content, "web-sessions create") && !strings.Contains(content, SlngWebSessionCommand) {
+		commands := profileFlag.ReplaceAllString(content, "voiceai ")
+		if strings.Contains(commands, "web-sessions create") && !strings.Contains(commands, SlngWebSessionCommand) {
 			t.Errorf("%s writes the web-session command without its agent id; %q is the whole command and the id is not optional",
 				name, SlngWebSessionCommand)
 		}
@@ -131,6 +134,7 @@ func TestEveryVoiceaiCommandNamedExists(t *testing.T) {
 		filepath.Join(root, "internal", "generate", "templates", "slng_v1", "README.md.tmpl"),
 		filepath.Join(root, "examples", "hotel-concierge", "README.md"),
 		filepath.Join(root, "docs-site", "targets", "slng.mdx"),
+		filepath.Join(root, "docs-site", "deploy", "slng.mdx"),
 		filepath.Join(root, "internal", "skill", "assets", "references", "package.md"),
 	}
 	// A word, then optionally a second, skipping any leading root flag so that

@@ -4,6 +4,13 @@ description: "What unmute compile writes for a Pipecat target, and how to run it
 sidebarTitle: "Pipecat"
 ---
 
+This page describes the generated Pipecat project and its target settings.
+
+<Card title="Deploy to Pipecat Cloud" icon="rocket" href="/deploy/pipecat-cloud">
+  Start here to create a deployment, choose its destination, supply credentials,
+  and update its code or secrets.
+</Card>
+
 ```sh
 unmute compile my-agent --target pipecat
 ```
@@ -85,35 +92,13 @@ One file holds the agent: the prompts as module constants, the model
 constructors, the tool wiring, and the pipeline. It imports Pipecat and your
 handlers, and nothing from Unmute.
 
-It also carries a startup check built from your `secrets:` list:
+The generated startup check names missing required environment variables.
+See the build's `.env.example` and [credentials reference](/reference/secrets).
 
-```python
-REQUIRED_ENV = [
-    "OPENAI_API_KEY",
-    "SLNG_API_KEY",
-]
-
-
-def require_env() -> None:
-    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
-    if missing:
-        raise RuntimeError(
-            f"Missing required environment variables: {', '.join(missing)}"
-        )
-```
-
-A missing key stops the container at startup and names what is missing, instead
-of failing on the first spoken word.
-
-A package that binds a [live model](/models/live) emits one service where the
-transcriber, the model and the synthesizer would be built. It hears the caller's
-audio directly, speaks in its own voice, and hands its tools to the `think` entry
-it names. It is the one shape whose emitted `bot.py` builds no transcriber and no
-synthesizer.
+Your [architecture](/build/architecture/overview) determines whether the pipeline
+uses separate speech services or a model that handles audio directly.
 
 ## Run it without Unmute
-
-The generated README says it:
 
 ```sh
 cd my-agent/build/pipecat
@@ -126,70 +111,32 @@ uv run bot.py -t webrtc                   # web: open the URL it prints
 
 ## Dependencies are pinned
 
-```toml pyproject.toml
-dependencies = [
-    "pipecat-ai[openai,runner,silero,tracing,webrtc]==1.10.0",
-    "pipecat-slng>=0.5.2",
-    "python-dotenv>=1.0",
-]
-```
-
-The extras are derived from what your package actually uses: the providers you
-bound, the turn detector, tracing if you enabled it. The framework version is
-the `version:` from your target.
-
-One thing to know if you change the base image. The OpenAI SDK this resolves
-verifies TLS against the operating system's certificate store rather than a
-bundle inside the package. The base image the generated Dockerfile uses is the
-framework vendor's own and carries them. Swap it for a minimal image with no
-certificates and every provider call fails at the handshake, with an error that
-names TLS and not the provider. Install `ca-certificates` in your image, or set
-`SSL_CERT_FILE` to a bundle you supply. The generated README says the same, next
-to the environment it lists.
+The generated `pyproject.toml` follows the providers, turn detector, and tracing
+settings your package uses. The framework version comes from your target's
+`version:` field. Change the package and compile again to update dependencies.
 
 ## Deploy
 
-The generated README is the authority, with your own values filled in. The
-shape of it:
+Follow [Deploy to Pipecat Cloud](/deploy/pipecat-cloud) for the complete sequence:
+package preparation, destination selection, runtime values, first deployment,
+updates, and a test interaction. The guide also covers secrets-only changes.
 
-```sh
-cd my-agent/build/pipecat
-cp .env.example .env            # then fill in the values
-pipecat cloud secrets set acme-support-pipecat-secrets --file .env
-pipecat cloud deploy
-pipecat cloud agent status acme-support-pipecat
-```
-
-The secret set comes first, because the manifest already names it and a deploy
-cannot start without it. `pipecat cloud deploy` builds the image in the cloud
-from the generated `Dockerfile`.
+Use the generated `build/pipecat/` directory as the build context. Keep secret
+values out of the image. Supply the runtime values listed by its `.env.example`
+and runbook through the platform's secret store.
 
 ### The deployed agent's name
 
-`acme-support-pipecat` above is the package's
-[`name:`](/reference/agent-yaml#name) joined to the target it was compiled for,
-and it is `agent_name` in `pcc-deploy.toml`. Pipecat Cloud agent names are
-unique across an organisation and a deploy updates the agent matching the name,
-so it has to say which package this is. Unmute used to write the target name
-there, and every package on this target calls its target `pipecat`: two packages
-in one organisation deployed over each other.
+A package named `my-agent` with target `pipecat` deploys as `my-agent-pipecat`.
+This is the package's [`name:`](/reference/agent-yaml#name) joined to its target,
+and it is `agent_name` in `pcc-deploy.toml`. The secret set uses the same name.
 
-The secret set follows the same name, because a secret set is per-organisation
-in the same way.
-
-A rename creates a second agent rather than moving the first. The old one keeps
-running and keeps billing, so delete it with
-`pipecat cloud agent delete <old-name>` and create the secret set again under
-the new name. On a phone route the TwiML Bin has to be repointed too:
-[Renaming the agent](/deploy/pipecat-cloud#renaming-the-agent) is the ordered walk.
-
-Every Pipecat route takes those same commands. Both telephony transports,
-`cloud-websocket` and `daily-sip`, emit a `pcc-deploy.toml` and build on the
-platform's base image, so there is no route here that you host yourself.
+A rename creates another agent and leaves the old one running. Follow
+[Renaming the agent](/deploy/pipecat-cloud#renaming-the-agent) to move traffic
+and remove the old deployment.
 
 <Warning>
   Do not edit files in `build/`. Change the source package and compile again.
-  The generated README says the same thing in its first paragraph.
 </Warning>
 
 ## Where to go next
