@@ -129,7 +129,7 @@ Follow the [complete customization steps](../../docs-site/build/architecture/rea
 
 Both S2S architectures currently support one agent and browser audio.
 They do not support tasks, task groups, handoffs, variables, pre-fetch, tracing, MCP tools, escalations, or phone connections.
-Realtime refuses separate listen, think, and turn model sections.
+Realtime refuses separate listen and turn model sections and an agent `think:` binding.
 
 For those features, follow the [architecture switching guide](../../docs-site/build/architecture/overview.mdx) and use cascade.
 Omitting `architecture` defaults to cascade, but you must also replace the model palette and agent bindings.
