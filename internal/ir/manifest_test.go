@@ -171,3 +171,37 @@ func TestManifestEmptyAllowlistsRefuseUnknownValues(t *testing.T) {
 		t.Fatalf("unsupported AWS region param suggested: %s", got)
 	}
 }
+
+func TestManifestProviderWideApprovalKeepsOtherRestrictions(t *testing.T) {
+	for _, role := range []string{"listen", "speak", "think"} {
+		for _, allow := range []string{"", "      allow: []\n", "      allow: [approved]\n"} {
+			manifest, err := packagespec.ParseManifest([]byte("manifest: acme\nversion: 1\nmodels:\n  " + role + ":\n    - provider: slng\n" + allow + "languages:\n  allow: [en]\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, provider := range []string{"slng", "deepgram"} {
+				agent := &Agent{Manifest: manifest, Models: map[string]ModelDef{"test": {Kind: ModelKind(role), Provider: provider, Model: "future/model", Language: "en"}}}
+				errs, _ := ValidateManifest(agent)
+				permitted := allow == "" && provider == "slng"
+				if (len(errs) == 0) != permitted {
+					t.Fatalf("%s/%s/%q: %v", role, provider, allow, errs)
+				}
+				if permitted {
+					agent.Manifest.Regions = &packagespec.ManifestRegions{Models: []packagespec.ManifestModelRegion{{Role: role, Provider: "slng", Allow: []string{}}}}
+					errs, _ = ValidateManifest(agent)
+					if !strings.Contains(strings.Join(errs, "\n"), "regions.models") {
+						t.Fatal("all models bypassed region restriction")
+					}
+					agent.Manifest.Regions = nil
+				}
+				if permitted && role != "think" {
+					agent.Models["test"] = ModelDef{Kind: ModelKind(role), Provider: provider, Model: "future/model", Language: "es"}
+					errs, _ = ValidateManifest(agent)
+					if !strings.Contains(strings.Join(errs, "\n"), "languages.allow") {
+						t.Fatal("all models bypassed language restriction")
+					}
+				}
+			}
+		}
+	}
+}

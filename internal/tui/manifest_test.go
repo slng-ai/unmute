@@ -244,3 +244,23 @@ func TestMaintainShowsContractWarnings(t *testing.T) {
 		t.Fatalf("missing warning: %v", warnings)
 	}
 }
+
+func TestManifestInitializationAcceptsAllProviderModels(t *testing.T) {
+	rules, err := spec.ParseManifest([]byte("manifest: acme\nversion: 1\nmodels:\n  listen:\n    - provider: slng\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	runner := newRunner(strings.NewReader("soniox/speech-ai:rt-v5\n"), &out, true)
+	runner.manifest = rules
+	if len(manifestTargetOptions(runner, []menuChoice{newChoice("LiveKit", "livekit")})) != 1 {
+		t.Fatal("all-model provider hid target")
+	}
+	binding := scaffold.Binding{Provider: "slng"}
+	if err := chooseManifestBinding(runner, "livekit", "listen", &binding); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if binding.Provider != "slng" || binding.Model != "soniox/speech-ai:rt-v5" {
+		t.Fatalf("wrong binding: %+v", binding)
+	}
+}

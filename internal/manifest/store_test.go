@@ -77,3 +77,74 @@ func TestConcurrentCreateNeverOverwrites(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUpdateBacksUpExactBytesAndCanRepairInvalidYAML(t *testing.T) {
+	s := Store{Root: t.TempDir()}
+	original := []byte("# hand-written contract\nmanifest: Acme\nversion: 7\n")
+	path, err := s.Create("acme", original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := []byte("manifest: Acme\nversion: 7\nlanguages:\n  allow:\n    - es\n")
+	got, backup, err := s.Update("acme", replacement)
+	if err != nil || got != path || backup == "" {
+		t.Fatalf("update: %s %s %v", got, backup, err)
+	}
+	old, err := os.ReadFile(backup)
+	if err != nil || string(old) != string(original) {
+		t.Fatalf("backup: %q %v", old, err)
+	}
+	if _, backup, err := s.Update("acme", replacement); err != nil || backup != "" {
+		t.Fatalf("unchanged update: %s %v", backup, err)
+	}
+	if _, _, err := s.Update("acme", []byte("invalid: true\n")); err == nil {
+		t.Fatal("invalid update accepted")
+	}
+	kept, err := os.ReadFile(path)
+	if err != nil || string(kept) != string(replacement) {
+		t.Fatal("invalid update changed saved file")
+	}
+	broken := []byte("manifest: [broken")
+	if err := os.WriteFile(path, broken, 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, backup, err = s.Update("acme", replacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err = os.ReadFile(backup)
+	if err != nil || string(old) != string(broken) {
+		t.Fatal("repair lost invalid original")
+	}
+	selected, err := s.Default()
+	if err != nil || selected.Name != "acme" {
+		t.Fatal("editing changed default")
+	}
+	if _, _, err := s.Update("missing", replacement); err == nil {
+		t.Fatal("edit created missing manifest")
+	}
+	if _, _, err := s.Update("../escape", replacement); err == nil {
+		t.Fatal("edit escaped library")
+	}
+}
+
+func TestBackupFailureLeavesManifestUntouched(t *testing.T) {
+	s := Store{Root: t.TempDir()}
+	original := []byte("manifest: Acme\nversion: 1\n")
+	path, err := s.Create("acme", original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := filepath.Dir(path)
+	if err := os.Chmod(directory, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(directory, 0700) })
+	if _, _, err := s.Update("acme", []byte("manifest: Acme\nversion: 2\n")); err == nil {
+		t.Fatal("expected backup failure in unwritable directory")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != string(original) {
+		t.Fatal("backup failure changed manifest")
+	}
+}

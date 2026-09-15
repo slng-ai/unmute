@@ -7,7 +7,9 @@ Write, validate, read the error, fix, repeat. Then run it and listen.
 | Command | What it does |
 |---|---|
 | `unmute init <name>` | scaffold a new package |
-| `unmute manifest create [name]` | edit and save a reusable manifest |
+| `unmute init <agent> --manifest <name> --draft` | create an unfinished package from a saved contract without prompts |
+| `unmute manifest create [name]` | create a reusable manifest with guided setup |
+| `unmute manifest edit <name>` | edit a saved manifest with guided setup |
 | `unmute manifest use <name>` | select the default manifest for future agents |
 | `unmute validate [dir]` | load, build, and check against every declared target |
 | `unmute compile [dir]` | validate, then write `build/<target>/` for each code target |
@@ -67,14 +69,43 @@ blocks still work exactly as before on livekit and pipecat.
 `codex`, `copilot`, or `cursor`. `--dir` installs somewhere other than the
 current directory. `--force` overwrites files that changed after they were
 installed, which is what the command otherwise refuses to do.
+After updating the CLI, run `unmute skill install` again to refresh the bundle.
+Review local changes before using `--force`.
 
 ## Start with init
 
 When a saved default manifest exists, `init` uses it and guides the author
-through the allowed choices. `unmute init my-agent --from-manifest` opens the
-saved-manifest picker instead. The chosen file is copied into the package;
+through the allowed choices. `unmute init my-agent --manifest acme-corp` selects
+a saved manifest directly. `unmute init my-agent --from-manifest` opens the
+saved-manifest picker instead. These are alternative flags; do not combine them. The chosen file is copied into the package;
 validation and compilation need no computer config. Read
 [Manifest](manifests.md) for creation, storage, updates and the rules.
+
+For a coding assistant, use the noninteractive draft flow:
+
+```sh
+unmute init my-agent --manifest acme-corp --draft
+```
+
+Use the user's saved manifest name; ask if it was not supplied. Both names are
+required, and `--draft` cannot be combined with `--from-manifest`.
+Explicit selection ignores the default, even if that default is broken.
+
+The draft writes `agent.yaml`, `targets.yaml`, `instructions.md`, `.gitignore`,
+`.env.example` and an exact `manifest` copy. It sets the package name and a
+starter agent's prompt link. Models, targets and channels remain unconfigured;
+it adds no tools, tracing or provider credentials. The draft is not runnable.
+
+Read the copied contract before choosing bindings or implementing the brief.
+Use the package, model, tool and orchestration references to complete the files.
+Keep `slng` as the provider for SLNG models, even when their IDs name other makers.
+Select exact listed model IDs; provider-wide permission still requires checking
+that the target and provider support the chosen model.
+Preserve the contract and its link. Explain a conflicting requirement rather
+than weakening the company rules.
+Run `unmute validate my-agent`, fix errors, then `unmute compile my-agent`.
+Validation and compilation refuse an incomplete draft; neither success proves
+that runtime or audio testing has happened.
 
 With no saved default, the ordinary scaffold works as below.
 

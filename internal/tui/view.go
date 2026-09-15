@@ -234,22 +234,4 @@ func (m console) renderNotice() string {
 	return style.Accented(m.notice.title) + "\n\n" + strings.Join(lines, "\n")
 }
 
-// panel is a rounded box; the focused panel carries the accent border, the other
-// the muted border (V44). NO_COLOR draws the border with no color.
-func panel(w, h int, focus bool) lipgloss.Style {
-	s := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
-	if w > 2 {
-		s = s.Width(w - 2)
-	}
-	if h > 2 {
-		s = s.Height(h - 2)
-	}
-	if !style.NoColor() {
-		if focus {
-			s = s.BorderForeground(lipgloss.Color(style.Accent))
-		} else {
-			s = s.BorderForeground(style.Border)
-		}
-	}
-	return s
-}
+func panel(w, h int, focus bool) lipgloss.Style { return style.Panel(w, h, focus) }

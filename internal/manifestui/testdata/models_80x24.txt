@@ -1,0 +1,22 @@
+ UNMUTE//   Manifests › Manifest › Model IDs · slng                             
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Model IDs · slng                                                             │
+│                                                                              │
+│ Changes stay in your draft. Select a model to edit or remove it. F1: help.   │
+│                                                                              │
+│ RULE                                                                         │
+│   [ ] Allow all models                                                       │
+│                                                                              │
+│ ALLOWED MODELS (2)                                                           │
+│ › 01  cartesia/sonic:3                                                       │
+│   02  cartesia/sonic:3.5                                                     │
+│                                                                              │
+│ ACTIONS                                                                      │
+│   Add model ID                                                               │
+│                                                                              │
+│ CONTROLS                                                                     │
+│   Back                                                                       │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+↑/↓ move · enter select · esc back · ctrl+c exit · F1 help · F2 sections        

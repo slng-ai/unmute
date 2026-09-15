@@ -1,9 +1,161 @@
 ---
 title: "unmute skill"
-description: "Install the Unmute skill so your coding assistant can build voice agents."
+description: "Give your coding assistant the workflow to build and check an Unmute agent."
 ---
 
-```text
+Install the Unmute skill so your coding assistant can turn a use case into an
+agent package. The CLI creates and checks files; the assistant writes the
+use case within your company's saved manifest.
+
+On this page:
+
+- [Quickstart](#quickstart): install and give the assistant one prompt
+- [Install the skill](#1-install-the-skill): share the workflow with your team
+- [Describe the agent](#2-describe-hotel-agent): build from acme-corp
+- [Check the result](#3-check-what-was-verified): validation, compilation and runtime
+- [Advanced](#advanced): install options, updates and command help
+- [Troubleshooting](#troubleshooting): common symptoms and fixes
+- [Where to go next](#where-to-go-next)
+
+## Quickstart
+
+Start in the project directory where you want `hotel-agent` created.
+This example assumes the company manifest `acme-corp` is already saved.
+If it is not, [create it first](/reference/cli/manifest).
+
+```sh Terminal
+unmute skill install
+```
+
+Give your coding assistant this complete request:
+
+```text Prompt for your coding assistant
+Use the Unmute skill to build hotel-agent from the saved
+manifest acme-corp.
+Run this command:
+unmute init hotel-agent --manifest acme-corp --draft
+Then read hotel-agent/manifest before choosing any models,
+targets or tools.
+
+Build a hotel information assistant that answers questions
+about opening hours and amenities. Ask me for the hotel's
+facts instead of inventing them.
+
+Preserve the manifest and its link. Explain any conflict
+with its rules instead of weakening them. Complete the
+package, validate it, fix errors and compile.
+
+Tell me separately what runtime or audio testing remains.
+```
+
+That is the loop: **install, describe, verify**. The prompt creates a new package;
+it is not YAML to paste into an existing one.
+
+## 1. Install the skill
+
+`unmute skill install` writes the workflow bundled with your CLI.
+Nothing is downloaded and no agent package is created.
+Commit the installed files so your team's assistants read the same workflow.
+
+| Assistant | Reads |
+|---|---|
+| Claude Code | `.claude/skills/unmute/` |
+| Codex | `.agents/skills/unmute/` |
+| Cursor | `.agents/skills/unmute/` |
+| GitHub Copilot | `.agents/skills/unmute/` |
+
+The shared instructions live in `.agents/skills/unmute/`.
+Claude's file points to them. The installer does not modify `AGENTS.md`,
+`.github/` or `.cursor/`.
+
+## 2. Describe hotel-agent
+
+Keep the saved name `acme-corp` in the prompt. The assistant must ask for a
+manifest name when one is missing; it must not invent company rules.
+Add the hotel's actual facts and available integrations as the conversation continues.
+
+| Responsibility | What happens |
+|---|---|
+| CLI: `init --manifest acme-corp --draft` | copies the contract and writes an unfinished starting point without prompts |
+| Assistant | reads the contract, chooses supported and approved bindings, writes prompts and implements the use case |
+| CLI: `validate` | checks the completed package against the contract and target rules |
+| CLI: `compile` | validates again and generates the target artifacts |
+
+The draft has no chosen models, targets or channels. It adds no tools,
+tracing or provider credentials. The assistant completes those settings only
+as the use case requires and the contract permits.
+
+A provider is the service the agent connects to. SLNG can serve models from
+several makers while the provider stays `slng`. An exact allowlist limits model
+IDs; provider-wide approval still requires a supported model on the chosen target.
+
+<Note>
+  If `hotel-agent` already exists, ask the assistant to read and complete that
+  package. Do not rerun `init` into it. The [init workflow](/reference/cli/init)
+  explains the draft files and how to continue an existing draft.
+</Note>
+
+## 3. Check what was verified
+
+After the assistant completes the package, these are complete commands you can
+run from its parent directory:
+
+```sh Terminal
+unmute validate hotel-agent
+unmute compile hotel-agent
+```
+
+Validation errors are work to fix in the package. They are not a reason to
+remove the contract or loosen its rules. Compilation writes generated files
+under `hotel-agent/build/`; edit the source package and compile again.
+
+Ask the assistant to name the models and target it chose, report the checks it
+ran, and identify any missing facts or integrations. A successful compile does
+not prove that a caller has heard or tested the agent.
+For LiveKit or Pipecat, use [unmute dev](/reference/cli/dev) for a browser
+conversation test. SLNG has no `unmute dev`; follow its
+[deployment workflow](/reference/cli/deploy).
+
+## Advanced
+
+### Choose assistants or another directory
+
+| Need | Command |
+|---|---|
+| All supported assistants | `unmute skill install` |
+| Claude only | `unmute skill install --agent claude` |
+| Codex and Cursor | `unmute skill install --agent codex --agent cursor` |
+| Another project | `unmute skill install --dir ../my-project` |
+
+`--agent` also accepts comma-separated names. Shared directories are written
+once. Unknown assistant names fail and list the supported choices.
+The install directory does not need to contain an agent package.
+
+### Refresh an existing installation
+
+After updating the CLI, rerun the same command:
+
+```sh Terminal
+unmute skill install
+```
+
+Matching files stay unchanged. An updated bundle replaces unmodified installed
+files and reports what changed. If you edited an installed file, the installer
+refuses to overwrite it and names the file.
+
+Review and save those local edits before choosing to replace them:
+
+```sh Terminal
+unmute skill install --force
+```
+
+`--force` replaces files; it does not merge your changes.
+To uninstall, remove `.agents/skills/unmute/` and `.claude/skills/unmute/`.
+There is no uninstall subcommand.
+
+### Command help
+
+```text Terminal — unmute skill --help
 $ unmute skill --help
 Install the coding-agent skill into a project.
 
@@ -20,9 +172,7 @@ Flags:
 Use "unmute skill [command] --help" for more information about a command.
 ```
 
-## unmute skill install
-
-```text
+```text Terminal — unmute skill install --help
 $ unmute skill install --help
 Write the Unmute skill into this project, so a coding assistant knows how to
 author an Unmute package. The files travel with the repository, so a team
@@ -38,148 +188,31 @@ Flags:
   -h, --help            help for install
 ```
 
-## Usage
-
-```sh
-unmute skill install
-```
-
-```text expandable
-  .agents/skills/unmute/
-    SKILL.md                         written
-    references/conversation.md       written
-    references/deploy.md             written
-    references/examples.md           written
-    references/latency.md            written
-    references/models.md             written
-    references/orchestration.md      written
-    references/package.md            written
-    references/prompting.md          written
-    references/telephony.md          written
-    references/tools.md              written
-    references/transfers.md          written
-    references/variables.md          written
-    references/workflow.md           written
-  .claude/skills/unmute/
-    SKILL.md                         written
-
-Installed the Unmute skill for claude, codex, copilot, cursor.
-Commit these files so your team's assistants get them too.
-Next: ask your assistant to build a voice agent, in a sentence.
-```
-
-Every file is printed with what happened to it, so a run that changed nothing
-reads differently from one that changed everything.
-
-## Where the files go
-
-No single directory serves every assistant, so the install writes two.
-
-| Assistant | Reads |
-|---|---|
-| Claude Code | `.claude/skills/unmute/` |
-| Codex | `.agents/skills/unmute/` |
-| Cursor | `.agents/skills/unmute/` |
-| GitHub Copilot | `.agents/skills/unmute/` |
-
-The instructions live once, in `.agents/skills/unmute/`. The file in
-`.claude/skills/unmute/` is a short pointer at them, so two assistants in one
-project read the same text rather than two copies that can drift.
-
-Nothing else in your project is created or edited. The command does not write
-`AGENTS.md`, `.github/`, or `.cursor/`.
-
-## Choosing assistants
-
-`--agent` is repeatable and takes a comma-separated list:
-
-```sh
-unmute skill install --agent claude
-unmute skill install --agent codex --agent cursor
-```
-
-Names that share a directory write it once. An unknown name fails and lists
-what is supported, rather than falling back to all:
-
-```text
-unmute: skill install: unknown assistant "emacs": supported names are all, claude, codex, copilot, cursor
-```
-
-## Installing somewhere else
-
-```sh
-unmute skill install --dir ../my-project
-```
-
-The command never reads or validates a package, so the directory does not have
-to hold one.
-
-## Running it again
-
-A second run reports what it found and changes nothing:
-
-```text expandable
-  .agents/skills/unmute/
-    SKILL.md                         left alone
-    references/conversation.md       left alone
-    references/deploy.md             left alone
-    references/examples.md           left alone
-    references/latency.md            left alone
-    references/models.md             left alone
-    references/orchestration.md      left alone
-    references/package.md            left alone
-    references/prompting.md          left alone
-    references/telephony.md          left alone
-    references/tools.md              left alone
-    references/transfers.md          left alone
-    references/variables.md          left alone
-    references/workflow.md           left alone
-  .claude/skills/unmute/
-    SKILL.md                         left alone
-```
-
-After you upgrade the CLI, the same command writes the new files and says what
-it upgraded from:
-
-```text
-  .agents/skills/unmute/  (upgraded from 0.1.2)
-```
-
-## Files you changed
-
-If you edit an installed file, the next install refuses rather than losing your
-work, and names every file at once:
-
-```text
-unmute: skill install: these files changed after they were installed:
-  .agents/skills/unmute/SKILL.md
-run `unmute skill install --force` to overwrite them
-```
-
-`--force` overwrites them. It never merges.
-
-## Uninstalling
-
-Delete the two directories. There is no subcommand for that.
-
-```sh
-rm -r .agents/skills/unmute .claude/skills/unmute
-```
-
-## No network
-
-The skill is embedded in the binary, so the install works on a machine that has
-never been online, and the skill can never disagree with the CLI that wrote it.
-
-## Exit codes
+### Exit codes
 
 | Code | Meaning |
 |---|---|
-| `0` | every requested directory is current, whether it was written or already matched |
-| `1` | an unknown assistant, an unwritable directory, or a refusal on files you changed |
+| `0` | the requested installation is current |
+| `1` | an unknown assistant, an unwritable directory or locally changed files prevented installation |
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| The assistant opens guided setup | it is using an older workflow or omitted `--draft` | update the CLI, rerun `skill install` and give the quickstart prompt |
+| `acme-corp` cannot be loaded | the saved name is missing or its contract is invalid | create or repair it with `unmute manifest` before creating the draft |
+| `hotel-agent` already exists | initialization protects existing packages | ask the assistant to inspect and complete the existing package |
+| The draft fails validation immediately | the draft intentionally leaves bindings unfinished | have the assistant complete it, then validate again |
+| Skill refresh refuses a file | it changed locally after installation | review the changes; use `--force` only to replace them |
+| The agent compiles but has not been heard | compile checks and generates artifacts; it runs no conversation | use `unmute dev hotel-agent` for LiveKit or Pipecat, or test the deployed SLNG agent |
 
 ## Where to go next
 
-<Card title="Changelog" icon="clock" href="/changelog">
-  What changed in each release of the Unmute CLI.
-</Card>
+<CardGroup cols={2}>
+  <Card title="Create the company contract" icon="file" href="/reference/cli/manifest">
+    Save acme-corp before asking an assistant to use it.
+  </Card>
+  <Card title="Understand the draft" icon="terminal" href="/reference/cli/init">
+    See what the CLI creates and how to finish hotel-agent.
+  </Card>
+</CardGroup>

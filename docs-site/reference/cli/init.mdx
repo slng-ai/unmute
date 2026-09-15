@@ -1,9 +1,142 @@
 ---
 title: "unmute init"
-description: "Scaffold a new agent package, with a name or interactively."
+description: "Create an agent package, or give a coding assistant a draft with your company rules attached."
 ---
 
-```text
+Create an agent package your coding assistant can complete within your company's rules.
+
+The manifest sets the allowed choices. `init` copies that contract into a
+package; the assistant writes the use case. **Create, complete, check** is the
+whole workflow. The CLI does not call a language model for you.
+
+On this page:
+
+- [Quickstart](#quickstart) - start from a saved manifest
+- [Choose the contract](#1-choose-the-contract) - named selection and defaults
+- [Create the draft](#2-create-the-draft) - what the command writes
+- [Give the assistant the brief](#3-give-the-assistant-the-brief) - complete the same package
+- [Check the result](#4-check-the-result) - validation, compilation and runtime tests
+- [Command reference](#command-reference) - flags and help
+- [Advanced](#advanced) - guided setup and ordinary scaffolding
+- [Troubleshooting](#troubleshooting) - symptoms, causes and fixes
+- [Where to go next](#where-to-go-next)
+
+## Quickstart
+
+Start in your project folder with a saved manifest named `acme-corp`.
+If it does not exist, [create and save it first](/reference/cli/manifest#quickstart).
+Use a new directory name for the agent.
+
+These are the complete setup commands:
+
+```sh Terminal — project folder
+unmute skill install
+unmute init hotel-agent --manifest acme-corp --draft
+```
+
+Then give your coding assistant this brief:
+
+```text Prompt for your coding assistant
+Use the Unmute skill to complete the existing hotel-agent
+draft.
+Read hotel-agent/manifest first and preserve it and its
+link unchanged.
+Build a hotel information assistant that answers questions
+about opening hours and amenities. Ask me for the hotel's
+facts instead of inventing them.
+Choose permitted models and infrastructure. Write the
+conversation instructions, then run validation and
+compilation and fix any errors.
+Tell me what still needs runtime testing.
+```
+
+<Note>
+  This creates an unfinished package, not a running voice agent. The prompt
+  asks the coding assistant to edit that package. Do not run `init` again to
+  complete it.
+</Note>
+
+## 1. Choose the contract
+
+`acme-corp` is the manifest's saved name on this computer. It can differ from
+the company name written inside the file.
+
+| Selection | What happens |
+|---|---|
+| `--manifest acme-corp` | Use that saved contract, regardless of the default |
+| `--from-manifest` | Open a picker for guided creation |
+| Neither flag | Use the saved default, if one exists |
+
+Direct selection does not change the default. A missing or invalid named
+manifest stops creation before any package files are written.
+A broken default stops creation only when you have not selected a manifest by name.
+
+`--draft` requires both an agent directory and explicit `--manifest`.
+It cannot use `--from-manifest`, and it never asks questions through stdin.
+
+## 2. Create the draft
+
+The quickstart command writes six files under `hotel-agent/`:
+
+| File | Starting contents |
+|---|---|
+| `agent.yaml` | Package name, manifest link and a starter agent pointing to its prompt |
+| `targets.yaml` | No targets selected |
+| `instructions.md` | Starter prompt for the assistant to replace with the use case |
+| `.gitignore` | Excludes local credentials and generated output |
+| `.env.example` | Empty; no credentials are chosen |
+| `manifest` | Exact copy of the selected contract, including comments |
+
+No models or channels are selected. No tools or tracing are added.
+The assistant must fill in the required choices before validation can pass.
+
+Commit the finished package and its manifest together. Validation and
+compilation read that local copy, so another computer needs no saved manifest.
+Editing the saved source later does not update existing packages.
+
+## 3. Give the assistant the brief
+
+The quickstart brief keeps the agent small: hotel facts and no booking system.
+The assistant reads the copied manifest before choosing models, targets,
+languages, regions, tools or tracing. It then edits the package files.
+
+For SLNG-served models, the provider remains `slng` even when a model ID names
+Cartesia or Deepgram. An explicit allowlist limits the IDs the assistant can
+choose. **Allow all models** permits any ID from that service; target support
+and provider requirements still apply.
+
+The skill explains conflicts instead of loosening the contract.
+It should ask for missing business facts or tool interfaces, not invent them.
+See [model choices](/models/llm) and [tools](/build/tools/overview) when the
+brief needs more than the native workflow.
+
+If you already created `my-new-agent`, use its name in the quickstart brief.
+Skip the `init` command and have the assistant complete those existing files.
+
+## 4. Check the result
+
+After the assistant finishes its edits, these are the complete check commands:
+
+```sh Terminal — project folder
+unmute validate hotel-agent
+unmute compile hotel-agent
+```
+
+Fix validation errors in the package. Do not remove a company rule to make an
+error disappear. Compilation writes target artifacts under `hotel-agent/build/`;
+it does not prove that the conversation works with real providers.
+
+| Target | Next runtime check |
+|---|---|
+| LiveKit or Pipecat | [Run the browser loop](/dev/overview) with `unmute dev hotel-agent` |
+| SLNG | Follow the [deployment workflow](/reference/cli/deploy); SLNG has no `unmute dev` |
+
+Phone calls require a deployed agent and a real carrier. See the
+[telephony guide](/telephony/overview) when your brief needs phone access.
+
+## Command reference
+
+```text Terminal — unmute init --help
 $ unmute init --help
 Scaffold a new v1 agent package.
 
@@ -11,123 +144,80 @@ Usage:
   unmute init [name] [flags]
 
 Flags:
-      --from-manifest   Choose a saved organization manifest.
-  -h, --help            help for init
+      --draft             Write an unfinished package without prompts (requires name and --manifest).
+      --from-manifest     Choose a saved organization manifest.
+  -h, --help              help for init
+      --manifest string   Use a saved organization manifest by name.
 ```
 
-## With a saved manifest
+The agent name is also its directory. An occupied directory is refused.
+Plain `init` without a name asks for one in a terminal; outside a terminal,
+you must supply the name.
 
-When a saved default manifest exists, both `unmute init` and
-`unmute init my-agent` use it and guide you through the allowed choices.
+## Advanced
 
-```sh
-unmute manifest create acme-corp
-unmute init my-agent
-unmute init another-agent --from-manifest
+### Use guided setup instead
+
+For a fresh package, this complete command selects the same contract and opens
+the interactive agent setup:
+
+```sh Terminal — alternative to the draft workflow
+unmute init guided-hotel-agent --manifest acme-corp
 ```
 
-`--from-manifest` opens a picker instead of using the default. The selection
-applies to this agent only. Initialization copies the chosen file into the
-package as `manifest` and links it from `agent.yaml`. Commit both files so
-validation and compilation work on another computer or in CI.
+Guided setup collects choices and checks the package before saving.
+The manifest picker is an alternative to named selection, not a name-taking flag:
 
-A missing or invalid saved default is an error. Manifest-based creation needs
-guided input; unattended creation is not supported. See
-[Manifest](/reference/manifest) for storage, editor setup and updates.
-
-The ordinary scaffold below applies when no saved default exists.
-
-## With a name
-
-```sh
-unmute init my-agent
+```sh Terminal — choose a saved contract interactively
+unmute init another-hotel-agent --from-manifest
 ```
 
-```text
-created my-agent/agent.yaml
-created my-agent/.env.example
-created my-agent/.gitignore
-created my-agent/instructions.md
-created my-agent/targets.yaml
-created my-agent/tools/end_call.yaml
-```
+The creation console cannot collect custom model endpoints or SLNG Context
+Router upstream settings. Use the draft workflow for those bindings, then
+follow the relevant [model reference](/models/llm).
 
-The name is also the directory. Each created file is printed. `cd` into it and
-`validate`, `compile`, and `dev` all run with no argument.
+### Start without a company contract
 
-## With no name
+When no saved default exists, `unmute init <name>` writes the ordinary scaffold.
+It selects LiveKit, SLNG speech models, an OpenAI reasoning model, a browser
+channel and an `end_call` tool. With a default present, it opens guided setup
+under that contract instead.
 
-In a terminal, `unmute init` with no argument opens an interactive console that
-asks for the name, the models, and the target, and can validate and compile the
-result for you.
+The scaffold's `.env.example` lists starter environment names. After compiling,
+`build/<target>/.env.example` lists the values needed by that target.
+Follow [credentials](/reference/secrets) and [targets](/targets/overview) to finish setup.
 
-Pick a phone route there and the scaffold writes one more file,
-`connections/<name>.yaml`, holding the transport, the carrier, and the
-environment variable names that route needs. The target only names it. See
-[`connections/<name>.yaml`](/reference/connections-yaml).
+### Refresh the assistant's instructions
 
-Outside a terminal, a name is required:
+After updating the CLI, run `unmute skill install` again in the project folder.
+The skill ships in the binary. Review local edits before replacing them with
+`--force`; see [skill installation](/reference/cli/skill).
 
-```text
-unmute: agent name required
-```
+## Troubleshooting
 
-## It never writes into an occupied directory
-
-```text
-unmute: init my-agent: my-agent: directory already exists and is not empty
-```
-
-## What the scaffold contains
-
-| File | What it is |
-|---|---|
-| `agent.yaml` | the agent: models, one agent, greeting, channel, capacity |
-| `instructions.md` | the agent's prompt |
-| `targets.yaml` | one target |
-| `tools/end_call.yaml` | a built in tool so the agent can hang up |
-| `.env.example` | starter keys for the scaffolded target |
-| `.gitignore` | keeps `.env` and `build/` out of git |
-
-The scaffold binds SLNG speech models and an OpenAI reasoning model, so one
-`SLNG_API_KEY` covers speech to text and text to speech.
-
-## The scaffolded target
-
-The target is **LiveKit**, so `targets.yaml` holds one instance named
-`livekit`, `agent.yaml` carries a matching LiveKit turn detector, and
-`unmute compile` writes `build/livekit/`. Pipecat is equally supported; pick it
-in the interactive console, or edit the package by hand as
-[Targets](/targets/overview) describes.
-
-```yaml targets.yaml
-targets:
-  livekit:
-    provider: livekit
-    version: "1.6.10"
-    sdk_language: python
-```
-
-`.env.example` lists the two values you supply:
-
-```text
-OPENAI_API_KEY=
-SLNG_API_KEY=
-```
-
-The LiveKit worker also needs `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
-`LIVEKIT_API_SECRET`, but they are not values you fill in. `unmute dev` supplies
-them locally; LiveKit Cloud or a self-hosted operator supplies them at deploy
-time. They remain in `compile-report.json` and the runtime startup checks.
-
-<Note>
-  The top level `.env.example` is a starter list. After `unmute compile`,
-  `build/<target>/.env.example` lists the values you supply for that target;
-  `compile-report.json` lists every required environment name.
-</Note>
+| Symptom | Cause | Fix |
+|---|---|---|
+| `accepts at most 1 arg(s), received 2` | An older binary treats the word after `--from-manifest` as another agent argument | Update the binary and use `--manifest acme-corp` |
+| Creation opens a TUI | `--draft` was omitted | Add `--draft` for coding-assistant setup without prompts |
+| `validate: no targets selected` | The draft is still incomplete | Have the assistant finish models, targets and channels, then validate again |
+| Creation reports a missing manifest | The name is not saved on this computer | Use the correct saved name or create it with `unmute manifest create` |
+| The assistant tries to weaken a rule | The brief conflicts with the contract | Change the agent design or ask the contract owner to resolve the conflict |
+| The destination is not empty | The package already exists | Complete those files, or choose a fresh directory |
+| The assistant does not know `--draft` | Its installed skill is older than the CLI | Update the CLI and rerun `unmute skill install` |
 
 ## Where to go next
 
-<Card title="unmute validate" icon="check" href="/reference/cli/validate">
-  Check the package you just made.
-</Card>
+<CardGroup cols={2}>
+  <Card title="Company manifests" icon="file" href="/reference/manifest">
+    Understand the contract the assistant must preserve.
+  </Card>
+  <Card title="The Unmute skill" icon="book-open" href="/reference/cli/skill">
+    Install the workflow your coding assistant follows.
+  </Card>
+  <Card title="Validate the package" icon="check" href="/reference/cli/validate">
+    Read and fix errors before compilation.
+  </Card>
+  <Card title="Choose the agent structure" icon="layers" href="/build/orchestration/choosing-a-structure">
+    Add tasks or handoffs when the use case needs them.
+  </Card>
+</CardGroup>

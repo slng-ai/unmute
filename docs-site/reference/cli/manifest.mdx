@@ -1,13 +1,187 @@
 ---
 title: "unmute manifest"
-description: "Create saved company contracts and choose the default for new agents."
+description: "Save company rules once, then use them to build an agent."
 ---
 
-Save company rules once in the computer's config directory. Plain `unmute init`
-uses the saved default automatically. The new package carries its own copy, so
-validation and compilation work without the computer's config.
+Save a company contract and use it to create `hotel-agent`. The saved manifest
+is your reusable source; each new agent gets its own copy to validate against.
 
-```text
+On this page:
+
+- [Quickstart](#quickstart): save a contract and use it
+- [Create the contract](#1-create-the-contract): choose rules and save
+- [Build an agent](#2-build-an-agent-from-it): guided setup or a coding assistant
+- [Check the agent](#3-check-the-agent): validate and compile
+- [Advanced](#advanced): external editors, storage and command help
+- [Troubleshooting](#troubleshooting): common symptoms and fixes
+- [Where to go next](#where-to-go-next)
+
+## Quickstart
+
+Run these complete commands from the directory that will hold your agent:
+
+```sh Terminal
+unmute manifest create acme-corp
+unmute init hotel-agent --manifest acme-corp
+unmute validate hotel-agent
+unmute compile hotel-agent
+```
+
+The first command opens the manifest editor. Set the rules, then choose
+**Review and save → Save manifest**. The second opens guided agent setup
+using those rules. Finish and save the agent before running the checks.
+
+<Note>
+  A manifest approves choices; it does not create models, tools or prompts.
+  Complete the agent setup before validating or running it.
+</Note>
+
+## 1. Create the contract
+
+In `acme-corp`, set the company name and revision under **Identity**.
+Then open the sections your company needs to restrict.
+Omitted rules add no restriction, so you do not need to fill every section.
+
+| Choose | What it means |
+|---|---|
+| No restriction | the contract adds no limit for this rule |
+| Allow selected values | only the listed values are approved |
+| Allow all models | every current and future model from this provider is approved |
+| Allow nothing | no values are approved; offered outside model rules |
+
+For **Models**, choose a role, then **Add provider**. Selecting a service offers
+**Allow all models** or **Add model ID**. The second opens the input directly;
+repeat it for more models. Each role supports several providers.
+
+Keep `slng` as the provider for models served through SLNG. Its model IDs can
+name different makers. Direct `deepgram` or `cartesia` connections are separate
+provider entries. Approval still depends on the target supporting that binding.
+
+### Move through the editor
+
+| Key | Action |
+|---|---|
+| Arrows, then Enter | choose and open a list row |
+| Tab / Shift+Tab | move between form fields, Apply and Back |
+| Enter on Apply | keep the completed form in the draft |
+| Esc or Back | leave a page; cancel an unfinished form or incomplete setup |
+| F2 | choose another section |
+| F1 | open help |
+| Page Up / Page Down | scroll the review |
+| Ctrl+C | choose whether to discard unsaved changes |
+
+Arrow keys edit text in a form; they do not move between its controls.
+After adding a value, **Add** stays selected: press Enter to add another.
+Completed edits stay in the draft when you leave a list or section.
+New provider and region entries join it once their required fields are complete.
+Switching sections asks before discarding incomplete input.
+
+Only **Review and save → Save manifest** writes the file.
+The review names changes, validation errors and the destination.
+Existing saved names are never overwritten by `create`.
+
+## 2. Build an agent from it
+
+Choose one route for the same `hotel-agent` example:
+
+| Route | Command | Who completes the package |
+|---|---|---|
+| Name a saved contract | `unmute init hotel-agent --manifest acme-corp` | you, through guided setup |
+| Choose from saved contracts | `unmute init hotel-agent --from-manifest` | you, through a picker and guided setup |
+| Give the work to an assistant | `unmute init hotel-agent --manifest acme-corp --draft` | the coding assistant, by editing the draft |
+
+These commands are alternatives. Do not run them all against the same directory.
+`--manifest` selects directly, even if an unrelated default is broken.
+`--from-manifest` opens a picker and cannot be combined with `--manifest` or `--draft`.
+
+For the assistant route, install the [Unmute skill](/reference/cli/skill) and
+give it the use case and saved name `acme-corp`. It creates the draft, reads the
+copied rules, implements the agent, then validates and compiles it.
+A draft has no chosen models, targets or channels and is not yet runnable.
+
+Both routes copy the exact contract into `hotel-agent/manifest` and link it
+from `agent.yaml`. Commit both files. Validation then works on another computer
+or in CI without the saved library.
+
+## 3. Check the agent
+
+After completing `hotel-agent`, run the validation and compilation commands
+from the quickstart. Both read `hotel-agent/manifest`, not the saved library.
+Fix the agent when it violates a company rule; do not weaken the contract.
+
+A successful compile does not test a conversation. Use the [browser loop](/dev/overview)
+for LiveKit or Pipecat. SLNG has no `unmute dev`; follow its
+[deployment workflow](/reference/cli/deploy).
+
+## Advanced
+
+### Update the saved contract
+
+Reopen the same contract when your company rules change:
+
+```sh Terminal
+unmute manifest edit acme-corp
+```
+
+The saved name stays fixed; the company name and revision are editable.
+Revisions increase only when you change them.
+Saving replaces formatting and comments with clean YAML and creates an exact
+backup beside the original. The command prints both paths.
+Unchanged edits preserve the original bytes and create no backup.
+A save error keeps the draft open for correction or retry.
+
+<Note>
+  Editing `acme-corp` does not change `hotel-agent/manifest` or any existing
+  package. See [updating a package contract](/reference/manifest#update-an-existing-agents-contract)
+  before replacing its copy.
+</Note>
+
+### Choose the default for future agents
+
+```sh Terminal
+unmute manifest use acme-corp
+```
+
+Plain `unmute init` uses this default. The first saved manifest becomes the
+default automatically; later creations offer to change it.
+Direct selection with `--manifest` changes only the new agent.
+`manifest use` requires a valid saved manifest and changes no existing package.
+
+### Edit YAML in an external editor
+
+Use this alternative when you prefer YAML or need to repair an invalid saved file:
+
+```sh Terminal
+export EDITOR='code --wait'
+unmute manifest edit acme-corp --editor
+```
+
+`--editor` uses `VISUAL`, falling back to `EDITOR`. The editor must wait until
+you close the file. This edits the complete contract, not a fragment to merge.
+The same flag also works with `manifest create acme-corp --editor` for a new name.
+
+Temporary drafts are validated before saving. A failed editor or invalid draft
+leaves the saved file untouched and reports the draft path.
+Successful replacements use the same backup protection as the terminal editor.
+
+### Storage and terminal support
+
+Saved files live under the user config directory at
+`unmute/manifests/<name>/manifest`; `unmute/default-manifest` holds the default name.
+Names use letters, digits, hyphens and underscores. Omitting a name from
+`manifest create` prompts for one.
+
+The editor needs at least 60 columns and 18 rows. Smaller terminals retain the
+draft and ask you to resize. `TERM=dumb` uses numbered prompts with `:sections`
+and `:help` instead of F2 and F1.
+
+The editor does not offer **Allow nothing** for models. Existing empty model
+rules must be repaired before saving. YAML and `--editor` still support them;
+see the [manifest reference](/reference/manifest) for all rule meanings.
+
+### Command help
+
+```text Terminal — unmute manifest --help
 $ unmute manifest --help
 Save organization contracts on this computer.
 
@@ -15,7 +189,8 @@ Usage:
   unmute manifest [command]
 
 Available Commands:
-  create      Create a saved manifest in your editor.
+  create      Create a saved manifest with guided setup.
+  edit        Edit a saved manifest with guided setup.
   use         Choose the default manifest for new agents.
 
 Flags:
@@ -24,46 +199,31 @@ Flags:
 Use "unmute manifest [command] --help" for more information about a command.
 ```
 
-## Create a manifest
-
-```sh
-unmute manifest create acme-corp
-```
-
-The command opens a commented YAML starter in `VISUAL`, falling back to
-`EDITOR`. Set an editor that waits until you finish, for example
-`EDITOR='code --wait'` or `EDITOR=vi`. With no local name, it asks for one.
-Names use letters, digits, hyphens and underscores.
-
-A valid file is saved under the user config directory at
-`unmute/manifests/<name>/manifest`. Its path is printed so you can reopen it
-later. Existing names are never overwritten. Invalid drafts are kept at the
-path in the error and are not installed.
-
-The first saved file becomes the default. Later creations offer to change the
-default. The default name is stored in `unmute/default-manifest`.
-
-```text
+```text Terminal — unmute manifest create --help
 $ unmute manifest create --help
-Create a saved manifest in your editor.
+Create a saved manifest with guided setup.
 
 Usage:
   unmute manifest create [name] [flags]
 
 Flags:
-  -h, --help   help for create
+      --editor   Edit YAML in VISUAL or EDITOR instead.
+  -h, --help     help for create
 ```
 
-## Change the default
+```text Terminal — unmute manifest edit --help
+$ unmute manifest edit --help
+Edit a saved manifest with guided setup.
 
-```sh
-unmute manifest use acme-corp
+Usage:
+  unmute manifest edit <name> [flags]
+
+Flags:
+      --editor   Edit YAML in VISUAL or EDITOR instead.
+  -h, --help     help for edit
 ```
 
-The named manifest must exist and validate. This changes the default for
-future agents; it does not update existing packages.
-
-```text
+```text Terminal — unmute manifest use --help
 $ unmute manifest use --help
 Choose the default manifest for new agents.
 
@@ -74,16 +234,24 @@ Flags:
   -h, --help   help for use
 ```
 
-## Choose for one agent
+## Troubleshooting
 
-```sh
-unmute init my-agent --from-manifest
-```
+| Symptom | Cause | Fix |
+|---|---|---|
+| Arrow keys do not reach Apply | a form uses Tab for focus | press Tab, then Enter on Apply |
+| `--from-manifest acme-corp` reports too many arguments | the flag opens a picker and takes no name | use `--manifest acme-corp` |
+| Creation reports an existing name | `create` protects saved contracts | use `manifest edit acme-corp` |
+| The saved default is invalid | default-based creation cannot use it | repair it with `manifest edit acme-corp --editor`, or select another valid contract with `--manifest` |
+| The old agent still has old rules | each agent keeps its own contract copy | review and replace its `manifest`, then validate and compile |
+| A draft fails validation | models, targets and channels are unfinished | complete it through the skill workflow before compiling |
 
-The picker starts with the saved default selected. Choosing another manifest
-here changes only this new agent. With no saved manifests, the command tells
-you to create one first. A broken saved default is an error, never an implicit
-unrestricted agent.
+## Where to go next
 
-See [Manifest](/reference/manifest) for the full format, rule meanings,
-package copies and updates. See [unmute init](/reference/cli/init) for creation.
+<CardGroup cols={2}>
+  <Card title="Build an agent" icon="terminal" href="/reference/cli/init">
+    Create hotel-agent from the contract you saved.
+  </Card>
+  <Card title="Use a coding assistant" icon="code" href="/reference/cli/skill">
+    Let the skill complete the use case within your company rules.
+  </Card>
+</CardGroup>
