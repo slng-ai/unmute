@@ -531,7 +531,7 @@ Choose the API, model, authentication and routing for the package's needs.
 | Route | Targets | Configuration | Authentication |
 |---|---|---|---|
 | Gemini Developer API | LiveKit and Pipecat | `provider: google` (alias `gemini`); omit `vertexai` and `location` | `GOOGLE_API_KEY` for the Developer API |
-| Vertex EU API-key bridge | LiveKit and Pipecat | `provider: google`, `params.vertexai: true`, `params.location: eu` | `GOOGLE_API_KEY` with Vertex access |
+| Vertex API-key bridge | LiveKit and Pipecat | `provider: google`, `params.vertexai: true`, explicit `params.location` | `GOOGLE_API_KEY` with Vertex access |
 | LiveKit Inference | LiveKit | `provider: livekit`; use a Gemini model identifier supported by LiveKit Inference | LiveKit project credentials |
 
 ### Gemini Developer API
@@ -547,9 +547,10 @@ models:
       model: gemini-3.5-flash-lite
 ```
 
-### Vertex EU endpoint
+### Vertex inference location
 
-For a package that needs the EU Vertex endpoint, add the routing params:
+Choose the inference location in provider params, independently of the worker's
+deployment region:
 
 ```yaml
 models:
@@ -559,14 +560,31 @@ models:
       model: gemini-3.5-flash-lite
       params:
         vertexai: true
-        location: eu
+        location: us
+        thinking_config:
+          thinking_level: minimal
 ```
 
-This configuration reads `GOOGLE_API_KEY` and sends requests to
-`https://aiplatform.eu.rep.googleapis.com`, with no global fallback.
-The compiler currently accepts only `location: eu` for this binding and does
-not expose OAuth configuration. These are compiler constraints, independent of
-the API key's permissions or the endpoints available to its account.
+This configuration keeps `GOOGLE_API_KEY` authentication and sends requests to
+`https://aiplatform.us.rep.googleapis.com`. `thinking_config` and other provider
+parameters still reach the native plugin.
+
+| Location | Inference endpoint |
+|---|---|
+| `us` | `https://aiplatform.us.rep.googleapis.com` |
+| `eu` | `https://aiplatform.eu.rep.googleapis.com` |
+| `global` | `https://aiplatform.googleapis.com` |
+| Individual region, such as `europe-west4` | `https://europe-west4-aiplatform.googleapis.com` |
+
+These follow [Google's endpoint rules](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations).
+The location must be explicit and have a valid lowercase location identifier.
+Unmute keeps no region allowlist: Google determines endpoint, model and API-key
+availability. An unsupported location or unavailable model fails at the requested
+endpoint. There is no fallback to global or another region.
+
+The adapter owns its endpoint and API-key authentication. Do not add
+`http_options`, `project` or `credentials` to this binding. It does not expose
+OAuth configuration.
 
 ### LiveKit Inference
 

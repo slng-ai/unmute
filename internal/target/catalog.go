@@ -3,6 +3,7 @@ package target
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -130,14 +131,22 @@ func (e Entry) Wildcard() bool { return e.Vendor == "*" }
 
 type Catalog struct{ entries []Entry }
 
-// CheckGoogleParams keeps the API-key Vertex bridge's EU endpoint unambiguous.
+// A location becomes one DNS label. Check its shape, not Google's changing
+// availability list: an unavailable endpoint/model must fail at the provider.
+var googleLocation = regexp.MustCompile(`^[a-z][a-z0-9-]{0,61}[a-z0-9]$`)
+
+// CheckGoogleParams keeps the API-key Vertex bridge's routing unambiguous.
 func CheckGoogleParams(params map[string]any) error {
 	if vertex, exists := params["vertexai"]; exists {
-		if vertex != true || params["location"] != "eu" {
-			return fmt.Errorf("google API-key Vertex binding needs vertexai: true and location: eu")
+		if vertex != true {
+			return fmt.Errorf("google API-key Vertex binding needs vertexai: true; omit vertexai and location for the Gemini Developer API")
+		}
+		location, ok := params["location"].(string)
+		if !ok || !googleLocation.MatchString(location) {
+			return fmt.Errorf("google API-key Vertex binding needs an explicit location: use a lowercase location identifier such as us, eu or us-central1 (at most 63 letters, digits or hyphens)")
 		}
 		if params["http_options"] != nil || params["project"] != nil || params["credentials"] != nil {
-			return fmt.Errorf("google EU API-key binding owns its endpoint and authentication; remove http_options, project and credentials")
+			return fmt.Errorf("google API-key Vertex binding owns its endpoint and authentication; remove http_options, project and credentials")
 		}
 	} else if params["location"] != nil {
 		return fmt.Errorf("google location needs vertexai: true; the Gemini Developer API has no regional endpoint")
