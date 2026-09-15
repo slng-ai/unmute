@@ -640,6 +640,8 @@ type pipecatData struct {
 	// reason: a package that authors no `messages` emits neither the helper nor
 	// the section header they share.
 	NeedsSpeechOnly bool
+	// Full-history handoffs need copy even when the package has no task flows.
+	NeedsHistoryCopy bool
 	// NeedsHistoryRunbook gates the README section explaining a non-`full`
 	// `context.history` value. True the moment any task or handoff's CtxExpr is
 	// non-empty or its Reset is set, so a package authoring only `full` gets the

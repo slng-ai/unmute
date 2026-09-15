@@ -711,6 +711,7 @@ func setImportNeeds(data *pipecatData) {
 			// the helper is emitted once at module scope for both.
 			data.NeedsLastN = data.NeedsLastN || strings.HasPrefix(t.CtxExpr, "_last_n(")
 			data.NeedsSpeechOnly = data.NeedsSpeechOnly || strings.HasPrefix(t.CtxExpr, "_speech_only(")
+			data.NeedsHistoryCopy = data.NeedsHistoryCopy || strings.HasPrefix(t.CtxExpr, "copy.deepcopy(")
 			// A handoff's own `context.history` is the other site the runbook
 			// section has to cover, not just a task's.
 			data.NeedsHistoryRunbook = data.NeedsHistoryRunbook || t.CtxExpr != ""
@@ -1276,8 +1277,8 @@ func pipecatCtxExpr(c ir.TaskContext) (expr string, needsLastN bool) {
 		return "_speech_only(self.context.get_messages())", false
 	case ir.HistoryLastN:
 		return fmt.Sprintf("_last_n(self.context.get_messages(), %d)", c.MaxMessages), true
-	default: // full keeps speech and paired tool records, never prior instructions.
-		return `[dict(m) for m in self.context.get_messages() if m.get("role") in ("user", "assistant", "tool")]`, false
+	default: // Full keeps provider metadata with its tool records, never prior instructions.
+		return `copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")])`, false
 	}
 }
 
