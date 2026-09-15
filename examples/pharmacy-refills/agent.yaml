@@ -1,0 +1,101 @@
+# The repeat prescription line at Elmtree Pharmacy, on the realtime
+# architecture: one model hears the caller and answers in its own voice, with no
+# transcriber and no synthesizer in between.
+#
+# It is here because of one thing callers do on this line. They read a
+# prescription reference out loud, slowly, and they stop in the middle of it to
+# check the label in their hand. A pipeline that ends the turn on silence starts
+# talking over them. Who ends the turn is the whole package, so read
+# turn_detection below before anything else.
+version: 1
+
+name: pharmacy-refills
+architecture: realtime
+entry_agent: refills
+
+# One key: the realtime model and the knowledge base both run on OpenAI. There
+# is no separate speech account, because nothing here transcribes or
+# synthesizes.
+secrets:
+  - OPENAI_API_KEY
+
+models:
+  realtime:
+    - name: counter
+      description: the repeat prescription line, listening and speaking
+      provider: openai
+      model: gpt-realtime
+      voice: marin
+
+      # semantic, and the reason is the reference number.
+      #
+      # server_vad ends the turn on a silence window. A caller reading "R X,
+      # four eight two one" and pausing to turn the box over has been silent
+      # long enough, so the model answers half a reference and the caller
+      # restarts. That is the failure this line has, over and over.
+      #
+      # semantic asks the model whether the caller finished a thought rather
+      # than only went quiet, and half a reference is not a finished thought. It
+      # costs a little more per turn than a silence window and it buys the one
+      # thing this caller needs.
+      #
+      # local was the other candidate. It hands the turn back to this project's
+      # own detector, which is what a cascaded package uses and what you would
+      # write if you wanted `pace:` and `endpointing_delay` to apply. It is not
+      # the right answer here: the local detector hears audio, not words, so on
+      # a paused reference number it makes the same mistake server_vad makes,
+      # with another service in the path.
+      turn_detection: semantic
+
+# A folder of documents the agent reads to answer a policy question, instead of
+# guessing or reciting a prompt. Three short markdown files, which is what a
+# small pharmacy's counter rules actually amount to.
+#
+# The defaults are left alone. chunk_size, chunk_overlap, top_k, mode and
+# min_score are all measured choices somewhere else, and this corpus is small
+# enough that none of them changes an answer.
+knowledge:
+  policies:
+    documents: knowledge/policies
+
+agents:
+  refills:
+    instructions: instructions.md
+    # `realtime:` instead of think, speak, listen and turn. One entry replaces
+    # all four, which is what the architecture key above says.
+    realtime: counter
+    tools:
+      - look_up_prescription
+      - request_refill
+      - look_up_pharmacy_policy
+      - end_call
+
+tools:
+  - look_up_prescription
+  - request_refill
+  - look_up_pharmacy_policy
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Elmtree Pharmacy, repeat prescriptions. How can I help?"
+  interruption:
+    enabled: true
+  inactivity:
+    # Longer than a chatty line would use. A caller on this number is often
+    # walking to a drawer to find the box, and cutting in after ten seconds of
+    # that is the same rudeness the turn setting above exists to avoid.
+    nudge_after: 25s
+    end_after: 75s
+  max_duration: 8m
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 5
+  peak_starts_per_second: 1
+  avg_session_duration: 3m

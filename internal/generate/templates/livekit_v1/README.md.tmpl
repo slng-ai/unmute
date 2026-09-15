@@ -105,6 +105,74 @@ the call straight back before the caller speaks again.
 {{- if .NeedsPrefetch}}
 {{.PrefetchRunbook}}
 {{- end}}
+{{- if .Live}}
+## The live model
+
+This package is `architecture: live`, so one model listens, thinks and speaks.
+`{{.Live.Call.Class}}` sits in the session where a transcriber, a model and a
+synthesizer would sit: it hears the caller's audio directly, decides for itself
+when to answer and how to handle being talked over, and speaks in its own voice.
+
+There is no turn-taking section in this runbook because no setting of this
+package decides the turn. There is also no voice activity detector: the model
+reports the caller's speech itself, and the framework reads those reports only
+when no detector of ours is present.
+
+**The greeting is spoken in the model's own words.** It reaches the session as
+an instruction rather than as a line to read, because there is no synthesizer to
+read it with. Expect the sense of the line, not its letters.
+
+**Inactivity works the same way.** The idle nudge is put to the model as an
+instruction, and `end_after` ends the call.
+{{if .LiveBackend}}
+**Tools and hard reasoning run on `{{.LiveBackend}}`**, the entry the live
+model's `backend:` names, on OpenAI's Responses API inside the same live session:
+the live model hands the request over and keeps talking, the backend calls this
+project's tools, and the answer comes back as something the live model says.
+Every tool in `agent.py` is registered exactly as it is for a cascaded package.
+{{else}}
+**No backend is named**, so the live model runs alone and declines any request
+that would need a tool. Add `backend: <a models.think entry>` to the live entry
+to give it one.
+{{end}}
+{{- end}}
+{{- if .Realtime}}
+## The realtime model
+
+This package is `architecture: realtime`, so one model hears the caller and
+answers. `{{.Realtime.Service.Call.Class}}` sits in the session where a
+transcriber and a reasoning model would sit, and this project's tools run over
+the same socket: every tool in `agent.py` is registered exactly as it is for a
+cascaded package.
+{{if .Realtime.TTS}}
+**A synthesizer speaks for it.** The agent binds `speak:`, so the model is asked
+for text only and `{{.Realtime.TTS.Call.Class}}` reads it out. This is the half
+cascade: the model's own voice is never used, and the greeting is spoken in the
+words the package wrote.
+{{else}}
+**The model speaks in its own voice**, so this package builds no synthesizer.
+The greeting reaches the session as an instruction rather than as a line to
+read, because there is nothing to read it with. Expect the sense of the line,
+not its letters. The idle nudge works the same way, and `end_after` ends the
+call.
+{{end}}
+{{- if .LocalTurnTaking}}
+**This package decides the turn.** It wrote `turn_detection: local`, so the
+vendor's own detector is switched off and the turn-taking section below is
+live: the prewarmed voice activity detector and the turn detector decide when
+the caller has finished, exactly as they do for a cascaded package.
+
+That is why **no** turn-detection argument is passed to the model. Passing one,
+even a value equal to the vendor's default, would leave the model deciding.
+{{else}}
+**The model decides the turn**, so there is no turn-taking section in this
+runbook: no setting of this package reaches that decision. There is also no
+voice activity detector, because loading one would quietly move "is the caller
+speaking" off the model. Write `turn_detection: local` on the realtime entry to
+take the decision back.
+{{end}}
+{{- end}}
+{{- if .LocalTurnTaking}}
 ## Turn taking
 
 Two numbers decide how long a caller waits, and they are not the same number.
@@ -114,8 +182,9 @@ silence before it reports end of speech.{{if .Pace.FloorAuthored}} It comes from
 `endpointing_delay`.{{else}} It comes from `pace: {{.Pace.Name}}`; set
 `endpointing_delay` to pin it yourself.{{end}}
 
-Nothing downstream can start earlier, because the transcriber is only asked to
-finalise once the VAD says the caller stopped. The runtime refuses anything under
+{{if .Realtime}}Nothing downstream can start earlier: this session has no transcriber, and the
+model is only told the caller finished once the VAD says they stopped.{{else}}Nothing downstream can start earlier, because the transcriber is only asked to
+finalise once the VAD says the caller stopped.{{end}} The runtime refuses anything under
 0.25s, so `unmute compile` rejects it rather than letting the worker raise on its
 first call.
 
@@ -136,7 +205,7 @@ call spent 2.5s per turn in endpointing while the authored window was 0.4s.
 Faster is not free. `pace: snappy` will occasionally answer a caller who was
 pausing to think, and `patient` is the escape hatch for callers reading out
 numbers, addresses or spellings.
-
+{{- end}}
 {{- if .NeedsTasks}}
 
 ## Handoffs and the opening turn

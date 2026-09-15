@@ -134,6 +134,29 @@ Pipecat reports service first-response and processing durations separately.
 Its native audio-latency summaries have no proven response ID and remain
 unassigned. Call first speech uses the native observer session-start boundary.
 
+**Where a reply's time went.** Beside that unassigned reply latency the page
+shows the reply broken into the parts that make it up, in time order, each with
+what it cost and who owns it. The parts account for the whole wait, so they add
+up to the total, and the owner is one of four kinds:
+
+- a **service** you bound, such as the transcriber or the model;
+- a **setting** you wrote, such as the silence window before a turn ends;
+- the **bot** itself, meaning this project's own code between the frameworks;
+- the **pipeline**, meaning time inside the framework that belongs to nobody
+  above, which is what makes a gap visible instead of silently missing.
+
+The line above the parts says what the interval was measured from: the caller
+falling silent, or the client connecting, which is how a greeting is kept from
+being compared with a reply. This breakdown carries no reply identity, so it
+sits with the unassigned values rather than being matched to a reply by timing.
+
+**A tool that produced no result says why.** Its row reads `failed` with the
+kind of error the handler raised, or `timed_out` when it ran past its deadline,
+and a call that ends badly names the service that stopped it. The messages
+themselves stay in `build/pipecat/dev.log`: an error's text quotes whatever
+was being worked on, and this feed carries no prompts, tool arguments or
+results.
+
 The event feed reconnects separately from audio. Retained events can replay;
 a gap stays marked until the next call. Switching Conversation and Logs keeps
 the same microphone connection.
@@ -198,7 +221,8 @@ LiveKit's moves, and why the inconsistency is deliberate.
 
 The end-of-turn analyzer (`LocalSmartTurnAnalyzerV3`) runs on every call. It is
 constructed explicitly only so the ceiling is reachable; left implicit it sits at
-its own 3s.
+its own 3s. A transcriber that detects turns itself only *proposes* an ending
+while this pair is bound; `turn: provider: listen` hands it the decision.
 
 A minimum interruption word count is set, and it replaces the default turn-*start*
 pair on purpose: gating turn start on words is the point, and leaving VAD start in
@@ -294,6 +318,24 @@ Set these before running (values are never written into the project):
 - `LOOKUP_CUSTOMER_URL`
 - `OPENAI_API_KEY`
 - `SLNG_API_KEY`
+
+### If every provider call fails to connect
+
+The OpenAI SDK this project resolves verifies TLS against the operating system's
+own certificate store rather than a bundle shipped inside the package. On an image
+with no system certificates every provider call fails at the handshake, and the
+error names TLS rather than the provider.
+
+The base image this project builds on is the framework vendor's own and normally
+carries them. If you swap the base for a minimal image, install `ca-certificates`
+in it, or point at a bundle you supply:
+
+```sh
+SSL_CERT_FILE=/path/to/ca-bundle.crt
+```
+
+`REQUESTS_CA_BUNDLE` is read by some libraries and not by this one, so set
+`SSL_CERT_FILE` even if you already set the other.
 
 ## Deploy to Pipecat Cloud
 
@@ -969,7 +1011,7 @@ class BillingAgent(LLMWorker):
                 delta=LLMSettings(system_instruction=BILLING_PROMPT),
             ))
             await super().on_activated(args)
-            # Pipecat 1.8 only runs on activation when messages are nonempty.
+            # Pipecat 1.8 and 1.9 only run on activation when messages are nonempty.
             # A handoff already shaped the shared context; request the reply
             # without adding a synthetic message or waiting for the caller.
             if args and args.get("run_llm") and not args.get("messages"):
@@ -1045,7 +1087,7 @@ class IntakeAgent(LLMWorker):
                 delta=LLMSettings(system_instruction=INTAKE_PROMPT),
             ))
             await super().on_activated(args)
-            # Pipecat 1.8 only runs on activation when messages are nonempty.
+            # Pipecat 1.8 and 1.9 only run on activation when messages are nonempty.
             # A handoff already shaped the shared context; request the reply
             # without adding a synthetic message or waiting for the caller.
             if args and args.get("run_llm") and not args.get("messages"):
@@ -1280,8 +1322,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     dev = install_dev_metrics(runner_args)
     try:
         await _run_bot(transport, runner_args, dev)
-    except Exception:
-        dev.finish(error=True)
+    except Exception as error:
+        # The dev page is where the author is looking when a call dies, so it
+        # names what stopped it. The type only: an exception's message quotes
+        # whatever it was working on, and that belongs in the log rather than
+        # on a page that carries no prompts, arguments or results.
+        dev.finish(error=True, reason=f"The agent stopped on {type(error).__name__}.")
         raise
     finally:
         dev.finish()
@@ -1302,11 +1348,11 @@ if __name__ == "__main__":
 {
   "target": "pipecat",
   "provider": "pipecat",
-  "version": "1.8.0",
+  "version": "1.10.0",
   "supported": {
-    "floor": "1.8.0",
-    "ceiling": "1.8.0",
-    "verified": "2026-08-27"
+    "floor": "1.10.0",
+    "ceiling": "1.10.0",
+    "verified": "2026-09-12"
   },
   "entry_agent": "intake",
   "agents": [
@@ -1495,6 +1541,8 @@ import sys
 import time
 
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     ErrorFrame,
     FunctionCallCancelFrame,
@@ -1507,6 +1555,8 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMTextFrame,
     MetricsFrame,
+    ProposedUserStartedSpeakingFrame,
+    ProposedUserStoppedSpeakingFrame,
     TTSSpeakFrame,
     TTSStoppedFrame,
     TranscriptionFrame,
@@ -1514,6 +1564,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import ProcessingMetricsData, TextAggregationMetricsData, TTFBMetricsData
+from pipecat.observers.base_observer import BaseObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 
 SENTINEL = "UNMUTE_METRIC"
@@ -1539,6 +1590,20 @@ def _emit(record: dict) -> None:
     except (OSError, ValueError):
         # A closed local output cannot interrupt the voice pipeline.
         pass
+
+
+def _error_kind(text):
+    """The exception's type name, and never the message beside it.
+
+    A provider's error text quotes the request that failed, and a handler's
+    quotes whatever it was working on, so neither belongs on a page that
+    deliberately carries no prompts, tool arguments or results. The type name
+    cannot carry any of that: it is an identifier from the code, so it is
+    returned only when it reads as one. The message itself stays in the agent's
+    own log, which `unmute dev` writes beside the build.
+    """
+    head = str(text or "").split(":", 1)[0].strip()
+    return head if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", head) else "an error"
 
 
 def _separator(previous, text, previous_includes_spaces, includes_spaces):
@@ -1681,8 +1746,61 @@ class DevReporter:
                               reason="The native breakdown does not identify its input.")
             # TTFB, text aggregation and tools already arrived at their sources.
             # The aggregate carries no request IDs and cannot refine ownership.
+            #
+            # The contributions are different: they name every part of the wait,
+            # including the parts no service measures, so they are the only
+            # answer to "where did that reply's time go". They are recorded whole
+            # and the framework's own total goes with them, so a part dropped
+            # here is a timeline that no longer adds up rather than a quiet gap.
+            parts = [
+                {
+                    "key": part.key,
+                    "label": part.label,
+                    "owner": part.owner,
+                    "owner_kind": str(part.owner_kind),
+                    "start_time": part.start_time,
+                    "duration_secs": part.duration_secs,
+                }
+                for part in breakdown.contributions
+            ]
+            if parts and breakdown.measured_from is not None:
+                self._put("breakdown", self._id("breakdown"), {
+                    "measured_from": str(breakdown.measured_from),
+                    "total_secs": breakdown.total_secs,
+                    "parts": parts,
+                })
 
-        return [observer]
+        return [observer, _SpeechObserver(self)]
+
+    def speech_measured(self, seconds, response=None):
+        """Record how long the bot spoke, which no service reports.
+
+        A synthesizer reports when it produced audio, not how long the caller
+        listened to it, and a live model reports neither. The transport's own
+        speaking frames are the only place the length of a reply shows up.
+        """
+        self._measure(self._id("speech-duration"), "speech_duration", seconds,
+                      "pipecat-bot-speaking-frames",
+                      scope="response" if response else "unassigned", exchange_id=response,
+                      reason=None if response else "The transport reports the bot's speech without a response identity.")
+
+    def speaking_response(self):
+        """The reply whose speech is starting, when exactly one is in flight.
+
+        Read when the speech starts, because synthesis for a reply can finish
+        while the caller is still hearing it. Two replies queued behind each
+        other, or a live model that runs no synthesis at all, leave the speech
+        unassigned rather than attached to a reply by how recent it is.
+        """
+        if not self.enabled or self._closed:
+            return None
+        responses = set()
+        for operations in self._tts_contexts.values():
+            for operation in operations:
+                record = self._records.get(("operation", operation))
+                if record and record["operation"].get("exchange_id"):
+                    responses.add(record["operation"]["exchange_id"])
+        return responses.pop() if len(responses) == 1 else None
 
     def _measure(self, identity, metric, value, source, *, scope="unassigned", exchange_id=None,
                  operation_id=None, state=None, reason=None, model=None, provider=None):
@@ -1750,7 +1868,12 @@ class DevReporter:
             async def source_error(_processor, frame):
                 if frame.fatal or not processor.is_usable:
                     self._error = True
-                    self._update("call", "call", state="error")
+                    # Which service stopped working, and nothing it said. A
+                    # call that reads "error" alone sends the author hunting
+                    # through logs for the service; the message itself is in
+                    # those logs, where quoting a request is not a leak.
+                    self._update("call", "call", state="error",
+                                 reason=f"{processor.name} reported a fatal error.")
         return True
 
     def _input_boundary(self, frame):
@@ -1837,7 +1960,12 @@ class DevReporter:
         async def user_before(_processor, frame):
             self._input_boundary(frame)
             scope = self._frame_scope(frame)
-            caller_frame = isinstance(frame, (InterimTranscriptionFrame, TranscriptionFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame))
+            # A proposed turn boundary is a caller frame too: when the transcriber
+            # or a live model decides the turn, the proposal is the frame whose
+            # processing pushes the context, so the input has to be in scope then
+            # or its exchange never ends.
+            caller_frame = isinstance(frame, (InterimTranscriptionFrame, TranscriptionFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame,
+                                              ProposedUserStartedSpeakingFrame, ProposedUserStoppedSpeakingFrame))
             input_id = scope.get("input_id") or (self._input if caller_frame else None)
             if input_id:
                 scope["call_id"] = self.call_id
@@ -1925,14 +2053,33 @@ class DevReporter:
             return
         if isinstance(frame, FunctionCallResultFrame) and frame.properties and not frame.properties.is_final:
             return
-        self._end_tool(tool, "cancelled" if isinstance(frame, FunctionCallCancelFrame) else "returned")
+        if isinstance(frame, FunctionCallCancelFrame):
+            # run_llm is set on one kind of cancellation only: the call's own
+            # deadline, which asks for inference because nothing else will tell
+            # the model the call is over. An interruption and a cancellation the
+            # model asked for both leave it False. So this is the framework's own
+            # answer to "did it run out of time", rather than one read off a log
+            # line whose wording is not a contract.
+            if getattr(frame, "run_llm", False):
+                self._end_tool(tool, "timed_out", reason="It ran past its deadline and was cancelled.")
+            else:
+                self._end_tool(tool, "cancelled")
+            return
+        # A handler that raised never reports, so the framework settles the call
+        # on its behalf: the result is a sentence written for the model to read
+        # and the error is what actually went wrong.
+        error = getattr(frame, "error", None)
+        if error:
+            self._end_tool(tool, "failed", reason=f"The handler raised {_error_kind(error)}.")
+        else:
+            self._end_tool(tool, "returned")
 
-    def _end_tool(self, tool, state):
+    def _end_tool(self, tool, state, reason=None):
         if tool["ended"]:
             return
         tool["ended"] = True
         operation = tool["id"]
-        self._update("operation", operation, state=state)
+        self._update("operation", operation, state=state, **({"reason": reason} if reason else {}))
         if tool["control"]:
             return
         self._measure(f"{operation}:duration", "tool_duration", time.monotonic() - tool["started"],
@@ -1977,7 +2124,7 @@ class DevReporter:
             if isinstance(frame, ErrorFrame) and scope.get("tool_operation_id"):
                 for tool in self._tools.values():
                     if tool["id"] == scope["tool_operation_id"]:
-                        self._end_tool(tool, "failed")
+                        self._end_tool(tool, "failed", reason=f"The handler raised {_error_kind(frame.error)}.")
                         return
             operation = scope.get("operation_id")
             request = self._requests.get(operation)
@@ -2064,9 +2211,14 @@ class DevReporter:
 
         return tts
 
-    def finish(self, *, error=False):
+    def finish(self, *, error=False, reason=None):
         if not self.enabled or self._closed:
             return
+        if reason:
+            # What ended the call, in the words of whatever raised. Without it
+            # an unhandled exception shows as a call that stopped for no stated
+            # reason, and the answer is in a terminal the author has closed.
+            self._update("call", "call", reason=reason)
         # Completed text and synthesis prove the response finished generating,
         # not that the browser played it. Keep playback unknown, and require
         # every associated operation to have succeeded before ending a response.
@@ -2112,6 +2264,31 @@ class DevReporter:
         self._tts_contexts.clear()
 
 
+class _SpeechObserver(BaseObserver):
+    """Times the bot's speech from the transport's own speaking frames.
+
+    The frames are pushed both ways, so one reply produces two of each: the
+    first start opens the stretch and the first stop closes it, and the copies
+    land on a closed stretch and are ignored.
+    """
+
+    def __init__(self, reporter):
+        super().__init__()
+        self._reporter = reporter
+        self._started = None
+        self._response = None
+
+    async def on_push_frame(self, data):
+        if isinstance(data.frame, BotStartedSpeakingFrame):
+            if self._started is None:
+                self._started = time.monotonic()
+                self._response = self._reporter.speaking_response()
+        elif isinstance(data.frame, BotStoppedSpeakingFrame) and self._started is not None:
+            started, self._started = self._started, None
+            response, self._response = self._response, None
+            self._reporter.speech_measured(time.monotonic() - started, response)
+
+
 def install_dev_metrics(runner_args):
     return DevReporter(runner_args)
 === pcc-deploy.toml ===
@@ -2125,7 +2302,7 @@ version = "0.1.0"
 description = "Generated Pipecat voice agent (compiled by unmute)."
 requires-python = ">=3.11"
 dependencies = [
-    "pipecat-ai[deepgram,openai,runner,silero,webrtc]==1.8.0",
+    "pipecat-ai[deepgram,openai,runner,silero,webrtc]==1.10.0",
     "pipecat-slng>=0.5.2",
     "python-dotenv>=1.0",
 

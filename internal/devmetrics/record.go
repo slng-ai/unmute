@@ -33,6 +33,7 @@ const (
 	KindText        = "text"
 	KindOperation   = "operation"
 	KindMeasurement = "measurement"
+	KindBreakdown   = "breakdown"
 	KindTurn        = "turn"
 	KindSession     = "session"
 )
@@ -52,6 +53,7 @@ type Record struct {
 	Text        *Text        `json:"text,omitempty"`
 	Operation   *Operation   `json:"operation,omitempty"`
 	Measurement *Measurement `json:"measurement,omitempty"`
+	Breakdown   *Breakdown   `json:"breakdown,omitempty"`
 	Kind        string       `json:"kind"`
 	Seq         int          `json:"seq,omitempty"`
 
@@ -187,6 +189,41 @@ type Operation struct {
 	SourceRequestID   string `json:"source_request_id,omitempty"`
 	ParentOperationID string `json:"parent_operation_id,omitempty"`
 	State             string `json:"state"`
+	// Reason says what went wrong, and belongs only on a row that ended badly:
+	// a tool's error text, or the deadline it ran past. On a returned row there
+	// is nothing to explain, so carrying one there is a producer bug.
+	Reason string `json:"reason,omitempty"`
+}
+
+// Breakdown is one measured reply split into the parts that make it up, in time
+// order. It carries no exchange: the framework's own observer measures audio in
+// and audio out and holds no request id, and attaching one by timing would be a
+// guess the reader could not tell from a fact.
+//
+// The parts account for the whole interval, so their durations sum to the total.
+// That is what makes a gap visible: time no service measured is a part of its
+// own, owned by the pipeline, rather than quietly missing from the list.
+type Breakdown struct {
+	// MeasuredFrom is what the interval was anchored on, so a greeting is never
+	// compared with a reply to a caller who spoke.
+	MeasuredFrom string  `json:"measured_from"`
+	TotalSecs    float64 `json:"total_secs"`
+	Parts        []Part  `json:"parts"`
+}
+
+// Part is one stretch of a reply's interval.
+type Part struct {
+	// Key is stable across a label being reworded, so it is what to group on.
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	// Owner is the service that spent the time, or the setting that governs it.
+	Owner string `json:"owner"`
+	// OwnerKind answers where the time went without reading the owner's name:
+	// a service you could swap, a setting you chose, the bot's own code, or the
+	// pipeline between them.
+	OwnerKind    string  `json:"owner_kind"`
+	StartTime    float64 `json:"start_time"`
+	DurationSecs float64 `json:"duration_secs"`
 }
 
 // Measurement is one independently arriving quantity. Absence is never zero.
@@ -228,7 +265,7 @@ func (r Record) validate() error {
 		return bad()
 	}
 	count := 0
-	for _, present := range []bool{r.Call != nil, r.Exchange != nil, r.Text != nil, r.Operation != nil, r.Measurement != nil} {
+	for _, present := range []bool{r.Call != nil, r.Exchange != nil, r.Text != nil, r.Operation != nil, r.Measurement != nil, r.Breakdown != nil} {
 		if present {
 			count++
 		}
@@ -258,7 +295,10 @@ func (r Record) validate() error {
 		}
 	case KindOperation:
 		p := r.Operation
-		if p == nil || !validID(p.ExchangeID, true) || !validID(p.ParentOperationID, true) || !validID(p.SourceRequestID, true) || p.Name == "" || !one(p.Type, "llm", "stt", "tts", "tool", "handoff") || !one(p.State, "running", "ended", "returned", "failed", "cancelled", "incomplete") {
+		if p == nil || !validID(p.ExchangeID, true) || !validID(p.ParentOperationID, true) || !validID(p.SourceRequestID, true) || p.Name == "" || !one(p.Type, "llm", "stt", "tts", "tool", "handoff") || !one(p.State, "running", "ended", "returned", "failed", "timed_out", "cancelled", "incomplete") {
+			return bad()
+		}
+		if p.Reason != "" && !one(p.State, "failed", "timed_out", "cancelled") {
 			return bad()
 		}
 	case KindMeasurement:
@@ -278,8 +318,39 @@ func (r Record) validate() error {
 		if p.Scope != "operation" && p.OperationID != "" || (p.Scope == "call" || p.Scope == "unassigned") && p.ExchangeID != "" {
 			return bad()
 		}
+	case KindBreakdown:
+		p := r.Breakdown
+		if p == nil || !one(p.MeasuredFrom, "user_silence", "client_connected") || len(p.Parts) == 0 {
+			return bad()
+		}
+		if !finite(p.TotalSecs) {
+			return bad()
+		}
+		sum := 0.0
+		for _, part := range p.Parts {
+			if part.Key == "" || part.Label == "" || part.Owner == "" || !one(part.OwnerKind, "service", "setting", "bot", "pipeline") {
+				return bad()
+			}
+			if !finite(part.DurationSecs) || !finite(part.StartTime) {
+				return bad()
+			}
+			sum += part.DurationSecs
+		}
+		// The parts account for the whole interval, so a producer that filters
+		// one out and keeps the framework's total is reporting a timeline that
+		// does not add up. That is the one way this record can lie, and it is
+		// arithmetic, so it is checked here rather than trusted.
+		if math.Abs(sum-p.TotalSecs) > 1e-6 {
+			return bad()
+		}
 	default:
 		return bad()
 	}
 	return nil
+}
+
+// finite refuses the values a duration can never be: not a number, infinite, or
+// negative. A negative span would render as a part that gave time back.
+func finite(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0
 }

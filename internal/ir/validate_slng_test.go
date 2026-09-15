@@ -95,8 +95,8 @@ func TestSlngRefusesProjectOnlySettings(t *testing.T) {
 		mutate  func(*Target)
 		wantOne string
 	}{
-		{"version", func(target *Target) { target.Version = "1.6.10" }, "does not take version"},
-		{"pins", func(target *Target) { target.Pins = map[string]string{"livekit-agents": "1.6.10"} }, "does not take pins"},
+		{"version", func(target *Target) { target.Version = "1.8.1" }, "does not take version"},
+		{"pins", func(target *Target) { target.Pins = map[string]string{"livekit-agents": "1.8.1"} }, "does not take pins"},
 		{"sdk_language", func(target *Target) { target.SDKLanguage = "python" }, "does not take sdk_language"},
 		{"connection", func(target *Target) { target.Connection = "primary_phone" }, "does not take connection"},
 	} {
@@ -242,9 +242,9 @@ func TestCodeTargetsKeepAuthoredToolBodies(t *testing.T) {
 		agent.Agents["support"] = entry
 
 		resolved := targetFor(agent, ProviderSlng)
-		resolved.Provider, resolved.Name, resolved.Version = provider, string(provider), "1.6.10"
+		resolved.Provider, resolved.Name, resolved.Version = provider, string(provider), "1.8.1"
 		if provider == ProviderPipecat {
-			resolved.Version = "1.8.0"
+			resolved.Version = "1.10.0"
 		}
 		report, _ := Validate(agent, []Target{resolved}, targetcap.Default())
 		for _, err := range reportFor(report, provider).Errors {
@@ -407,7 +407,7 @@ func TestVaultTokenPassesOnSlngAndIsNamedElsewhere(t *testing.T) {
 
 	// On a code target it fails, and the message names the token for what it is.
 	target := targetFor(agent, ProviderSlng)
-	target.Provider, target.Name, target.Version = ProviderLiveKit, "livekit", "1.6.10"
+	target.Provider, target.Name, target.Version = ProviderLiveKit, "livekit", "1.8.1"
 	report, err := Validate(agent, []Target{target}, targetcap.Default())
 	if err == nil {
 		t.Fatal("a Vault token passed on livekit, which cannot resolve one")
@@ -469,7 +469,7 @@ func TestWebhookNeedsURLEnvOnACodeTarget(t *testing.T) {
 	agent.Agents["support"] = entry
 
 	resolved := targetFor(agent, ProviderSlng)
-	resolved.Provider, resolved.Name, resolved.Version = ProviderPipecat, "pipecat", "1.8.0"
+	resolved.Provider, resolved.Name, resolved.Version = ProviderPipecat, "pipecat", "1.10.0"
 	report, err := Validate(agent, []Target{resolved}, targetcap.Default())
 	if err == nil {
 		t.Fatal("a webhook with no url_env passed on pipecat, which reads the base from the environment")

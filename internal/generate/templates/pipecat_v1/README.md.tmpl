@@ -46,6 +46,29 @@ Pipecat reports service first-response and processing durations separately.
 Its native audio-latency summaries have no proven response ID and remain
 unassigned. Call first speech uses the native observer session-start boundary.
 
+**Where a reply's time went.** Beside that unassigned reply latency the page
+shows the reply broken into the parts that make it up, in time order, each with
+what it cost and who owns it. The parts account for the whole wait, so they add
+up to the total, and the owner is one of four kinds:
+
+- a **service** you bound, such as the transcriber or the model;
+- a **setting** you wrote, such as the silence window before a turn ends;
+- the **bot** itself, meaning this project's own code between the frameworks;
+- the **pipeline**, meaning time inside the framework that belongs to nobody
+  above, which is what makes a gap visible instead of silently missing.
+
+The line above the parts says what the interval was measured from: the caller
+falling silent, or the client connecting, which is how a greeting is kept from
+being compared with a reply. This breakdown carries no reply identity, so it
+sits with the unassigned values rather than being matched to a reply by timing.
+
+**A tool that produced no result says why.** Its row reads `failed` with the
+kind of error the handler raised, or `timed_out` when it ran past its deadline,
+and a call that ends badly names the service that stopped it. The messages
+themselves stay in `build/{{.Target}}/dev.log`: an error's text quotes whatever
+was being worked on, and this feed carries no prompts, tool arguments or
+results.
+
 The event feed reconnects separately from audio. Retained events can replay;
 a gap stays marked until the next call. Switching Conversation and Logs keeps
 the same microphone connection.
@@ -130,8 +153,122 @@ is a flows handler and queues it through `flow_manager.worker`. Same frame, same
 contract, and nothing waits for playout in either.
 {{- end}}
 
-## Turn taking
+{{if .Live}}## The live model
 
+This package is `architecture: live`, so one model listens, thinks and speaks.
+`{{(index .Agents 0).LLM.Call.Class}}` sits in the pipeline
+where the transcriber, the model and the synthesizer would sit, hears the
+caller's audio directly, decides for itself when to answer and how to handle
+being talked over, and speaks in its own voice. There is no turn-taking
+section in this runbook because no setting of this package's decides the turn.
+
+**The greeting is spoken in the model's own words.** The package's greeting
+reaches the session as its opening instruction, which the model paraphrases
+rather than reads out, so expect the sense of the line and not its letters.
+{{if (index .Agents 0).Backend}}
+**Tools and hard reasoning run on `{{(index .Agents 0).Backend}}`**, the entry the live
+model's `backend:` names, on OpenAI's Responses API inside the same live session:
+the live model hands the request over and keeps talking, the backend calls this
+project's tools, and the answer comes back as something the live model says.
+Every tool in `bot.py` is registered exactly as it is for a cascaded pipeline.
+{{else}}
+**No backend is named**, so the live model runs alone and declines any
+request that would need a tool. Add `backend: <a models.think entry>` to the
+live entry to give it one.
+{{end}}
+**Fixed for the session.** The model, the voice and the instructions are set
+when the session starts and cannot change until it ends. That is why this
+package has one agent and no tasks: a handoff or a step would have to change
+the instructions mid-call. It is also why no call state is rendered into the
+prompt in this version.
+
+**What the dev page shows.** The caller's and the model's transcripts, as the
+model reports them, and every tool call the backend makes. Reply latency is
+measured from the voice activity detector, which still runs for that reason.
+{{if .Inactivity}}
+**Inactivity.** After {{.Inactivity.NudgeSecs}}s of silence the model is asked, in its own
+words, to check whether the caller is still there{{if gt .Inactivity.EndSecs 0}}, and the call ends
+after {{.Inactivity.EndSecs}}s{{end}}.
+{{end}}
+{{else if .Realtime}}## The realtime model
+
+This package is `architecture: realtime`, so one model hears the caller and
+answers over a single websocket session. `{{(index .Agents 0).LLM.Call.Class}}`
+sits in the pipeline where the transcriber{{if .HalfCascade}} and the model would sit{{else}}, the model and the synthesizer
+would sit{{end}}. The model id is not a session field: it rides the socket URL as a query
+parameter, which is why it is set once and cannot change while the call runs.
+{{if .HalfCascade}}
+**A synthesizer speaks, not the model.** The package binds `speak:` as well as
+`realtime:`, which is the half cascade: the model is asked for text only
+(`output_modalities=["text"]`), and `{{(index .Agents 0).TTS.Call.Class}}` speaks
+what it writes. The model has no voice of its own here, by design.
+{{else}}
+**The model speaks in its own voice**, named on the realtime entry. Bind a
+`speak:` model on the agent instead of writing `voice:` on the entry if you want
+your own synthesizer in front of it (the half cascade).
+{{end}}
+**Who decides the turn.** {{if eq .RealtimeTurnDetection "local"}}`turn_detection: local`, so the vendor's own detection
+is switched off and this project's detector below decides the caller has
+finished. The next section says how long it waits.{{else if .RealtimeTurnDetection}}`turn_detection: {{.RealtimeTurnDetection}}`, so the vendor decides. No
+detector of this project's is built and no strategy of ours is passed: the
+aggregator takes the external strategies the service recommends.{{else}}The package writes no `turn_detection:`, so the vendor's own default
+stands and nothing here pins it. No detector of this project's is built.{{end}}
+
+**The caller is transcribed on purpose.** The session asks for input audio
+transcription. Without it the server sends no transcription events at all, and
+the caller's words would reach neither the conversation context nor the dev
+page. It is a second model running on the caller's audio, and it is what makes
+the call readable.
+
+**The greeting is spoken in the model's own words.** The opening line is seeded
+into the conversation the session starts with, and the model paraphrases it
+rather than reading it out, so expect the sense of the line and not its letters.
+{{if .Inactivity}}
+**Inactivity.** After {{.Inactivity.NudgeSecs}}s of silence the model is asked, in its own
+words, to check whether the caller is still there{{if gt .Inactivity.EndSecs 0}}, and the call ends
+after {{.Inactivity.EndSecs}}s{{end}}.
+{{end}}
+**No tasks, no handoffs.** A realtime package is one agent. The library cannot
+reshape a running server-side conversation, so a task or a handoff is refused at
+validate rather than compiled into something that would not work.
+{{if eq .RealtimeTurnDetection "local"}}
+## Turn taking
+{{if .Pace.ByListener}}{{else}}
+**The floor is {{.Pace.Floor}}s**: how long silence has to last before the caller's
+speech counts as stopped. **The ceiling is {{.Pace.Ceiling}}s**, on the end-of-turn
+analyzer: the longest the turn may run before closing whatever the analyzer's
+confidence says. Both are this project's own, because `turn_detection: local`
+took the decision off the vendor.
+{{end}}{{end}}
+{{else}}## Turn taking
+{{if .Pace.ByListener}}
+**The transcriber decides the turn.** The package's `turn:` binding names the
+listener as the decider (`provider: listen`), so `{{.Pace.Listener.Class}}` ends
+the caller's turn from what it hears, and no local silence window or end-of-turn
+analyzer is built. The VAD still runs, for the speaking frames the idle timer and
+the latency measurement anchor on, but it ends no turn.
+
+**The ceiling is {{.Pace.Ceiling}}s**, in `{{.Pace.Listener.CeilingArg}}={{.Pace.CeilingMillis}}` on the
+transcriber's settings: the longest it waits after the caller stops before it
+closes the turn whatever its own confidence says. It comes from `pace: {{.Pace.Name}}`.
+There is no floor to set on this target under a listening decider: `endpointing_delay`
+is refused at validate because nothing here would read it.
+{{if .Pace.Eager}}
+**The reply starts before the turn is confirmed.** `eager: true` asks the
+transcriber to predict the end of turn and answers the prediction while the
+transcriber is still deciding; the framework holds the reply inside the LLM
+service and drops it if the caller resumes speaking or the confirmed words
+differ. An unconfirmed turn never reaches the caller, the context or a tool.
+Each prediction costs one model request, including the ones the transcriber
+withdraws, which is why it is a choice rather than the default.
+{{else}}
+The reply starts when the transcriber confirms the turn. `eager: true` on the
+`turn:` binding would start it on the transcriber's prediction instead, at the
+cost of one model request per prediction.
+{{end}}
+The wait does not adapt to the caller on this target. Unlike the LiveKit driver,
+which has a `dynamic` endpointing mode, the ceiling is the same on every turn.
+{{else}}
 Two numbers decide how long a caller waits. **Both are spelled `stop_secs` in
 `bot.py` and they are different fields**, so grep finds two and only this tells
 you which is which.
@@ -139,11 +276,16 @@ you which is which.
 **The floor is {{.Pace.Floor}}s**, in `VADParams(stop_secs={{.Pace.Floor}})`. The VAD waits that
 much silence before speech counts as stopped.{{if .Pace.FloorAuthored}} It comes from the
 package's `endpointing_delay`.{{else}} It is Pipecat's own default.{{end}}
-
+{{if .SemanticOff}}
+**There is no ceiling.** `semantic_endpointing: off` removed the end-of-turn
+analyzer, and on this target the ceiling is that analyzer's own `stop_secs`, so
+it went with it. The turn ends on a speech timeout, `SpeechTimeoutUserTurnStopStrategy()`,
+which is the framework's own and takes no number from the package.
+{{else}}
 **The ceiling is {{.Pace.Ceiling}}s**, in `SmartTurnParams(stop_secs={{.Pace.Ceiling}})` on the
 end-of-turn analyzer. That is the longest the turn can run before closing
 regardless, and it comes from `pace: {{.Pace.Name}}`.
-
+{{end}}
 The wait does not adapt to the caller on this target. Unlike the LiveKit driver,
 which has a `dynamic` endpointing mode, this is the same fixed window on every
 turn.
@@ -156,16 +298,17 @@ out a flat 1.0s safety net instead. Measured over eight turns at 0.4s: every tur
 whose transcript beat the window paid a flat 1.000s, and observed transcripts
 arrive from 0.27s. That is why the floor here stays at 0.2s for every pace while
 LiveKit's moves, and why the inconsistency is deliberate.
-
+{{if not .SemanticOff}}
 The end-of-turn analyzer (`LocalSmartTurnAnalyzerV3`) runs on every call. It is
 constructed explicitly only so the ceiling is reachable; left implicit it sits at
-its own 3s.
-{{if .NeedsTurnStrategies}}
+its own 3s. A transcriber that detects turns itself only *proposes* an ending
+while this pair is bound; `turn: provider: listen` hands it the decision.
+{{end}}{{end}}{{if .NeedsTurnStrategies}}
 A minimum interruption word count is set, and it replaces the default turn-*start*
 pair on purpose: gating turn start on words is the point, and leaving VAD start in
 place would open the turn before the words arrive. It no longer costs you the
 end-of-turn analyzer, which it used to.
-{{end}}
+{{end}}{{end}}
 
 {{- if .HasFlows}}
 
@@ -438,6 +581,24 @@ Helper side, optional:
 One group, because one thing reads them: the deployed agent. There is no second
 side on this route, so every name above belongs in the platform secret set.
 {{end}}{{end}}{{end}}
+### If every provider call fails to connect
+
+The OpenAI SDK this project resolves verifies TLS against the operating system's
+own certificate store rather than a bundle shipped inside the package. On an image
+with no system certificates every provider call fails at the handshake, and the
+error names TLS rather than the provider.
+
+The base image this project builds on is the framework vendor's own and normally
+carries them. If you swap the base for a minimal image, install `ca-certificates`
+in it, or point at a bundle you supply:
+
+```sh
+SSL_CERT_FILE=/path/to/ca-bundle.crt
+```
+
+`REQUESTS_CA_BUNDLE` is read by some libraries and not by this one, so set
+`SSL_CERT_FILE` even if you already set the other.
+
 {{if .Slng.Any}}
 ## SLNG Context Router
 
@@ -1377,10 +1538,14 @@ anything. Two lines answer almost every latency question:
 - **First bot speech** counts from inside the process only. If it reads about two
   seconds and your caller waited much longer, the difference was the container
   starting: see the cold-start row above{{if not .WarmInstances}} and declare `warm_instances: 1`{{end}}.
-- **The breakdown** attributes each turn to a service by name. One service far
-  above the others is that provider, not this project and not the platform: take
-  it up with them, or bind a different provider for that role in the source
-  package and recompile.
+- **The breakdown** names every part of the turn, not only the services: a part
+  owned by a service far above the others is that provider, not this project and
+  not the platform, so take it up with them or bind a different provider for that
+  role in the source package and recompile. A part owned by a **setting** is
+  yours to change in the package, a part owned by the **bot** is this project's
+  own code, and a part owned by the **pipeline** is time inside the framework.
+  `unmute dev` shows the same parts per reply while you are still on the browser
+  loop, which is the cheaper place to read them.
 - **End-of-turn detection sits between the two.** The pipeline waits to be sure
   the caller has finished before it answers, which costs a second or two per turn
   on purpose. It is the difference between an agent that interrupts and one that

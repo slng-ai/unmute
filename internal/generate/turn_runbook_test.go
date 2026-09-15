@@ -127,10 +127,10 @@ func TestPipecatRunbookRecordsWhyItsFloorDoesNotMove(t *testing.T) {
 //
 // This was a coverage gap in the plan and it closed itself on the rebase: main's
 // dev_metrics work now emits `turn_detection` on Pipecat from
-// LatencyBreakdown.user_turn_secs, which the pinned pipecat 1.8.0 documents as
+// LatencyBreakdown.user_turn_secs, which the pinned pipecat 1.9.0 documents as
 // running "from when the user actually stopped speaking to when the turn was
 // released", including VAD silence, STT finalisation and the turn analyzer wait
-// (observers/user_bot_latency_observer.py:97-102). LiveKit reports the same thing
+// (observers/user_bot_latency_observer.py:410-415). LiveKit reports the same thing
 // from end_of_turn_delay. So the gate is that they stay agreed, not that either
 // gets built.
 func TestBothTargetsReportTheEndpointingWaitUnderOneKey(t *testing.T) {

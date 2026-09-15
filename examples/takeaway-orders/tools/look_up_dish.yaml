@@ -1,0 +1,40 @@
+description: >-
+  Look a dish up on the menu before you agree to it. Takes what the caller
+  called it, in their own words, and hands back the real menu name, the price in
+  pounds and whether the kitchen has it tonight. Use the name and the price this
+  returns, never one you remember.
+
+input:
+  type: object
+  properties:
+    spoken_name:
+      type: string
+      description: The dish as the caller said it, such as "sweet and sour chicken".
+  required:
+    - spoken_name
+
+output:
+  type: object
+  properties:
+    found:
+      type: boolean
+    name:
+      type: string
+    price:
+      type: number
+    available:
+      type: boolean
+    note:
+      type: string
+  required:
+    - found
+    - name
+    - price
+    - available
+    - note
+
+local:
+  handler: tools/takeaway.py
+
+interruption: provider_default
+effect: returns_data

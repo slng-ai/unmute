@@ -52,7 +52,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		EntryAgent:        agent.EntryAgent,
 		EntryClass:        pyName(agent.EntryAgent),
 		TurnVersion:       turnVersion,
-		Pace:              resolvePaceView(targetcap.LiveKit, tgt.Models.Turn),
+		Pace:              resolvePaceView(targetcap.LiveKit, tgt.Models.Turn, tgt.Models.Listen),
 		SemanticOff:       semanticEndpointingOff(tgt.Models.Turn),
 		Pins:              tgt.Pins,
 		Tracing:           agent.Tracing != nil,
@@ -66,28 +66,51 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	}
 
 	entry := agent.Agents[agent.EntryAgent]
-	stt, err := livekitSTTService(tgt.Models.Listen, env)
-	if err != nil {
-		return livekitData{}, err
-	}
-	data.STT = livekitChain{Primary: stt}
-	// The selected listen model's fallback chain lowers to stt.FallbackAdapter
-	// (T16); each entry resolves through the same catalogue path as the primary.
-	for _, fallback := range tgt.Models.ListenFallbacks {
-		binding := fallback.Binding
-		svc, err := livekitSTTService(&binding, env)
+	switch agent.Architecture {
+	case ir.ArchitectureLive:
+		// One service where three stand. The transcriber, the reasoning chain
+		// and the synthesizer are not built at all, which is what makes their
+		// absence in the emitted module a fact rather than a template accident.
+		live, err := livekitLiveService(agent, tgt, entry, env)
 		if err != nil {
-			return livekitData{}, fmt.Errorf("listen fallback %q: %w", fallback.Name, err)
+			return livekitData{}, fmt.Errorf("entry agent %q: %w", agent.EntryAgent, err)
 		}
-		data.STT.Chain = append(data.STT.Chain, svc)
-	}
-	data.SessionLLM, err = livekitReasonLLM(agent, tgt, entry.Model, env)
-	if err != nil {
-		return livekitData{}, fmt.Errorf("entry agent %q: %w", agent.EntryAgent, err)
-	}
-	data.SessionTTS, err = livekitTTSService(tgt.Models.Speak[entry.Voice], env)
-	if err != nil {
-		return livekitData{}, fmt.Errorf("entry agent %q: %w", agent.EntryAgent, err)
+		data.Live = &live
+		data.LiveBackend = tgt.Models.Live[entry.Live].Backend
+	case ir.ArchitectureRealtime:
+		// One model again, and the same three that are not built. What differs
+		// from live is who decides the turn and who speaks: both are the
+		// package's to choose here, so both are resolved in the builder below.
+		realtime, err := livekitRealtimeService(tgt, entry, env)
+		if err != nil {
+			return livekitData{}, fmt.Errorf("entry agent %q: %w", agent.EntryAgent, err)
+		}
+		data.Realtime = &realtime
+	default:
+		stt, err := livekitSTTService(tgt.Models.Listen, env)
+		if err != nil {
+			return livekitData{}, err
+		}
+		data.STT = livekitChain{Primary: stt}
+		// The selected listen model's fallback chain lowers to
+		// stt.FallbackAdapter (T16); each entry resolves through the same
+		// catalogue path as the primary.
+		for _, fallback := range tgt.Models.ListenFallbacks {
+			binding := fallback.Binding
+			svc, err := livekitSTTService(&binding, env)
+			if err != nil {
+				return livekitData{}, fmt.Errorf("listen fallback %q: %w", fallback.Name, err)
+			}
+			data.STT.Chain = append(data.STT.Chain, svc)
+		}
+		data.SessionLLM, err = livekitReasonLLM(agent, tgt, entry.Model, env)
+		if err != nil {
+			return livekitData{}, fmt.Errorf("entry agent %q: %w", agent.EntryAgent, err)
+		}
+		data.SessionTTS, err = livekitTTSService(tgt.Models.Speak[entry.Voice], env)
+		if err != nil {
+			return livekitData{}, fmt.Errorf("entry agent %q: %w", agent.EntryAgent, err)
+		}
 	}
 
 	for _, name := range sortedAgentNames(agent) {
@@ -752,6 +775,24 @@ func buildLiveKitSIPTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*liv
 
 // livekitServices lists every resolved service in the template model.
 func livekitServices(data livekitData) []livekitService {
+	if data.Live != nil {
+		// A live package builds this one service and none of the three below, so
+		// returning early is what makes it the only entry whose extras, imports
+		// and dependency reach the emitted project.
+		return []livekitService{*data.Live}
+	}
+	if data.Realtime != nil {
+		// The same early return, with one difference: a realtime package may
+		// also build a synthesizer, because the half cascade asks the model for
+		// text and lets a voice of the author's choosing speak it. That entry's
+		// extras, imports and dependency have to reach the emitted project the
+		// way a cascaded package's do.
+		services := []livekitService{data.Realtime.Service}
+		if data.Realtime.TTS != nil {
+			services = append(services, *data.Realtime.TTS)
+		}
+		return services
+	}
 	services := append(data.STT.services(), data.SessionTTS)
 	services = append(services, data.SessionLLM.services()...)
 	for _, a := range data.Agents {
@@ -790,7 +831,14 @@ func livekitServices(data livekitData) []livekitService {
 // present (the session VAD).
 func collectLiveKitPlugins(data livekitData) []string {
 	const prefix = "from livekit.plugins import "
-	set := map[string]bool{"silero": true}
+	set := map[string]bool{}
+	if data.LocalTurnTaking() {
+		// Silero is the voice activity detector, loaded in prewarm by every
+		// session whose own settings decide the turn. A session where the model
+		// decides loads none, so importing the plugin would leave the emitted
+		// module with an import it never uses, which its own ruff gate refuses.
+		set["silero"] = true
+	}
 	for _, svc := range livekitServices(data) {
 		if strings.HasPrefix(svc.Entry.Import, prefix) {
 			set[strings.TrimPrefix(svc.Entry.Import, prefix)] = true
@@ -1333,6 +1381,99 @@ func livekitTTSService(binding ir.Binding, env *envSet) (livekitService, error) 
 	return resolveLiveKitService(targetcap.Speak, binding, env, slngSite{})
 }
 
+// livekitLiveService builds the one service an `architecture: live` package
+// runs on, where a cascaded package builds a transcriber, a model and a
+// synthesizer. It mirrors buildPipecatLiveAgent on the other target.
+//
+// The two arguments the catalogue row cannot express are attached here, because
+// both are computed from a *second* binding (the backend the live entry names)
+// and a row describes one binding:
+//
+//   - `delegation`, which is where the model's handed-over work runs. With a
+//     backend it is the vendor's Responses route; with none it goes back to the
+//     application, which on this target has no tool channel at all. ir.Validate
+//     refuses tools in that case, so by here it means an agent with no tools.
+//   - `responses_options`, carrying the one key the package actually states.
+//     The vendor's own type is total=False and its docstring says an unset key
+//     is not sent, so nothing is invented for the rest.
+func livekitLiveService(agent *ir.Agent, tgt ir.Target, def ir.AgentDef, env *envSet) (livekitService, error) {
+	binding, ok := tgt.Models.Live[def.Live]
+	if !ok {
+		return livekitService{}, fmt.Errorf("livekit live binding %q is missing", def.Live)
+	}
+	svc, err := resolveLiveKitService(targetcap.Live, binding, env, slngSite{})
+	if err != nil {
+		return livekitService{}, err
+	}
+	if binding.Backend == "" {
+		svc.Call.Args = append(svc.Call.Args, pyKV{Key: "delegation", Value: pyQuote("client")})
+		return svc, nil
+	}
+	backend := tgt.Models.Reason[binding.Backend]
+	svc.Call.Args = append(svc.Call.Args,
+		pyKV{Key: "delegation", Value: pyQuote("responses")},
+		pyKV{Key: "responses_options", Value: "{\"model\": " + pyQuote(backend.Model) + "}"},
+	)
+	return svc, nil
+}
+
+// livekitRealtimeService builds the one model an `architecture: realtime`
+// package runs on, plus the two answers the catalogue row cannot carry.
+//
+// Both are expressions over more than one field of the package, which is why
+// they are attached here rather than declared as a FieldSpec:
+//
+//   - `turn_detection` comes from the shared table in internal/target, and for
+//     `local` the table says to emit nothing. That is not a gap: passing any
+//     value, the vendor's own default included, sets
+//     can_disable_turn_detection=False (realtime_model.py:484,
+//     livekit-plugins-openai 1.8.1) and the framework can no longer take the
+//     decision back.
+//   - `modalities` is decided by whether the agent bound `speak:`. With one
+//     bound, the model is asked for text and the synthesizer speaks it:
+//     agent_activity.py:4180-4200 routes a reply with no audio modality through
+//     tts_node. Without one, nothing is emitted: ["text","audio"] is the
+//     constructor's own default (realtime_model.py:477) and ["audio"] is
+//     identical to it on the wire, so writing either would be a setting the
+//     package did not ask for.
+func livekitRealtimeService(tgt ir.Target, def ir.AgentDef, env *envSet) (livekitRealtime, error) {
+	binding, ok := tgt.Models.Realtime[def.Realtime]
+	if !ok {
+		return livekitRealtime{}, fmt.Errorf("livekit realtime binding %q is missing", def.Realtime)
+	}
+	svc, err := resolveLiveKitService(targetcap.Realtime, binding, env, slngSite{})
+	if err != nil {
+		return livekitRealtime{}, err
+	}
+	out := livekitRealtime{Service: svc}
+	if def.Voice != "" {
+		tts, err := livekitTTSService(tgt.Models.Speak[def.Voice], env)
+		if err != nil {
+			return livekitRealtime{}, err
+		}
+		out.TTS = &tts
+		// "text" alone, and never ["text","audio"] with a synthesizer beside it:
+		// audio_output is `"audio" in modalities` (realtime_model.py:487), and a
+		// reply that carries audio is played as the model's own voice, so the
+		// caller would hear the line twice in two voices.
+		out.Service.Call.Args = append(out.Service.Call.Args, pyKV{Key: "modalities", Value: `["text"]`})
+	}
+	if binding.TurnDetection == "" {
+		return out, nil // the vendor's own default stands, and nothing is sent
+	}
+	profile, err := targetcap.ResolveTurnDetection(targetcap.LiveKit, binding.TurnDetection)
+	if err != nil {
+		return livekitRealtime{}, err
+	}
+	if profile.Omit {
+		out.LocalTurn = true
+		return out, nil
+	}
+	out.Service.Call.Args = append(out.Service.Call.Args, pyKV{Key: "turn_detection", Value: profile.Expr})
+	out.Imports = slices.Clone(profile.Imports)
+	return out, nil
+}
+
 func livekitChainService(binding ir.Binding, env *envSet, site slngSite) (livekitService, error) {
 	svc, err := resolveLiveKitService(targetcap.Reason, binding, env, site)
 	if err != nil {
@@ -1788,9 +1929,13 @@ func livekitDeps(data livekitData) []string {
 	if len(extras) > 0 {
 		base = fmt.Sprintf("%s[%s]%s", pkg, strings.Join(sortedKeys(extras), ","), constraint)
 	}
-	deps := append([]string{
-		base,
-		pinned("livekit-plugins-silero", targetcap.SileroFloor),
+	deps := []string{base}
+	if data.LocalTurnTaking() {
+		// The dependency follows the import above, and both follow the same
+		// question: does this package's own detector decide the turn.
+		deps = append(deps, pinned("livekit-plugins-silero", targetcap.SileroFloor))
+	}
+	deps = append(deps, []string{
 		"python-dotenv",
 		// httpx is unconditional, and not only for our own webhook tools.
 		// `livekit/agents/inference/llm.py` imports it while livekit-agents
@@ -1802,7 +1947,8 @@ func livekitDeps(data livekitData) []string {
 		// 3.0.0 in a clean container: undeclared by the former, absent from the
 		// latter. Drop this when livekit-agents declares its own.
 		"httpx",
-	}, sortedKeys(packages)...)
+	}...)
+	deps = append(deps, sortedKeys(packages)...)
 	switch data.TracingProvider {
 	case "langfuse":
 		// langfuse 4 is the observations-first data model. It is a major with

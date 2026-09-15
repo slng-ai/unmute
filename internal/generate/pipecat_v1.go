@@ -76,9 +76,18 @@ type pipecatAgent struct {
 	// It exists because a task borrows this worker's service: entering one swaps
 	// the task's scope in, and every way out has to swap this back or the owner
 	// would keep answering under the task's cache scope.
-	SlngHeaders       string
-	LLM               pipecatService
-	TTS               pipecatService
+	SlngHeaders string
+	LLM         pipecatService
+	TTS         pipecatService
+	// Live is the live model's row when this agent binds one: LLM then holds
+	// the live service and TTS is empty. Backend is the think model it hands its
+	// tools and reasoning to, "" when it runs alone.
+	Live bool
+	// Realtime is this agent's row when it binds a realtime model: LLM holds the
+	// realtime service, and TTS is empty unless the agent also binds speak: (the
+	// half cascade).
+	Realtime          bool
+	Backend           string
 	Tools             []pipecatTool
 	Transfers         []pipecatTransfer
 	Delegates         []pipecatDelegate
@@ -526,10 +535,20 @@ type pipecatData struct {
 	GreetingExpr        string   // Python expression for the fixed greeting line
 	GreetingText        string
 	GreetingInstruction string
-	GreetingRunLLM      string // "True" or "False"
-	Interrupt           *pipecatInterrupt
-	Inactivity          *pipecatInactivity
-	MaxDurationSecs     int
+	// RealtimeOpening is the Python expression for the opening line a realtime
+	// package seeds into its context, or "" when the caller speaks first. It is
+	// not a second greeting: it is the same greeting the other shapes render,
+	// written as the one message this service will actually deliver.
+	RealtimeOpening string
+	// EmptyStartSession means the inline start_session body would otherwise be
+	// empty and needs a `pass`. Computed in Go rather than as a template
+	// condition because what fills that body differs per shape, and a condition
+	// that listed them was already one shape out of date.
+	EmptyStartSession bool
+	GreetingRunLLM    string // "True" or "False"
+	Interrupt         *pipecatInterrupt
+	Inactivity        *pipecatInactivity
+	MaxDurationSecs   int
 	// NeedsEndAfter emits the _end_after helper, which the max-duration cap and
 	// the inactivity hangup share.
 	NeedsEndAfter bool
@@ -683,6 +702,40 @@ type pipecatData struct {
 	NeedsContextStrategy bool
 	NeedsLanguage        bool // any emitted service sets a language kwarg (Language enum import, N16)
 	Inline               bool // single agent, no bus: LLM inline in the pipeline (F3)
+	// Live means the one agent binds a live model: the inline pipeline with
+	// the live service where the transcriber, the model and the synthesizer sat,
+	// no local turn machinery, and the greeting delivered as the session's
+	// opening instruction. Validation has already held the package to what this
+	// shape carries (ir.validateLive).
+	Live bool
+	// Realtime means the one agent binds a realtime model: one service over one
+	// websocket session where the transcriber, the model and (unless the package
+	// also binds a synthesizer) the synthesizer sat. Validation has already held
+	// the package to what this shape carries (ir.validateRealtime).
+	Realtime bool
+	// RealtimeTurnDetection is the authored turn_detection value, or "" when the
+	// package said nothing and the vendor's own default stands. Carried for the
+	// runbook, which has to name who decides the turn.
+	RealtimeTurnDetection string
+	// HalfCascade is a realtime package that also binds speak:. The model is
+	// asked for text only and the bound synthesizer speaks it, so a TTS service
+	// is built and the model gets no voice.
+	HalfCascade bool
+	// SpeechToSpeech is Live or Realtime. It marks every site where one service
+	// stands in for three: no transcriber is built and the model sits in the one
+	// pipeline that carries the caller's audio.
+	SpeechToSpeech bool
+	// SpokenByModel is the speech to speech shapes whose own voice reaches the
+	// caller, so the words a reply produces are that speech transcribed rather
+	// than text written for a synthesizer to read. The half cascade is the one
+	// speech to speech shape where it is false.
+	SpokenByModel bool
+	// ExternalTurns says the speech to speech service decides the caller has
+	// finished, so this bot builds no local end-of-turn analyzer and passes no
+	// turn strategies of its own: the aggregator takes the external ones the
+	// service recommends. True for every live package, and for a realtime
+	// package whose turn_detection is not `local`.
+	ExternalTurns bool
 	// Knowledge is the shared knowledge-module data: the declared bases and the
 	// deduplicated embedding imports across them.
 	Knowledge knowledgeData
@@ -724,7 +777,11 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTurnPlacement:        true, // advisory (VAD/smart-turn supplied)
 	targetcap.FieldSemanticEndpointing:  true, // advisory
 	targetcap.FieldEndpointingDelay:     true, // VAD stop_secs
-	targetcap.FieldPace:                 true, // smart-turn analyzer stop_secs (the ceiling)
+	targetcap.FieldPace:                 true, // smart-turn analyzer stop_secs (the ceiling), or the transcriber's end-of-turn timeout under provider: listen
+	targetcap.FieldTurnByListener:       true, // the vendor's turn-detecting service class in place of the transcriber, no local analyzer
+	targetcap.FieldTurnEager:            true, // enable_eager_end_of_turn on that service and EagerUserTurnStrategies on the aggregator
+	targetcap.FieldLiveModel:            true, // one live service where the transcriber, the model and the synthesizer sat; its backend by Responses delegation
+	targetcap.FieldRealtimeModel:        true, // one realtime service over one websocket session; a bound speak model may synthesize the reply instead (the half cascade)
 	targetcap.FieldTask:                 true, // Flow node on the owning worker (C8)
 	targetcap.FieldTaskNestedResult:     true, // forwarded json_schema properties
 	targetcap.FieldTaskGroup:            true, // linear dynamic-flow chain

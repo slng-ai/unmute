@@ -31,8 +31,8 @@ class CallTrace(SpanProcessor):
 
     It copies the call's correlating attributes onto every span, because
     Langfuse v4 filters and sums over observations and an attribute that sits
-    only on the top span cannot group the spans underneath it. On 1.6.10
-    livekit's own metadata= does this too, but 1.8.0 rewrote that processor to
+    only on the top span cannot group the spans underneath it. Before 1.8.0
+    livekit's own metadata= did this too, but 1.8.0 rewrote that processor to
     stamp the job's room and job id instead, so this does not rely on it.
 
     It groups each exchange under a `turn` span. livekit has no span covering
@@ -201,11 +201,11 @@ def setup_langfuse(
         )
 
     trace_provider = TracerProvider()
-    # Our own processor, not livekit-agents' metadata= below. On 1.6.10 that
-    # argument does stamp every span, but 1.8.0 rewrote its processor to stamp
-    # the job's own room_id and job_id instead and return early, so from 1.8.0
-    # on the metadata= route reaches nothing inside a job. This one is the same
-    # on both.
+    # Our own processor, not livekit-agents' metadata= below. Before 1.8.0 that
+    # argument did stamp every span, but 1.8.0 rewrote its processor to stamp
+    # the job's own room_id and job_id instead and return early, so at the
+    # supported version the metadata= route reaches nothing inside a job. This
+    # one works either way.
     # The tracer is taken before the patch so this module's own spans are not
     # wrapped by it. They name no turn span, so it would change nothing, but a
     # tracer that wraps itself is a bad thing to leave for the next reader.

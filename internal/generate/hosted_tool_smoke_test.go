@@ -54,7 +54,7 @@ func TestSmokeHostedCodeToolRunsThroughThePlatformContract(t *testing.T) {
 			// pydantic only. The mirrored module imports it, and it is already a
 			// hard dependency of both frameworks, so this adds nothing an
 			// emitted project does not already install.
-			cmd := exec.Command("uv", "run", "--with", "pydantic", "python", "smoke_check.py")
+			cmd := uvCommand("run", "--with", "pydantic", "python", "smoke_check.py")
 			cmd.Dir = dir
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("smoke check failed:\n%s", out)

@@ -113,11 +113,39 @@ type Data struct {
 	// never inferred: maintain rewrites agent.yaml from this struct, so a name
 	// absent here is a name deleted from the author's file, and a name invented
 	// here is a live SLNG agent claimed on the author's behalf.
-	AgentName  string
-	Target     string
-	Channel    string
-	Channels   []Channel
-	EntryAgent string
+	AgentName string
+	// Architecture is the package's pipeline shape. The console does not offer
+	// it, and it has to be here anyway, for the reason every other carried field
+	// is: maintain rewrites agent.yaml from this struct, so a key absent here is
+	// a key deleted at exit 0. Losing this one is quieter than most, because the
+	// rewritten file still compiles: it just compiles a cascaded pipeline where
+	// the author wrote a speech to speech one.
+	//
+	// Empty means cascade, written as no key, so a cascaded package's file is
+	// byte for byte what it was.
+	Architecture string
+	// Realtime and Live are the two speech to speech sections, carried for the
+	// same reason. Both empty on a cascaded package.
+	Realtime []SpeechModel
+	Live     []SpeechModel
+	// Backends are the models.think entries a live model delegates to, carried
+	// whole. Writing the name alone and inventing the rest is what this field
+	// exists to stop: the rewritten file then still names a backend, still
+	// validates and still compiles, with the author's model id gone and an
+	// empty one in the emitted session.
+	Backends []SpeechBackend
+	// SpeechBound is the speech entry the agent binds, and SpeechSpeak the
+	// synthesizer it binds beside it for a half cascade. Both are read off the
+	// package rather than derived: the entry used to be taken as the first in
+	// the section, which silently repointed an agent that had bound a later one,
+	// and the synthesizer was not carried at all, so a half cascade came back
+	// with nothing to speak with.
+	SpeechBound string
+	SpeechSpeak SpeechBackend
+	Target      string
+	Channel     string
+	Channels    []Channel
+	EntryAgent  string
 	// Transport and Carrier describe the route. They are written into
 	// connections/<Connection>.yaml, never onto the target: a target names one
 	// connection and says nothing else about how a call reaches it (FR-001).
@@ -164,6 +192,30 @@ type Data struct {
 	HumanTransfers []HumanTransfer
 	Fallbacks      []ModelFallback
 	Capacity       Capacity
+}
+
+// SpeechModel is one entry of models.realtime or models.live: one model doing
+// the three jobs a cascade splits up. One struct for both sections rather than
+// two, because the console neither offers nor edits either, and it needs only to
+// write back what it read; the fields that belong to one section are simply
+// empty on the other, and the strict decoder already refused a package that
+// wrote them in the wrong place.
+type SpeechModel struct {
+	Name        string
+	Provider    string
+	Model       string
+	Voice       string
+	Backend     string // live only: the think entry the model delegates to
+	Turn        string // realtime only: turn_detection
+	Description string
+}
+
+// SpeechBackend is one models.think entry a live model names as its backend,
+// carried whole so the console's rewrite reproduces it rather than inventing it.
+type SpeechBackend struct {
+	Name        string
+	Description string
+	Binding     Binding
 }
 
 // Binding is one concrete role choice collected by the wizard. Params is an
@@ -618,6 +670,73 @@ type ConnectionKey struct {
 // AllAgents returns the original assistant plus additional wizard agents in
 // stable order. Keeping the starter fields on Data preserves noninteractive
 // init compatibility.
+// SpeechSection is the models section this package's architecture writes, and
+// the binding word its agents use, which are the same word. Empty on a cascade,
+// which is what the template branches on: one question with one answer, rather
+// than the template asking about the architecture in four places.
+func (d Data) SpeechSection() string {
+	switch d.Architecture {
+	case string(spec.ArchitectureRealtime):
+		return "realtime"
+	case string(spec.ArchitectureLive):
+		return "live"
+	}
+	return ""
+}
+
+// SpeechModels is the entries of whichever section SpeechSection names.
+func (d Data) SpeechModels() []SpeechModel {
+	switch d.SpeechSection() {
+	case "realtime":
+		return d.Realtime
+	case "live":
+		return d.Live
+	}
+	return nil
+}
+
+// SpeechName is the entry the agent binds. Read from the package where there is
+// one, because alternates in the list are palette entries the way they are in
+// every other section, and taking the first one rewrote a package onto a model
+// its author had deliberately not bound.
+func (d Data) SpeechName() string {
+	if d.SpeechBound != "" {
+		return d.SpeechBound
+	}
+	// A package the wizard just wrote has one entry and binds it, so the two
+	// agree. Falling back keeps that path working without the console having to
+	// set a field it has no answer for yet.
+	if models := d.SpeechModels(); len(models) > 0 {
+		return models[0].Name
+	}
+	return ""
+}
+
+// SpeechBackends is the think entries the live models delegate to, so the
+// rewritten file still declares them. Without them the file names a backend
+// that no models.think entry defines and the next build refuses it: a console
+// rewrite has to produce a package that still compiles.
+//
+// Read from Backends, which carries each entry whole. Deriving them from the
+// names alone is what this used to do, and it wrote `provider: openai` with no
+// model: the rewritten package still validated, still compiled, and built its
+// backend with an empty model id.
+func (d Data) SpeechBackends() []SpeechBackend {
+	named := map[string]bool{}
+	for _, model := range d.SpeechModels() {
+		if model.Backend != "" {
+			named[model.Backend] = true
+		}
+	}
+	var out []SpeechBackend
+	for _, backend := range d.Backends {
+		if named[backend.Name] {
+			out = append(out, backend)
+		}
+	}
+	return out
+}
+
 func (d Data) AllAgents() []Agent {
 	agents := []Agent{{Name: "assistant", Instructions: d.Instructions, Reason: d.Reason, Speak: d.Speak}}
 	agents = append(agents, d.Agents...)

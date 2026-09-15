@@ -1,0 +1,7 @@
+# The LiveKit target only. The Pipecat half of architecture: realtime has its
+# own fixture, so a change to one driver cannot move the other's emitted bytes
+# while both are being built.
+targets:
+  livekit:
+    provider: livekit
+    version: "1.8.1"

@@ -1,7 +1,7 @@
 targets:
   livekit:
     provider: livekit
-    version: "1.6.10"
+    version: "1.8.1"
     sdk_language: python
     connection: twilio_sip
     deployment_region: eu-central
@@ -13,7 +13,7 @@ targets:
 
   pipecat:
     provider: pipecat
-    version: "1.8.0"
+    version: "1.10.0"
     connection: twilio_voice
     deployment_region: eu-central
     warm_instances: 1

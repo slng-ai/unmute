@@ -21,6 +21,11 @@ func TestPublishedSchemaAcceptsWhatTheDecoderAccepts(t *testing.T) {
 		filepath.Join("..", "testdata", "terminal_step"),
 		filepath.Join("..", "testdata", "remy"),
 		filepath.Join("..", "..", "examples", "salon-concierge"),
+		// A speech to speech package, because `architecture:` and the two model
+		// sections it governs are the newest keys the schema has to publish, and
+		// a section the schema lost reads as a package the decoder takes and the
+		// schema refuses.
+		filepath.Join("..", "testdata", "live_model"),
 	} {
 		if err := resolved.Validate(authoredInstance(t, dir)); err != nil {
 			t.Errorf("%s: the published schema refuses a package the decoder accepts: %v", dir, err)

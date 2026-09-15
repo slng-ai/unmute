@@ -154,6 +154,16 @@
               "build/orchestration/handoffs",
               "build/orchestration/choosing-a-structure"
             ]
+          },
+          {
+            "group": "Architecture",
+            "icon": "sitemap",
+            "root": "build/architecture/overview",
+            "pages": [
+              "build/architecture/cascade",
+              "build/architecture/realtime",
+              "build/architecture/live"
+            ]
           }
         ]
       },
@@ -249,6 +259,7 @@
               "models/stt",
               "models/tts",
               "models/llm",
+              "models/live",
               "models/turn-detection"
             ]
           }

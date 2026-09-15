@@ -1,6 +1,6 @@
 # Examples
 
-Four packages. `customer-intake` is the small one: a single agent that collects
+`customer-intake` is the small one: a single agent that collects
 a caller's details, saves each under a declared type, and hands them to a tool
 the model cannot type over. Start there if the question is about types, saved
 values or injection. `salon-concierge` is the full Sage and Stone Salon project
@@ -9,7 +9,11 @@ and the one to read when you want to see every path working together.
 optimizations removed, so the optimized package can be read against something.
 `hotel-concierge` is the hosted target, which emits no runnable project and
 publishes only agents whose tools SLNG already holds; it uses everything that
-target accepts.
+target accepts. `takeaway-orders` is the speech to speech one: a single live
+model hears the caller and speaks back, and a backend model runs the tools and
+searches the shop's documents behind it. `pharmacy-refills` is the other speech
+to speech one: one realtime model does everything itself, and the package is
+there to show who decides the caller has finished talking.
 
 If you want a package of your own to start from rather than one to read, run
 `unmute init my-agent`. The scaffold writes the smallest package that does
@@ -26,6 +30,8 @@ provider request and a human conversation, not only the automated checks.
 | [`salon-concierge`](salon-concierge/) | Two agents, four tasks (three on the concierge, one on the specialist, none shared between them), a task group `book` that runs verification then booking and skips verification with `skip_when_confirmed` once the caller's number is confirmed, three tasks that end on their own tool with `finish:`, handoffs in both directions, a cold manager transfer, tracing, and inbound phone routes on two targets | **Release-readiness example.** Verify once, manage stored bookings, answer or escalate complaints, cold-transfer to a manager, and inspect Langfuse traces. Every tool is local Python, so nothing remote has to be up before the greeting. Browser and inbound phone on two targets, one per telephony plane, no outbound. |
 | [`salon-concierge-single-prompt`](salon-concierge-single-prompt/) | One agent, one prompt holding everything, every tool on every turn | **The baseline, not a template.** The same salon as above with no tasks, no handoffs, no variables and no pre-fetch: the caller is asked for a number the carrier already supplied, the model calls a tool to find out what day it is, and it retypes the phone number into every tool call. Model, transport and turn taking are held identical to the package above, so a difference you hear is a difference the structure made. Validates, compiles and runs on the same two targets, because a baseline that did not would prove nothing. |
 | [`hotel-concierge`](hotel-concierge/) | One agent, four tool references, five template variables, a model fallback, hosted by SLNG | **The hosted target's showcase.** Produces no runnable project: `unmute deploy` compiles a deployment body and pushes it. Two `slng:` tools by name, two named tools from one `mcp:` server and one `builtin:`, so the push creates nothing and SLNG already owns every capability it names. Template variables with defaults reach the greeting and the prompt, an `inject:` pins the hotel's identifier so the model never asks for it, and a tool `announce:` covers the wait. No `unmute dev`: a web session or an attached phone number talks to it. |
+| [`takeaway-orders`](takeaway-orders/) | One agent on `architecture: live`, one live model with a think backend, two local tools, one knowledge base of three documents, browser audio on both code targets | **The speech to speech example.** Take phone orders for a busy takeaway. One OpenAI live model hears the caller, decides when they have finished and speaks in its own voice, so a caller who talks over the agent is answered rather than queued. Tools and the harder reasoning run on the `backend:` think entry while the live model keeps talking: the menu lookup and the order both go there, and so does the search over the shop's opening hours, allergens and offers. One agent and nothing else, because a live session fixes its instructions when it starts. No phone route, and one key, `OPENAI_API_KEY`. |
+| [`pharmacy-refills`](pharmacy-refills/) | One agent on `architecture: realtime`, one realtime model doing all four jobs, two local tools, one knowledge base of three documents, browser audio on both code targets | **The turn taking example.** Reorder a repeat prescription at a pharmacy. One OpenAI realtime model hears the caller and answers in its own voice, with no transcriber and no synthesizer in the path. It is here for one key, `turn_detection:`, which says whether a silence window, the model, or this project's own detector decides the caller has finished. Callers read a seven character prescription reference off a box and pause in the middle of it, so a silence window answers half a number. A knowledge base of three markdown documents answers questions about how the shop works. No phone route, and one key, `OPENAI_API_KEY`. |
 
 The two salon packages are the ones with a telephony route, and they carry the
 same pair: a Twilio Elastic SIP Trunk on their LiveKit target and Pipecat Cloud's

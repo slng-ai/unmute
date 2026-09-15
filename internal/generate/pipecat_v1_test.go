@@ -1999,8 +1999,9 @@ func TestCheckPipecatVersion(t *testing.T) {
 		{"1.5.3", false},
 		{"1.6.0", false},
 		{"1.6.9", false},
-		{"1.8.0", true},
-		{"1.7.0", false}, // the previous pin; one version is supported, not a range
+		{"1.10.0", true},
+		{"1.9.0", false}, // the previous pin; one version is supported, not a range
+		{"1.8.0", false}, // and the one before that
 		{"1.0.3", false}, // never existed on PyPI; workers API not present
 		{"1.4.9", false},
 		{"1", false}, // too vague / pre-1.5
@@ -2740,7 +2741,7 @@ func TestPipecatDoesNotClaimMultiRegion(t *testing.T) {
 // scope half of tool announcements. An agent tool reaches the pipeline through
 // FunctionCallParams; a task tool is a flows handler and reaches it through
 // FlowManager.worker, which is the documented seam for queueing a frame from
-// inside a handler (verified against pipecat-ai 1.8.0, the pinned version, where
+// inside a handler (verified against pipecat-ai 1.9.0, the pinned version, where
 // flows ships as pipecat.flows rather than the standalone pipecat_flows).
 //
 // This case exists because the capability table used to deny Pipecat here with
@@ -2947,7 +2948,7 @@ func pipecatHistoryBot(t *testing.T) string {
 //
 // Pipecat keeps one LLMContext for the whole call and hands every worker the
 // same object, so shaping means replacing that object's message list rather
-// than handing over a copy. LLMContext at pipecat-ai 1.8.0 has no copy(), no
+// than handing over a copy. LLMContext at pipecat-ai 1.9.0 has no copy(), no
 // truncate() and no exclusion filter, so this is plain list work and the
 // framework provides no safety.
 func TestPipecatLowersEveryTaskHistoryValue(t *testing.T) {
@@ -3258,5 +3259,39 @@ func TestPipecatFullOnlyPackageEmitsNoShaping(t *testing.T) {
 	handoff := pipecatMethodBody(t, bot, "async def to_billing(self, params: FunctionCallParams):", "\n    @_direct_tool")
 	if !strings.Contains(handoff, `m.get("role") in ("user", "assistant", "tool")`) {
 		t.Errorf("history: full does not strip old instructions on handoff:\n%s", handoff)
+	}
+}
+
+// TestAParamReachesTheSettingsByName is the passthrough every model page
+// promises: a `params:` key a Pipecat service's settings class declares is
+// written into that class by name, so naming a 1.9.0 setting on a page is a
+// thing an author can actually write rather than advice that compiles to
+// nothing.
+//
+// Deepgram's `version` is the case worth pinning: before 1.9.0 it was reachable
+// only as an untyped extra key, and the page now tells authors to write it.
+func TestAParamReachesTheSettingsByName(t *testing.T) {
+	agent := agentFor(t, "safe_core")
+	tgt := targetByProvider(t, agent, ir.ProviderPipecat)
+	listen := *tgt.Models.Listen
+	listen.Provider, listen.Model = "deepgram", "nova-3"
+	listen.Params = map[string]any{"version": "2021-03-17.0", "profanity_filter": true}
+	tgt.Models.Listen = &listen
+	artifact, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	settings := bot[strings.Index(bot, "DeepgramSTTService("):]
+	if end := strings.Index(settings, "\n    )\n"); end > 0 {
+		settings = settings[:end]
+	}
+	for _, want := range []string{`version="2021-03-17.0"`, "profanity_filter=True"} {
+		if !strings.Contains(settings, want) {
+			t.Errorf("the emitted transcriber does not carry %q:\n%s", want, settings)
+		}
+	}
+	if !strings.Contains(settings, "DeepgramSTTService.Settings(") {
+		t.Errorf("the params do not reach a settings class at all:\n%s", settings)
 	}
 }

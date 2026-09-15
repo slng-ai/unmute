@@ -39,10 +39,16 @@ var exactVersionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 // The ceiling is a claim about verification, not about upstream. A newer
 // release upstream is unsupported until a human proves it and a new unmute
 // ships, which is what ties the supported version to the unmute version.
+//
+// Verified is the date of the newest verification, and the comment beside each
+// row says what that verification was: a browser call on a shipped example is
+// the whole answer, and anything less (the offline suite, the smoke suite on
+// the real wheel, a source diff) is named as what it is, with the call still
+// owed. A date with no comment would let a suite run read as a call.
 type SupportWindow struct {
 	Floor    string // oldest supported, inclusive
 	Ceiling  string // newest verified, inclusive
-	Verified string // ISO date the ceiling was verified by live call
+	Verified string // ISO date of the verification the row's comment describes
 }
 
 // supportWindows is the one recorded home for these facts (Principle III).
@@ -54,12 +60,73 @@ type SupportWindow struct {
 // Each runtime intentionally supports one tested SDK version rather than
 // claiming a compatibility range the release matrix does not exercise.
 var supportWindows = map[Provider]SupportWindow{
-	LiveKit: {Floor: "1.6.10", Ceiling: "1.6.10", Verified: "2026-08-16"},
-	// 1.8.0 verified by browser call on salon-concierge: 13 turns, 20
-	// interruptions, 3 handoffs, 12 function calls in progress and 12 results,
-	// no errors. The settled count is the number that mattered, because the
-	// async-call fixes in 1.8.0 are what stop a handoff hanging unsettled.
-	Pipecat: {Floor: "1.8.0", Ceiling: "1.8.0", Verified: "2026-08-27"},
+	// 1.8.1 is the first release carrying the GPT-Live model
+	// (livekit/plugins/openai/realtime/gpt_live_model.py), which is why this
+	// moved: architecture: live cannot compile on this target below it. Checked
+	// by downloading the 1.7.0, 1.7.1 and 1.8.0 wheels, none of which contains
+	// the module.
+	//
+	// Verified on 2026-09-13 by two things short of a call: the offline suite,
+	// and the opt-in smoke suite running every emitted LiveKit module against
+	// the real 1.8.1 wheel, livekit-plugins-slng 1.8.1 beside it, with the same
+	// suite green on 1.6.10 first so a failure could be attributed.
+	//
+	// Two checks are OWED rather than made:
+	//
+	//  1. A browser call. The machine that did this reaches no provider. The
+	//     1.6.10 row carried a bare date and no comment, so what closed it is
+	//     not recorded; make the call on salon-concierge and replace this
+	//     paragraph with its counts.
+	//  2. PII redaction, which is new here. 1.8.1's set_tracer_provider also
+	//     calls _install_pii_redaction (telemetry/traces.py:581), which prepends
+	//     a filtering span processor to the provider WE build. The default
+	//     allows, so nothing changes today, but LIVEKIT_TELEMETRY_ALLOW_PII=0
+	//     would now strip the conversation out of our Langfuse and Coval spans
+	//     with no error anywhere. Absent at 1.6.10. Nothing asserts the default,
+	//     and a run with that variable set would pass every gate we have.
+	//
+	// `metrics_collected` is deprecated and the emitted module subscribes to it
+	// in four places (agent.py, tracing.py, tracing_coval.py, dev_metrics.py),
+	// which prints a warning per registration: two on a deployed traced run,
+	// three under `unmute dev`. It is NOT owed by this bump and this row is not
+	// where it gets fixed: the deprecation block is byte-identical in 1.6.10
+	// (agent_session.py:717-723), so it has been printing all along. Moving off
+	// it changes what every traced span carries, so it is its own change with
+	// its own verification. Pipecat has a gate refusing deprecated shapes in
+	// emitted code (pipecat_deprecations_test.go); LiveKit has none, and this is
+	// the first thing it would catch.
+	//
+	// The deprecated AgentSession keywords are NOT owed: 1.8.1 marks eleven for
+	// removal in v2.0.0 (min_endpointing_delay, allow_interruptions,
+	// turn_detection and the rest) in favour of TurnHandlingOptions and
+	// STTContextOptions, and the emitted module already passes the new shapes
+	// and none of the old ones.
+	LiveKit: {Floor: "1.8.1", Ceiling: "1.8.1", Verified: "2026-09-13"},
+	// 1.10.0 verified on 2026-09-12 by three things short of a call: the offline
+	// suite; the opt-in smoke suite running every emitted Pipecat module against
+	// the real 1.10.0 wheel, pipecat-slng 0.5.2 beside it; and a diff of every
+	// module the emitted bot imports between 1.9.0 and 1.10.0, all 24 of them
+	// byte-identical (research R1 of spec 022). Only two services a package can
+	// bind changed at all, and both are handled: speechmatics, whose turn mode
+	// default flipped and is now pinned from the turn binding, and gradium,
+	// which gained turn detection and joined the decider table.
+	//
+	// Two checks are OWED rather than made, and neither is a formality:
+	//
+	//  1. A browser call. The machine that did this reaches no provider, so the
+	//     call on salon-concierge that closed 1.8.0 (13 turns, 20 interruptions,
+	//     3 handoffs, 12 function calls settled, no errors) is still owed, for
+	//     1.9.0 and now for this. Make it, and replace this paragraph with its
+	//     counts.
+	//  2. The base image's certificate set. 1.10.0 widens the OpenAI SDK pin to
+	//     the 3.x line, which builds on httpx2 and verifies TLS against the
+	//     operating system trust store rather than a bundled set. An image with
+	//     no system certificates fails every provider call. The emitted project
+	//     builds on the framework vendor's own image, which could not be
+	//     inspected here: no container runtime, and the registry's blob CDN is
+	//     refused by the egress proxy. The runbook names the variable that
+	//     points at a bundle. The first real deployment settles it.
+	Pipecat: {Floor: "1.10.0", Ceiling: "1.10.0", Verified: "2026-09-12"},
 }
 
 // LiveKitDeploymentRegions are the agent compute regions, not media region groups.
@@ -139,7 +206,13 @@ func ParseVersion(v string) ([3]int, bool) {
 // SileroFloor is the constraint the always-emitted session VAD plugin carries.
 // It is here rather than in the emitter so the floor validation checks and the
 // floor the driver emits cannot drift apart (FR-003).
-const SileroFloor = ">=1.6.1"
+//
+// It tracks the support window because livekit's plugins version in lockstep
+// with the framework and declare it: livekit-plugins-silero 1.8.1 requires
+// livekit-agents>=1.8.1. A floor left at an older release still resolved, since
+// the newest plugin wins and an old one cannot pair with new agents anyway, but
+// it stated a requirement that was no longer true.
+const SileroFloor = ">=1.8.1"
 
 // PinFloors is the pinnable package set for a driver, with each one's catalogue
 // floor. Empty for a driver that pins nothing.

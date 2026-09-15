@@ -633,8 +633,12 @@ func TestLiveKitV1MultiVendor(t *testing.T) {
 		}
 	}
 	pyproject := artifactFile(t, artifact, "pyproject.toml")
-	if !strings.Contains(pyproject, `"livekit-agents[cartesia,deepgram,elevenlabs,openai]==1.6.10"`) {
-		t.Errorf("pyproject.toml missing merged extras dep:\n%s", pyproject)
+	// The version is read from the support window rather than written here: a
+	// literal turns every framework bump into a failure about something this
+	// test does not test, which is the reason smoke_version_test.go exists.
+	livekitWindow, _ := target.Window(target.LiveKit)
+	if want := `"livekit-agents[cartesia,deepgram,elevenlabs,openai]==` + livekitWindow.Ceiling + `"`; !strings.Contains(pyproject, want) {
+		t.Errorf("pyproject.toml missing merged extras dep %s:\n%s", want, pyproject)
 	}
 	if strings.Contains(pyproject, "livekit-plugins-slng") {
 		t.Error("pyproject.toml pulls the slng plugin without an slng binding")
@@ -1195,7 +1199,7 @@ func TestV1LiveKitCompletedFlowEndsOnce(t *testing.T) {
 	if strings.Contains(botpy, `return "Done."`) {
 		t.Error(`finish must not return a value after self.complete() (stray post-completion output)`)
 	}
-	// LiveKit 1.6.10 resolves AgentTask before recording finish's tool output.
+	// LiveKit resolves AgentTask before recording finish's tool output.
 	// Shared TaskGroups repair that exact output through the SDK callback, without
 	// returning from finish() and triggering another child-model turn.
 	for _, want := range []string{
@@ -1830,7 +1834,8 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 	// A warm package installs exactly the one supported version its target
 	// declares; it is never quietly widened or narrowed on the author's behalf.
 	pyproject := artifactFile(t, artifact, "pyproject.toml")
-	if !strings.Contains(pyproject, "==1.6.10") {
+	warmWindow, _ := target.Window(target.LiveKit)
+	if !strings.Contains(pyproject, "=="+warmWindow.Ceiling) {
 		t.Errorf("warm pyproject.toml must pin the declared livekit-agents version exactly:\n%s", pyproject)
 	}
 	if strings.Contains(pyproject, ">=1.6,<1.7") {
@@ -2378,12 +2383,12 @@ func TestLiveKitV1PinsAndSDKLanguage(t *testing.T) {
 		t.Fatal(err)
 	}
 	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
-	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.7.0"}
+	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.8.2"}
 	artifact, err := Generate(agent, tgt, target.Default())
 	if err != nil {
 		t.Fatalf("generate with pin: %v", err)
 	}
-	if pyproject := artifactFile(t, artifact, "pyproject.toml"); !strings.Contains(pyproject, `"livekit-plugins-slng>=1.7.0"`) {
+	if pyproject := artifactFile(t, artifact, "pyproject.toml"); !strings.Contains(pyproject, `"livekit-plugins-slng>=1.8.2"`) {
 		t.Errorf("pin did not raise the plugin floor:\n%s", pyproject)
 	}
 	// No deployment config file is emitted: the platform assigns both of its
@@ -2772,7 +2777,7 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	tgt.Connection = "twilio_sip"
 	tgt.Models.Reason["backup"] = ir.Binding{Model: "openai/gpt-4o"}
 	tgt.Destinations = map[string]string{"line": "+14155550123"}
-	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.7.0"}
+	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.8.2"}
 
 	artifact, err := Generate(agent, tgt, target.Default())
 	if err != nil {
@@ -2791,7 +2796,7 @@ func TestCheckLiveKitVersion(t *testing.T) {
 		version string
 		ok      bool
 	}{
-		{"1.6.10", true},
+		{"1.8.1", true},
 		// A declared version is an exact install pin, so half a version is no
 		// longer accepted and resolved on the author's behalf.
 		{"1.5", false},

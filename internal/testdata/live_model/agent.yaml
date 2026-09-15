@@ -1,0 +1,54 @@
+# The smallest package on the live architecture: one agent, two tools, a
+# greeting the model speaks in its own words, and an idle nudge. The live model
+# listens, thinks and speaks; the backend it names runs the tools and the hard
+# reasoning at OpenAI. internal/generate/live_test.go reads the emitted bot.
+version: 1
+
+name: live-model
+architecture: live
+entry_agent: desk
+
+secrets:
+  - OPENAI_API_KEY
+
+models:
+  live:
+    - name: voice
+      provider: openai
+      model: gpt-live-1
+      voice: marin
+      # Tools and reasoning run here, while the live model keeps talking.
+      backend: fast
+  think:
+    fast:
+      provider: openai
+      model: gpt-5.6-terra
+
+agents:
+  desk:
+    instructions: instructions.md
+    live: voice
+    tools:
+      - lookup_customer
+      - check_availability
+
+tools:
+  - lookup_customer
+  - check_availability
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, this is Sage and Stone Salon. How can I help?"
+  inactivity:
+    nudge_after: 20s
+    end_after: 60s
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m

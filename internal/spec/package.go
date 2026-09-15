@@ -80,6 +80,23 @@ func (p *Package) Location(file, token string) string {
 	return file
 }
 
+// KeyLocation returns the line where a top-level key is written, which Location
+// cannot do: it matches a substring anywhere on a line, so a word in a comment
+// wins over the key itself. `architecture:` found this the hard way, because the
+// fixture's own opening comment describes the live architecture and sits on line
+// one, which is where every refusal about the key then pointed.
+//
+// Falls back to Location, so a key written somewhere this does not expect still
+// gets the best line available rather than none.
+func (p *Package) KeyLocation(file, key string) string {
+	for i, line := range strings.Split(string(p.files[file]), "\n") {
+		if strings.HasPrefix(line, key+":") {
+			return fmt.Sprintf("%s:%d", file, i+1)
+		}
+	}
+	return p.Location(file, key+":")
+}
+
 type AgentFile struct {
 	Manifest string `json:"manifest,omitempty" yaml:"manifest,omitempty"`
 	Version  int    `json:"version" yaml:"version"`
@@ -91,9 +108,17 @@ type AgentFile struct {
 	// identity, and on SLNG the name IS the identity: names are unique per
 	// organisation and a push resolves the agent to update by matching one, so a
 	// name that two packages share is one live agent that two packages overwrite.
-	Name       string        `json:"name,omitempty" yaml:"name,omitempty"`
-	EntryAgent string        `json:"entry_agent" yaml:"entry_agent"`
-	Models     ModelSections `json:"models" yaml:"models"`
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+	// Architecture is the pipeline shape this package compiles to: `cascade`,
+	// `realtime` or `live`. Omitted means cascade, which is what every package
+	// written before the key existed gets, so none of their emitted bytes move.
+	//
+	// Declared here, above the models it governs, because it decides which of
+	// those sections are legal. See the Architecture type for why it is written
+	// rather than derived from whichever binding happens to be present.
+	Architecture Architecture  `json:"architecture,omitempty" yaml:"architecture,omitempty"`
+	EntryAgent   string        `json:"entry_agent" yaml:"entry_agent"`
+	Models       ModelSections `json:"models" yaml:"models"`
 	// Listen/Turn select one entry of the matching models section by name.
 	// Optional when the section has at most one entry (the sole entry selects
 	// itself); required with 2+ entries (N15 palette).
@@ -204,6 +229,14 @@ type ModelSections struct {
 	Speak  map[string]ModelDef `json:"speak,omitempty" yaml:"speak,omitempty"`
 	Listen map[string]ModelDef `json:"listen,omitempty" yaml:"listen,omitempty"`
 	Turn   map[string]ModelDef `json:"turn,omitempty" yaml:"turn,omitempty"`
+	// Realtime and Live are the two speech to speech sections, one model each
+	// doing the three jobs the four sections above split up. Which one a package
+	// may write is decided by `architecture:`, and writing either under
+	// `architecture: cascade` is refused naming the key.
+	//
+	// Lists of named entries rather than maps, for the reason LiveDef gives.
+	Realtime []RealtimeDef `json:"realtime,omitempty" yaml:"realtime,omitempty"`
+	Live     []LiveDef     `json:"live,omitempty" yaml:"live,omitempty"`
 }
 
 // ModelDef is the unified model definition (N15): one shape for every models
@@ -240,6 +273,18 @@ type ModelDef struct {
 	// shortening it shortens every answer and lengthening it gives a caller who
 	// pauses mid-sentence more room. LiveKit will not accept less than 250ms.
 	EndpointingDelay string `json:"endpointing_delay,omitempty" yaml:"endpointing_delay,omitempty"`
+	// Eager answers the transcriber's predicted end of turn before it is
+	// confirmed, so the wait for the confirmation is spent generating the
+	// reply. The early reply is dropped if the caller goes on or the confirmed
+	// words differ, so the caller never hears a reply to something they did not
+	// say. Turn bindings only, and only with `provider: listen`, because the
+	// local detector predicts nothing; a transcriber that decides turns without
+	// predicting them is refused by name.
+	//
+	// Off unless asked for: the framework spends one model request on every
+	// prediction, including the ones the transcriber withdraws, which is a cost
+	// an author should choose.
+	Eager *bool `json:"eager,omitempty" yaml:"eager,omitempty"`
 	// AgentID scopes the SLNG Context Router's cache. One stable value per
 	// package, authored by a human, carrying a version suffix they own and bump
 	// after a prompt change they judge meaningful. Never composed, never
@@ -387,14 +432,27 @@ type Prefetch struct {
 // `think:` and `speak:` name entries in the same-named `models:` sections, so the
 // four model kinds are spelled one way everywhere they are referred to.
 type AgentDef struct {
-	Instructions string     `json:"instructions" yaml:"instructions"`
-	Think        string     `json:"think" yaml:"think"`
-	Speak        string     `json:"speak" yaml:"speak"`
-	Tools        []string   `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Tasks        []TaskItem `json:"tasks,omitempty" yaml:"tasks,omitempty"`
-	TaskGroups   []string   `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
-	Handoffs     []string   `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
-	Escalations  []string   `json:"escalations,omitempty" yaml:"escalations,omitempty"`
+	Instructions string `json:"instructions" yaml:"instructions"`
+	// Think and Speak name the agent's models the way a cascaded package does:
+	// one entry of `models.think` and one of `models.speak`.
+	//
+	// Realtime and Live each name one entry of the same-named section instead,
+	// one model doing all three jobs. Each binding is spelled like the section
+	// it reads, which is the rule every other binding here follows, and which
+	// one is legal is decided by `architecture:`.
+	//
+	// Speak is legal alongside Realtime, and only there: it is the half cascade,
+	// where the realtime model listens and thinks and a synthesizer speaks. The
+	// entry's own `voice:` and this binding are mutually exclusive.
+	Think       string     `json:"think,omitempty" yaml:"think,omitempty"`
+	Speak       string     `json:"speak,omitempty" yaml:"speak,omitempty"`
+	Realtime    string     `json:"realtime,omitempty" yaml:"realtime,omitempty"`
+	Live        string     `json:"live,omitempty" yaml:"live,omitempty"`
+	Tools       []string   `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Tasks       []TaskItem `json:"tasks,omitempty" yaml:"tasks,omitempty"`
+	TaskGroups  []string   `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
+	Handoffs    []string   `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
+	Escalations []string   `json:"escalations,omitempty" yaml:"escalations,omitempty"`
 }
 
 // Task is one entry of an agent's `tasks:` list. It carries both what the task is

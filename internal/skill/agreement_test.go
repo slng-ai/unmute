@@ -284,7 +284,7 @@ func TestPipecatMCPTracingDocsStayAligned(t *testing.T) {
 			t.Errorf("%s does not state the Pipecat MCP collision contract", name)
 		}
 		// The third rule these three surfaces used to share was a cleanup limit
-		// on cancelling MCPClient.start(). Pipecat 1.8.0 cancels the stranded
+		// on cancelling MCPClient.start(). Pipecat since 1.8.0 cancels the stranded
 		// session task itself (services/mcp_service.py, start()), so the limit
 		// is gone and so is the sentence.
 	}
@@ -416,10 +416,10 @@ func TestModelsReferenceMatchesCatalog(t *testing.T) {
 
 	// The reference names the roles the way an author writes them; the
 	// catalogue keeps the internal name "reason" for the thinking kind.
-	roles := map[string]target.Role{"listen": target.Listen, "speak": target.Speak, "think": target.Reason}
+	roles := map[string]target.Role{"listen": target.Listen, "speak": target.Speak, "think": target.Reason, "live": target.Live}
 	providers := map[string]target.Provider{"pipecat": target.Pipecat, "livekit": target.LiveKit}
 
-	row := regexp.MustCompile(`^\| (pipecat|livekit) \| (listen|speak|think) \| (.*) \|$`)
+	row := regexp.MustCompile(`^\| (pipecat|livekit) \| (listen|speak|think|live) \| (.*) \|$`)
 	vendor := regexp.MustCompile("`([a-z0-9_]+)`")
 
 	documented := map[string][]string{}
@@ -434,8 +434,17 @@ func TestModelsReferenceMatchesCatalog(t *testing.T) {
 		}
 		documented[m[1]+" "+m[2]] = vendors
 	}
-	if len(documented) != 6 {
-		t.Fatalf("parsed %d vendor rows from references/models.md, want 6 (two targets, three roles) — table format changed? update this parser", len(documented))
+	// Two targets, three cascaded roles each, and a live row for each: both code
+	// targets emit a live model since spec 023. The count is pinned so a table
+	// that loses a row fails here rather than silently narrowing what a coding
+	// agent is told it may bind.
+	if len(documented) != 8 {
+		t.Fatalf("parsed %d vendor rows from references/models.md, want 8 (two targets, three cascaded roles each, and a live row each) — table format changed? update this parser", len(documented))
+	}
+	for _, key := range []string{"pipecat live", "livekit live"} {
+		if _, ok := documented[key]; !ok {
+			t.Errorf("references/models.md has no `| %s |` vendor row", strings.ReplaceAll(key, " ", " | "))
+		}
 	}
 
 	cat := target.DefaultCatalog()
@@ -465,6 +474,76 @@ func TestModelsReferenceMatchesCatalog(t *testing.T) {
 	for _, fw := range []target.Provider{target.Pipecat, target.LiveKit} {
 		if vendors := cat.Vendors(fw, target.Turn); len(vendors) != 0 {
 			t.Errorf("the catalogue now has %s turn vendors %v: references/models.md must list them", fw, vendors)
+		}
+	}
+}
+
+// TestLiveSurfacesAgree holds the three surfaces that teach a live model to
+// one block and one list of what it refuses: the public page an author lands
+// on, the skill a coding agent reads first, and the agent.yaml reference. The
+// refusals are the rows of ir.validateLive, held in
+// internal/ir/validate_live_test.go; a surface that drops one teaches a
+// shape the compiler refuses.
+func TestLiveSurfacesAgree(t *testing.T) {
+	block := []string{
+		"architecture: live", "live:", "- name: voice", "provider: openai",
+		"model: gpt-live-1", "voice: marin", "backend: fast", "live: voice",
+	}
+	// Whole clauses, not words. "tasks", "tracing" and "OpenAI" appear on any
+	// models page for unrelated reasons, so matching those would pass on a
+	// surface that had dropped the refusal entirely.
+	refused := []string{
+		"serves one agent", "no `tasks`", "`handoffs`", "`escalations`",
+		"listens, speaks and decides the turn itself",
+		"`conversation.interruption`",
+		"carries no call state yet", "no traced worker yet",
+		"start and close a server connection yet",
+		"browser route in this version", "must be at OpenAI",
+		// Named as the architecture rather than as a binding, because that is
+		// what the refusals themselves now say and what the author edits.
+		// Named for slng alone since spec 023: both code targets emit this
+		// architecture, and a clause saying LiveKit refuses it would be the
+		// stale half of what these two surfaces have to agree on.
+		"slng target refuses",
+	}
+	fields := []string{"`name`", "`provider`", "`model`", "`voice`", "`backend`", "`description`"}
+	surfaces := map[string]string{
+		"references/models.md":      bundleFile(t, "references/models.md"),
+		"docs-site/models/live.mdx": trackedFile(t, "docs-site/models/live.mdx"),
+	}
+	for name, content := range surfaces {
+		// Whitespace-normalised, because these are clauses rather than words and
+		// a clause is wrapped wherever its line ran out.
+		flat := strings.Join(strings.Fields(content), " ")
+		for _, want := range append(append(block, refused...), fields...) {
+			if !strings.Contains(flat, strings.Join(strings.Fields(want), " ")) {
+				t.Errorf("%s does not carry %q, which the other live-model surfaces teach", name, want)
+			}
+		}
+		if !strings.Contains(content, "paraphrase") {
+			t.Errorf("%s does not say the greeting is paraphrased, which a live call makes obvious", name)
+		}
+	}
+	// The reference documents the entry's fields and the agent's `live:`
+	// key, and points at the page for the rest.
+	//
+	// The `live:` binding is asserted by its ParamField path rather than by a
+	// table row: that page moved to ParamField blocks, which is the shape the
+	// docs-site key gate now requires, and pinning the old row syntax here made
+	// a house-style change look like a lost fact.
+	reference := trackedFile(t, "docs-site/reference/agent-yaml.mdx")
+	for _, want := range append(fields, `<ParamField path="live"`, "`models.live`", "/models/live") {
+		if !strings.Contains(reference, want) {
+			t.Errorf("docs-site/reference/agent-yaml.mdx does not carry %q", want)
+		}
+	}
+	// One vendor row, read from the catalogue rather than repeated here.
+	vendors := target.DefaultCatalog().Vendors(target.Pipecat, target.Live)
+	for _, vendor := range vendors {
+		for name, content := range surfaces {
+			if !strings.Contains(content, "`"+vendor+"`") {
+				t.Errorf("%s does not name the live vendor %q the catalogue has", name, vendor)
+			}
 		}
 	}
 }
