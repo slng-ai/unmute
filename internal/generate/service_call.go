@@ -122,6 +122,7 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 		}
 		if params["vertexai"] == true {
 			call.Class = "_GoogleVertexLLM"
+			call.Args = append(call.Args, pyKV{Key: "location", Value: pyLiteral(params["location"])})
 			params = withoutParams(params, []string{"vertexai", "location"})
 		}
 	}
