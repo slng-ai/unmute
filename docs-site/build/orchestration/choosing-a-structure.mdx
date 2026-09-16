@@ -150,8 +150,8 @@ with no task in between.
 
 **Confirm who is calling before anything personal.** One job with a definite,
 typed answer: a task. `verify_customer` holds the one tool that looks the
-caller up, ends on that tool through `finish:`, and saves `customer_phone` and
-`customer_status` with `assign:`. The `customer_phone` variable carries
+caller up, ends on that tool through `finish:`, and saves `customer_phone`
+with `assign:`. The `customer_phone` variable carries
 `confirm: verify_customer`, so until this task has heard the caller agree, the
 number reaches no other prompt and every tool that needs it refuses. The task
 keeps a `when:` of its own for one case only: the caller correcting their phone
@@ -193,11 +193,13 @@ Three things follow from the group.
 **Hand a complaint to someone who needs a different tool list and a refund
 policy the booking agent should never see.** A different role with different
 permissions, not another task in the same role: a handoff. `to_complaints`
-moves the caller to `complaint_specialist`, whose `handle_complaint` task alone
-holds `record_complaint`, and who alone reads the refund knowledge base through
-`look_up_refund_policy`. `to_concierge` carries the reverse direction. The
-specialist does not list `verify_customer`: only the concierge verifies, and
-every tool that needs the number refuses while it is unconfirmed.
+moves the caller to `complaint_specialist`, who alone holds `record_complaint`
+and alone reads the refund knowledge base through `look_up_refund_policy`.
+Recording a complaint is one action, not an ordered step, so it sits directly
+on the specialist rather than behind a task. `to_concierge` carries the
+reverse direction. The specialist does not list `verify_customer`: only the
+concierge verifies, and every tool that needs the number refuses while it is
+unconfirmed.
 
 What is left over goes to a person. A caller who asks for a manager reaches
 `to_manager`, a cold transfer, not any of the four shapes above. Both agents

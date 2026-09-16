@@ -205,7 +205,7 @@ prefetch assignment.
 
 ```yaml agent.yaml
 variables:
-  customer_name:
+  caller_name:
     type: str
     source: call_start
     default: there
@@ -213,7 +213,7 @@ variables:
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi {{customer_name}}, how can I help?"
+    text: "Hi {{caller_name}}, how can I help?"
 ```
 
 <Warning>
@@ -294,11 +294,11 @@ the whole list:
 
 ```yaml agent.yaml
 variables:
-  complaints:
+  notes:
     type: list[str]
 
 assign:
-  - complaints+: result.complaint
+  - notes+: result.note
 ```
 
 Appending skips `null` and skips an identical structured item. See
@@ -380,7 +380,7 @@ saved result, and choosing one record or a list, see
 Sometimes the tool needs a value the model does not need to read or type. Use
 `inject:` for that argument:
 
-```yaml tools/check_availability.yaml
+```yaml tools/check_slots.yaml
 input:
   type: object
   properties:
@@ -391,7 +391,7 @@ input:
 inject:
   - service: "{{requested_service}}"
 local:
-  handler: tools/check_availability.py
+  handler: tools/check_slots.py
 ```
 
 The model supplies `date`. The handler receives both `date` and the current
@@ -409,7 +409,7 @@ messages can still contain it. See
 ### Try it locally
 
 ```sh
-unmute dev my-agent --var customer_name=Priya
+unmute dev my-agent --var caller_name=Priya
 ```
 
 `--var` works for a declared variable with `source: call_start` or no `source:`

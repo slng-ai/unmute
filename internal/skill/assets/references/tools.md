@@ -5,10 +5,10 @@ the model calls it. Both live in one file, `tools/<name>.yaml`.
 
 ## The shape of a tool file
 
-```yaml tools/check_availability.yaml
+```yaml tools/find_slots.yaml
 description: >-
-  List Sage and Stone slots for one service and date. Call only after customer
-  identification succeeds. This tool accepts only service and date.
+  List Sage and Stone slots for one service and date, and the caller's own
+  bookings. Call this before offering a time and before changing a booking.
 
 input:
   type: object
@@ -22,12 +22,9 @@ input:
     date:
       type: string
       description: Preferred date in YYYY-MM-DD form
-  required:
-    - service
-    - date
 
 local:
-  handler: tools/check_availability.py
+  handler: tools/find_slots.py
 ```
 
 The top is the contract. `description` and `input` are everything the model
@@ -694,7 +691,7 @@ Every `tools:` entry in `agent.yaml` is a string name:
 
 ```yaml agent.yaml
 tools:
-  - check_availability
+  - check_slots
   - end_call
 
 agents:
@@ -703,7 +700,7 @@ agents:
     think: reasoning
     speak: voice
     tools:
-      - check_availability
+      - check_slots
       - end_call
 ```
 
@@ -717,7 +714,7 @@ agents:
       - name: find_slot
         instructions: tasks/find-slot.md
         tools:
-          - check_availability
+          - check_slots
 ```
 
 The agent and task lists are visibility scopes. Attach a tool only where it is
@@ -735,8 +732,9 @@ all, and nothing complains. When a tool is never offered, check that list first.
 
 Splitting tool lists is how you make a wrong action impossible rather than
 discouraged. In `examples/salon-concierge`, only the booking task holds
-`cancel_booking`, so no caller can talk the entry agent into a cancellation
-without going through the step that checks who they are.
+`save_booking`, so no caller can talk the entry agent into booking, moving, or
+cancelling an appointment without going through the step that checks who they
+are.
 
 ## Choosing a kind, from a plain English ask
 

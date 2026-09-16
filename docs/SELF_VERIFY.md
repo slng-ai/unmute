@@ -70,8 +70,14 @@ a router think binding:
 ./bin/unmute compile examples/salon-concierge --target livekit
 SLNG_API_KEY=... OPENAI_API_KEY=... \
   python3 scripts/replay_router_scopes.py examples/salon-concierge \
-    --first concierge --second booking_specialist --summary
+    --first concierge --second complaint_specialist --summary
 ```
+
+`salon-concierge`'s think model moved to native Google Vertex, so it no longer
+routes through the SLNG Context Router: this exact command now exits with
+"this target has no SLNG Context Router think binding to replay". Point the
+script at whichever package still declares a router think binding before
+using it to reproduce a router defect.
 
 ### Change exactly one variable
 

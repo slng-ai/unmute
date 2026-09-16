@@ -162,7 +162,7 @@ General behaviour goes in the prompt. Per tool prose goes in the tool's own
 ```
 
 **Name a tool by what it does, not by its name.** Writing "call
-`check_availability`" in the prompt lets the model say that string, and the
+`check_slots`" in the prompt lets the model say that string, and the
 speech model will read it out character by character. Write "check what is free"
 instead.
 

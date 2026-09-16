@@ -183,14 +183,13 @@ made. The saving grows with the number of tasks a call runs through.
       - name: manage_booking
         instructions: tasks/booking.md
         tools:
-          - check_availability
-          - create_booking
-          - cancel_booking
+          - find_slots
+          - save_booking
         finish:
-          - tool: create_booking
+          - tool: save_booking
             success:
               - status: booked
-          - tool: cancel_booking
+          - tool: save_booking
             success:
               - status: cancelled
         assign:
@@ -312,7 +311,7 @@ on SLNG are coming.
       - name: reschedule_booking
         instructions: tasks/reschedule-booking.md
         tools:
-          - modify_booking
+          - save_booking
         context:
           history: reset
 ```

@@ -205,7 +205,7 @@ agents:
     think: reasoning
     speak: voice
     tools:
-      - check_availability
+      - check_slots
 ```
 
 | Field | What it is |

@@ -527,7 +527,10 @@ func TestPipecatHydratesASystemSourceVariable(t *testing.T) {
 //
 // This compiled before this feature and nothing in the repository showed it, so
 // an author had no reason to believe a second line was legal. The gate is here
-// because the example that shows it can be tidied away.
+// because the example that shows it can be tidied away, and it was: the shipped
+// salon dropped its `profile` entry when the two variables it filled turned out
+// to be read by no prompt in the package. salon-concierge-v3 fills two from one
+// local lookup and is where this property now lives.
 func TestPrefetchFillsTwoVariablesFromOneCall(t *testing.T) {
 	for _, tc := range []struct {
 		provider ir.Provider
@@ -537,27 +540,27 @@ func TestPrefetchFillsTwoVariablesFromOneCall(t *testing.T) {
 		{ir.ProviderPipecat, "bot.py"},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
-			agent := salonAgent(t)
+			agent := loadExample(t, "salon-concierge-v3")
 			artifact, err := Generate(agent, targetByProvider(t, agent, tc.provider), target.Default())
 			if err != nil {
 				t.Fatal(err)
 			}
 			block := prefetchBlockOf(t, artifactFile(t, artifact, tc.file))
-			// One call. The salon's lookup is a local handler, so the invocation is
+			// One call. The lookup is a local handler, so the invocation is
 			// `tools.<name>.<name>(...)`: counting the bare name would count the
 			// module, the function and the entry's own comment.
 			if got := strings.Count(block, "handler = tools.look_up_customer.look_up_customer"); got != 1 {
 				t.Errorf("the block invokes look_up_customer %d times, want 1", got)
 			}
 			// Two variables written from it.
-			for _, name := range []string{"customer_name", "customer_on_file"} {
+			for _, name := range []string{"customer_id", "customer_name"} {
 				if !strings.Contains(block, `"`+name+`": _prefetch_bounded(`) {
 					t.Errorf("%s is not written by the lookup entry", name)
 				}
 			}
 			// And both are named in the one log line, so a trace can answer
 			// whether the second landed.
-			if !strings.Contains(block, "prefetch profile: resolved customer_name, customer_on_file") {
+			if !strings.Contains(block, "prefetch profile: resolved customer_name, customer_id") {
 				t.Error("the entry's log line does not name both variables it assigned")
 			}
 		})

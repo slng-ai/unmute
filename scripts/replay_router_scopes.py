@@ -23,7 +23,7 @@ Usage
 -----
     ./bin/unmute compile examples/salon-concierge --target livekit
     python3 scripts/replay_router_scopes.py examples/salon-concierge \\
-        --first concierge --second booking_specialist --family try1
+        --first concierge --second complaint_specialist --family try1
 
 Needs SLNG_API_KEY and the upstream's key (OPENAI_API_KEY for an openai
 upstream) in the environment. Reads nothing from a file but the build output.

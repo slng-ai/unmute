@@ -82,7 +82,7 @@ session.
 | `targets.yaml` | the two targets, one per telephony plane |
 | `instructions.md` | the concierge prompt |
 | `agents/complaint-specialist.md` | the customer care prompt |
-| `tasks/` | the verification, booking, confirmation contact and complaint task prompts |
+| `tasks/` | the verification and booking step prompts |
 | `tools/` | one file per tool: local Python over one in-memory store, plus the `end_call` builtin |
 | `knowledge/refunds/`, `knowledge/services/` | two document sets, each its own index |
 | `connections/` | the two carrier connections |
@@ -94,13 +94,16 @@ call. Customer care is a second agent because it holds a document set and a
 permission the concierge must not have: the refund policy and the complaint
 record.
 
-**Four tasks, two of them steps of the booking group.**
-Verification confirms who is calling.
-Booking does create, modify and cancel in one task and saves a typed Appointment.
-Taking the confirmation contact is its own step, so a caller who does not want an
-email never has to give one and a booking is never held up by a missing address.
-Customer care records complaints in its own task and appends typed Complaint
-values. It does not verify anyone: see "One agent verifies" below.
+**Two tasks, and both are steps of the booking group.** Verification confirms
+who is calling. Booking does book, move and cancel in one task and saves a typed
+Appointment.
+
+A task is worth a model request when something has to happen in an order.
+Verification before a write is that; filing a complaint is not, so
+`record_complaint` sits on customer care as an ordinary tool. Entering a task
+costs one model request whatever the task does, and that request speaks no
+words, so a task wrapped around a single action is a silence the caller pays
+for.
 
 **One agent verifies.** `verify_customer` is on the concierge and nowhere else.
 A task within reach beats a prompt rule, so the task is not listed on the
@@ -109,8 +112,8 @@ that needs the number refuses while it is unconfirmed, so the gate is still
 there, and `to_concierge` is the way back to the agent that verifies.
 
 **One agent asks for agreement.** The specialist says the complaint back and
-asks once; `handle_complaint` records what was agreed and asks nothing. Both
-asking cost the caller a whole turn to learn nothing.
+asks once, then calls `record_complaint` with what was agreed. The tool speaks
+its own fixed line as it starts, so the prompt adds none of its own.
 
 ## The booking flow
 
@@ -122,30 +125,61 @@ booking on the same call goes straight to the booking step; a caller who
 corrects their number gets verification again, because entering that step
 withdraws the confirmation it made.
 
-**Three steps end on their own tools.** `verify_customer` names its lookup
-under `finish:`, `manage_booking` names its three mutations, and
-`handle_complaint` names `record_complaint`. When one of those returns a result
+**Both steps end on their own tools.** `verify_customer` names its lookup
+under `finish:`, and `manage_booking` names `save_booking` once, with its three
+successful statuses listed under the one `status:` field. Written as three
+entries naming the same tool it used to compile to the last one alone, so an
+ordinary booking left the step open; that shape is refused now. When one of
+those returns a result
 the package calls a success, the step saves its `assign:` from that result and
 hands over, with no model request in between and without the result reaching
 the model. A result that is not a success, a `not_confirmed` or a
-`slot_unavailable`, goes back to the model and the step stays open.
+`slot_taken`, goes back to the model and the step stays open.
 
 Together, the group and `finish:` take the model out of the seams. The group
 means the concierge makes one call and never chooses between the two steps, and
 `finish:` removes the model request between a tool succeeding and the hand-over
 that follows it, on both steps. The one request left on the turn that books is
-the concierge saying it is done. Recording a complaint loses its `finish` call
-the same way.
+the concierge saying it is done.
 
-Each of those tools returns the record it saved, whole, on success:
-`create_booking` returns the `appointment` and `record_complaint` returns the
-`complaint`. That is what makes the step's `assign:` possible without the
-model, and it is the reason the model can never retype an id it was handed.
+`save_booking` returns the record it saved, whole, on success: the
+`appointment`, complete. That is what makes the step's `assign:` possible
+without the model, and it is the reason the model can never retype an id it was
+handed.
 
-**Two rules live in the booking backend, not the prompt.** `create_booking`
+**One read tool and one write tool.** `find_slots` answers what the caller
+already holds and what is free in one call, because a caller moving an
+appointment needs their booking id and the new day's free times in the same
+breath. Asking for those separately cost two model round trips for one request.
+`save_booking` is the only tool that changes anything, so the caller's yes is
+checked in one place.
+
+**One line covers the wait.** The `book` group speaks a fixed sentence as it
+starts, and nothing else in the flow speaks one. That covers the longest silence
+in the call: on a live LiveKit call, about 2.6 seconds between the caller
+finishing their request and hearing anything, because the delegate call and the
+verification turn are two model requests back to back.
+
+Three lines were tried and each of the other two was a different mistake. The
+`manage_booking` step's own line never reached the caller at all, because a
+task's `announce:` is spoken only under `opening: listen` and this step opens on
+a generated turn. Moving it onto `find_slots` made it audible and made it
+collide: on the second booking of a call, verification is skipped, so the
+group's line and the tool's landed back to back with one model request between
+them. And `save_booking`'s line was a promise the tool could break, because an
+`announce:` is spoken when a tool is called and this one refuses a save that
+arrives unconfirmed. The caller heard "putting that through now" and then a
+question asking their permission.
+
+The hesitation a person actually makes before answering rides on the answer
+instead. The booking prompt opens its first sentence with a written "hmm" or
+"okay", which the voice reads as thinking, and which costs no speech of its own
+and no extra request.
+
+**Two rules live in the booking backend, not the prompt.** `save_booking`
 refuses with `has_booking` while the caller already holds one, unless the model
 passes `additional` because the caller asked for another appointment. A change
-to a booking is `modify_booking`, and a prompt rule alone does not stop a model
+to a booking is `action: move`, and a prompt rule alone does not stop a model
 from answering "move it" with a second booking. And a slot earlier than the
 salon's own clock today is not offered and not accepted.
 
@@ -157,29 +191,30 @@ and assistant speech available at entry, without tool calls and results.
 Returning from a task restores the owner's earlier conversation and gives only
 a completed or unserved status. It does not copy the task's conversation back.
 
-**Typed values shared on purpose.** Verification saves `customer_status` so both
-agents know it already happened. Booking saves `appointment` only after a create,
-move or cancellation succeeds. The owner and customer care read those values
-through explicit prompt references, including `{{appointment}}`, so a later
-complaint can refer to the updated date without asking again. Tools inject the
-confirmed phone number. No value is automatically added to a prompt.
+**Typed values shared on purpose.** Booking saves `appointment` only after a
+book, move or cancellation succeeds. The owner and customer care read it through
+explicit prompt references, so a later complaint can refer to the updated date
+without asking again. Tools inject the confirmed phone number. No value is
+automatically added to a prompt.
 
-**An email address checked where it enters.** `confirmation_contact` is a
-`NameEmail`, which holds the name and the address as two fields, so the agent can
-say whose name the booking is under without reading an address out loud.
-`confirmation_email` is an `EmailStr` taken off that pair with a dotted
-assignment, so the caller spells the address out once and both values are filled
-from the one answer. The address is checked by `email-validator`, which the two
-emitted projects declare because this package uses the types, and the check never
-asks DNS: it runs while the caller is on the line.
+**Five variables, and each one is read somewhere.** A saved value costs a task
+to write and a line in every prompt that names it, so a value nothing reads is
+pure cost. This package used to carry a `customer_status` that only ever said
+what `confirm:` already enforced, and a name and an on-file flag that no prompt
+mentioned at all. They are gone. See
+[choosing fewer variables](https://unmute.ai/build/variables#keep-only-the-values-the-call-needs).
 
 ## Before the greeting
 
 **Facts resolved before the greeting.** The `prefetch:` block reads the date,
 the weekday and the salon's local time off one clock reading, and the caller's
-number off the call, then looks up the caller's name and whether they are on
-file, both from that one lookup. Nothing in the block can fail a call: an
-entry whose inputs are empty is skipped and the values keep their defaults.
+number off the call. Nothing in the block can fail a call: an entry whose
+inputs are empty is skipped and the values keep their defaults.
+
+No entry runs a tool, and that is deliberate. A pre-fetch runs unasked on every
+inbound call, so an entry nothing reads costs the caller time on every wrong
+number that ever rings. `salon-concierge-v3` keeps a tool-bearing entry if you
+want to see one.
 
 ## The manager transfer and the knowledge bases
 
@@ -288,7 +323,7 @@ unmute dev examples/salon-concierge --source from_number=<E.164 number>
 
 ### The agent will not book a second appointment
 
-That rule is in the booking backend, not the prompt. `create_booking` refuses
+That rule is in the booking backend, not the prompt. `save_booking` refuses
 while the caller already holds a booking, unless the caller has asked for another
 appointment as well as the one they have.
 

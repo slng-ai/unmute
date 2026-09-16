@@ -176,15 +176,18 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 			t.Errorf("task %q history = %q, want messages", name, task.Context.History)
 		}
 	}
+	// Both agents read the saved appointment, so neither asks the caller to
+	// repeat what was just booked. customer_status is deliberately not here:
+	// the variable existed so a prompt could say "verification status: existing",
+	// which told the model nothing `confirm:` was not already enforcing, and it
+	// cost a line in every prompt that carried it.
 	for _, name := range []string{"concierge", "complaint_specialist"} {
-		for _, variable := range []string{"customer_status", "appointment"} {
-			if !slices.Contains(ir.TemplateRefs(resolved.Agents[name].Instructions), variable) {
-				t.Errorf("%s cannot read saved %s, so it would ask the caller again", name, variable)
-			}
+		if !slices.Contains(ir.TemplateRefs(resolved.Agents[name].Instructions), "appointment") {
+			t.Errorf("%s cannot read the saved appointment, so it would ask the caller again", name)
 		}
 	}
-	if !slices.Contains(ir.TemplateRefs(resolved.Tasks["handle_complaint"].Instructions), "appointment") {
-		t.Error("the complaint task cannot read the latest saved appointment")
+	if _, declared := resolved.Variables["customer_status"]; declared {
+		t.Error("customer_status is declared again; confirm: on customer_phone is what gates the write")
 	}
 
 	// The entry agent holds the escalation control directly, so a caller who
@@ -309,14 +312,24 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if group.Steps[0].SkipWhenConfirmed != "customer_phone" {
 		t.Errorf("verification is not skippable: %+v; a second booking would ask for the number again", group.Steps[0])
 	}
-	// The one task has to reach every step it absorbed: read the diary, resolve a
-	// relative date, offer times, and write exactly one of the three mutations.
-	for _, want := range []string{
+	// One read and one write, and the seam is the conversation's own: find_slots
+	// answers "what do they hold" and "what is free" together, because a caller
+	// moving an appointment needs their booking id and the new day's free times
+	// in the same breath, and fetching those separately cost two model round
+	// trips for one request. save_booking is the only tool that changes
+	// anything, so `confirmed` is checked in one place.
+	if !slices.Equal(slices.Sorted(slices.Values(booking.Tools)), []string{"find_slots", "save_booking", "to_complaints"}) {
+		t.Errorf("booking tools = %v, want one read, one write and the complaints handoff", booking.Tools)
+	}
+	// The five narrower booking tools are gone, not merely unlisted: each one the
+	// model could still see was a name it had to choose between, and a package an
+	// author copies should not show five tools where two do the work.
+	for _, merged := range []string{
 		"list_bookings", "check_availability",
 		"create_booking", "modify_booking", "cancel_booking",
 	} {
-		if !slices.Contains(booking.Tools, want) {
-			t.Errorf("booking tools = %v, want %q", booking.Tools, want)
+		if _, declared := resolved.Tools[merged]; declared {
+			t.Errorf("%q is still declared; find_slots and save_booking replaced it", merged)
 		}
 	}
 	// Resolving a relative date is no longer a tool call. get_current_date was a
@@ -330,7 +343,7 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if _, declared := resolved.Tools["get_current_date"]; declared {
 		t.Error("get_current_date is still declared; the prefetch replaced it")
 	}
-	var clock, caller, profile bool
+	var clock, caller bool
 	for _, entry := range resolved.Prefetch {
 		if entry.Clock == ir.PrefetchClockNow {
 			clock = true
@@ -347,31 +360,29 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 			}
 		}
 		caller = caller || entry.Source == ir.VariableSourceFromNumber
-		profile = profile || entry.Tool == "look_up_customer"
 	}
-	if !clock || !caller || !profile {
-		t.Errorf("prefetch = %+v, want a clock entry, a from_number entry and a look_up_customer entry", resolved.Prefetch)
+	if !clock || !caller {
+		t.Errorf("prefetch = %+v, want a clock entry and a from_number entry", resolved.Prefetch)
 	}
-	// The lookup a prefetch runs has to be the one that writes nothing, and the
-	// entry running it has to say so. Pre-fetching find_or_create_customer would
-	// create a customer record on every inbound call, wrong numbers included,
-	// which is the reason both tools exist and why the split survived `writes:`
-	// arriving: the shipped example an author copies should not model it.
-	var declared bool
+	// No entry runs a tool, and that is the point. The salon used to pre-fetch
+	// look_up_customer on every inbound call to fill customer_name and
+	// customer_on_file, and no prompt in the package read either: a lookup on
+	// every wrong number that ever rang, for two values nothing rendered. A
+	// pre-fetch runs unasked, so an entry nothing reads is the one kind of dead
+	// code that costs the caller time. salon-concierge-v3 keeps a tool-bearing
+	// entry, and TestPrefetchFillsTwoVariablesFromOneCall holds it there.
 	for _, entry := range resolved.Prefetch {
-		if entry.Tool != "look_up_customer" {
-			continue
+		if entry.Tool != "" {
+			t.Errorf("prefetch entry %q runs %q; every value this package pre-fetches is a clock "+
+				"reading or a carrier fact, and no prompt reads anything a lookup would add",
+				entry.Name, entry.Tool)
 		}
-		declared = true
-		if entry.Writes {
-			t.Error("the salon pre-fetches look_up_customer and declares writes: true; that entry reads")
-		}
-	}
-	if !declared {
-		t.Error("no prefetch entry runs look_up_customer, so nothing declares whether the lookup writes")
 	}
 	if _, ok := resolved.Tools["find_or_create_customer"]; !ok {
-		t.Error("find_or_create_customer is gone; it is the writing twin the pre-fetched lookup exists to avoid")
+		t.Error("find_or_create_customer is gone; it is what the verification step ends on")
+	}
+	if _, ok := resolved.Tools["look_up_customer"]; ok {
+		t.Error("look_up_customer is still declared; nothing calls it since the profile entry went")
 	}
 	if got := slices.Sorted(maps.Keys(booking.Result)); !slices.Equal(got, []string{"appointment"}) {
 		t.Errorf("booking result = %v, want the typed appointment saved after success", got)
@@ -386,36 +397,62 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if got := resolved.Tasks["verify_customer"].EndsOnTools(); !slices.Equal(got, []string{"find_or_create_customer"}) {
 		t.Errorf("verify_customer ends on %v, want its lookup", got)
 	}
-	if got := booking.EndsOnTools(); !slices.Equal(got, []string{"cancel_booking", "create_booking", "modify_booking"}) {
-		t.Errorf("manage_booking ends on %v, want its three mutations", got)
+	// One write tool, one entry, and all three of its successes end the step.
+	// Written as three entries the compiler kept only the last, so an ordinary
+	// booking left the step open and spent a model request calling `finish`;
+	// that shape is refused now, and this holds the shape that replaced it.
+	if got := booking.EndsOnTools(); !slices.Equal(got, []string{"save_booking"}) {
+		t.Errorf("manage_booking ends on %v, want its one write tool", got)
 	}
-	// The clock tool's input and output schema used to be pinned here. Its
-	// replacement has no schema to pin: the clock is not a tool. What is worth
-	// pinning is the shape the lookup returns, because the prefetch's assign:
-	// names a field of it and a renamed field is a refusal rather than a silence.
-	prefetched, ok := resolved.Tools["look_up_customer"]
+	if len(booking.Finish) != 1 {
+		t.Fatalf("manage_booking has %d finish entries, want one naming save_booking", len(booking.Finish))
+	}
+	if got := booking.Finish[0].Success["status"]; !slices.Equal(got, []string{"booked", "moved", "cancelled"}) {
+		t.Errorf("save_booking succeeds on %v, want all three actions", got)
+	}
+	// find_slots returns the caller's own bookings whatever it was asked, which
+	// is what lets one call replace the list-then-check pair. A booking id the
+	// model cannot get here is a booking it cannot move or cancel, and the only
+	// other place it could get one is from speech, where the prompts keep ids
+	// silent on purpose.
+	read, ok := resolved.Tools["find_slots"]
 	if !ok {
-		t.Fatal("tools omit look_up_customer")
+		t.Fatal("tools omit find_slots")
 	}
-	prefetchedOutput, ok := prefetched.Output["properties"].(map[string]any)
+	readOutput, ok := read.Output["properties"].(map[string]any)
 	if !ok {
-		t.Fatalf("look_up_customer output properties = %#v, want object", prefetched.Output["properties"])
+		t.Fatalf("find_slots output properties = %#v, want object", read.Output["properties"])
 	}
-	nameProperty, ok := prefetchedOutput["name"].(map[string]any)
-	if !ok || nameProperty["type"] != "string" {
-		t.Errorf("look_up_customer name output = %#v, want string", prefetchedOutput["name"])
-	}
-	if prefetched.Execution != ir.ToolLocal {
-		t.Errorf("look_up_customer execution = %q; a prefetch runs webhook and local tools", prefetched.Execution)
-	}
-	for _, name := range []string{"create_booking", "modify_booking", "cancel_booking"} {
-		tool := resolved.Tools[name]
-		properties := tool.Input["properties"].(map[string]any)
-		confirmed := properties["confirmed"].(map[string]any)
-		required := tool.Input["required"].([]any)
-		if confirmed["type"] != "boolean" || !slices.Contains(required, any("confirmed")) {
-			t.Errorf("tool %q must require boolean confirmed: %#v", name, tool.Input)
+	for _, want := range []string{"bookings", "slots"} {
+		if _, carried := readOutput[want]; !carried {
+			t.Errorf("find_slots returns no %q; one read has to answer what they hold and what is free", want)
 		}
+	}
+	if read.Execution != ir.ToolLocal {
+		t.Errorf("find_slots execution = %q, want local", read.Execution)
+	}
+	// The write still refuses an unconfirmed change, and now in one place rather
+	// than three. `confirmed` is the caller's yes, and the backend is where that
+	// rule holds: a live call proved the prompt alone does not.
+	write := resolved.Tools["save_booking"]
+	writeProperties, ok := write.Input["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("save_booking input properties = %#v, want object", write.Input["properties"])
+	}
+	confirmed, ok := writeProperties["confirmed"].(map[string]any)
+	if !ok || confirmed["type"] != "boolean" {
+		t.Errorf("save_booking confirmed = %#v, want boolean", writeProperties["confirmed"])
+	}
+	writeRequired, ok := write.Input["required"].([]any)
+	if !ok || !slices.Contains(writeRequired, any("confirmed")) || !slices.Contains(writeRequired, any("action")) {
+		t.Errorf("save_booking must require action and confirmed: %#v", write.Input)
+	}
+	action, ok := writeProperties["action"].(map[string]any)
+	if !ok {
+		t.Fatalf("save_booking action = %#v, want an object", writeProperties["action"])
+	}
+	if got, want := action["enum"], []any{"book", "move", "cancel"}; !slices.Equal(got.([]any), want) {
+		t.Errorf("save_booking action enum = %#v, want %v", got, want)
 	}
 
 	requireText := func(name, text string, wants ...string) {
@@ -445,18 +482,26 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		}
 	}
 
-	// The caller hears the booking once, not twice. The task's confirmation
-	// question has to restate the service, the day and the time, because it is
-	// the yes-gate and nothing said before it counts as a yes. That makes the
-	// relay afterwards the redundant one, so the relay is what stays short.
-	// Heard on a live call on 2026-08-24: "haircut at 15" in the confirmation
-	// question and again in the outcome. Both halves are held, because either
-	// one drifting alone brings the repetition back.
+	// The caller hears the booking exactly once: never twice, and never not at
+	// all. Two live calls, one per failure mode, and the rule has to hold both.
+	// On 2026-08-24 the relay repeated the confirmation question's own words:
+	// "haircut at 15" in the yes-gate and again in the outcome. So the relay was
+	// made unconditionally short, and on 2026-09-16 a LiveKit call went straight
+	// from the caller's agreement to the save with no confirmation question,
+	// then ended on "You're all set, have a great day." and hung up. The caller
+	// was never told what had been booked, at all.
+	//
+	// Neither "always restate" nor "never restate" survives both. The relay is
+	// conditional instead, and the condition is readable: the group is
+	// context_scope: shared, so the booking step's turns are in the owner's
+	// context when it speaks. Both halves are held, because either one drifting
+	// alone brings one of the two calls back.
 	requireText("concierge", resolved.Agents["concierge"].Instructions,
-		"confirm it in one short sentence without repeating the service, the day and the time")
+		"say\n   the day and the time only when that exchange did not already settle them out\n   loud",
+		"exactly once in the call,\n   never twice and never not at all")
 	requireText("booking task", resolved.Tasks["manage_booking"].Instructions,
 		"Say the whole thing back in one sentence and ask one yes-or-no question",
-		"does not repeat the details")
+		"so say nothing here that would make it the second time they hear it")
 
 	// One placeholder, in the one prompt that says the value. The compiler sends
 	// the union of every name any prompt on the think profile references, so an

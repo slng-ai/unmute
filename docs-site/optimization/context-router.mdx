@@ -386,9 +386,9 @@ through to OpenRouter.
 
 No shipped example binds to the router today.
 [`examples/salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)
-reaches OpenAI directly, which makes it a starting point rather than a finished
-demonstration. It has several prompt sites, so pointing its think binding at
-the router gives you one scope per site to look at.
+reaches Google Vertex directly, which makes it a starting point rather than a
+finished demonstration. It has several prompt sites, so pointing its think
+binding at the router gives you one scope per site to look at.
 
 To see the router's own contribution on your own agent, compile it once with
 the think profile bound directly to the upstream vendor and once bound to the
@@ -467,8 +467,8 @@ model, same param, two different failures, and neither is a reason to set it.
 
 A prompt that names the caller is different on every call, which would mean
 nothing ever repeats. So a router-bound prompt keeps its placeholders, for
-example `{{customer_name}}` in an instructions file with a matching
-`customer_name` variable. The router receives the prompt with the placeholder
+example `{{caller_name}}` in an instructions file with a matching
+`caller_name` variable. The router receives the prompt with the placeholder
 intact, plus a map of this call's values, and substitutes them itself. Every
 call sends the same prompt, so turns can still repeat. This applies to the
 system prompt only; greetings, tool arguments, injected values, and webhook

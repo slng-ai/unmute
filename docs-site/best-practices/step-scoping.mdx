@@ -27,36 +27,36 @@ If the owner already holds every tool the task holds, the owner can finish the
 job without entering the task. It usually will. The task's `assign:` then never
 runs and nothing is saved.
 
-This is the shape that produces it. A complaint specialist declared:
+This is the shape that produces it. A scheduling desk declared:
 
 ```yaml agent.yaml
-complaint_specialist:
+scheduling_desk:
   tools:
-    - look_up_refund_policy
-    - record_complaint          # also the task's only tool
+    - look_up_hours
+    - book_appointment          # also the task's only tool
   tasks:
-    - name: handle_complaint
+    - name: take_booking
       tools:
-        - record_complaint
+        - book_appointment
       assign:
-        - complaints+: result.complaint
+        - appointment: result.appointment
 ```
 
-The specialist records the complaint itself, because the tool is in its own
-list, and `complaints` stays empty. The prompt is not the fix. A workflow that
-says "then run the complaint task in the same turn" is a request to the model,
-and a tool within reach beats a request.
+The desk books the appointment itself, because the tool is in its own list,
+and `appointment` stays empty. The prompt is not the fix. A workflow that says
+"then run the booking task in the same turn" is a request to the model, and a
+tool within reach beats a request.
 
 The fix is to take the tool off the owner and leave it on the task:
 
 ```yaml agent.yaml
-complaint_specialist:
+scheduling_desk:
   tools:
-    - look_up_refund_policy
+    - look_up_hours
   tasks:
-    - name: handle_complaint
+    - name: take_booking
       tools:
-        - record_complaint
+        - book_appointment
 ```
 
 <Note>
@@ -94,7 +94,7 @@ clause, what has to be true first:
 
 ```yaml agent.yaml
       - name: manage_booking
-        when: The caller wants to create, modify, or cancel a booking, once the caller is verified.
+        when: The caller wants to book, move, or cancel an appointment, once the caller is verified.
 ```
 
 The model has something real to check that clause against when the owner's
@@ -136,15 +136,15 @@ model to make the `finish` call. A result that is not a success goes back to
 the model and the task stays open.
 
 ```yaml agent.yaml
-    - name: handle_complaint
+    - name: take_booking
       tools:
-        - record_complaint
+        - book_appointment
       finish:
-        - tool: record_complaint
+        - tool: book_appointment
           success:
-            - status: recorded
+            - status: booked
       assign:
-        - complaints+: result.complaint
+        - appointment: result.appointment
 ```
 
 The tool has to declare the success values in its output `enum:`, and every

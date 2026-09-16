@@ -16,7 +16,7 @@ by `context.history`.
 
 ```yaml agent.yaml
 variables:
-  customer_name:
+  caller_name:
     type: string
     source: call_start
     default: there
@@ -297,13 +297,13 @@ prefetch:
       - customer_phone: result.value
 
   - name: profile
-    tool: look_up_customer
+    tool: look_up_account
     writes: false
     args:
       - phone: "{{customer_phone}}"
     assign:
-      - customer_name: result.name
-      - customer_on_file: result.status
+      - account_name: result.name
+      - account_on_file: result.status
 ```
 
 `profile` assigns two variables from one lookup. An entry can `assign:` as
@@ -522,7 +522,7 @@ step](/best-practices/context-scope) to choose exactly what crosses a boundary.
 ## Seeding values locally
 
 ```sh
-unmute dev ./agent --var customer_name=Ada --var customer_id=cus_2002
+unmute dev ./agent --var caller_name=Ada --var customer_id=cus_2002
 ```
 
 Repeatable. Each value is parsed against the declared type, so an `integer`

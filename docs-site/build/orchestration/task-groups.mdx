@@ -42,7 +42,7 @@ agents:
       - name: select_appointment
         instructions: tasks/select-appointment.md
         tools:
-          - check_availability
+          - check_slots
         assign:
           - selected_slot: result.selected_slot
 

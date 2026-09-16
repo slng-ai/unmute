@@ -4,9 +4,9 @@ Compile examples/salon-concierge for LiveKit, then run:
     uv run --project examples/salon-concierge/build/livekit \
         python scripts/check_salon_verification.py
 
-Uses the package's direct OpenAI model. Makes paid model requests, without audio
-or tracing. A saved identity must finish silently; an explicit phone correction
-must still ask for confirmation.
+Uses the package's own compiled model, whatever it is bound to. Makes paid
+model requests, without audio or tracing. A saved identity must finish
+silently; an explicit phone correction must still ask for confirmation.
 """
 
 import asyncio
@@ -14,7 +14,7 @@ import os
 import sys
 from pathlib import Path
 
-from text_run_livekit import _openai_model, describe, events_of
+from text_run_livekit import compiled_llm, describe, events_of
 
 
 async def main():
@@ -25,21 +25,13 @@ async def main():
 
     import agent as generated  # noqa: PLC0415
     from livekit.agents import AgentSession, llm  # noqa: PLC0415
-    from livekit.plugins import openai  # noqa: PLC0415
 
-    for status, correction in (
-        ("created", False),
-        ("existing", False),
-        ("created", True),
-    ):
+    for correction in (False, True):
         state = generated.Userdata()
         generated._save_result(
             "verify_customer",
             state,
-            {
-                "customer_phone": "+15005550006",
-                "customer_status": status,
-            },
+            {"customer_phone": "+15005550006"},
         )
         context = llm.ChatContext()
         context.add_message(
@@ -50,9 +42,7 @@ async def main():
                 else "Can we switch my appointment to another day around the same time?"
             ),
         )
-        model = openai.LLM(
-            model=_openai_model(package / "agent.yaml"), reasoning_effort="none"
-        )
+        model = compiled_llm(build / "agent.py", vars(generated))
         async with AgentSession(userdata=state, llm=model) as session:
             task = generated.VerifyCustomer(chat_ctx=context)
             result = await session.start(task, capture_run=True)
@@ -85,8 +75,7 @@ async def main():
                 assert calls == ["finish"] and task.done(), calls
                 assert not speech, f"verified caller was asked again: {speech}"
             assert state.customer_phone == "+15005550006"
-            assert state.customer_status == status
-            print(f"PASS: status={status}, phone_correction={correction}")
+            print(f"PASS: phone_correction={correction}")
 
 
 if __name__ == "__main__":

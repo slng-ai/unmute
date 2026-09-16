@@ -3,6 +3,7 @@ package ir
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -142,6 +143,125 @@ func TestBuildLowersFinish(t *testing.T) {
 		t.Errorf("success = %v", task.Finish[0].Success)
 	}
 	if got := task.EndsOnTools(); len(got) != 1 || got[0] != "book_it" {
+		t.Errorf("EndsOnTools = %v", got)
+	}
+}
+
+// A finish entry a package writes and the compiler drops is the worst shape
+// this key has: nothing fails, the step simply stops ending on two of its three
+// successes. Both spellings of it are refused, and both messages say what to
+// write instead.
+//
+// Found by driving a real conversation: a package naming booked, moved and
+// cancelled in three entries ended its step on cancelled alone, so an ordinary
+// booking left the step open and spent a model request calling `finish`.
+func TestBuildRefusesAFinishEntryItWouldDrop(t *testing.T) {
+	const twoSuccesses = `  type: object
+  properties:
+    status:
+      type: string
+      enum:
+        - booked
+        - moved
+        - slot_unavailable
+    reference:
+      type: string
+  required:
+    - status
+    - reference
+`
+	for _, tc := range []struct {
+		name   string
+		finish string
+		want   string
+	}{
+		{
+			name: "the same tool twice",
+			finish: `        finish:
+          - tool: book_it
+            success:
+              - status: booked
+          - tool: book_it
+            success:
+              - status: moved
+`,
+			want: `finish names "book_it" twice`,
+		},
+		{
+			name: "the same field twice in one entry",
+			finish: `        finish:
+          - tool: book_it
+            success:
+              - status: booked
+              - status: moved
+`,
+			want: `finish on "book_it" names status twice`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg := finishPackage(t, finishVariables, `      - name: take_booking
+        when: The caller wants an appointment.
+        instructions: steps.md
+        tools:
+          - book_it
+          - look_up
+`+tc.finish+`        assign:
+          - booking_reference: result.reference
+`, twoSuccesses)
+			_, err := Build(pkg)
+			if err == nil {
+				t.Fatal("build accepted a finish entry it would have dropped")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// The shape those refusals point at compiles, and both alternatives survive.
+func TestBuildKeepsEveryAlternativeOnOneField(t *testing.T) {
+	const twoSuccesses = `  type: object
+  properties:
+    status:
+      type: string
+      enum:
+        - booked
+        - moved
+        - slot_unavailable
+    reference:
+      type: string
+  required:
+    - status
+    - reference
+`
+	pkg := finishPackage(t, finishVariables, `      - name: take_booking
+        when: The caller wants an appointment.
+        instructions: steps.md
+        tools:
+          - book_it
+          - look_up
+        finish:
+          - tool: book_it
+            success:
+              - status:
+                  - booked
+                  - moved
+        assign:
+          - booking_reference: result.reference
+`, twoSuccesses)
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	task := agent.Tasks["take_booking"]
+	if len(task.Finish) != 1 {
+		t.Fatalf("finish = %+v, want one entry", task.Finish)
+	}
+	if got := task.Finish[0].Success["status"]; !slices.Equal(got, []string{"booked", "moved"}) {
+		t.Errorf("success = %v, want both alternatives kept", got)
+	}
+	if got := task.EndsOnTools(); !slices.Equal(got, []string{"book_it"}) {
 		t.Errorf("EndsOnTools = %v", got)
 	}
 }

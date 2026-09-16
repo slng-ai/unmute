@@ -22,7 +22,8 @@ type TerminalTool struct {
 }
 
 // EndsOnTools names the tools this task ends on, sorted, for the report and the
-// runbook. Derived rather than stored: two copies of one fact drift.
+// runbook. Derived rather than stored: two copies of one fact drift. One tool
+// appears once, because terminalTools refuses a second entry naming it.
 func (t Task) EndsOnTools() []string {
 	names := make([]string, 0, len(t.Finish))
 	for _, entry := range t.Finish {
@@ -46,7 +47,18 @@ func terminalTools(taskName string, raw packagespec.Task, agent *Agent, result m
 		return nil, nil
 	}
 	out := make([]TerminalTool, 0, len(raw.Finish))
+	named := map[string]bool{}
 	for _, entry := range raw.Finish {
+		// One entry per tool. A second one used to be accepted and then reduced
+		// to whichever was written last, because the generator keys its success
+		// conditions by tool: a package naming booked, moved and cancelled in
+		// three entries ended its step on cancelled alone, and the two dropped
+		// values failed nothing and appeared nowhere.
+		if named[entry.Tool] {
+			return nil, fmt.Errorf("finish names %q twice in %q; write one entry for it and list the alternatives under the field, as `- status:` with a value per line",
+				entry.Tool, taskName)
+		}
+		named[entry.Tool] = true
 		if !slices.Contains(raw.Tools, entry.Tool) {
 			return nil, fmt.Errorf("finish names %q, which %q does not list under tools:; add it there or name one it has",
 				entry.Tool, taskName)
@@ -67,6 +79,12 @@ func terminalTools(taskName string, raw packagespec.Task, agent *Agent, result m
 					return nil, fmt.Errorf("%s never returns %s: %s; it declares %s",
 						entry.Tool, pair.Field, value, strings.Join(declared, ", "))
 				}
+			}
+			// Same reason as the per-tool check above: a second pair on one
+			// field overwrote the first rather than widening it.
+			if _, twice := success[pair.Field]; twice {
+				return nil, fmt.Errorf("finish on %q names %s twice; list its alternatives under one `- %s:` instead, a value per line",
+					entry.Tool, pair.Field, pair.Field)
 			}
 			success[pair.Field] = pair.Values
 		}

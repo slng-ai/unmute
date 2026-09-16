@@ -2771,11 +2771,11 @@ func TestPipecatV1TaskToolAnnounceQueuesFrameFromFlowManager(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// check_availability is listed on the booking task, never on an agent,
+		// find_slots is listed on the booking task, never on an agent,
 		// so it can only be reached through the flows-handler path.
-		tool := agent.Tools["check_availability"]
+		tool := agent.Tools["find_slots"]
 		tool.Announce = announce
-		agent.Tools["check_availability"] = tool
+		agent.Tools["find_slots"] = tool
 		artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
 		if err != nil {
 			t.Fatalf("generate with announce %q: %v", announce, err)
@@ -2793,7 +2793,7 @@ func TestPipecatV1TaskToolAnnounceQueuesFrameFromFlowManager(t *testing.T) {
 	}
 	// The line is queued, never awaited for playout: the whole point is that
 	// speech starts while the handler body runs.
-	handler := bot[strings.Index(bot, "async def _flow_tool_check_availability"):]
+	handler := bot[strings.Index(bot, "async def _flow_tool_find_slots"):]
 	handler = handler[:strings.Index(handler, "\n\n\nasync def ")+1]
 	for _, absent := range []string{"BotStoppedSpeakingFrame", "asyncio.wait_for", "_handoff_finished"} {
 		if strings.Contains(handler, absent) {
@@ -2803,10 +2803,10 @@ func TestPipecatV1TaskToolAnnounceQueuesFrameFromFlowManager(t *testing.T) {
 
 	// Unset must leave this handler exactly as it was, so no existing package
 	// gains a frame it never asked for. Scoped to this tool's own handler:
-	// salon-concierge announces on several other task tools, so the package as a
-	// whole still queues frames.
+	// salon-concierge still announces on save_booking, so the package as a whole
+	// still queues frames.
 	silent := load(t, "")
-	quiet := silent[strings.Index(silent, "async def _flow_tool_check_availability"):]
+	quiet := silent[strings.Index(silent, "async def _flow_tool_find_slots"):]
 	quiet = quiet[:strings.Index(quiet, "\n\n\nasync def ")+1]
 	if strings.Contains(quiet, "queue_frame(TTSSpeakFrame") {
 		t.Errorf("a task tool that announces nothing must queue no frame:\n%s", quiet)

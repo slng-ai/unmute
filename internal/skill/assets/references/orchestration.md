@@ -114,7 +114,7 @@ agents:
     think: reasoning
     speak: voice
     tools:
-      - check_availability
+      - check_slots
       - book_appointment
       - end_call
 ```
@@ -357,14 +357,13 @@ request on a decision the tool already made. Name the tools that end the step:
       - name: manage_booking
         instructions: tasks/booking.md
         tools:
-          - check_availability
-          - create_booking
-          - cancel_booking
+          - find_slots
+          - save_booking
         finish:
-          - tool: create_booking
+          - tool: save_booking
             success:
               - status: booked
-          - tool: cancel_booking
+          - tool: save_booking
             success:
               - status: cancelled
         assign:
@@ -538,7 +537,7 @@ call's own record even when a step is not shown them.
 ```yaml agent.yaml
 tools:
   - lookup_customer
-  - check_availability
+  - check_slots
   - book_appointment
 
 variables:
@@ -565,7 +564,7 @@ agents:
       - name: select_appointment
         instructions: tasks/select-appointment.md
         tools:
-          - check_availability
+          - check_slots
         assign:
           - selected_slot: result.selected_slot
 
@@ -746,13 +745,15 @@ rather than one list with a kind field.
 
 One package in the unmute repository shows these shapes working together:
 `examples/salon-concierge`. Two agents hand the caller over, in both
-directions. The concierge defines three tasks, `verify_customer`,
-`take_confirmation_contact` and `manage_booking`. The complaint specialist
-defines one, `handle_complaint`, and deliberately does not list
-`verify_customer`: only the concierge verifies, because a task within reach
-beats a prompt rule telling the model not to run it. Every tool that needs the
-caller's number refuses while it is unconfirmed, and `to_concierge` is the way
-back. Three of the four tasks end on their own tool through `finish:`.
+directions. The concierge defines two tasks, `verify_customer` and
+`manage_booking`. The complaint specialist defines no tasks at all:
+`record_complaint` sits directly on it as a tool, because filing a complaint
+is one action rather than a step that has to happen in order. The specialist
+does not list `verify_customer`: only the concierge verifies, because a task
+within reach beats a prompt rule telling the model not to run it. Every tool
+that needs the caller's number refuses while it is unconfirmed, and
+`to_concierge` is the way back. Both tasks end on their own tool through
+`finish:`.
 
 The same package carries the task group, `book`: `verify_customer` with
 `skip_when_confirmed: customer_phone`, then `manage_booking`, with
