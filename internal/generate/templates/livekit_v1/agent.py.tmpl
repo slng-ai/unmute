@@ -27,7 +27,7 @@ there is nothing left to hold this back. */ -}}
         # Not awaited, for the same reason the tool announcement is not: awaiting
         # the handle holds the step until playout finishes, which is the delay
         # this line exists to hide.
-        dev_say(self.session, {{pyq .Announce}}){{end}}{{end}}{{define "opening_tools"}}tools=[t.id for t in self.tools if t.id not in { {{- range $i, $t := .Transfers}}{{if $i}}, {{end}}{{pyq $t.Method}}{{end -}} }]{{end}}
+        dev_say(self.session, {{.Announce}}){{end}}{{end}}{{define "opening_tools"}}tools=[t.id for t in self.tools if t.id not in { {{- range $i, $t := .Transfers}}{{if $i}}, {{end}}{{pyq $t.Method}}{{end -}} }]{{end}}
 {{- /* svc renders any resolved ServiceCall inline (session/agent kwargs).
 Classes, kwargs, and model-route forms come from the provider catalogue
 (internal/target/catalog_livekit.go). */ -}}
@@ -56,7 +56,7 @@ agents and tasks share the shape (T15). */ -}}
         # handle holds the tool until playout finishes, which is the delay this
         # line exists to hide. Announced after any refusal, so a refused call
         # stays silent.
-        dev_say(self.session, {{pyq .Announce}})
+        dev_say(self.session, {{.Announce}})
 {{- end}}
 {{- if .Terminal}}
         try:
@@ -106,7 +106,7 @@ the file defines a callable named like the tool; sync or async). */ -}}
 {{- template "terminal_guard" .}}
 {{- if .Announce}}
         # Not awaited, on purpose: see the same line in webhook_tool.
-        dev_say(self.session, {{pyq .Announce}})
+        dev_say(self.session, {{.Announce}})
 {{- end}}
 {{- if .Terminal}}
         try:
@@ -139,7 +139,7 @@ never reads a file and never re-indexes (FR-017). */ -}}
         {{triple .Description}}
 {{- if .Announce}}
         # Not awaited, on purpose: see the same line in webhook_tool.
-        dev_say(self.session, {{pyq .Announce}})
+        dev_say(self.session, {{.Announce}})
 {{- end}}
         return await knowledge.look_up({{pyq .KnowledgeBase}}, query)
 {{end -}}
@@ -159,7 +159,7 @@ The result is a pydantic model, so it is dumped to a dict for the model. */ -}}
 {{- template "terminal_guard" .}}
 {{- if .Announce}}
         # Not awaited, on purpose: see the same line in webhook_tool.
-        dev_say(self.session, {{pyq .Announce}})
+        dev_say(self.session, {{.Announce}})
 {{- end}}
 {{- if .Terminal}}
         try:
@@ -215,7 +215,8 @@ MCP sources, in the order the package lists them. */ -}}
 {{end}}{{if or .Outbound .Telephony .CallStartVars .NeedsTaskGroups .Slng.Vertex .NeedsPrefetchSeed .TypedState}}import json
 {{end}}import logging
 import os
-{{if .Slng.Any}}import uuid
+{{if .NeedsAnnounceChoice}}import random
+{{end}}{{if .Slng.Any}}import uuid
 {{end}}{{if or .NeedsRender (and .TypedState .TypedState.NeedsRe)}}import re
 {{end}}{{if or .HasWarmTransfer .HasColdTransfer}}import time
 {{end}}{{if .HasUserdata}}from dataclasses import {{if .NeedsDataclassField}}dataclass, field{{else}}dataclass{{end}}
@@ -237,6 +238,7 @@ import os
 {{- if .Outbound}}
     AMD,
 {{- end}}
+    APIConnectOptions,
 {{- if not .SingleAgentMinimal}}
     NOT_GIVEN,
 {{- end}}
@@ -294,6 +296,9 @@ from livekit.agents.llm import ToolError
 from livekit.agents.beta.tools import EndCallTool  # prebuilt end_call (beta)
 {{- end}}
 from livekit.agents.voice import MetricsCollectedEvent
+# Not re-exported from livekit.agents or livekit.agents.voice, so it comes from
+# the module that defines it. Checked against 1.6.10 and 1.8.x.
+from livekit.agents.voice.agent_session import SessionConnectOptions
 {{if .Live}}{{.Live.Entry.Import}}
 {{else if .Realtime}}{{.Realtime.Service.Entry.Import}}
 {{range .Realtime.Imports}}{{.}}
@@ -313,7 +318,28 @@ logger.setLevel(logging.INFO)
 
 {{.GoogleVertex}}load_dotenv()
 
+{{if .NeedsAnnounceChoice}}
 
+# --- announcements ---------------------------------------------------------
+
+# A line a package writes as `announce:` is spoken by this code, not written by
+# the model, so one sentence is the same sentence every time it fires. A live
+# call on 2026-09-16 entered the booking flow twice inside a minute and played
+# "Sure, let me get that sorted for you." both times. An author writing several
+# alternatives gets one of them per firing, and never the one that site used
+# last.
+_ANNOUNCE_LAST: dict[str, str] = {}
+
+
+def _announce(key: str, lines: list[str]) -> str:
+    """One of these lines, never the one this key used last."""
+    # ponytail: process wide, not per call. Two concurrent callers can only
+    # affect each other's variety, which is the whole thing this is for.
+    choices = [line for line in lines if line != _ANNOUNCE_LAST.get(key)] or lines
+    pick = random.choice(choices)
+    _ANNOUNCE_LAST[key] = pick
+    return pick
+{{end}}
 # --- prompts ---------------------------------------------------------------
 {{range .Prompts}}
 {{.Const}} = {{triple .Body}}
@@ -983,6 +1009,17 @@ class IgnorePhrasesMixin:
         self.results = results
 
 
+{{end}}{{if .NeedsTasks}}def _caller_turns(chat_ctx) -> int:
+    """How many turns the caller has taken in this context.
+
+    The one signal that separates "they asked again" from "the model re-read its
+    own finished work". A step that has already run and returned cannot have a
+    new request in front of it unless somebody spoke, so this is what each
+    delegate's re-entry guard compares.
+    """
+    return sum(1 for message in chat_ctx.messages() if message.role == "user")
+
+
 {{end}}{{if .NeedsTerminal}}def _newest_caller_turn(chat_ctx):
     """The caller turn a terminal tool call answered.
 
@@ -1507,7 +1544,25 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- range .Delegates}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext){{if or .Task (eq .Then "return")}} -> dict{{if .CanTaskTransfer}} | Agent{{end}}{{end}}:
-        {{triple .When}}{{template "delegate_announce" .}}
+        {{triple .When}}
+        # Already ran, and nobody has spoken since. Then this is not a second
+        # request, it is the model reading its own completed result as though it
+        # were one, and running the whole thing again is the worst possible
+        # answer: on a live call on 2026-09-16 (trace 917975e9) a booking saved,
+        # the flow re-entered on the caller's own "3 o'clock" still sitting
+        # above the result, read the diary twice more, and the last thing the
+        # caller heard was an agent saying it was off to check the diary.
+        #
+        # Refused here rather than asked for in the prompt, which this package
+        # did twice and which failed twice. The announcement is below this, so a
+        # refused call speaks nothing at all.
+        if _caller_turns(self.chat_ctx) == getattr(self, "_ran_at_{{.Method}}", None):
+            return {
+                "refused": "This already ran and finished, and the caller has "
+                "not spoken since, so its result is the answer to what they "
+                "asked. Reply to them from the values in your prompt. Run it "
+                "again only once they have asked for something new."
+            }{{template "delegate_announce" .}}
         owner_ctx = self.chat_ctx.copy()
 {{- if .CarriesTurn}}
         # Filled by a step that ended on its own tool, and read in the finally
@@ -1554,7 +1609,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- end}}
             _steps = {
 {{- range .Steps}}
-                {{pyq .ID}}: lambda: {{.Class}}(chat_ctx=llm.ChatContext()),
+                {{pyq .ID}}: lambda: {{.Class}}(chat_ctx=llm.ChatContext(){{if .SpeakOpening}}, speak_opening=True{{end}}),
 {{- end}}
             }
             for _id in _plan:
@@ -1583,9 +1638,9 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
             if _is_confirmed(ctx.userdata, {{pyq .SkipWhenConfirmed}}):
                 logger.info({{pyq (printf "skipped %s: %s is already confirmed" .ID .SkipWhenConfirmed)}})
             else:
-                group.add(lambda: {{.Class}}(), id={{pyq .ID}}, description={{pyq .Desc}})
+                group.add(lambda: {{.Class}}({{if .SpeakOpening}}speak_opening=True{{end}}), id={{pyq .ID}}, description={{pyq .Desc}})
 {{- else}}
-            group.add(lambda: {{.Class}}(), id={{pyq .ID}}, description={{pyq .Desc}})
+            group.add(lambda: {{.Class}}({{if .SpeakOpening}}speak_opening=True{{end}}), id={{pyq .ID}}, description={{pyq .Desc}})
 {{- end}}
 {{- end}}
             result = await group
@@ -1607,6 +1662,12 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- if .RefreshOwnerPrompt}}
             await self._refresh_prompt()
 {{- end}}
+            # Counted after the restore, so a turn a step consumed and carried
+            # back is included: that turn is the one the owner is about to read,
+            # and it is exactly the turn that must not be mistaken for a new
+            # request. Set in the finally so a step that raised still blocks an
+            # immediate retry the caller did not ask for.
+            self._ran_at_{{.Method}} = _caller_turns(self.chat_ctx)
 {{- if .Task}}
         dev_metrics.dev_task_returned(ctx, result)
         return _task_status(result)
@@ -1819,10 +1880,17 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
     # than by a mixin of its own, because that mixin already owns llm_node here.
     _slng_scope = {{pyq .SlngScope}}
 
-{{end}}    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
+{{end}}    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN{{if and .Announce .SpeakOpening}}, speak_opening: bool = False{{end}}) -> None:
         super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}}{{if or .Prebuilt .MCPServers}}, tools=[{{template "tools_list" .}}]{{end}})
         if isinstance(chat_ctx, llm.ChatContext):
             self._chat_ctx = chat_ctx.copy()
+{{- if and .Announce .SpeakOpening}}
+        # A group step speaks its own `announce:` as it is entered. A delegate
+        # says it at the seam instead, before this class is even built, so the
+        # caller of a standalone entry leaves this False and nothing says it
+        # twice.
+        self._speak_opening = speak_opening
+{{- end}}
         self._response_tool_call_ids: set[str] = set()
 {{- if or $.NeedsTaskGroups .Terminal}}
         # The call id of the ending that committed. A group reads it to fill its
@@ -1877,9 +1945,16 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
         # line is in this step's context whatever its history policy is, and
         # said once.
 {{- if .Announce}}
-        self.session.say({{pyq .Announce}})
+        self.session.say({{.Announce}})
 {{- end}}
 {{- else}}
+{{- if and .Announce .SpeakOpening}}
+        # Said here, not at the seam, so it lands in this step's own context and
+        # the model can see the sentence it just spoke. Not awaited: the opening
+        # request runs while it plays.
+        if self._speak_opening:
+            dev_say(self.session, {{.Announce}})
+{{- end}}
         # The task's own instructions describe this step; let them drive the opening.
 {{- if .Transfers}}
 {{template "opening_guard_note" .}}        self.session.generate_reply({{template "opening_tools" .}})
@@ -2141,6 +2216,22 @@ async def entrypoint(ctx: JobContext) -> None:
 {{- if .HasUserdata}}
         userdata={{if .Slng.Any}}slng_state{{else}}Userdata(){{end}},
 {{- end}}
+        # One retry, not the framework's three. A failed completion is retried
+        # four times by default with 0.1 + 2.0 + 2.0 seconds of sleep between the
+        # attempts, on top of four round trips to the provider: a live call on
+        # 2026-09-16 (trace 917975e9) spent 18.5 seconds in two of those and the
+        # caller asked whether anybody was still there.
+        #
+        # A caller cannot wait that out, and a retry loop tuned for a batch job
+        # is the wrong default for a conversation. One retry still covers a
+        # transient fault and costs 0.1s, because the first retry is nearly
+        # immediate; anything worse is better surfaced than slept through.
+        #
+        # ponytail: fixed, not authorable. No package would want a different
+        # number, and the one that does can say so when it turns up.
+        conn_options=SessionConnectOptions(
+            llm_conn_options=APIConnectOptions(max_retry=1),
+        ),
 {{- if .Live}}
         # One model listens, thinks and speaks. It is an llm.DuplexModel, and
         # AgentSession wraps one in DuplexRealtimeAdapter itself, so it is passed

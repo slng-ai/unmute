@@ -473,8 +473,8 @@ type Task struct {
 	// Announce is one fixed sentence the agent speaks as the task is entered, so
 	// the two model requests it takes to enter one are not silence. Spoken at
 	// the very start of the step, before anything else runs.
-	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
-	Assign   []Pair `json:"assign,omitempty" yaml:"assign,omitempty"`
+	Announce Announce `json:"announce,omitempty" yaml:"announce,omitempty"`
+	Assign   []Pair   `json:"assign,omitempty" yaml:"assign,omitempty"`
 	// Finish names the tools this step ends on. When one of them returns a
 	// result meeting every `success:` pair, the step saves `assign:` from that
 	// result and ends, so the model is not asked to call `finish` for a decision
@@ -502,7 +502,7 @@ type TaskGroup struct {
 	// naming the task and how the group treats it.
 	Steps        []StepItem `json:"steps" yaml:"steps"`
 	When         string     `json:"when,omitempty" yaml:"when,omitempty"`
-	Announce     string     `json:"announce,omitempty" yaml:"announce,omitempty"`
+	Announce     Announce   `json:"announce,omitempty" yaml:"announce,omitempty"`
 	ContextScope string     `json:"context_scope" yaml:"context_scope"`
 	Then         string     `json:"then" yaml:"then"`
 	ThenTarget   string     `json:"then_target,omitempty" yaml:"then_target,omitempty"`
@@ -536,7 +536,7 @@ type Callable struct {
 	Task     string
 	Group    string
 	When     string
-	Announce string
+	Announce Announce
 }
 
 // Handoff is one entry under `handoffs:`. The conversation becomes another
@@ -653,7 +653,7 @@ type Tool struct {
 	// ponytail: a plain string, not a pointer, because both execution-block
 	// agreement tests read every pointer field on Tool as an execution block.
 	// A pointer here would claim a seventh block that does not exist.
-	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
+	Announce Announce `json:"announce,omitempty" yaml:"announce,omitempty"`
 }
 
 // ToolWebhook is the `webhook:` block: an HTTP endpoint named by env var or by

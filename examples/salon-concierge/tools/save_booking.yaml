@@ -89,13 +89,16 @@ output:
             - blowout
         date:
           type: string
-        weekday:
+        spoken:
           type: string
           description: >-
-            The day this booking falls on, spelled out in English. The tool
-            works it out from the date, because the agent has to say it aloud
-            and cannot derive one: a live call confirmed a Friday booking as
-            "Thursday the 18th" off a record that carried the date alone.
+            The day and the time written the way they are said out loud, like
+            "Friday at 9:00 AM". The tool composes it, because every part of
+            this sentence the agent has composed itself it has got wrong on a
+            live call: a Friday booking confirmed as "Thursday the 18th" off a
+            record carrying only a date, "09:00" read back as "09:00 AM", and a
+            move saved at 09:00 confirmed as "3:00 PM" because that was the time
+            the caller had named earlier in the call. Say it exactly as written.
         time:
           type: string
         action:

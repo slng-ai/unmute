@@ -60,7 +60,7 @@ agents:
 [[range $tasks]]      - name: [[.Name]]
         when: [[quote .When]]
         instructions: [[.PromptPath]]
-[[if .Announce]]        announce: [[quote .Announce]]
+[[if .Announce]]        announce: [[announce 10 .Announce]]
 [[end]][[$taskTools := $.TaskTools .Name]][[if $taskTools]]        tools:
 [[range $taskTools]]          - [[.]]
 [[end]][[end]][[$taskHandoffs := $.TaskHandoffs .Name]][[if $taskHandoffs]]        handoffs:
@@ -106,7 +106,7 @@ agents:
 [[end]][[if .TaskGroups]]task_groups:
 [[range .TaskGroups]]  [[.Name]]:
     when: [[quote .When]]
-[[if .Announce]]    announce: [[quote .Announce]]
+[[if .Announce]]    announce: [[announce 6 .Announce]]
 [[end]]    steps:
 [[range .Steps]][[if .SkipWhenConfirmed]]      - task: [[.Task]]
         skip_when_confirmed: [[.SkipWhenConfirmed]]

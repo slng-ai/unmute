@@ -257,12 +257,14 @@ _WEEKDAYS = (
 def appointment_value(action, booking_id, slot_id):
     day, service, time = slot_id.split("|")
     # Spelled out from the date rather than read off strftime("%A"), which
-    # follows the container's locale: the tool fills weekday the same way, so
-    # a fixture that read it off the host clock would agree with the tool by
+    # follows the container's locale: the tool fills the weekday the same way,
+    # so a fixture that read it off the host clock would agree with the tool by
     # accident on an English host and disagree everywhere else.
     weekday = _WEEKDAYS[date.fromisoformat(day).weekday()]
+    hour = int(time[:2])
+    spoken = f"{weekday} at {(hour - 1) % 12 + 1}:{time[3:5]} {'AM' if hour < 12 else 'PM'}"
     return dict(
-        booking_id=booking_id, service=service, date=day, weekday=weekday, time=time, action=action
+        booking_id=booking_id, service=service, date=day, spoken=spoken, time=time, action=action
     )
 
 
@@ -271,7 +273,11 @@ def check_saved_appointment(module, state, appointment):
     for name, site in (("CONCIERGE_PROMPT", "agent:concierge"),
                        ("COMPLAINT_SPECIALIST_PROMPT", "agent:complaint_specialist")):
         prompt = module._render(getattr(module, name), state, site=site)
+        # The spoken phrase too: it is the one field the agent reads out, so a
+        # record that reached state without reaching the prompt would leave the
+        # agent composing the sentence again, which is what it gets wrong.
         assert appointment["date"] in prompt and appointment["time"] in prompt, prompt
+        assert appointment["spoken"] in prompt, prompt
 
 
 def booking_rows():

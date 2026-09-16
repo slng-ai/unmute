@@ -1254,7 +1254,7 @@ func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) err
 			options = []menuChoice{
 				newChoice("Hosted tool  ·  "+cmp.Or(tool.SlngName, tool.Name), "hosted"),
 				newChoice("Description  ·  "+cmp.Or(oneLine(tool.Description), "inherited from SLNG"), "description"),
-				newChoice("Announcement  ·  "+cmp.Or(oneLine(tool.Announce), "none"), "announce"),
+				newChoice("Announcement  ·  "+announceLabel(tool.Announce), "announce"),
 				newChoice("Attached to  ·  "+toolAttachmentLabel(data, *tool), "attach"),
 				newChoice("Delete tool", "delete"),
 				newChoice("← Back", actionBack),
@@ -1297,9 +1297,25 @@ func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) err
 				return err
 			}
 		case "announce":
+			// Alternatives are edited in the file, not here. A one-line input
+			// bound to a list would flatten it at exit 0, which is the silent
+			// data loss the maintain round-trip tests exist to stop, and a list
+			// editor is a screen nobody has asked for.
+			if len(tool.Announce) > 1 {
+				break
+			}
+			line := ""
+			if len(tool.Announce) == 1 {
+				line = tool.Announce[0]
+			}
 			if _, err := runner.input("Announcement (optional)", "One fixed sentence spoken as the tool starts, so a slow call is not silence.",
-				&tool.Announce, validateBasic); err != nil {
+				&line, validateBasic); err != nil {
 				return err
+			}
+			if strings.TrimSpace(line) == "" {
+				tool.Announce = nil
+			} else {
+				tool.Announce = spec.Announce{line}
 			}
 		case "server":
 			if _, err := runner.input("MCP server (optional)", "The platform's name for the server, when it differs from this tool's own name.",
@@ -3237,6 +3253,20 @@ func oneLine(value string) string {
 		return string(runes[:limit-1]) + "…"
 	}
 	return value
+}
+
+// announceLabel names what a tool's `announce:` holds without pretending a list
+// is one sentence. Alternatives are counted rather than shown, because the row
+// is one line and picking one of them to display would read as the value.
+func announceLabel(a spec.Announce) string {
+	switch len(a) {
+	case 0:
+		return "none"
+	case 1:
+		return oneLine(a[0])
+	default:
+		return fmt.Sprintf("%d alternatives, edited in the file", len(a))
+	}
 }
 
 func yesNo(value bool) string {

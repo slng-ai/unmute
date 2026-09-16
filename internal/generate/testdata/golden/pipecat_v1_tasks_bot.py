@@ -732,6 +732,26 @@ class IntakeAgent(TracedLLMWorker):
     @_direct_tool
     async def run_collect(self, params: FunctionCallParams):
         """Collect the caller's account details."""
+        # Already ran, and nobody has spoken since. Then this is not a second
+        # request, it is the model reading its own completed result as though it
+        # were one. On a live call on 2026-09-16 (trace 917975e9, LiveKit, same
+        # package) a booking saved, the flow re-entered on the caller's own
+        # "3 o'clock" still sitting above the result, and the last thing the
+        # caller heard was an agent saying it was off to check the diary.
+        #
+        # Refused here rather than asked for in the prompt, which this package
+        # did twice and which failed twice. Before the announcement below, so a
+        # refused call speaks nothing at all.
+        if _caller_turns(self.context.get_messages()) == getattr(
+            self, "_ran_at_run_collect", None
+        ):
+            await params.result_callback({
+                "refused": "This already ran and finished, and the caller has "
+                "not spoken since, so its result is the answer to what they "
+                "asked. Reply to them from the values in your prompt. Run it "
+                "again only once they have asked for something new."
+            })
+            return
         self._run_collect_visit = object()
         self._run_collect_results = {}
         self._run_collect_active_step = "collect"
@@ -810,11 +830,35 @@ class IntakeAgent(TracedLLMWorker):
             "content": json.dumps(_group_status(self._run_collect_results)),
         }])
         self.context.set_tools(tools)
+        # Counted after the restore, so a turn a step consumed and carried back
+        # is included: that turn is the one the owner is about to read, and it
+        # is exactly the turn that must not be mistaken for a new request.
+        self._ran_at_run_collect = _caller_turns(self.context.get_messages())
         return {"status": "ok"}, None
 
     @_direct_tool
     async def run_triage(self, params: FunctionCallParams):
         """Run the triage group."""
+        # Already ran, and nobody has spoken since. Then this is not a second
+        # request, it is the model reading its own completed result as though it
+        # were one. On a live call on 2026-09-16 (trace 917975e9, LiveKit, same
+        # package) a booking saved, the flow re-entered on the caller's own
+        # "3 o'clock" still sitting above the result, and the last thing the
+        # caller heard was an agent saying it was off to check the diary.
+        #
+        # Refused here rather than asked for in the prompt, which this package
+        # did twice and which failed twice. Before the announcement below, so a
+        # refused call speaks nothing at all.
+        if _caller_turns(self.context.get_messages()) == getattr(
+            self, "_ran_at_run_triage", None
+        ):
+            await params.result_callback({
+                "refused": "This already ran and finished, and the caller has "
+                "not spoken since, so its result is the answer to what they "
+                "asked. Reply to them from the values in your prompt. Run it "
+                "again only once they have asked for something new."
+            })
+            return
         self._run_triage_visit = object()
         self._run_triage_results = {}
         # The steps this invocation will run, decided once as the flow starts.
@@ -918,7 +962,21 @@ class IntakeAgent(TracedLLMWorker):
             "content": json.dumps(_group_status(self._run_triage_results)),
         }])
         self.context.set_tools(tools)
+        # Counted after the restore, so a turn a step consumed and carried back
+        # is included: that turn is the one the owner is about to read, and it
+        # is exactly the turn that must not be mistaken for a new request.
+        self._ran_at_run_triage = _caller_turns(self.context.get_messages())
         return {"status": "ok"}, None
+
+
+def _caller_turns(messages):
+    """How many turns the caller has taken in this message list.
+
+    Read by every delegate, not just the ones that carry a turn: it is the one
+    signal that separates "they asked again" from "the model re-read its own
+    finished work", which is what the re-entry guard compares.
+    """
+    return sum(1 for message in messages if isinstance(message, dict) and message.get("role") == "user")
 
 
 def _settle_task_call(messages, name, status):

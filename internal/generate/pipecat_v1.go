@@ -151,6 +151,11 @@ type pipecatTask struct {
 	Withdraws bool
 	// Opening is how the step's first turn happens: "generate" or "listen".
 	Opening string
+	// SpeakOpening is true when this step speaks its own `announce:` as it is
+	// entered, which is every group step that carries one. A single-task
+	// delegate leaves it false: the seam says the line before this step is even
+	// built, and both saying it would say it twice.
+	SpeakOpening bool
 	// Announce is the line a listening step speaks itself.
 	Announce    string
 	Tools       []pipecatTool
@@ -329,8 +334,11 @@ func (t pipecatTool) Decorator() string {
 	case "continue":
 		args = append(args, "cancel_on_interruption=False")
 	}
+	// Already a Python expression: a literal, or the _announce call that picks
+	// between alternatives as the tool fires. Quoting it again would pass the
+	// source text as the sentence.
 	if t.Announce != "" {
-		args = append(args, "announce="+pyQuote(t.Announce))
+		args = append(args, "announce="+t.Announce)
 	}
 	if len(args) == 0 {
 		return ""
@@ -994,6 +1002,55 @@ func renderPipecatV1(name string, data pipecatData) ([]byte, error) {
 }
 
 // pyQuote renders a Go string as a Python string literal.
+// SpeaksItsOwnLine is true when the node itself says the step's `announce:`,
+// which is a listening opening or a group step. A standalone delegate says it at
+// the seam instead, so its node reads the value nowhere and must not bind a
+// local for it: an unused name is an F841 from the emitted project's own ruff
+// gate.
+func (t pipecatTask) SpeaksItsOwnLine() bool {
+	return t.Announce != "" && (t.Opening == "listen" || t.SpeakOpening)
+}
+
+// AnnounceChosen is true when this step's line is picked from alternatives at
+// run time rather than being one literal, which is the only case that needs a
+// local: the node reads the value twice, once to seed the turn and once to
+// speak it, and two calls would disagree.
+func (t pipecatTask) AnnounceChosen() bool { return announceChosen(t.Announce) }
+
+// OpenExpr is what the node writes where the line goes: the local when the line
+// is chosen, the literal itself otherwise, so a step writing one sentence emits
+// exactly the bytes it did before alternatives existed.
+func (t pipecatTask) OpenExpr() string {
+	if t.AnnounceChosen() {
+		return "_open"
+	}
+	return t.Announce
+}
+
+// NeedsAnnounceChoice is the livekit twin: true when any announcement lowered to
+// the _announce helper, which is what decides whether the helper and its
+// `random` import are emitted.
+func (d pipecatData) NeedsAnnounceChoice() bool {
+	for _, agent := range d.Agents {
+		for _, tool := range agent.Tools {
+			if announceChosen(tool.Announce) {
+				return true
+			}
+		}
+		for _, delegate := range agent.Delegates {
+			if announceChosen(delegate.Announce) {
+				return true
+			}
+			for _, step := range delegate.StepTasks {
+				if announceChosen(step.Announce) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func pyQuote(s string) string { return strconv.Quote(s) }
 
 // resultAccess is how an assign: reads one of its own step's result fields, at

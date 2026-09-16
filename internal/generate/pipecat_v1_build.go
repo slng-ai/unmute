@@ -1289,7 +1289,7 @@ func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, e
 	delegate := pipecatDelegate{
 		MethodName: ref,
 		When:       delegateReason(c) + pipecatTerminalOwnerRule(agent, c),
-		Announce:   c.Announce,
+		Announce:   announceExpr("delegate:"+ref, c.Announce),
 	}
 	steps := []string{c.Task}
 	// skips runs parallel to steps: one entry per step, empty where the step
@@ -1323,6 +1323,7 @@ func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, e
 			return pipecatDelegate{}, err
 		}
 		task.SkipWhenConfirmed = skips[i]
+		task.SpeakOpening = c.Group != ""
 		delegate.HasTransfers = delegate.HasTransfers || len(task.Transfers) > 0
 		delegate.CarriesTurn = delegate.CarriesTurn || len(task.Terminals) > 0
 
@@ -1444,7 +1445,7 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 	}
 	built.Withdraws = task.Withdraws
 	built.Opening = string(task.Opening)
-	built.Announce = task.Announce
+	built.Announce = announceExpr("task:"+name, task.Announce)
 	return built, nil
 }
 
@@ -1626,7 +1627,7 @@ func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, supp
 		Builtin: tool.Builtin, Instructions: tool.Instructions,
 		KnowledgeBase: tool.KnowledgeBase,
 		EndsCall:      tool.Effect == ir.ToolEndsConversation, Interruption: interruptionValue(tool.Interruption),
-		Announce: tool.Announce,
+		Announce: announceExpr("tool:"+name, tool.Announce),
 	}
 	// A hosted tool's definition is the mirror. The args below still come from
 	// Tool.Input, which Build filled from the platform's own introspected

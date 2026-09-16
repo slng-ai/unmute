@@ -17,7 +17,7 @@ func announcingAgent(t *testing.T) *ir.Agent {
 	if !ok {
 		t.Fatalf("verify_caller is not a delegate: %T", agent.Controls["verify_caller"])
 	}
-	if delegate.Announce == "" {
+	if len(delegate.Announce) == 0 {
 		t.Fatal("the fixture stopped carrying a delegate announcement")
 	}
 	return agent
@@ -74,7 +74,7 @@ func TestDelegateWithoutAnnounceEmitsNothing(t *testing.T) {
 			if !ok {
 				t.Fatalf("verify_caller is not a delegate: %T", agent.Controls["verify_caller"])
 			}
-			delegate.Announce = ""
+			delegate.Announce = nil
 			artifact, err := Generate(agent, targetByProvider(t, agent, tc.provider), target.Default())
 			if err != nil {
 				t.Fatalf("generate: %v", err)

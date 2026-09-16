@@ -712,7 +712,7 @@ func TestEditToolSlngArmEditsHostedNameDescriptionAndAnnounce(t *testing.T) {
 	if tool.Description != "Look up an order." {
 		t.Errorf("Description = %q, want it set", tool.Description)
 	}
-	if tool.Announce != "One moment while I look that up." {
+	if len(tool.Announce) != 1 || tool.Announce[0] != "One moment while I look that up." {
 		t.Errorf("Announce = %q, want it set", tool.Announce)
 	}
 }

@@ -132,6 +132,31 @@ func (d livekitData) NeedsDevSay() bool {
 	return false
 }
 
+// NeedsAnnounceChoice reports whether any announcement lowered to the _announce
+// helper, which is what the helper's own emission and its `random` import
+// follow. A package writing only scalar `announce:` keys emits neither, which
+// is what keeps its bytes exactly what they were before alternatives existed.
+func (d livekitData) NeedsAnnounceChoice() bool {
+	for _, task := range d.Tasks {
+		if announceChosen(task.Announce) {
+			return true
+		}
+	}
+	for _, agent := range d.Agents {
+		for _, tool := range agent.Tools {
+			if announceChosen(tool.Announce) {
+				return true
+			}
+		}
+		for _, delegate := range agent.Delegates {
+			if announceChosen(delegate.Announce) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (l livekitChain) services() []livekitService {
 	return append([]livekitService{l.Primary}, l.Chain...)
 }
@@ -367,6 +392,11 @@ type livekitStep struct {
 	SkipWhenConfirmed string
 	// Terminal says this step can end on its own tool.
 	Terminal bool
+	// SpeakOpening is true when this step's task carries an `announce:`, which
+	// the step speaks itself as it is entered. It is also what says the emitted
+	// class takes the keyword at all: a task with no announcement has no such
+	// parameter, so passing one would be a TypeError.
+	SpeakOpening bool
 }
 
 // livekitTerminal is one tool a step ends on.
@@ -410,6 +440,11 @@ type livekitTask struct {
 	Withdraws bool
 	// Opening is how the step's first turn happens: "generate" or "listen".
 	Opening string
+	// SpeakOpening is true when some task group runs this task as a step, which
+	// is the only way its `announce:` is spoken from inside the class. Entered
+	// as a delegate instead, the seam says the line before the class is built,
+	// so a task no group names emits none of this and its bytes do not move.
+	SpeakOpening bool
 	// Announce is the line a listening step speaks itself.
 	Announce string
 	// TerminalTools is this step's own terminal tool methods as a Python set

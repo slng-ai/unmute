@@ -2103,7 +2103,7 @@ func TestValidateToolAnnounceLegalExecutionOnly(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			agent := safeAgent(t)
 			tool := agent.Tools["lookup_customer"]
-			tool.Announce = "Let me look that up."
+			tool.Announce = []string{"Let me look that up."}
 			tool.Execution = tc.execution
 			if tc.execution == ToolLocal {
 				tool.Handler, tool.URLEnv = "tools/lookup_customer.py", ""
@@ -2141,7 +2141,7 @@ func TestValidateToolAnnounceLegalExecutionOnly(t *testing.T) {
 func TestValidateToolAnnounceRejectsTemplates(t *testing.T) {
 	agent := safeAgent(t)
 	tool := agent.Tools["lookup_customer"]
-	tool.Announce = "Checking on {{customer_id}} now."
+	tool.Announce = []string{"Checking on {{customer_id}} now."}
 	agent.Tools["lookup_customer"] = tool
 	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
 	if err == nil {
@@ -2157,7 +2157,7 @@ func TestValidateToolAnnounceRejectsTemplates(t *testing.T) {
 func TestValidateToolAnnouncePerTarget(t *testing.T) {
 	agent := safeAgent(t)
 	tool := agent.Tools["lookup_customer"]
-	tool.Announce = "Let me look that up."
+	tool.Announce = []string{"Let me look that up."}
 	agent.Tools["lookup_customer"] = tool
 	for provider, wantError := range map[Provider]bool{
 		ProviderLiveKit: false,
@@ -2185,7 +2185,7 @@ func TestValidateToolAnnounceOnTaskScopePerTarget(t *testing.T) {
 	for _, provider := range []Provider{ProviderLiveKit, ProviderPipecat} {
 		agent := safeAgent(t)
 		tool := agent.Tools["lookup_customer"]
-		tool.Announce = "Let me look that up."
+		tool.Announce = []string{"Let me look that up."}
 		agent.Tools["lookup_customer"] = tool
 		agent.Tasks["verify_caller"] = Task{
 			Instructions: "Confirm who is calling.",
@@ -3482,7 +3482,7 @@ func TestValidateWarnsOnASilentListenOpening(t *testing.T) {
 		}
 	}
 	// A step that speaks its line warns about nothing.
-	agent.Tasks["take_note"] = Task{Instructions: "Take a note.", Opening: OpeningListen, Announce: "What shall I pass on?"}
+	agent.Tasks["take_note"] = Task{Instructions: "Take a note.", Opening: OpeningListen, Announce: []string{"What shall I pass on?"}}
 	report, _ = Validate(agent, []Target{targetFor(agent, ProviderSlng)}, targetcap.Default())
 	for _, warning := range reportFor(report, ProviderSlng).Warnings {
 		if strings.Contains(warning, "opens by listening") {

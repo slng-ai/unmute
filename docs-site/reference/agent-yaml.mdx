@@ -714,7 +714,9 @@ agents:
     tasks:
       - name: customer_record
         when: Identify the caller before handling an appointment request.
-        announce: One moment.
+        announce:
+          - One moment.
+          - Let me have a look.
         instructions: tasks/customer-record.md
         tools:
           - lookup_customer
@@ -743,9 +745,16 @@ agents:
   by bare name.
 </ParamField>
 
-<ParamField path="announce" type="string">
+<ParamField path="announce" type="string or list of strings">
   A fixed spoken line with no `{{placeholders}}`. Omit it for no fixed announcement.
   Required when `opening` is `listen`.
+  Write several as a list and the caller hears one of them each time the line fires.
+  Never the one that site used last. A caller who comes back through the same flow
+  does not hear the identical sentence twice.
+
+  Spoken as the step is entered, before anything else runs: when the owning agent
+  calls the task directly the line comes at that seam, and when a task group runs
+  it as a step the step speaks it itself. Either way it is spoken once.
 </ParamField>
 
 <ParamField path="opening" type="string">
@@ -895,9 +904,16 @@ task_groups:
   but supplies no trigger guidance, so write one.
 </ParamField>
 
-<ParamField path="announce" type="string">
+<ParamField path="announce" type="string or list of strings">
   One fixed spoken line, with no `{{placeholders}}`, when the group starts. Omit for no
   announcement.
+  Write several as a list and the caller hears one of them each time the line fires.
+  Never the one that site used last. A caller who comes back through the same flow
+  does not hear the identical sentence twice.
+
+  It fires on entry, before any step runs, so it is spoken whether or not a
+  `skip_when_confirmed:` step is skipped. A line that is only true when some step
+  runs belongs on that step's own `announce:`, not here.
 </ParamField>
 
 <ParamField path="context_scope" type="string" required>
@@ -1085,9 +1101,17 @@ exactly one execution block says how it runs.
   builtins whose effect comes from the registry. Refused on MCP and knowledge tools.
 </ParamField>
 
-<ParamField path="announce" type="string">
+<ParamField path="announce" type="string or list of strings">
   A fixed spoken sentence with no `{{variables}}`. Omit for no announcement. Legal on
   local, webhook, knowledge, and hosted `slng` tools.
+  Write several as a list and the caller hears one of them each time the line fires.
+  Never the one that site used last. A caller who comes back through the same flow
+  does not hear the identical sentence twice.
+
+  The `slng` target takes one line only: an attachment carries a single pre-action
+  message, so a list is refused there rather than narrowed to its first entry.
+  Spoken when the tool is called, not when it succeeds, so a tool that can refuse
+  turns its line into a promise it then breaks.
 </ParamField>
 
 | Execution block | Fields |

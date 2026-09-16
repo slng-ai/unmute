@@ -181,6 +181,11 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		if err != nil {
 			return livekitData{}, err
 		}
+		for _, group := range agent.TaskGroups {
+			for _, step := range group.Steps {
+				built.SpeakOpening = built.SpeakOpening || step.Task == name
+			}
+		}
 		data.Tasks = append(data.Tasks, built)
 	}
 	data.NeedsTasks = len(data.Tasks) > 0
@@ -1085,7 +1090,7 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 			Method: ref, When: delegateWhen(c) + delegateReturnFinality,
 			Task:            single,
 			Then:            "return",
-			Announce:        c.Announce,
+			Announce:        announceExpr("delegate:"+ref, c.Announce),
 			CanTaskTransfer: livekitTaskCanTransfer(agent, task),
 		}, nil
 	}
@@ -1097,7 +1102,7 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 	// sequence of standalone AgentTasks (each starts fresh, C4) instead.
 	delegate := livekitDelegate{
 		Method: ref, When: delegateWhen(c), Then: string(group.Then),
-		Announce: c.Announce,
+		Announce: announceExpr("delegate:"+ref, c.Announce),
 		Isolated: group.ContextScope == ir.ContextIsolated,
 	}
 	// N13/§4.7: return hands the owner the typed results; transfer and end do not
@@ -1121,6 +1126,7 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 			Class: pyName(step.Task), ID: step.Task, Desc: humanize(step.Task),
 			SkipWhenConfirmed: step.SkipWhenConfirmed,
 			Terminal:          len(agent.Tasks[step.Task].Finish) > 0,
+			SpeakOpening:      len(agent.Tasks[step.Task].Announce) > 0,
 		})
 		delegate.HasSkips = delegate.HasSkips || step.SkipWhenConfirmed != ""
 		delegate.CanTaskTransfer = delegate.CanTaskTransfer || livekitTaskCanTransfer(agent, agent.Tasks[step.Task])
@@ -1184,7 +1190,7 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 	built.Terminal = len(task.Finish) > 0
 	built.Withdraws = task.Withdraws
 	built.Opening = string(task.Opening)
-	built.Announce = task.Announce
+	built.Announce = announceExpr("task:"+name, task.Announce)
 	built.ResultExpr = livekitResultExpr(built)
 	for _, ref := range task.Tools {
 		tool, ok := agent.Tools[ref]
@@ -1277,7 +1283,7 @@ func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variabl
 			Auth:             loweredAuth(tool.Auth),
 			Args:             args,
 			EndsConversation: tool.Effect == ir.ToolEndsConversation,
-			Announce:         tool.Announce,
+			Announce:         announceExpr("tool:"+name, tool.Announce),
 		}, nil
 	case ir.ToolLocal:
 		return livekitTool{
@@ -1286,7 +1292,7 @@ func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variabl
 			CallKwargs:       callKwargs(argNames, inject),
 			Args:             args,
 			EndsConversation: tool.Effect == ir.ToolEndsConversation,
-			Announce:         tool.Announce,
+			Announce:         announceExpr("tool:"+name, tool.Announce),
 		}, nil
 	case ir.ToolKnowledge:
 		// One string parameter, always, and the tool owns it: the author writes
@@ -1295,7 +1301,7 @@ func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variabl
 			Method: name, Description: knowledgeDescription(tool.Description),
 			KnowledgeBase: tool.KnowledgeBase,
 			Args:          []livekitArg{knowledgeQueryArg()},
-			Announce:      tool.Announce,
+			Announce:      announceExpr("tool:"+name, tool.Announce),
 		}, nil
 	case ir.ToolBuiltin:
 		// Prebuilt: no method, no args; the registry id picks the SDK helper.
@@ -1316,7 +1322,7 @@ func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variabl
 			Inject: inject, Needed: needed, NeededLiteral: neededLiteral(needed),
 			Args:             args,
 			EndsConversation: tool.Effect == ir.ToolEndsConversation,
-			Announce:         tool.Announce,
+			Announce:         announceExpr("tool:"+name, tool.Announce),
 		}
 		switch tool.Mirror.ToolType {
 		case "code":

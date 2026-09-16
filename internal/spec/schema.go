@@ -16,6 +16,16 @@ func Schema() (*jsonschema.Schema, error) {
 			{Type: "string"},
 			{Type: "array", Items: &jsonschema.Schema{Type: "string"}},
 		}},
+		// Announce is the same mismatch, for the same reason: one sentence as a
+		// scalar, or several alternatives as a list, one spoken per firing.
+		reflect.TypeFor[Announce](): {
+			OneOf: []*jsonschema.Schema{
+				{Type: "string"},
+				{Type: "array", Items: &jsonschema.Schema{Type: "string"}},
+			},
+			Description: "One fixed sentence the agent speaks, or a list of alternatives, one of which is spoken each time the line fires. " +
+				"Alternatives stop a caller who enters the same flow twice hearing the identical sentence both times.",
+		},
 		// Pair is the same kind of mismatch. Reflection sees Key and Value and
 		// would publish `{key: ..., value: ...}`, which is not what anybody
 		// writes: a pair is authored as a one-key mapping, `- phone: "+34..."`,

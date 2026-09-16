@@ -220,6 +220,18 @@ func validateSlngTool(name string, tool Tool, row *TargetValidation) {
 		row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
 			"tool %q exposes every tool on its MCP server, and SLNG attaches one reference per tool: list the tools you want under mcp.tools", name))
 	}
+	// Alternatives have nowhere to go here. An attachment carries exactly one
+	// execution_policy.pre_action_message, and there is no place in it to put
+	// the other lines or the pick between them, which happens where the line is
+	// spoken. Refused rather than silently narrowed to the first line, because
+	// an author who wrote three and heard one every call has no way to see why.
+	//
+	// Not a capability row: FieldToolAnnounce already allows announcements here,
+	// and this is the shape of one rather than the key itself.
+	if len(tool.Announce) > 1 {
+		row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
+			"tool %q writes %d announce: alternatives and a SLNG attachment carries one pre-action message: keep one line, or compile to livekit or pipecat which pick between them as the tool fires", name, len(tool.Announce)))
+	}
 }
 
 // What used to live here, and why none of it does any more.

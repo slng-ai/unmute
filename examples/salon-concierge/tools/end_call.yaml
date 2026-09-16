@@ -1,4 +1,9 @@
-description: End the call when the caller is finished or says goodbye.
+description: >-
+  End the call once the caller's own words say the call is over: "no, that's
+  all", "I'm good, thanks", "goodbye". A question is never one of those,
+  however tired it sounds. On a live call on 2026-09-16 the caller asked "can
+  we just recap when I have the next appointment?" and this ended the call on
+  them. Answer what they asked and wait for them to say they are done.
 
 builtin:
   id: end_call

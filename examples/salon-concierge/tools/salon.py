@@ -171,6 +171,13 @@ def find_slots(customer_phone, date="", service=""):
         bookings = _held_by(caller)
 
     if not date:
+        # A read with no date can only answer "what does this caller already
+        # hold". When the answer is nothing, reporting `ok` alongside two empty
+        # lists reads as a completed search: a live call (149178e8) took it that
+        # way, then invented an appointment the diary had twice said was not
+        # there and asked for the service three times. Name the gap instead.
+        if not bookings:
+            return {"bookings": [], "slots": [], "status": "need_date"}
         return {"bookings": bookings, "slots": [], "status": "ok"}
 
     if service and service not in _SERVICES:
@@ -216,6 +223,19 @@ _WEEKDAYS = (
 )
 
 
+def _spoken(day, time):
+    """The day and time of one booking, written the way it is said out loud.
+
+    "2026-09-18", "09:00" -> "Friday at 9:00 AM".
+    """
+    try:
+        weekday = _WEEKDAYS[date.fromisoformat(day).weekday()]
+        hour, minute = int(time[:2]), time[3:5]
+    except (ValueError, IndexError):
+        return ""
+    return f"{weekday} at {(hour - 1) % 12 + 1}:{minute} {'AM' if hour < 12 else 'PM'}"
+
+
 def _appointment(booking_id, service, slot_id, action):
     """The saved shape of one successful booking action.
 
@@ -223,25 +243,24 @@ def _appointment(booking_id, service, slot_id, action):
     it without the model in between, so a half-filled record here is a
     half-filled record in the call state.
 
-    `weekday` is here because the agent has to say the day out loud and cannot
-    work one out from a date. On a live call on 2026-09-16 the diary held
-    2026-09-18, which is a Friday, the caller had asked for Friday, and the
-    confirmation came out as "you're all set for Thursday the 18th". Every
-    earlier turn had the day right; only the sentence read off this record was
-    wrong, because this record carried a date and nothing else.
+    `spoken` is the whole confirmation phrase, because every part of it the
+    agent composes itself, it has got wrong on a live call. It held a date and
+    nothing else, and a Friday booking was confirmed as "Thursday the 18th", so
+    the weekday moved in here. It then held a weekday and a 24 hour time, and
+    two calls on 2026-09-16 read "09:00" back as "09:00 AM" and answered a move
+    saved at 09:00 with "Friday at 3:00 PM", which was the time the caller had
+    said earlier in the sentence "the same time". The model is a poor place to
+    keep a fact that is already known: this field is the sentence, and the
+    prompts copy it.
     """
     parts = _slot_parts(slot_id)
-    day = parts[0] if parts else ""
-    try:
-        weekday = _WEEKDAYS[date.fromisoformat(day).weekday()]
-    except ValueError:
-        weekday = ""
+    day, time = (parts[0], parts[2]) if parts else ("", "")
     return {
         "booking_id": booking_id,
         "service": service,
         "date": day,
-        "weekday": weekday,
-        "time": parts[2] if parts else "",
+        "spoken": _spoken(day, time),
+        "time": time,
         "action": action,
     }
 
@@ -412,6 +431,14 @@ def _demo():
     assert _e164("15550707444") == "+15550707444"
     assert _e164("34111111111") == "+34111111111"
 
+    # The confirmation phrase, both ends of the clock and both ways it can be
+    # asked with nothing to say.
+    assert _spoken("2026-09-18", "09:00") == "Friday at 9:00 AM"
+    assert _spoken("2026-09-18", "15:00") == "Friday at 3:00 PM"
+    assert _spoken("2026-09-18", "00:30") == "Friday at 12:30 AM"
+    assert _spoken("2026-09-18", "12:00") == "Friday at 12:00 PM"
+    assert _spoken("", "") == "" and _spoken("2026-09-18", "") == ""
+
     created = find_or_create_customer("+1 555 010 1010")
     repeated = find_or_create_customer("15550101010")
     assert created["customer_status"] == "created"
@@ -440,9 +467,11 @@ def _demo():
     first_date = (date.fromisoformat(current_date) + timedelta(days=1)).isoformat()
     second_date = (date.fromisoformat(current_date) + timedelta(days=2)).isoformat()
 
-    # A read with no date answers "what do I hold" and offers nothing.
+    # A read with no date answers "what do I hold". A caller holding nothing has
+    # asked a question this call cannot answer, so it says so rather than
+    # reporting a successful search of nothing.
     empty = find_slots(customer)
-    assert empty == {"bookings": [], "slots": [], "status": "ok"}
+    assert empty == {"bookings": [], "slots": [], "status": "need_date"}
     assert find_slots(customer, date="not-a-date")["status"] == "invalid_date"
     assert find_slots(customer, date=first_date, service="massage")["status"] == "invalid_service"
     # No service means every service, so one call covers "what have you got".
@@ -464,8 +493,11 @@ def _demo():
     booked = save_booking(customer, "book", confirmed=True, slot_id=first_slot)
     assert booked["status"] == "booked"
     assert booked["appointment"]["action"] == "book"
-    # The read now reports the booking without being asked for a date.
-    held = find_slots(customer)["bookings"]
+    # The read now reports the booking without being asked for a date, and says
+    # `ok` rather than `need_date`, because there is something to answer with.
+    dateless = find_slots(customer)
+    assert dateless["status"] == "ok", dateless
+    held = dateless["bookings"]
     assert len(held) == 1 and held[0]["booking_id"] == booked["booking_id"]
     assert held[0]["service"] == "haircut"
 

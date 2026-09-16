@@ -223,6 +223,12 @@ receiving agent. It does not return through the task owner. A task definition
 has `tools:` and `handoffs:` and no other list, so a task or an escalation on a
 task is unwritable rather than rejected: there is no key to put one in.
 
+A step is refused, rather than run, when the caller has not spoken since it last
+returned. A completed result with no new caller turn above it is the model
+reading its own finished work as though it were a fresh request, and running the
+step again answers nothing while costing the caller a turn. The refusal arrives
+before the step's `announce:`, so a refused call speaks nothing at all.
+
 A task that lists no handoff still has a way out. Every task prompt here
 ends with one generated rule: when the caller asks for something none of the
 step's tools can do, and no handoff on the step covers it, call `finish` right

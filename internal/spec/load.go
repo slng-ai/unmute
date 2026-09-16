@@ -162,7 +162,7 @@ func (p *Package) flattenTasks() error {
 				// A listening step speaks the line itself, after its own history
 				// policy has been applied. The delegate speaking it too would say
 				// it twice, once at the seam and once inside the step.
-				announce = ""
+				announce = nil
 			}
 			p.Callables[task.Name] = Callable{
 				Task:     task.Name,

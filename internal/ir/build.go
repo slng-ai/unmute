@@ -296,7 +296,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 			Assign:       assign,
 			Instructions: instructions, Tools: attached(raw.Tools, raw.Handoffs), Model: raw.Think, Result: result,
 			Context: buildTaskContext(raw.Context),
-			Finish:  finish, Opening: opening, Announce: strings.TrimSpace(raw.Announce),
+			Finish:  finish, Opening: opening, Announce: raw.Announce.Settled(),
 		}
 	}
 
@@ -963,10 +963,10 @@ func buildTool(name string, raw packagespec.Tool) Tool {
 	if tool.Effect == "" {
 		tool.Effect = ToolReturnsData
 	}
-	// ponytail: one TrimSpace is the whole default resolution. A blank or
+	// ponytail: Settled is the whole default resolution. A blank or
 	// whitespace-only line reads as no announcement, so every driver sees a
-	// settled value and none has to decide what " " means.
-	tool.Announce = strings.TrimSpace(raw.Announce)
+	// settled list and none has to decide what " " means.
+	tool.Announce = raw.Announce.Settled()
 	return tool
 }
 
@@ -1138,11 +1138,11 @@ func buildCallable(pkg *packagespec.Package, raw packagespec.Callable, agent *Ag
 	} else if _, ok := agent.TaskGroups[raw.Group]; !ok {
 		return nil, missing(pkg, "agent.yaml", "group", raw.Group)
 	}
-	// ponytail: one TrimSpace, matching buildTool. A blank line reads as no
+	// ponytail: Settled, matching buildTool. A blank line reads as no
 	// announcement, so no driver has to decide what " " means.
 	return &Delegate{
 		Kind: ControlDelegate, When: raw.When, Task: raw.Task, Group: raw.Group,
-		Announce: strings.TrimSpace(raw.Announce),
+		Announce: raw.Announce.Settled(),
 	}, nil
 }
 

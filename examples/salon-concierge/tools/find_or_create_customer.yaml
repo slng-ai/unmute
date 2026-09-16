@@ -11,7 +11,12 @@ input:
   properties:
     phone:
       type: string
-      description: Exact confirmed phone; 10 to 15 digits with no inferred country code
+      description: >-
+        The exact confirmed number in E.164: a plus sign, then 10 to 15 digits,
+        with no spaces, brackets or dashes. The plus sign is part of the number
+        and is never dropped; a text run sent the digits alone and the lookup
+        could not tell which country it was. Never infer a country code the
+        caller did not say.
   required:
     - phone
 
@@ -39,5 +44,15 @@ output:
 local:
   handler: tools/salon.py
 
+# No `announce:` here, and it used to be. It covered the middle of a booking:
+# this tool is called right after the caller's yes, and it is the first of three
+# model requests that run with nothing spoken between them, measured at 4.0
+# seconds on Pipecat (trace 617a2377) and 2.0 on LiveKit (trace 50d99406).
+#
+# It moved to `verify_customer`'s own `announce:`, which is spoken as the step is
+# entered rather than in the middle of it. That is earlier and it is honest on
+# both routes in, and it leaves this tool free: a line here would now land about
+# a second after `find_slots` speaks its own, in the next model turn, which is
+# the collision that took the first announcement out of this package.
 interruption: provider_default
 effect: returns_data

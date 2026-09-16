@@ -557,7 +557,10 @@ type Task struct {
 	// well as on the delegate because a listening step speaks it after its own
 	// history policy has been applied, which is inside the step and not at the
 	// seam; the delegate's copy is cleared for such a step so it is spoken once.
-	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
+	//
+	// A list, always, because `announce:` accepts one sentence or several
+	// alternatives and the resolved shape holds one thing. Empty means silent.
+	Announce []string `json:"announce,omitempty" yaml:"announce,omitempty"`
 	// Withdraws is true when some task group names this task with
 	// `skip_when_confirmed:`. Such a task withdraws confirmation of the values it
 	// confirms whenever it is entered, standalone entry included, so a skip
@@ -662,7 +665,10 @@ type Delegate struct {
 	// start of the step, before anything else runs: ordering between steps is
 	// the prompt's job (the step's `when:` sentence and the owning agent's
 	// instructions), not a code gate, so there is nothing left to hold this back.
-	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
+	//
+	// A list for the same reason ir.Task.Announce is one: the authoring key takes
+	// a scalar or alternatives, and the resolved shape holds one of them.
+	Announce []string `json:"announce,omitempty" yaml:"announce,omitempty"`
 }
 
 func (*Delegate) control() {}
@@ -785,8 +791,9 @@ type Tool struct {
 	Effect       ToolEffect       `json:"effect,omitempty" yaml:"effect,omitempty"`
 	// Announce is one fixed sentence spoken as the tool starts, so a slow call
 	// is not silence. Webhook, local and knowledge only; blank means no
-	// announcement, so no driver has to interpret whitespace.
-	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
+	// announcement, so no driver has to interpret whitespace. A list, because
+	// the authoring key takes a scalar or alternatives; empty means silent.
+	Announce []string `json:"announce,omitempty" yaml:"announce,omitempty"`
 	// KnowledgeBase names the base this tool searches (knowledge only).
 	// Validation has proven the name is declared.
 	KnowledgeBase string `json:"knowledge_base,omitempty" yaml:"knowledge_base,omitempty"`

@@ -4,7 +4,12 @@ description: >-
   writes anything, so call it whenever you are unsure what the caller holds.
 
   Give a date to see free times on that date. Leave the service out to see every
-  service. The caller's own bookings come back every time, whatever you asked.
+  service. The caller's own bookings come back every time, whatever you asked,
+  so you never need a second call to find out what they hold.
+
+  Ask the caller which day they want before you call this, and never guess one.
+  A call for a day nobody named answers nothing, and the second call you then
+  have to make speaks a second announcement the caller did not need to hear.
 
 input:
   type: object
@@ -12,8 +17,16 @@ input:
     date:
       type: string
       description: >-
-        The date to look at, YYYY-MM-DD. An empty string reads only the caller's
-        own bookings and offers no times.
+        The day to look at, YYYY-MM-DD. Always a real day, never an empty
+        string: the caller's own bookings come back whatever day you ask for, so
+        an empty date buys nothing and answers nothing.
+
+        Send the day the caller named, and **never a day they did not name**.
+        Today is not a default. A caller who asks for an appointment without
+        saying when needs the question "which day?", not a guess: a guess reads
+        the wrong day, comes back with nothing, and costs them the wait twice
+        over. A live call on 2026-09-16 guessed today, got `full`, called again
+        for tomorrow, and the caller heard two announcements in three seconds.
     service:
       type: string
       description: >-
@@ -78,8 +91,14 @@ output:
           - time
     status:
       type: string
+      description: >-
+        `need_date` means this caller holds no booking and you gave no date, so
+        there was nothing to look up: ask which day they want and call again
+        with it. Never call again without a date, and never describe a booking
+        after this answer, because it means there is none.
       enum:
         - ok
+        - need_date
         - full
         - invalid_date
         - invalid_service
@@ -91,17 +110,24 @@ output:
 local:
   handler: tools/salon.py
 
-# No `announce:` here, and the reason is the rule in the skill's latency page:
-# never put one on two tools that fire in the same turn. The `book` group's line
-# already covers entering this flow, and on the second booking of a call
-# verification is skipped, so the group's line and this one landed back to back
-# with a single model call between them. A text run on 2026-09-16 produced
-# "Sure, let me get that sorted for you." followed by "Hmm, let me check the
-# diary." for one request.
+# No `announce:` here, and there was one until 2026-09-16. It read the diary, so
+# a line here was honest about what happened next, and it was the only line on a
+# booking after the first.
 #
-# The hesitation the caller hears before the diary answer rides on the answer
-# itself instead, written into the booking prompt's opening sentence, which
-# costs no extra speech and no extra request.
-
+# It moved to the `manage_booking` step. A tool's line is emitted inside the
+# tool body, so it fires once per call rather than once per request: on the live
+# call of 2026-09-16 (trace 917975e9) the model called this twice in one turn
+# and the caller heard "Let me see what is free." and "Let me double check what
+# I have available." 0.8 seconds apart. No prompt rule stops a model chaining a
+# tool, and this package had one that said not to.
+#
+# A step's line fires once in `on_enter`, before the model has decided anything,
+# which makes the repetition structurally impossible and also lands the line
+# 0.64 seconds earlier than it did here.
+#
+# There is still exactly one announcement in this flow, which is the rule in the
+# skill's latency page: never put one on two tools that fire in the same turn,
+# or in turns a second apart. `find_or_create_customer` gave up its line first,
+# and this one followed it onto the step that owns the work.
 interruption: provider_default
 effect: returns_data
