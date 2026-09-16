@@ -222,8 +222,17 @@ class TracedLLMWorker(LLMWorker):
             return await call(None)
         parent = context.get_turn_context() or context.get_conversation_context()
         with trace.get_tracer("unmute.pipecat.tools").start_as_current_span(
-            f"tool:{name}", context=parent
+            name, context=parent
         ) as span:
+            # The two GenAI semantic-convention keys that make this a tool call
+            # rather than an unlabelled span. Langfuse v4 reads them: the
+            # observation becomes a TOOL and takes its name from
+            # gen_ai.tool.name, whatever the span is called. livekit-agents
+            # sets the same pair, so one call reads the same way on both
+            # targets, which it did not while this span carried only
+            # tool.function_name and arrived as a plain span named `tool:<name>`.
+            span.set_attribute("gen_ai.operation.name", "execute_tool")
+            span.set_attribute("gen_ai.tool.name", name)
             span.set_attribute("tool.function_name", name)
             span.set_attribute("langfuse.observation.input", json.dumps(arguments, default=str))
             if tool_call_id:

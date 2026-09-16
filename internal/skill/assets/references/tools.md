@@ -541,7 +541,7 @@ or tool-list error stops the session before it greets the caller on either
 target. A LiveKit probe close error also stops startup. Pipecat cleanup errors
 surface during teardown after every close has been attempted.
 
-With Langfuse tracing enabled, Pipecat MCP calls emit finite `tool:<name>` spans with tool arguments and, when completed, the result.
+With Langfuse tracing enabled, Pipecat MCP calls emit finite spans named after the tool, with its arguments and, when completed, the result.
 With Coval tracing enabled, the same calls emit `llm_tool_call` spans carrying `function.name`, `tool_call_id`, `function.arguments`, the bounded result as `tool.result`, `tool.latency_ms`, and a numeric `tool.error`, with an error status when the tool failed.
 Pipecat refuses to start when an agent tool, task function, or MCP source on the same agent exposes the same name.
 

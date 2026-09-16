@@ -1213,6 +1213,16 @@ async def main() -> None:
     tracing.install_turn_spans(provider, call)
     set_tracer_provider(provider)
 
+    # What livekit-agents 1.8.1's loop monitor files on any stall past 100ms:
+    # a parentless span, of its own, before the session exists. A cold start
+    # produces one, and while the call's root was picked as the first span with
+    # no parent this stole it, so every turn went into the stall's trace and the
+    # call's own root kept the lifecycle spans and no conversation. Seen on a
+    # real call on 2026-09-16. Without this the harness cannot see the defect,
+    # because nothing else here opens a span before AgentSession does.
+    stall = provider.get_tracer("livekit-agents").start_span("event_loop_blocked")
+    stall.end()
+
     audio_input = FakeAudioInput()
     audio_output = FakeAudioOutput()
     async with AgentSession(
@@ -1309,7 +1319,14 @@ async def main() -> None:
     # exec-the-emitted-module harness cannot: it stubs livekit out.
     session = by_name["agent_session"]
     assert session.parent is None, "the call's root has a parent"
-    assert len({span.context.trace_id for span in spans}) == 1, "the call split into traces"
+    # The call is one trace, and the stall filed before it began is not in it.
+    # The stall is livekit's own span about the process, not about the call, so
+    # it is neither the call's root nor something the call has to hold.
+    stall_id = stall.context.span_id
+    call_spans = [span for span in spans if span.context.span_id != stall_id]
+    call_traces = {span.context.trace_id for span in call_spans}
+    assert len(call_traces) == 1, "the call split into traces"
+    assert stall.context.trace_id not in call_traces, "the call landed in the stall's trace"
     assert "turn" in by_name, sorted(by_name)
     turn = by_name["turn"]
     by_id = {span.context.span_id: span for span in spans}

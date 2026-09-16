@@ -55,21 +55,23 @@ func TestLiveKitTaskRetryDoesNotRestartTheScript(t *testing.T) {
 	}
 }
 
-// A tool span carries the name of the tool that ran (V5).
+// The export hook keeps the whole call and writes no span name (V5).
 //
-// livekit-agents starts every one of them as the literal "function_tool" and
-// puts the tool's name in an attribute inside the span, so a trace lists one
-// identical row per tool call and reading a call means opening each row to
-// find out which tool it was. Pipecat names the same span `tool:<name>`, so
-// this is also what makes one call comparable across the two targets.
+// Setting the hook is what keeps the call at all: the Langfuse v4 default
+// filter recognises neither livekit-agents' scope nor the emitted module's, so
+// the default drops every span before the exporter sees it. Its answer decides
+// whether a span is kept, so it always exports.
 //
-// The rename is only possible at the end of the span, where the hook gets a
-// ReadableSpan with no update_name(), so it writes `_name`. That is a private
-// attribute of a dependency, which is exactly the kind of thing that stops
-// working quietly, so this asserts the guard as well as the rename: a missing
-// attribute leaves the name alone, an AttributeError is swallowed, and the
-// hook always exports, because its answer decides whether the span is kept.
-func TestLiveKitNamesAToolSpanAfterItsTool(t *testing.T) {
+// It used to rename livekit's tool spans too, because livekit-agents starts
+// every one as the literal "function_tool" and carries the tool's name in an
+// attribute, so a trace listed one identical row per tool call. 1.8.1 sets
+// gen_ai.operation.name=execute_tool and gen_ai.tool.name on that span and
+// Langfuse v4 names the observation after gen_ai.tool.name, so the tool's own
+// name is what a reader sees and a name written here is overwritten on
+// ingestion. Measured on 2026-09-16: the `_name` write still lands on the
+// pinned OTel SDK, and a deployed call still read back the bare tool name.
+// This holds the hook to a pass-through so nobody adds a write the server wins.
+func TestLiveKitExportHookKeepsTheWholeCall(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
@@ -86,12 +88,8 @@ func TestLiveKitNamesAToolSpanAfterItsTool(t *testing.T) {
 	tracing := artifactFile(t, artifact, "tracing.py")
 
 	for _, want := range []string{
-		`def _name_tool_spans(span: ReadableSpan) -> bool:`,
-		`tool = (span.attributes or {}).get("lk.function_tool.name")`,
-		`if tool and span.name == "function_tool":`,
-		`span._name = f"tool:{tool}"`,
-		`except AttributeError:`,
-		"should_export_span=_name_tool_spans",
+		`def _export_every_span(span: ReadableSpan) -> bool:`,
+		"should_export_span=_export_every_span",
 		"from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor, TracerProvider",
 	} {
 		if !strings.Contains(tracing, want) {
@@ -99,17 +97,17 @@ func TestLiveKitNamesAToolSpanAfterItsTool(t *testing.T) {
 		}
 	}
 
-	hook := pipecatMethodBody(t, tracing, "def _name_tool_spans(", "\n\n\ndef ")
+	hook := pipecatMethodBody(t, tracing, "def _export_every_span(", "\n\n\ndef ")
 	if !strings.HasSuffix(strings.TrimSpace(hook), "return True") {
-		t.Errorf("the filter hook must end by exporting the span, or a rename drops it:\n%s", hook)
+		t.Errorf("the filter hook must end by exporting the span, or the call is dropped:\n%s", hook)
 	}
 	if strings.Contains(hook, "return False") {
-		t.Errorf("this hook renames, it never drops:\n%s", hook)
+		t.Errorf("this hook never drops a span:\n%s", hook)
 	}
-	guardAt := strings.Index(hook, "except AttributeError:")
-	renameAt := strings.Index(hook, `span._name = f"tool:{tool}"`)
-	if guardAt < 0 || renameAt < 0 || guardAt < renameAt {
-		t.Errorf("the private write must be guarded, so a renamed attribute upstream is not a crash mid-call:\n%s", hook)
+	// A span name written here is overwritten on ingestion, so writing one
+	// leaves a line that looks load-bearing and does nothing.
+	if strings.Contains(hook, "._name") {
+		t.Errorf("the hook writes a span name Langfuse overwrites from gen_ai.tool.name:\n%s", hook)
 	}
 }
 
@@ -229,7 +227,7 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 		`TURN_SPANS = ("user_turn", "agent_turn")`,
 		`self._tracer.start_span("turn", context=self._call_context)`,
 		"set_tracer_provider(trace_provider, metadata=metadata)",
-		"should_export_span=_name_tool_spans",
+		"should_export_span=_export_every_span",
 		"ctx.add_shutdown_callback(flush_trace)",
 		`@session.on("conversation_item_added")`,
 	} {

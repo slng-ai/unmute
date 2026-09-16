@@ -270,7 +270,7 @@ func TestPipecatTracingProviderOwnershipStaysExplicit(t *testing.T) {
 }
 
 func TestPipecatMCPTracingDocsStayAligned(t *testing.T) {
-	const tracingRule = "With Langfuse tracing enabled, Pipecat MCP calls emit finite `tool:<name>` spans with tool arguments and, when completed, the result."
+	const tracingRule = "With Langfuse tracing enabled, Pipecat MCP calls emit finite spans named after the tool, with its arguments and, when completed, the result."
 	const collisionRule = "Pipecat refuses to start when an agent tool, task function, or MCP source on the same agent exposes the same name."
 	for name, content := range map[string]string{
 		"references/tools.md":                                   bundleFile(t, "references/tools.md"),
